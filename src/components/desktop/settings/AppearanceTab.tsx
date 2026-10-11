@@ -1,7 +1,7 @@
 'use client';
 
 import { useTheme } from '@/lib/theme/context';
-import type { ThemePalette, SurfaceMode } from '@/lib/theme/registry';
+import type { ThemePalette } from '@/lib/theme/registry';
 import {
   APP_FONT_STACK,
   RAMS_ACCENT,
@@ -199,13 +199,12 @@ export function AppearanceTab() {
     workspaceGlass,
     setWorkspaceGlass,
   } = useTheme();
-  const options = palettes.flatMap((palette) => (['solid', 'glass'] as SurfaceMode[]).map((surface) => ({
-    id: `${palette.id}-${surface}`,
+  const options = palettes.map((palette) => ({
+    id: `${palette.id}-solid`,
     palette,
-    surface,
-    name: `${palette.name} ${surface === 'solid' ? 'Solid' : 'Glass'}`,
-    description: surface === 'solid' ? 'Opaque panels and workspace.' : 'Glass panels with an opaque workspace.',
-  })));
+    name: `${palette.name} Solid`,
+    description: 'Opaque panels and workspace.',
+  }));
   const darkPalette = palettes.find((palette) => palette.id === 'dark');
 
   return (
@@ -220,12 +219,12 @@ export function AppearanceTab() {
               palette={option.palette}
               name={option.name}
               description={option.description}
-              glass={option.surface === 'glass'}
-              active={!workspaceGlass && paletteId === option.palette.id && surface === option.surface}
+              glass={false}
+              active={!workspaceGlass && paletteId === option.palette.id && surface === 'solid'}
               onSelect={() => {
                 setWorkspaceGlass(false);
                 setPalette(option.palette.id);
-                setReduceTransparency(option.surface === 'solid' ? 'on' : 'off');
+                setReduceTransparency('on');
               }}
             />
           ))}

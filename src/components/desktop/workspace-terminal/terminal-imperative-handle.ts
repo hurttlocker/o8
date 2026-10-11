@@ -258,6 +258,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         id: tab.id,
         label: tab.label,
         kind: tab.kind,
+        canvasKind: tab.canvasTab?.kind,
         sessionKey: tab.chatSessionKey,
         laneId: tab.laneId ?? null,
         packetId: tab.orchestrationPacket?.packetId ?? null,

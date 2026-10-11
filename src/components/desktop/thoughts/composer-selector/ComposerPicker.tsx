@@ -1,504 +1,235 @@
 'use client';
 
-import { useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AcpModelPicker } from '../AcpModelPicker';
 import { useRuntimeInventory } from '../../onboarding/useRuntimeInventory';
 import { RuntimeToolsPanel } from '../../onboarding/RuntimeToolsPanel';
+import { FloatingSurface } from '../../FloatingSurface';
 import { runtimeForLead, visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
-import {
-  type ComposerModelGroup,
-  type ComposerModelOption,
-} from '../ModelThinkingChip';
-import {
-  workerModelForDisplay,
-  type ComposerWorkerDefaults,
-} from './worker-settings';
-import { ComposerPopover } from '../chat-panel/ComposerPopover';
-import {
-  composerRuntimeLabel,
-  isComposerEffortShortcut,
-  providerMarkForLead,
-  providerMarkForRuntime,
-  stepComposerEffort,
-  type ComposerProviderMark,
-  type ResolvedComposerSelectorState,
-} from './state';
-import { LeadChip, WorkersChip } from './ComposerSelectorChips';
-import { EffortSlider } from './EffortSlider';
-import { ProviderMarkGlyph } from './provider-marks';
+import { findCatalogueModel, type CatalogueGroup } from '@/lib/orchestrator/acp-model-catalogue';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import { WORKER_START_OPTIONS, type WorkerStartMode } from '@/lib/operator/worker-start-mode';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
+import { COMPOSER_MODEL_GROUPS, type ComposerModelGroup, type ComposerModelOption } from '../ModelThinkingChip';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
-
-type VisiblePick =
-  | { key: string; kind: 'lead-house'; group: ComposerModelGroup }
-  | { key: string; kind: 'lead'; group: ComposerModelGroup; option: ComposerModelOption }
-  | { key: string; kind: 'lead-searchable'; group: ComposerModelGroup }
-  | { key: string; kind: 'worker'; runtime: OrchestratorRuntime };
-
-type LeadPickerView =
-  | { kind: 'providers' }
-  | { kind: 'models'; groupKey: ComposerModelGroup['key'] }
-  | { kind: 'effort'; groupKey: ComposerModelGroup['key'] };
-
-type AcpPickerTarget =
-  | { kind: 'lead'; backend: OrchestratorBackendSetting }
-  | { kind: 'worker'; backend: OrchestratorRuntime };
-
-function CheckGlyph() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function SearchGlyph() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
-    </svg>
-  );
-}
-
-function ChevronGlyph({ expanded }: { expanded: boolean }) {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={expanded ? 'm6 15 6-6 6 6' : 'm9 18 6-6-6-6'} />
-    </svg>
-  );
-}
+import { ComposerPopover } from '../chat-panel/ComposerPopover';
+import { workerModelForDisplay, type ComposerWorkerDefaults } from './worker-settings';
+import { composerRuntimeLabel, providerMarkForLead, providerMarkForRuntime, type ResolvedComposerSelectorState } from './state';
+import { LeadChip, WorkersChip } from './ComposerSelectorChips';
+import { ThinkingChip } from './ThinkingChip';
+import { WorkerPickerOptions } from './WorkerPickerOptions';
+import { ProviderMarkGlyph } from './provider-marks';
+import { FavoriteGlyph, ModelPickerRow } from './ModelPickerRow';
+import { useModelVisibility, openRouterModelKey } from './model-visibility';
+import { modelFavoriteKey, readModelFavorites, useModelFavorites, type ModelFavorite } from './model-favorites';
+import { CLAUDE_OPENROUTER_HOUSE, ClaudeWorkerModels, useClaudeWorkerProvider } from './ClaudeWorkerModels';
+import type { WorkerModelChange } from './worker-settings';
 
 type PickerTarget = 'lead' | 'workers';
+interface House { id: string; label: string; ready: boolean; group?: ComposerModelGroup; runtime?: OrchestratorRuntime }
+interface Pick { favorite: ModelFavorite; option?: ComposerModelOption; group?: ComposerModelGroup; runtime?: OrchestratorRuntime }
+const WORKER_HOUSE_ORDER = ['codex', 'claude-code', 'antigravity', 'grok', 'opencode', '3code'];
 
-export function ComposerPicker({
-  state,
-  defaults,
-  composerModelGroups: allComposerModelGroups,
-  onModelChange,
-  onBackendChange,
-  onEffortChange,
-  onRuntimeChange,
-  onWorkerModelChange,
-  onWorkerStartModeChange,
-  onRequestTextareaFocus,
-  onOpenChange,
-  saving = false,
-}: {
+export function ComposerPicker({ state, defaults, composerModelGroups, onModelChange, onBackendChange, onEffortChange, onWorkerModelChange, onWorkerEffortChange, onWorkerStartModeChange, onRequestTextareaFocus, onOpenChange, workerLocks, saving = false }: {
   state: ResolvedComposerSelectorState;
   defaults: ComposerWorkerDefaults;
   composerModelGroups: ComposerModelGroup[];
   onModelChange?: (model: string) => void;
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
-  onEffortChange: (effort: ResolvedComposerSelectorState['effort']) => void;
+  onEffortChange: (effort: ThinkingEffort) => void;
   onRuntimeChange: (runtime: OrchestratorRuntime) => void;
-  onWorkerModelChange: (model: string | null, runtime?: OrchestratorRuntime) => void;
+  onWorkerModelChange: WorkerModelChange;
+  onWorkerEffortChange?: (effort: ThinkingEffort, runtime: OrchestratorRuntime) => void;
   onWorkerStartModeChange: (mode: WorkerStartMode) => void;
   onRequestTextareaFocus?: () => void;
   onOpenChange?: (open: boolean) => void;
+  workerLocks?: { runtime?: boolean; defaultModel: boolean; opencode: boolean; threecode: boolean; codexEffort: boolean; claudeEffort: boolean };
   saving?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const tools = useRuntimeInventory(open);
-  const [advancedLeads, setAdvancedLeads] = useState(false);
-  const installed = useMemo(() => visibleRuntimeInventory(tools.inventory ?? [], [defaults.defaultDispatchRuntime]), [tools.inventory, defaults.defaultDispatchRuntime]);
-  const ready = (id: string | null) => tools.inventory?.some((item) => item.id === id && item.available) === true;
-  const leadReady = (group: ComposerModelGroup) => group.key === 'o8' || ready(runtimeForLead(group.key));
-  const composerModelGroups = useMemo(() => allComposerModelGroups.filter((group) => {
-    if (group.key === state.leadBackend || (group.key === 'claude' && state.leadBackend === 'fable')) return true;
-    if (group.key === 'o8') return advancedLeads;
-    return installed.some((item) => item.id === runtimeForLead(group.key)) && (group.key !== 'opencode' || advancedLeads);
-  }), [allComposerModelGroups, state.leadBackend, installed, advancedLeads]);
-  const [openTarget, setOpenTarget] = useState<PickerTarget>('lead');
+  const [acpAvailable, setAcpAvailable] = useState(false);
+  const { hidden: hiddenModels } = useModelVisibility();
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch('/api/setup/orchestrator-backends').then(response => response.ok ? response.json() : null)
+      .then(data => { if (alive) setAcpAvailable(data?.acp === true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
+  const [thinkingOpen, setThinkingOpen] = useState(false);
+  const [target, setTarget] = useState<PickerTarget>('lead');
+  const [houseId, setHouseId] = useState<string>('codex');
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [acpPicker, setAcpPicker] = useState<AcpPickerTarget | null>(null);
-  const [workersExpanded, setWorkersExpanded] = useState(false);
-  const [leadView, setLeadView] = useState<LeadPickerView>({ kind: 'providers' });
-  const leadTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const workerTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  const selectedLeadRef = useRef<HTMLButtonElement | null>(null);
-  const workerSectionRef = useRef<HTMLDivElement | null>(null);
-  const selectedWorkerRef = useRef<HTMLButtonElement | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const leadRef = useRef<HTMLButtonElement>(null);
+  const workerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current += 1; }, []);
+  const tools = useRuntimeInventory(open);
+  const claude = useClaudeWorkerProvider(open && target === 'workers');
+  const { favorites, toggleFavorite } = useModelFavorites(target);
+  const installed = useMemo(() => visibleRuntimeInventory(tools.inventory ?? [], [defaults.defaultDispatchRuntime])
+    .filter((item) => item.id !== 'pi' || item.available || item.installed || item.piSetup?.detected), [tools.inventory, defaults.defaultDispatchRuntime]);
+  const ready = (runtime: string | null) => tools.inventory?.some((item) => item.id === runtime && item.available) === true;
+  const claudeInstalled = tools.inventory?.some((item) => item.id === 'claude-code' && (item.available || item.installed || item.unavailableReason === 'needs_auth')) === true;
+  const leadGroup = composerModelGroups.find((group) => group.key === state.leadBackend || group.options.some((option) => option.backend === state.leadBackend && option.model === state.leadModelId));
+  const houses: House[] = target === 'lead'
+    ? composerModelGroups.filter((group) => group === leadGroup || group.key === 'o8' || (group.key === 'acp' && acpAvailable) || installed.some((item) => item.id === runtimeForLead(group.key)))
+      .map((group) => ({ id: group.key, label: group.key === 'claude' ? 'Claude Code' : group.label, ready: group.key === 'o8' || (group.key === 'acp' ? acpAvailable : ready(runtimeForLead(group.key))), group }))
+    : installed.map((item) => ({ id: item.id, label: composerRuntimeLabel(item.id), ready: ready(item.id), runtime: item.id }))
+      .sort((a, b) => (WORKER_HOUSE_ORDER.indexOf(a.id) < 0 ? WORKER_HOUSE_ORDER.length : WORKER_HOUSE_ORDER.indexOf(a.id)) - (WORKER_HOUSE_ORDER.indexOf(b.id) < 0 ? WORKER_HOUSE_ORDER.length : WORKER_HOUSE_ORDER.indexOf(b.id)));
+  const house = houses.find((item) => item.id === houseId);
+  const searchable = house?.group?.searchable || house?.runtime === 'opencode' || house?.runtime === '3code';
   const normalizedQuery = query.trim().toLowerCase();
-  const leadRows = useMemo(() => composerModelGroups.flatMap((group) => group.options.map((option) => ({ group, option })))
-    .filter(({ group, option }) => !normalizedQuery || `${group.label} ${option.label} ${option.sub ?? ''}`.toLowerCase().includes(normalizedQuery)), [composerModelGroups, normalizedQuery]);
-  const searchableLeadRows = useMemo(() => composerModelGroups.filter((group) => group.searchable && (
-    !normalizedQuery || `${group.label} ${state.leadBackend === group.key ? state.leadModelLabel : ''}`.toLowerCase().includes(normalizedQuery)
-  )), [composerModelGroups, normalizedQuery, state.leadBackend, state.leadModelLabel]);
-  const selectedLeadGroup = useMemo(() => composerModelGroups.find((group) => (
-    group.key === state.leadBackend
-    || group.options.some((option) => option.backend === state.leadBackend && option.model === state.leadModelId)
-  )) ?? composerModelGroups[0], [composerModelGroups, state.leadBackend, state.leadModelId]);
-  const activeLeadGroup = leadView.kind === 'providers'
-    ? null
-    : composerModelGroups.find((group) => group.key === leadView.groupKey) ?? selectedLeadGroup;
-  const providerRows = !normalizedQuery && leadView.kind === 'providers' ? composerModelGroups : [];
-  const shownLeadRows = leadView.kind === 'effort'
-    ? []
-    : normalizedQuery ? leadRows : activeLeadGroup?.options.map((option) => ({ group: activeLeadGroup, option })) ?? [];
-  const shownSearchableLeadRows = leadView.kind === 'effort'
-    ? []
-    : normalizedQuery ? searchableLeadRows : activeLeadGroup?.searchable ? [activeLeadGroup] : [];
-  const workerRows = useMemo(() => installed.map((item) => item.id).filter((runtime) => {
-    if (!normalizedQuery) return true;
-    const capability = getRuntimeCapability(runtime);
-    const model = workerModelForDisplay(runtime, defaults);
-    return `${capability.label} ${runtime} ${model}`.toLowerCase().includes(normalizedQuery);
-  }), [defaults, normalizedQuery, installed]);
-  const workersVisible = state.mode !== 'solo' && (workersExpanded || (normalizedQuery.length > 0 && workerRows.length > 0));
-  const visiblePicks: VisiblePick[] = [
-    ...providerRows.map((group) => ({ key: `lead-house:${group.key}`, kind: 'lead-house' as const, group })),
-    ...shownLeadRows.map(({ group, option }) => ({ key: `lead:${option.value}`, kind: 'lead' as const, group, option })),
-    ...shownSearchableLeadRows.map((group) => ({ key: `lead-searchable:${group.key}`, kind: 'lead-searchable' as const, group })),
-    ...(workersVisible ? workerRows.map((runtime) => ({ key: `worker:${runtime}`, kind: 'worker' as const, runtime })) : []),
-  ];
-  const visibleActiveIndex = Math.min(activeIndex, Math.max(visiblePicks.length - 1, 0));
-  const pickerOpen = open && !(state.mode === 'solo' && openTarget === 'workers');
+  const modelLocked = (runtime: OrchestratorRuntime) => (workerLocks?.runtime && runtime !== defaults.defaultDispatchRuntime) || (runtime === 'opencode' ? workerLocks?.opencode : runtime === '3code' ? workerLocks?.threecode : workerLocks?.defaultModel);
+  const nativePicks: Pick[] = houses.flatMap((item): Pick[] => {
+    if (item.group) return item.group.options.map((option) => ({ option, group: item.group, favorite: { house: option.backend, id: option.model ?? option.value, label: option.label } }));
+    const runtime = item.runtime!;
+    if (runtime === 'opencode' || runtime === '3code') return [];
+    // Lead groups can contain a paid carrier model. Native worker choices retain
+    // their own identity even while Claude Code uses another provider.
+    const group = (runtime === 'claude-code' ? COMPOSER_MODEL_GROUPS : composerModelGroups).find((entry) => entry.key === (runtime === 'claude-code' ? 'claude' : runtime));
+    const options = group?.options.filter((option) => option.backend === (runtime === 'claude-code' ? 'claude' : runtime) && (!getRuntimeCapability(runtime).modelIdPattern || getRuntimeCapability(runtime).modelIdPattern!.test(option.model ?? option.value))) ?? [];
+    return options.length ? options.map((option) => ({ option, runtime, favorite: { house: runtime, id: option.model ?? option.value, label: option.label } }))
+      : [{ runtime, favorite: { house: runtime, id: getRuntimeCapability(runtime).defaultModel ?? '', label: runtime === 'pi' || runtime === 'pi-builtin' ? composerRuntimeLabel(runtime) : 'Runtime default' } }];
+  });
+  const favoriteKeys = new Set(favorites.map(modelFavoriteKey));
+  const picks: Pick[] = houseId === 'favorites'
+    ? favorites.flatMap((favorite): Pick[] => {
+      const native = nativePicks.find((pick) => modelFavoriteKey(pick.favorite) === modelFavoriteKey(favorite));
+      if (native) return [native];
+      if (favorite.house === CLAUDE_OPENROUTER_HOUSE && houses.some((item) => item.runtime === 'claude-code')) return [{ favorite, runtime: 'claude-code' }];
+      const source = houses.find((item) => item.id === favorite.house && (item.group?.searchable || item.runtime === 'opencode' || item.runtime === '3code'));
+      return source ? [{ favorite, group: source.group, runtime: source.runtime }] : [];
+    })
+    : nativePicks.filter((pick) => normalizedQuery || (target === 'lead' ? pick.group?.key === houseId : pick.runtime === houseId));
+  const shownPicks = picks.filter(pick => !((pick.favorite.house === CLAUDE_OPENROUTER_HOUSE || pick.favorite.id.startsWith('openrouter/')) && hiddenModels.includes(openRouterModelKey(pick.favorite.id))) || pick.favorite.id === state.leadModelId || pick.favorite.id === workerModelForDisplay(defaults.defaultDispatchRuntime, defaults)).filter((pick) => !normalizedQuery || `${pick.favorite.label} ${pick.favorite.id} ${pick.favorite.house}`.toLowerCase().includes(normalizedQuery))
+    .sort((a, b) => Number(favoriteKeys.has(modelFavoriteKey(b.favorite))) - Number(favoriteKeys.has(modelFavoriteKey(a.favorite))));
+  const isSelected = (pick: Pick) => target === 'lead' ? pick.favorite.house === state.leadBackend && pick.favorite.id === state.leadModelId
+    : pick.runtime === defaults.defaultDispatchRuntime && (pick.favorite.house === CLAUDE_OPENROUTER_HOUSE
+      ? claude.snapshot?.profile.source === 'openrouter' && pick.favorite.id === claude.snapshot.effectiveModel
+      : (pick.runtime !== 'claude-code' || claude.snapshot?.profile.source === 'native') && pick.favorite.id === workerModelForDisplay(pick.runtime!, defaults));
 
-  const setPopoverOpen = (next: boolean, target: PickerTarget = openTarget) => {
-    setOpenTarget(target);
-    setOpen(next);
-    onOpenChange?.(next);
-    if (next) {
-      if (target === 'workers') setWorkersExpanded(true);
-      if (target === 'lead') setLeadView({ kind: 'providers' });
-      setActiveIndex(0);
-      window.setTimeout(() => {
-        if (target === 'lead') {
-          searchRef.current?.focus();
-          (selectedLeadRef.current?.parentElement ?? selectedLeadRef.current)
-            ?.scrollIntoView?.({ block: 'nearest' });
-        } else {
-          workerSectionRef.current?.scrollIntoView?.({ block: 'nearest' });
-          selectedWorkerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  const close = () => { generation.current += 1; setOpen(false); setPending(null); setError(null); setQuery(''); onOpenChange?.(false); };
+  const toggle = (nextTarget: PickerTarget) => {
+    if (open && target === nextTarget) { close(); return; }
+    generation.current += 1;
+    setTarget(nextTarget);
+    const savedFavorites = readModelFavorites(nextTarget);
+    setThinkingOpen(false);
+    setHouseId(savedFavorites.length > 0 ? 'favorites' : nextTarget === 'lead' ? leadGroup?.key ?? 'codex' : defaults.defaultDispatchRuntime);
+    setQuery(''); setPending(null); setError(null); setToolsOpen(false); setOpen(true); onOpenChange?.(true);
+    window.setTimeout(() => searchRef.current?.focus(), 0);
+  };
+  const commit = async (pick: Pick) => {
+    const version = generation.current;
+    if (target === 'lead') {
+      if (pick.favorite.house === state.leadBackend && onModelChange) onModelChange(pick.favorite.id);
+      else onBackendChange?.(pick.favorite.house as OrchestratorBackendSetting, pick.favorite.id);
+    } else {
+      const result = await onWorkerModelChange(pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? null : pick.favorite.id || null, pick.runtime, pick.runtime === 'claude-code'
+        ? () => claude.applyModel(pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? 'openrouter' : 'native', pick.favorite.id)
+        : undefined);
+      if (result === false) throw new Error('The worker selection could not be saved. Reopen its house to check the current settings.');
+    }
+    if (generation.current === version) { close(); onRequestTextareaFocus?.(); }
+  };
+  const selectClaude = async (source: 'native' | 'openrouter', model: string) => {
+    if (saving || pending || modelLocked('claude-code') || !claudeInstalled || (source === 'native' && !ready('claude-code'))) return;
+    const version = generation.current;
+    setPending(model); setError(null);
+    try { await commit({ runtime: 'claude-code', favorite: { house: source === 'openrouter' ? CLAUDE_OPENROUTER_HOUSE : 'claude-code', id: model, label: model } }); }
+    catch (failure) { if (generation.current === version) setError(failure instanceof Error ? failure.message : 'Could not save this selection.'); }
+    finally { if (generation.current === version) setPending(null); }
+  };
+  const select = async (pick: Pick) => {
+    const source = houses.find((item) => item.id === (target === 'lead' ? pick.group?.key : pick.runtime));
+    const sourceReady = pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? claudeInstalled && claude.snapshot?.openrouterConfigured : source?.ready;
+    if (saving || pending || !sourceReady || (pick.runtime && modelLocked(pick.runtime))) return;
+    // A saved favorite must be checked against the runtime before reuse.
+    const version = ++generation.current;
+    setPending(modelFavoriteKey(pick.favorite)); setError(null);
+    try {
+      if ((!pick.option && (!pick.runtime || pick.runtime === 'opencode' || pick.runtime === '3code')) || pick.favorite.house === CLAUDE_OPENROUTER_HOUSE) {
+        const url = pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? '/api/runtime/claude-code-models' : pick.runtime === '3code' ? '/api/runtime/threecode-models' : `/api/orchestrator/backend-models?backend=${encodeURIComponent(pick.favorite.house)}`;
+        const response = await fetch(url, { cache: 'no-store' });
+        const data = await response.json() as { groups?: CatalogueGroup[]; available?: boolean; error?: string };
+        if (generation.current !== version) return;
+        if (!response.ok || data.available === false || data.error || !findCatalogueModel(data.groups ?? [], pick.favorite.id)) {
+          setError('This favorite is unavailable. Open its house to choose a current model.'); return;
         }
-      }, 0);
-    }
-    if (!next) {
-      setQuery('');
-      setAcpPicker(null);
-      setWorkersExpanded(false);
-      setLeadView({ kind: 'providers' });
-    }
-  };
-
-  const togglePicker = (target: PickerTarget) => {
-    if (open && openTarget !== target) {
-      setQuery('');
-      setAcpPicker(null);
-    }
-    setPopoverOpen(!(pickerOpen && openTarget === target), target);
-  };
-
-  const selectLead = (group: ComposerModelGroup, option: ComposerModelOption) => {
-    if (saving || !leadReady(group)) return;
-    if (option.backend === state.leadBackend) onModelChange?.(option.model ?? option.value);
-    else onBackendChange?.(option.backend, option.model);
-    setQuery('');
-    setLeadView({ kind: 'effort', groupKey: group.key });
-    setActiveIndex(0);
-  };
-
-  const selectLeadHouse = (group: ComposerModelGroup) => {
-    if (saving || !leadReady(group)) return;
-    if (group.searchable) setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting });
-    else setLeadView({ kind: 'models', groupKey: group.key });
-    setActiveIndex(0);
-  };
-
-  const backFromLeadView = () => {
-    setLeadView((view) => view.kind === 'effort'
-      ? { kind: 'models', groupKey: view.groupKey }
-      : { kind: 'providers' });
-    setActiveIndex(0);
-  };
-
-  const selectWorker = (runtime: OrchestratorRuntime) => {
-    if (saving || !ready(runtime)) return;
-    onRuntimeChange(runtime);
-    if (runtime === 'opencode' || runtime === '3code') setAcpPicker({ kind: 'worker', backend: runtime });
-    else setPopoverOpen(false);
-  };
-
-  const activateCurrent = () => {
-    const item = visiblePicks[visibleActiveIndex];
-    if (!item) return;
-    if (item.kind === 'lead-house') selectLeadHouse(item.group);
-    else if (item.kind === 'lead') selectLead(item.group, item.option);
-    else if (item.kind === 'lead-searchable' && leadReady(item.group) && !saving) setAcpPicker({ kind: 'lead', backend: item.group.key as OrchestratorBackendSetting });
-    else if (item.kind === 'worker') selectWorker(item.runtime);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.defaultPrevented) return;
-    if (isComposerEffortShortcut(event.nativeEvent)) {
-      event.preventDefault();
-      const nextEffort = stepComposerEffort(state.effort, state.effortOptions, event.shiftKey ? -1 : 1);
-      if (nextEffort !== state.effort) onEffortChange(nextEffort);
-      return;
-    }
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (visiblePicks.length === 0) return;
-      setActiveIndex((current) => (
-        event.key === 'ArrowDown'
-          ? (current + 1) % visiblePicks.length
-          : (current - 1 + visiblePicks.length) % visiblePicks.length
-      ));
-      return;
-    }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      activateCurrent();
-      return;
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      if (!normalizedQuery && leadView.kind !== 'providers') backFromLeadView();
-      else {
-        setPopoverOpen(false);
-        onRequestTextareaFocus?.();
       }
-    }
+      await commit(pick);
+    } catch (failure) {
+      if (generation.current === version) setError(failure instanceof Error ? failure.message : 'Could not check this model. Try its house again.');
+    } finally { if (generation.current === version) setPending(null); }
   };
-
-  const runtime = defaults.defaultDispatchRuntime;
-  const selectedWorkerSummary = composerRuntimeLabel(runtime);
-  const leadHouseLabel = (group: ComposerModelGroup) => group.key === 'claude' ? 'Claude Code' : group.key === 'opencode' ? 'OpenCode · experimental' : group.label;
-  const scrollStyle: CSSProperties = { overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' };
-  const anchorRef = openTarget === 'workers' ? workerTriggerRef : leadTriggerRef;
-
-  return (
-    <>
-      <LeadChip
-        state={state}
-        open={pickerOpen && openTarget === 'lead'}
-        saving={saving}
-        buttonRef={leadTriggerRef}
-        onClick={() => togglePicker('lead')}
-      />
-      {state.mode !== 'solo' ? (
-        <WorkersChip
-          mode={state.mode}
-          availableRuntimes={tools.inventory?.filter((item) => item.available).map((item) => item.id)}
-          runtime={runtime}
-          model={workerModelForDisplay(runtime, defaults)}
-          open={pickerOpen && openTarget === 'workers'}
-          saving={saving}
-          buttonRef={workerTriggerRef}
-          onClick={() => togglePicker('workers')}
-        />
-      ) : null}
-      <ComposerPopover anchorRef={anchorRef} open={pickerOpen} onClose={() => setPopoverOpen(false)} align="end">
-        <div
-          data-testid="composer-selector-popover"
-          role="dialog"
-          aria-label="Composer model and workers"
-          onKeyDown={handleKeyDown}
-          style={{
-            width: 300,
-            maxWidth: 'min(300px, calc(100vw * var(--zoom-inverse, 1) - 32px))',
-            maxHeight: 'calc(100vh * var(--zoom-inverse, 1) - 56px)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflowY: 'hidden',
-            borderRadius: 14,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-panel-border)',
-            background: 'var(--t-popover-surface)',
-            backdropFilter: 'blur(24px) saturate(1.4)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-            boxShadow: 'var(--t-panel-shadow)',
-            paddingTop: 6,
-            paddingRight: 6,
-            paddingBottom: 6,
-            paddingLeft: 6,
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          {acpPicker ? (
-            saving ? <div style={{ paddingTop: 12, paddingRight: 10, paddingBottom: 12, paddingLeft: 10, color: 'var(--t-text-faint)', fontSize: 11 }}>Saving selection…</div> : (
-              <AcpModelPicker
-                backend={acpPicker.backend}
-                catalogueUrl={acpPicker.kind === 'worker' && acpPicker.backend === '3code'
-                  ? '/api/runtime/threecode-models'
-                  : undefined}
-                value={acpPicker.kind === 'lead'
-                  ? state.leadModelId
-                  : acpPicker.backend === '3code'
-                    ? defaults.threecodeWorkerModel
-                    : defaults.opencodeWorkerModel}
-                width={288}
-                onSelect={(model) => {
-                  if (acpPicker.kind === 'lead') {
-                    if (acpPicker.backend === state.leadBackend) onModelChange?.(model);
-                    else onBackendChange?.(acpPicker.backend, model);
-                  } else onWorkerModelChange(model, acpPicker.backend);
-                  setPopoverOpen(false);
-                }}
-              />
-            )
-          ) : (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, paddingTop: 4, paddingRight: 8, paddingBottom: 6, paddingLeft: 8, borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-border)', marginBottom: 4 }}>
-                <span style={{ color: 'var(--t-text-faint)' }}><SearchGlyph /></span>
-                <input
-                  ref={searchRef}
-                  data-testid="composer-selector-search"
-                  value={query}
-                  onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
-                  placeholder="Model or runtime…"
-                  autoComplete="off"
-                  style={{ flex: 1, minWidth: 0, borderWidth: 0, outline: 'none', background: 'transparent', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12.5, fontWeight: 300 }}
-                />
-              </div>
-              <SectionLabel text={leadView.kind === 'models' ? `${leadHouseLabel(activeLeadGroup!)} models` : leadView.kind === 'effort' ? 'Effort' : 'Models'} />
-              <div data-testid="composer-selector-lead-scroll" style={{ ...scrollStyle, flex: '0 1 auto', minHeight: 0, maxHeight: 184 }}>
-                {!normalizedQuery && leadView.kind !== 'providers' ? (
-                  <div style={{ display: 'flex', alignItems: 'center', minHeight: 26, paddingTop: 2, paddingRight: 8, paddingBottom: 2, paddingLeft: 8 }}>
-                    <button data-testid="composer-selector-lead-back" type="button" onClick={backFromLeadView} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 22, paddingTop: 0, paddingRight: 4, paddingBottom: 0, paddingLeft: 0, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300 }}>
-                      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
-                      Back
-                    </button>
-                    {leadView.kind === 'effort' ? <span data-testid="composer-selector-lead-step" style={{ marginLeft: 4, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300 }}>{state.leadModelLabel}</span> : null}
-                  </div>
-                ) : null}
-                {providerRows.map((group) => {
-                  const selected = group.key === selectedLeadGroup.key;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead-house:${group.key}`);
-                  const firstOption = group.options[0];
-                  return (
-                    <PickerRow
-                      key={group.key}
-                      testId={`lead-house-${group.key}`}
-                      mark={providerMarkForLead(firstOption?.backend ?? group.key as OrchestratorBackendSetting, firstOption?.model ?? group.key)}
-                      selected={selected}
-                      highlighted={pickIndex === visibleActiveIndex}
-                      label={leadHouseLabel(group)}
-                      meta=""
-                      disabled={saving || !leadReady(group)}
-                      onClick={() => selectLeadHouse(group)}
-                    />
-                  );
-                })}
-                {leadView.kind !== 'effort' ? shownLeadRows.map(({ group, option }) => {
-                  const selected = option.model === state.leadModelId && option.backend === state.leadBackend;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead:${option.value}`);
-                  return (
-                    <PickerRow
-                      key={option.value}
-                      rowRef={selected ? selectedLeadRef : undefined}
-                      testId={`lead-row-${option.model ?? option.value}`}
-                      mark={providerMarkForLead(option.backend, option.model ?? option.value)}
-                      selected={selected}
-                      highlighted={pickIndex === visibleActiveIndex}
-                      label={option.label}
-                      meta={normalizedQuery ? group.label.toLowerCase() : ''}
-                      disabled={saving || !leadReady(group)}
-                      onClick={() => selectLead(group, option)}
-                    />
-                  );
-                }) : null}
-                {leadView.kind !== 'effort' ? shownSearchableLeadRows.map((group) => {
-                  const selected = group.key === state.leadBackend;
-                  const pickIndex = visiblePicks.findIndex((entry) => entry.key === `lead-searchable:${group.key}`);
-                  return (
-                    <PickerRow
-                      key={group.key}
-                      rowRef={selected ? selectedLeadRef : undefined}
-                      testId={`lead-row-${group.key}`}
-                      mark={providerMarkForLead(group.key as OrchestratorBackendSetting, selected ? state.leadModelId : group.key)}
-                      selected={selected}
-                      highlighted={pickIndex === visibleActiveIndex}
-                      label={leadHouseLabel(group)}
-                      meta="live models"
-                      disabled={saving || !leadReady(group)}
-                      onClick={() => setAcpPicker({ kind: 'lead', backend: group.key as OrchestratorBackendSetting })}
-                    />
-                  );
-                }) : null}
-                {!normalizedQuery && leadView.kind === 'effort' ? (
-                  <EffortSlider state={state} onPick={onEffortChange} disabled={saving} />
-                ) : null}
-              </div>
-              <button type="button" aria-expanded={advancedLeads} onClick={() => setAdvancedLeads((current) => !current)} style={{ border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300, padding: 8, textAlign: 'left', cursor: 'pointer' }}>{advancedLeads ? 'Standard leads' : 'Customize leads'}</button>
-              <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />
-              {state.mode !== 'solo' ? (
-              <div ref={workerSectionRef} style={{ flexShrink: 0, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', scrollMarginTop: 6 }}>
-                <button
-                  data-testid="composer-selector-workers-section"
-                  type="button"
-                  aria-expanded={workersVisible}
-                  title={workersVisible ? 'Collapse workers' : `Workers: ${selectedWorkerSummary}`}
-                  onClick={() => setWorkersExpanded((expanded) => !expanded)}
-                  style={{ display: 'flex', alignItems: 'center', width: '100%', minHeight: 28, paddingTop: 5, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, borderWidth: 0, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textAlign: 'left', textTransform: 'uppercase' }}
-                >
-                  <span>Workers</span>
-                  <span data-testid="composer-selector-workers-summary" style={{ marginLeft: 7, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, letterSpacing: '-0.05px', textTransform: 'none' }}>{selectedWorkerSummary}</span>
-                  <span style={{ display: 'inline-flex', marginLeft: 'auto', color: 'var(--t-text-faint)' }}><ChevronGlyph expanded={workersVisible} /></span>
-                </button>
-                {workersVisible ? (
-                  <div style={{ paddingRight: 2, paddingBottom: 3, paddingLeft: 6 }}>
-                    <div data-testid="composer-selector-workers-scroll" style={{ ...scrollStyle, maxHeight: 112 }}>
-                      {workerRows.map((workerRuntime) => {
-                        const selected = workerRuntime === runtime;
-                        const pickIndex = visiblePicks.findIndex((entry) => entry.key === `worker:${workerRuntime}`);
-                        return (
-                          <PickerRow
-                            key={workerRuntime}
-                            rowRef={selected ? selectedWorkerRef : undefined}
-                            testId={`worker-row-${workerRuntime}`}
-                            mark={providerMarkForRuntime(workerRuntime)}
-                            selected={selected}
-                            highlighted={pickIndex === visibleActiveIndex}
-                            label={composerRuntimeLabel(workerRuntime)}
-                            meta={ready(workerRuntime) ? getRuntimeCapability(workerRuntime).workerProvider : 'Needs setup'}
-                            disabled={saving || !ready(workerRuntime)}
-                            onClick={() => selectWorker(workerRuntime)}
-                          />
-                        );
-                      })}
-                    </div>
-                    <div style={{ paddingTop: 5, paddingRight: 8, paddingBottom: 3, paddingLeft: 8, color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Start</div>
-                    <div data-testid="composer-selector-worker-start" style={{ display: 'flex', gap: 2, paddingRight: 8, paddingLeft: 8 }}>
-                      {WORKER_START_OPTIONS.map((option) => {
-                        const selected = option.value === defaults.workerStartMode;
-                        return (
-                          <button key={option.value} type="button" aria-pressed={selected} title={option.detail} disabled={saving} onClick={() => onWorkerStartModeChange(option.value)} style={{ display: 'inline-flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: 22, borderRadius: 6, borderWidth: 1, borderStyle: 'solid', borderColor: selected ? 'transparent' : 'var(--t-border)', background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', cursor: saving ? 'default' : 'pointer', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, opacity: saving ? 0.6 : 1, textAlign: 'center' }}>
-                            {option.long}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              ) : null}
-              <div style={{ display: 'flex', gap: 10, flexShrink: 0, paddingTop: 6, paddingRight: 8, paddingBottom: 2, paddingLeft: 8, marginTop: 4, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-border)', fontSize: 10, color: 'var(--t-text-faint)' }}>
-                <span>⌥T effort</span><span>⇧⇥ mode</span><span>↑↓ ↵ pick</span>
-              </div>
-            </>
-          )}
+  const keyDown = (event: React.KeyboardEvent) => {
+    if (!event.defaultPrevented && event.key === 'Escape') {
+      event.preventDefault(); close(); onRequestTextareaFocus?.(); return;
+    }
+    if (event.defaultPrevented || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+    const rows = [...(contentRef.current?.querySelectorAll<HTMLButtonElement>('[data-model-choice]:not(:disabled)') ?? [])];
+    if (!rows.length) return;
+    if (event.key === 'Enter') {
+      if (event.target instanceof HTMLInputElement) { event.preventDefault(); rows[0]?.click(); }
+      return;
+    }
+    event.preventDefault();
+    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+    rows[(index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length]?.focus();
+  };
+  const pickerOpen = open && (target === 'lead' || state.mode !== 'solo');
+  return <>
+    <LeadChip state={state} open={pickerOpen && target === 'lead'} saving={saving} buttonRef={leadRef} onClick={() => toggle('lead')} />
+    <ThinkingChip state={state} saving={saving} onPick={onEffortChange} open={thinkingOpen} onOpenChange={(next) => { if (next) close(); setThinkingOpen(next); }} />
+    {state.mode !== 'solo' ? <WorkersChip mode={state.mode} availableRuntimes={tools.inventory?.filter((item) => item.available).map((item) => item.id)} runtime={defaults.defaultDispatchRuntime} model={workerModelForDisplay(defaults.defaultDispatchRuntime, defaults)} open={pickerOpen && target === 'workers'} saving={saving} buttonRef={workerRef} onClick={() => toggle('workers')} /> : null}
+    <ComposerPopover anchorRef={target === 'lead' ? leadRef : workerRef} open={pickerOpen} onClose={close} align="end">
+      <FloatingSurface data-testid="composer-selector-popover" role="dialog" aria-label={target === 'lead' ? 'Orchestrator models' : 'Worker models'} style={{ width: 366, maxWidth: 'calc(100vw * var(--zoom-inverse, 1) - 32px)', borderRadius: 18, overflowY: 'hidden' }} contentStyle={{ display: 'flex', maxHeight: 'min(470px, calc(100vh * var(--zoom-inverse, 1) - 72px))', overflow: 'hidden' }}>
+        <div role="toolbar" aria-label={target === 'lead' ? 'Orchestrator houses' : 'Worker houses'} aria-orientation="vertical" style={{ width: 44, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 8, paddingRight: 5, paddingBottom: 8, paddingLeft: 5, borderRight: '1px solid var(--t-border)', overflowY: 'auto', scrollbarWidth: 'none' }}>
+          <HouseButton label="Favorites" selected={houseId === 'favorites'} onClick={() => { generation.current += 1; setHouseId('favorites'); setQuery(''); setError(null); setPending(null); }} onRight={() => contentRef.current?.querySelector('input')?.focus()}><FavoriteGlyph filled={houseId === 'favorites'} /></HouseButton>
+          {houses.map((item) => <HouseButton key={item.id} label={item.label} testId={`${target === 'lead' ? 'lead' : 'worker'}-house-${item.id}`} selected={houseId === item.id} onClick={() => { generation.current += 1; setHouseId(item.id); setQuery(''); setError(null); setPending(null); }} onRight={() => contentRef.current?.querySelector('input')?.focus()}>
+            <ProviderMarkGlyph mark={item.runtime ? providerMarkForRuntime(item.runtime) : providerMarkForLead(item.group!.options[0]?.backend ?? item.id as OrchestratorBackendSetting, item.group!.options[0]?.model ?? item.id)} size={17} />
+          </HouseButton>)}
         </div>
-      </ComposerPopover>
-    </>
-  );
+        <div ref={contentRef} onKeyDown={keyDown} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingTop: 8, paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 24, paddingRight: 8, paddingLeft: 8, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}><span>{target === 'lead' ? 'Orchestrator' : 'Workers'}</span><span>{houseId === 'favorites' ? 'Favorites' : house?.label}</span></div>
+          {target === 'lead' && house?.id === 'acp' ? <ModelPickerRow label="Use agent default" testId="lead-acp-default" selected={state.leadBackend === 'acp' && !state.leadModelId} disabled={!house.ready || saving || Boolean(pending)} onSelect={() => { void commit({ group: house.group, favorite: { house: 'acp', id: '', label: 'Agent default' } }); }} /> : null}
+          {target === 'workers' && house?.runtime === 'claude-code' ? <ClaudeWorkerModels controller={claude} favorites={favorites} onToggleFavorite={toggleFavorite} nativeModel={workerModelForDisplay('claude-code', defaults)} nativeReady={ready('claude-code')} disabled={saving || Boolean(pending) || Boolean(modelLocked('claude-code')) || !claudeInstalled} onSelect={(source, model) => { void selectClaude(source, model); }} /> : searchable && house ? <AcpModelPicker key={`${target}:${house.id}`} backend={house.id} catalogueUrl={house.runtime === '3code' ? '/api/runtime/threecode-models' : undefined} width={310} embedded defaultProvider="openrouter" allowEffortVariants={target === 'lead'} favorites={favorites.filter((favorite) => favorite.house === house.id)} onToggleFavorite={toggleFavorite} value={target === 'lead' ? state.leadModelId : workerModelForDisplay(house.runtime!, defaults)} disabled={saving || Boolean(pending) || (house.runtime ? Boolean(modelLocked(house.runtime)) : !house.ready)}
+            onSelect={(id) => { void select({ favorite: { house: house.id, id, label: id }, runtime: house.runtime, group: house.group }); }} /> : <>
+            <input ref={searchRef} data-testid="composer-selector-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={houseId === 'favorites' ? 'Search favorites' : 'Search models'} aria-label="Search models" autoComplete="off" style={{ boxSizing: 'border-box', width: '100%', minHeight: 30, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, marginBottom: 4, borderWidth: 0, borderBottom: '1px solid var(--t-border)', background: 'transparent', outline: 'none', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300 }} />
+            <div data-testid={target === 'lead' ? 'composer-selector-lead-scroll' : 'composer-selector-workers-scroll'} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none', maxHeight: 320 }}>
+              {shownPicks.map((pick) => <ModelPickerRow key={modelFavoriteKey(pick.favorite)} testId={`${target === 'lead' ? 'lead' : 'worker'}-row-${pick.favorite.id || pick.runtime}`} label={pick.favorite.label} detail={pick.group?.key === 'o8' ? pick.option?.sub : pick.runtime === 'pi-builtin' ? 'Managed model · o8 allowance' : pick.runtime === 'pi' ? 'Your Pi CLI · runtime default' : houseId === 'favorites' || normalizedQuery ? target === 'lead' ? pick.group?.label : `${composerRuntimeLabel(pick.runtime!)}${pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? ' · OpenRouter' : ''}` : undefined} selected={isSelected(pick)} disabled={saving || Boolean(pending) || (pick.runtime ? (pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? !claudeInstalled || !claude.snapshot?.openrouterConfigured : !ready(pick.runtime)) || Boolean(modelLocked(pick.runtime)) : pick.group?.key !== 'o8' && !ready(runtimeForLead(pick.group!.key)))} favorite={favoriteKeys.has(modelFavoriteKey(pick.favorite))} onFavorite={pick.favorite.id ? () => toggleFavorite(pick.favorite) : undefined} onSelect={() => { void select(pick); }} />)}
+              {!shownPicks.length ? <div style={{ padding: 12, fontSize: 11, color: 'var(--t-text-muted)' }}>{houseId === 'favorites' && !query ? 'Star a model to keep it here.' : 'No models match this search.'}</div> : null}
+            </div>
+          </>}
+          {pending ? <div role="status" style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>Applying selection…</div> : null}
+          {error ? <div role="status" style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{error}</div> : null}
+          {house?.runtime && modelLocked(house.runtime) ? <div role="status" style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{workerLocks?.runtime && house.runtime !== defaults.defaultDispatchRuntime ? 'Worker runtime is fixed by your runtime settings.' : 'Worker model is set by the environment.'}</div> : null}
+          {target === 'workers' && house?.runtime ? <WorkerPickerOptions key={house.id} runtime={house.runtime} defaults={defaults} saving={saving || Boolean(pending)} providerDefault={house.runtime === 'claude-code' && claude.provider === 'openrouter'} onEffortChange={onWorkerEffortChange} effortLocked={house.runtime === 'codex' ? workerLocks?.codexEffort : workerLocks?.claudeEffort} onStartChange={onWorkerStartModeChange} /> : null}
+          {target === 'workers' && house?.runtime === '3code' ? <div style={{ padding: 8, fontSize: 10.5, lineHeight: '15px', color: 'var(--t-text-faint)' }}>Models come from your 3code providers. Configure OpenRouter in 3code to include it here.</div> : null}
+          <button type="button" aria-expanded={toolsOpen} onClick={() => setToolsOpen(!toolsOpen)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 27, flexShrink: 0, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, marginTop: 4, borderWidth: 0, borderTop: '1px solid var(--t-border)', background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'var(--font-sans-system)', fontSize: 10.5, fontWeight: 300, cursor: 'pointer' }}><span>Coding tools</span><span>{toolsOpen ? '−' : '+'}</span></button>
+          {toolsOpen ? <div style={{ overflowY: 'auto', scrollbarWidth: 'none', maxHeight: 130 }}><RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} /></div> : null}
+        </div>
+      </FloatingSurface>
+    </ComposerPopover>
+  </>;
 }
 
-function SectionLabel({ text, hint }: { text: string; hint?: string }) {
-  return <div style={{ display: 'flex', justifyContent: 'space-between', flexShrink: 0, paddingTop: 6, paddingRight: 8, paddingBottom: 3, paddingLeft: 8, fontSize: 10, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}><span>{text}</span>{hint ? <span style={{ textTransform: 'none', letterSpacing: '-0.05px' }}>{hint}</span> : null}</div>;
-}
-
-function PickerRow({ rowRef, testId, mark, selected, highlighted, label, meta, disabled, onClick }: { rowRef?: Ref<HTMLButtonElement>; testId: string; mark: ComposerProviderMark; selected: boolean; highlighted: boolean; label: string; meta: string; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button ref={rowRef} data-testid={testId} aria-pressed={selected} type="button" disabled={disabled} onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 26, paddingTop: 3, paddingRight: 8, paddingBottom: 3, paddingLeft: 8, borderRadius: 8, borderWidth: 0, background: selected || highlighted ? 'var(--t-hover)' : 'transparent', color: selected ? 'var(--t-text)' : 'var(--t-text-secondary)', cursor: disabled ? 'default' : 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans-system)', fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', opacity: disabled ? 0.6 : 1 }}>
-      <span style={{ display: 'inline-flex', width: 13, flexShrink: 0, color: 'currentColor' }}><ProviderMarkGlyph mark={mark} /></span>
-      <span>{label}</span>
-      <span style={{ marginLeft: 'auto', fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', color: 'var(--t-text-faint)' }}>{meta}</span>
-      <span style={{ display: 'inline-flex', width: 13, flexShrink: 0, color: 'var(--t-accent)', visibility: selected ? 'visible' : 'hidden' }}><CheckGlyph /></span>
-    </button>
-  );
+function HouseButton({ label, testId, selected, onClick, onRight, children }: { label: string; testId?: string; selected: boolean; onClick: () => void; onRight: () => void; children: React.ReactNode }) {
+  return <button data-testid={testId} type="button" title={label} aria-label={label} aria-pressed={selected} onClick={onClick}
+    onKeyDown={(event) => {
+      if (event.key === 'ArrowRight') { event.preventDefault(); onRight(); }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const buttons = [...(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+        const index = buttons.indexOf(event.currentTarget);
+        buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+      }
+    }}
+    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, flexShrink: 0, padding: 0, borderWidth: 0, borderRadius: 9, background: selected ? 'var(--t-accent-soft)' : 'transparent', color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)', cursor: 'pointer' }}>{children}</button>;
 }

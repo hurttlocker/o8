@@ -11,6 +11,10 @@ export interface BundleIntegrityStatus {
 }
 
 export function BundleIntegrityWarning({ status }: { status: BundleIntegrityStatus }) {
+  // An attached hot-reload host can use an older installed bundle. Keep its
+  // diagnostic available without covering development screenshots with it.
+  if (process.env.NODE_ENV === 'development') return null;
+
   const instruction = status.instruction
     ?? 'Quit o8, move /Applications/o8.app to /Applications/o8.app.damaged, then download and reinstall the latest release.';
 

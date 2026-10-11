@@ -82,6 +82,13 @@ it('formats current model IDs without dropping their minor versions', () => {
   expect(formatModelLabel('openai-codex/gpt-6.1-sol')).toBe('Codex GPT-6.1 Sol');
 });
 
+it('labels the built-in agent\'s receipt ids by whole id only', () => {
+  expect(formatModelLabel('o8-free')).toBe('o8');
+  expect(formatModelLabel('pi')).toBe('Pi');
+  expect(formatModelLabel('o8-operator')).toBe('o8-operator');
+  expect(formatModelLabel('pi-custom')).toBe('pi-custom');
+});
+
 it('advances only the Sol-class defaults', () => {
   expect(MODEL_IDS.codexCliDefault).toBe('gpt-6.1-sol');
   expect(MODEL_IDS.mobileOpenAiDefault).toBe('gpt-6.1-sol');

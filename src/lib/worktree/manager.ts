@@ -22,6 +22,8 @@
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { mayHaveGitRepositoryContext } from '@/lib/git/repository-context';
+import { taskDraftGitOptions } from '@/lib/mcp/task-draft-git';
+import { assertReviewMaterializationOptions, finishReviewMaterialization } from './review-materialization';
 import type {
   CleanupOptions,
   ConflictReport,
@@ -319,6 +321,7 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    if (opts.materializationOnly) assertReviewMaterializationOptions(opts);
     if (opts.agentType === 'claude-code' && !opts.managed) {
       return this.createMaterialized(opts, null, null, () => {});
     }
@@ -365,7 +368,7 @@ export class WorktreeManager {
     // Git worktree maintenance and creation mutate the same shared registry.
     // Keep every create behind the throttled prune instead of letting a cold
     // start race `git worktree prune` against `git worktree add`.
-    if (!autoPrunePromise && Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
+    if (!opts.materializationOnly && !autoPrunePromise && Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
       lastAutoPruneAt = Date.now();
       const prune = this.prune().catch(() => []);
       autoPrunePromise = prune;
@@ -373,7 +376,7 @@ export class WorktreeManager {
         if (autoPrunePromise === prune) autoPrunePromise = null;
       });
     }
-    if (autoPrunePromise) await autoPrunePromise;
+    if (!opts.materializationOnly && autoPrunePromise) await autoPrunePromise;
 
     const baseTaskId = deriveWorktreeId(opts);
     let taskId = baseTaskId;
@@ -470,6 +473,8 @@ export class WorktreeManager {
 
       await this.saveMeta(taskId, {
         id: taskId,
+        packetId: opts.packetId,
+        laneId: opts.laneId,
         agentType: 'claude-code',
         baseBranch,
         createdAt: now,
@@ -523,6 +528,7 @@ export class WorktreeManager {
       });
     }
 
+    const reviewGitOptions = opts.materializationOnly ? await taskDraftGitOptions(this.repoRoot) : [];
     const preparedExecutionIdentity = await ensurePinnedWorkspaceDirectory(
       this.worktreeBase, baseExecutionIdentity, taskId,
     );
@@ -531,6 +537,8 @@ export class WorktreeManager {
     // than an identity-less workspace that cleanup must refuse forever.
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,
@@ -553,6 +561,7 @@ export class WorktreeManager {
     if (!path.isAbsolute(gitDirectory)) throw new Error('Repository Git directory is not absolute.');
     await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
       execFileAsync('git', [
+        ...reviewGitOptions,
         `--git-dir=${gitDirectory}`,
         'worktree', 'add',
         taskId,
@@ -567,6 +576,11 @@ export class WorktreeManager {
       worktreePath, preparedExecutionIdentity,
     );
     await this.bindCreatedMaterializationIdentity(taskId, createdExecutionIdentity);
+    if (opts.materializationOnly) {
+      const info = await withWorktreeMaterializationExecution(worktreePath, createdExecutionIdentity, () => finishReviewMaterialization({ id: taskId, path: worktreePath, branch: branchName, baseBranch, agentType: opts.agentType, status: 'ready', createdAt: now, lastActivityAt: now, dirtyFiles: [], claudeManaged: false, isolationKind: 'git-worktree' }, reviewGitOptions));
+      await this.updateMetaStatus(taskId, 'ready');
+      return info;
+    }
 
     // Packet lanes with a pinned creation receipt were cut from the exact
     // fetched base above. Other callers retain the remote-first rebase path.
@@ -664,6 +678,9 @@ export class WorktreeManager {
     return info;
     });
     } catch (err) {
+      // Preserve failed review materialization and its inode receipt for
+      // inspection; ordinary rollback may invoke repository Git hooks.
+      if (opts.materializationOnly) throw err;
       if (isPinnedWorkspacePublishError(err)) throw err;
       try {
         await this.detachDependencyMaterializationForWorkspace(
@@ -735,6 +752,8 @@ export class WorktreeManager {
     );
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,

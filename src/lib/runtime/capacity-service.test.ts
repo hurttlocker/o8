@@ -42,6 +42,7 @@ describe('runtime capacity service bounds', () => {
     const [left, right] = await Promise.all([first, second]);
 
     expect(observe).toHaveBeenCalledTimes(1);
+    expect(observe).toHaveBeenCalledWith(null, { fresh: true });
     expect(left).toBe(right);
     expect(left.capacities).toEqual([expect.objectContaining({
       runtime: 'stuck-runtime',
@@ -74,9 +75,9 @@ describe('runtime capacity service bounds', () => {
     const snapshot = await getRuntimeCapacityControlSnapshot({ fresh: true });
 
     expect(observe).toHaveBeenCalledTimes(3);
-    expect(observe).toHaveBeenNthCalledWith(1, null);
-    expect(observe).toHaveBeenNthCalledWith(2, 'identity-a');
-    expect(observe).toHaveBeenNthCalledWith(3, 'identity-b');
+    expect(observe).toHaveBeenNthCalledWith(1, null, { fresh: true });
+    expect(observe).toHaveBeenNthCalledWith(2, 'identity-a', { fresh: true });
+    expect(observe).toHaveBeenNthCalledWith(3, 'identity-b', { fresh: true });
     expect(snapshot.capacities.map((capacity) => capacity.identityId)).toEqual([null, 'identity-a', 'identity-b']);
   });
 

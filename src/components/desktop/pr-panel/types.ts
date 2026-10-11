@@ -3,10 +3,31 @@
 // `fetchGitHubPullRequestComments` then layers `resolvedRepo`, `readiness`,
 // `workflowStage`, `reviewComments`, `issueComments`, `diffStat` on top.
 
-export type PrTabId = 'changes' | 'checks' | 'commits' | 'reviews';
+export type PrTabId = 'summary' | 'timeline' | 'changes' | 'checks' | 'commits' | 'reviews';
+export type PrComposerMode = 'brain' | 'comment' | 'review';
+export type PrReviewAction = 'review-comment' | 'approve' | 'request-changes';
+export type PrMergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface PrTimelineEvent {
+  id: string;
+  kind: string;
+  title: string;
+  actor: string;
+  avatarUrl: string | null;
+  at: string;
+  body: string;
+  url: string;
+  commitSha?: string;
+}
+
+export interface PrTimelinePage {
+  events: PrTimelineEvent[];
+  nextPage: number | null;
+}
 
 export interface PrFile {
   path: string;
+  previousPath?: string | null;
   status: string;
   additions: number;
   deletions: number;
@@ -17,6 +38,7 @@ export interface PrCheck {
   name: string;
   status?: string | null;
   conclusion?: string | null;
+  url?: string | null;
 }
 
 export interface PrReviewComment {
@@ -45,11 +67,19 @@ export interface PrDetail {
   body: string;
   state: string;
   author: string;
+  avatarUrl?: string | null;
+  labels?: string[];
+  requestedReviewers?: string[];
   headRefName: string;
   baseRefName: string;
+  headSha?: string;
+  baseSha?: string;
   additions: number;
   deletions: number;
   changedFiles: number;
+  draft?: boolean;
+  autoMergeEnabled?: boolean;
+  allowedMergeMethods?: PrMergeMethod[];
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -72,6 +102,8 @@ export interface PrDetailResponse {
 export type CheckBucket = 'failing' | 'running' | 'passed' | 'neutral' | 'skipped';
 
 export interface PrPanelProps {
+  active?: boolean;
+  id?: string;
   prNumber: number;
   repoSlug?: string | null;
   repoPath?: string | null;

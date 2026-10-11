@@ -10,16 +10,18 @@ import type { O8AuthState } from '@/components/auth/O8AuthProvider';
 
 const mocks = vi.hoisted(() => ({
   signedIn: false,
+  userLoaded: true,
   user: null as { id: string; reload: () => Promise<void> } | null,
   clerk: {} as Record<string, unknown>,
   signIn: {} as Record<string, unknown>,
   opened: vi.fn(),
+  browserSignIn: vi.fn(),
   ticket: vi.fn(async () => ({})),
   callbacks: null as ((event: { payload: string[] }) => void) | null,
 }));
 vi.mock('@clerk/nextjs', () => ({
   ClerkProvider: ({ children }: { children: unknown }) => children,
-  useUser: () => ({ isLoaded: true, isSignedIn: mocks.signedIn, user: mocks.user }),
+  useUser: () => ({ isLoaded: mocks.userLoaded, isSignedIn: mocks.signedIn, user: mocks.user }),
   useClerk: () => mocks.clerk,
   useSignIn: () => ({ signIn: mocks.signIn }),
 }));
@@ -42,6 +44,7 @@ vi.mock('@/lib/auth/tauri-clerk-store', async (original) => ({
 
 let dataDir: string;
 let root: Root;
+let host: HTMLDivElement;
 let state: O8AuthState;
 let render: () => void;
 let fetchMock: ReturnType<typeof vi.fn<(input: string, init?: RequestInit) => Promise<Response>>>;
@@ -53,19 +56,19 @@ function localRequest(input: string, init?: RequestInit) {
   });
 }
 
-async function mount(withDrawer = false) {
+async function mount(withAccount = false) {
   const { O8AuthProvider, useO8Auth } = await import('@/components/auth/O8AuthProvider');
-  const Drawer = withDrawer ? (await import('@/components/desktop/SettingsQuickDrawer')).SettingsQuickDrawer : null;
+  const Account = withAccount ? (await import('@/components/desktop/settings/AccountTab')).AccountTab : null;
   const Probe = () => {
     const value = useO8Auth();
     useEffect(() => { state = value; }, [value]);
     return null;
   };
-  root = createRoot(document.createElement('div'));
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
   render = () => root.render(createElement(O8AuthProvider, null, createElement(Fragment, null,
-    createElement(Probe), Drawer && createElement(Drawer, {
-      open: true, anchorRect: null, onClose: () => {}, onOpenSettings: () => {},
-    }),
+    createElement(Probe), Account && createElement(Account),
   )));
   await act(async () => { render(); });
 }
@@ -75,18 +78,33 @@ function callbackForLastHandoff() {
   return `o8://auth/callback?state=${url.searchParams.get('state')}&ticket=${randomBytes(24).toString('hex')}`;
 }
 
+async function openNativeLauncher(open = () => state.signIn()) {
+  const opened = mocks.opened.mock.calls.length;
+  const begins = fetchMock.mock.calls.filter(([input]) => input.endsWith('/handoff?action=begin')).length;
+  await act(async () => { open(); });
+  const dialog = document.querySelector('[role="dialog"][aria-label="Sign in to o8"]');
+  expect(dialog).not.toBeNull();
+  expect(mocks.opened.mock.calls.length).toBe(opened);
+  expect(fetchMock.mock.calls.filter(([input]) => input.endsWith('/handoff?action=begin'))).toHaveLength(begins);
+  const button = [...dialog!.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Continue in browser');
+  expect(button).toBeDefined();
+  return button!;
+}
+
 async function beginHandoff() {
   const opened = mocks.opened.mock.calls.length;
+  const button = await openNativeLauncher();
   await act(async () => {
-    state.signIn();
-    await vi.waitFor(() => expect(mocks.opened.mock.calls.length).toBe(opened + 1));
+    button.click();
+    await vi.waitFor(() => expect(mocks.opened.mock.calls.length).toBe(opened + 1), { timeout: 10000 });
   });
   return callbackForLastHandoff();
 }
 
 async function deliver(raw: string) {
   await act(async () => {
-    mocks.callbacks?.({ payload: [raw] });
+    await vi.waitFor(() => expect(mocks.callbacks).not.toBeNull(), { timeout: 10000 });
+    mocks.callbacks!({ payload: [raw] });
     // The callback handler is intentionally event-driven and fire-and-forget.
     await new Promise((resolve) => setTimeout(resolve, 25));
   });
@@ -95,8 +113,10 @@ async function deliver(raw: string) {
 beforeEach(() => {
   vi.resetModules();
   mocks.signedIn = false;
+  mocks.userLoaded = true;
   mocks.user = null;
   mocks.opened.mockClear();
+  mocks.browserSignIn.mockClear();
   mocks.ticket.mockClear();
   mocks.callbacks = null;
   enrollments = 0;
@@ -110,6 +130,7 @@ beforeEach(() => {
   });
   mocks.signIn = { status: 'complete', createdSessionId: 'session_device', ticket: mocks.ticket, finalize: async () => ({}) };
   mocks.clerk = {
+    openSignIn: mocks.browserSignIn,
     user: null, session: { getToken: async () => randomBytes(24).toString('hex') },
     setActive: async () => {
       mocks.signedIn = true;
@@ -140,6 +161,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => { root?.unmount(); });
+  host?.remove();
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   rmSync(dataDir, { recursive: true, force: true });
   vi.unstubAllEnvs();
@@ -147,6 +169,21 @@ afterEach(async () => {
 });
 
 describe('round 2 handoff through the native provider, real callback handler and persisted route state', () => {
+  it('opens the native launcher from Account settings while the account SDK is still loading, then begins the browser handoff', async () => {
+    mocks.userLoaded = false;
+    await mount(true);
+    const button = [...host.querySelectorAll('button')].find((element) => element.textContent?.trim() === 'Sign in to o8');
+    expect(button).toBeDefined();
+    const continueButton = await openNativeLauncher(() => button!.click());
+    expect(fetchMock.mock.calls.filter(([input]) => input.endsWith('/handoff?action=begin'))).toHaveLength(0);
+    await act(async () => {
+      continueButton.click();
+      await vi.waitFor(() => expect(mocks.opened).toHaveBeenCalledOnce(), { timeout: 10000 });
+    });
+    expect(state.signedIn).toBe(false);
+    expect(new URL(String(mocks.opened.mock.calls[0][0])).searchParams.has('state')).toBe(true);
+  });
+
   it('rejects a delayed callback from a handoff begun before explicit sign-out', async () => {
     await mount();
     const raw = await beginHandoff();
@@ -182,6 +219,7 @@ describe('round 2 handoff through the native provider, real callback handler and
     expect(state.signedIn).toBe(true);
     expect(enrollments).toBe(1);
     expect(existsSync(target)).toBe(false);
+    expect(document.querySelector('[role="dialog"][aria-label="Sign in to o8"]')).toBeNull();
   });
 
   it('accepts the durable nonce despite stale sessionStorage and rejects the older local nonce', async () => {
@@ -203,12 +241,18 @@ describe('round 2 handoff through the native provider, real callback handler and
     let release!: () => void;
     const hold = new Promise<void>((resolve) => { release = resolve; });
     const normal = fetchMock.getMockImplementation()!;
+    let beginResponseReady = false;
     fetchMock.mockImplementation(async (input, init) => {
       const response = await normal(input, init);
-      if (input.endsWith('/handoff?action=begin')) await hold;
+      if (input.endsWith('/handoff?action=begin')) { beginResponseReady = true; await hold; }
       return response;
     });
-    await act(async () => { state.signIn(); });
+    const button = await openNativeLauncher();
+    await act(async () => {
+      button.click();
+      await vi.waitFor(() => expect(beginResponseReady).toBe(true), { timeout: 10000 });
+    });
+    expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(true);
     try {
       await act(async () => { await state.signOut(); });
     } finally {
@@ -224,12 +268,16 @@ describe('round 2 handoff through the native provider, real callback handler and
     let release!: () => void;
     const hold = new Promise<void>((resolve) => { release = resolve; });
     const normal = fetchMock.getMockImplementation()!;
+    const validation = { response: null as Response | null };
     fetchMock.mockImplementation(async (input, init) => {
       const response = await normal(input, init);
-      if (input.endsWith('/handoff?action=validate')) await hold;
+      if (input.endsWith('/handoff?action=validate')) { validation.response = response; await hold; }
       return response;
     });
     await deliver(raw);
+    await vi.waitFor(() => expect(validation.response).not.toBeNull(), { timeout: 10000 });
+    expect(await validation.response!.clone().json()).toMatchObject({ ok: true });
+    expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(false);
     try {
       await act(async () => { await state.signOut(); });
     } finally {
@@ -241,11 +289,15 @@ describe('round 2 handoff through the native provider, real callback handler and
   });
 
   it('does not report completed sign-out without durable handoff cancellation acknowledgement', async () => {
-    mocks.signedIn = true;
-    mocks.user = { id: 'user_device', reload: async () => {} };
-    mocks.clerk.user = mocks.user;
     await mount();
     await beginHandoff();
+    await act(async () => {
+      mocks.signedIn = true;
+      mocks.user = { id: 'user_device', reload: async () => {} };
+      mocks.clerk.user = mocks.user;
+      render();
+    });
+    expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(true);
     const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
       if (input.endsWith('/device/revoke') || input.endsWith('/handoff?action=cancel')) throw new Error('Unavailable');
@@ -298,7 +350,7 @@ describe('round 2 handoff through the native provider, real callback handler and
       vi.useRealTimers();
       await act(async () => {
         release();
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await vi.waitFor(() => expect(mocks.signedIn).toBe(false), { timeout: 10000 });
       });
     }
     expect(state.signedIn).toBe(false);
@@ -307,7 +359,10 @@ describe('round 2 handoff through the native provider, real callback handler and
   it('preserves browser-mode sign-in without a native handoff request', async () => {
     delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     await mount();
-    await beginHandoff();
+    await act(async () => { state.signIn(); });
+    expect(mocks.browserSignIn).toHaveBeenCalledExactlyOnceWith({ forceRedirectUrl: window.location.href, signUpForceRedirectUrl: window.location.href });
+    expect(mocks.opened).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"][aria-label="Sign in to o8"]')).toBeNull();
     expect(fetchMock.mock.calls.filter(([input]) => input.includes('/auth/handoff')).length).toBe(0);
   });
 });

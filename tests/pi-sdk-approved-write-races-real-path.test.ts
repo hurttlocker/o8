@@ -284,6 +284,16 @@ describe('approved writes under concurrent workspace mutation', () => {
 
   it('a helper that stops responding is killed and its stage removed', async () => {
     const f = fixture(null, [{ at: 'synced', action: 'hang' }]);
+    // Keep cold Node startup at unrelated hook points out of the helper's
+    // two-second deadline. This still blocks the real helper at synced.
+    writeFileSync(join(f.helperDir, 'hook'), `#!/bin/sh
+if [ "$1" = synced ]; then
+  hook_dir=\${0%/*}
+  : > "$hook_dir/fired-0"
+  : > "$hook_dir/reached"
+  while kill -0 "$2" 2>/dev/null; do sleep 0.02; done
+fi
+`, { mode: 0o755 });
     const parentStat = lstatSync(f.parent);
     const workspaceStat = lstatSync(f.workspace);
     const parent = { path: f.parent, dev: parentStat.dev, ino: parentStat.ino, root: { dev: workspaceStat.dev, ino: workspaceStat.ino } };

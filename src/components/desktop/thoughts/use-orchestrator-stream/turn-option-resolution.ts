@@ -12,6 +12,8 @@ import {
   TURN_OPTIONS_REFRESH_TIMEOUT,
 } from './resolve-turn-options';
 import type { OrchestratorSendOptions } from './types';
+import { readComposerServiceTier } from '../composer-selector/service-tier-store';
+import { normalizeOrchestratorTurnModel } from '@/lib/orchestrator/turn-model-selection';
 
 const TURN_OPTIONS_REFRESH_TIMEOUT_MS = 5_000;
 
@@ -21,10 +23,12 @@ export function prepareOrchestratorTurn(message: string, options?: OrchestratorS
   const collide = options?.collide === true && requestedOrchestrationMode !== 'single';
   const backend: OrchestratorBackendId | undefined = collide ? 'collide' : options?.backend;
   const orchestrationMode: OrchestratorExecutionMode = collide ? 'fleet' : requestedOrchestrationMode;
+  const model = normalizeOrchestratorTurnModel(options?.model) ?? DEFAULT_ORCHESTRATOR_MODEL;
   return {
     permissionMode,
     thinkingEffort: options?.thinkingEffort,
-    model: options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL,
+    serviceTier: options?.serviceTier ?? (backend === 'claude' || backend === 'codex' ? readComposerServiceTier(backend, model) : undefined),
+    model,
     displayMessage: options?.displayMessage?.trim() || message,
     wireMessage: options?.wireMessage?.trim() || message,
     localEntriesAfterUser: options?.localEntriesAfterUser ?? [],

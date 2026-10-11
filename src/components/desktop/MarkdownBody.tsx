@@ -114,7 +114,7 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
 
 // ── Inline rendering ──
 
-function renderInline(text: string): React.ReactNode {
+function renderInline(text: string, options: Pick<MarkdownBodyProps, 'renderInlineCode' | 'resolveLink'>): React.ReactNode {
   // Handle images, bold, italic, inline code, and links
   const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
@@ -124,6 +124,8 @@ function renderInline(text: string): React.ReactNode {
       return <InlineImage key={i} alt={imgMatch[1]} src={imgMatch[2]} />;
     }
     if (part.startsWith('`') && part.endsWith('`')) {
+      const custom = options.renderInlineCode?.(part.slice(1, -1));
+      if (custom !== undefined) return <React.Fragment key={i}>{custom}</React.Fragment>;
       return (
         <code key={i} style={{
           background: 'var(--t-code-bg)',
@@ -134,7 +136,7 @@ function renderInline(text: string): React.ReactNode {
           borderRadius: 4,
           fontSize: '0.85em',
           fontFamily: '"SF Mono", ui-monospace, monospace',
-          color: '#d946ef',
+          color: /\w+\(|^(?:\$ |[\w./-]+\s+--?\w)/.test(part.slice(1, -1)) ? 'var(--t-terminal-ansi-cyan)' : 'var(--t-text-secondary)',
         }}>
           {part.slice(1, -1)}
         </code>
@@ -150,13 +152,15 @@ function renderInline(text: string): React.ReactNode {
     // Links: [text](url)
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
+      const href = options.resolveLink ? options.resolveLink(linkMatch[2]) : linkMatch[2];
+      if (!href) return <span key={i}>{linkMatch[1]}</span>;
       return (
         <a
           key={i}
-          href={linkMatch[2]}
+          href={href}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: '#2563eb', textDecoration: 'none', borderBottom: '1px solid rgba(37,99,235,0.3)' }}
+          style={{ color: 'var(--t-accent)', textDecoration: 'none', borderBottom: '1px solid color-mix(in srgb, var(--t-accent) 30%, transparent)' }}
         >
           {linkMatch[1]}
         </a>
@@ -171,9 +175,12 @@ function renderInline(text: string): React.ReactNode {
 interface MarkdownBodyProps {
   text: string;
   compact?: boolean;
+  renderInlineCode?: (code: string) => React.ReactNode | undefined;
+  resolveLink?: (href: string) => string | null;
 }
 
-export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }: MarkdownBodyProps) {
+export const MarkdownBody = memo(function MarkdownBody({ text, compact = false, renderInlineCode, resolveLink }: MarkdownBodyProps) {
+  const inline = (text: string) => renderInline(text, { renderInlineCode, resolveLink });
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
   let i = 0;
@@ -220,7 +227,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           marginBottom: compact ? 6 : 8,
           letterSpacing: '-0.01em',
         }}>
-          {renderInline(line.slice(4))}
+          {inline(line.slice(4))}
         </h4>
       );
       i++;
@@ -236,7 +243,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           marginBottom: compact ? 8 : 10,
           letterSpacing: '-0.01em',
         }}>
-          {renderInline(line.slice(3))}
+          {inline(line.slice(3))}
         </h3>
       );
       i++;
@@ -252,7 +259,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           marginBottom: compact ? 8 : 12,
           letterSpacing: '-0.02em',
         }}>
-          {renderInline(line.slice(2))}
+          {inline(line.slice(2))}
         </h2>
       );
       i++;
@@ -295,7 +302,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           lineHeight: bodyLineHeight,
         }}>
           {quoteLines.map((ql, qi) => (
-            <div key={qi}>{renderInline(ql)}</div>
+            <div key={qi}>{inline(ql)}</div>
           ))}
         </blockquote>
       );
@@ -318,7 +325,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           color: 'var(--t-text)',
         }}>
           {items.map((item) => (
-            <li key={item.idx} style={{ marginBottom: 3 }}>{renderInline(item.text)}</li>
+            <li key={item.idx} style={{ marginBottom: 3 }}>{inline(item.text)}</li>
           ))}
         </ul>
       );
@@ -341,7 +348,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
           color: 'var(--t-text)',
         }}>
           {items.map((item) => (
-            <li key={item.idx} style={{ marginBottom: 3 }}>{renderInline(item.text)}</li>
+            <li key={item.idx} style={{ marginBottom: 3 }}>{inline(item.text)}</li>
           ))}
         </ol>
       );
@@ -393,7 +400,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
                       borderBottom: '2px solid var(--t-divider)',
                       whiteSpace: 'nowrap',
                     }}>
-                      {renderInline(cell)}
+                      {inline(cell)}
                     </th>
                   ))}
                 </tr>
@@ -413,7 +420,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
                           paddingLeft: tableCellPaddingX,
                           color: 'var(--t-text)',
                         }}>
-                          {renderInline(cell)}
+                          {inline(cell)}
                         </td>
                       ))}
                     </tr>
@@ -453,7 +460,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
               textDecoration: item.checked ? 'line-through' : 'none',
             }}>
               <span style={{ fontSize: 14, marginTop: 2 }}>{item.checked ? '☑' : '☐'}</span>
-              {renderInline(item.text)}
+              {inline(item.text)}
             </li>
           ))}
         </ul>
@@ -507,7 +514,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }
         lineHeight: bodyLineHeight,
         color: 'var(--t-text)',
       }}>
-        {renderInline(line)}
+        {inline(line)}
       </p>
     );
     i++;

@@ -6,7 +6,7 @@ import {
 } from './identity-catalog';
 
 export const CAPACITY_CACHE_MS = 15_000;
-export const CAPACITY_OBSERVATION_TIMEOUT_MS = 5_000;
+export const CAPACITY_OBSERVATION_TIMEOUT_MS = 8_000;
 
 export interface RuntimeCapacityCapabilityProjection {
   runtime: string;
@@ -42,12 +42,13 @@ function unavailable(runtime: string, reason: string, identityId: string | null 
 async function boundedCapacity(
   runtime: ReturnType<typeof getAllRuntimes>[number],
   identityId: string | null = null,
+  options: { fresh?: boolean } = {},
 ): Promise<RuntimeCapacitySnapshot> {
   if (!runtime.getCapacity) return unavailable(runtime.id, 'adapter_observation_unavailable', identityId);
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      Promise.resolve(runtime.getCapacity(identityId)),
+      Promise.resolve(runtime.getCapacity(identityId, options)),
       new Promise<RuntimeCapacitySnapshot>((resolve) => {
         timeout = setTimeout(
           () => resolve(unavailable(runtime.id, 'observation_timeout', identityId)),
@@ -63,7 +64,7 @@ async function boundedCapacity(
   }
 }
 
-async function buildSnapshot(): Promise<RuntimeCapacityControlSnapshot> {
+async function buildSnapshot(options: { fresh?: boolean }): Promise<RuntimeCapacityControlSnapshot> {
   const runtimes = getAllRuntimes().filter((runtime) => runtime.capabilities.capacity?.observe);
   const identities = await listPublicRuntimeIdentities();
   const observedCapacities = await Promise.all(runtimes.flatMap((runtime) => {
@@ -72,10 +73,10 @@ async function buildSnapshot(): Promise<RuntimeCapacityControlSnapshot> {
       : [];
     return runtimeIdentities.length > 0
       ? [
-          boundedCapacity(runtime),
-          ...runtimeIdentities.map((identity) => boundedCapacity(runtime, identity.id)),
+          boundedCapacity(runtime, null, options),
+          ...runtimeIdentities.map((identity) => boundedCapacity(runtime, identity.id, options)),
         ]
-      : [boundedCapacity(runtime)];
+      : [boundedCapacity(runtime, null, options)];
   }));
   const capacities = [...new Map(observedCapacities.map((capacity) => [
     `${capacity.runtime}:${capacity.identityId ?? 'default'}`,
@@ -101,7 +102,7 @@ export async function getRuntimeCapacityControlSnapshot(
   if (!options.fresh && cached && now - cached.cachedAt < CAPACITY_CACHE_MS) return cached.value;
   if (inflight) return inflight;
   const generation = capacityGeneration;
-  const promise = buildSnapshot().then((value) => {
+  const promise = buildSnapshot(options).then((value) => {
     if (generation === capacityGeneration) cached = { value, cachedAt: Date.now() };
     return value;
   }).finally(() => {

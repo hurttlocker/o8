@@ -7,12 +7,9 @@ import { orchestratorBackendDisplayLabel, orchestratorRuntimeTone } from '@/lib/
 import { correlatedActionIsUnsettled } from '@/lib/orchestrator/action-receipt';
 import { fetchRuntimeLaunchReceipt, fetchRuntimeSteerReceipt } from '@/lib/orchestrator/runtime-mutation-receipt';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
-import type { ManualThinkingEffort, ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
-  readAdaptiveThinkingEnabled,
-  readStoredOrchestratorThinkingOverride,
   resolveInitialOrchestratorThinkingPreferences,
-  subscribeOrchestratorThinkingPreferences,
   writeStoredOrchestratorThinkingOverride,
 } from '@/lib/orchestrator/thinking-preferences';
 import {
@@ -33,7 +30,6 @@ import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
   parseOrchestratorSlashCommand,
-  type SlashOrchestrationRequest,
 } from '@/lib/slash-commands';
 import type { AgentTarget, FleetAgent } from './types';
 import {
@@ -48,6 +44,7 @@ import {
   resolveThreadLoadPlan,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
+import { useSlashOrchestration } from './useSlashOrchestration';
 import type { OrchestratorSendOptions } from './use-orchestrator-stream/types';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
@@ -55,7 +52,7 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
-import { packetsForOrchestratorThread, SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
+import { packetsForOrchestratorThread, SwarmStatusCard } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
@@ -86,6 +83,8 @@ import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
+import { TranscriptActivity } from '../transcript/TranscriptActivity';
+import { transcriptScouts } from '../transcript/activity';
 import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
@@ -97,6 +96,10 @@ import {
 } from './chat-panel/thread-history-window';
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
+import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
+import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
+import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
+import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type {
@@ -130,6 +133,8 @@ export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsCha
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
+  /** An isolated contextual chat keeps its draft and attaches context on send. */
+  contextualConversation?: ContextualConversation;
   imageInjection?: { id: string; dataUri: string; name: string; mimeType: string } | null;
   onImageInjectionConsumed?: () => void;
   agents: FleetAgent[];
@@ -213,6 +218,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
+  contextualConversation,
   imageInjection,
   onImageInjectionConsumed,
   agents,
@@ -254,7 +260,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   suppressAutoRestore = false, suppressRuntimePrewarm = false,
   expectsThreadLoad = false,
 }, ref) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => contextualConversation?.initialDraft ?? '');
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
   useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
   // The mode ref keeps sends in sync with the selected composer mode.
@@ -367,9 +373,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => window.removeEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
   }, [handleSelectOrchestrationMode, open]);
 
-  const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
+  const contextModelDefaults = contextualConversation?.modelDefaults;
+  const [operatorDefaults, setOperatorDefaults] = useState(() => contextualOperatorDefaults(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, contextModelDefaults));
   const [orchestratorBackend, setOrchestratorBackend] = useState<OrchestratorBackendSetting>(
-    () => resolveActiveComposerBackend(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK),
+    () => resolveActiveComposerBackend(contextualOperatorDefaults(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, contextModelDefaults)),
   );
   // Who chose the composer's backend: 'default' (operator default seeded it),
   // 'thread' (adopted from a loaded thread's stored backend), 'user' (picked
@@ -378,12 +385,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // operator default ("they all say o8", 2026-07-16): a thread-bound tab
   // continues on ITS backend; the default is for new sessions.
   const backendSourceRef = useRef<'default' | 'thread' | 'user'>('default');
-  const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
-    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
-  );
-  const [thinkingOverride, setThinkingOverride] = useState<ManualThinkingEffort | null>(
-    () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).thinkingOverride,
-  );
+  const { adaptiveThinkingEnabled, setAdaptiveThinkingEnabled, thinkingOverride, setThinkingOverride } = useContextThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort, contextualConversation);
   const [chatMessages, setChatMessages] = useReducer(retainedTranscriptReducer, []);
   const {
     entries: threadHistoryEntries,
@@ -410,7 +412,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const orchestratorSessionRef = useRef<string | null>(null);
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
-  const [orchestratorSpawning, setOrchestratorSpawning] = useState(false);
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
@@ -438,7 +439,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     model: orchestratorModel,
     restoreModel: restoreOrchestratorModel,
     setModel: setOrchestratorModel,
-  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath });
+  } = useOrchestratorModelState({ operatorDefaultModel: operatorDefaults.orchestratorModel, repoPath: resolvedRepoPath, isolated: Boolean(contextualConversation) });
   const resetComposerModeForLeadChange = useCallback(() => {
     if (composerModeRef.current === 'moa' || composerModeRef.current === 'fusion') {
       handleComposerModeChange('solo');
@@ -456,6 +457,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setModel: acceptOrchestratorModel,
     setOperatorDefaults,
     onBeforeApply: resetComposerModeForLeadChange,
+    persistSelection: !contextualConversation,
   });
   const [threadProjectId, setThreadProjectId] = useState<string | null>(projectIdProp ?? null);
   useEffect(() => {
@@ -526,7 +528,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setOperatorDefaults((current) => ({ ...current, readyRuntimeCount }));
     });
     void (async () => {
-      const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
+      const defaults = contextualOperatorDefaults(await fetchThoughtsOperatorDefaults(controller.signal), contextModelDefaults);
       if (controller.signal.aborted) return;
       setOperatorDefaults(defaults);
       // Late-landing defaults must not clobber a backend the thread (or the
@@ -535,18 +537,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setOrchestratorBackend(resolveActiveComposerBackend(defaults));
       }
       if (thinkingPreferenceTouchedRef.current) return;
-      const nextThinkingPreferences = resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
+      const nextThinkingPreferences = contextModelDefaults ? { adaptiveThinkingEnabled: false, thinkingOverride: contextModelDefaults.effort } : resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
       setAdaptiveThinkingEnabled(nextThinkingPreferences.adaptiveThinkingEnabled);
       setThinkingOverride(nextThinkingPreferences.thinkingOverride);
     })();
 
     return () => { controller.abort(); cancelRuntimeReadiness(); };
-  }, []);
+  }, [contextModelDefaults, setAdaptiveThinkingEnabled, setThinkingOverride]);
 
-  useEffect(() => subscribeOrchestratorThinkingPreferences(() => {
-    setAdaptiveThinkingEnabled(readAdaptiveThinkingEnabled());
-    setThinkingOverride(readStoredOrchestratorThinkingOverride());
-  }), []);
+
 
   useEffect(() => {
     if (!isOrchestratorMode) return;
@@ -696,9 +695,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return sessionKey ? { sessionKey, launched: true } : null;
   }, [resolveRuntimeRepoPath, singleRuntime]);
 
-  // ── Pre-warm orchestrator session on mount ──
+  // ── Reuse an idle orchestrator session on mount ──
   useEffect(() => {
-    if (suppressRuntimePrewarm || !isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current || orchestratorSpawning) return;
+    if (!open || suppressRuntimePrewarm || !isOrchestratorMode || !orchestrationSettingsLoaded || isChatMode || orchestratorSessionRef.current) return;
 
     let cancelled = false;
     (async () => {
@@ -718,9 +717,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         const invRes = await fetch('/api/runtime/inventory?fresh=1');
         if (invRes.ok && !cancelled) {
           const invData = await invRes.json() as { agents?: Array<{ sessionKey: string; runtime: string; status: string; workspace: string }> };
-          const existing = (invData.agents ?? []).find(
-            (a) => a.runtime === 'claude-code' && (a.status === 'idle' || a.status === 'reviewing') && a.workspace?.includes(repoPath!),
-          );
+          const existing = findIdleOrchestratorSession(invData.agents ?? [], repoPath);
           if (existing) {
             orchestratorSessionRef.current = existing.sessionKey;
             return;
@@ -728,40 +725,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         }
       } catch { /* silent */ }
 
-      if (cancelled) return;
-      let receiptUnsettled = false;
-      try {
-        setOrchestratorSpawning(true);
-        const { payload: data } = await fetchRuntimeLaunchReceipt({
-          runtime: 'claude-code',
-          prompt: 'You are the orchestrator for o8. Acknowledge ready.',
-          repoPath,
-          cwd: repoPath,
-          skipSetup: true,
-        });
-        if (data?.ok && data.surfaceId && !cancelled) {
-          orchestratorSessionRef.current = data.surfaceId;
-        }
-      } catch (error) {
-        receiptUnsettled = correlatedActionIsUnsettled(error);
-      } finally {
-        if (!cancelled && !receiptUnsettled) setOrchestratorSpawning(false);
-      }
+      // Opening a conversation is observation. Runtime creation belongs to
+      // the normal send path after the operator submits their request.
     })();
     return () => { cancelled = true; };
-  }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath, suppressRuntimePrewarm]);
+  }, [isChatMode, isOrchestratorMode, open, orchestrationSettingsLoaded, resolvedRepoPath, suppressRuntimePrewarm]);
 
   useEffect(() => {
     openRef.current = open;
   }, [open]);
 
-  useEffect(() => {
-    if (!open || !draftInjection?.id) return;
-    setInput((prev) => prev.trim()
-      ? `${prev.trimEnd()}\n\n${draftInjection.text}\n\n`
-      : `${draftInjection.text}\n\n`);
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }, [draftInjection?.id, draftInjection?.text, open]);
+  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, setInput, setPreEnhanceInput, inputRef });
 
   // Right-click "Add to chat" on an inline o8.md image relays here (via the
   // dashboard, so only the VISIBLE tab consumes it). Apply once per id (ref
@@ -775,48 +749,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     addAttachedImage({ name: imageInjection.name, dataUri: imageInjection.dataUri, mimeType: imageInjection.mimeType });
     onImageInjectionConsumed?.();
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
-
-  // Clear stale composer drafts on tab refocus unless a fresh draft injection
-  // arrived while hidden. Tabs are display:none, so composer state persists.
-  const previousOpenRef = useRef(open);
-  const inputAtBlurRef = useRef<string>('');
-  const lastSeenDraftIdRef = useRef<string | null>(draftInjection?.id ?? null);
-  const [showDraftClearedToast, setShowDraftClearedToast] = useState(false);
-  const draftClearedToastTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    return () => {
-      if (draftClearedToastTimerRef.current !== null) {
-        window.clearTimeout(draftClearedToastTimerRef.current);
-      }
-    };
-  }, []);
-  useEffect(() => {
-    const wasOpen = previousOpenRef.current;
-    previousOpenRef.current = open;
-    if (wasOpen && !open) {
-      inputAtBlurRef.current = input;
-      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
-      return;
-    }
-    if (open && !wasOpen) {
-      const staleDraft = inputAtBlurRef.current.trim();
-      const newDraftArrived = (draftInjection?.id ?? null) !== lastSeenDraftIdRef.current;
-      if (staleDraft && !newDraftArrived) {
-        setInput('');
-        setPreEnhanceInput(null);
-        setShowDraftClearedToast(true);
-        if (draftClearedToastTimerRef.current !== null) {
-          window.clearTimeout(draftClearedToastTimerRef.current);
-        }
-        draftClearedToastTimerRef.current = window.setTimeout(() => {
-          setShowDraftClearedToast(false);
-          draftClearedToastTimerRef.current = null;
-        }, 1800);
-      }
-      inputAtBlurRef.current = '';
-      lastSeenDraftIdRef.current = draftInjection?.id ?? null;
-    }
-  }, [open, input, draftInjection?.id]);
 
   useEffect(() => {
     if (suppressNextTranscriptAutoScrollRef.current) {
@@ -1563,6 +1495,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const sendingThreadId = threadIdRef.current;
     return orchStream.send(message, {
       ...options, pickedMode: composerModeRef.current,
+      wireMessage: contextualTurnMessage(options.wireMessage ?? message, contextualConversation?.requestContext),
       ...(handoffMode ? { handoffMode } : {}),
       beforeSend: async (signal) => {
         const ready = await ensureSelectedRepoPersisted(signal);
@@ -1578,26 +1511,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
         repoPath: resolvedRepoPath,
         backend: orchestratorBackend,
+        localModel: contextualConversation ? orchestratorModel : undefined,
         backendSourceRef, setBackend: setOrchestratorBackend,
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal),
     });
-  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, resolvedRepoPath, setOrchestratorModel]);
+  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, orchestratorModel, resolvedRepoPath, setOrchestratorModel, contextualConversation]);
 
-  const startSlashOrchestration = useCallback(async (request: SlashOrchestrationRequest) => {
-    const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
-    sendOrchestrator(request.displayMessage, {
-      permissionMode,
-      backend: composerBackendTurnOverride(orchestratorBackend),
-      thinkingEffort,
-      model: orchestratorModel,
-      wireMessage: request.prompt,
-      displayMessage: request.displayMessage,
-      localEntriesAfterUser,
-      orchestrationMode: resolveComposerExecutionMode('multitask', soloOrchestrator),
-      collide: collideEnabled,
-    });
-  }, [sendOrchestrator, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, soloOrchestrator, collideEnabled]);
+  const slashAttachments = useMemo(() => attachedImages.length
+    ? attachedImages.map(image => ({ dataUri: image.dataUri, name: image.name })) : undefined, [attachedImages]);
+  const startSlashOrchestration = useSlashOrchestration(sendOrchestrator, {
+    permissionMode, backend: composerBackendTurnOverride(orchestratorBackend), thinkingEffort, model: orchestratorModel,
+    orchestrationMode: resolveComposerExecutionMode('multitask', soloOrchestrator), collide: collideEnabled,
+    attachments: slashAttachments,
+  });
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1613,7 +1540,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       missionState,
       runningTotal: orchStream.runningTotal,
       currentModel: orchestratorModel,
-      setCurrentModel: (model) => { writeStoredOrchestratorModel(resolvedRepoPath, model); acceptOrchestratorModel(model); },
+      setCurrentModel: (model) => { if (!contextualConversation) writeStoredOrchestratorModel(resolvedRepoPath, model); acceptOrchestratorModel(model); },
       replaceTranscript: (entries) => { if (isCurrentThread()) orchStream.replaceTranscript(entries); },
       compactNow: orchStream.compactNow,
       isCurrentThread,
@@ -1648,10 +1575,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       openRulesManager: () => window.dispatchEvent(new CustomEvent('o8:open-session-rules')), openPromptLibrary: () => window.dispatchEvent(new CustomEvent('o8:prompt-library:open')),
     });
     if (!handled.handled) return false;
-    if (isCurrentThread()) latestInputRef.current = '';
+    if (isCurrentThread()) {
+      latestInputRef.current = '';
+      if (parsedCommand?.command.name === 'visualization' && parsedCommand.args && resolvedRepoPath) clearAttachments();
+    }
     return true;
   }, [
+    contextualConversation,
     displayMessages,
+    clearAttachments,
     handleClearCommand,
     isChatMode,
     isOrchestratorMode,
@@ -2031,6 +1963,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     shouldBypass: (text) => Boolean(parseOrchestratorSlashCommand(text) || parseModeRoutingPrefix(text)),
     sendUnbuffered: (text) => { void handleTaskSend(text); },
   });
+  const onContextBusyChange = contextualConversation?.onBusyChange;
+  useEffect(() => { onContextBusyChange?.(displayWaiting || sendBuffer.undoArmed || sendBuffer.queued.length > 0); }, [displayWaiting, onContextBusyChange, sendBuffer.undoArmed, sendBuffer.queued.length]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -2105,8 +2039,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     thinkingPreferenceTouchedRef.current = true;
     const nextOverride = next === 'adaptive' ? null : next;
     setThinkingOverride(nextOverride);
-    writeStoredOrchestratorThinkingOverride(nextOverride);
-  }, []);
+    if (!contextualConversation) writeStoredOrchestratorThinkingOverride(nextOverride);
+  }, [contextualConversation, setThinkingOverride]);
 
   const handleBackendStartFresh = useCallback(() => {
     if (!backendSwitch.pending) return;
@@ -2154,24 +2088,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // under the composer is the number of rows on screen (#2148).
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
-  const orchestratorScouts: SwarmScoutView[] = (() => {
-    if (!isOrchestratorMode) return [];
-    const assistants = displayMessages.filter((message) => message.role === 'assistant');
-    const lastAssistant = assistants[assistants.length - 1];
-    const tasks = (lastAssistant?.toolCalls ?? []).filter(
-      (tool) => tool.name === 'Task' || tool.name.toLowerCase() === 'task',
-    );
-    return tasks.map((tool, index) => {
-      const args = tool.args ?? {};
-      const description = typeof args.description === 'string' ? args.description.trim() : '';
-      const subagentType = typeof args.subagent_type === 'string' ? args.subagent_type.trim() : '';
-      const label = description || subagentType || `Scout ${index + 1}`;
-      const status: SwarmScoutView['status'] =
-        tool.status === 'done' ? 'done' : displayWaiting ? 'running' : 'done';
-      return { id: tool.id ?? `scout-${index}`, label, status };
-    });
-  })();
-  const composeFirst = displayMessages.length === 0 && !displayWaiting;
+  const orchestratorScouts = isOrchestratorMode ? transcriptScouts(displayMessages, displayWaiting) : [];
+  const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (
     <div
       style={{
@@ -2288,6 +2206,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ) : null}
       <ComposerArea
         ref={inputRef} activeComposer={open}
+        inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
+        placeholder={contextualConversation?.placeholder}
         input={input}
         onInputChange={setInput}
         isOrchestratorMode={isOrchestratorMode}
@@ -2296,6 +2216,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
+        activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
+          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onLaunchPacket ? packet => { void onLaunchPacket(packet); } : undefined} /> : undefined}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
         // Feed the EFFECTIVE transcript (orchestrator streams live into
@@ -2325,6 +2247,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}
+        isolatedModelSelection={Boolean(contextualConversation)}
         onModelRestore={isOrchestratorMode ? restoreOrchestratorModel : undefined}
         onModelChange={isOrchestratorMode ? backendSwitch.selectModel : undefined}
         activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}

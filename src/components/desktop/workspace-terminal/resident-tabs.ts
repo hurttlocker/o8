@@ -11,9 +11,13 @@ export function updateResidentTabIds(
   const active = activeTabId && visible.has(activeTabId) ? activeTabId : null;
   const next = previous.filter((id) => visible.has(id) && id !== active);
 
-  for (const id of visibleTabIds) {
-    if (id === active || next.includes(id)) continue;
-    next.push(id);
+  // Warm neighbors only on the first restore. Re-adding every offscreen tab
+  // on each switch would evict the page the user just left, losing its state.
+  if (previous.length === 0) {
+    for (const id of visibleTabIds) {
+      if (id === active || next.includes(id)) continue;
+      next.push(id);
+    }
   }
   if (active) next.push(active);
 

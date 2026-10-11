@@ -2,58 +2,27 @@
 
 /** Provider and model choices share one settings state; task behavior lives in Dispatch. */
 
-import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
-import { visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
-import { useEffect, useState } from 'react';
 
 import {
   APP_FONT_STACK,
-  SettingsToggleButton,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
-import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
+import { SettingsGroup, SettingsRow } from './grouped';
 import { useModelSettings } from './useModelSettings';
-import { ChatGPTPlanConnection } from './ChatGPTPlanConnection';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import {
   PickerMenu,
   BRAIN_CODEX_MODEL_OPTIONS,
-  ORCHESTRATOR_MODEL_OPTIONS,
   CODEX_WORKER_EFFORT_OPTIONS,
-  CLAUDE_WORKER_EFFORT_OPTIONS,
   ENV_LOCKED_REASON,
   type OperatorDefaults,
   type ThinkingEffort,
 } from './dispatch-shared';
-import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
 import { ModelRoutingControls } from './ModelRoutingControls';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { AgentRoleRoutingSection } from './AgentRoleRoutingSection';
-import { CliUpdatePrompt } from './CliUpdatePrompt';
-
-// ── Runtime detection (real, via /api/setup/detect) ──
-
-interface DetectedTool {
-  id: string;
-  detected: boolean;
-  ready?: boolean;
-  authHint?: string;
-}
-
-type DetectState = 'loading' | 'ready' | 'error';
-
-// ── Row icons (raw SVG only — React icon libs don't render in the webview) ──
-
-function RuntimeDot({ color }: { color: string }) {
-  return (
-    <svg width={12} height={12} viewBox="0 0 12 12" style={{ display: 'block', flexShrink: 0 }}>
-      <circle cx="6" cy="6" r="4.5" fill={color} />
-    </svg>
-  );
-}
 
 function CpuIcon() {
   return (
@@ -72,69 +41,13 @@ function CpuIcon() {
   );
 }
 
-// Short, honest one-liners keyed off runtime-capabilities.ts (its `description`
-// strings run long; these fit a settings row).
-const RUNTIME_BLURB: Record<string, string> = {
-  codex: 'Codex connection and default worker effort',
-  'claude-code': 'Claude Code connection and default worker effort',
-  antigravity: 'Google Antigravity CLI (agy) for free and AI Pro/Ultra accounts',
-  '3code': 'Uses the providers and models configured in 3code',
-  opencode: 'Uses the providers configured in OpenCode',
-  cursor: 'Cursor account or API key connection',
-  grok: 'Uses the model selected in Grok Build',
-  gemini: 'Legacy Gemini CLI (gemini) for enterprise or paid API access',
-};
-
-function DetectionPill({ tool, state }: { tool: DetectedTool | undefined; state: DetectState }) {
-  if (state === 'error') return <ValuePill>Unavailable</ValuePill>;
-  if (state === 'loading') {
-    return <ValuePill>Checking…</ValuePill>;
-  }
-  if (!tool) return <ValuePill>Not checked</ValuePill>;
-  if (!tool.detected) {
-    return <ValuePill>Not installed</ValuePill>;
-  }
-  if (tool.ready === true) {
-    return <ValuePill tone="success">Ready</ValuePill>;
-  }
-  // Detected but auth not confirmed (or retired, ready===false).
-  return <ValuePill>{tool.ready === false ? 'Sign in' : 'Installed'}</ValuePill>;
+export function ModelsTab(props: { onNavigateTab?: (tab: SettingsTab) => void }) {
+  const settings = useModelSettings();
+  return <ModelDefaultsContent {...props} settings={settings} />;
 }
 
-function TrailingCluster({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-      {children}
-    </div>
-  );
-}
-
-export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
-  const { data, loading, notice, busyField, updateField } = useModelSettings();
-
-  // ── Runtime detection ──
-  const [detectState, setDetectState] = useState<DetectState>('loading');
-  const [tools, setTools] = useState<Record<string, DetectedTool>>({});
-
-  useEffect(() => {
-    let alive = true;
-    fetch('/api/setup/detect', { cache: 'no-store' })
-      .then((r) => { if (!r.ok) throw new Error('Tool detection failed'); return r.json(); })
-      .then((payload: { tools?: DetectedTool[] }) => {
-        if (!alive) return;
-        const map: Record<string, DetectedTool> = {};
-        for (const t of payload.tools ?? []) {
-          if (t && typeof t.id === 'string') map[t.id] = t;
-        }
-        setTools(map);
-        setDetectState('ready');
-      })
-      .catch(() => { if (alive) setDetectState('error'); });
-    return () => { alive = false; };
-  }, []);
-
-  const runtimeInventory = useRuntimeInventory();
-  const visibleTools = new Set(visibleRuntimeInventory(runtimeInventory.inventory ?? [], [...(data?.values.workerRuntimes ?? []), ...(data?.values.defaultDispatchRuntime ? [data.values.defaultDispatchRuntime] : [])]).map((item) => item.id));
+export function ModelDefaultsContent({ settings, onNavigateTab }: { settings: ReturnType<typeof useModelSettings>; onNavigateTab?: (tab: SettingsTab) => void }) {
+  const { data, loading, notice, busyField, updateField } = settings;
 
   if (loading && !data) {
     return (
@@ -157,11 +70,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) => (envLocked(field) ? ENV_LOCKED_REASON : normal);
 
-  const runtimeSubtitle = (id: keyof typeof ORCHESTRATOR_RUNTIMES) => {
-    const cap = ORCHESTRATOR_RUNTIMES[id];
-    return RUNTIME_BLURB[id] ?? cap.shortLabel;
-  };
-
   return (
     <div style={{
       paddingTop: 8,
@@ -172,12 +80,10 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
       fontFamily: APP_FONT_STACK,
     }}>
       <TabHeading
-        title="models & providers"
-        subtitle="Manage orchestrator and worker connections here. Choose their models in the workspace composer."
+        title="model defaults"
+        subtitle="Choose app-wide routing and fallback behavior. Conversation models stay in the composer."
       />
 
-      <CliUpdatePrompt />
-      <ChatGPTPlanConnection />
 
       {notice ? (
         <div style={{ marginBottom: 28, fontSize: 13, color: 'var(--t-text)', lineHeight: 1.55 }}>
@@ -255,111 +161,6 @@ export function ModelsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab
           />
         </SettingsGroup>
       </section>
-
-      <SettingsAdvanced label="Connected tools" description={detectState === 'loading'
-        ? 'Checking installed tools…'
-        : detectState === 'error' ? 'Could not check connections. Reopen this page to try again.'
-        : `Ready: ${Object.entries(tools).filter(([id, tool]) => id in ORCHESTRATOR_RUNTIMES && ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].dispatchable && tool.ready).map(([id]) => ORCHESTRATOR_RUNTIMES[id as keyof typeof ORCHESTRATOR_RUNTIMES].label).join(', ') || 'none confirmed'}. Expand to see connection status and worker options.`}>
-        <SettingsGroup
-          footnote="Supported workers and available connection checks. Not checked means setup has no result for that tool; it does not mean the tool is missing. Local model connections and API keys have their own pages."
-        >
-          {/* Codex — worker effort */}
-          {visibleTools.has('codex') ? <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.codex.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.codex.label}
-            subtitle={lockedSub('codexWorkerEffort', runtimeSubtitle('codex'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools.codex} state={detectState} />
-                <PickerMenu<ThinkingEffort>
-                  value={values.codexWorkerEffort}
-                  options={CODEX_WORKER_EFFORT_OPTIONS}
-                  onChange={(next) => { updateField('codexWorkerEffort', next); }}
-                  disabled={envLocked('codexWorkerEffort') || busyField === 'codexWorkerEffort'}
-                  minWidth={130}
-                />
-              </TrailingCluster>
-            }
-            divider
-          /> : null}
-          {/* Claude Code — worker effort */}
-          {visibleTools.has('claude-code') ? <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES['claude-code'].accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES['claude-code'].label}
-            subtitle={lockedSub('claudeWorkerEffort', runtimeSubtitle('claude-code'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools['claude-code']} state={detectState} />
-                <PickerMenu<ThinkingEffort>
-                  value={values.claudeWorkerEffort}
-                  options={CLAUDE_WORKER_EFFORT_OPTIONS}
-                  onChange={(next) => { updateField('claudeWorkerEffort', next); }}
-                  disabled={envLocked('claudeWorkerEffort') || busyField === 'claudeWorkerEffort'}
-                  minWidth={130}
-                />
-              </TrailingCluster>
-            }
-            divider
-          /> : null}
-          {Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, runtime]) => runtime.dispatchable && visibleTools.has(id as keyof typeof ORCHESTRATOR_RUNTIMES) && !['codex', 'claude-code', 'opencode'].includes(id)).map(([id, runtime]) => (
-            <SettingsRow key={id}
-              icon={<RuntimeDot color={runtime.accentColor} />}
-              label={runtime.label}
-              subtitle={tools[id]?.authHint ?? RUNTIME_BLURB[id] ?? `Connect through ${runtime.label}.`}
-              accessory={<DetectionPill tool={tools[id]} state={detectState} />}
-              divider
-            />
-          ))}
-          {/* opencode — enable toggle (experimentalOpencode) */}
-          {visibleTools.has('opencode') ? <SettingsRow
-            icon={<RuntimeDot color={ORCHESTRATOR_RUNTIMES.opencode.accentColor} />}
-            label={ORCHESTRATOR_RUNTIMES.opencode.label}
-            subtitle={lockedSub('experimentalOpencode', runtimeSubtitle('opencode'))}
-            accessory={
-              <TrailingCluster>
-                <DetectionPill tool={tools.opencode} state={detectState} />
-                <SettingsToggleButton
-                  checked={values.experimentalOpencode}
-                  disabled={envLocked('experimentalOpencode') || busyField === 'experimentalOpencode'}
-                  onChange={(next) => {
-                    updateField('experimentalOpencode', next);
-                  }}
-                />
-              </TrailingCluster>
-            }
-          /> : null}
-        </SettingsGroup>
-      </SettingsAdvanced>
-
-      <SettingsAdvanced label="Claude Code settings" description="Choose what powers Claude Code: its existing connection, an API provider, or a subscription compatibility connection."
-        initiallyOpen={values.subscriptionProfile === 'claude-only' || (values.subscriptionProfile !== 'codex-only' && (values.orchestratorBackend === 'claude' || values.orchestratorBackend === 'collide' || (values.orchestratorBackend === 'auto' && values.inAppOrchestratorEnabled)))}>
-        <ClaudeCodeHarnessSection />
-      {/* ── Orchestrator ── */}
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Claude fallback model"
-          footnote="Fallback for Claude account requests without a model choice. The composer selection takes precedence."
-        >
-          <SettingsRow
-            icon={<CpuIcon />}
-            label="Claude fallback model"
-            subtitle={lockedSub('orchestratorModel', 'Used with the existing Claude connection when a request does not select a model.')}
-            accessory={
-              <PickerMenu<string>
-                value={values.orchestratorModel}
-                options={ORCHESTRATOR_MODEL_OPTIONS}
-                onChange={(next) => { updateField('orchestratorModel', next); }}
-                disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-                minWidth={150}
-              />
-            }
-            disabled={envLocked('orchestratorModel') || busyField === 'orchestratorModel'}
-            divider
-          />
-        </SettingsGroup>
-      </section>
-
-      </SettingsAdvanced>
 
       <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} advanced />
       <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />

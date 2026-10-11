@@ -1,5 +1,13 @@
 import type { Socket } from 'node:net';
 
+/** A mutation may have executed before transport loss. Never automatically replay it. */
+export class WebviewMutationUncertainError extends Error {
+  constructor() {
+    super('Webview connection dropped during a mutation; not retried automatically because the action may have already executed. Inspect the app before issuing another action.');
+    this.name = 'WebviewMutationUncertainError';
+  }
+}
+
 export interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;

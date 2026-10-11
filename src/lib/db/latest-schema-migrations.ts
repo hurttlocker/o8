@@ -31,6 +31,10 @@ import { ensureV64SymonFuzzyWatchSchema } from '@/lib/db/v64-symon-fuzzy-watch-m
 import { ensureV65OrchestratorLeadSchema } from '@/lib/db/v65-orchestrator-lead-migration';
 import { ensureV66CloudWorkerPresenceSchema } from '@/lib/db/v66-cloud-worker-presence-migration';
 import { ensureV67WorkspacePreservationSchema } from '@/lib/db/v67-workspace-preservation-migration';
+import { ensureV68TranscriptVisualizationsSchema } from '@/lib/db/v68-transcript-visualizations-migration';
+import { ensureV69VisualizationVersionsSchema } from '@/lib/db/v69-visualization-versions-migration';
+import { ensureV68ExactFinalizationSchema } from '@/lib/db/v68-exact-finalization-migration';
+import { ensureV69GeneratedOutputSchema } from '@/lib/db/v69-generated-output-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -73,4 +77,8 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV65OrchestratorLeadSchema(sqlite);
   ensureV66CloudWorkerPresenceSchema(sqlite);
   ensureV67WorkspacePreservationSchema(sqlite);
+  ensureV68TranscriptVisualizationsSchema(sqlite);
+  ensureV69VisualizationVersionsSchema(sqlite);
+  ensureV68ExactFinalizationSchema(sqlite);
+  ensureV69GeneratedOutputSchema(sqlite);
 }

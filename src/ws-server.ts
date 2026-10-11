@@ -122,7 +122,7 @@ import { getOrCreateWsToken, WS_TOKEN_PATH } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { resolveAppVersion } from '@/lib/telemetry/crash-store';
-import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -155,6 +155,8 @@ import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
+import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
+import { normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
@@ -972,6 +974,8 @@ interface TerminalAttachment {
   snapshotSource: 'tmux' | 'scrollback';
   /** The first attach came from a viewer; its tmux client ignores window size. */
   observerOwned?: boolean;
+  /** Direct setup shells are temporary and must not survive their last view. */
+  transient?: boolean;
   cols: number;
   rows: number;
   batchBuffer: string;
@@ -1018,7 +1022,7 @@ const TERMINAL_HIDDEN_BUFFER_MAX_BYTES = 64 * 1024;
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 const TERMINAL_TMUX_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string; directPty: boolean; clientId?: string }>();
 
 // ── Orchestrator channel state ──
 
@@ -3869,6 +3873,7 @@ type SymonTextTurnState = {
   sessionId: string;
   turnId: string;
   terminal: boolean;
+  interruptRequested?: boolean;
 };
 
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
@@ -3990,6 +3995,7 @@ function pushSymonTextDone(
   status: 'done' | 'failed' | 'interrupted',
   detail?: string,
   activeMachine?: SymonMachineIdentity,
+  selectionPending: boolean = false,
 ): void {
   if (turn.terminal) return;
   turn.terminal = true;
@@ -4002,6 +4008,10 @@ function pushSymonTextDone(
       turnId: turn.turnId,
       status,
       activeMachine: activeMachine ?? loadSymonTextSession(turn.sessionId)?.activeMachine ?? DEFAULT_SYMON_MACHINE,
+      ...(!selectionPending ? {
+        model: loadSymonTextSession(turn.sessionId)?.model,
+        effort: loadSymonTextSession(turn.sessionId)?.effort,
+      } : {}),
       ...(detail ? { detail } : {}),
     });
   }
@@ -4035,6 +4045,11 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
     return;
   }
+  // A queued turn can be stopped before it ever reaches the native planner.
+  if (turn.interruptRequested) {
+    pushSymonTextDone(turn, 'interrupted');
+    return;
+  }
   const prompt = formatSymonTextPlannerPrompt(initial, text);
   if (!appendSymonTextTranscript(turn.sessionId, [{ role: 'user', text }])) {
     pushSymonTextDone(turn, 'failed', 'Text session expired.');
@@ -4052,83 +4067,104 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
     });
   }
   const deadline = Date.now() + 5 * 60_000;
-  const mirroredConfirmations = new Set<string>();
-  while (!turn.terminal && Date.now() < deadline) {
-    let outcome: SymonTextRelayResult;
-    try {
-      outcome = await fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
-        method: 'POST',
-        body: {
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          prompt,
-          planner: {
-            engine: initial.engine,
-            model: initial.model,
-            effort: initial.effort,
-          },
-        },
-        timeoutMs: 8_000,
-      });
-    } catch (error) {
-      pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
-      return;
+  const pollNative = (reconcileOnly = false) => fetchNextJson<SymonTextRelayResult>('/api/mobile/symon/text-turn', {
+    method: 'POST',
+    body: {
+      sessionId: turn.sessionId,
+      turnId: turn.turnId,
+      prompt,
+      // The built-in Pi brain keeps its own history and takes the newest message only.
+      text,
+      planner: { engine: initial.engine, model: initial.model, effort: initial.effort },
+      reconcileOnly,
+    },
+    timeoutMs: 8_000,
+  });
+  const reconcileSelection = async () => {
+    // Keep the serialized owner until the first native result consumes retry
+    // eligibility, or the session expires. Lookup-only polling cannot replay a
+    // call lost during webview teardown; a Stop delivery is not its result.
+    while (loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true) {
+      try {
+        await pollNative(true);
+      } catch {
+        // Transport failure does not establish the effective native selection.
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
     }
-    if (outcome.state === 'pending') continue;
-    if (outcome.state === 'needs_confirmation') {
-      const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
-        ? (outcome.confirmation as Record<string, unknown>).tool
-        : null;
-      const confirmation = typeof rawTool === 'string'
-        ? parseSymonPendingConfirmation(outcome.confirmation, {
-          sessionId: turn.sessionId,
-          callId: turn.turnId,
-          tool: rawTool,
-        })
-        : null;
-      if (!confirmation) {
-        pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
+  };
+  const mirroredConfirmations = new Set<string>();
+  try {
+    while (!turn.terminal && Date.now() < deadline) {
+      let outcome: SymonTextRelayResult;
+      try {
+        outcome = await pollNative();
+      } catch (error) {
+        pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
         return;
       }
-      if (!mirroredConfirmations.has(confirmation.confirmationId)) {
-        if (!symonConfirmationTracker.register(confirmation, Date.now())) {
-          pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+      if (outcome.state === 'pending') continue;
+      if (outcome.state === 'needs_confirmation') {
+        const rawTool = outcome.confirmation && typeof outcome.confirmation === 'object'
+          ? (outcome.confirmation as Record<string, unknown>).tool
+          : null;
+        const confirmation = typeof rawTool === 'string'
+          ? parseSymonPendingConfirmation(outcome.confirmation, {
+            sessionId: turn.sessionId,
+            callId: turn.turnId,
+            tool: rawTool,
+          })
+          : null;
+        if (!confirmation) {
+          pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
           return;
         }
-        mirroredConfirmations.add(confirmation.confirmationId);
-        pushSymonConfirmRequired(turn.clientId, confirmation);
+        if (!mirroredConfirmations.has(confirmation.confirmationId)) {
+          if (!symonConfirmationTracker.register(confirmation, Date.now())) {
+            pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+            return;
+          }
+          mirroredConfirmations.add(confirmation.confirmationId);
+          pushSymonConfirmRequired(turn.clientId, confirmation);
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        continue;
       }
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-      continue;
-    }
-    if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
-      pushSymonTextDone(turn, 'interrupted');
+      if (outcome.state === 'done' && outcome.result?.status === 'interrupted') {
+        pushSymonTextDone(turn, 'interrupted');
+        return;
+      }
+      if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
+        const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
+        if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
+        const answer = outcome.result.text;
+        appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
+        const owner = clients.get(turn.clientId);
+        if (owner && answer) {
+          send(owner, {
+            channel: 'symon',
+            type: 'symon-text-delta',
+            sessionId: turn.sessionId,
+            turnId: turn.turnId,
+            delta: answer,
+          });
+        }
+        pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
+        return;
+      }
+      pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
       return;
     }
-    if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
-      const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
-      if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
-      const answer = outcome.result.text;
-      appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
-      const owner = clients.get(turn.clientId);
-      if (owner && answer) {
-        send(owner, {
-          channel: 'symon',
-          type: 'symon-text-delta',
-          sessionId: turn.sessionId,
-          turnId: turn.turnId,
-          delta: answer,
-        });
+    if (!turn.terminal) {
+      if (!turn.interruptRequested) {
+        turn.interruptRequested = true;
+        await interruptSymonTextNative(turn.sessionId, turn.turnId);
       }
-      pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
-      return;
+      pushSymonTextDone(turn, 'failed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
+        loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true);
     }
-    pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
-    return;
-  }
-  if (!turn.terminal) {
-    await interruptSymonTextNative(turn.sessionId, turn.turnId);
-    pushSymonTextDone(turn, 'failed', 'Planner turn timed out.');
+  } finally {
+    await reconcileSelection();
   }
 }
 
@@ -4157,9 +4193,11 @@ async function handleSymonTextInterrupt(client: ClientState, msg: Record<string,
   const record = loadSymonTextSession(sessionId);
   if (!record || !symonTextClientMatches(record, client)) return;
   const turn = symonTextTurns.get(textTurnKey(sessionId, turnId));
-  if (!turn || turn.clientId !== client.id || turn.terminal) return;
+  if (!turn || turn.clientId !== client.id || turn.terminal || turn.interruptRequested) return;
+  turn.interruptRequested = true;
+  // Delivery is only an acknowledgement. Keep the existing polling/queue owner
+  // alive until the native terminal result persists the effective selection.
   await interruptSymonTextNative(sessionId, turnId);
-  pushSymonTextDone(turn, 'interrupted');
 }
 
 async function interruptSymonTool(call: PendingToolCall): Promise<boolean> {
@@ -5377,9 +5415,8 @@ async function handleOrchestratorSendMsgOnce(
   const thinkingEffort: ManualThinkingEffort | undefined = isManualThinkingEffort(msg.thinkingEffort)
     ? msg.thinkingEffort
     : undefined;
-  const model = typeof msg.model === 'string' && msg.model.trim()
-    ? msg.model.trim()
-    : undefined;
+  const serviceTier = isOrchestratorServiceTier(msg.serviceTier) ? msg.serviceTier : undefined;
+  const model = normalizeOrchestratorTurnModel(msg.model);
   const crossHouseRole = msg.surface === 'canvas-agent' ? 'canvas-agent' : 'orchestrator';
   const requestedBackendId = resolveMsgBackendId(msg);
   const requestedBackend = getOrchestratorBackend(requestedBackendId);
@@ -5643,6 +5680,7 @@ async function handleOrchestratorSendMsgOnce(
       return sendOrchestratorBackendTurn(turnBackend, repoPath, overrideMessage ?? turnMessage, onEvent, {
         permissionMode,
         thinkingEffort,
+        serviceTier: serviceTierForTurn(serviceTier, requestedBackend.id, model, turnBackend.id, effectiveModel),
         model: effectiveModel,
         collideBaseBackend: turnBackend.id === 'collide' ? collideBaseBackend : undefined,
         agent: turnAgentTag,
@@ -6972,6 +7010,7 @@ function materializePendingDashSession(
     id: randomUUID(),
     sessionName,
     kind: 'dash-shell',
+    transient: pending.directPty,
     ptyProcess,
     clientIds: new Set([client.id]),
     clientViews: new Map(),
@@ -7044,7 +7083,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   }
 
   const sessionName = ownerSessionName ?? `cortex-dash-${randomUUID().slice(0, 8)}`;
-  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty });
+  pendingDashSessions.set(sessionName, { cols, rows, cwd, directPty, clientId: directPty ? client.id : undefined });
   console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
@@ -7307,7 +7346,7 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
       const pending = pendingDashSessions.get(sessionName);
-      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true });
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd, directPty: pending?.directPty === true, clientId: pending?.clientId });
     }
     return;
   }
@@ -7382,7 +7421,7 @@ function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>)
   sendTerminal(client, 'detached', { sessionName });
 }
 
-function removeClientFromTerminal(clientId: string, sessionName: string) {
+function removeClientFromTerminal(clientId: string, sessionName: string, disconnected = false) {
   const attachment = terminalAttachments.get(sessionName);
   if (!attachment) return;
 
@@ -7408,6 +7447,17 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
 
   // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
+    if (attachment.transient) {
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      // A live view may briefly detach while xterm reinitializes. A disconnected
+      // setup transport has no owner left, so terminate it immediately.
+      if (disconnected) terminateTerminalSession(sessionName);
+      else attachment.orphanTimer = setTimeout(() => {
+        const latest = terminalAttachments.get(sessionName);
+        if (latest?.clientIds.size === 0) terminateTerminalSession(sessionName);
+      }, 1_000);
+      return;
+    }
     if (attachment.kind === 'dash-shell') {
       // #6 persistent terminals — when persistence is on, a dash PTY is a
       // `tmux attach` client over a detached session, so detaching costs us
@@ -8893,7 +8943,10 @@ wss.on('connection', (ws, req) => {
     client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
-      removeClientFromTerminal(client.id, sessionName);
+      removeClientFromTerminal(client.id, sessionName, true);
+    }
+    for (const [sessionName, pending] of pendingDashSessions) {
+      if (pending.directPty && pending.clientId === client.id) pendingDashSessions.delete(sessionName);
     }
     // Clean up orchestrator subscriptions (one per backend the client used).
     for (const key of orchestratorSubscriptions.keys()) {
@@ -9488,15 +9541,8 @@ async function bootstrapWsServer() {
   }
 
   try {
-    const { sweepKnownTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
-    const registeredRepoPaths = (await listRepos()).map((repo) => repo.localPath);
-    const result = await sweepKnownTerminalCortexWorktrees(REPO_ROOT, registeredRepoPaths);
-    if (result.removed > 0 || result.failed > 0) {
-      console.log(
-        `[cleanup] Startup worktree sweep repos=${result.reposScanned} scanned=${result.scanned} `
-        + `removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
-      );
-    }
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    await runWorktreeMaintenanceTick(REPO_ROOT);
   } catch (error) {
     console.warn(
       `[cleanup] Startup worktree sweep failed: ${error instanceof Error ? error.message : String(error)}`,

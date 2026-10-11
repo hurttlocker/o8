@@ -30,6 +30,12 @@ const EFFORTS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh',
 describe('composer selector state', () => {
   beforeEach(() => localStorage.clear());
 
+  it('preserves explicit model choices while retaining the fallback for absent choices', () => {
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '' }).model).toBe('');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '  agent-model  ' }).model).toBe('agent-model');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp' }).model).toBe(MODEL_IDS.orchestratorDefault);
+  });
+
   it('keeps mode, wire directive, execution mode, and effort in one resolved state', () => {
     for (const mode of MODES) {
       for (const effort of EFFORTS) {
@@ -58,8 +64,10 @@ describe('composer selector state', () => {
         expect(turn.wireMessage, mode).toContain(resolved.modeDirective);
         expect(route.orchestrationMode, mode).toBe(resolved.orchestrationMode);
         expect(route.wireMessage, mode).toContain(resolved.modeDirective);
-        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(effort);
-        expect(resolved.effort, `${mode}:${effort}`).toBe(effort);
+        const expected = effort === 'adaptive' ? 'high' : effort;
+        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effortOptions).not.toContain('adaptive');
       }
     }
   });
@@ -143,7 +151,7 @@ describe('composer selector state', () => {
     expect(resolved.effort).toBe('low');
     expect(resolved.effortOptions).toEqual(['low']);
     expect(resolved.lockedEffortOptions).toEqual([]);
-    expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
+    expect(composerEffortConsequence('o8', 'low')).toBe('Low · managed model');
     expect(resolved.effortClampedFrom).toBe('high');
   });
 
@@ -179,6 +187,7 @@ describe('composer selector state', () => {
     expect(providerMarkForLead('opencode', 'google/gemini-3-pro')).toBe('gemini');
     expect(providerMarkForRuntime('claude-code')).toBe('anthropic');
     expect(providerMarkForRuntime('deepseek-harness')).toBe('deepseek');
+    expect(providerMarkForRuntime('hermes')).toBe('terminal');
   });
 
   it('resolves in-session over thread over operator default', () => {
@@ -225,19 +234,22 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
     });
-    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Fast · shared checkout', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Shared', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
     expect(resolved.orchestrationMode).toBe(execution);
     expect(resolved.workerRuntimeLabel).toBe(runtime);
     expect(resolved.workerModelLabel).toBe(workerModel);
   });
 
-  it('offers Fast only for leads with the orchestrator delegation tool', () => {
+  it('offers Shared only for compatible leads and cycles the three visible modes', () => {
     expect(composerSupportsFastMode('codex')).toBe(true);
     expect(composerSupportsFastMode('claude')).toBe(true);
     expect(composerSupportsFastMode('fable')).toBe(true);
     expect(composerSupportsFastMode('openclaw')).toBe(false);
-    expect(cycleComposerSelectorMode('multitask', 1, 'openclaw')).toBe('moa');
-    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('solo', 1, 'openclaw')).toBe('multitask');
+    expect(cycleComposerSelectorMode('solo', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('fast', 1, 'codex')).toBe('multitask');
+    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('solo');
+    expect(cycleComposerSelectorMode('fusion', 1, 'codex')).toBe('solo');
     const state = resolveComposerSelectorState({
       mode: 'fast', leadModelId: 'external', leadModelLabel: 'External', leadBackend: 'openclaw',
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'medium', adaptiveEnabled: false,

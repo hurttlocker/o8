@@ -9,14 +9,15 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
+import { createPortal } from 'react-dom';
 import { O8ActivityPane } from './O8ActivityPane';
-import { O8HandoffsPane } from './O8HandoffsPane';
+import { O8ThreadTools } from './o8-panel/O8ThreadTools';
 import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
+import { DevicePanel } from './o8-panel/devices/DevicePanel';
 import { O8InboxPane } from './O8InboxPane';
-import { O8ThreadsPane } from './o8-panel/O8ThreadsPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ComparisonMatrix } from './comparison/ComparisonMatrix';
@@ -26,13 +27,12 @@ import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { TargetsPanel } from './o8-panel/TargetsPanel';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
-import { WorkspaceBrowserPreview } from './o8-panel/WorkspaceBrowserPreview';
-import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
-import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
+import { LinkedPullRequests } from './pr-panel/LinkedPullRequests';
+import { WorkspaceFilesPane } from './o8-panel/workspace-rail/WorkspaceFilesPane';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
-import type { O8Tab } from './o8-panel/types';
+import { canonicalPanelTab, isRightUtilityTab, type O8Tab } from './o8-panel/types';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
-import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, isRightUtilityTab, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
+import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
@@ -43,6 +43,9 @@ interface O8PanelProps {
   active?: boolean;
   repoPath?: string | null;
   registeredRepos?: RepoRegistryEntry[];
+  linkableRepos?: RepoRegistryEntry[];
+  prContextId?: string;
+  prContextTabId?: string | null;
   onRepoPathChange?: (repoPath: string) => void;
   /** Shared repo scope: true = "All repos" aggregate across the active project. */
   allRepos?: boolean;
@@ -63,15 +66,14 @@ interface O8PanelProps {
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
-  /** Header-rail portal target for the browser's page tabs
-   *  (Q 2026-07-12) — provided by the dashboard's PanelHeaderStrip. Pages
-   *  render up there next to the state drawer; the pane skips its own row. */
-  browserHeaderTabSlot?: HTMLElement | null;
+  /** Portal target for browser pages or utility tabs in the column header. */
+  headerTabSlot?: HTMLElement | null;
   onSelectedFileChange?: (filePath: string) => void;
   commitSha?: string | null;
   onClearCommit?: () => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onClosePR?: (prNumber: number, repo?: string | null) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   registerContextualPanelHandle?: (tileId: string, handle: ContextualPanelHandle | null) => void;
   sendTerminalCreate?: ContextualPanelProps['sendTerminalCreate'];
@@ -89,6 +91,9 @@ export function O8Panel({
   active = true,
   repoPath,
   registeredRepos = [],
+  linkableRepos = registeredRepos,
+  prContextId,
+  prContextTabId = null,
   onRepoPathChange,
   allRepos = false,
   onSelectAllRepos,
@@ -99,17 +104,19 @@ export function O8Panel({
   repoSlug,
   activeTab: externalTab,
   onActiveTabChange,
-  secondaryTab = null,
+  secondaryTab: externalSecondaryTab = null,
   onSecondaryTabChange,
   selectedFile,
   reviewLaneId,
   browserUrl,
   browserStateKey = 'right-panel',
   onBrowserActiveUrlChange,
-  browserHeaderTabSlot = null,
+  headerTabSlot = null,
   onSelectedFileChange,
   onSelectCommit,
   onSelectIssue,
+  onSelectPR,
+  onClosePR,
   registerContextualPanelHandle,
   sendTerminalCreate,
   sendTerminalAttach,
@@ -119,7 +126,9 @@ export function O8Panel({
   sendAgentKill,
   termWsConnected = false,
 }: O8PanelProps) {
-  const activeTab = externalTab ?? 'activity';
+  const activeTab = canonicalPanelTab(externalTab ?? 'activity');
+  const requestedSecondary = externalSecondaryTab ? canonicalPanelTab(externalSecondaryTab) : null;
+  const secondaryTab = requestedSecondary === activeTab ? null : requestedSecondary;
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const [splitRatio, setSplitRatio] = useState(() => {
     if (typeof window === 'undefined') return 50;
@@ -147,7 +156,8 @@ export function O8Panel({
   const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
   const compareGroup = compareReadyGroups[0] ?? null;
   const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
-  const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(null);
+  const rightContextualPanelRef = useRef<ContextualPanelHandle | null>(null);
+  const [localSelectedFile, setLocalSelectedFile] = useState<{ repoPath: string | null; path: string } | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
   // (fired by the o8_view_open_browser MCP tool) sets this; it overrides the
   // parent-owned browserUrl prop so the agent can open the Browser tab to a URL
@@ -166,19 +176,21 @@ export function O8Panel({
     ?? null
   ), [registeredRepos, repoPath]);
   const dirtyFiles = useMemo(() => new Set<string>(), []);
-  const selectedUtilityFile = selectedFile ?? localSelectedFile;
+  const selectedUtilityFile = selectedFile ?? (localSelectedFile?.repoPath === (repoPath ?? null) ? localSelectedFile.path : null);
   const renderedUtilityTabs = activeUtilityTab && !utilityTabs.includes(activeUtilityTab)
     ? [...utilityTabs, activeUtilityTab]
     : utilityTabs;
   const splitUtilityTabs = secondaryTab
     ? [activeTab, secondaryTab].filter((tab): tab is RightUtilityTab => isRightUtilityTab(tab) && tab !== 'browser')
     : [];
+  const secondaryUtilityTab = secondaryTab && isRightUtilityTab(secondaryTab) && secondaryTab !== 'browser' ? secondaryTab : null;
+  const mountedUtilityTabs = [...new Set([...renderedUtilityTabs, ...splitUtilityTabs])];
   useEffect(() => {
-    if (!activeUtilityTab) return;
+    if (!activeUtilityTab && !secondaryUtilityTab) return;
     queueMicrotask(() => {
-      setUtilityTabs((prev) => (prev.includes(activeUtilityTab) ? prev : [...prev, activeUtilityTab]));
+      setUtilityTabs((prev) => [...new Set([...prev, ...[activeUtilityTab, secondaryUtilityTab].filter((tab) => tab !== null)])]);
     });
-  }, [activeUtilityTab]);
+  }, [activeUtilityTab, secondaryUtilityTab]);
 
   const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
     // Browser is a first-class drawer state now (Q ruling 2026-07-12: "the
@@ -193,24 +205,24 @@ export function O8Panel({
     onActiveTabChange?.(tab);
   }, [onActiveTabChange]);
 
-  const closeRightUtilityTab = useCallback((tab: RightUtilityTab) => {
-    setUtilityTabs((prev) => {
-      const remaining = prev.filter((entry) => entry !== tab);
-      if (activeTab === tab) {
-        const currentIndex = prev.indexOf(tab);
-        const next = remaining[Math.min(currentIndex, remaining.length - 1)] ?? null;
-        onActiveTabChange?.(next ?? 'launcher');
-      }
-      return remaining;
-    });
-  }, [activeTab, onActiveTabChange]);
+  const closeRightUtilityTab = useCallback(async (tab: RightUtilityTab) => {
+    if (tab === 'terminal' && rightContextualPanelRef.current?.confirmClose && !await rightContextualPanelRef.current.confirmClose()) return false;
+    const remaining = utilityTabs.filter((entry) => entry !== tab);
+    setUtilityTabs(remaining);
+    if (activeTab === tab) {
+      const currentIndex = utilityTabs.indexOf(tab);
+      onActiveTabChange?.(remaining[Math.min(currentIndex, remaining.length - 1)] ?? 'launcher');
+    }
+    return true;
+  }, [activeTab, onActiveTabChange, utilityTabs]);
 
   const handleSelectUtilityFile = useCallback((path: string) => {
-    setLocalSelectedFile(path);
+    setLocalSelectedFile({ repoPath: repoPath ?? null, path });
     onSelectedFileChange?.(path);
-  }, [onSelectedFileChange]);
+  }, [onSelectedFileChange, repoPath]);
 
   const handleRightContextualPanelRef = useCallback((handle: ContextualPanelHandle | null) => {
+    rightContextualPanelRef.current = handle;
     registerContextualPanelHandle?.('right-utility-panel', handle);
   }, [registerContextualPanelHandle]);
 
@@ -236,13 +248,26 @@ export function O8Panel({
       }
       onActiveTabChange?.('review');
       if (typeof detail.file === 'string' && detail.file) {
-        setLocalSelectedFile(detail.file);
+        setLocalSelectedFile({ repoPath: detail.repoPath || repoPath || null, path: detail.file });
         onSelectedFileChange?.(detail.file);
       }
     };
     window.addEventListener('o8:focus-review', handler);
     return () => window.removeEventListener('o8:focus-review', handler);
   }, [onActiveTabChange, onRepoPathChange, onSelectedFileChange, repoPath]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoPath?: string; path?: string | null }>).detail;
+      if (!detail?.repoPath) return;
+      onRepoPathChange?.(detail.repoPath);
+      setLocalSelectedFile(detail.path ? { repoPath: detail.repoPath, path: detail.path } : null);
+      onSelectedFileChange?.(detail.path ?? '');
+      onActiveTabChange?.('files');
+    };
+    window.addEventListener('o8:browse-review-file', handler);
+    return () => window.removeEventListener('o8:browse-review-file', handler);
+  }, [onActiveTabChange, onRepoPathChange, onSelectedFileChange]);
 
   // #1169 — the o8_view_open_browser MCP tool dispatches `o8:open-browser`;
   // reveal the Browser tab and (optionally) navigate it. One deterministic
@@ -258,21 +283,10 @@ export function O8Panel({
   }, [browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
+    if (tab === 'device') return <DevicePanel active={active} />;
     if (tab === 'files') {
-      // Cursor arrangement (Q ruling 2026-07-12, vid2 3:10-4:10): the file
-      // CONTENT reads in the center-left, the tree hugs the far-right edge.
       return (
-        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(210px, 34%)', background: 'var(--t-bg)' }}>
-          <FileViewer repoPath={repoPath} selectedFile={selectedUtilityFile} />
-          <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderLeft: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
-            <AllFilesTree
-              repoPath={repoPath}
-              selectedFile={selectedUtilityFile}
-              dirtyFiles={dirtyFiles}
-              onSelectFile={handleSelectUtilityFile}
-            />
-          </div>
-        </div>
+        <WorkspaceFilesPane repoPath={repoPath} selectedFile={selectedUtilityFile} dirtyFiles={dirtyFiles} onSelectFile={handleSelectUtilityFile} />
       );
     }
 
@@ -309,38 +323,35 @@ export function O8Panel({
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
-          tabStripSlot={browserHeaderTabSlot}
+          tabStripSlot={headerTabSlot}
           onFocusRequest={() => onActiveTabChange?.('browser')}
         />
       );
     }
 
     if (tab === 'review') {
-      if (!repoPath) {
-        return (
-          <SurfaceEmptyState
-            icon={<ReviewIcon size={18} />}
-            title="No repository selected"
-            detail="Select or register a repo before opening review in the right panel."
-          />
-        );
-      }
-      return (
-        <ReviewPanel
-          repoPath={repoPath}
-          registeredRepos={reviewRepos}
-          onRepoPathChange={onRepoPathChange}
-          selectedFile={selectedUtilityFile}
-          reviewLaneId={reviewLaneId}
-        />
-      );
+      return <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
+          <O8RepoSelector active={active} repos={registeredRepos} allRepos={allRepos} selectedRepoPath={repoPath ?? null} onSelectAll={() => onSelectAllRepos?.()} onSelectRepo={(path) => onRepoPathChange?.(path)} style={{ flex: 1 }} />
+        </div>
+        <LinkedPullRequests context={prContextId ?? `worktree:${repoPath ?? 'unbound'}`} tabId={prContextTabId} repoPath={repoPath ?? null} repos={linkableRepos} active={active} onOpen={onSelectPR} />
+        {allRepos ? <ProjectChangesOverview repos={registeredRepos} onPickRepo={(path) => onRepoPathChange?.(path)} /> : repoPath
+          ? <ReviewPanel repoPath={repoPath} registeredRepos={reviewRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedUtilityFile} reviewLaneId={reviewLaneId} />
+          : <SurfaceEmptyState icon={<ReviewIcon size={18} />} title="No repository selected" detail="Select a repository to review its changes." />}
+      </>;
     }
+
+    if (tab === 'threads') return <O8ThreadTools active={active} exchanges={externalTab === 'handoffs' || externalSecondaryTab === 'handoffs'} onViewChange={(exchanges) => (secondaryTab === 'threads' ? onSecondaryTabChange : onActiveTabChange)?.(exchanges ? 'handoffs' : 'threads')} repoPath={repoPath ?? null} repos={registeredRepos} allRepos={allRepos} onRepoPathChange={onRepoPathChange} selection={handoffSelection} />;
+    if (tab === 'activity') return <O8ActivityPane active={active} repoPath={repoPath} repoSlug={prRepo ?? repoSlug} registeredRepos={registeredRepos} allRepos={allRepos} onSelectAllRepos={onSelectAllRepos} onSelectRepoPath={onRepoPathChange} onSelectCommit={onSelectCommit} onSelectIssue={onSelectIssue} onSelectPR={onSelectPR} onClosePR={onClosePR} selectedPrNumber={prNumber ?? null} selectedPrRepo={prRepo ?? null} />;
+    if (tab === 'resources') return <O8ResourcesPane active={active} />;
+    if (tab === 'targets') return <TargetsPanel repoPath={repoPath} active={active} />;
+    if (tab === 'spec') return <O8SpecPane repoPath={repoPath} active={active} toolbarSlot={(specRepoPath) => <O8ScratchChat repoPath={specRepoPath} selectedFile={specRepoPath === repoPath ? selectedFile ?? null : null} surface="diff" surfaceLabel="o8.md" />} />;
 
     if (tab === 'inbox') {
       // Incident Queue is a closeable contextual surface now (report RVKTQV):
       // it joins the utility strip like Review/Files rather than force-taking
       // the panel. The status-bar / header approval badge re-opens it.
-      return <O8InboxPane active={active} />;
+      return <O8InboxPane active={active} repoPath={repoPath ?? null} repos={registeredRepos} />;
     }
 
     if (sendTerminalCreate && sendTerminalAttach && sendTerminalInput && sendTerminalResize && sendTerminalDetach && sendAgentKill) {
@@ -360,7 +371,8 @@ export function O8Panel({
           previews={previews}
           onRepoPathChange={onRepoPathChange}
           panelLabel="Right Panel"
-          onClose={() => onActiveTabChange?.('launcher')}
+          showPanelLabel={false}
+          onClose={() => { void closeRightUtilityTab('terminal'); }}
         />
       );
     }
@@ -407,7 +419,7 @@ export function O8Panel({
           (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
       {/* No Brain chat on the browser — it's a real browser now (Q ruling
           2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' ? (
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' && activeTab !== 'inbox' && activeTab !== 'device' && activeTab !== 'review' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}
@@ -418,10 +430,7 @@ export function O8Panel({
         </div>
       ) : null}
 
-      {/* Tab content — all tabs stay mounted to preserve state */}
-      <div style={paneStyle('threads')}>
-        <O8ThreadsPane active={paneVisible('threads')} repoPath={repoPath ?? null} repos={registeredRepos} allRepos={allRepos} />
-      </div>
+      {/* Open tools retain their state when another tab is selected. */}
       {secondaryTab && onSecondaryTabChange ? (
         <O8PanelSplitDivider
           secondary={secondaryTab}
@@ -431,67 +440,13 @@ export function O8Panel({
           containerRef={splitContainerRef}
         />
       ) : null}
-      {secondaryTab && splitUtilityTabs.map((tab) => (
-        <div key={`split-${tab}`} style={{ ...paneStyle(tab), background: 'var(--t-bg)' }}>
-          {renderUtilitySurface(tab, true)}
-        </div>
-      ))}
-      {secondaryTab && (activeTab === 'launcher' || secondaryTab === 'launcher') ? (
-        <div style={paneStyle('launcher')}><RightUtilityLauncher onOpen={openRightUtilityTab} /></div>
-      ) : null}
-      {!secondaryTab && (utilityShellActive || renderedUtilityTabs.length > 0) ? (
-        <div style={{ flex: 1, minHeight: 0, display: utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-          <RightUtilityTabStrip
-            tabs={renderedUtilityTabs}
-            activeTab={activeTab}
-            onOpenLauncher={() => onActiveTabChange?.('launcher')}
-            onSelect={(tab) => onActiveTabChange?.(tab)}
-            onClose={closeRightUtilityTab}
-          />
-          {activeTab === 'launcher' ? (
-            <RightUtilityLauncher onOpen={openRightUtilityTab} />
-          ) : null}
-          {renderedUtilityTabs.map((tab) => (
-            <div
-              key={tab}
-              aria-hidden={activeUtilityTab !== tab}
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: activeUtilityTab === tab ? 'flex' : 'none',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                background: 'var(--t-bg)',
-              }}
-            >
-              {renderUtilitySurface(tab, activeUtilityTab === tab)}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <div style={paneStyle('workspace')}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
-          <O8RepoSelector
-            repos={registeredRepos}
-            allRepos={allRepos}
-            selectedRepoPath={repoPath ?? null}
-            onSelectAll={() => onSelectAllRepos?.()}
-            onSelectRepo={(path) => onRepoPathChange?.(path)}
-            style={{ flex: 1 }}
-          />
-        </div>
-        <WorkspaceBrowserPreview
-          active={paneVisible('workspace')}
-          suppressed={utilityShellActive && renderedUtilityTabs.includes('browser')}
-          browserScopeKey={browserStateKey}
-          onOpenBrowser={() => onActiveTabChange?.('browser')}
-        />
-        {allRepos ? (
-          <ProjectChangesOverview repos={registeredRepos} onPickRepo={(path) => onRepoPathChange?.(path)} />
-        ) : (
-          <ReviewPanel repoPath={repoPath} registeredRepos={reviewRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile ?? null} reviewLaneId={reviewLaneId} />
-        )}
-      </div>
+      {utilityShellActive ? headerTabSlot ? createPortal(
+        <RightUtilityTabStrip tabs={mountedUtilityTabs} activeTab={activeTab === 'activity' && prNumber ? 'prs' : activeTab} inHeader onOpenLauncher={() => onActiveTabChange?.('launcher')} onSelect={(tab) => onActiveTabChange?.(tab)} onClose={closeRightUtilityTab} />, headerTabSlot,
+      ) : <RightUtilityTabStrip tabs={mountedUtilityTabs} activeTab={activeTab === 'activity' && prNumber ? 'prs' : activeTab} onOpenLauncher={() => onActiveTabChange?.('launcher')} onSelect={(tab) => onActiveTabChange?.(tab)} onClose={closeRightUtilityTab} /> : null}
+      {activeTab === 'launcher' || secondaryTab === 'launcher' ? <div style={paneStyle('launcher')}><RightUtilityLauncher onOpen={openRightUtilityTab} /></div> : null}
+      {mountedUtilityTabs.map((tab) => <div key={tab} aria-hidden={!paneVisible(tab)} inert={!paneVisible(tab)} style={{ ...paneStyle(tab), background: 'var(--t-bg)' }}>
+        {renderUtilitySurface(tab, paneVisible(tab))}
+      </div>)}
       <div style={paneStyle('browser')}>
         {/* The utility-mounted browser wins the header slot when both exist —
             two instances portaling into one node would duplicate the pills. */}
@@ -501,54 +456,8 @@ export function O8Panel({
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
-          tabStripSlot={secondaryTab === 'browser' || renderedUtilityTabs.includes('browser') ? null : browserHeaderTabSlot}
+          tabStripSlot={paneVisible('browser') && !secondaryTab ? headerTabSlot : null}
           onFocusRequest={() => onActiveTabChange?.('browser')}
-        />
-      </div>
-      <div style={paneStyle('activity')}>
-        <O8ActivityPane
-          active={paneVisible('activity')}
-          repoPath={repoPath}
-          repoSlug={prRepo ?? repoSlug}
-          registeredRepos={registeredRepos}
-          allRepos={allRepos}
-          onSelectAllRepos={onSelectAllRepos}
-          onSelectRepoPath={onRepoPathChange}
-          onSelectCommit={onSelectCommit}
-          onSelectIssue={onSelectIssue}
-          selectedPrNumber={prNumber ?? null}
-          selectedPrRepo={prRepo ?? null}
-        />
-      </div>
-      <div style={paneStyle('resources')}>
-        <O8ResourcesPane active={paneVisible('resources')} />
-      </div>
-      <div style={paneStyle('handoffs')}>
-        <O8HandoffsPane
-          active={paneVisible('handoffs')}
-          repoPath={repoPath}
-          registeredRepos={registeredRepos}
-          allRepos={allRepos ?? false}
-          onRepoPathChange={onRepoPathChange}
-          selection={handoffSelection}
-        />
-      </div>
-      {/* Inbox (Incident Queue) now renders through the closeable utility strip
-          above — see renderUtilitySurface('inbox'). No standalone main-tab mount
-          (report RVKTQV): a second mount here would double the pane + its data
-          subscriptions when the utility shell is active. */}
-      <div style={paneStyle('spec')}>
-        <O8SpecPane
-          repoPath={repoPath}
-          active={paneVisible('spec')}
-          toolbarSlot={(specRepoPath) => (
-            <O8ScratchChat
-              repoPath={specRepoPath}
-              selectedFile={specRepoPath === repoPath ? selectedFile ?? null : null}
-              surface="diff"
-              surfaceLabel="o8.md"
-            />
-          )}
         />
       </div>
       <div style={paneStyle('compare')}>
@@ -561,9 +470,6 @@ export function O8Panel({
         )}
       </div>
 
-      <div style={paneStyle('targets')}>
-        <TargetsPanel repoPath={repoPath} active={paneVisible('targets')} />
-      </div>
     </div>
   );
 }

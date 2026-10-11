@@ -6,8 +6,9 @@ import { readStoredOrchestratorModel } from '@/lib/orchestrator/store';
 export function useOrchestratorModelState(input: {
   operatorDefaultModel: string;
   repoPath: string | null;
+  isolated?: boolean;
 }) {
-  const { operatorDefaultModel, repoPath } = input;
+  const { operatorDefaultModel, repoPath, isolated = false } = input;
   const [model, setModel] = useState(operatorDefaultModel);
   const sourceRef = useRef<'default' | 'stored' | 'user'>('default');
   const repoPathRef = useRef<string | null | undefined>(undefined);
@@ -24,8 +25,8 @@ export function useOrchestratorModelState(input: {
   useEffect(() => {
     if (repoPathRef.current !== repoPath) {
       repoPathRef.current = repoPath;
-      const storedModel = readStoredOrchestratorModel(repoPath);
-      sourceRef.current = storedModel ? 'stored' : 'default';
+      const storedModel = isolated ? null : readStoredOrchestratorModel(repoPath);
+      sourceRef.current = storedModel !== null ? 'stored' : 'default';
       // Persisted repo state is an external source that must be synchronized after render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setModel(storedModel ?? operatorDefaultModel);
@@ -35,7 +36,7 @@ export function useOrchestratorModelState(input: {
       // Operator-default refreshes apply only until a stored or user choice takes ownership.
       setModel(operatorDefaultModel);
     }
-  }, [operatorDefaultModel, repoPath]);
+  }, [isolated, operatorDefaultModel, repoPath]);
 
   return { acceptModel, model, restoreModel, setModel };
 }

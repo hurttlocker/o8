@@ -1,9 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFile, execSync, spawn } from 'child_process';
 import type { Dirent } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 // No process.cwd() fallback on purpose — the server runs from wherever Node
@@ -18,6 +18,7 @@ const filesCache = new Map<string, { data: unknown; ts: number }>();
 const FILES_CACHE_TTL_MS = 15_000;
 const MAX_DEPTH = 3;
 const MAX_FLAT_FILES = 20_000;
+const MAX_SEARCH_RESULTS = 500;
 // Dotfiles/dirs to show (everything else starting with . is hidden)
 const SHOW_DOT = new Set([
   '.github', '.vscode', '.claude', '.cursor', '.cortexrules', '.cursorrules', '.clinerules',
@@ -56,18 +57,22 @@ function resolveDirectory(root: string, directory: string): string | null {
   const resolvedRoot = path.resolve(root);
   const target = path.resolve(resolvedRoot, directory || '.');
   const relative = path.relative(resolvedRoot, target);
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return target;
+  if (relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) return target;
   return null;
 }
 
 async function listDirectory(root: string, directory: string): Promise<DirectoryEntry[]> {
   const target = resolveDirectory(root, directory);
   if (!target) throw new Error('directory_outside_workspace');
+  const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(target)]);
+  if (!resolveDirectory(realRoot, path.relative(realRoot, realTarget))) throw new Error('directory_outside_workspace');
   const entries = sortEntries(await readdir(target, { withFileTypes: true }));
-  return entries.flatMap((entry) => {
-    if ((!entry.isDirectory() && !entry.isFile()) || !isVisible(entry.name, entry.isDirectory())) return [];
+  const visible = entries.flatMap((entry) => {
+    // Git internals stay out of the explorer. Other dotfiles and ignored
+    // folders remain discoverable; their names are dimmed, not removed.
+    if ((!entry.isDirectory() && !entry.isFile()) || entry.name === '.git') return [];
     const entryPath = path.join(directory, entry.name);
-    const ignored = entry.isDirectory() && IGNORE.has(entry.name);
+    const ignored = IGNORE.has(entry.name);
     return [{
       name: entry.name,
       path: entryPath,
@@ -75,6 +80,45 @@ async function listDirectory(root: string, directory: string): Promise<Directory
       ...(ignored ? { ignored: true } : {}),
     }];
   });
+  const ignored = await ignoredPaths(root, visible.map(entry => entry.path));
+  return visible.map(entry => ignored.has(entry.path) ? { ...entry, ignored: true } : entry);
+}
+
+/** NUL-delimited stdin avoids shell interpretation and argument-size limits. */
+function ignoredPaths(root: string, paths: string[]): Promise<Set<string>> {
+  if (!paths.length) return Promise.resolve(new Set());
+  return new Promise(resolve => {
+    const child = spawn('git', ['check-ignore', '--no-index', '-z', '--stdin'], { cwd: root, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    let output = '';
+    const timer = setTimeout(() => { child.kill(); }, 2000);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      output += chunk;
+      if (output.length > 4_000_000) child.kill();
+    });
+    child.stdin.on('error', () => { /* A non-Git workspace may exit before consuming stdin. */ });
+    child.once('error', () => { clearTimeout(timer); resolve(new Set()); });
+    child.once('close', code => { clearTimeout(timer); resolve(code === 0 ? new Set(output.split('\0').filter(Boolean)) : new Set()); });
+    child.stdin.end(`${paths.join('\0')}\0`);
+  });
+}
+
+/** Git supplies a fast project-wide index without descending into dependency trees. */
+async function searchFiles(root: string, query: string) {
+  let paths: string[];
+  try {
+    paths = await new Promise<string[]>((resolve, reject) => {
+      execFile('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, windowsHide: true, timeout: 2000, maxBuffer: 4_000_000 }, (error, stdout) => {
+        if (error) reject(error);
+        else resolve([...new Set(stdout.split('\0').filter(Boolean))]);
+      });
+    });
+  } catch {
+    paths = (await listFiles(root)).map(entry => entry.path);
+  }
+  const terms = query.toLowerCase().trim().split(/\s+/);
+  const matches = paths.filter(file => terms.every(term => file.toLowerCase().includes(term)));
+  return { entries: matches.slice(0, MAX_SEARCH_RESULTS).map(file => ({ name: path.basename(file), path: file, kind: 'file' as const })), truncated: matches.length > MAX_SEARCH_RESULTS };
 }
 
 async function listFiles(root: string): Promise<DirectoryEntry[]> {
@@ -170,6 +214,15 @@ export async function GET(request: Request) {
   // whatever repo the server process happens to be sitting in.
   if (!root) {
     return NextResponse.json({ tree: [], root: null, changedFiles: [] });
+  }
+
+  if (searchParams.has('search')) {
+    const query = (searchParams.get('search') ?? '').trim().slice(0, 256);
+    try {
+      return NextResponse.json(query ? await searchFiles(root, query) : { entries: [], truncated: false });
+    } catch {
+      return NextResponse.json({ error: 'File search failed', code: 'file_search_failed' }, { status: 500 });
+    }
   }
 
   if (searchParams.has('directory')) {

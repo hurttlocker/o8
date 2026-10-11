@@ -9,6 +9,7 @@ import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
+import { laneGit } from '@/lib/lane/lane-git';
 import {
   extractAddedDiffLines,
   extractAddedLines,
@@ -283,14 +284,14 @@ export async function readLaneReviewDiff(lane: Lane): Promise<LaneReviewDiff> {
 
   const base = (lane.baseBranch || 'main').trim();
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const headSha = await readHeadSha(source.cwd);
+    const headSha = await readHeadSha(source.cwd, lane.repoPath);
     const diffBase = await resolveLaneAttributionBase(lane, source.cwd, headSha);
     const against = diffBase.mergeBase ?? diffBase.comparisonRef;
     const [stat, full] = await Promise.all([
-      gitOutput(source.cwd, ['diff', '--stat', against]).catch(() => ''),
-      gitOutput(source.cwd, ['diff', against]).catch(() => ''),
+      laneGit(source.cwd, lane.repoPath, ['diff', '--stat', against]).then(({ stdout }) => stdout).catch(() => ''),
+      laneGit(source.cwd, lane.repoPath, ['diff', against]).then(({ stdout }) => stdout).catch(() => ''),
     ]);
-    if (await readHeadSha(source.cwd) !== headSha) continue;
+    if (await readHeadSha(source.cwd, lane.repoPath) !== headSha) continue;
     return { source, headSha, base, diffBase, stat, full };
   }
   throw new Error('Worktree HEAD moved while computing diff. Retry o8_packet_diff before reviewing.');

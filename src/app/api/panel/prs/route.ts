@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ensureGitHubPullRequests, normalizeRepoSlug, resolveRepoSlug } from '@/lib/github-broker';
+import { fetchPullRequestListPage } from '@/lib/github-broker/pull-request-list';
+import type { PullRequestListState, PullRequestListSort } from '@/lib/github-broker/pull-request-list.types';
 
 const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
 const execFileAsync = promisify(execFile);
@@ -31,6 +33,20 @@ export async function GET(request: Request) {
 
   if (!repo) {
     return NextResponse.json({ prs: [], repo: null, unavailable: true });
+  }
+
+  if (searchParams.get('view') === 'list') {
+    const state = searchParams.get('state') ?? 'open';
+    const page = Number(searchParams.get('page') ?? 1);
+    const sort = searchParams.get('sort') ?? 'updated';
+    if (!['open', 'closed', 'all'].includes(state) || !['updated', 'oldest', 'newest'].includes(sort) || !Number.isSafeInteger(page) || page < 1) {
+      return NextResponse.json({ error: 'Choose a valid pull request state and page.' }, { status: 400 });
+    }
+    try {
+      return NextResponse.json(await fetchPullRequestListPage(repo, state as PullRequestListState, page, request.signal, sort as PullRequestListSort));
+    } catch {
+      return NextResponse.json({ error: 'Pull requests could not be loaded. Check your GitHub connection in Settings, then retry.' }, { status: 502 });
+    }
   }
 
   const result = await ensureGitHubPullRequests(repo);

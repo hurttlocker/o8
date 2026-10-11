@@ -12,6 +12,8 @@
  */
 
 import { createPortal } from 'react-dom';
+import { FloatingSurface } from './FloatingSurface';
+import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { MetaRow, resolveHoverPosition } from './SpawnedAgentHoverCard';
 import { AGENT_STATUS_ACCENT } from './AgentStatusDot';
 import { attentionBand, type AttentionBand } from './repo-focus/tabs/chats/sections';
@@ -46,6 +48,9 @@ export function OrchestratorHoverCard({
   title,
   repoLabel,
   backendLabel,
+  branchLabel,
+  workspacePath,
+  updatedAt,
   packets,
   anchorRect,
   onMouseEnter,
@@ -54,6 +59,9 @@ export function OrchestratorHoverCard({
   title: string;
   repoLabel: string | null;
   backendLabel: string | null;
+  branchLabel?: string | null;
+  workspacePath?: string | null;
+  updatedAt?: string;
   packets: OrchestratorPacket[];
   anchorRect: DOMRect | null;
   onMouseEnter: () => void;
@@ -66,7 +74,8 @@ export function OrchestratorHoverCard({
   const overflow = packets.length - shown.length;
 
   return createPortal(
-    <div
+    <FloatingSurface
+      role="tooltip"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
@@ -75,17 +84,13 @@ export function OrchestratorHoverCard({
         top: position.top,
         zIndex: 10000,
         width: 348,
+        pointerEvents: 'auto',
+      }}
+      contentStyle={{
         paddingTop: 14,
         paddingRight: 16,
         paddingBottom: 13,
         paddingLeft: 16,
-        borderRadius: 12,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-popover-surface)',
-        boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
-        color: 'var(--t-text)',
-        pointerEvents: 'auto',
-        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div
@@ -95,9 +100,7 @@ export function OrchestratorHoverCard({
           letterSpacing: '-0.1px',
           lineHeight: 1.25,
           color: 'var(--t-text)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          overflowWrap: 'anywhere',
           marginBottom: 11,
         }}
         title={title}
@@ -107,11 +110,14 @@ export function OrchestratorHoverCard({
 
       <div style={{ display: 'grid', gap: 7 }}>
         {repoLabel ? <MetaRow label="Repo" value={repoLabel} /> : null}
+        {branchLabel ? <MetaRow label="Branch" value={branchLabel} /> : null}
+        {workspacePath ? <MetaRow label="Workspace" value={<span title={workspacePath}>{workspacePath}</span>} /> : null}
+        {updatedAt ? <MetaRow label="Updated" value={formatElapsedAgo(updatedAt)} /> : null}
         {backendLabel ? <MetaRow label="Backend" value={backendLabel} /> : null}
-        <MetaRow label="Agents" value={`${packets.length} dispatched`} />
+        {packets.length > 0 ? <MetaRow label="Agents" value={`${packets.length} dispatched`} /> : null}
       </div>
 
-      <div
+      {shown.length > 0 ? <div
         style={{
           marginTop: 12,
           paddingTop: 10,
@@ -195,8 +201,8 @@ export function OrchestratorHoverCard({
             +{overflow} more
           </div>
         ) : null}
-      </div>
-    </div>,
+      </div> : null}
+    </FloatingSurface>,
     document.body,
   );
 }

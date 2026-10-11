@@ -67,10 +67,10 @@ describe('AcpModelPicker', () => {
     expect(openRouterButton.parentElement?.getAttribute('role')).toBe('listitem');
     await act(async () => { openRouterButton.click(); });
 
-    const ordered = [...container.querySelectorAll<HTMLButtonElement>('button[role="option"]')];
+    const ordered = [...container.querySelectorAll<HTMLButtonElement>('button[data-model-choice]')];
     expect(ordered.map((button) => button.title)).toEqual(['openrouter/beta/model', 'openrouter/alpha/model']);
     await act(async () => { search(container.querySelector<HTMLInputElement>('[aria-label="Search models"]')!, 'Image'); });
-    expect(container.querySelector('[title="openrouter/media/image"]')).toBeNull();
+    expect(container.querySelector('[title="openrouter/media/image"]')).not.toBeNull();
     expect([...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Coding')?.getAttribute('aria-pressed')).toBe('true');
     await act(async () => { search(container.querySelector<HTMLInputElement>('[aria-label="Search models"]')!, ''); });
     const allButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'All')!;
@@ -145,4 +145,41 @@ describe('AcpModelPicker', () => {
     expect(container.querySelector('[title="openrouter/media/image"]')).toBeNull();
     expect(freeButton.getAttribute('aria-pressed')).toBe('true');
   });
+  it('caps suggestions, surfaces stealth and the selected model, and searches the entire runtime list', async () => {
+    const models = Array.from({ length: 40 }, (_, index) => ({ id: `openrouter/vendor/model-${index}`, label: `Model ${index}`, provider: 'openrouter', efforts: [], metadata: { rank: index, compatible: true } }));
+    const stealth = { id: 'openrouter/stealth/hidden', label: 'Hidden model', provider: 'openrouter', efforts: [{ effort: 'high', id: 'openrouter/stealth/hidden/high' }], metadata: { rank: 42, compatible: true, stealth: true, contextLength: 200000, created: Date.now() / 1000, inputPricePerMillion: 1, outputPricePerMillion: 4 } };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ groups: [{ provider: 'openrouter', models: [...models, stealth] }], rankingAvailable: true })));
+    const onSelect = vi.fn();
+    await act(async () => { root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: models[30]!.id, onSelect, allowEffortVariants: false })); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(container.querySelectorAll('[data-model-choice]')).toHaveLength(18);
+    expect(container.textContent).toContain('Stealth');
+    expect(container.textContent).toContain('NEW');
+    expect(container.textContent).toContain('200K context');
+    expect(container.textContent).toContain('$1.00 / $4.00 per 1M');
+    expect(container.querySelector('[title="openrouter/stealth/hidden/high"]')).toBeNull();
+    expect(container.querySelector('[title="openrouter/vendor/model-30"]')).not.toBeNull();
+    expect(container.querySelector('[title="openrouter/vendor/model-39"]')).toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Favorite Hidden model"]')!.click());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(JSON.parse(localStorage.getItem('o8:model-favorites:catalogue:opencode') ?? '[]')).toContainEqual({ house: 'opencode', id: stealth.id, label: stealth.label });
+    act(() => search(container.querySelector<HTMLInputElement>('[aria-label="Search models"]')!, 'model-39'));
+    act(() => container.querySelector<HTMLButtonElement>('[title="openrouter/vendor/model-39"]')!.click());
+    expect(onSelect).toHaveBeenCalledWith(models[39]!.id);
+  });
+
+});
+
+it('shares hidden OpenRouter ids across runtime prefixes while keeping the selected model visible', async () => {
+  localStorage.setItem('o8:openrouter-hidden-models', JSON.stringify(['beta/model']));
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ groups: rankedGroups, rankingAvailable: true })));
+  const container = document.createElement('div'); const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: null, onSelect: () => {} })));
+    expect(container.querySelector('[title="openrouter/beta/model"]')).toBeNull();
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: 'openrouter/beta/model', onSelect: () => {} })));
+    expect(container.querySelector('[title="openrouter/beta/model"]')).not.toBeNull();
+    await act(async () => root.render(createElement(AcpModelPicker, { backend: 'opencode', defaultProvider: 'openrouter', value: null, onSelect: () => {}, manageVisibility: true })));
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show Beta Model"]')!.click());
+    expect(JSON.parse(localStorage.getItem('o8:openrouter-hidden-models')!)).toEqual([]);
+  } finally { act(() => root.unmount()); localStorage.clear(); vi.unstubAllGlobals(); }
 });

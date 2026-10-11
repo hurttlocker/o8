@@ -1,12 +1,16 @@
 'use client';
 
 import { useComposerImageBridge } from './useComposerImageBridge';
+import Image from 'next/image';
+import { useComposerClock } from './useComposerClock';
 import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
+import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
@@ -27,9 +31,18 @@ import {
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 import { ComposerContextRow } from './ComposerContextRow';
+import { ComposerPermissionChip } from './ComposerPermissionChip';
+import { ComposerFileTags } from './ComposerFileTags';
+import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
+const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
+  activityContent?: React.ReactNode;
+  inputLabel?: string;
+  placeholder?: string;
+  literalInput?: boolean;
+  footerOverride?: React.ReactNode;
   input: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
@@ -53,6 +66,7 @@ interface ComposerAreaProps {
   /** Raw orchestrator model id — only meaningful in orchestrator mode. */
   modelId?: string;
   /** Restore persisted model state without applying user-pick side effects. */
+  isolatedModelSelection?: boolean;
   onModelRestore?: (model: string) => void;
   /** Orchestrator-mode model switching from the composer chip. */
   onModelChange?: (model: string) => void;
@@ -97,6 +111,10 @@ interface ComposerAreaProps {
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
+  inputLabel,
+  placeholder,
+  literalInput = false,
+  footerOverride,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -105,6 +123,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   displayWaiting,
   chatMessages,
   workerPackets,
+  activityContent,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -116,6 +135,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSlashCommand,
   modelLabel,
   modelId,
+  isolatedModelSelection = false,
   onModelRestore,
   onModelChange,
   activeBackend,
@@ -156,12 +176,18 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const setTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (typeof inputRef === 'function') inputRef(node);
+    else if (inputRef) inputRef.current = node;
+  }, [inputRef]);
+  const now = useComposerClock(activeComposer && isOrchestratorMode);
+  const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
+  useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
-  useEffect(() => {
-    setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
-  }, []);
+  const composerSelectorV1Enabled = useSyncExternalStore(subscribeToComposerSelectorFlag, readComposerSelectorV1Flag, () => true);
   const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
   const selectorControls = useComposerSelectorState({
     enabled: isOrchestratorMode,
@@ -176,43 +202,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     threadId: sessionRulesThreadId ?? null,
     repoPath,
     onModeChange: onComposerModeChange,
+    isolated: isolatedModelSelection,
     onModelRestore,
     onModelChange,
     onBackendChange,
     onEffortChange,
   });
-  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
-    if (!isOrchestratorMode) return [];
-    // Scan the latest assistant message for any tool calls still marked as
-    // running. This is what the sticky status bar uses to stay visible even
-    // if orchStream.status flickers — if there are live tool calls, the user
-    // should see the bar regardless of the top-level status flag.
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      const msg = chatMessages[i];
-      if (msg.role !== 'assistant') continue;
-      const tools = msg.toolCalls ?? [];
-      const running = tools.filter((t) => t.status === 'running' || t.status === 'calling');
-      if (running.length > 0) {
-        // Stale-turn gate (Q's iMac, 2026-07-17: "225:16 · 1 running" — a
-        // dead turn from a previous app run restores with a tool call whose
-        // completion event never landed, and the bar counted forever while
-        // the composer sat locked in "Queue for next turn"). A genuinely
-        // live turn keeps the stream busy (displayWaiting) — including
-        // durable-turn reattach — and stream flicker gaps are seconds, so an
-        // idle stream plus a message older than the ceiling means the tool
-        // is dead history, not work. Server-authoritative healing (#8) is
-        // the structural fix; this stops the lie at the surface.
-        const STALE_TURN_MS = 30 * 60 * 1000;
-        const stale = !displayWaiting
-          && typeof msg.timestamp === 'number'
-          && Date.now() - msg.timestamp > STALE_TURN_MS;
-        return stale ? [] : running;
-      }
-      // Stop at the most recent assistant message — older tool calls are done.
-      break;
-    }
-    return [];
-  }, [chatMessages, displayWaiting, isOrchestratorMode]);
+  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => isOrchestratorMode
+    ? transcriptRunningTools(chatMessages, displayWaiting, now) : [], [chatMessages, displayWaiting, isOrchestratorMode, now]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];
@@ -237,20 +234,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     ];
   }, [dismissedSlashInput, input, isOrchestratorMode]);
 
-  // After the parent clears `input` (post-submit), force the textarea height
-  // back to its minHeight. The onSubmit keydown handler already sets
-  // height: 'auto' optimistically, but React's value-clear happens on the next
-  // render so the autosize effect inside onChange never re-fires to shrink the
-  // box — the result is a textarea that stays oversized with the "Queue for
-  // next turn" placeholder showing at the grown height. Watching `input` for
-  // the empty-string transition catches every clear path (submit, slash-route,
-  // programmatic resets) without having to touch each call site.
-  useEffect(() => {
-    if (input !== '') return;
-    const node = inputRef && 'current' in inputRef ? inputRef.current : null;
-    if (!node) return;
-    node.style.height = 'auto';
-  }, [input, inputRef]);
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
     if (!composerCenter || !activeComposer) return;
@@ -307,30 +290,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   const handleFileReferenceSelect = (filePath: string) => {
     const node = getInputNode();
-    const cursorPos = node?.selectionStart ?? input.length;
-    const textBeforeCursor = input.slice(0, cursorPos);
-    const textAfterCursor = input.slice(cursorPos);
-    const atMatch = textBeforeCursor.match(/@[\w./-]*$/);
-
-    let nextValue: string;
-    let nextCursorPos: number;
-    if (atMatch && typeof atMatch.index === 'number') {
-      const beforeMatch = textBeforeCursor.slice(0, atMatch.index);
-      nextValue = `${beforeMatch}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = beforeMatch.length + filePath.length + 2;
-    } else {
-      const spacer = textBeforeCursor.length === 0 || /\s$/.test(textBeforeCursor) ? '' : ' ';
-      nextValue = `${textBeforeCursor}${spacer}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = textBeforeCursor.length + spacer.length + filePath.length + 2;
-    }
-
-    updateInput(nextValue);
+    const next = addComposerFileReference(input, filePath, node?.selectionStart ?? fileReferences.body.length);
+    updateInput(next.input);
     requestAnimationFrame(() => {
       const nextNode = getInputNode();
       nextNode?.focus();
       if (!nextNode) return;
-      nextNode.selectionStart = nextCursorPos;
-      nextNode.selectionEnd = nextCursorPos;
+      nextNode.selectionStart = next.cursor;
+      nextNode.selectionEnd = next.cursor;
       nextNode.style.height = 'auto';
       nextNode.style.height = `${Math.min(nextNode.scrollHeight, 200)}px`;
     });
@@ -374,6 +341,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           awaitingReply={awaitingReply}
         />
       ) : null}
+      {activityContent}
       {sendBufferStatus}
       <div style={{ position: 'relative' }}>
         <SlashCommandPicker
@@ -416,7 +384,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}>
               {attachedImages.map((image, index) => (
                 <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
-                  <img
+                  <Image width={56} height={56} unoptimized
                     src={image.dataUri}
                     alt={image.name}
                     title={onAttachedImageAnnotate ? 'Click to annotate' : undefined}
@@ -562,15 +530,17 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               ))}
             </div>
           ) : null}
+          <ComposerFileTags paths={fileReferences.paths} repoPath={selectedRepoPath ?? repoPath} onRemove={path => {
+            updateInput(writeComposerFileReferences(fileReferences.body, fileReferences.paths.filter(item => item !== path)));
+            getInputNode()?.focus();
+          }} />
           <textarea
-            ref={inputRef}
+            ref={setTextareaRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
-            value={input}
+            aria-label={inputLabel}
+            value={fileReferences.body}
             onChange={(event) => {
-              updateInput(event.target.value);
-              const el = event.target;
-              el.style.height = 'auto';
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+              updateInput(writeComposerFileReferences(event.target.value, fileReferences.paths));
             }}
             onKeyDown={(event) => {
               if (
@@ -700,13 +670,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
             }}
             onPaste={handleTextareaPaste}
-            placeholder={composerPlaceholder}
+            placeholder={placeholder ?? composerPlaceholder}
             disabled={isDisabled}
             rows={2}
             style={{
               width: '100%',
               minHeight: 52,
-              maxHeight: 200,
+              maxHeight: 'max(52px, min(200px, 28vh, calc(100cqh - 120px)))',
+              display: 'block',
               paddingTop: 11,
               paddingRight: 14,
               paddingBottom: 4,
@@ -727,9 +698,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               // 2026-07-15, 80% zoom) that also ate clicks along its band.
               overflowX: 'hidden',
               overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              overflowWrap: 'anywhere',
             }}
           />
-          <InputButtons
+          {footerOverride ?? <InputButtons
             input={input}
             hasAttachments={attachedImages.length > 0}
             enhancing={enhancing}
@@ -760,6 +733,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
+            permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
+              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange} /> : null}
             inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
             voiceModeEnabled={voiceModeEnabled}
             onVoiceModeChange={onVoiceModeChange}
@@ -773,21 +748,18 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             } : undefined}
             composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
             onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
-          />
+          />}
         </div>
       </div>
-
       <ComposerContextRow
+        showRepoTarget={displayMessagesCount === 0 && !displayWaiting && !hasAssistantActivity}
         contextLocationSlot={contextLocationSlot}
         repoLabel={repoLabel}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={selectedRepoPath}
         onSelectRepoPath={onSelectRepoPath}
         onAddProject={() => window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode: 'existing' } }))}
-        permissionMode={isOrchestratorMode ? permissionMode : undefined}
-        onPermissionModeChange={isOrchestratorMode ? onPermissionModeChange : undefined}
       />
-
       {footerLeadingSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

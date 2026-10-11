@@ -20,6 +20,7 @@ import {
   supportedEffortsForLead,
 } from './composer-selector/state';
 import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
+import { ServiceTierPicker } from './composer-selector/ServiceTierPicker';
 
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
@@ -41,9 +42,10 @@ const MODEL_THINKING_MENU_WIDTH = 200;
 // open; the fixed houses keep their locked 200px geometry.
 const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 
-// Synthetic model id for the free o8 backend — there is no underlying model name
+// Synthetic model id for the o8 backend — there is no underlying model name
 // exposed in the UI (monetization doctrine: we own the brand, hide the model).
-// This value is what `onModelChange` stores and what `activeModelOption` matches.
+// This value is what `onModelChange` stores and what `activeModelOption` matches,
+// so it keeps its original value for saved selections.
 const O8_FREE_MODEL_ID = 'o8-free';
 
 export type ComposerModelOption = {
@@ -57,7 +59,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -117,17 +119,18 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   // and either can return when its setup story is one-click. Settings →
   // Operator Defaults still offers Hermes when a HEALTHY binary is present
   // (isHermesAvailable now exec-probes instead of existsSync).
-  // The free house (operator ruling 2026-07-12): one conversational model that
-  // streams with no subscription draw, so the operator can drive the full
-  // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
-  // underlying model is never surfaced.
+  // o8's own house (#3408): its built-in agent, bundled Pi with the full o8
+  // command set, on the managed model and the o8 model allowance. Needs no
+  // installed CLI or key, so it draws on no Claude/Codex subscription. It is
+  // the one Pi entry: a separate Pi row would name the same agent twice.
   {
     key: 'o8',
     label: 'o8',
     options: [
-      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'Managed model' },
     ],
   },
+  { key: 'acp', label: 'Local ACP', options: [], searchable: true },
 ];
 
 export interface ComposerModelCatalogue {
@@ -364,16 +367,24 @@ export function ModelThinkingChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const tools = useRuntimeInventory(open);
+  const [acpAvailable, setAcpAvailable] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch('/api/setup/orchestrator-backends').then(response => response.json()).then(data => { if (alive) setAcpAvailable(data.acp === true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
   const [advancedLeads, setAdvancedLeads] = useState(false);
   const installed = visibleRuntimeInventory(tools.inventory ?? []);
   const visibleLead = (key: ComposerModelGroup['key']) => {
     const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
     if (current) return true;
+    if (key === 'acp') return acpAvailable;
     if (key === 'o8') return advancedLeads;
     const tool = runtimeForLead(key);
     return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
   };
-  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || (key === 'acp' && acpAvailable)
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
   const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
   const ultraEnabled = useUltraEffortPreference();
@@ -412,10 +423,10 @@ export function ModelThinkingChip({
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
+  const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
     activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
       ? activeBackend
-      : 'claude',
+      : activeBackend === 'pi' ? 'o8' : 'claude',
   );
   // The ACP house needs a wider menu than the fixed drawers (see the width
   // constants) — derived from the open house, not the active backend, so the
@@ -642,6 +653,7 @@ export function ModelThinkingChip({
                           models come from the live agent, so it renders a
                           searchable picker instead of a drawer of literals. */}
                       {houseOpen && !leadReady(group.key) ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{tools.loading ? 'Checking readiness…' : tools.inventory?.find((item) => item.id === runtimeForLead(group.key))?.fix || 'Connect this tool using Add tools below.'}</div> : null}
+                      {houseOpen && leadReady(group.key) && group.key === 'acp' ? <button type="button" onClick={() => { onBackendChange?.('acp', ''); setOpen(false); }} style={{ border: 0, borderRadius: 8, paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, background: 'var(--t-hover)', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left' }}>Use agent default</button> : null}
                       {houseOpen && leadReady(group.key) && group.searchable ? (
                         <AcpModelPicker
                           backend={group.key}
@@ -729,6 +741,7 @@ export function ModelThinkingChip({
           {onEffortChange && !hideEffortUi ? (
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
+          {onEffortChange && !hideEffortUi ? <ServiceTierPicker backend={activeBackend ?? 'claude'} model={modelId ?? ''} disabled={false} /> : null}
 
           {/* Mode section removed (Q 2026-07-17): Solo / Multitask /
               Mixture of Agents live in the composer's "+" switcher now —

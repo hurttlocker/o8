@@ -51,7 +51,7 @@ const SESSION_KEY = 'workspace-owned:tile-specimen-alpha';
 const VIEWPORT = { width: 1440, height: 900 };
 const NARROW_TILE_WIDTH_PX = 200;
 const MID_TILE_WIDTH_PX = 320;
-const ROOMY_TILE_WIDTH_PX = 760;
+const ROOMY_TILE_WIDTH_PX = 960;
 
 interface Box {
   left: number;
@@ -172,13 +172,17 @@ function measureHeaderInPage(probe: { expectedName: string; expectedModel: strin
         bottom: Math.min(box.bottom, textRect.bottom),
       });
     }
-    if (tileRoot) {
-      const tileBox = tileRoot.getBoundingClientRect();
+    // Metadata now has its own clipping group inside the header. Apply every
+    // ancestor clip, so hidden caption ink cannot falsely collide with controls.
+    for (let ancestor = el.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const ancestorStyle = window.getComputedStyle(ancestor);
+      if (ancestorStyle.overflowX === 'visible' && ancestorStyle.overflowY === 'visible') continue;
+      const clip = ancestor.getBoundingClientRect();
       painted = withSize({
-        left: Math.max(painted.left, tileBox.left),
-        top: Math.max(painted.top, tileBox.top),
-        right: Math.min(painted.right, tileBox.right),
-        bottom: Math.min(painted.bottom, tileBox.bottom),
+        left: Math.max(painted.left, clip.left),
+        top: Math.max(painted.top, clip.top),
+        right: Math.min(painted.right, clip.right),
+        bottom: Math.min(painted.bottom, clip.bottom),
       });
     }
     return {
@@ -417,7 +421,7 @@ window.__o8TileHarness = (() => {
     const aliasPlugin: Plugin = {
       name: 'o8-tile-header-alias',
       setup(builder) {
-        builder.onResolve({ filter: /^\.\/WorkspaceTranscript$/ }, () => ({
+        builder.onResolve({ filter: /^(?:\.\/|@\/components\/desktop\/workspace-terminal\/)WorkspaceTranscript$/ }, () => ({
           path: path.join(tempDir!, 'workspace-transcript-stub.jsx'),
         }));
         builder.onResolve({ filter: /BrowserPipCard$/ }, () => ({
@@ -454,11 +458,14 @@ window.__o8TileHarness = (() => {
     browser = await chromium.launch({ executablePath: executablePath!, headless: true });
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
     page = await context.newPage();
+    const bootstrapErrors: string[] = [];
+    page.on('pageerror', (error) => bootstrapErrors.push(error.stack ?? error.message));
     await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${PRODUCT_ENV_STYLE}</style></head><body></body></html>`);
     // Install the fetch fixture in the existing document, before any
     // component can mount (addInitScript does not run for setContent).
     await page.evaluate(FETCH_STUB_SOURCE);
     await page.addScriptTag({ content: bundleCode });
+    expect(bootstrapErrors, 'tile fixture browser bootstrap failed').toEqual([]);
   }, 60_000);
 
   afterAll(async () => {

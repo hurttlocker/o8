@@ -30,6 +30,7 @@ vi.mock('@/lib/mobile/symon-text-session-store', () => ({
   loadSymonTextSession: h.loadSession,
   createSymonTextSessionFromTranscript: h.createSession,
   appendSymonTextTranscript: h.appendTranscript,
+  bindSymonTextEffectiveModel: vi.fn(),
   formatSymonTextPlannerPrompt: (_session: unknown, text: string) => `User: ${text}`,
 }));
 vi.mock('@/lib/chat/gateway-client', () => ({ generateSharedSymonText: h.generateShared }));

@@ -1,3 +1,4 @@
+import { safeErrorText } from '@/lib/mcp/api-error';
 import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -8,6 +9,7 @@ import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageAgents, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
 import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-handlers/task-artifact';
+import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, handleAsk, handleProposeObservation } from '@/lib/mcp/operator-handlers/cortex';
@@ -246,7 +248,7 @@ async function handleConsoleErrors(): Promise<McpToolResult> {
     const data = await invokeTauriCommandFromWebview('o8_view_console_errors');
     return textResult(JSON.stringify(data));
   } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), true);
+    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
   }
 }
 
@@ -255,7 +257,7 @@ async function handleActiveRoute(): Promise<McpToolResult> {
     const data = await invokeTauriCommandFromWebview('o8_view_active_route');
     return textResult(JSON.stringify(data));
   } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), true);
+    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
   }
 }
 
@@ -292,6 +294,7 @@ const TOOLS: McpTool[] = [
   ...O8_WEBVIEW_TOOLS,
   ...CANVAS_TOOLS,
   ...TASK_ARTIFACT_TOOLS,
+  ...VISUALIZATION_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'create_mission'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'dispatch_mission'),
@@ -337,6 +340,7 @@ const DOGFOOD_TOOL_NAMES = new Set([
 export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PROFILE): McpTool[] {
   if (!profile || profile === 'full') return TOOLS;
   if (profile === 'dogfood') return TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
+  if (profile === 'visualizations') return VISUALIZATION_TOOLS;
   // An explicitly requested but unknown profile fails closed. A typo in a
   // safety launcher must not silently restore approvals or task tools.
   return [];
@@ -411,6 +415,9 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_canvas: handleCanvas,
   o8_render: handleRender,
   o8_task_artifact: handleTaskArtifact,
+  o8_html_preview: handleHtmlPreview,
+  o8_html_render: handleHtmlRender,
+  o8_visualization_read: handleVisualizationRead,
   o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
@@ -441,7 +448,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   report_packet_event: handleReportPacketEvent,
 };
 
-export async function handleOperatorMcpMessage(message: OperatorMcpRequest): Promise<OperatorMcpResponse | null> {
+export async function handleOperatorMcpMessage(message: OperatorMcpRequest, requestedProfile?: string): Promise<OperatorMcpResponse | null> {
   const { method, id, params } = message;
   if (id === undefined || id === null) return null;
 
@@ -457,7 +464,9 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest): Pro
       },
     };
   }
-  const activeTools = operatorToolsForProfile();
+  const allowedNames = requestedProfile ? new Set(operatorToolsForProfile(requestedProfile).map(tool => tool.name)) : null;
+  // A transport may narrow the server's own profile, never expand it.
+  const activeTools = operatorToolsForProfile().filter(tool => !allowedNames || allowedNames.has(tool.name));
   if (method === 'tools/list') return { jsonrpc: '2.0', id, result: { tools: activeTools } };
   if (method === 'tools/call') {
     const toolName = (params as Record<string, unknown> | undefined)?.name as string;
@@ -478,7 +487,7 @@ export async function handleOperatorMcpMessage(message: OperatorMcpRequest): Pro
     try {
       return { jsonrpc: '2.0', id, result: await handler(toolArgs) };
     } catch (error) {
-      return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${error}`, true) };
+      return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${safeErrorText(error)}`, true) };
     }
   }
   return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };

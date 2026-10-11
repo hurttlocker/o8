@@ -29,6 +29,7 @@ export function SectionLabel({
   collapsed,
   onToggle,
   action,
+  controls,
 }: {
   label: string;
   compact?: boolean;
@@ -39,17 +40,18 @@ export function SectionLabel({
   /** Section-level affordance (#2154's Agents "Clear"). Rendered OUTSIDE the
    *  toggle button — a button inside a button is invalid markup. */
   action?: ReactNode;
+  controls?: string;
 }) {
   const commonStyle = {
-    paddingTop: compact ? 7 : 10,
+    paddingTop: compact ? 10 : 12,
     paddingRight: 12,
-    paddingBottom: compact ? 4 : 5,
+    paddingBottom: compact ? 7 : 8,
     paddingLeft: 12,
-    fontSize: 10,
-    lineHeight: '14px',
-    fontWeight: 300,
+    fontSize: 11.5,
+    lineHeight: '16px',
+    fontWeight: 500,
     letterSpacing: '-0.1px',
-    color: 'var(--t-text-faint)',
+    color: 'var(--t-text-secondary)',
     fontFamily: REPO_FOCUS_FONT,
   };
 
@@ -61,16 +63,17 @@ export function SectionLabel({
           <span
             aria-label={`${count} ${label.toLowerCase()}`}
             style={{
-              fontSize: compact ? 9 : 9.5,
+              fontSize: 10.5,
               lineHeight: '12px',
               letterSpacing: 0,
-              color: countTone ?? 'var(--t-text-faint)',
+              color: countTone ?? 'var(--t-text-muted)',
               fontWeight: 300,
             }}
           >
             {count}
           </span>
         ) : null}
+        {action}
       </div>
     );
   }
@@ -79,6 +82,7 @@ export function SectionLabel({
     <button
       type="button"
       aria-expanded={!collapsed}
+      aria-controls={!collapsed ? controls : undefined}
       onClick={onToggle}
       title={`${collapsed ? 'Show' : 'Hide'} ${label.toLowerCase()}`}
       style={{
@@ -87,23 +91,22 @@ export function SectionLabel({
         borderWidth: 0,
         background: 'transparent',
         cursor: 'pointer',
-        outline: 'none',
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        gap: 8,
         textAlign: 'left',
       }}
     >
-      {collapsed ? <ChevronRight size={11} strokeWidth={2} /> : <ChevronDown size={11} strokeWidth={2} />}
+      {collapsed ? <ChevronRight size={12} strokeWidth={1.8} /> : <ChevronDown size={12} strokeWidth={1.8} />}
       <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
       {typeof count === 'number' ? (
         <span
           aria-label={`${count} ${label.toLowerCase()}`}
           style={{
-            fontSize: compact ? 9 : 9.5,
+            fontSize: 10.5,
             lineHeight: '12px',
             letterSpacing: 0,
-            color: countTone ?? 'var(--t-text-faint)',
+            color: countTone ?? 'var(--t-text-muted)',
             fontWeight: 300,
           }}
         >
@@ -151,19 +154,19 @@ function RepoGroupLabel({
   // they are). At rest the folder reads as identity; the chevron only takes
   // the slot when the drawer is collapsed (state must read at a glance) or
   // while hovering a toggleable header (affordance).
-  const leadingGlyph = noIcon
-    ? null
-    : toggleable && collapsed
+  const leadingGlyph = toggleable && collapsed
       ? <ChevronRight size={11} strokeWidth={2} />
-      : toggleable && hovered
+      : toggleable
         ? <ChevronDown size={11} strokeWidth={2} />
-        : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />;
+        : noIcon ? null : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />;
   return (
     <div
       role={toggleable ? 'button' : undefined}
+      tabIndex={toggleable ? 0 : undefined}
       aria-expanded={toggleable ? !collapsed : undefined}
       title={toggleable ? `${collapsed ? 'Show' : 'Hide'} ${label} sessions` : undefined}
       onClick={onToggle}
+      onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle?.(); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -175,7 +178,8 @@ function RepoGroupLabel({
         paddingRight: 10,
         paddingBottom: 3,
         paddingLeft: 12,
-        color: 'var(--t-text-faint)',
+        color: 'var(--t-text-secondary)',
+        background: hovered && toggleable ? 'var(--t-hover)' : 'transparent',
         fontFamily: REPO_FOCUS_FONT,
         cursor: toggleable ? 'pointer' : undefined,
         userSelect: 'none',
@@ -193,7 +197,7 @@ function RepoGroupLabel({
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: 'var(--t-text-faint)',
+          color: 'var(--t-text-secondary)',
           flexShrink: 0,
         }}
       >
@@ -206,9 +210,9 @@ function RepoGroupLabel({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: 10,
+          fontSize: 11,
           lineHeight: '14px',
-          fontWeight: 300,
+          fontWeight: 500,
           letterSpacing: '-0.1px',
         }}
       >

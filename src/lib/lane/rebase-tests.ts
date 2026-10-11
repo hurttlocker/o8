@@ -2,9 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
-
-const execFileAsync = materializationAwareExecFile;
+import { ranUnconfined, runConfinedProcess } from '@/lib/sandbox/run-confined';
 
 const TEST_TIMEOUT_MS = 300_000;
 const TEST_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
@@ -18,9 +16,13 @@ const PLACEHOLDER_TEST_SCRIPTS = new Set([
   "echo 'error: no test specified' && exit 1",
 ]);
 
+/** `unconfined` is set when the lane's tests ran without the sandbox because confinement is unavailable on this host. */
 export type LaneRebaseTestResult =
-  | { ok: true; skipped: boolean }
-  | { ok: false; output: string };
+  | { ok: true; skipped: boolean; unconfined?: true }
+  | { ok: false; output: string; unconfined?: true };
+
+/** One line for the merge card when the lane's tests ran without the sandbox (#3414). */
+export const UNCONFINED_TESTS_NOTE = 'The lane\'s tests ran without the sandbox: command confinement is unavailable on this host.';
 
 async function resolveTestScript(cwd: string): Promise<string | null> {
   try {
@@ -43,6 +45,11 @@ async function resolveTestScript(cwd: string): Promise<string | null> {
  * different-files-clean-merge-but-broken-CI class. Opt-in and skip-safe: when
  * no real `test` script is configured we treat it as a pass so the merge does
  * not loop the layer-1 auto-retry.
+ *
+ * The test script is lane code, so it runs confined to the worktree (#3414):
+ * no network, writes only in the worktree and a private TMPDIR, where the npm
+ * and XDG caches also go. A toolchain that writes elsewhere (for example a
+ * cache under a symlinked node_modules) fails here rather than being granted.
  */
 export async function runLaneRebaseTests(input: {
   cwd: string;
@@ -63,19 +70,18 @@ export async function runLaneRebaseTests(input: {
     // as "the tests failed". Same shape as the rebase typecheck gate: a merge
     // that should pass burns its layer-1 rerun and escalates instead.
     const testRun = cliInvocation('npm', ['test', '--silent']);
-    await execFileAsync(testRun.command, testRun.args, {
-      windowsHide: true,
+    const run = await runConfinedProcess(input.cwd, testRun.command, testRun.args, {
       cwd: input.cwd,
       timeout: TEST_TIMEOUT_MS,
       maxBuffer: TEST_MAX_BUFFER_BYTES,
     });
     console.log(`[${input.logPrefix}] Test replay passed for ${input.actualBranch}`);
-    return { ok: true, skipped: false };
+    return { ok: true, skipped: false, ...(run.unconfined ? { unconfined: true as const } : {}) };
   } catch (error) {
     const output = extractTestOutput(error);
     const preview = output.slice(0, TEST_OUTPUT_PREVIEW_CHARS) || 'Unknown test failure';
     console.error(`[${input.logPrefix}] Test replay failed for ${input.actualBranch}:\n${preview}`);
-    return { ok: false, output: preview };
+    return { ok: false, output: preview, ...(ranUnconfined(error) ? { unconfined: true as const } : {}) };
   }
 }
 

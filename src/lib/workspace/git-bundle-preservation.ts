@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath } from 'node:fs/promises';
-import { devNull } from 'node:os';
 import path from 'node:path';
 
+import { laneGitArguments, laneGitEnvironment, laneGitInvocation } from '@/lib/lane/lane-git';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   assertWorktreeMaterializationIdentity,
@@ -32,17 +32,7 @@ export interface WorkspaceGitBundleReceipt {
   objectCount: number;
 }
 
-function gitEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
-  delete env.NODE_OPTIONS;
-  return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: devNull,
-    GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_OPTIONAL_LOCKS: '0' };
-}
-
-function gitArguments(args: string[]): string[] {
-  return ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args];
-}
+const gitEnvironment = () => laneGitEnvironment(true);
 
 async function privateDirectory(directory: string): Promise<WorktreeMaterializationIdentity> {
   await mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
@@ -125,8 +115,12 @@ export async function readWorkspaceGitBundle(receipt: WorkspaceGitBundleReceipt)
 
 async function gitValue(cwd: string, identity: WorktreeMaterializationIdentity, args: string[]): Promise<string> {
   return withWorktreeMaterializationExecution(cwd, identity, async () => {
-    const { stdout } = await materializationAwareExecFile('git', gitArguments(args), {
-      cwd, env: gitEnvironment(), timeout: 120_000, maxBuffer: 32 * 1024 * 1024,
+    // Private empty verifiers have no lane metadata or configured drivers.
+    const invocation = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
+      ? { args: laneGitArguments(args), env: gitEnvironment() }
+      : laneGitInvocation(cwd, cwd, args, true);
+    const { stdout } = await materializationAwareExecFile('git', invocation.args, {
+      cwd, env: invocation.env, timeout: 120_000, maxBuffer: 32 * 1024 * 1024,
     });
     return stdout.trim();
   });
@@ -188,12 +182,13 @@ const written = pipeline(child.stdout, new Writable({
 
 async function createBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
   repositoryIdentity: WorktreeMaterializationIdentity, preparation: string, identity: WorktreeMaterializationIdentity) {
-  const invocation = guardedWorkspaceInvocation('git', gitArguments([
+  const safe = laneGitInvocation(repositoryPath, repositoryPath, [
     'bundle', 'create', '--version=3', '-', snapshot.recoveryRef,
-  ]), repositoryIdentity);
+  ], true);
+  const invocation = guardedWorkspaceInvocation('git', safe.args, repositoryIdentity);
   await withWorktreeMaterializationExecution(preparation, identity, () => materializationAwareExecFile(
     process.execPath, ['-e', CAPTURE_BUNDLE, JSON.stringify({ invocation, repositoryPath, maxBytes: MAX_BUNDLE_BYTES })],
-    { cwd: preparation, env: gitEnvironment(), timeout: 125_000, maxBuffer: 1024 * 1024 },
+    { cwd: preparation, env: safe.env, timeout: 125_000, maxBuffer: 1024 * 1024 },
   ));
 }
 

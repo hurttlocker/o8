@@ -88,7 +88,7 @@ describe('Pi SDK in the packaged server layout', () => {
     sessions.push(session);
     const command = execFileSync('ps', ['-o', 'command=', '-p', String(session.pid)], { encoding: 'utf8' });
     expect(command).toContain(`${piDir}${sep}worker.mjs`);
-    expect(session.tools).toEqual(['read_file', 'write_file']);
+    expect(session.tools).toEqual(['read_file', 'write_file', 'run_command']);
     expect(await session.prompt('Write a note')).toMatchObject({ text: 'Saved from the bundle', stopReason: 'stop' });
     expect(await readFile(join(workspace, 'note.txt'), 'utf8')).toBe('packaged π');
     expect(approved).toBe(1);

@@ -5,11 +5,12 @@ import type { SettingsTab } from './shared';
 
 export function useSettingsSectionNavigation(activeTab: SettingsTab, setActiveTab: (tab: SettingsTab) => void) {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [target, setTarget] = useState<{ tab: SettingsTab; section: string } | null>(null);
+  const navigationId = useRef(0);
+  const [target, setTarget] = useState<{ tab: SettingsTab; section: string; id: number } | null>(null);
   const [notice, setNotice] = useState('');
   const navigate = useCallback((tab: SettingsTab, section?: string) => {
     setNotice('');
-    setTarget(section ? { tab, section } : null);
+    setTarget(section ? { tab, section, id: ++navigationId.current } : null);
     setActiveTab(tab);
     if (!section && contentRef.current) contentRef.current.scrollTop = 0;
   }, [setActiveTab]);
@@ -21,7 +22,7 @@ export function useSettingsSectionNavigation(activeTab: SettingsTab, setActiveTa
     let complete = false;
     const jump = () => {
       const heading = Array.from(root.querySelectorAll<HTMLElement>('[data-settings-section]'))
-        .find((element) => element.dataset.settingsSection === target.section);
+        .find((element) => !element.closest('[hidden]') && element.dataset.settingsSection === target.section);
       if (!heading) return false;
       let ancestor: HTMLElement | null = heading;
       while (ancestor && ancestor !== root) {
@@ -36,7 +37,7 @@ export function useSettingsSectionNavigation(activeTab: SettingsTab, setActiveTa
     };
     if (jump()) return;
     const observer = new MutationObserver(() => { if (!complete && jump()) observer.disconnect(); });
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
     const timeout = setTimeout(() => {
       observer.disconnect();
       if (!complete) setNotice(`${target.section} is not available on this page right now.`);
@@ -44,5 +45,5 @@ export function useSettingsSectionNavigation(activeTab: SettingsTab, setActiveTa
     return () => { observer.disconnect(); clearTimeout(timeout); };
   }, [activeTab, target]);
 
-  return { contentRef, navigate, notice };
+  return { contentRef, navigate, notice, targetSection: target?.tab === activeTab ? target.section : undefined, navigationId: target?.id };
 }

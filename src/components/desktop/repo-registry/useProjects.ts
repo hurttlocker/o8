@@ -57,7 +57,7 @@ interface UseProjectsResult {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  switchActive: (projectId: string) => Promise<void>;
+  switchActive: (projectId: string) => Promise<boolean>;
   createProject: (name: string) => Promise<ProjectRecord | null>;
   renameProject: (projectId: string, name: string) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
@@ -110,9 +110,12 @@ export function useProjects(): UseProjectsResult {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
-      setLedger(data); broadcastProjectsUpdated();
+      setLedger(data); setError(null); broadcastProjectsUpdated();
+      return true;
     } catch {
+      setError('Could not switch projects. Try again.');
       void refresh();
+      return false;
     }
   }, [refresh]);
 

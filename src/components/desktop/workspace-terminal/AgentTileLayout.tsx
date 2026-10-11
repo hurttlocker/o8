@@ -1,5 +1,7 @@
 'use client';
 
+import { ResizeEdge } from '../shell/ResizeEdge';
+
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { AgentTilePane } from './AgentTilePane';
@@ -103,7 +105,6 @@ export function AgentTileLayout({
     return { hash: sessionsHash, widths: persisted ?? evenWidths(sessions.length) };
   });
   const [focusedSession, setFocusedSession] = useState<string | null>(sessions[0] ?? null);
-  const [hoveredDivider, setHoveredDivider] = useState<number | null>(null);
   const [draggingDivider, setDraggingDivider] = useState<number | null>(null);
 
   const widths = useMemo(
@@ -240,58 +241,28 @@ export function AgentTileLayout({
             />
           </div>
           {index < sessions.length - 1 ? (
-            // Apple HIG drag handle: visible bar stays at 4px to keep panes
-            // tight, but the draggable region is widened via transparent
-            // padding so the cursor zone meets the 44pt minimum.
-            <div
-              role="separator"
-              aria-orientation="vertical"
+            <ResizeEdge
               aria-label={`Resize panes ${index + 1} and ${index + 2}`}
-              onMouseDown={(event) => startResize(index, event)}
-              onMouseEnter={() => setHoveredDivider(index)}
-              onMouseLeave={() => setHoveredDivider((current) => current === index ? null : current)}
-              style={{
-                position: 'relative',
-                width: DIVIDER_WIDTH,
-                minWidth: DIVIDER_WIDTH,
-                cursor: 'col-resize',
-                background: 'transparent',
-                flexShrink: 0,
+              aria-valuemin={0} aria-valuemax={100} aria-valuenow={widths[index]}
+              hitSlop={10}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                const available = (containerRef.current?.getBoundingClientRect().width ?? 0) - (sessions.length - 1) * DIVIDER_WIDTH;
+                if (available <= 0) return;
+                const pair = widths[index] + widths[index + 1];
+                const minimum = Math.min((MIN_PANE_WIDTH / available) * 100, pair / 2);
+                const next = [...widths];
+                next[index] = Math.max(minimum, Math.min(pair - minimum, widths[index] + (event.key === 'ArrowRight' ? 2 : -2)));
+                next[index + 1] = pair - next[index];
+                setStoredWidths({ hash: sessionsHash, widths: next });
+                saveStoredWidthMap(sessionsHash, next);
               }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: '50%',
-                  width: DIVIDER_WIDTH,
-                  transform: 'translateX(-50%)',
-                  borderRadius: 999,
-                  background: hoveredDivider === index || draggingDivider === index
-                    ? 'var(--t-border-hover, var(--t-accent-border))'
-                    : 'var(--t-border)',
-                  pointerEvents: 'none',
-                }}
-              />
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: '50%',
-                  // Hit zone widened to 12px per side (24px total) — full HIG
-                  // 44 would overhang the panes and steal pane-internal clicks.
-                  // The handle is full-height vertically so the long-axis
-                  // dimension already exceeds 44pt for any pane > 44 tall.
-                  width: 24,
-                  transform: 'translateX(-50%)',
-                  background: 'transparent',
-                }}
-              />
-            </div>
+              onMouseDown={(event) => startResize(index, event)}
+              dragging={draggingDivider === index}
+              style={{ width: DIVIDER_WIDTH, minWidth: DIVIDER_WIDTH }}
+              glowStyle={{ left: '50%' }}
+            />
           ) : null}
         </Fragment>
       ))}

@@ -37,7 +37,7 @@ export type TurnSummary = {
   toolNames: string[];
   /** Distinct tool name count for the +N tail. */
   toolNameTotal: number;
-  /** Files edited during the turn (from /api/review/workspace at turn end). */
+  /** Files attributed to successful edit-tool receipts during the turn. */
   filesEditedCount: number;
   /** File paths so the inner ChatActionCard can Undo + Review. */
   filePaths: string[];

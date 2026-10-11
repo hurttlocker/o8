@@ -29,10 +29,10 @@ describe('/api/panel/files listing modes', () => {
 
     expect(payload.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'src', kind: 'directory' }),
-      expect.objectContaining({ name: '.git', kind: 'directory', ignored: true }),
       expect.objectContaining({ name: 'node_modules', kind: 'directory', ignored: true }),
       expect.objectContaining({ name: 'README.md', kind: 'file' }),
     ]));
+    expect(payload.entries.some(entry => entry.name === '.git')).toBe(false);
   });
 
   it('returns recursive files without walking ignored directories', async () => {

@@ -7,7 +7,10 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { RAMS_BUTTON_GEOMETRY } from './control-geometry';
+import { RAMS_ACCENT, RAMS_HAIRLINE_SOFT, RAMS_HAIRLINE, RAMS_INK_QUIET, RAMS_CONTROL_BG, RAMS_CONTROL_BORDER, RAMS_CONTROL_ACTIVE_BG, RAMS_CONTROL_ACTIVE_BORDER, RAMS_ACCENT_GLOW, RAMS_TOGGLE_OFF } from './control-tokens';
+
+export { RamsButton } from './RamsButton';
+export { RAMS_ACCENT, RAMS_HAIRLINE_SOFT, RAMS_HAIRLINE, RAMS_INK_QUIET, RAMS_CONTROL_BG, RAMS_CONTROL_BORDER, RAMS_CONTROL_ACTIVE_BG, RAMS_CONTROL_ACTIVE_BORDER, RAMS_ACCENT_GLOW, RAMS_TOGGLE_OFF } from './control-tokens';
 
 // ── Types ──
 
@@ -55,7 +58,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'general' | 'local-models' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'worktrees' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'permissions' | 'billing' | 'diagnostics' | 'about';
+export type SettingsTab = 'general' | 'account' | 'local-models' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'worktrees' | 'git-prs' | 'models' | 'indexing' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'permissions' | 'billing' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -70,23 +73,6 @@ export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace
 // Match the 620px settings cards plus equal 8px tab gutters.
 export const SETTINGS_CONTENT_MAX_WIDTH = 636;
 export const SETTINGS_WIDE_CONTENT_MAX_WIDTH = 1024;
-
-// Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
-// Accent is palette-aware (registry.ts): deep #1D4ED8 on light paper, lighter
-// #8FB4FF on dark graphite so active states stand out (operator, 2026-07-05).
-export const RAMS_ACCENT = 'var(--t-settings-accent-strong, #1D4ED8)';
-export const RAMS_HAIRLINE_SOFT = 'rgba(17, 17, 17, 0.08)';
-export const RAMS_HAIRLINE = 'rgba(17, 17, 17, 0.18)';
-export const RAMS_INK_QUIET = 'var(--t-text-muted, #9A968E)';
-export const RAMS_CONTROL_BG = 'var(--t-bg-card, rgba(17, 17, 17, 0.035))';
-export const RAMS_CONTROL_BORDER = 'var(--t-panel-border, rgba(17, 17, 17, 0.14))';
-export const RAMS_CONTROL_ACTIVE_BG = 'var(--t-settings-accent-active-bg, rgba(29, 78, 216, 0.1))';
-export const RAMS_CONTROL_ACTIVE_BORDER = 'var(--t-settings-accent-active-border, rgba(29, 78, 216, 0.32))';
-// Symon-shape control extras (port of voice-settings primitives): focus-ring
-// glow + the iOS-switch off-track. Off-track uses a theme divider so it reads
-// on both cream (light) and graphite (dark) paper.
-export const RAMS_ACCENT_GLOW = 'var(--t-settings-accent-glow, rgba(29, 78, 216, 0.28))';
-export const RAMS_TOGGLE_OFF = 'var(--t-divider-strong, rgba(17, 17, 17, 0.22))';
 
 // ── Helpers ──
 
@@ -525,65 +511,6 @@ export function SettingsToggleButton({
           transform: checked ? 'translateX(20px)' : 'translateX(0)',
         }}
       />
-    </button>
-  );
-}
-
-export function RamsButton({
-  children,
-  onClick,
-  disabled = false,
-  variant = 'primary',
-  type = 'button',
-  busy = false,
-  icon,
-  width,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  variant?: 'primary' | 'ghost' | 'danger';
-  type?: 'button' | 'submit';
-  busy?: boolean;
-  icon?: React.ReactNode;
-  width?: number;
-}) {
-  const tone = variant === 'danger' ? '#d94f3a' : variant === 'ghost' ? 'var(--t-text-secondary)' : RAMS_ACCENT;
-  const border = variant === 'ghost'
-    ? RAMS_CONTROL_BORDER
-    : variant === 'danger'
-      ? 'rgba(217, 79, 58, 0.32)'
-      : RAMS_CONTROL_ACTIVE_BORDER;
-  const bg = disabled
-    ? 'transparent'
-    : variant === 'ghost'
-      ? RAMS_CONTROL_BG
-      : variant === 'danger'
-        ? 'rgba(217, 79, 58, 0.08)'
-        : RAMS_CONTROL_ACTIVE_BG;
-  // Symon voice-settings button shape (system sans, sentence case, 32h) kept on
-  // o8's accent + variant colors. Was: mono / 10px / 300 / UPPERCASE / 44h.
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled || busy}
-      style={{
-        ...RAMS_BUTTON_GEOMETRY,
-        width,
-        gap: 7,
-        borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
-        background: bg,
-        color: disabled ? RAMS_INK_QUIET : tone,
-        cursor: disabled || busy ? 'default' : 'pointer',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        opacity: busy ? 0.7 : 1,
-      }}
-    >
-      {icon ? <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span> : null}
-      <span>{children}</span>
     </button>
   );
 }

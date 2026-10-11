@@ -9,7 +9,8 @@
 import { resolvePacketWorkMode } from '@/lib/orchestrator/packet-launch-context';
 import type { WorkerWorkMode } from '@/lib/orchestrator/types';
 
-const READ_ONLY_RUNTIME_IDS = new Set(['codex', 'claude-code']);
+// Bundled Pi enforces read-only by offering only `read_file` (#3258).
+const READ_ONLY_RUNTIME_IDS = new Set(['codex', 'claude-code', 'pi-builtin']);
 
 export function runtimeSupportsReadOnlyWorkMode(runtime: string): boolean {
   return READ_ONLY_RUNTIME_IDS.has(runtime);
@@ -31,7 +32,7 @@ function enforceRuntimeSupport(
     ok: false,
     retryable: false,
     reason: `Dispatch refused: runtime ${runtime} cannot enforce read-only worker execution. `
-      + 'Use codex or claude-code.',
+      + 'Use codex, claude-code or pi-builtin.',
   };
 }
 

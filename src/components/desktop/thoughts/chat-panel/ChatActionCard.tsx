@@ -13,11 +13,17 @@
  */
 
 import { useState } from 'react';
+import type { TurnFile } from '../../transcript/turns';
+import { TranscriptPeek } from '../../transcript/TranscriptPeek';
+import { TurnFilePreview } from '../../transcript/TurnFilePreview';
+import { DiffCounts } from './turn-line';
 
 type CardState = 'idle' | 'confirming' | 'undoing' | 'undone' | 'error';
 
 type Props = {
   filesEditedCount: number;
+  files?: TurnFile[];
+  allowUndo?: boolean;
   /** Repo root. Required for the Review handoff + Undo dispatch. */
   repoPath: string | null;
   /** Files to revert when Undo fires. Same list /api/review/workspace returned. */
@@ -26,7 +32,7 @@ type Props = {
   firstFilePath?: string | null;
 };
 
-export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFilePath }: Props) {
+export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFilePath, files, allowUndo = true }: Props) {
   const [state, setState] = useState<CardState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -82,8 +88,8 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
     : `Edited ${filesEditedCount} ${filesEditedCount === 1 ? 'file' : 'files'}`;
 
   // Wave 2 — the card's per-file list gets the same filename→full-review
-  // handoff as FileEditRow (no inline peek here; the card is a rollup, not a
-  // live turn). Only renders when we actually have the paths + a repo scope.
+  // handoff as FileEditRow, with a passive current-diff preview.
+  // Only renders when we actually have the paths + a repo scope.
   const canReviewFiles = Boolean(repoPath?.trim()) && Array.isArray(filePaths) && filePaths.length > 0;
 
   return (
@@ -171,10 +177,10 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
 
         {state === 'idle' ? (
           <>
-            <ActionButton label="Undo" onClick={() => setState('confirming')}>
+            {allowUndo ? <ActionButton label="Undo" onClick={() => setState('confirming')}>
               <UndoIcon />
               <span style={{ fontSize: 12, marginLeft: 5 }}>Undo</span>
-            </ActionButton>
+            </ActionButton> : null}
             <ActionButton label="Review" onClick={onReview} accent>
               <ReviewIcon />
               <span style={{ fontSize: 12, marginLeft: 5 }}>Review</span>
@@ -185,26 +191,20 @@ export function ChatActionCard({ filesEditedCount, repoPath, filePaths, firstFil
       </div>
 
       {canReviewFiles && state !== 'undone' ? (
-        <ChatActionFileList repoPath={repoPath!.trim()} filePaths={filePaths!} />
+        <ChatActionFileList repoPath={repoPath!.trim()} filePaths={filePaths!} files={files} />
       ) : null}
     </div>
   );
 }
 
-function basenameOf(p: string): string {
-  const parts = p.split('/').filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : p;
-}
-
 /**
  * The rollup card's per-file list (Wave 2). Truncated at INITIAL_SHOWN with a
  * "Show N more" expander; each row's filename dispatches `o8:focus-review` —
- * same full-fidelity handoff as FileEditRow, no inline peek (this is a rollup,
- * not a live turn). Typography matches the card's mono file idiom.
+ * same scoped handoff as FileEditRow. Hover and focus preview current changes.
  */
 const INITIAL_SHOWN = 4;
 
-function ChatActionFileList({ repoPath, filePaths }: { repoPath: string; filePaths: string[] }) {
+function ChatActionFileList({ repoPath, filePaths, files }: { repoPath: string; filePaths: string[]; files?: TurnFile[] }) {
   const [showAll, setShowAll] = useState(false);
   const shown = showAll ? filePaths : filePaths.slice(0, INITIAL_SHOWN);
   const remaining = filePaths.length - shown.length;
@@ -212,7 +212,7 @@ function ChatActionFileList({ repoPath, filePaths }: { repoPath: string; filePat
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 4, paddingBottom: 4 }}>
       {shown.map((path, index) => (
-        <FileListRow key={`${path}-${index}`} path={path} repoPath={repoPath} />
+        <FileListRow key={`${path}-${index}`} path={path} repoPath={repoPath} counts={files?.find(file => file.path === path)} />
       ))}
       {remaining > 0 && !showAll ? (
         <button
@@ -238,7 +238,7 @@ function ChatActionFileList({ repoPath, filePaths }: { repoPath: string; filePat
   );
 }
 
-function FileListRow({ path, repoPath }: { path: string; repoPath: string }) {
+function FileListRow({ path, repoPath, counts }: { path: string; repoPath: string; counts?: TurnFile }) {
   const [hover, setHover] = useState(false);
   const onOpen = (event: React.MouseEvent | React.KeyboardEvent) => {
     event.stopPropagation();
@@ -246,7 +246,7 @@ function FileListRow({ path, repoPath }: { path: string; repoPath: string }) {
     window.dispatchEvent(new CustomEvent('o8:focus-review', { detail: { repoPath, file: path } }));
   };
   return (
-    <button
+    <TranscriptPeek preview={() => <TurnFilePreview path={path} repoPath={repoPath} />}><button
       type="button"
       onClick={onOpen}
       onKeyDown={(event) => {
@@ -254,7 +254,7 @@ function FileListRow({ path, repoPath }: { path: string; repoPath: string }) {
       }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={`Open ${path} in Review`}
+      aria-label={`Open ${path} in Review`}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -289,9 +289,10 @@ function FileListRow({ path, repoPath }: { path: string; repoPath: string }) {
           textUnderlineOffset: 2,
         }}
       >
-        {basenameOf(path)}
+        {path}
       </span>
-    </button>
+      {counts?.added !== undefined ? <DiffCounts added={counts.added} removed={counts.removed ?? 0} /> : null}
+    </button></TranscriptPeek>
   );
 }
 

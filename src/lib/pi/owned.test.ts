@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveApproval } from '@/lib/approvals/resolution';
 import { getApproval, listApprovals } from '@/lib/approvals/store';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { isPidAlive } from '@/lib/runtimes/shared/owned-session/helpers';
+import { probeOwnedRunProcessClaim, resolveSpawnedProcessGroupId } from '@/lib/runtimes/shared/owned-session/run-process-proof';
 import {
   archiveOwnedPiSession,
   buildPiPermissionDefaultResponse,
@@ -81,14 +83,15 @@ describe('Pi owned-session archival', () => {
   });
 
   it('does not move a live session until the process is confirmed dead', async () => {
+    const processMarker = `pi-archive-${randomUUID()}`;
     const child = spawn(process.execPath, [
       '-e',
       "process.on('SIGINT',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>{},1000);process.send('ready')",
       'pi-live-archive-test',
-    ], { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
-    await new Promise<void>((resolve, reject) => {
-      child.once('message', () => resolve());
-      child.once('error', reject);
+    ], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      env: { ...process.env, O8_OWNED_RUN_MARKER: processMarker },
     });
     const pid = child.pid as number;
     const done = new Promise<void>((resolve) => child.once('exit', () => resolve()));
@@ -97,39 +100,65 @@ describe('Pi owned-session archival', () => {
     const sessionDir = path.join(process.env.O8_OWNED_PI_ROOT ?? path.join(getDataDir(), 'owned-pi'), dirName);
     const runDir = path.join(sessionDir, 'runs');
     const runId = 'run-live-archive';
-    await mkdir(runDir, { recursive: true });
-    await writeFile(path.join(runDir, `${runId}.jsonl`), '', 'utf8');
-    await writeFile(path.join(runDir, `${runId}.stderr.log`), '', 'utf8');
-    const startedAt = new Date().toISOString();
-    await writeFile(path.join(sessionDir, 'session.json'), JSON.stringify({
-      surfaceId,
-      sessionDir,
-      cwd: process.cwd(),
-      repoPath: process.cwd(),
-      title: 'Live Pi archive lifecycle test',
-      createdAt: startedAt,
-      updatedAt: startedAt,
-      latestPrompt: 'verify live archive',
-      latestSummary: 'verify live archive',
-      activeRun: {
-        id: runId,
-        mode: 'launch',
-        prompt: 'verify live archive',
-        startedAt,
-        outcome: 'running',
-        stdoutPath: path.join(runDir, `${runId}.jsonl`),
-        stderrPath: path.join(runDir, `${runId}.stderr.log`),
-        pid,
-      },
-      recentRuns: [],
-    }), 'utf8');
-
-    await expect(archiveOwnedPiSession(surfaceId)).resolves.toMatchObject({ archived: true });
-    await done;
-    expect(isPidAlive(pid)).toBe(false);
-
     const archiveRoot = process.env.O8_OWNED_PI_ARCHIVE_ROOT ?? path.join(getDataDir(), 'owned-pi-archive');
-    await rm(path.join(archiveRoot, dirName), { recursive: true, force: true });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once('message', () => resolve());
+        child.once('error', reject);
+      });
+      const processGroupId = await resolveSpawnedProcessGroupId(pid);
+      if (process.platform !== 'win32') {
+        expect(processGroupId).toBe(pid);
+        await expect(probeOwnedRunProcessClaim({ pid, marker: processMarker, rootPid: pid })).resolves.toEqual({ state: 'match' });
+      }
+      await mkdir(runDir, { recursive: true });
+      await writeFile(path.join(runDir, `${runId}.jsonl`), '', 'utf8');
+      await writeFile(path.join(runDir, `${runId}.stderr.log`), '', 'utf8');
+      const startedAt = new Date().toISOString();
+      const session = {
+        surfaceId,
+        sessionDir,
+        cwd: process.cwd(),
+        repoPath: process.cwd(),
+        title: 'Live Pi archive lifecycle test',
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        latestPrompt: 'verify live archive',
+        latestSummary: 'verify live archive',
+        activeRun: {
+          id: runId,
+          mode: 'launch',
+          prompt: 'verify live archive',
+          startedAt,
+          outcome: 'running',
+          stdoutPath: path.join(runDir, `${runId}.jsonl`),
+          stderrPath: path.join(runDir, `${runId}.stderr.log`),
+          pid,
+          processMarker,
+          processGroupId,
+        },
+        recentRuns: [],
+      };
+      const metadataPath = path.join(sessionDir, 'session.json');
+      if (process.platform !== 'win32') {
+        await writeFile(metadataPath, JSON.stringify({
+          ...session, activeRun: { ...session.activeRun, processMarker: `${processMarker}-mismatch` },
+        }), 'utf8');
+        await expect(archiveOwnedPiSession(surfaceId)).resolves.toMatchObject({ archived: false });
+        expect(isPidAlive(pid)).toBe(true);
+        expect(JSON.parse(await readFile(metadataPath, 'utf8')).activeRun.id).toBe(runId);
+      }
+      await writeFile(metadataPath, JSON.stringify(session), 'utf8');
+
+      await expect(archiveOwnedPiSession(surfaceId)).resolves.toMatchObject({ archived: true });
+      await done;
+      expect(isPidAlive(pid)).toBe(false);
+    } finally {
+      if (isPidAlive(pid)) child.kill('SIGKILL');
+      await done;
+      await rm(sessionDir, { recursive: true, force: true });
+      await rm(path.join(archiveRoot, dirName), { recursive: true, force: true });
+    }
   }, 15_000);
 
   it('kills a persistent idle RPC child even when its turn has no activeRun', async () => {

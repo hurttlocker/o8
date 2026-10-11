@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
 import type { PrDetail, PrDetailResponse } from './types';
+import { readPrJson } from './read-pr-json';
+
+type Snapshot = PrDetail & { loadedAt: number };
 
 interface UsePrDetailResult {
   detail: PrDetail | null;
@@ -19,59 +22,44 @@ function hasRunningChecks(detail: PrDetail | null): boolean {
   });
 }
 
-export function usePrDetail(prNumber: number | null, repoSlug?: string | null): UsePrDetailResult {
-  const [detail, setDetail] = useState<PrDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function usePrDetail(prNumber: number | null, repoSlug?: string | null, visible = true): UsePrDetailResult {
+  const key = prNumber ? `pr-detail:${repoSlug ?? ''}:${prNumber}` : null;
   const [reloadNonce, setReloadNonce] = useState(0);
-  const visibleDetail = prNumber ? detail : null;
-  const visibleError = prNumber ? error : null;
-  const detailRef = useRef<PrDetail | null>(null);
-  useLayoutEffect(() => {
-    detailRef.current = visibleDetail;
-  }, [visibleDetail]);
+  const [failure, setFailure] = useState<{ key: string; nonce: number; message: string } | null>(null);
+  // Read only this selection's snapshot during render. A new PR must never
+  // inherit the previous PR's content while its request is in flight.
+  const subscribe = useCallback((listener: () => void) => key ? subscribeSWR(key, listener) : () => {}, [key]);
+  const readSnapshot = useCallback(() => key ? getSWR<Snapshot>(key).data ?? null : null, [key]);
+  const detail = useSyncExternalStore(subscribe, readSnapshot, () => null);
+  const error = failure?.key === key && failure.nonce === reloadNonce ? failure.message : null;
 
   useEffect(() => {
-    if (!prNumber) return;
+    if (!visible || !prNumber || !key) return;
+    const selectionKey = key;
 
     let active = true;
     const repoQuery = repoSlug ? `?repo=${encodeURIComponent(repoSlug)}` : '';
     const url = `/api/panel/prs/${prNumber}${repoQuery}`;
 
-    const key = `pr-detail:${repoSlug ?? ''}:${prNumber}`;
     const fetchDetail = async () => {
-      const res = await fetch(url);
-      const data = await res.json() as PrDetailResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error || `Request failed: ${res.status}`);
-      return data.pr;
-    };
-    const applySnapshot = () => {
-      const snapshot = getSWR<PrDetail>(key);
-      if (snapshot.data) setDetail(snapshot.data);
-      setLoading(!snapshot.data && snapshot.stale);
+      const data = await readPrJson<PrDetailResponse>(url);
+      return { ...data.pr, loadedAt: Date.now() };
     };
     async function fetchOnce() {
+      if (!active) return;
+      setFailure(null);
       try {
-        await refreshSWR(key, fetchDetail);
-        if (!active) return;
-        applySnapshot();
-        setError(null);
+        await refreshSWR(selectionKey, fetchDetail);
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : 'Failed to load PR');
+        setFailure({ key: selectionKey, nonce: reloadNonce, message: err instanceof Error ? err.message : 'Failed to load PR' });
       }
     }
-
-    applySnapshot();
-    const unsubscribe = subscribeSWR(key, () => {
-      if (active) applySnapshot();
-    });
-    void fetchOnce();
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     function scheduleNext() {
       if (!active) return;
-      const current = detailRef.current;
+      const current = getSWR<PrDetail>(selectionKey).data ?? null;
       const isOpen = (current?.state ?? '').toLowerCase() === 'open';
       const fast = isOpen && hasRunningChecks(current);
       const intervalMs = fast ? 10_000 : 30_000;
@@ -79,19 +67,22 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null): 
         void fetchOnce().finally(scheduleNext);
       }, intervalMs);
     }
-    scheduleNext();
+    const cached = getSWR<Snapshot>(selectionKey).data;
+    // Opening a recently read PR is immediate and does not restart its read.
+    // Manual Retry/Refresh and visible check polling always request fresh data.
+    if (!reloadNonce && cached && Date.now() - cached.loadedAt < 20_000) scheduleNext();
+    else void fetchOnce().finally(scheduleNext);
 
     return () => {
       active = false;
-      unsubscribe();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [prNumber, repoSlug, reloadNonce]);
+  }, [visible, prNumber, repoSlug, key, reloadNonce]);
 
   return {
-    detail: visibleDetail,
-    loading,
-    error: visibleError,
+    detail,
+    loading: Boolean(key && !detail && !error),
+    error,
     refresh: () => setReloadNonce((value) => value + 1),
   };
 }

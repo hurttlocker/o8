@@ -50,6 +50,11 @@ export interface CatalogueModelMetadata {
   free?: boolean;
   /** The metadata source already constrained this model to text and tools. */
   compatible?: boolean;
+  created?: number;
+  contextLength?: number;
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
+  stealth?: boolean;
 }
 
 export interface CatalogueModel {

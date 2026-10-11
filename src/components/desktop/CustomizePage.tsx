@@ -10,6 +10,7 @@ import { ProjectInstructions } from './customize/ProjectInstructions';
 import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
 import type { ProjectRecord } from './repo-registry/useProjects';
 import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
+import { useCustomizeTab } from './customize/navigation';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
@@ -40,13 +41,15 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal }: {
+export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal, fixedTab }: {
   onClose?: () => void;
   onOpenPluginTerminal?: (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => Promise<void>;
   project?: ProjectRecord | null;
   registeredRepos?: CustomizeRepo[];
+  fixedTab?: 'plugins';
 }) {
-  const [tab, setTab] = useState<CustomizeTab>('rules');
+  const [navigationTab, setTab] = useCustomizeTab();
+  const tab = fixedTab ?? navigationTab;
   const [query, setQuery] = useState('');
   const [pluginRepo, setPluginRepo] = useState('');
   const [addingSkill, setAddingSkill] = useState(false);
@@ -156,6 +159,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         gap: 28,
       }}>
         <CustomizeHeader
+          pluginsOnly={fixedTab === 'plugins'}
           tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
           query={query} onQuery={setQuery} repos={repos} scope={scope}
           onScope={(value) => { setSelection({ projectId: project?.id, value }); setExpandedRow(null); }} project={project}

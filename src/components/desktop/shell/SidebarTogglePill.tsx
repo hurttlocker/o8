@@ -18,6 +18,7 @@ import { IconPanelLeft } from '../title-bar/icons';
 
 interface SidebarTogglePillProps {
   sidebarVisible?: boolean;
+  attention?: boolean;
   onClick?: () => void;
   /**
    * Per-context vertical nudge (px). LOCKED at 100% UI zoom against the
@@ -43,7 +44,7 @@ interface SidebarTogglePillProps {
   onHoverLeave?: () => void;
 }
 
-export function SidebarTogglePill({ sidebarVisible = false, onClick, yNudge = 3.3, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
+export function SidebarTogglePill({ sidebarVisible = false, attention = false, onClick, yNudge = 3.3, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
   return (
     <motion.button
       type="button"
@@ -51,7 +52,7 @@ export function SidebarTogglePill({ sidebarVisible = false, onClick, yNudge = 3.
       onMouseEnter={onHoverEnter}
       onMouseLeave={onHoverLeave}
       aria-label="Toggle sidebar"
-      title="Toggle sidebar (⌘B)"
+      title={attention ? 'Open chats — unread results or needs attention (⌘B)' : 'Toggle sidebar (⌘B)'}
       data-no-drag
       initial={false}
       animate="rest"
@@ -97,7 +98,11 @@ export function SidebarTogglePill({ sidebarVisible = false, onClick, yNudge = 3.
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
-      <IconPanelLeft size={14} />
+      <span style={{ position: 'relative', display: 'inline-flex' }}>
+        <IconPanelLeft size={14} />
+        {attention ? <span data-attention-dot aria-hidden="true" style={{ position: 'absolute', right: -2, top: -2,
+          width: 6, height: 6, borderRadius: '50%', background: 'var(--t-accent)' }} /> : null}
+      </span>
     </motion.button>
   );
 }

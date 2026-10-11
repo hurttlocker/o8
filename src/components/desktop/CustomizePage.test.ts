@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomizePage } from './CustomizePage';
 import { RetainedCustomizeView } from './customize/RetainedCustomizeView';
+import { openCustomizeTab, setCustomizeTab } from './customize/navigation';
 
 describe('CustomizePage skills', () => {
   let host: HTMLDivElement;
@@ -31,6 +32,7 @@ describe('CustomizePage skills', () => {
   });
 
   beforeEach(() => {
+    setCustomizeTab('rules');
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -54,10 +56,37 @@ describe('CustomizePage skills', () => {
       }
       if (url.startsWith('/api/cortex/directives')) return Response.json({ directives: [] });
       if (url === '/api/setup/mcp-servers') return Response.json({ servers: [] });
+      if (url === '/api/customize/actions') return Response.json({ installed: [], damaged: [], receipts: [] });
       if (url.startsWith('/api/projects/context')) return Response.json({ context: { id: 'sample', runtimeProjectId: 'sample', settingsProjectId: 'sample', instructions: 'Shared instructions' }, taskBrief: 'Sample project' });
       if (url.startsWith('/api/prompt-library')) return Response.json({ prompts: [] });
       return Response.json({}, { status: 404 });
     }));
+  });
+
+  it('keeps the dedicated Plugins page separate from customization navigation', async () => {
+    const props = {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
+    };
+    const event = vi.fn();
+    window.addEventListener('o8:open-customize', event);
+    try {
+      openCustomizeTab('plugins');
+      expect((event.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'plugins' });
+      await act(async () => root.render(createElement(CustomizePage, { ...props, fixedTab: 'plugins' })));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      expect(host.querySelector('[aria-label="Customization sections"]')).toBeNull();
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
+      });
+      await act(async () => openCustomizeTab('rules'));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      await act(async () => root.render(createElement(CustomizePage, props)));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+      await act(async () => openCustomizeTab('plugins'));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+    } finally { window.removeEventListener('o8:open-customize', event); }
   });
 
   afterEach(() => {

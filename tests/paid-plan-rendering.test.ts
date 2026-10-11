@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountTab from '@/app/voice-settings/tabs/AccountTab';
 import { BillingTab } from '@/components/desktop/settings/BillingTab';
-import { SettingsQuickDrawer } from '@/components/desktop/SettingsQuickDrawer';
+import { AccountTab as DesktopAccountTab } from '@/components/desktop/settings/AccountTab';
 import { AccountBlock } from '@/components/desktop/account-block/AccountBlock';
 import { GeneralTab } from '@/components/desktop/settings/GeneralTab';
 import { EntitlementProvider, useEntitlement } from '@/lib/entitlement/context';
@@ -120,17 +120,14 @@ describe('lifetime plan copy in desktop settings', () => {
     else expect(currentPlan?.textContent).not.toContain('Pro · Lifetime');
   });
 
-  it('keeps the lifetime serial and renames the quick-settings badge tooltip', async () => {
+  it('keeps the lifetime serial in Account settings', async () => {
     respondWithPlan('founder');
     await act(async () => root.render(createElement(EntitlementProvider, null,
-      createElement(SettingsQuickDrawer, {
-        open: true, anchorRect: null, onClose: () => {}, onOpenSettings: () => {},
-      }),
+      createElement(DesktopAccountTab),
     )));
 
-    const drawer = document.querySelector('[aria-label="Quick settings"]');
-    expect(drawer?.querySelector('[title="Pro · Lifetime · No. 007"]')?.textContent).toBe('007');
-    expect(drawer?.innerHTML).not.toMatch(/Founding Operator/);
+    expect(container.querySelector('[title="Pro · Lifetime · No. 007"]')?.textContent).toBe('007');
+    expect(container.innerHTML).not.toMatch(/Founding Operator/);
   });
 });
 

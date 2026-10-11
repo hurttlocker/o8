@@ -17,6 +17,11 @@ export interface DictationPolishContext {
   activeRepoPath?: string | null;
 }
 
+/** Replace typographic quotes and primes with their ASCII forms. */
+export function straightenQuotes(text: string): string {
+  return text.replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"');
+}
+
 export function buildPolishSystemPrompt(
   surface: DictationSurface,
   context: DictationPolishContext = {},

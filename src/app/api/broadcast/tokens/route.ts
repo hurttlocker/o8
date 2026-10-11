@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       ok: false,
       error: {
         code: 'broadcast_token_persistence_failed',
-        message: error instanceof Error ? error.message : 'Broadcast token mutation failed.',
+        message: 'Broadcast token mutation failed.',
       },
     }, 503);
   }

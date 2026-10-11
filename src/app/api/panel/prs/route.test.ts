@@ -11,6 +11,8 @@ const { ensureGitHubPullRequests } = vi.hoisted(() => ({
     stale: false,
   })),
 }));
+const { fetchPullRequestListPage } = vi.hoisted(() => ({ fetchPullRequestListPage: vi.fn() }));
+vi.mock('@/lib/github-broker/pull-request-list', () => ({ fetchPullRequestListPage }));
 
 vi.mock('@/lib/github-broker', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/github-broker')>(),
@@ -23,7 +25,35 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   ensureGitHubPullRequests.mockClear();
+  fetchPullRequestListPage.mockReset();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('workspace pull request list entry point', () => {
+  it('resolves the actual local origin and forwards pagination and ordering without loading the activity preview', async () => {
+    const repoPath = transientRepo('https://github.com/example/workspace.git');
+    const page = { repo: 'example/workspace', prs: [{ number: 25 }], nextPage: 3 };
+    fetchPullRequestListPage.mockResolvedValue(page);
+    const response = await GET(new Request(`http://localhost/api/panel/prs?view=list&state=open&page=2&sort=oldest&repoPath=${encodeURIComponent(repoPath)}`));
+    expect(await response.json()).toEqual(page);
+    expect(fetchPullRequestListPage).toHaveBeenCalledWith('example/workspace', 'open', 2, expect.any(AbortSignal), 'oldest');
+    expect(ensureGitHubPullRequests).not.toHaveBeenCalled();
+  });
+
+  it.each(['state=unknown', 'page=0', 'page=1.5', 'page=NaN', 'sort=unknown'])('rejects invalid list controls: %s', async (query) => {
+    const repoPath = transientRepo('https://github.com/example/workspace.git');
+    const response = await GET(new Request(`http://localhost/api/panel/prs?view=list&${query}&repoPath=${encodeURIComponent(repoPath)}`));
+    expect(response.status).toBe(400);
+    expect(fetchPullRequestListPage).not.toHaveBeenCalled();
+  });
+
+  it('reports connection failure without exposing configuration internals', async () => {
+    const repoPath = transientRepo('https://github.com/example/workspace.git');
+    fetchPullRequestListPage.mockRejectedValue(new Error('Private configuration details'));
+    const response = await GET(new Request(`http://localhost/api/panel/prs?view=list&repoPath=${encodeURIComponent(repoPath)}`));
+    expect(response.status).toBe(502);
+    expect(await response.text()).toContain('Check your GitHub connection in Settings');
+  });
 });
 
 function transientRepo(remote?: string): string {

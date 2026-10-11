@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NavSection } from '@/app/dashboard/types';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 export function useUIChrome() {
@@ -8,6 +8,30 @@ export function useUIChrome() {
 
   // ── Sidebar ──
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarPreferencesHydrated, setSidebarPreferencesHydrated] = useState(false);
+  const sidebarManualIntentRef = useRef(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- hydrate persisted shell preferences after SSR */
+  useEffect(() => {
+    try {
+      const visible = localStorage.getItem('o8:sidebar:visible');
+      if (visible !== null) {
+        setSidebarVisible(visible !== 'false');
+        sidebarManualIntentRef.current = true;
+      }
+      const width = Number(localStorage.getItem('o8:sidebar:width'));
+      if (Number.isFinite(width) && width >= 160 && width <= 500) setSidebarWidth(width);
+    } catch { /* Storage can be unavailable; the list remains usable. */ }
+    setSidebarPreferencesHydrated(true);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!sidebarPreferencesHydrated) return;
+    try {
+      localStorage.setItem('o8:sidebar:visible', String(sidebarVisible));
+      localStorage.setItem('o8:sidebar:width', String(sidebarWidth));
+    } catch { /* Keep in-memory preferences when storage is unavailable. */ }
+  }, [sidebarPreferencesHydrated, sidebarVisible, sidebarWidth]);
 
   // ── Overlay state ──
   const [searchOpen, setSearchOpen] = useState(false);
@@ -52,6 +76,9 @@ export function useUIChrome() {
     // Sidebar
     sidebarVisible,
     setSidebarVisible,
+    sidebarWidth,
+    setSidebarWidth,
+    sidebarManualIntentRef,
 
     // Overlays
     searchOpen,

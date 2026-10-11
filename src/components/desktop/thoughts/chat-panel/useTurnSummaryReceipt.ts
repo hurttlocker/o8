@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
-import { isFileEditCall } from './file-edits';
+import { transcriptTurnFiles } from '../../transcript/turns';
 import type { TurnSummary } from './TurnSummaryCard';
 
 interface TurnStreamReceiptSource {
@@ -145,7 +145,6 @@ export function useTurnSummaryReceipt(input: {
     let toolCount = 0;
     let firstAssistantId: string | null = null;
     let lastAssistantId: string | null = null;
-    let turnHadEdits = false;
     for (const entry of newEntries) {
       if (entry.role === 'assistant') {
         firstAssistantId ??= entry.id;
@@ -155,7 +154,6 @@ export function useTurnSummaryReceipt(input: {
         toolCount += 1;
         const name = call.name?.trim();
         if (name) toolNamesAll.push(name);
-        if (isFileEditCall(call)) turnHadEdits = true;
       }
     }
     if (!lastAssistantId) return;
@@ -177,6 +175,7 @@ export function useTurnSummaryReceipt(input: {
       ))
       ? currentMissionId
       : null;
+    const filePaths = transcriptTurnFiles(newEntries).map(file => file.path);
     const summary: TurnSummary = {
       assistantMessageId: lastAssistantId,
       firstAssistantMessageId: firstAssistantId,
@@ -184,8 +183,8 @@ export function useTurnSummaryReceipt(input: {
       toolCount,
       toolNames: distinctNames.slice(0, 3),
       toolNameTotal: distinctNames.length,
-      filesEditedCount: 0,
-      filePaths: [],
+      filesEditedCount: filePaths.length,
+      filePaths,
       tokensUsed: reportedTurnTokens > 0 ? reportedTurnTokens : runningTotalDelta,
       ...(cacheObserved ? { freshInputTokens, cacheReadTokens, cacheWriteTokens } : {}),
       costUsd: null,
@@ -221,23 +220,7 @@ export function useTurnSummaryReceipt(input: {
         : current);
     });
 
-    if (input.repoPath && turnHadEdits) {
-      const targetAssistantId = lastAssistantId;
-      void fetch(`/api/review/workspace?workspace=${encodeURIComponent(input.repoPath)}&strictBranch=1`)
-        .then(async (response) => response.ok
-          ? await response.json() as { changedFiles?: Array<{ path?: string }> }
-          : null)
-        .then((snapshot) => {
-          if (!snapshot) return;
-          const filePaths = (snapshot.changedFiles ?? [])
-            .map((file) => file.path)
-            .filter((value): value is string => typeof value === 'string' && value.length > 0);
-          setTurnSummary((current) => current?.assistantMessageId === targetAssistantId
-            ? { ...current, filesEditedCount: filePaths.length, filePaths }
-            : current);
-        })
-        .catch(() => {});
-    }
+
   }, [
     input.displayMessages,
     input.isChatMode,

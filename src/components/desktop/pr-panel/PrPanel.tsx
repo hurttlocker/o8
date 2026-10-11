@@ -1,49 +1,91 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PrPanelHeader } from './PrPanelHeader';
-import { PrPanelTitle } from './PrPanelTitle';
 import { PrPanelTabs } from './PrPanelTabs';
+import { PrChangesToolbar } from './PrChangesToolbar';
+import { PrSummary } from './PrSummary';
+import { PrBrainComposer } from './PrBrainComposer';
+import { usePrViewState } from './usePrViewState';
 import { ChangesTab } from './tabs/ChangesTab';
 import { ChecksTab } from './tabs/ChecksTab';
-import { CommitsTab } from './tabs/CommitsTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
+import { TimelineTab } from './tabs/TimelineTab';
 import { usePrDetail } from './usePrDetail';
-import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
+import { X } from '../lucide-shims';
 import { ArtifactStrip } from '../artifacts/ArtifactStrip';
 import { useArtifacts } from '../artifacts/useArtifacts';
-import type { PrPanelProps, PrTabId } from './types';
+import type { PrComposerMode, PrPanelProps, PrReviewAction } from './types';
 
-export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose }: PrPanelProps) {
-  const { detail, loading, error } = usePrDetail(prNumber, repoSlug);
-  const [activeTab, setActiveTab] = useState<PrTabId>('changes');
-  const [summaryExpanded, setSummaryExpanded] = useState(false);
+export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose, active = true, id }: PrPanelProps) {
+  const { detail, loading, error, refresh } = usePrDetail(prNumber, repoSlug, active);
+  const hasDetail = Boolean(detail);
+  const selectionKey = `${repoSlug || repoPath || ''}:${prNumber}`;
+  const { view, update, recordScroll, scrollFor } = usePrViewState(selectionKey);
+  const panelId = useId();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [fileJump, setFileJump] = useState(0);
+  const pendingFile = useRef<{ key: string; path: string } | null>(null);
+  const openFile = useCallback((path: string) => {
+    pendingFile.current = { key: selectionKey, path };
+    setFileJump((value) => value + 1);
+    update({ activeTab: 'changes', openFiles: view.openFiles.includes(path) ? view.openFiles : [...view.openFiles, path] });
+  }, [selectionKey, update, view.openFiles]);
+  const toggleDescription = useCallback(() => update({ descriptionOpen: !view.descriptionOpen }), [update, view.descriptionOpen]);
+  const changeQuestionDraft = useCallback((questionDraft: string) => update({ questionDraft }), [update]);
+  const changeCommentDraft = useCallback((commentDraft: string) => update({ commentDraft }), [update]);
+  const changeReviewDraft = useCallback((reviewDraft: string) => update({ reviewDraft }), [update]);
+  const changeReviewAction = useCallback((reviewAction: PrReviewAction) => update({ reviewAction }), [update]);
+  const changeReviewHead = useCallback(() => update({ reviewHeadSha: detail?.headSha || '' }), [update, detail?.headSha]);
+  const changeComposerMode = useCallback((composerMode: PrComposerMode, commandDraft?: string) => update({
+    composerMode,
+    ...(composerMode === 'review' && !view.reviewHeadSha ? { reviewHeadSha: detail?.headSha || '' } : {}),
+    ...(commandDraft !== undefined ? { questionDraft: '', ...(commandDraft ? composerMode === 'review' ? { reviewDraft: commandDraft } : { commentDraft: commandDraft } : {}) } : {}),
+  }), [update, detail?.headSha, view.reviewHeadSha]);
+  const changeOpenFiles = useCallback((openFiles: string[]) => update({ openFiles }), [update]);
+  const changeDiffStyle = useCallback((diffStyle: 'unified' | 'split') => update({ diffStyle }), [update]);
+  const changeTreeOpen = useCallback((fileTreeOpen: boolean) => update({ fileTreeOpen }), [update]);
+  const toggleFolder = useCallback((path: string) => { const current = view.collapsedFolders || []; update({ collapsedFolders: current.includes(path) ? current.filter((folder) => folder !== path) : [...current, path] }); }, [update, view.collapsedFolders]);
+  const toggleFile = useCallback((path: string) => update({ openFiles: view.openFiles.includes(path) ? view.openFiles.filter((file) => file !== path) : [...view.openFiles, path] }), [update, view.openFiles]);
+  const closePanel = () => {
+    const previousFocus = document.activeElement;
+    onClose();
+    window.requestAnimationFrame(() => {
+      if (document.activeElement !== document.body && document.activeElement !== previousFocus) return;
+      const list = Array.from(document.querySelectorAll<HTMLElement>('[data-pull-requests-list]')).find((element) => !element.closest('[inert]') && (!repoPath || element.dataset.repoPath === repoPath));
+      const row = Array.from(list?.querySelectorAll<HTMLButtonElement>('[data-pr-number]') ?? []).find((button) => button.dataset.prNumber === String(prNumber) && button.getAttribute('aria-current') === 'true');
+      (row ?? list?.querySelector<HTMLElement>('input'))?.focus({ preventScroll: true });
+    });
+  };
+  const onKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || (event.target as Element).closest('[role="dialog"]')) return;
+    event.preventDefault(); event.stopPropagation(); closePanel();
+  };
   // Visual proof (#1147): an agent's before/after stills for this PR, if any.
   // The strip self-hides when empty, so it only appears on PRs whose packet
   // captured proof.
   const { artifacts } = useArtifacts({ prNumber });
 
-  const counts = useMemo(() => {
-    if (!detail) return { changes: 0, checksTotal: 0, checksFailing: 0, reviews: 0 };
-    const checksTotal = detail.statusCheckRollup.length;
-    const checksFailing = detail.statusCheckRollup.filter((check) => {
-      const conclusion = (check.conclusion ?? '').toLowerCase();
-      return conclusion === 'failure' || conclusion === 'timed_out' || conclusion === 'action_required' || conclusion === 'startup_failure';
-    }).length;
-    return {
-      changes: detail.files.length,
-      checksTotal,
-      checksFailing,
-      reviews: detail.reviewComments.length + detail.issueComments.length,
-    };
-  }, [detail]);
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !hasDetail) return;
+    scroller.scrollTop = scrollFor(view.activeTab);
+  }, [hasDetail, selectionKey, view.activeTab, scrollFor]);
 
-  const hasReviewerRequest = useMemo(() => {
-    if (!detail) return false;
-    return (detail.reviewDecision ?? '').toUpperCase() === 'CHANGES_REQUESTED';
-  }, [detail]);
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !hasDetail) return;
+    if (pendingFile.current?.key === selectionKey && view.activeTab === 'changes') {
+      const path = pendingFile.current.path;
+      pendingFile.current = null;
+      const row = Array.from(scroller.querySelectorAll<HTMLButtonElement>('[data-pr-file]')).find((button) => button.dataset.prFile === path);
+      row?.scrollIntoView?.({ block: 'start' });
+      row?.focus({ preventScroll: true });
+    }
+  }, [hasDetail, selectionKey, view.activeTab, view.openFiles, fileJump]);
 
   const containerStyle: React.CSSProperties = {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
@@ -52,72 +94,56 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
     minHeight: 0,
   };
 
-  if (loading && !detail) {
-    return (
-      <div style={containerStyle}>
-        <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>
-          Loading PR #{prNumber}...
-        </div>
-      </div>
-    );
-  }
-
-  if (error && !detail) {
-    return (
-      <div style={containerStyle}>
-        <div style={{ padding: 16, fontSize: 12, color: '#ef4444' }}>{error}</div>
-      </div>
-    );
-  }
-
   if (!detail) {
     return (
-      <div style={containerStyle}>
-        <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>
-          PR #{prNumber} not available.
+      <div id={id || panelId} data-pr-detail={prNumber} aria-busy={loading} style={containerStyle} onKeyDown={onKeyDown}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+          <span style={{ flex: 1, fontSize: 12 }}>PR #{prNumber}</span>
+          <button type="button" aria-label="Close pull request" onClick={closePanel} style={{ width: 28, height: 28, display: 'grid', placeItems: 'center', border: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}>
+            <X size={14} />
+          </button>
+        </div>
+        <div style={{ padding: 16, fontSize: 12 }}>
+          <div role={error ? 'alert' : 'status'} style={{ color: error ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>
+            {loading ? `Loading PR #${prNumber}…` : error ?? `PR #${prNumber} not available.`}
+          </div>
+          {loading ? (
+            <>
+              <p style={{ marginTop: 6, color: 'var(--t-text-muted)', fontSize: 11 }}>Fetching changes, checks and discussion.</p>
+              <div aria-hidden="true" style={{ display: 'grid', gap: 12, marginTop: 22 }}>
+                {[85, 60, 100].map((width) => <div key={width} style={{ height: 10, width: `${width}%`, borderRadius: 5, background: 'var(--t-divider-subtle)' }} />)}
+              </div>
+            </>
+          ) : null}
+          {error ? (
+            <button type="button" onClick={refresh} style={{ marginTop: 12, height: 32, paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, border: '1px solid var(--t-border)', borderRadius: 8, background: 'var(--t-bg-card)', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}>Retry</button>
+          ) : null}
         </div>
       </div>
     );
   }
 
   return (
-    <div style={containerStyle}>
-      <PrPanelHeader
-        prNumber={detail.number}
-        state={detail.state}
-        baseRefName={detail.baseRefName}
-        headRefName={detail.headRefName}
-        url={detail.url}
-        actions={(
-          <O8ScratchChat
-            surfaceLabel="pull requests"
-            repoPath={repoPath ?? null}
-            selectedFile={null}
-            surface="diff"
-            placement="review-toolbar"
-          />
-        )}
-        onClose={onClose}
-      />
-      <PrPanelTitle
-        title={detail.title}
-        prNumber={detail.number}
-        body={detail.body}
-        expanded={summaryExpanded}
-        onToggle={() => setSummaryExpanded((current) => !current)}
-      />
+    <div id={id || panelId} data-pr-detail={detail.number} style={containerStyle} onKeyDown={onKeyDown}>
+      <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
+        update({ composerMode: 'brain', ...(prompt ? { questionDraft: view.questionDraft ? view.questionDraft + '\n\n' + prompt : prompt } : {}) });
+        window.requestAnimationFrame(() => document.getElementById(id || panelId)?.querySelector<HTMLTextAreaElement>('[data-pr-brain-chat] textarea')?.focus({ preventScroll: true }));
+      }} />
+      {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
       <PrPanelTabs
-        activeTab={activeTab}
-        onChange={setActiveTab}
-        changesCount={counts.changes}
-        checksTotal={counts.checksTotal}
-        checksFailing={counts.checksFailing}
-        commitsCount={null}
-        reviewsCount={counts.reviews}
-        hasReviewerRequest={hasReviewerRequest}
+        activeTab={view.activeTab}
+        onChange={(activeTab) => update({ activeTab })}
+        changesCount={detail.changedFiles}
+        checks={detail.statusCheckRollup}
+        reviewsCount={detail.reviewComments.length + detail.issueComments.length}
+        idBase={panelId}
       />
-      <div className="cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        {activeTab === 'changes' ? (
+      {(['summary', 'timeline', 'changes', 'checks', 'reviews'] as const).map((tab) => <div key={tab} id={`${panelId}-${tab}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${tab}`} hidden={view.activeTab !== tab} inert={view.activeTab !== tab} style={{ display: view.activeTab === tab ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, containerType: 'size', maskImage: 'linear-gradient(to bottom, #000 calc(100% - var(--pr-composer-occlusion, 60px) - 12px), transparent calc(100% - var(--pr-composer-occlusion, 60px)))', WebkitMaskImage: 'linear-gradient(to bottom, #000 calc(100% - var(--pr-composer-occlusion, 60px) - 12px), transparent calc(100% - var(--pr-composer-occlusion, 60px)))' }}>
+        {tab === 'changes' && detail.files.length > 0 ? <PrChangesToolbar files={detail.files} totalFiles={detail.changedFiles} additions={detail.additions} deletions={detail.deletions} allOpen={detail.files.every((file) => view.openFiles.includes(file.path))} onSetOpenFiles={changeOpenFiles} diffStyle={view.diffStyle || 'unified'} onDiffStyleChange={changeDiffStyle} treeOpen={Boolean(view.fileTreeOpen)} onTreeOpenChange={changeTreeOpen} collapsedFolders={view.collapsedFolders || []} onToggleFolder={toggleFolder} onNavigate={openFile} /> : null}
+        <div data-pr-detail-scroll={tab} ref={view.activeTab === tab ? scrollRef : undefined} role="region" aria-labelledby={`${panelId}-${tab}`} tabIndex={0} onScroll={(event) => { if (view.activeTab === tab) recordScroll(tab, event.currentTarget.scrollTop); }} style={{ flex: 1, overflowY: 'auto', minHeight: 0, overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingBottom: 76 }}>
+        {tab === 'summary' ? <PrSummary detail={detail} descriptionOpen={view.descriptionOpen} onToggleDescription={toggleDescription} onOpenFile={openFile} /> : null}
+        {tab === 'timeline' ? <TimelineTab detail={detail} repoSlug={repoSlug} active={active && view.activeTab === 'timeline'} newestFirst={view.timelineNewestFirst} onToggleOrder={() => update({ timelineNewestFirst: !view.timelineNewestFirst })} onOpenFile={openFile} /> : null}
+        {tab === 'changes' ? (
           <>
             {artifacts.length > 0 ? (
               <div style={{ paddingTop: 12, paddingBottom: 8, paddingLeft: 14, paddingRight: 14 }}>
@@ -126,21 +152,26 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
             ) : null}
             <ChangesTab
               files={detail.files}
-              totalAdditions={detail.additions}
-              totalDeletions={detail.deletions}
+              totalFiles={detail.changedFiles}
+              openFiles={view.openFiles}
+              onToggleFile={toggleFile}
+              diffStyle={view.diffStyle || 'unified'}
             />
           </>
         ) : null}
-        {activeTab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} /> : null}
-        {activeTab === 'commits' ? <CommitsTab prNumber={detail.number} /> : null}
-        {activeTab === 'reviews' ? (
+        {tab === 'checks' ? <ChecksTab checks={detail.statusCheckRollup} /> : null}
+        {tab === 'reviews' ? (
           <ReviewsTab
             reviewComments={detail.reviewComments}
             issueComments={detail.issueComments}
             reviewDecision={detail.reviewDecision}
+            detail={detail}
+            onOpenFile={openFile}
           />
         ) : null}
-      </div>
+        </div>
+      </div>)}
+      <PrBrainComposer key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={changeQuestionDraft} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} />
     </div>
   );
 });

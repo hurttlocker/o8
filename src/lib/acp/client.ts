@@ -194,6 +194,8 @@ export interface AcpClientOptions {
   /** Working directory used to boot the ACP agent and its private service. */
   cwd?: string;
   env?: Record<string, string>;
+  /** Remove inherited credentials for explicitly disconnected providers. */
+  omitEnv?: string[];
   /** Called for every session/update notification's OrchestratorEvent (mapped). */
   onEvent?: (event: OrchestratorEvent) => void;
   /** Raw stderr lines from the agent (logs) — optional, for diagnostics. */
@@ -243,7 +245,7 @@ export class AcpClient {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
-      env: { ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) },
+      env: Object.fromEntries(Object.entries({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) }).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
@@ -424,6 +426,12 @@ export class AcpClient {
       if (!message.includes('ACP error -32601') && !message.includes('Method not found')) throw err;
       await this.request('session/set_model', { sessionId, modelId });
     }
+  }
+
+  /** Select a model on agents whose model axis is the dedicated ACP method. */
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    const result = await this.request('session/set_model', { sessionId, modelId });
+    if (!asRecord(result)) throw new Error('ACP session/set_model did not confirm a session.');
   }
 
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;

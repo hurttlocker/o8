@@ -29,4 +29,6 @@ export function buildLatestShip(input: {
   releaseUrl: string;
   commits: PublicReleaseCommit[];
   notesMarkdown?: string;
+  /** Pull request number → GitHub login of an outside contributor to credit. */
+  credits?: Record<number, string>;
 }): LatestShip;

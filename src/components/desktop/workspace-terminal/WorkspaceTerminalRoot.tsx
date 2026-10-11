@@ -6,7 +6,7 @@ import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } 
 // recovery now lives in the AgentPanel ConnectionPill.
 import { registerFreshOrchestratorAction } from '@/lib/desktop/fresh-orchestrator-action';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
-import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
+import { ResizeEdge } from '../shell/ResizeEdge';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
 import { useTerminalMode } from '@/components/desktop/workspace-terminal/use-terminal-mode';
@@ -414,29 +414,9 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         ) : null}
 
         {hasPreviews && !terminalMode.active ? (
-          <div
-            onMouseDown={controller.handleDragStart}
-            style={{
-              height: 8,
-              cursor: 'row-resize',
-              background: controller.isDragging ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider)',
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 20,
-              position: 'relative',
-            }}
-          >
-            <div
-              style={{
-                width: 32,
-                height: 3,
-                borderRadius: 2,
-                background: controller.isDragging ? THEME_ACCENT : 'var(--t-text-muted)',
-              }}
-            />
-          </div>
+          <ResizeEdge orientation="horizontal" aria-label="Resize preview and terminal" tabIndex={-1}
+            onMouseDown={controller.handleDragStart} dragging={controller.isDragging}
+            style={{ height: 8, zIndex: 20 }} />
         ) : null}
 
         {/* The full-width "Reconnecting to workspace runtime" banner used
@@ -468,7 +448,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onConsumeChatDraftInjection={controller.handleConsumeChatDraftInjection}
           onSaveCheckpoint={controller.handleSaveCheckpoint}
           onRestoreLatestCheckpoint={controller.handleRestoreLatestCheckpoint}
-          projectContextRailVisible={projectContextRailVisible}
+          projectContextRailVisible={projectContextRailVisible && props.activeWorkspaceSurface !== false}
           sendTerminalAttach={props.sendTerminalAttach}
           sendTerminalInput={props.sendTerminalInput}
           sendTerminalResize={props.sendTerminalResize}

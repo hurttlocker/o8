@@ -479,9 +479,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             title={runtimeModelLabel}
             style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}
           >
-            {/* Identity never flex-shrinks (subpixel shrink already triggers ellipsis);
-                maxWidth reserves the 8px gap plus a 10px status dot floor so long
-                titles stay bounded and the status indicator always survives. */}
+            {/* Long identities yield before the metadata group's status-dot floor,
+                so the title stays bounded and the status indicator survives. */}
             <div
               title={peerExchange.self ? `${displayTitle} · ${peerExchange.self.runtime} · ${peerExchange.self.sessionKey}` : name}
               style={{
@@ -492,7 +491,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             >
               {displayTitle}
             </div>
-            <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+            <div style={{ minWidth: 10, flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
               {modelLabel ? <span data-worker-model title={runtimeModelLabel} style={{ minWidth: 0, maxWidth: '45%', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-faint)', fontSize: 10.5, fontWeight: 400 }}>· {modelLabel}</span> : null}
               <span
                 title={statusEvidence?.summary ?? STATUS_META[status].label}
@@ -595,6 +594,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               markLast={status !== 'running'}
               isStreaming={status === 'running'}
               repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
+              packetId={packet?.id}
             />
           </div>
         )}

@@ -1,7 +1,8 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import type { PrIssueComment, PrReviewComment } from '../types';
+import type { PrDetail, PrIssueComment, PrReviewComment } from '../types';
+import { PrMarkdown } from '../PrMarkdown';
 
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 
@@ -13,6 +14,8 @@ interface ReviewsTabProps {
   reviewComments: PrReviewComment[];
   issueComments: PrIssueComment[];
   reviewDecision: string | null;
+  detail?: PrDetail;
+  onOpenFile?: (path: string) => void;
 }
 
 function decisionPill(decision: string | null): { label: string; bg: string; color: string } | null {
@@ -35,7 +38,7 @@ function formatTime(value: string): string {
   return `${Math.max(1, Math.round(diffMs / 86_400_000))}d ago`;
 }
 
-const CommentRow = memo(function CommentRow({ comment }: { comment: CombinedComment }) {
+const CommentRow = memo(function CommentRow({ comment, detail, onOpenFile }: { comment: CombinedComment; detail?: PrDetail; onOpenFile?: (path: string) => void }) {
   const initial = (comment.author || '?').slice(0, 1).toUpperCase();
   return (
     <div
@@ -93,18 +96,18 @@ const CommentRow = memo(function CommentRow({ comment }: { comment: CombinedComm
             letterSpacing: '-0.1px',
             color: 'var(--t-text)',
             lineHeight: 1.45,
-            whiteSpace: 'pre-wrap',
+            whiteSpace: detail ? 'normal' : 'pre-wrap',
             wordBreak: 'break-word',
           }}
         >
-          {comment.body || <span style={{ color: 'var(--t-text-faint)', fontStyle: 'italic' }}>(no body)</span>}
+          {comment.body ? detail && onOpenFile ? <PrMarkdown text={comment.body} detail={detail} onOpenFile={onOpenFile} /> : comment.body : <span style={{ color: 'var(--t-text-faint)', fontStyle: 'italic' }}>(no body)</span>}
         </div>
       </div>
     </div>
   );
 });
 
-export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueComments, reviewDecision }: ReviewsTabProps) {
+export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueComments, reviewDecision, detail, onOpenFile }: ReviewsTabProps) {
   const combined = useMemo<CombinedComment[]>(() => {
     const merged: CombinedComment[] = [
       ...issueComments.map((comment): CombinedComment => ({
@@ -174,7 +177,7 @@ export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueCommen
         </div>
       ) : (
         combined.map((comment) => (
-          <CommentRow key={`${comment.kind}-${comment.id}`} comment={comment} />
+          <CommentRow key={`${comment.kind}-${comment.id}`} comment={comment} detail={detail} onOpenFile={onOpenFile} />
         ))
       )}
     </div>

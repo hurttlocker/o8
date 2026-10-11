@@ -18,10 +18,11 @@
 import { useRef, useState } from 'react';
 import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
 import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
+import { FloatingSurface } from '../FloatingSurface';
 import { visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
-import { composerRuntimeLabel } from './composer-selector/state';
+import { composerRuntimeLabel, VISIBLE_COMPOSER_SELECTOR_MODES } from './composer-selector/state';
 import { AcpModelPicker } from './AcpModelPicker';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import {
@@ -121,27 +122,25 @@ export function ComposerModeChip({
       </button>
 
       <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="end">
-        <div
+        <FloatingSurface role="menu" aria-label="Work mode"
           style={{
             width: 240,
             maxWidth: 'min(240px, calc(100vw - 32px))',
-            borderRadius: 14,
-            border: '1px solid var(--t-panel-border)',
-            background: 'var(--t-popover-surface)',
-            boxShadow: 'var(--t-panel-shadow)',
-            overflow: 'hidden',
+          }} contentStyle={{
             paddingTop: 6,
             paddingRight: 5,
             paddingBottom: 5,
             paddingLeft: 5,
           }}
         >
-          {COMPOSER_MODES.map((spec) => {
+          {VISIBLE_COMPOSER_SELECTOR_MODES.map(id => COMPOSER_MODES.find(spec => spec.id === id)!).map((spec) => {
             const active = spec.id === mode;
             return (
               <button
                 key={spec.id}
                 type="button"
+                role="menuitemradio"
+                aria-checked={active}
                 onClick={() => { onModeChange(spec.id); setOpen(false); }}
                 onMouseEnter={(event) => { setHoveredMode(spec.id); event.currentTarget.style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(event) => { setHoveredMode(null); event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
@@ -189,7 +188,7 @@ export function ComposerModeChip({
           }}>
             {captionSpec.sublabel}
           </div>
-        </div>
+        </FloatingSurface>
       </ComposerPopover>
     </>
   );

@@ -1,5 +1,18 @@
 // @vitest-environment jsdom
 
+vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
+  const { getRuntimeCapability, listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
+  const runtimes = listDispatchableRuntimes();
+  return { ...await importOriginal<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+    getRuntimeAuthSnapshot: async () => ({ statuses: Object.fromEntries(runtimes.map((runtime) => {
+      const house = getRuntimeCapability(runtime).authHouse;
+      return [house, { house, runtime, installed: true, ready: true, authenticated: true, unavailableReason: null, detail: 'Fixture', fix: '', checkedAt: 0 }];
+    }).filter(([house]) => house)), suggestedSubscriptionProfile: { profile: null, detail: null } }),
+    getDispatchableRuntimeAvailability: async () => runtimes.map((id) => ({ id, label: id, available: true, unavailableReason: null, detail: 'Fixture', fix: '' })),
+    invalidateRuntimeAuthCache: () => {},
+  };
+});
+
 vi.mock('@/components/desktop/onboarding/useRuntimeInventory', async () => {
   const { listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
   return { useRuntimeInventory: () => ({
@@ -16,12 +29,14 @@ import { DELETE as DELETE_CHAT, GET as GET_CHAT, PATCH as PATCH_CHAT, POST as PO
 import { NextRequest } from 'next/server';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { REPLY_MODEL_DEFAULTS } from '../chat-panel/contextual-turn';
 import { ThoughtsChatPanel, type ThoughtsChatPanelHandle } from '../ThoughtsChatPanel';
 import { composerModeStorageKey, legacySwarmStorageKey } from '../composer-mode-storage';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK, type OrchestratorBackendSetting } from '../operator-defaults';
 import { resolveFreshComposerTurnOptions } from '../useBackendSwitchChoice';
 import { useOrchestratorStream } from '../useOrchestratorStream';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
+import { findIdleOrchestratorSession } from '../chat-panel/idle-orchestrator-session';
 
 const transport = vi.hoisted(() => ({ socket: null as WebSocket | null }));
 vi.mock('./shared', async (importOriginal) => ({
@@ -42,6 +57,7 @@ let releaseFreshFetch: (() => void) | null = null;
 let historyResponse: Record<string, unknown> | null = null;
 let useRealHistoryRoute = false;
 let historyPatchGate: Promise<void> | null = null;
+let runtimeInventoryAgents: Array<{ sessionKey: string; runtime: string; status: string; workspace: string }> = [];
 
 interface ComposerTestWindow extends Window {
   interruptComposerTurn?: () => void;
@@ -119,8 +135,8 @@ function ComposerSubmissionHarness() {
   return createElement('output', { 'data-testid': 'displayed-model' }, displayedModel);
 }
 
-function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChatPanelHandle | null> }) {
-  const [collideEnabled, setCollideEnabled] = useState(false);
+function RoutingThoughtsHarness({ panelRef, initialComposerMode, observeIdle = false, visible = false }: { panelRef: RefObject<ThoughtsChatPanelHandle | null>; initialComposerMode?: 'moa' | 'fusion'; observeIdle?: boolean; visible?: boolean }) {
+  const [collideEnabled, setCollideEnabled] = useState(initialComposerMode === 'moa');
   const missionState: OrchestratorMissionState = {
     version: 2,
     prompt: '',
@@ -130,7 +146,8 @@ function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChat
   };
   return createElement(ThoughtsChatPanel, {
     ref: panelRef,
-    open: false,
+    composerModeStorageId: initialComposerMode === 'fusion' ? 'routing-fusion-tab' : undefined,
+    open: visible,
     agents: [],
     missionState,
     preferredRuntime: 'codex',
@@ -142,7 +159,7 @@ function RoutingThoughtsHarness({ panelRef }: { panelRef: RefObject<ThoughtsChat
     collideEnabled,
     onSetCollide: setCollideEnabled,
     suppressAutoRestore: true,
-    suppressRuntimePrewarm: true,
+    suppressRuntimePrewarm: !observeIdle,
     thoughtsBodyBackground: 'var(--t-bg)',
     thoughtsElevatedSurface: 'var(--t-panel)',
     thoughtsElevatedBorder: 'var(--t-border)',
@@ -173,11 +190,16 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
+    unobserve() {}
     disconnect() {}
   });
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith('/api/runtime/inventory')) {
+      return new Response(JSON.stringify({ agents: runtimeInventoryAgents }));
+    }
+    if (url.startsWith('/api/runtime/launch')) return new Promise<Response>(() => {});
     if (url.startsWith('/api/panel/operator-defaults')) {
       if (freshFetchFails) return new Response('unavailable', { status: 503 });
       if (freshFetchGate) await freshFetchGate;
@@ -211,6 +233,7 @@ beforeEach(async () => {
   historyResponse = null;
   useRealHistoryRoute = false;
   historyPatchGate = null;
+  runtimeInventoryAgents = [];
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -227,7 +250,56 @@ afterEach(async () => {
 });
 
 describe('composer fresh operator defaults at the send seam', () => {
-  it('keeps an existing thread on the selected repository through send and history reload', async () => {
+  it('reuses only an idle orchestrator at the exact normalized repository, excluding siblings and descendants', async () => {
+    runtimeInventoryAgents = [
+      { sessionKey: 'sibling', runtime: 'claude-code', status: 'idle', workspace: `${repoPath}-other` },
+      { sessionKey: 'descendant', runtime: 'claude-code', status: 'idle', workspace: `${repoPath}/child` },
+      { sessionKey: 'same', runtime: 'claude-code', status: 'reviewing', workspace: `${repoPath}/` },
+    ];
+    expect(findIdleOrchestratorSession(runtimeInventoryAgents, repoPath)?.sessionKey).toBe('same');
+    expect(findIdleOrchestratorSession(runtimeInventoryAgents.slice(0, 2), repoPath)).toBeNull();
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(RoutingThoughtsHarness, { panelRef, observeIdle: true, visible: true }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
+    expect(requests.some((url) => url.startsWith('/api/runtime/inventory'))).toBe(true);
+    expect(requests.filter((url) => url.startsWith('/api/runtime/launch'))).toEqual([]);
+    expect(sentTurnPayloads()).toEqual([]);
+  });
+
+  it.each([false, true])('does not launch a ready turn while an empty panel is visible: %s, and sends only the operator request', async (visible) => {
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    // Two mounts cover the reload lifecycle without an actual runtime.
+    for (let mount = 0; mount < 2; mount += 1) {
+      await act(async () => {
+        root.render(createElement(RoutingThoughtsHarness, { key: mount, panelRef, observeIdle: true, visible }));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(sentTurnPayloads()).toEqual([]);
+      const requests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
+      expect(requests.filter((url) => url.startsWith('/api/runtime/launch'))).toEqual([]);
+      if (!visible) expect(requests.filter((url) => url.startsWith('/api/runtime/inventory'))).toEqual([]);
+    }
+    await act(async () => {
+      expect(panelRef.current?.sendNow('operator requested work')).toBe(true);
+      await waitForPayload(1);
+    });
+    expect(sentTurnPayloads()).toHaveLength(1);
+    expect(sentTurnPayloads()[0]).toMatchObject({ type: 'orchestrator-send', displayMessage: 'operator requested work', backend: 'codex' });
+    // Let this mount's 800ms history debounce land against its own synthetic
+    // transport before the next test installs a real history-route fixture.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
+  });
+
+  it('keeps a new chat on its selected repository through the first send and history reload', async () => {
     const oldRepo = '/repo/old-thread-home';
     const newRepo = '/repo/new-turn-home';
     const tabId = `thoughts-existing-target-${Date.now()}`;
@@ -237,7 +309,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         tabId,
         repoPath: oldRepo,
         repoName: 'old-thread-home',
-        messages: [{ id: 'history-user', role: 'user', content: 'Previous turn', timestamp: 1 }],
+        messages: [],
       }),
     }));
     expect(saved.ok).toBe(true);
@@ -315,7 +387,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         panelRef.current!.loadThread(tabId);
         await new Promise((resolve) => setTimeout(resolve, 50));
       });
-      expect(host.querySelector('button[aria-label="Project target: new-turn-home"]')).toBeTruthy();
+      expect(host.querySelector('button[aria-label^="Project target"]')).toBeNull();
     } finally {
       releasePatch();
       historyPatchGate = null;
@@ -438,6 +510,36 @@ describe('composer fresh operator defaults at the send seam', () => {
     expect(localStorage.getItem(legacySwarmStorageKey(composerModeStorageId))).toBe('0');
   });
 
+  it('sends a new reply through managed inference without inheriting or overwriting the workspace model', async () => {
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('gpt-6-astra', 'codex');
+    writeStoredOrchestratorModel(repoPath, 'gpt-6-astra');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(ThoughtsChatPanel, {
+        ref: panelRef, open: true, agents: [],
+        missionState: { version: 2, prompt: '', summary: '', packets: [], updatedAt: new Date(0).toISOString() },
+        preferredRuntime: 'codex', sessionTargets: [], workspaceTargets: [], repoPath,
+        initialMode: 'fleet', lockedMode: 'fleet', suppressAutoRestore: true, suppressRuntimePrewarm: true,
+        contextualConversation: { requestContext: 'Issue context for a private draft', modelDefaults: REPLY_MODEL_DEFAULTS },
+        thoughtsBodyBackground: 'transparent', thoughtsElevatedSurface: 'transparent', thoughtsElevatedBorder: 'none',
+        thoughtsElevatedShadow: 'none', thoughtsMutedGlass: 'transparent', onMissionStateChange: () => {}, onChromeChange: () => {},
+      }));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    let payload: Record<string, unknown> = {};
+    await act(async () => {
+      expect(panelRef.current?.sendNow('Help me draft a reply.')).toBe(true);
+      payload = await waitForPayload(1);
+    });
+    expect(payload).toMatchObject({ backend: 'o8', model: 'o8-free', displayMessage: 'Help me draft a reply.' });
+    expect(payload.message).toContain('Issue context for a private draft');
+    expect(readStoredOrchestratorModel(repoPath)).toBe('gpt-6-astra');
+    const defaults = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await defaults.json()).values).toMatchObject({ orchestratorBackend: 'codex', orchestratorModel: 'gpt-6-astra' });
+  });
+
   for (const selectorEnabled of [true, false]) {
     it(`resets comparison mode before a ${selectorEnabled ? 'selector' : 'classic'} lead pick reaches routing`, async () => {
       localStorage.setItem('o8:composer-selector-v1', selectorEnabled ? '1' : '0');
@@ -447,22 +549,8 @@ describe('composer fresh operator defaults at the send seam', () => {
       await persistDefaults('gpt-5.6-sol', 'codex');
       const panelRef = createRef<ThoughtsChatPanelHandle>();
       await act(async () => {
-        root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+        root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'moa' }));
         await new Promise((resolve) => setTimeout(resolve, 50));
-      });
-
-      const modeTrigger = selectorEnabled
-        ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
-        : host.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]');
-      await act(async () => {
-        modeTrigger!.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-      const compareMode = [...document.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent?.includes('Compare plans'))!;
-      await act(async () => {
-        compareMode.click();
-        await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
       const modelTrigger = selectorEnabled
@@ -512,6 +600,7 @@ describe('composer fresh operator defaults at the send seam', () => {
 
   it('resets Fusion when a deferred backend handoff applies through the real panel', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
+    localStorage.setItem(composerModeStorageKey('routing-fusion-tab'), 'fusion');
     writeStoredOrchestratorModel(repoPath, 'gpt-5.6-sol');
     historyResponse = {
       backend: 'codex',
@@ -526,7 +615,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     await persistDefaults('gpt-5.6-sol', 'codex');
     const panelRef = createRef<ThoughtsChatPanelHandle>();
     await act(async () => {
-      root.render(createElement(RoutingThoughtsHarness, { panelRef }));
+      root.render(createElement(RoutingThoughtsHarness, { panelRef, initialComposerMode: 'fusion' }));
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     expect(panelRef.current).not.toBeNull();
@@ -536,9 +625,7 @@ describe('composer fresh operator defaults at the send seam', () => {
     });
 
     const modeTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
-    act(() => modeTrigger.click());
-    act(() => [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Fusion'))!.click());
+    expect(modeTrigger.textContent).toContain('Fusion');
     const leadTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     act(() => leadTrigger.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-claude"]')!.click());

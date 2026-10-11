@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { CheckCircle2, Folder } from '../../../lucide-shims';
-import { GitBranch } from '@/components/desktop/tabler-shims';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { CheckCircle2 } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
@@ -13,43 +12,12 @@ import {
   packetRepoLabel,
   packetTimestamp,
 } from './helpers';
-import { AGENT_STATUS_ACCENT, AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { ScheduledTaskMark } from '@/components/desktop/ScheduledTaskMark';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
-import type { AttentionBand } from './sections';
-import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
+import { repoSuffix } from './sections';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
-
-// 'human' rides the warm rejected accent, NOT the slate review tone — rank 3
-// ("agent blocked on you") washed in gray reads as a hover state and vanishes
-// next to finished rows (rig finding 2026-07-31). Slate stays for review:
-// quieter is correct one rank down. Hierarchy: red > orange > slate > green.
-export function attentionAccent(band: AttentionBand): string | null {
-  return band === 'failed'
-    ? AGENT_STATUS_ACCENT.failed
-    : band === 'rejected' || band === 'human'
-      ? AGENT_STATUS_ACCENT.rejected
-      : band === 'review'
-        ? AGENT_STATUS_ACCENT.review
-        : band === 'merged'
-          ? AGENT_STATUS_ACCENT.merged
-          : null;
-}
-
-export function attentionWashStyle(band: AttentionBand): CSSProperties | null {
-  const accent = attentionAccent(band);
-  if (!accent) return null;
-  return {
-    position: 'absolute',
-    top: 2,
-    right: 6,
-    bottom: 2,
-    left: 6,
-    borderRadius: 8,
-    background: `color-mix(in srgb, ${accent} 10%, transparent)`,
-    zIndex: 0,
-  };
-}
 
 export function ArchivedLaneCompactRow({
   lane,
@@ -102,7 +70,7 @@ export function ArchivedLaneCompactRow({
           flex: 1,
           minWidth: 0,
           overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          textOverflow: 'clip',
           whiteSpace: 'nowrap',
           fontSize: 13.5,
           fontWeight: 300,
@@ -171,7 +139,7 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
             fontWeight: 300,
             letterSpacing: '-0.1px',
             overflow: 'hidden',
-            textOverflow: 'ellipsis',
+            textOverflow: 'clip',
             whiteSpace: 'nowrap',
           }}
         >
@@ -188,7 +156,7 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
               fontWeight: 260,
               letterSpacing: '-0.4px',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              textOverflow: 'clip',
               whiteSpace: 'nowrap',
             }}
           >
@@ -226,9 +194,10 @@ export function HistoryChatRow({
   onOpenMenu,
   ownedCount = 0,
   repoLabel,
-  branchLabel,
   recede = false,
-  washBand,
+  preview,
+  scheduled = false,
+  roomy = false,
   onHoverChange,
 }: {
   item: ChatHistoryItem;
@@ -241,14 +210,16 @@ export function HistoryChatRow({
   /** Static count only; worker rows live in the flat Agents section. */
   ownedCount?: number;
   repoLabel?: string | null;
-  branchLabel?: string | null;
   recede?: boolean;
-  washBand?: AttentionBand | null;
+  preview?: string;
+  scheduled?: boolean;
+  roomy?: boolean;
   /** Fleet-reveal hook: rect on enter, null on leave. Wired only for threads
    *  that own live packets — see ChatsTab. */
   onHoverChange?: (rect: DOMRect | null) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [keyboardFocused, setKeyboardFocused] = useState(false);
   // Drag-to-split (Claude Code parity): a pointerdown that travels past the
   // threshold becomes a workspace drag; the trailing click is suppressed so
   // a real drag never ALSO opens the thread in place.
@@ -278,22 +249,25 @@ export function HistoryChatRow({
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
+  const statusTone = tone ?? rowTone;
   const dotState: AgentDotState =
-    rowTone.key === 'running' ? 'running'
-      : rowTone.key === 'review' ? 'review'
-        : rowTone.key === 'merged' ? 'merged'
-          : rowTone.key === 'failed' ? 'failed'
+    statusTone.key === 'running' ? 'running'
+      : statusTone.key === 'review' ? 'review'
+        : statusTone.key === 'merged' ? 'merged'
+          : statusTone.key === 'failed' ? 'failed'
             : 'idle';
-  // Status rides WITH the repo (Q ruling 2026-07-31) — the meta line reads
-  // "repo · branch · status", each part optional but never mutually exclusive.
-  const statusLabel = tone?.label ?? rowTone.label ?? 'Idle';
-  const backendLabel = !repoLabel && !compact && item.backend
-    ? orchestratorBackendDisplayLabel({ backend: item.backend, agent: item.agent })
-    : null;
+  const statusLabel = statusTone.label ?? 'Idle';
+  const inlineRepo = dotState === 'running' ? null : repoLabel;
 
   return (
     <div
       role="button"
+      title={[item.title, repoSuffix(item), item.repoBranch, item.repoPath, statusLabel].filter(Boolean).join(' · ')}
+      onFocus={(event) => {
+        setKeyboardFocused(event.currentTarget.matches(':focus-visible'));
+        onHoverChange?.(event.currentTarget.getBoundingClientRect());
+      }}
+      onBlur={() => { setKeyboardFocused(false); onHoverChange?.(null); }}
       tabIndex={disabled ? -1 : 0}
       onClick={() => {
         if (dragActivatedRef.current) {
@@ -324,9 +298,9 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 47,
+        minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact ? 33 : 42,
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: 8,
         // Selection + hover both paint on the rounded inset layer below —
         // the row itself stays transparent so the fill never hits the rail's
@@ -336,16 +310,13 @@ export function HistoryChatRow({
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.72 : 1,
         textAlign: 'left',
-        outline: 'none',
+        outline: keyboardFocused ? '2px solid var(--t-accent)' : 'none',
+        outlineOffset: -3,
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 3,
+        paddingTop: roomy ? 8 : 3,
         paddingRight: 12,
-        paddingBottom: 3,
-        // Indented to align with top-nav text X (MiniAgentPanelAction =
-        // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
-        // header sits at X=12, so chats nest visually under their group.
-        paddingLeft: 37,
-        // Gutter dot needs an anchor; visual layout unchanged otherwise.
+        paddingBottom: roomy ? 8 : 3,
+        paddingLeft: 12,
         position: 'relative',
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
@@ -358,12 +329,10 @@ export function HistoryChatRow({
           lighter var(--t-hover) fill so sibling states stay cohesive. Inset
           so the fill never touches the rail edges; text X stays exactly 37
           (the hurttlocker indent is untouched — this layer is behind it). */}
-      {(active || hovered || washBand) ? (
+      {(active || hovered) ? (
         <span
           aria-hidden
           style={{
-            ...(attentionWashStyle(washBand ?? 'neutral') ?? {}),
-            ...(active || hovered ? {
               position: 'absolute',
               top: 2,
               right: 4,
@@ -372,76 +341,21 @@ export function HistoryChatRow({
               borderRadius: 9,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
-            } : {}),
           }}
         />
       ) : null}
-      {/* Status dot leads the row in the 37px indent gutter (Q 2026-07-12):
-          you scan states down the LEFT edge before reading a
-          word. Title X stays exactly 37 — the hurttlocker indent is untouched;
-          the dot centers in the gutter beside it. */}
-      <span
-        aria-hidden
-        style={{
-          position: 'absolute',
-          left: 14,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          display: 'inline-flex',
-          alignItems: 'center',
-        }}
-      >
-        <AgentStatusDot state={dotState} />
-      </span>
       <span style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-        <span
-          style={{
-            display: 'block',
-            fontSize: 13.5,
-            lineHeight: 1.25,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            color: recede && !active && !hovered ? 'var(--t-text-muted)' : 'var(--t-text)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {item.title}
-        </span>
-        {(repoLabel || branchLabel || statusLabel || backendLabel) ? (
-          <span
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              marginTop: 2,
-              color: 'var(--t-text-faint)',
-              fontSize: 9.5,
-              lineHeight: 1.1,
-              fontWeight: 260,
-              letterSpacing: '-0.4px',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {repoLabel ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                <Folder size={10} strokeWidth={1.7} style={{ flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{repoLabel}</span>
-              </span>
-            ) : null}
-            {branchLabel ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
-                <GitBranch size={10} strokeWidth={1.7} style={{ flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{branchLabel}</span>
-              </span>
-            ) : null}
-            {statusLabel ? <span>{statusLabel}</span> : null}
-            {backendLabel ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{backendLabel}</span> : null}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, height: 17 }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap',
+            fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px',
+            color: recede && !active && !hovered ? 'var(--t-text-muted)' : 'var(--t-text)' }}>
+            {item.title}
           </span>
-        ) : null}
+          {inlineRepo ? <span style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap',
+            fontSize: 11.5, fontWeight: 260, color: 'var(--t-text-faint)' }}>{inlineRepo}</span> : null}
+        </span>
+        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 6 : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
+
       </span>
       {/* Trailing meta — Antigravity-style: timestamp + status indicator
           live on the right edge so the title can breathe at the left. */}
@@ -450,7 +364,8 @@ export function HistoryChatRow({
           flexShrink: 0,
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 8,
+          height: 17,
           color: 'var(--t-text-faint)',
           fontSize: 9.5,
           fontWeight: 260,
@@ -460,6 +375,7 @@ export function HistoryChatRow({
           position: 'relative',
         }}
       >
+        {scheduled ? <ScheduledTaskMark /> : null}
         {compact && ownedCount > 0 ? (
           <span
             style={{
@@ -472,6 +388,7 @@ export function HistoryChatRow({
           </span>
         ) : null}
         <span>{formatElapsedAgo(item.modifiedAt)}</span>
+        <AgentStatusDot state={dotState} label={statusLabel} />
       </span>
     </div>
   );
@@ -494,6 +411,7 @@ export function CompactSessionRow({
   return (
     <button
       type="button"
+      title={[session.name, session.workspace, session.branch, session.status].filter(Boolean).join(' · ')}
       onClick={() => onSelectSession?.(session.sessionKey)}
       style={{
         width: '100%',
@@ -511,24 +429,21 @@ export function CompactSessionRow({
         paddingTop: 4,
         paddingRight: 12,
         paddingBottom: 4,
-        paddingLeft: 37,
+        paddingLeft: 12,
         position: 'relative',
       }}
     >
-      {/* Left-gutter status dot — same treatment as HistoryRow (Q 2026-07-12). */}
-      <span
-        aria-hidden
-        style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', display: 'inline-flex', alignItems: 'center' }}
-      >
-        <AgentStatusDot state={isRunning ? 'running' : 'idle'} />
-      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
         </span>
-        <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>
           {metaLabel}
         </span>
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)' }}>{formatElapsed(session.lastActivityAt ?? session.lastEventAt)}</span>
+        <AgentStatusDot state={isRunning ? 'running' : 'idle'} />
       </span>
     </button>
   );

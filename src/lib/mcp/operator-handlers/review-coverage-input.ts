@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import { readCoverageEvidence, type ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 
 export const CONTRACT_COVERAGE_EVIDENCE_SCHEMA = {
@@ -40,7 +41,7 @@ export function parseContractCoverageEvidenceInput(value: unknown): ReviewCovera
   if (value === undefined) return undefined;
   const evidence = readCoverageEvidence({ contractCoverageEvidence: value });
   if (!evidence) {
-    throw new Error('contractCoverageEvidence must include contractVersion, headSha, and requirement entries');
+    throw new McpInputError('contractCoverageEvidence must include contractVersion, headSha, and requirement entries');
   }
   return evidence;
 }

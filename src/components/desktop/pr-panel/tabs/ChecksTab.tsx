@@ -1,27 +1,12 @@
 'use client';
 
 import { memo, useMemo } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Minus, XCircle } from '../../lucide-shims';
+import { AlertCircle, CheckCircle2, ExternalLink, Loader2, Minus, XCircle } from '../../lucide-shims';
 import type { CheckBucket, PrCheck } from '../types';
+import { checkBucket } from '../check-status';
 
 interface ChecksTabProps {
   checks: PrCheck[];
-}
-
-function bucketFor(check: PrCheck): CheckBucket {
-  const status = (check.status ?? '').toLowerCase();
-  const conclusion = (check.conclusion ?? '').toLowerCase();
-  if (!conclusion && (status === 'in_progress' || status === 'queued' || status === 'pending' || status === 'waiting')) {
-    return 'running';
-  }
-  if (conclusion === 'success') return 'passed';
-  if (conclusion === 'failure' || conclusion === 'timed_out' || conclusion === 'action_required' || conclusion === 'startup_failure') {
-    return 'failing';
-  }
-  if (conclusion === 'skipped' || conclusion === 'cancelled') return 'skipped';
-  if (conclusion === 'neutral' || conclusion === 'stale') return 'neutral';
-  if (!conclusion) return 'running';
-  return 'neutral';
 }
 
 const BUCKET_ORDER: CheckBucket[] = ['failing', 'running', 'passed', 'neutral', 'skipped'];
@@ -35,8 +20,8 @@ function bucketLabel(bucket: CheckBucket): string {
 }
 
 function bucketColor(bucket: CheckBucket): string {
-  if (bucket === 'failing') return '#ef4444';
-  if (bucket === 'passed') return '#16a34a';
+  if (bucket === 'failing') return 'var(--t-danger)';
+  if (bucket === 'passed') return 'var(--t-success)';
   if (bucket === 'running') return '#f59e0b';
   return 'var(--t-text-muted)';
 }
@@ -68,11 +53,12 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
       <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={check.name}>
         {check.name}
       </span>
-      {bucket === 'failing' ? (
-        <button
-          type="button"
-          onClick={() => {}}
-          title="Coming soon"
+      {check.url && /^https?:\/\//i.test(check.url) ? (
+        <a
+          href={check.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`View ${check.name} on GitHub`}
           style={{
             paddingTop: 3,
             paddingBottom: 3,
@@ -86,6 +72,7 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
             fontWeight: 300,
             letterSpacing: '-0.1px',
             cursor: 'pointer',
+            textDecoration: 'none',
             transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           onMouseEnter={(e) => {
@@ -97,8 +84,8 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
             e.currentTarget.style.color = 'var(--t-text-secondary, var(--t-text-muted))';
           }}
         >
-          Debug
-        </button>
+          View run <ExternalLink size={11} aria-hidden="true" />
+        </a>
       ) : null}
     </div>
   );
@@ -109,7 +96,7 @@ export const ChecksTab = memo(function ChecksTab({ checks }: ChecksTabProps) {
     const map = new Map<CheckBucket, PrCheck[]>();
     for (const bucket of BUCKET_ORDER) map.set(bucket, []);
     for (const check of checks) {
-      const bucket = bucketFor(check);
+      const bucket = checkBucket(check);
       map.get(bucket)!.push(check);
     }
     return map;

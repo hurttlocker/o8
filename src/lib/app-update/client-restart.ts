@@ -102,6 +102,10 @@ export async function installUpdateAndRestart(
     return { installed: false, blocked: { version: result.version, note: health.note } };
   }
 
+  // Verify connected stable CLIs while the old server is still available.
+  // A busy, unsupported or unverified installation defers this update.
+  const { synchronizeConnectedClis } = await import('./update-hub-client');
+  await synchronizeConnectedClis();
   await result.downloadAndInstall();
   const restarted = await relaunchInstalledUpdate(options);
   return { installed: true, restartDeferred: !restarted };

@@ -6,13 +6,16 @@
  * orientation, positioning, controls, and motion.
  */
 
-import type { CSSProperties } from 'react';
-import { useState } from 'react';
+import type { CSSProperties, RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HoverPipCard } from '@/components/desktop/HoverPipCard';
 import { NativeBrowserSurface } from '@/components/desktop/NativeBrowserSurface';
 import { useO8BrowserTabs } from '@/components/desktop/use-o8-browser-tabs';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import { isTauri } from '@/lib/tauri/bridge';
+import { readBrowserPaneState } from '@/lib/browser/pane-state';
+import { browserFrameSrc } from '@/lib/browser/url';
+import { O8EnginePane } from './O8EnginePane';
 
 export const BROWSER_PIP_EVENT = 'o8:browser-pip';
 
@@ -22,17 +25,37 @@ export function BrowserPipCard({
   active,
   scopeKey,
   onOpenBrowser,
+  panelVisible = false,
+  browserVisible = false,
+  boundsRef,
 }: {
   /** No side panel is open — the only mode where the PIP earns its place. */
   active: boolean;
   /** MUST match the dashboard's browser tab-store scope (right-panel:<repo>). */
   scopeKey: string;
-  onOpenBrowser?: () => void;
+  onOpenBrowser?: (url?: string) => void;
+  panelVisible?: boolean;
+  browserVisible?: boolean;
+  boundsRef?: RefObject<HTMLElement | null>;
 }) {
   const tabs = useO8BrowserTabs(scopeKey);
   const [inTauri] = useState<boolean>(() => isTauri());
   const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
-  const tab = tabs[0] ?? null;
+  const [selection, setSelection] = useState<{ scope: string; id: string } | null>(null);
+  const activeId = readBrowserPaneState(scopeKey)?.activeTabId;
+  const tab = tabs.find((item) => item.id === (selection?.scope === scopeKey ? selection.id : activeId)) ?? tabs[0] ?? null;
+  const previous = useRef({ scopeKey, panelVisible, browserSeen: browserVisible });
+  useEffect(() => {
+    const before = previous.current;
+    const sameScope = before.scopeKey === scopeKey;
+    const browserSeen = browserVisible || sameScope && before.browserSeen;
+    previous.current = { scopeKey, panelVisible, browserSeen: panelVisible && browserSeen };
+    if (sameScope && before.panelVisible && !panelVisible && browserSeen && tabs.length > 0) {
+      window.dispatchEvent(new CustomEvent(BROWSER_PIP_EVENT, { detail: { open: true } }));
+    }
+  }, [browserVisible, panelVisible, scopeKey, tabs.length]);
+  const tabIndex = tab ? tabs.findIndex((item) => item.id === tab.id) : 0;
+  const cycle = (direction: number) => { const next = tabs[(tabIndex + direction + tabs.length) % tabs.length]; if (next) setSelection({ scope: scopeKey, id: next.id }); };
 
   return (
     <HoverPipCard
@@ -40,10 +63,17 @@ export function BrowserPipCard({
       available={Boolean(tab)}
       eventName={BROWSER_PIP_EVENT}
       storageKey={ORIENTATION_KEY}
+      contextKey={scopeKey}
+      boundsRef={boundsRef}
       title={tab?.title || tab?.host || tab?.url || ''}
       titleTooltip={tab?.url}
       openLabel="Open in Browser tab"
-      onOpen={onOpenBrowser}
+      onOpen={() => onOpenBrowser?.(tab?.url)}
+      headerContent={tabs.length > 1 ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+        <button type="button" aria-label="Previous browser preview" onClick={() => cycle(-1)} style={pageButton}>‹</button>
+        <span aria-label={`${tabIndex + 1} of ${tabs.length} browser pages`} style={{ fontSize: 10, color: 'var(--t-text-muted)', fontVariantNumeric: 'tabular-nums' }}>{tabIndex + 1}/{tabs.length}</span>
+        <button type="button" aria-label="Next browser preview" onClick={() => cycle(1)} style={pageButton}>›</button>
+      </span> : null}
     >
       {({ shape, close }) => {
         if (!tab) return null;
@@ -51,12 +81,12 @@ export function BrowserPipCard({
 
         return (
           <div style={{ position: 'relative', height: shape.frameHeight, overflow: 'hidden', background: 'var(--t-canvas-bg)' }}>
-            {nativeEnabled ? (
+            {tab.surface === 'engine' && !nativeEnabled ? <O8EnginePane url={tab.url} /> : nativeEnabled ? (
               <NativeBrowserSurface url={tab.url} />
             ) : (
               <>
                 <iframe
-                  src={tab.url}
+                  src={browserFrameSrc(tab.url)}
                   title="Browser preview"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   style={{
@@ -73,7 +103,7 @@ export function BrowserPipCard({
                   aria-label="Open browser tab"
                   onClick={() => {
                     close();
-                    onOpenBrowser?.();
+                    onOpenBrowser?.(tab.url);
                   }}
                   style={{
                     position: 'absolute',
@@ -94,3 +124,5 @@ export function BrowserPipCard({
     </HoverPipCard>
   );
 }
+
+const pageButton: CSSProperties = { width: 22, height: 24, padding: 0, border: 0, borderRadius: 6, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 16, cursor: 'pointer' };

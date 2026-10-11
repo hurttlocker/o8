@@ -63,6 +63,7 @@ describe('bottom chrome merge visibility', () => {
     expect(host?.textContent).not.toContain('Review merge');
     expect(host?.textContent).not.toContain('Merge PR');
     expect(host?.querySelector('[aria-label="Toggle bottom panel"]')).toBeNull();
+    expect(host?.childElementCount).toBe(0);
   });
 
   it('keeps merge widgets out of the active composer row', async () => {
@@ -82,6 +83,7 @@ describe('bottom chrome merge visibility', () => {
       expect(slot.textContent).not.toContain('Review merge');
       expect(slot.textContent).not.toContain('Merge PR');
       expect(slot.querySelector('[aria-label="Toggle bottom panel"]')).toBeNull();
+      expect(slot.childElementCount).toBe(0);
     } finally {
       composer.remove();
     }

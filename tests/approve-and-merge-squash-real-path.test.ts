@@ -257,6 +257,18 @@ describe('approve_and_merge governed squash through the route handler', () => {
     const fixture = await createFixture('successor-attempt');
     lifecycle.afterMerge = () => {
       const state = readOrchestratorControlPlaneState();
+      // Inner lane merge persists its proved release before returning. A new
+      // attempt clears that receipt, as resetPacketFields does in a real rerun.
+      expect(state.packets[0]).toMatchObject({
+        releaseState: 'released',
+        releaseStatePayload: {
+          source: 'approve_and_merge', evidenceKind: 'merge_command',
+          mergeCommit: expect.stringMatching(/^[a-f0-9]{40}$/),
+          headSha: fixture.reviewedHeadSha,
+        },
+      });
+      state.packets[0].releaseState = 'pending';
+      state.packets[0].releaseStatePayload = null;
       state.packets[0].attemptCount = (state.packets[0].attemptCount ?? 0) + 1;
       state.packets[0].operatorStopped = true;
       writeOrchestratorControlPlaneState(state);

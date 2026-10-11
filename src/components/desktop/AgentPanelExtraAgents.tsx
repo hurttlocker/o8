@@ -25,6 +25,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePublishSidebarAttention, useSidebarView } from './repo-focus/tabs/chats/sidebar-view-store';
 import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
 import { AGENT_STATUS_ACCENT } from '@/components/desktop/AgentStatusDot';
@@ -55,7 +56,9 @@ import {
   repoSuffix,
   SIDEBAR_HOVER_THREAD_EVENT,
 } from './repo-focus/tabs/chats/sections';
-import { getLastVisited, markVisited } from './repo-focus/tabs/chats/read-state';
+import { staysInWorkingView } from './repo-focus/tabs/chats/sidebar-view';
+import { useRowReadState } from './repo-focus/tabs/chats/use-row-read-state';
+import { getCompletionStart, getLastVisited, markVisited } from './repo-focus/tabs/chats/read-state';
 
 // ── Types ──
 
@@ -85,6 +88,7 @@ export interface AgentPanelExtraAgentsProps {
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
   packets?: OrchestratorPacket[];
+  workingOnly?: boolean;
 }
 
 // ── Constants ──
@@ -209,8 +213,8 @@ function buildRows(
  *
  * Live lanes always. A terminal lane stays only while it still says something
  * true about today: outcome-stamped completed/archived lanes keep their chip
- * for 24h (Q ruling 2026-07-18 — terminal agents live in the CLEAN view, not
- * behind a click), and legacy archives with no outcome stay hidden.
+ * for the recent 24h window once read. Unread new completions remain until acknowledged;
+ * legacy archives with no outcome stay hidden.
  *
  * #2154 — an archive the OPERATOR performed is a dismissal, not history. That
  * row leaves the rail at once and the collapsed Archived section keeps it.
@@ -222,8 +226,11 @@ export function isRailLane(lane: LaneSummary, now = Date.now()): boolean {
   if (lane.archivedByOperator) return false;
   const terminal = lane.status === 'archived' || lane.status === 'completed';
   if (!terminal) return true;
-  if (!lane.outcome) return false;
   const at = Date.parse(lane.lastEventAt ?? '');
+  const readKey = lane.packetId ? `packet:${lane.packetId}` : `lane:${lane.id}`;
+  if ((lane.status === 'completed' || lane.outcome) && at >= getCompletionStart(now)
+    && isCompletionUnread(at, getLastVisited(readKey))) return true;
+  if (!lane.outcome && lane.status !== 'completed') return false;
   return Number.isFinite(at) && now - at < RECENT_TERMINAL_WINDOW_MS;
 }
 
@@ -258,7 +265,9 @@ export function deriveSpawnedAgentRows({
   const terminal = rows
     .filter(isTerminalRow)
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-    .slice(0, RECENT_TERMINAL_CAP);
+    .filter((row, index) => index < RECENT_TERMINAL_CAP
+      || (row.lastActivityAt >= getCompletionStart()
+        && isCompletionUnread(row.lastActivityAt, getLastVisited(row.packetId ? `packet:${row.packetId}` : row.key))));
   return [...live, ...terminal];
 }
 
@@ -329,6 +338,7 @@ function AgentPanelExtraAgentsBase({
   activeSessionKey,
   onSelectSession,
   packets = [],
+  workingOnly = false,
 }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -338,7 +348,8 @@ function AgentPanelExtraAgentsBase({
   const [hoverCard, setHoverCard] = useState<{ row: ExtraAgentRow; rect: DOMRect } | null>(null);
   const [busy, setBusy] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
-  const [readStateVersion, setReadStateVersion] = useState(0);
+  const readStateVersion = useRowReadState();
+  const priorityView = useSidebarView() === 'flat';
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(COLLAPSED_KEY) === '1';
@@ -547,20 +558,21 @@ function AgentPanelExtraAgentsBase({
     };
   }, [cancelHoverClose, fetchData]);
 
-  const rows = useMemo(() => deriveSpawnedAgentRows({
+  const rows = useMemo(() => {
+    void readStateVersion; // Re-evaluate retained results when acknowledged.
+    return deriveSpawnedAgentRows({
     lanes,
     agents,
     packets,
     rejectedPacketIds,
     archivedRowKeys,
-  }), [lanes, agents, packets, rejectedPacketIds, archivedRowKeys]);
+    });
+  }, [lanes, agents, packets, rejectedPacketIds, archivedRowKeys, readStateVersion]);
   const showRepoSuffix = deriveShowRepoSuffix(rows);
   const rankedRows = useMemo(() => {
     void readStateVersion;
     return rows.map((row) => {
-      const unread = row.packetId
-        ? isCompletionUnread(row.lastActivityAt, getLastVisited(`packet:${row.packetId}`))
-        : false;
+      const unread = isCompletionUnread(row.lastActivityAt, getLastVisited(row.packetId ? `packet:${row.packetId}` : row.key));
       const subject = {
         status: row.laneStatus ?? row.status,
         rejected: row.rejected,
@@ -572,8 +584,10 @@ function AgentPanelExtraAgentsBase({
         band: attentionBand(subject),
         rank: attentionRank(subject),
       };
-    }).sort((a, b) => b.rank - a.rank || b.row.lastActivityAt - a.row.lastActivityAt);
-  }, [readStateVersion, rows]);
+    }).filter(({ row, rank }) => !workingOnly || rank > 0 || staysInWorkingView({
+      status: row.laneStatus ?? row.status, rejected: row.rejected, outcome: row.outcome,
+    }, Boolean(activeSessionKey && row.sessionKey === activeSessionKey))).sort((a, b) => b.rank - a.rank || b.row.lastActivityAt - a.row.lastActivityAt);
+  }, [activeSessionKey, readStateVersion, rows, workingOnly]);
   // #2154 — the rows a bulk clear would retire. Lane-terminal only, so the
   // affordance can never reach live work; the count drives the header reveal.
   const clearableRowKeys = useMemo(
@@ -603,6 +617,7 @@ function AgentPanelExtraAgentsBase({
   }, [clearableRowKeys]);
 
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
+  usePublishSidebarAttention(needsYouCount);
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
   // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
   // never slate, so the header count always matches the loudest wash below it.
@@ -612,20 +627,22 @@ function AgentPanelExtraAgentsBase({
       ? AGENT_STATUS_ACCENT.rejected
       : highestBand === 'review'
         ? AGENT_STATUS_ACCENT.review
-        : highestBand === 'merged'
+        : highestBand === 'merged' || highestBand === 'finished'
           ? AGENT_STATUS_ACCENT.merged
           : undefined;
 
   useEffect(() => {
     const onFocus = (event: Event) => {
-      const detail = (event as CustomEvent<{ packetId?: string | null }>).detail;
-      if (!detail?.packetId) return;
-      markVisited(`packet:${detail.packetId}`);
-      setReadStateVersion((current) => current + 1);
+      const detail = (event as CustomEvent<{ packetId?: string | null; laneId?: string | null; sessionKey?: string | null }>).detail;
+      if (!detail) return;
+      const row = rows.find((entry) => (detail.laneId && entry.laneId === detail.laneId)
+        || (detail.sessionKey && entry.sessionKey === detail.sessionKey));
+      const key = detail.packetId ? `packet:${detail.packetId}` : row?.key;
+      if (key) markVisited(key);
     };
     window.addEventListener(FOCUS_LANE_EVENT, onFocus);
     return () => window.removeEventListener(FOCUS_LANE_EVENT, onFocus);
-  }, []);
+  }, [rows]);
 
   // Fleet reveal: a hovered orchestrator thread broadcasts its packet ids;
   // those rows light up, everything else dims (see ExtraAgentRowView's link).
@@ -638,14 +655,6 @@ function AgentPanelExtraAgentsBase({
     window.addEventListener(SIDEBAR_HOVER_THREAD_EVENT, onHoverThread);
     return () => window.removeEventListener(SIDEBAR_HOVER_THREAD_EVENT, onHoverThread);
   }, []);
-
-  useEffect(() => {
-    if (!activeSessionKey) return;
-    const activeRow = rows.find((row) => row.sessionKey === activeSessionKey);
-    if (!activeRow?.packetId) return;
-    markVisited(`packet:${activeRow.packetId}`);
-    setReadStateVersion((current) => current + 1);
-  }, [activeSessionKey, rows]);
 
   if (rankedRows.length === 0) return null;
 
@@ -698,10 +707,11 @@ function AgentPanelExtraAgentsBase({
         <ExtraAgentRowView
           row={row}
           band={band}
+          roomy={priorityView}
           link={linkedPacketIds
             ? (row.packetId && linkedPacketIds.has(row.packetId) ? 'linked' : 'dimmed')
             : null}
-          repoLabel={showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
+          repoLabel={priorityView || showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
           active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
           busy={busy}
           onSelectSession={onSelectSession}

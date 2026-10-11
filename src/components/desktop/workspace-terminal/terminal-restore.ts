@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  persistedTabStateSavedAt,
   sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
@@ -24,7 +25,7 @@ import {
 
 export interface ApplyPersistedStateOptions {
   preferredRepo: RegisteredRepo | null;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   createDefaultChatTab: () => TerminalTab;
 }
 
@@ -502,7 +503,7 @@ export async function computeRestoredTabs(
   let finalTabs: TerminalTab[];
   let nextActiveId: string;
 
-  if (options.defaultTab === 'llm-chat') {
+  if (options.defaultTab !== 'terminal') {
     const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
     if (restoredChat) {
       nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
@@ -541,7 +542,7 @@ export async function computeRestoredTabs(
 
 export interface LoadInitialTabStateOptions {
   stateScope: string;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   splitCreated: boolean;
   preferredRepoPath: string | null;
 }
@@ -734,9 +735,21 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
+  const selectedTabId = saved?.activeTabId;
+  const selectedTab = saved?.tabs.find((tab) => tab.id === selectedTabId);
+  const selectedConversation = selectedTab?.kind === 'orchestrator'
+    ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
+    : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);
+  // The primary conversation follows sidebar selection independently of the
+  // global repo preference. Keep a newer, explicitly bound selection; other
+  // workspace scopes retain their repo-specific restore behavior.
+  const newerPrimaryConversation = options.stateScope === 'tile-root'
+    && selectedConversation && persistedTabStateSavedAt(saved) > 0
+    && persistedTabStateSavedAt(saved) >= persistedTabStateSavedAt(repoSaved);
+
   if (
     !options.splitCreated
-    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs && !newerPrimaryConversation))
     && currentStableRepoScope
   ) {
     saved = repoSaved;

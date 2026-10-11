@@ -10,10 +10,9 @@
  * back to process.env so smoke and the founder's dev env continue to work
  * unchanged.
  *
- * IMPORTANT: this module runs server-side only. It reads ~/.o8/.env.local
- * synchronously (one stat + one read per cold call) and caches for the process
- * lifetime. The cache is busted whenever the POST /api/v2/keys route updates
- * process.env directly (which is the existing behaviour after a save).
+ * Stored OpenRouter credentials are refreshed before new sessions so a save or
+ * removal in the API process is also seen by the WebSocket process. Explicit
+ * ambient credentials retain precedence. No secret is returned by inventory.
  */
 
 import 'server-only';
@@ -34,10 +33,8 @@ const ENV_FILE = join(CONFIG_DIR, '.env.local');
  * Parse raw env lines (synchronous). Returns a map of key → raw stored value
  * (either `enc:<iv>:<ct>` or legacy plaintext).
  *
- * We read the file fresh on each process startup (no persistent module-level
- * cache) because process.env is updated by the /api/v2/keys POST route
- * immediately after a save, so process.env is always the freshest source for
- * the current process. The file read is the cold-start path only.
+ * This read is intentionally fresh. Processes share the encrypted file but not
+ * process.env, so process-lifetime caching would retain rotated/deleted keys.
  */
 function parseRawEnvFileSync(): Map<string, string> {
   const vars = new Map<string, string>();
@@ -87,35 +84,25 @@ async function decodeStoredValue(stored: string): Promise<string | null> {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Resolve the OpenRouter API key for the Cortex Q&A tier.
- *
- * Resolution order:
- *   1. process.env.OPENROUTER_API_KEY — already set (smoke / dev / prior save)
- *   2. Stored encrypted value in ~/.o8/.env.local (cold start after reboot)
- *
- * Returns null when neither source has a value.
- *
- * NOTE: process.env is checked FIRST because the /api/v2/keys POST route
- * sets process.env immediately after a successful save. On a cold process
- * start before any save the env var is absent, so we fall through to the
- * file. This means the smoke path (OPENROUTER_API_KEY in the shell env)
- * always wins — no regression for smoke or the founder's dev env.
+ * Resolve OpenRouter from an explicit ambient key, then encrypted local storage.
+ * Values this module injected into process.env are refreshed from storage on
+ * every call. A removed stored key is also removed from the child environment.
  */
+// Track only values injected by this module/API, so genuine shell credentials
+// keep their precedence while sibling processes can refresh a saved credential.
+let managedOpenRouterValue: string | undefined;
+export function updateManagedOpenRouterKey(value: string | null): void {
+  managedOpenRouterValue = value ?? '';
+  if (value) process.env.OPENROUTER_API_KEY = value;
+  else delete process.env.OPENROUTER_API_KEY;
+}
 export async function resolveOpenRouterKey(): Promise<string | null> {
-  // 1. process.env — smoke / dev / prior save in same process
-  const envKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (envKey) return envKey;
-
-  // 2. ~/.o8/.env.local (cold start)
+  const envKey = process.env.OPENROUTER_API_KEY?.trim() ?? '';
+  if (envKey && envKey !== managedOpenRouterValue) return envKey;
   const raw = parseRawEnvFileSync().get('OPENROUTER_API_KEY');
-  if (!raw) return null;
-  const plain = await decodeStoredValue(raw);
-  if (plain?.trim()) {
-    // Warm process.env so subsequent calls in this request skip the file read.
-    process.env.OPENROUTER_API_KEY = plain.trim();
-    return plain.trim();
-  }
-  return null;
+  const plain = raw ? (await decodeStoredValue(raw))?.trim() || null : null;
+  updateManagedOpenRouterKey(plain);
+  return plain;
 }
 
 /**

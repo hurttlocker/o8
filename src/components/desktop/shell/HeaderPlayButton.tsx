@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface } from '../FloatingSurface';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { WORKSPACE_TAB_DRAG_TYPE, type WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
@@ -141,28 +142,21 @@ export function HeaderPlayButton({
           ['WebkitAppRegion' as string]: 'no-drag',
         }}
       >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-          <path d="M12 5v14M5 12h14" />
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d={paneMode ? 'M7 4.5 20 12 7 19.5Z' : 'M12 5v14M5 12h14'} />
         </svg>
       </button>
-      {open && anchorRect && typeof document !== 'undefined' ? createPortal(<div
+      {open && anchorRect && typeof document !== 'undefined' ? createPortal(<FloatingSurface
         ref={menuRef}
         id={menuId}
         role="menu"
         aria-label={paneMode ? `Add pane options (${ariaSuffix ?? 'workspace'})` : ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
+        contentStyle={{ paddingTop: 4, paddingBottom: 4 }}
         style={{
           position: 'fixed',
           top: anchorRect.bottom + 4,
           right: Math.max(8, window.innerWidth - anchorRect.right),
           minWidth: 220,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          background: 'var(--t-popover-surface)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-          paddingTop: 4,
-          paddingBottom: 4,
           zIndex: 100,
           overflow: 'hidden',
           fontFamily: 'var(--font-sans-system)',
@@ -194,7 +188,7 @@ export function HeaderPlayButton({
             <div style={{ color: 'var(--t-text-muted)', fontSize: 11, paddingTop: 7, paddingBottom: 5, paddingLeft: 12, borderTop: '1px solid var(--t-divider)' }}>Drag Chat or Terminal onto a pane</div>
           </>
         ) : null}
-      </div>, document.body) : null}
+      </FloatingSurface>, document.body) : null}
     </div>
   );
 }

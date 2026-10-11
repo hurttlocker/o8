@@ -4,6 +4,7 @@ import { act, createElement, forwardRef, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from './types';
+import { subscribeTerminalCloseConfirm, type TerminalCloseRequest } from './terminal-close-confirm';
 
 const restoreHarness = vi.hoisted(() => ({
   resolveValidated: null as null | ((value: unknown) => void),
@@ -43,11 +44,13 @@ vi.mock('./terminal-restore', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => false }));
+const experimental = vi.hoisted(() => ({ chat: false }));
+vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => experimental.chat }));
 vi.mock('@/lib/operator/use-experimental-canvas', () => ({ useExperimentalCanvasFlag: () => false }));
 vi.mock('./orchestrator-thread-restore', () => ({ readLastOrchestratorThreadTitle: vi.fn(async () => null) }));
 
 import { useWorkspaceTerminalController } from './useWorkspaceTerminalController';
+import { loadInitialTabState } from './terminal-restore';
 
 function ControllerHarness({
   controllerRef,
@@ -58,6 +61,7 @@ function ControllerHarness({
 }) {
   const controller = useWorkspaceTerminalController(props, controllerRef);
   return createElement('div', {
+    'data-tabs': JSON.stringify(controller.tabs),
     'data-sessions': JSON.stringify(controller.tabs.map((tab) => [tab.id, tab.tmuxSession])),
   });
 }
@@ -73,6 +77,7 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
   let root: Root;
 
   beforeEach(() => {
+    experimental.chat = false;
     restoreHarness.validatedPromise = new Promise((resolve) => {
       restoreHarness.resolveValidated = resolve;
     });
@@ -90,6 +95,21 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([false, true])('opens only a fresh orchestrator for a rail drop when experimental chat is %s', async (experimentalChat) => {
+    experimental.chat = experimentalChat;
+    vi.mocked(loadInitialTabState).mockResolvedValueOnce(null);
+    const selectedRepo = { name: 'Selected repo', localPath: '/tmp/selected-repo', branch: 'main' };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'fixture-rail-orchestrator-pane', defaultTab: 'orchestrator', splitCreated: true, selectedRepo,
+      termWsConnected: false, sendTerminalCreate: vi.fn(), sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(),
+      sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(), sendTerminalDetach: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    const tabs = JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!);
+    expect(tabs).toEqual([expect.objectContaining({ kind: 'orchestrator', freshSpawn: true, mode: 'fleet', label: 'Orchestrator', repo: selectedRepo })]);
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
   });
 
   it('keeps an ack that lands during validation without detaching or requesting the tab twice', async () => {
@@ -228,7 +248,14 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
       body: JSON.stringify({ sessionName: 'remote-live-session', command: 'o8 machine attach fixture' }),
     }));
     await act(async () => Promise.resolve());
+    let closeRequest: TerminalCloseRequest | undefined;
+    const stopConfirm = subscribeTerminalCloseConfirm((request) => { closeRequest = request; });
     await act(async () => expect(controllerRef.current?.closeActiveTab()).toBe(true));
+    expect(sendTerminalInput).not.toHaveBeenCalled();
+    expect(sendTerminalDetach).not.toHaveBeenCalled();
+    expect(closeRequest?.tab.id).toBe(tabId);
+    await act(async () => closeRequest?.resolve(true));
+    stopConfirm();
     expect(sendTerminalInput).toHaveBeenCalledWith('remote-live-session', '\x1d');
     expect(sendTerminalDetach).toHaveBeenCalledWith('remote-live-session');
     expect(sendTerminalInput.mock.invocationCallOrder[0]).toBeLessThan(sendTerminalDetach.mock.invocationCallOrder[0]);

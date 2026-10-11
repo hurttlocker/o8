@@ -11,6 +11,11 @@ import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-jso
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { AgentMessage } from '@/lib/agents/types';
 import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
+import { MessageVisualizations } from '@/components/desktop/visualizations/MessageVisualizations';
+import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
+
+import { TranscriptTurns } from '../transcript/TranscriptTurns';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 
@@ -30,6 +35,8 @@ interface WorkspaceTranscriptProps {
   peerName?: string;
   packetHeader?: WorkspaceTranscriptHeader;
   repoPath?: string | null;
+  packetId?: string | null;
+  active?: boolean;
   markLast?: boolean;
   isStreaming?: boolean;
   onRunInTerminal?: (command: string) => void;
@@ -111,14 +118,21 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
   peerName,
   packetHeader,
   repoPath,
+  packetId,
+  active = true,
   markLast = true,
   isStreaming = false,
   onRunInTerminal,
   onPermissionDecision,
 }: WorkspaceTranscriptProps) {
   const renderItems = composeWorkspaceTranscriptWithPeers(entries, peerMessages, packetHeader);
+  const references = useTranscriptVisualizations({ packetId, active, length: entries.length });
+  const buckets = placeTranscriptVisualizations(references, entries);
+  const byEntry = new Map(entries.map((entry, index) => [entry.id, buckets.get(index)]));
 
-  return renderItems.map((item) => {
+  return <><MessageVisualizations references={buckets.get(-1)} /><TranscriptTurns busy={isStreaming || !markLast} repoPath={repoPath}
+    entries={renderItems.map(item => item.kind === 'message' ? item.entry : { id: item.key, role: item.kind === 'packet-header' ? 'user' : 'system', text: '' })}
+    nodes={renderItems.map((item) => {
     if (item.kind === 'earlier-peers') {
       return <div key={item.key} style={{ color: 'var(--t-text-faint)', fontSize: 10.5 }}>Showing the latest 8 agent messages · {item.count} earlier in Handoffs</div>;
     }
@@ -127,8 +141,7 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
     }
     if (item.kind === 'packet-header') {
       return (
-        <PacketHeaderCard
-          key={item.key}
+        <div key={item.key} data-o8-message-id={item.key}><PacketHeaderCard
           title={packetHeader?.title ?? 'Dispatched packet'}
           branch={packetHeader?.branch}
           runtime={packetHeader?.runtime}
@@ -136,13 +149,14 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
           repo={packetHeader?.repo}
           launchContext={packetHeader?.launchContext}
           prompt={item.prompt}
-        />
+        /></div>
       );
     }
 
     return (
       <div
         key={item.key}
+        data-o8-message-id={item.entry.id}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -155,13 +169,15 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
           isLast={item.isLast && markLast}
           isStreaming={item.isLast && isStreaming}
           repoPath={repoPath}
+          visualizations={item.entry.role === 'assistant' ? byEntry.get(item.entry.id) : undefined}
           onRunInTerminal={onRunInTerminal}
         />
+        {item.entry.role !== 'assistant' ? <MessageVisualizations references={byEntry.get(item.entry.id)} /> : null}
         <WorkspaceTranscriptEventExtras
           entry={item.entry}
           onPermissionDecision={onPermissionDecision}
         />
       </div>
     );
-  });
+  })} /></>;
 });

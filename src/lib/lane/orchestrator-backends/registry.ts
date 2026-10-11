@@ -21,9 +21,11 @@ import { acpBackend, hermesBackend, opencodeBackend } from './acp';
 import { collideBackend } from './moa';
 import { fableBackend } from './fable';
 import { o8Backend } from './o8';
+import { piBackend } from './pi';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
+import { withVisualizationInstructions } from '@/lib/visualizations/orchestrator-prompt';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -38,7 +40,9 @@ export function withOrchestrationMode(
     ...backend,
     sendTurn(repoPath, message, onEvent, options) {
       const resolved = applyOrchestrationMode(message, options);
-      return backend.sendTurn(repoPath, withOperatingAgreement(resolved.message), onEvent, resolved.options);
+      const prompt = ['openclaw', 'hermes', 'acp', 'opencode'].includes(backend.id)
+        ? withVisualizationInstructions(resolved.message, repoPath, options?.threadId) : resolved.message;
+      return backend.sendTurn(repoPath, withOperatingAgreement(prompt), onEvent, resolved.options);
     },
   };
 }
@@ -53,6 +57,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   collide: withOrchestrationMode(collideBackend),
   fable: withOrchestrationMode(fableBackend),
   o8: withOrchestrationMode(o8Backend),
+  pi: withOrchestrationMode(piBackend),
 };
 
 /** The default backend — also the fallback for any unregistered id. */

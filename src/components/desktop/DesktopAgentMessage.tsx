@@ -17,6 +17,8 @@ import type {
 import { resolveIsErrorNotice } from '@/lib/transcripts/error-notice';
 import { deliveryFailureClientMessageId } from '@/components/desktop/thoughts/use-orchestrator-stream/delivery';
 import { renderLLMMarkdown } from './LLMMarkdown';
+import { MessageVisualizations } from './visualizations/MessageVisualizations';
+import type { VisualizationReference } from '@/lib/visualizations/types';
 import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
@@ -48,6 +50,7 @@ interface DesktopAgentMessageProps {
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
   onRetryDelivery?: (clientMessageId: string) => void;
+  visualizations?: VisualizationReference[];
 }
 
 function mediaHref(path: string) {
@@ -178,6 +181,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onOpenInCanvas,
   onRunInTerminal,
   onRetryDelivery,
+  visualizations,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
   // Sanitize regex chain runs on every render unless memoized — heavy on
@@ -549,6 +553,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       {brainFeedCalls.map((toolCall, index) => (
         <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />
       ))}
+      <MessageVisualizations toolCalls={entry.toolCalls} references={visualizations} />
 
       {entry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%' }}>

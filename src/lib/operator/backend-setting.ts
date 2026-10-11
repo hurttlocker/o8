@@ -24,10 +24,12 @@ export type OrchestratorBackendSetting =
   | 'collide'
   | 'fable'
   | 'o8'
-  | 'opencode';
+  | 'opencode'
+  | 'pi'
+  | 'acp';
 
 const VALUES = new Set<string>([
-  'auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'o8', 'opencode',
+  'auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'o8', 'opencode', 'pi', 'acp',
 ]);
 
 export function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {

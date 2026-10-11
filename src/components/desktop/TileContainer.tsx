@@ -2,6 +2,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ResizeEdge } from './shell/ResizeEdge';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
@@ -84,12 +85,22 @@ export function TileContainer({
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+  const [paneDragging, setPaneDragging] = useState(false);
   const [paneFocus, setPaneFocus] = useState<{ tileId: string; leaves: string } | null>(null);
 
   useEffect(() => {
-    const clearDropPreview = () => setTabDrop(null);
+    const startPaneDrag = (event: DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes(WORKSPACE_TAB_DRAG_TYPE)) setPaneDragging(true);
+    };
+    const clearDropPreview = () => { setTabDrop(null); setPaneDragging(false); };
+    window.addEventListener('dragstart', startPaneDrag);
     window.addEventListener('dragend', clearDropPreview);
-    return () => window.removeEventListener('dragend', clearDropPreview);
+    window.addEventListener('drop', clearDropPreview, true);
+    return () => {
+      window.removeEventListener('dragstart', startPaneDrag);
+      window.removeEventListener('dragend', clearDropPreview);
+      window.removeEventListener('drop', clearDropPreview, true);
+    };
   }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
@@ -126,7 +137,7 @@ export function TileContainer({
 
   const handlePaneDrop = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
-    if (kind !== 'chat' && kind !== 'terminal') return;
+    if (kind !== 'orchestrator' && kind !== 'chat' && kind !== 'terminal') return;
     event.preventDefault();
     event.stopPropagation();
     setTabDrop(null);
@@ -235,6 +246,7 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
+            onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
@@ -316,6 +328,11 @@ export function TileContainer({
                   tileId: leaf.id,
                 }) : null}
               </div>
+              {/* Cover iframe content during internal drags so every pane receives the drop. */}
+              {paneDragging && leaf.content.kind === 'terminal' ? <div data-workspace-drop-target={leaf.id}
+                onDragOver={event => handlePaneDragOver(event, leaf.id)}
+                onDropCapture={event => handlePaneDrop(event, leaf.id)}
+                style={{ position: 'absolute', inset: 0, zIndex: 19 }} /> : null}
               {tabDrop?.tileId === leaf.id ? (
                 <div aria-hidden style={{
                   position: 'absolute',
@@ -346,6 +363,7 @@ export function TileContainer({
           aria-hidden={!primaryRect}
           inert={!primaryRect}
           onMouseDown={primaryRect ? () => onActivateTile('tile-root') : undefined}
+          onFocusCapture={primaryRect ? () => onActivateTile('tile-root') : undefined}
           onDragOver={primaryRect ? (event) => handlePaneDragOver(event, 'tile-root') : undefined}
           onDropCapture={primaryRect ? (event) => handlePaneDrop(event, 'tile-root') : undefined}
           style={primaryRect ? {
@@ -415,10 +433,9 @@ function ResizeHandle({
       };
 
   return (
-    <div
-      role="separator"
+    <ResizeEdge
+      orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-label="Resize terminal panes"
-      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-valuemin={20}
       aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
@@ -432,34 +449,7 @@ function ResizeHandle({
         event.preventDefault();
         onResize(ratio + step);
       }}
-      onMouseEnter={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0.65';
-      }}
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        zIndex: 10,
-      }}
-    >
-      <div aria-hidden style={{ position: 'absolute', width: isVertical ? 1 : '100%', height: isVertical ? '100%' : 1, backgroundColor: 'var(--t-divider-subtle)', pointerEvents: 'none' }} />
-      <div
-        style={{
-          width: isVertical ? 3 : 42,
-          height: isVertical ? 42 : 3,
-          borderRadius: 999,
-          backgroundColor: 'var(--t-drag-handle)',
-          opacity: 0.65,
-          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-    </div>
+      style={style}
+    />
   );
 }

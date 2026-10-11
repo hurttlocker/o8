@@ -379,6 +379,7 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
         --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(143, 180, 255, 0.36), 0 0 12px rgba(143, 180, 255, 0.28);
         --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
         --t-accent: #8fb4ff;
+        --t-accent-contrast: #0f1216;
         --t-accent-soft: rgba(143, 180, 255, 0.14);
         --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
         --t-accent-border: rgba(143, 180, 255, 0.28);

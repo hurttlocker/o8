@@ -1,4 +1,5 @@
 import './globals.css';
+import './scrollbars.css';
 import type { Metadata, Viewport } from 'next';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import NavigationBridge from '@/components/NavigationBridge';

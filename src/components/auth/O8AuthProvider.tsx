@@ -2,7 +2,6 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
-import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { accountIdentity } from '@/lib/auth/account-identity';
 import { openAccountSettings } from '@/lib/auth/open-account-settings';
@@ -13,6 +12,8 @@ import { desktopAuthTicketExchangeInProgress, invalidateDesktopAuthHandoffs, sub
 import { completeDesktopSignIn, DEVICE_RETRY_MS, deviceSessionDecision, renewDesktopSession, type DeviceSessionTrigger } from '@/lib/auth/device-session-client';
 import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import { registerPlanAccountToken } from '@/lib/chatgpt-plan/client';
+import { DesktopSignInDialog } from './DesktopSignInDialog';
+import { clerkAppearance } from './clerk-appearance';
 
 // Survives bridge remounts; explicit sign-out permits a fresh enrollment.
 const enrolledDeviceUsers = new Set<string>();
@@ -38,7 +39,7 @@ export interface O8AuthState {
   isLoaded: boolean;
   signedIn: boolean;
   user: O8AuthUser | null;
-  /** Kick off the desktop sign-in handoff (opens the system browser). */
+  /** Open sign-in: native handoff dialog, or Clerk's browser modal. */
   signIn: () => void;
   /** Open Clerk's account-management modal ("Manage account"). */
   openManageAccount: () => void;
@@ -84,6 +85,12 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
   const { signIn } = useSignIn();
+  const [signInPrompt, setSignInPrompt] = useState(false);
+  useEffect(() => {
+    if (!isSignedIn) return;
+    // Clear the launcher after success so a later sign-out cannot reopen it.
+    queueMicrotask(() => setSignInPrompt(false));
+  }, [isSignedIn]);
   const ticketExchanging = useSyncExternalStore(
     subscribeDesktopAuthTicketExchange, desktopAuthTicketExchangeInProgress, () => false,
   );
@@ -428,7 +435,9 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
         explicitSignOutRef.current = false;
         deviceRetryAfterRef.current = 0;
         if (nativeMode) enrolledDeviceUsers.clear();
-        startDesktopSignIn();
+        if (isSignedIn) { openAccountSettings(clerk); return; }
+        if (nativeMode) setSignInPrompt(true);
+        else clerk.openSignIn({ forceRedirectUrl: window.location.href, signUpForceRedirectUrl: window.location.href });
       },
       openManageAccount: () => openAccountSettings(clerk),
       signOut: () => fullSignOut(true).catch(() => {
@@ -442,6 +451,7 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
     <O8AuthContext.Provider value={value}>
       <DesktopAuthCallbackHandler />
       {children}
+      {signInPrompt && !isSignedIn ? <DesktopSignInDialog onClose={() => setSignInPrompt(false)} /> : null}
     </O8AuthContext.Provider>
   );
 }
@@ -511,14 +521,14 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
 
   if (engine === 'web') {
     return (
-      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} appearance={clerkAppearance}>
         <ClerkAuthBridge>{children}</ClerkAuthBridge>
       </ClerkProvider>
     );
   }
 
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine}>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine} appearance={clerkAppearance}>
       <ClerkAuthBridge nativeMode>{children}</ClerkAuthBridge>
     </ClerkProvider>
   );

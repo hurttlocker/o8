@@ -135,7 +135,7 @@ describe('runLivenessProbeSweep', () => {
     git(clone, ['push', 'origin', 'packet']);
     git(seed, ['fetch', 'origin', 'packet', '--quiet']);
     git(seed, ['merge', '--ff-only', 'origin/packet']);
-    const mergedSha = git(seed, ['rev-parse', '--short', 'HEAD']);
+    const mergedSha = git(seed, ['rev-parse', 'HEAD']);
     git(seed, ['push', 'origin', 'main']);
     git(clone, ['fetch', 'origin', 'main', '--quiet']);
 

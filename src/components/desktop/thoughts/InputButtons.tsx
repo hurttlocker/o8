@@ -12,6 +12,7 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { ComposerSelectorFooterView } from './composer-selector/ComposerSelectorFooter';
+import { SendPill } from './ComposerSendControl';
 import type { ComposerSelectorController } from './composer-selector/useComposerSelectorState';
 
 // xhigh stays in the menu but reads as a sibling option to max, NOT as
@@ -440,6 +441,7 @@ export function InputButtons({
   selectedRepoPath,
   onSelectRepoPath,
   inlineLeadingExtras,
+  permissionControl,
   inlineMeterSlot,
   onBrowsePrompts,
   onSavePrompt,
@@ -490,6 +492,7 @@ export function InputButtons({
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
+  permissionControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
@@ -501,7 +504,7 @@ export function InputButtons({
   const canSubmit = Boolean(input.trim() || hasAttachments);
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
   const selectorReady = Boolean(
-    composerSelectorController && composerMode && modelLabel && modelId && activeBackend && onEffortChange,
+    composerSelectorController && composerMode && (modelLabel || activeBackend === 'acp') && (modelId || activeBackend === 'acp') && activeBackend && onEffortChange,
   );
   const selectorControls = composerSelectorController;
 
@@ -540,8 +543,11 @@ export function InputButtons({
           onEffortChange={selectorControls.onEffortChange}
           onRuntimeChange={selectorControls.onRuntimeChange}
           onWorkerModelChange={selectorControls.onWorkerModelChange}
+          onWorkerEffortChange={selectorControls.onWorkerEffortChange}
+          workerLocks={selectorControls.workerLocks}
           onWorkerStartModeChange={selectorControls.onWorkerStartModeChange}
           saving={selectorControls.savingWorkerDefaults}
+          permissionControl={permissionControl}
           leadingControls={(
             <>
               {inlineLeadingExtras ? (
@@ -610,6 +616,7 @@ export function InputButtons({
           The right action cluster stays pinned, so Send/mic/attach are never
           pushed off the clipped right edge — the bug this fixes. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+      {permissionControl}
       {inlineLeadingExtras ? (
         // overflow:hidden is load-bearing — without it a nowrap child that
         // can't shrink spills out of this minWidth:0 span and paints under
@@ -638,10 +645,6 @@ export function InputButtons({
           now auto-arms silently — standing doctrine covers materially
           ambiguous requests, and the system prompt arms it for a repo's
           first-ever mission. No transcript-visible directive, no chrome. */}
-
-      {/* Permission (shield) toggle removed 2026-07-11 (Q ruling): the
-          orchestrator + worker composers always run full access — a
-          read-only mode chip was chrome nobody used. */}
 
       {/* Session rules (#1329) — "Rules · N" chip. Lists the merged
           Session/Repo/Global rule set; session tier is editable inline.
@@ -722,79 +725,5 @@ export function InputButtons({
       </div>
     </div>
     </ComposerChipCompactContext.Provider>
-  );
-}
-
-function SendPill({
-  canSubmit,
-  working,
-  onSubmit,
-  onStop,
-}: {
-  canSubmit: boolean;
-  working: boolean;
-  onSubmit: () => void;
-  onStop?: () => void;
-}) {
-  // Compact icon-only button — operator-pinned visual, matches the reference
-  // pill set (voice / pause / stop). Single button: play when idle+armed,
-  // pause when working (clicking it stops the orchestrator if onStop is
-  // wired, otherwise it's a passive indicator).
-  const canStop = working && Boolean(onStop);
-  const interactive = canStop || (!working && canSubmit);
-  const accent = '#2563eb';
-  const background = !interactive
-    ? 'transparent'
-    : accent;
-  const iconColor = interactive ? '#ffffff' : 'var(--t-text-faint)';
-  const title = working
-    ? (canStop ? 'Stop orchestrator' : 'Orchestrator working…')
-    : canSubmit ? 'Send (Enter)' : 'Type to send';
-
-  return (
-    <button
-      type="button"
-      onClick={canStop ? onStop : onSubmit}
-      disabled={!interactive}
-      title={title}
-      aria-label={title}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 32,
-        height: 32,
-        paddingTop: 0,
-        paddingRight: 0,
-        paddingBottom: 0,
-        paddingLeft: 0,
-        borderRadius: 10,
-        borderWidth: interactive ? 0 : 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        background,
-        color: iconColor,
-        cursor: interactive ? 'pointer' : 'default',
-        flexShrink: 0,
-        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-        opacity: working && !canStop ? 0.7 : 1,
-        animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
-      }}
-    >
-      {working ? (
-        // Stop glyph — solid square (Claude Code reference). Click stops
-        // (canStop) or shows "working" indicator otherwise.
-        <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
-          <rect x="4" y="4" width="8" height="8" rx="1.5" />
-        </svg>
-      ) : (
-        // Enter-key glyph — ↵ (Claude Code reference).
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-          <polyline points="9 10 4 15 9 20" />
-          <path d="M20 4v7a4 4 0 0 1-4 4H4" />
-        </svg>
-      )}
-      <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
-    </button>
   );
 }

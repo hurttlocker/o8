@@ -71,11 +71,12 @@ function repoHasDispatchHistory(repoPath: string): boolean {
 }
 
 /** The CLI running the orchestrator turn. Fable runs through the Claude Code session. */
-export type OrchestratorPromptBackend = 'claude' | 'codex';
+export type OrchestratorPromptBackend = 'claude' | 'codex' | 'pi';
 
 const BACKEND_LABEL: Record<OrchestratorPromptBackend, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
+  pi: 'Pi',
 };
 
 /** The tool surface a turn actually has, which decides the prompt sections it gets. */
@@ -84,6 +85,8 @@ export interface OrchestratorPromptSurface {
   dispatch: boolean;
   /** Cortex read tools: fleet status, issues, PRs, packets, transcripts. */
   cortexReads: boolean;
+  /** Display-only tools, available with MCP even when dispatch is disabled. */
+  visualizations?: boolean;
   /** Backend-only sections (`<!-- o8:claude -->`) reach only that backend (#2900). */
   backend: OrchestratorPromptBackend;
 }
@@ -98,15 +101,17 @@ export function orchestratorPromptSurface(opts: {
   return {
     dispatch: mcpServers && toolProfileCanDispatch(opts.toolProfile),
     cortexReads: mcpServers,
+    visualizations: mcpServers,
     backend: opts.backend,
   };
 }
 
-const SCOPED_SECTION = /^<!-- o8:(dispatch|cortex-reads|claude) -->\n([\s\S]*?)^<!-- o8:\/\1 -->\n/gm;
+const SCOPED_SECTION = /^<!-- o8:(dispatch|cortex-reads|visualizations|claude) -->\n([\s\S]*?)^<!-- o8:\/\1 -->\n/gm;
 
 function keepsSection(kind: string, surface: OrchestratorPromptSurface): boolean {
   if (kind === 'dispatch') return surface.dispatch;
   if (kind === 'cortex-reads') return surface.cortexReads;
+  if (kind === 'visualizations') return surface.visualizations ?? surface.cortexReads;
   return kind === surface.backend;
 }
 

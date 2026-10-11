@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
+import { readPullRequestFiles } from './pull-request-files';
+import { readPullRequestChecks } from './pull-request-checks';
 
 async function parseGithubJson<T>(response: Response) {
   const text = await response.text();
@@ -43,8 +45,8 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
   };
 }
 
-export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number) {
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`);
+export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>) {
+  const { response, installation } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) });
   const pr = await parseGithubJson<{
     number: number;
     title: string;
@@ -55,48 +57,33 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     updated_at: string;
     closed_at?: string | null;
     merged_at?: string | null;
-    user?: { login?: string | null } | null;
+    user?: { login?: string | null; avatar_url?: string | null } | null;
+    labels?: Array<{ name?: string | null }>;
+    requested_reviewers?: Array<{ login?: string | null }>;
     head?: { ref?: string | null; sha?: string | null } | null;
-    base?: { ref?: string | null } | null;
+    base?: { ref?: string | null; sha?: string | null; repo?: { allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean } } | null;
     additions?: number;
     deletions?: number;
     changed_files?: number;
+    draft?: boolean;
+    auto_merge?: unknown;
     mergeable?: boolean | null;
   }>(response);
 
-  const filesResponse = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/files?per_page=100`);
-  const files = await parseGithubJson<Array<{
-    filename: string;
-    additions?: number;
-    deletions?: number;
-    status?: string;
-    patch?: string;
-  }>>(filesResponse.response);
+  // Once the head SHA is known these reads are independent. A large diff must
+  // not delay starting the checks and reviews requests.
+  const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha);
 
-  let statusCheckRollup: Array<{ name: string; status?: string | null; conclusion?: string | null }> = [];
-  if (pr.head?.sha) {
-    try {
-      const checksResponse = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/commits/${pr.head.sha}/check-runs?per_page=100`);
-      const checksPayload = await parseGithubJson<{
-        check_runs?: Array<{ name?: string | null; status?: string | null; conclusion?: string | null }>;
-      }>(checksResponse.response);
-      statusCheckRollup = (checksPayload.check_runs ?? [])
-        .filter((check): check is { name: string; status?: string | null; conclusion?: string | null } => Boolean(check.name))
-        .map((check) => ({ name: check.name, status: check.status ?? null, conclusion: check.conclusion ?? null }));
-    } catch {
-      statusCheckRollup = [];
-    }
-  }
+  const checksPromise = pr.head?.sha
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id).catch(() => [])
+    : Promise.resolve([]);
 
-  let reviewDecision: string | null = null;
-  try {
-    const reviewsResponse = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`);
-    const reviews = await parseGithubJson<Array<{ state?: string | null }>>(reviewsResponse.response);
-    const latestDecision = [...reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED');
-    reviewDecision = latestDecision?.state ?? null;
-  } catch {
-    reviewDecision = null;
-  }
+  const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
+    .then(({ response: reviewsResponse }) => parseGithubJson<Array<{ state?: string | null }>>(reviewsResponse))
+    .then((reviews) => [...reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED')?.state ?? null)
+    .catch(() => null);
+
+  const [files, statusCheckRollup, reviewDecision] = await Promise.all([filesPromise, checksPromise, reviewsPromise]);
 
   return {
     number: pr.number,
@@ -104,11 +91,19 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     body: pr.body ?? '',
     state: pr.state ?? 'open',
     author: pr.user?.login ?? 'unknown',
+    avatarUrl: pr.user?.avatar_url ?? null,
+    labels: (pr.labels ?? []).flatMap((label) => label.name ? [label.name] : []),
+    requestedReviewers: (pr.requested_reviewers ?? []).flatMap((reviewer) => reviewer.login ? [reviewer.login] : []),
     headRefName: pr.head?.ref ?? '',
     baseRefName: pr.base?.ref ?? '',
+    headSha: pr.head?.sha ?? '',
+    baseSha: pr.base?.sha ?? '',
     additions: pr.additions ?? 0,
     deletions: pr.deletions ?? 0,
     changedFiles: pr.changed_files ?? 0,
+    draft: Boolean(pr.draft),
+    autoMergeEnabled: Boolean(pr.auto_merge),
+    allowedMergeMethods: (['merge', 'squash', 'rebase'] as const).filter((method) => pr.base?.repo?.[method === 'merge' ? 'allow_merge_commit' : method === 'squash' ? 'allow_squash_merge' : 'allow_rebase_merge'] !== false),
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
     closedAt: pr.closed_at ?? null,
@@ -119,6 +114,7 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
     url: pr.html_url,
     files: files.map((file) => ({
       path: file.filename,
+      ...(file.previous_filename ? { previousPath: file.previous_filename } : {}),
       status: file.status ?? 'modified',
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
@@ -129,9 +125,9 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
 
 export async function fetchGitHubPullRequestComments(repoFullName: string, prNumber: number) {
   const [reviewCommentsResponse, reviewsResponse, issueCommentsResponse] = await Promise.all([
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`),
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`),
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
   ]);
 
   const [reviewComments, reviews, issueComments] = await Promise.all([

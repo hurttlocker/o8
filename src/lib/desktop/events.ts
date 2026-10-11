@@ -7,6 +7,8 @@ export const REQUEST_ADD_REPO_EVENT = 'cortex:request-add-repo';
 export const OPEN_MOBILE_PAIRING_EVENT = 'cortex:open-mobile-pairing';
 /** Open the desktop Settings overlay to a specific tab. */
 export const OPEN_SETTINGS_TAB_EVENT = 'cortex:open-settings-tab';
+/** Open the keyboard-shortcuts reference from quick settings. */
+export const OPEN_KEYBOARD_SHORTCUTS_EVENT = 'o8:open-keyboard-shortcuts';
 
 export interface FocusRepoSetupDetail {
   repoId?: string;

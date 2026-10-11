@@ -13,6 +13,7 @@ vi.mock('@/lib/approvals/store', () => ({
 
 vi.mock('@/lib/lane/registry', () => ({
   findLaneByPacket: () => null,
+  findLatestLaneByPacket: () => null,
 }));
 
 vi.mock('@/lib/runtime/inventory', () => ({

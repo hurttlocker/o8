@@ -1,22 +1,24 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useState } from 'react';
+import { act, createElement, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
-import { writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
+import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { ComposerArea } from '../chat-panel/ComposerArea';
 import { composerModeStorageKey, writeStoredComposerMode } from '../composer-mode-storage';
-import type { ComposerSelectorMode } from './state';
+import { readComposerEffortMaps, writeComposerModelEffort, type ComposerSelectorMode } from './state';
+import { useComposerSelectorState } from './useComposerSelectorState';
+import { useOrchestratorModelState } from './useOrchestratorModelState';
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
 
 const STORED_MODEL_TAB_ID = 'stored-model-tab';
 
-function StoredModelRestoreHarness({ repoPath }: { repoPath: string }) {
+function StoredModelRestoreHarness({ repoPath, isolated = false, threadId = 'stored-model-thread' }: { repoPath: string; isolated?: boolean; threadId?: string }) {
   const [input, setInput] = useState('Build it');
   const [mode, setMode] = useState<ComposerSelectorMode>('fusion');
   const [effort, setEffort] = useState<ThinkingEffort>('high');
@@ -44,6 +46,7 @@ function StoredModelRestoreHarness({ repoPath }: { repoPath: string }) {
       onSlashCommand: () => {},
       modelLabel: model,
       modelId: model,
+      isolatedModelSelection: isolated,
       onModelRestore: setModel,
       onModelChange: (nextModel) => {
         setMode('solo');
@@ -59,10 +62,25 @@ function StoredModelRestoreHarness({ repoPath }: { repoPath: string }) {
       composerMode: mode,
       onComposerModeChange: setMode,
       composerModeStorageId: STORED_MODEL_TAB_ID,
-      sessionRulesThreadId: 'stored-model-thread',
+      sessionRulesThreadId: threadId,
       repoPath,
     }),
   );
+}
+
+let isolatedControls: ReturnType<typeof useComposerSelectorState>;
+function LeadModelHarness({ operatorDefaultModel }: { operatorDefaultModel: string }) {
+  const { model } = useOrchestratorModelState({ repoPath: '/repo/alpha', operatorDefaultModel });
+  return createElement('output', null, model);
+}
+function IsolatedSelector({ threadId = null }: { threadId?: string | null }) {
+  const [model, setModel] = useState('gpt-6-luna');
+  const [effort, setEffort] = useState<ThinkingEffort>('low');
+  const controls = useComposerSelectorState({ enabled: true, isolated: true, mode: 'solo', modelId: model, modelLabel: model,
+    backend: 'codex', effort, operatorDefaultEffort: 'low', adaptiveEnabled: false, threadId, repoPath: '/repo/alpha',
+    onModelRestore: setModel, onModelChange: setModel, onEffortChange: setEffort, isFreePlan: false });
+  useEffect(() => { isolatedControls = controls; }, [controls]);
+  return createElement('output', null, `${model}:${effort}`);
 }
 
 describe('composer selector model restore', () => {
@@ -118,4 +136,41 @@ describe('composer selector model restore', () => {
     expect(container.querySelector('[data-testid="stored-model-mode"]')?.textContent).toBe('fusion');
     expect(localStorage.getItem(composerModeStorageKey(STORED_MODEL_TAB_ID))).toBe('fusion');
   });
+  it('keeps a stored agent-default choice when operator defaults refresh', async () => {
+    writeStoredOrchestratorModel('/repo/alpha', '');
+    await act(async () => root.render(createElement(LeadModelHarness, { operatorDefaultModel: 'model-a' })));
+    expect(container.querySelector('output')?.textContent).toBe('');
+    await act(async () => root.render(createElement(LeadModelHarness, { operatorDefaultModel: 'model-b' })));
+    expect(container.querySelector('output')?.textContent).toBe('');
+  });
+
+  it('restores an empty agent-default choice without resetting the composer mode', async () => {
+    writeStoredComposerMode(STORED_MODEL_TAB_ID, 'fusion');
+    writeStoredOrchestratorModel('/repo/alpha', '');
+    await act(async () => root.render(createElement(StoredModelRestoreHarness, { repoPath: '/repo/alpha' })));
+    expect(container.querySelector('[data-testid="stored-model-value"]')?.textContent).toBe('');
+    expect(container.querySelector('[data-testid="stored-model-mode"]')?.textContent).toBe('fusion');
+  });
+  it('keeps a reply model isolated when its conversation acquires a thread id', async () => {
+    writeStoredOrchestratorModel('/repo/alpha', 'gpt-6-astra');
+    await act(async () => root.render(createElement(StoredModelRestoreHarness, { repoPath: '/repo/alpha', isolated: true, threadId: '' })));
+    expect(container.querySelector('[data-testid="stored-model-value"]')?.textContent).toBe('gpt-5.6-sol');
+    await act(async () => root.render(createElement(StoredModelRestoreHarness, { repoPath: '/repo/alpha', isolated: true, threadId: 'new-reply-thread' })));
+    expect(container.querySelector('[data-testid="stored-model-value"]')?.textContent).toBe('gpt-5.6-sol');
+  });
+
+  it('does not read or write global lead preferences from the reply selector', async () => {
+    writeStoredOrchestratorModel('/repo/alpha', 'gpt-6-astra');
+    writeComposerModelEffort('gpt-6-luna', 'high', null);
+    const before = readComposerEffortMaps(null, 'gpt-6-luna');
+    await act(async () => root.render(createElement(IsolatedSelector, {})));
+    expect(container.querySelector('output')?.textContent).toBe('gpt-6-luna:low');
+    await act(async () => isolatedControls.onEffortChange('medium'));
+    await act(async () => root.render(createElement(IsolatedSelector, { threadId: 'new-reply-thread' })));
+    expect(container.querySelector('output')?.textContent).toBe('gpt-6-luna:medium');
+    await act(async () => isolatedControls.onModelChange('gpt-6-sol'));
+    expect(readStoredOrchestratorModel('/repo/alpha')).toBe('gpt-6-astra');
+    expect(readComposerEffortMaps(null, 'gpt-6-luna')).toEqual(before);
+  });
+
 });

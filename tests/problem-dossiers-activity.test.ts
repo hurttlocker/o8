@@ -208,10 +208,11 @@ describe('Activity recurring-problem surface', () => {
     root = createRoot(container);
 
     await act(async () => root?.render(createElement(O8InboxPane, { active: true })));
+    await act(async () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((button) => button.textContent?.startsWith('Agent issues'))!.click());
     await renderUntil(container, 'unlinked-source incident');
 
     expect(container.textContent).toContain('unlinked-source incident');
     expect(container.textContent).not.toContain('dossier-source incident');
-    expect(container.textContent).toContain('Active · 1');
+    expect(container.textContent).toContain('Agent issues1');
   });
 });

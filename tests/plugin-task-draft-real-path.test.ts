@@ -36,6 +36,7 @@ const oldKey = process.env.O8_LICENSE_PUBKEY;
 const dirs: string[] = [];
 let repo: string;
 let projectId: string;
+let projectName: string;
 let repoId: string;
 const accountId = 'user_fixture_task_draft';
 const execAsync = promisify(execFile);
@@ -110,6 +111,7 @@ beforeEach(async () => {
   repoId = randomUUID();
   const project = createProject({ name: `Task fixture ${randomUUID()}` });
   projectId = project.id;
+  projectName = project.name;
   addRepoToProject(projectId, repoId);
   writeFileSync(join(getDataDir(), 'repos.json'), JSON.stringify({ version: 1, repos: [{
     id: repoId, name: 'Task fixture', localPath: repo, remoteUrl: null, defaultBranch: 'main',
@@ -133,7 +135,7 @@ describe('plugin task drafts through the actual authenticated route and persiste
   it('prepares one held draft, preserves existing work, and launches nothing on headless ticks', async () => {
     const before = readOrchestratorMissionState();
     const choice = await call('o8_task_options', { machineId: 'draft-machine' });
-    expect(choice.result.choices).toContainEqual({ repoId, repository: 'Task fixture', projectId });
+    expect(choice.result.choices).toContainEqual({ repoId, repository: 'Task fixture', projectId, project: projectName });
     const selected = await options();
     const prepared = await call('o8_prepare_task', contract(selected.snapshotId));
     expect(prepared.result).toMatchObject({ ok: true, accepted: true, state: 'held', executionEnabled: false,
@@ -155,6 +157,28 @@ describe('plugin task drafts through the actual authenticated route and persiste
     const audit = readPluginAudit();
     expect(audit.some((entry) => entry.taskId === prepared.result.taskId)).toBe(true);
     expect(JSON.stringify(audit)).not.toContain('Read the fixture');
+  });
+
+  it('distinguishes canonical project labels for one repository before a name-selected held draft', async () => {
+    const alternate = createProject({ name: 'Alternate fixture project' });
+    addRepoToProject(alternate.id, repoId);
+    await upsertProjectLedgerRecord({ id: alternate.id, name: alternate.name, slug: alternate.slug, repoPaths: [repo] });
+    const listed = await call('o8_task_options', { machineId: 'draft-machine' });
+    expect(listed.result.selectionGuidance).toContain('Mentioning the o8 app does not select a repository');
+    expect(listed.result.choices).toEqual(expect.arrayContaining([
+      { repoId, repository: 'Task fixture', projectId, project: projectName },
+      { repoId, repository: 'Task fixture', projectId: alternate.id, project: alternate.name },
+    ]));
+    expect(JSON.stringify(listed.result)).not.toContain(repo);
+    expect(intents()).toHaveLength(0);
+    expect(launches).not.toHaveBeenCalled();
+    const selected = listed.result.choices.find((choice: { project: string }) => choice.project === alternate.name);
+    const snapshot = await call('o8_task_options', { machineId: 'draft-machine', repoId: selected.repoId, projectId: selected.projectId });
+    const prepared = await call('o8_prepare_task', { ...contract(snapshot.result.snapshotId), projectId: selected.projectId });
+    expect(prepared.result).toMatchObject({ ok: true, state: 'held', dispatched: false });
+    expect(listTaskDrafts(accountId)[0].contract.projectId).toBe(alternate.id);
+    expect(intents()).toHaveLength(1);
+    expect(launches).not.toHaveBeenCalled();
   });
 
   it('keeps permanent exact retry identity across expired snapshots, concurrent calls, and cold reads', async () => {
@@ -189,6 +213,24 @@ describe('plugin task drafts through the actual authenticated route and persiste
     expect((await call('o8_prepare_task', args)).result).toMatchObject({ taskId: simultaneous[0].result.taskId, replayed: true });
     expect((await call('o8_prepare_task', { ...args, objective: 'Changed task.' })).result.code).toBe('idempotency_key_conflict');
     expect(intents()).toHaveLength(2);
+  });
+
+  it('returns safe field guidance for rejected sealed metadata without persisting or launching', async () => {
+    const args = contract((await options()).snapshotId);
+    args.sealedTaskContract.requirements[0].productionPath = 'private-unrequested-file.txt';
+    const refused = await call('o8_prepare_task', args);
+    expect(refused.status).toBe(400);
+    expect(refused.result).toMatchObject({ ok: false, code: 'contract_file_scope_mismatch' });
+    expect(refused.result.message).toContain('requirements[].productionPath');
+    expect(refused.result.message).toContain('smallestRoute[].path');
+    expect(refused.result.message).toContain('new idempotency key');
+    expect(JSON.stringify(refused.result)).not.toContain('private-unrequested-file');
+    expect(intents()).toHaveLength(0);
+    expect(launches).not.toHaveBeenCalled();
+    const malformed = await call('o8_prepare_task', { ...args, sealedTaskContract: { version: 2 } });
+    expect(malformed.result).toMatchObject({ ok: false, code: 'invalid_task_contract' });
+    expect(malformed.result.message).toContain('sealedTaskContract');
+    expect(intents()).toHaveLength(0);
   });
 
   it('recovers the same receipt after persistence succeeds but the final audit fails', async () => {

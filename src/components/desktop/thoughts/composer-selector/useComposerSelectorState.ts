@@ -6,6 +6,7 @@ import { useEntitlement } from '@/lib/entitlement/context';
 import { formatModelLabel } from '@/lib/format';
 import {
   fetchOperatorDefaultsValues,
+  fetchFreshOperatorDefaultsValues,
   updateOperatorDefaultsValues,
 } from '@/lib/operator/operator-defaults-values-client';
 import type { WorkerStartMode } from '@/lib/operator/worker-start-mode';
@@ -33,14 +34,28 @@ import {
   normalizeComposerWorkerDefaults,
   workerModelForDisplay,
   type ComposerWorkerDefaults,
+  type WorkerModelChange,
 } from './worker-settings';
 
 type WorkerDefaultsPatch = Partial<Pick<
   ComposerWorkerDefaults,
-  'defaultDispatchRuntime' | 'opencodeWorkerModel' | 'threecodeWorkerModel' | 'workerStartMode'
+  'defaultDispatchRuntime' | 'defaultDispatchModel' | 'opencodeWorkerModel' | 'threecodeWorkerModel' | 'workerStartMode' | 'codexWorkerEffort' | 'claudeWorkerEffort'
 >>;
 
 const EMPTY_COMPOSER_EFFORTS: ComposerEffortMap = {};
+type WorkerDefaultsSnapshot = {
+  values?: Partial<ComposerWorkerDefaults>;
+  sources?: Partial<Record<keyof ComposerWorkerDefaults, string>>;
+};
+function workerSelectionLocked(runtime: OrchestratorRuntime, snapshot: WorkerDefaultsSnapshot): boolean {
+  const source = snapshot.sources?.defaultDispatchRuntime;
+  const runtimeLocked = (source === 'env' || source === 'profile') && runtime !== snapshot.values?.defaultDispatchRuntime;
+  const modelField = runtime === '3code' ? 'threecodeWorkerModel' : runtime === 'opencode' ? 'opencodeWorkerModel' : 'defaultDispatchModel';
+  return runtimeLocked || snapshot.sources?.[modelField] === 'env';
+}
+function workerPatchMatches(patch: WorkerDefaultsPatch, snapshot: WorkerDefaultsSnapshot | undefined): boolean {
+  return Boolean(snapshot?.values && Object.entries(patch).every(([key, value]) => snapshot.values?.[key as keyof ComposerWorkerDefaults] === value));
+}
 
 function sessionEffortKey(threadId: string | null): string {
   return threadId ?? '__fresh__';
@@ -48,6 +63,7 @@ function sessionEffortKey(threadId: string | null): string {
 
 export function useComposerSelectorState(input: {
   enabled: boolean;
+  isolated?: boolean;
   mode: ComposerSelectorMode | undefined;
   modeStorageId?: string;
   modelId: string | undefined;
@@ -67,6 +83,7 @@ export function useComposerSelectorState(input: {
 }) {
   const {
     enabled,
+    isolated = false,
     mode,
     modeStorageId,
     modelId,
@@ -93,7 +110,7 @@ export function useComposerSelectorState(input: {
     key: string;
     efforts: ComposerEffortMap;
   }>(() => {
-    const maps = modelId ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
+    const maps = modelId && !isolated ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
     return {
       key: `${threadId ?? ''}:${modelId ?? ''}`,
       efforts: { ...maps.global, ...maps.thread },
@@ -107,7 +124,7 @@ export function useComposerSelectorState(input: {
     FALLBACK_COMPOSER_WORKER_DEFAULTS,
   );
   const [workerOverrides, setWorkerOverrides] = useState<WorkerDefaultsPatch>({});
-  const [workerModelLocks, setWorkerModelLocks] = useState({ opencode: false, threecode: false });
+  const [workerModelLocks, setWorkerModelLocks] = useState({ runtime: false, defaultModel: false, opencode: false, threecode: false, codexEffort: false, claudeEffort: false });
   const [savingWorkerDefaults, setSavingWorkerDefaults] = useState(false);
   const modeStorageIdRef = useRef(modeStorageId);
   const parentModeRef = useRef(mode);
@@ -116,7 +133,7 @@ export function useComposerSelectorState(input: {
   const { plan } = useEntitlement();
   const isFreePlan = freePlanOverride ?? plan === 'free';
   const ultraEnabled = useUltraEffortPreference();
-  const { groups: baseComposerModelGroups } = useComposerModelCatalogue();
+  const { groups: baseComposerModelGroups, carrier } = useComposerModelCatalogue();
 
   const localLead = useMemo(
     () => backend === 'codex' && modelId ? parseLocalModel(modelId) : null,
@@ -141,22 +158,24 @@ export function useComposerSelectorState(input: {
   }, [baseComposerModelGroups, localLead, modelId]);
 
   const workerDefaults = useMemo(
-    () => ({ ...operatorWorkerDefaults, ...workerOverrides }),
-    [operatorWorkerDefaults, workerOverrides],
+    () => ({ ...operatorWorkerDefaults, ...workerOverrides, claudeCodeProviderModel: carrier?.source !== 'native' ? carrier?.model ?? null : null }),
+    [carrier, operatorWorkerDefaults, workerOverrides],
   );
-  const refetchWorkerDefaults = useCallback(async () => {
+  const refetchWorkerDefaults = useCallback(async (fresh = false) => {
     try {
-      const response = await fetchOperatorDefaultsValues();
+      const response = await (fresh ? fetchFreshOperatorDefaultsValues() : fetchOperatorDefaultsValues());
       if (!response.ok) return;
-      const payload = await response.json() as {
-        values?: Partial<ComposerWorkerDefaults>;
-        sources?: Partial<Record<keyof ComposerWorkerDefaults, string>>;
-      };
+      const payload = await response.json() as WorkerDefaultsSnapshot;
       setOperatorWorkerDefaults(normalizeComposerWorkerDefaults(payload.values ?? {}));
       setWorkerModelLocks({
+        runtime: payload.sources?.defaultDispatchRuntime === 'env' || payload.sources?.defaultDispatchRuntime === 'profile',
+        defaultModel: payload.sources?.defaultDispatchModel === 'env',
         opencode: payload.sources?.opencodeWorkerModel === 'env',
         threecode: payload.sources?.threecodeWorkerModel === 'env',
+        codexEffort: payload.sources?.codexWorkerEffort === 'env',
+        claudeEffort: payload.sources?.claudeWorkerEffort === 'env',
       });
+      return payload;
     } catch {
       // Keep the last confirmed operator defaults.
     }
@@ -195,23 +214,23 @@ export function useComposerSelectorState(input: {
   }, [restoreModel]);
 
   useEffect(() => {
-    if (!enabled || !repoPath) return;
+    if (!enabled || !repoPath || isolated) return;
     const storedModel = readStoredOrchestratorModel(repoPath);
-    if (storedModel && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
-  }, [enabled, repoPath, threadId]);
+    if (storedModel !== null && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
+  }, [enabled, isolated, repoPath, threadId]);
 
   const storedEffortKey = `${threadId ?? ''}:${modelId ?? ''}`;
   useEffect(() => {
-    const maps = modelId ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
+    const maps = modelId && !isolated ? readComposerEffortMaps(threadId, modelId) : { global: {}, thread: {} };
     setStoredEffortSnapshot({
       key: storedEffortKey,
       efforts: { ...maps.global, ...maps.thread },
     });
-  }, [modelId, storedEffortKey, threadId]);
+  }, [isolated, modelId, storedEffortKey, threadId]);
   const storedEfforts = storedEffortSnapshot.key === storedEffortKey
     ? storedEffortSnapshot.efforts
     : EMPTY_COMPOSER_EFFORTS;
-  const effortKey = sessionEffortKey(threadId);
+  const effortKey = sessionEffortKey(isolated ? null : threadId);
   const currentSessionEfforts = inSessionEffortsRef.current[effortKey] ?? EMPTY_COMPOSER_EFFORTS;
   const resolvedModelLabel = backend && modelId
     ? resolveComposerLeadCatalogueLabel(
@@ -225,7 +244,7 @@ export function useComposerSelectorState(input: {
   const resolved = useMemo(() => resolveComposerSelectorState({
     mode: mode ?? 'solo',
     leadModelId: modelId ?? '',
-    leadModelLabel: resolvedModelLabel,
+    leadModelLabel: backend === 'acp' && !modelId ? 'Local ACP' : resolvedModelLabel,
     leadBackend: backend ?? 'codex',
     inSessionEffortByModel: currentSessionEfforts,
     threadEffortByModel: storedEfforts,
@@ -245,7 +264,9 @@ export function useComposerSelectorState(input: {
         : (workerOverrides.defaultDispatchRuntime ?? operatorWorkerDefaults.defaultDispatchRuntime) === 'opencode'
           && Object.prototype.hasOwnProperty.call(workerOverrides, 'opencodeWorkerModel')
           ? { workerModel: workerOverrides.opencodeWorkerModel }
-          : {}),
+          : Object.prototype.hasOwnProperty.call(workerOverrides, 'defaultDispatchModel')
+            ? { workerModel: workerOverrides.defaultDispatchModel }
+            : {}),
       ...(workerOverrides.workerStartMode
         ? { workerStartMode: workerOverrides.workerStartMode }
         : {}),
@@ -292,7 +313,7 @@ export function useComposerSelectorState(input: {
     const resolutionKey = `${threadId ?? ''}:${backend}:${modelId}:${adaptiveEnabled}:${ultraEnabled}:${isFreePlan}`;
     if (lastResolvedModelRef.current === resolutionKey) return;
     lastResolvedModelRef.current = resolutionKey;
-    const effortKey = sessionEffortKey(threadId);
+    const effortKey = sessionEffortKey(isolated ? null : threadId);
     inSessionEffortsRef.current[effortKey] = setModelEffort(
       inSessionEffortsRef.current[effortKey] ?? {},
       modelId,
@@ -303,12 +324,12 @@ export function useComposerSelectorState(input: {
       if (cancelled) return;
       setClampNotice(resolved.effortClampedFrom ? { modelId, from: resolved.effortClampedFrom } : null);
     });
-    if (resolved.effortClampedFrom) {
+    if (resolved.effortClampedFrom && !isolated) {
       writeComposerModelEffort(modelId, resolved.effort, threadId);
     }
     if (resolved.effort !== effort) changeEffort(resolved.effort);
     return () => { cancelled = true; };
-  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, enabled, isolated, isFreePlan, modelId, resolved.effort, resolved.effortClampedFrom, threadId, ultraEnabled]);
 
   const onModeChange = useCallback((nextMode: ComposerSelectorMode) => {
     requestedModeRef.current = nextMode;
@@ -328,59 +349,62 @@ export function useComposerSelectorState(input: {
       return;
     }
     if (change.effort === effort) {
-      if (modelId) writeComposerModelEffort(modelId, change.effort, threadId);
+      if (modelId && !isolated) writeComposerModelEffort(modelId, change.effort, threadId);
       return;
     }
     if (!modelId) return changeEffort(change.effort);
-    const effortKey = sessionEffortKey(threadId);
+    const effortKey = sessionEffortKey(isolated ? null : threadId);
     inSessionEffortsRef.current[effortKey] = setModelEffort(
       inSessionEffortsRef.current[effortKey] ?? {},
       modelId,
       change.effort,
     );
-    writeComposerModelEffort(modelId, change.effort, threadId);
+    if (!isolated) writeComposerModelEffort(modelId, change.effort, threadId);
     changeEffort(change.effort);
-  }, [adaptiveEnabled, backend, changeEffort, effort, isFreePlan, modelId, threadId, ultraEnabled]);
+  }, [adaptiveEnabled, backend, changeEffort, effort, isolated, isFreePlan, modelId, threadId, ultraEnabled]);
 
   const onModelChange = useCallback((nextModel: string) => {
     if (modelId) {
-      const effortKey = sessionEffortKey(threadId);
+      const effortKey = sessionEffortKey(isolated ? null : threadId);
       inSessionEffortsRef.current[effortKey] = setModelEffort(
         inSessionEffortsRef.current[effortKey] ?? {},
         modelId,
         effort,
       );
-      writeComposerModelEffort(modelId, effort, threadId);
+      if (!isolated) writeComposerModelEffort(modelId, effort, threadId);
     }
-    writeStoredOrchestratorModel(repoPath, nextModel);
+    if (!isolated) writeStoredOrchestratorModel(repoPath, nextModel);
     changeModel?.(nextModel);
-  }, [changeModel, effort, modelId, repoPath, threadId]);
+  }, [changeModel, effort, isolated, modelId, repoPath, threadId]);
 
   const onBackendChange = useCallback((nextBackend: OrchestratorBackendSetting, nextModel?: string) => {
     if (modelId) {
-      const effortKey = sessionEffortKey(threadId);
+      const effortKey = sessionEffortKey(isolated ? null : threadId);
       inSessionEffortsRef.current[effortKey] = setModelEffort(
         inSessionEffortsRef.current[effortKey] ?? {},
         modelId,
         effort,
       );
-      writeComposerModelEffort(modelId, effort, threadId);
+      if (!isolated) writeComposerModelEffort(modelId, effort, threadId);
     }
     changeBackend?.(nextBackend, nextModel);
-  }, [changeBackend, effort, modelId, threadId]);
+  }, [changeBackend, effort, isolated, modelId, threadId]);
 
   const persistWorkerDefaults = useCallback(async (patch: WorkerDefaultsPatch) => {
     setWorkerOverrides((current) => ({ ...current, ...patch }));
     setSavingWorkerDefaults(true);
+    let confirmed: WorkerDefaultsSnapshot | undefined;
     try {
-      await updateOperatorDefaultsValues(patch);
+      const response = await updateOperatorDefaultsValues(patch);
+      if (response.ok) confirmed = await response.json() as WorkerDefaultsSnapshot;
     } catch {
-      // The confirmed read below restores server truth after a failed write.
+      // A lost response may still have saved. Check effective values below.
     } finally {
-      await refetchWorkerDefaults();
+      confirmed = await refetchWorkerDefaults(true) ?? confirmed;
       setWorkerOverrides({});
       setSavingWorkerDefaults(false);
     }
+    return workerPatchMatches(patch, confirmed);
   }, [refetchWorkerDefaults]);
 
   const onRuntimeChange = useCallback((defaultDispatchRuntime: OrchestratorRuntime) => {
@@ -388,16 +412,31 @@ export function useComposerSelectorState(input: {
   }, [persistWorkerDefaults]);
   const workerModelLocked = workerDefaults.defaultDispatchRuntime === '3code'
     ? workerModelLocks.threecode
-    : workerModelLocks.opencode;
-  const onWorkerModelChange = useCallback((model: string | null, runtime = workerDefaults.defaultDispatchRuntime) => {
-    const locked = runtime === '3code' ? workerModelLocks.threecode : workerModelLocks.opencode;
-    if (locked) return;
-    if (runtime === '3code') {
-      void persistWorkerDefaults({ threecodeWorkerModel: model });
-    } else if (runtime === 'opencode') {
-      void persistWorkerDefaults({ opencodeWorkerModel: model });
+    : workerDefaults.defaultDispatchRuntime === 'opencode' ? workerModelLocks.opencode : workerModelLocks.defaultModel;
+  const onWorkerModelChange = useCallback<WorkerModelChange>(async (model, runtime = workerDefaults.defaultDispatchRuntime, applyProvider) => {
+    const locked = runtime === '3code' ? workerModelLocks.threecode : runtime === 'opencode' ? workerModelLocks.opencode : workerModelLocks.defaultModel;
+    if (locked || (workerModelLocks.runtime && runtime !== workerDefaults.defaultDispatchRuntime)) return false;
+    // The provider is shared with leads. Recheck precedence before changing it.
+    const latest = await refetchWorkerDefaults(true);
+    if (!latest || workerSelectionLocked(runtime, latest)) return false;
+    const undoProvider = await applyProvider?.();
+    const modelPatch = runtime === '3code' ? { threecodeWorkerModel: model }
+      : runtime === 'opencode' ? { opencodeWorkerModel: model }
+      : { defaultDispatchModel: model ?? '' };
+    const saved = await persistWorkerDefaults({ defaultDispatchRuntime: runtime, ...modelPatch, workerStartMode: 'autonomous' });
+    if (!saved && undoProvider) {
+      await undoProvider();
+      throw new Error('The worker selection was not applied. The previous Claude Code provider was restored.');
     }
-  }, [persistWorkerDefaults, workerDefaults.defaultDispatchRuntime, workerModelLocks]);
+    return saved;
+  }, [persistWorkerDefaults, refetchWorkerDefaults, workerDefaults.defaultDispatchRuntime, workerModelLocks]);
+  const onWorkerEffortChange = useCallback((effort: ThinkingEffort, runtime: OrchestratorRuntime) => {
+    if (runtime !== 'codex' && runtime !== 'claude-code') return;
+    if (runtime === 'codex' ? workerModelLocks.codexEffort : workerModelLocks.claudeEffort) return;
+    const supported = supportedEffortsForLead(runtime === 'codex' ? 'codex' : 'claude', workerModelForDisplay(runtime, workerDefaults), true, false, ultraEnabled);
+    if (effort !== 'adaptive' && !supported.includes(effort)) return;
+    void persistWorkerDefaults(runtime === 'codex' ? { codexWorkerEffort: effort } : { claudeWorkerEffort: effort });
+  }, [persistWorkerDefaults, workerDefaults, workerModelLocks, ultraEnabled]);
   const onWorkerStartModeChange = useCallback((workerStartMode: WorkerStartMode) => {
     void persistWorkerDefaults({ workerStartMode });
   }, [persistWorkerDefaults]);
@@ -412,12 +451,14 @@ export function useComposerSelectorState(input: {
     onBackendChange,
     onRuntimeChange,
     onWorkerModelChange,
+    onWorkerEffortChange,
     onWorkerStartModeChange,
     refreshWorkerDefaults: refetchWorkerDefaults,
     clampNotice,
     isFreePlan,
     savingWorkerDefaults,
     workerModelLocked,
+    workerLocks: workerModelLocks,
   };
 }
 

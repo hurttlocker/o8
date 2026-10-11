@@ -68,6 +68,16 @@ const COMPACTION_PRELUDE = [
 ].join('\n');
 
 describe('orchestrator-send backend entry', () => {
+  it.each(['openclaw', 'hermes', 'acp', 'opencode'] as const)('teaches %s the same visualization tools and current transcript without changing the selected turn', async id => {
+    const send = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
+    const backend = withOrchestrationMode(fakeBackend(id, send));
+    const options = { threadId: 'thoughts-current', model: 'selected-model', thinkingEffort: 'high' as const };
+    await backend.sendTurn('/repo', 'I want to see how this works', () => {}, options);
+    expect(send.mock.calls[0][1]).toContain('o8_html_preview and o8_html_render');
+    expect(send.mock.calls[0][1]).toContain('"threadId":"thoughts-current"');
+    expect(send.mock.calls[0][1]).toContain('I want to see how this works');
+    expect(send.mock.calls[0][3]).toEqual(options);
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
   });

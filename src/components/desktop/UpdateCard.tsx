@@ -1,28 +1,8 @@
 'use client';
 
-/**
- * UpdateCard — inline card for the AgentPanel bottom slot.
- *
- * Replaces the old center-top UpdateBanner. The banner covered the
- * workspace tab strip + reconnect row whenever an update was available;
- * relocating it to the left rail (just above the chrome icons) lets the
- * operator dismiss + read changelog without losing content area.
- *
- * Collapsed shape:
- *   [•] Update available                 [Restart] [×]
- *       v0.1.172
- *
- * The action reads [Download] instead on an install that cannot replace
- * itself (a deb/rpm Linux install — see `isSelfUpdatableInstall`).
- *
- * Click anywhere on the body to expand. The expanded section calls
- * /api/panel/o8-update-summary (free OpenRouter pool) to render a
- * 1-paragraph professional summary from the actual GitHub release body
- * + recent commits. Result cached per version in localStorage so the
- * second open is instant.
- */
+/** App update controller, with a legacy card outside the compact rail. */
 
-import { CodexCliUpdateNotice } from './CodexCliUpdateNotice';
+import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
@@ -175,11 +155,11 @@ function normalizeUpdateCheckReport(payload: unknown): UpdateCheckReport | null 
   return updateCheckReport(outcome, record.error, checkedAt);
 }
 
-export function UpdateCard() {
-  return <><CodexCliUpdateNotice /><AppUpdateCard /></>;
+export function UpdateCard({ quiet = false }: { quiet?: boolean }) {
+  return <AppUpdateCard quiet={quiet} />;
 }
 
-function AppUpdateCard() {
+function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
@@ -198,6 +178,12 @@ function AppUpdateCard() {
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
   const restartDeferredRef = useRef(false);
+
+  useEffect(() => {
+    publishAppUpdateView({ version: update?.version ?? null, outcome: checkReport.outcome, installing,
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download' });
+  }, [update, checkReport, installing, blockedNote, installError, installInfo]);
+  useEffect(() => { void refreshCliUpdateView(); }, []);
 
   useEffect(() => {
     updateRef.current = update;
@@ -262,7 +248,7 @@ function AppUpdateCard() {
   }, []);
 
   const checkForUpdate = useCallback(async () => {
-    if (!canUseTauriEvents()) return;
+    if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
     try {
       const { check } = await import('@/lib/app-update/check');
       const result = await check();
@@ -273,12 +259,15 @@ function AppUpdateCard() {
           date: result.date ?? undefined,
         });
         setCheckReport(updateCheckReport('available'));
+        return { version: result.version };
       } else {
         setUpdate(null);
         setCheckReport(updateCheckReport('current'));
+        return { version: null };
       }
     } catch (error) {
       setCheckReport(updateCheckReport('failed', error));
+      return { version: null, error: error instanceof Error ? error.message : 'o8 update check failed.' };
     }
   }, []);
 
@@ -368,6 +357,8 @@ function AppUpdateCard() {
       }),
     }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
   }, [checkReport, update]);
+
+  useEffect(() => registerAppUpdateCheck(checkForUpdate), [checkForUpdate]);
 
   // Fetch summary when the card is expanded and we have a version. Cache
   // by version in localStorage so repeated opens are instant.
@@ -472,6 +463,11 @@ function AppUpdateCard() {
       setInstalling(false);
     }
   }, [checkUpdateIdle]);
+  useEffect(() => {
+    const install = () => { void handleInstall({ userInitiated: true, requireIdle: true }); };
+    window.addEventListener('o8:install-all-updates', install);
+    return () => window.removeEventListener('o8:install-all-updates', install);
+  }, [handleInstall]);
 
   useEffect(() => {
     const onRealtime = (event: Event) => {
@@ -525,7 +521,7 @@ function AppUpdateCard() {
   if (bundleIntegrity?.status === 'invalid') {
     return <BundleIntegrityWarning status={bundleIntegrity} />;
   }
-  if (!update) return null;
+  if (quiet || !update) return null;
   if (dismissed && dismissed === update.version) return null;
 
   // A deb/rpm Linux install cannot replace itself, so the same slot carries a

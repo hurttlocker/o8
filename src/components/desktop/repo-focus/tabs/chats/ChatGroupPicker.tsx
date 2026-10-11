@@ -1,15 +1,14 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { FilterList } from 'iconoir-react';
+import { createPortal } from 'react-dom';
 import { REPO_FOCUS_FONT } from '../../utils';
+import { FloatingSurface } from '../../../FloatingSurface';
 
-export type ChatGroupMode = 'repo' | 'date' | 'flat';
+import { CHAT_VIEW_LABELS, type ChatGroupMode } from './sidebar-view';
+export type { ChatGroupMode } from './sidebar-view';
 
-/** Group-by picker — vertical-sliders icon rendered inline at the
- *  right of the FIRST group header. Click opens a popover with three
- *  radio options: Repo / Date / Flat. Matches Claude's sidebar
- *  pattern from the operator's reference video. */
+/** Compact chat view menu; the glyph and hover target share one center. */
 export function ChatGroupPicker({
   mode,
   onChange,
@@ -19,45 +18,63 @@ export function ChatGroupPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const choose = (next: ChatGroupMode) => {
+    onChange(next);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  useEffect(() => {
+    if (open) menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onDocDown = (event: globalThis.MouseEvent) => {
       if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+      if (!wrapperRef.current.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     window.addEventListener('mousedown', onDocDown);
     window.addEventListener('keydown', onKey);
+    const reposition = () => setAnchor(triggerRef.current?.getBoundingClientRect() ?? null);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
     return () => {
       window.removeEventListener('mousedown', onDocDown);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
     };
   }, [open]);
 
   return (
     <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0, marginRight: -1 }}>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { setAnchor(triggerRef.current?.getBoundingClientRect() ?? null); setOpen((v) => !v); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label="Change chat grouping"
-        title="Change chat grouping"
+        aria-label="Change chat view"
+        title="Change chat view"
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          // Right-align the glyph so its right edge sits on the same
-          // vertical column as the chat-row rings + chevrons in the
-          // top-nav above (per operator's alignment ask).
-          justifyContent: 'flex-end',
+          justifyContent: 'center',
           width: 18,
           height: 18,
           borderRadius: 4,
@@ -71,41 +88,45 @@ export function ChatGroupPicker({
         }}
       >
         {/* Iconoir FilterList — matches hurttlocker chrome vocabulary. */}
-        <FilterList width={12} height={12} color="currentColor" strokeWidth={1.8} />
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
 
       </button>
-      {/* Always-mounted (display toggles) so agents can enumerate the
-          grouping options from the DOM without opening first. */}
-      <div
+      {/* Portal keeps the glass blur and menu outside the scrolling chat panel. */}
+      {typeof document !== 'undefined' ? createPortal(<FloatingSurface
+        ref={menuRef}
         id={menuId}
+        onKeyDown={(event) => {
+          const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length
+            : event.key === 'ArrowUp' ? (index - 1 + buttons.length) % buttons.length
+              : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
+          if (next !== null) { event.preventDefault(); buttons[next]?.focus(); }
+          if (event.key === 'Tab') setOpen(false);
+        }}
         role="menu"
-        aria-label="Chat grouping options"
+        aria-label="Chat view options"
+        contentStyle={{ paddingTop: 8, paddingBottom: 8, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', scrollbarWidth: 'none' }}
         style={{
             display: open ? 'block' : 'none',
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 4,
-            minWidth: 168,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'var(--t-popover-surface)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-            paddingTop: 4,
-            paddingBottom: 4,
-            zIndex: 50,
+            position: 'fixed',
+            top: Math.max(12, Math.min((anchor?.bottom ?? 0) + 6, window.innerHeight - 216)),
+            left: Math.max(12, Math.min((anchor?.right ?? 0) - 168, window.innerWidth - 180)),
+            width: 168,
+            zIndex: 210,
             fontFamily: REPO_FOCUS_FONT,
             textTransform: 'none',
             letterSpacing: 0,
           }}
         >
-          <ChatGroupPickerItem label="Group by repo" selected={mode === 'repo'} onClick={() => { onChange('repo'); setOpen(false); }} />
-          <ChatGroupPickerItem label="Group by date" selected={mode === 'date'} onClick={() => { onChange('date'); setOpen(false); }} />
-          {/* Persisted id stays `flat` for compatibility; operator vocabulary calls this Activity. */}
-          <ChatGroupPickerItem label="Activity" selected={mode === 'flat'} onClick={() => { onChange('flat'); setOpen(false); }} />
-      </div>
+          {(['flat', 'chronological', 'working', 'scheduled'] as const).map((value) => (
+            <ChatGroupPickerItem key={value} label={CHAT_VIEW_LABELS[value]} selected={mode === value} onClick={() => choose(value)} />
+          ))}
+          <div role="separator" style={{ height: 1, marginTop: 4, marginBottom: 4, background: 'var(--t-divider)' }} />
+          {(['repo', 'date'] as const).map((value) => (
+            <ChatGroupPickerItem key={value} label={`Group ${CHAT_VIEW_LABELS[value].toLowerCase()}`} selected={mode === value} onClick={() => choose(value)} />
+          ))}
+      </FloatingSurface>, document.body) : null}
     </div>
   );
 }
@@ -120,11 +141,14 @@ function ChatGroupPickerItem({
   onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   return (
     <button
       type="button"
       role="menuitemradio"
       aria-checked={selected}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -138,7 +162,7 @@ function ChatGroupPickerItem({
         paddingLeft: 10,
         paddingRight: 10,
         borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
+        background: hovered || focused ? 'var(--t-hover)' : 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
         textAlign: 'left',

@@ -886,7 +886,7 @@ export function useOrchestratorStream(
         return;
       }
       const {
-        permissionMode, thinkingEffort, model, displayMessage, wireMessage,
+        permissionMode, thinkingEffort, serviceTier, model, displayMessage, wireMessage,
         localEntriesAfterUser, collideBaseBackend, backend, orchestrationMode, pickedMode,
       } = prepareOrchestratorTurn(message, turnOptions);
       activeTurnBackendRef.current = backend ?? null;
@@ -997,7 +997,7 @@ export function useOrchestratorStream(
         displayMessage,
         permissionMode,
         orchestrationMode, pickedMode,
-        thinkingEffort,
+        thinkingEffort, serviceTier,
         model,
         // Per-turn override stays truthful while the global default write settles.
         backend,

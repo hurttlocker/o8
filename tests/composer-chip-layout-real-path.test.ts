@@ -5,8 +5,7 @@
 // This renders the REAL footer through InputButtons in headless Chromium and
 // asserts on browser boxes, clip-aware painted unions, and hit-test reachability.
 // Only unrelated persistence/store, entitlement context, and fetch are stubbed.
-// Expected on unchanged main: the narrow cases fail (escape/overlap, no readable
-// lead prefix, hint not collapsing). If the collision is absent, report that.
+// The real dictation host mounts idle; no recording or provider request starts.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -90,8 +89,8 @@ interface ComposerMetrics {
   workersLabelText: string;
 }
 
-const CONTROL_KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'voice', 'send'] as const;
-const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'workers', 'voice', 'send'] as const;
+const CONTROL_KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'] as const;
+const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'] as const;
 
 // Evaluated inside the page (serialized by Playwright — it must not reference
 // any outer-scope binding). Finds the real footer controls by their production
@@ -100,7 +99,7 @@ const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'workers', 'voice'
 // interactive center. Text clipped to nothing contributes nothing; text painted
 // over a sibling is measured.
 function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
-  const KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'voice', 'send'];
+  const KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'];
 
   function withSize(box: { left: number; top: number; right: number; bottom: number }): Box {
     return { ...box, width: box.right - box.left, height: box.bottom - box.top };
@@ -231,8 +230,9 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
   const meterButton = query('[data-context-meter]');
   const lead = query('[data-testid="composer-selector-lead"]');
   const workers = query('[data-testid="composer-selector-workers"]');
-  const voiceWrapper = query('[data-testid="composer-selector-voice"]');
-  const voiceButton = voiceWrapper?.querySelector('button') ?? null;
+  const thinking = query('[data-testid="composer-selector-thinking"]');
+  const micWrapper = query('[data-testid="composer-selector-mic"]');
+  const micButton = micWrapper?.querySelector('button') ?? null;
   const sendWrapper = query('[data-testid="composer-selector-send"]');
   const sendButton = sendWrapper?.querySelector('button') ?? null;
 
@@ -243,7 +243,8 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
     meter: metricsFor(meterWrapper, meterButton),
     lead: metricsFor(lead, lead),
     workers: metricsFor(workers, workers),
-    voice: metricsFor(voiceWrapper, voiceButton),
+    thinking: metricsFor(thinking, thinking),
+    mic: metricsFor(micWrapper, micButton),
     send: metricsFor(sendWrapper, sendButton),
   };
 
@@ -427,6 +428,7 @@ import { createRoot } from 'react-dom/client';
 import { InputButtons } from ${JSON.stringify(inputButtonsPath)};
 import { ContextMeter } from ${JSON.stringify(contextMeterPath)};
 import { useComposerSelectorState } from ${JSON.stringify(selectorStateHookPath)};
+import { DictationHost } from ${JSON.stringify(path.join(repoRoot, 'src/components/desktop/dictation/DictationHost.tsx'))};
 
 const MODEL_ID = ${JSON.stringify(LONG_MODEL_ID)};
 const MODEL_LABEL = ${JSON.stringify(LONG_MODEL_LABEL)};
@@ -477,8 +479,6 @@ function ComposerHarness() {
     onComposerModeChange: setMode,
     composerSelectorController: selectorControls,
     inlineMeterSlot: createElement(ContextMeter, { tokenCount: 4200, runningTotal: 18400 }),
-    voiceModeEnabled: false,
-    onVoiceModeChange: () => {},
     composerSelectorV1Enabled: true,
     onRequestTextareaFocus: () => {},
   });
@@ -499,7 +499,7 @@ window.__o8ComposerHarness = (() => {
       host.style.background = 'var(--t-chat-surface-input-bg, #ffffff)';
       document.body.appendChild(host);
       root = createRoot(host);
-      root.render(createElement(ComposerHarness));
+      root.render(createElement(DictationHost, null, createElement(ComposerHarness)));
     },
     setWidth(widthPx) { if (host) host.style.width = widthPx + 'px'; },
     dispose() {
@@ -706,7 +706,7 @@ window.__o8ComposerHarness = (() => {
 
     expect(lead.ariaLabel ?? '', 'Lead chip lost its accessible name').toContain('Lead:');
     expect(lead.ariaLabel ?? '', 'Lead chip accessible name dropped the model identity').toContain(LONG_MODEL_LABEL);
-    expect(lead.ariaLabel ?? '', 'Lead chip accessible name dropped the effort').toContain('High');
+    expect(control(metrics, 'thinking').ariaLabel ?? '', 'Thinking control lost its accessible effort').toContain('Thinking: High');
     expect(lead.title ?? '', 'full lead model value is not reachable via the chip tooltip').toContain(LONG_MODEL_LABEL);
     expect(metrics.modelReachableViaTitle, 'no hoverable tooltip carrier exposes the full lead model value').toBe(true);
     expect(

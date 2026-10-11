@@ -7,6 +7,8 @@ const resolveCliMock = vi.hoisted(() => vi.fn(async () => ({ path: process.execP
 const prepareSingleMock = vi.hoisted(() => vi.fn());
 const codexComposerImagePathsMock = vi.hoisted(() => vi.fn(() => ['/tmp/o8-test-image.png']));
 const backendSessions = vi.hoisted(() => new Map<string, string>());
+const speedCatalogue = vi.hoisted(() => vi.fn(async () => ({ models: { 'gpt-5.5': [{ id: 'default' }, { id: 'priority' }] } })));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: speedCatalogue }));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -77,10 +79,28 @@ async function waitForSpawn(): Promise<void> {
 }
 
 describe('Codex orchestrator process lifecycle', () => {
+  it.each([false, true])('passes an explicit tier to the actual CLI launch (resume=%s)', async (resume) => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `speed-${resume}-${Date.now()}`);
+    if (resume) session.threadId = 'saved-speed-thread';
+    const proc = useFakeProc(); const events: OrchestratorEvent[] = [];
+    const turn = sendToCodexOrchestrator(session, 'speed fixture', (event) => events.push(event), { model: 'gpt-5.5', serviceTier: 'priority' });
+    await waitForSpawn();
+    expect(spawnMock.mock.calls[0][1]).toContain('service_tier="priority"');
+    expect(speedCatalogue).toHaveBeenCalledWith(spawnMock.mock.calls[0][2].env.CODEX_HOME);
+    proc.exitCode = 0; proc.emit('close', 0); await turn;
+    expect(events.at(-1)?.type).toBe('done');
+  });
+  it('rejects an unadvertised tier without spawning or stranding the session busy', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `speed-rejected-${Date.now()}`);
+    const events: OrchestratorEvent[] = [];
+    await sendToCodexOrchestrator(session, 'speed fixture', (event) => events.push(event), { model: 'gpt-5.5', serviceTier: 'ultrafast' });
+    expect(spawnMock).not.toHaveBeenCalled(); expect(session.status).toBe('ready'); expect(events.at(-2)).toMatchObject({ type: 'error', error: expect.stringContaining('not available') }); expect(events.at(-1)?.type).toBe('done');
+  });
   beforeEach(() => {
     process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '0';
     backendSessions.clear();
     spawnMock.mockReset();
+    speedCatalogue.mockClear();
     resolveCliMock.mockReset();
     resolveCliMock.mockResolvedValue({ path: process.execPath, version: '0.140.0' });
     prepareSingleMock.mockReset();
