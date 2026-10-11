@@ -4140,6 +4140,12 @@
       ]
     },
     {
+      "path": "tests/symon-brain-without-node-sqlite-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-conversations-api-real-path.test.ts",
       "reasons": [
         "real-path"

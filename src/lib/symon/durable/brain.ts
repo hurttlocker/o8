@@ -25,7 +25,6 @@ import {
   type Conversation,
   type EntryRecord,
 } from '@earendil-works/pi-durable';
-import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { requirePiNode } from '@/lib/pi/sdk/platform';
 import { isPiAllowanceMessage } from '@/lib/pi/sdk/transport';
@@ -171,7 +170,11 @@ export class SymonBrain {
 
   static async open(options: SymonBrainOptions): Promise<SymonBrain> {
     // The store uses node:sqlite, which Pi's supported Node range provides.
+    // It loads only after this check: o8 runs on Node 22 releases that lack
+    // node:sqlite, and a static import would break every route that imports
+    // this module there (#3486).
     requirePiNode();
+    const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
     const models = options.models ?? (() => {
       const created = createModels();
       created.setProvider(createSymonManagedProvider());
