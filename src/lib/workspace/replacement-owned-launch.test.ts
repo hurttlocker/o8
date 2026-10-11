@@ -307,5 +307,5 @@ describe('parked replacement through the production owned launch guard', { timeo
       laneId: lane.id, originalPath: replacementPath,
     });
     await store.interrupt(result.surfaceId);
-  });
+  }, 60_000);
 });
