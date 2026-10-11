@@ -20,7 +20,7 @@ describe('terminal close through the workspace tab handler', () => {
     useEffect(() => { cleanup = current; }, [current]);
     return null;
   }
-  function Harness({ controllerKey = 'original', controllerOptions = options }: { controllerKey?: string; controllerOptions?: typeof options } = {}) {
+  function Harness({ controllerKey = 'original', controllerOptions = options }: { controllerKey?: string; controllerOptions?: typeof options }) {
     return createElement(Fragment, null,
       createElement(Controller, { key: controllerKey, value: controllerOptions }),
       createElement(TerminalCloseDialog));
