@@ -174,7 +174,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "server-only": "^0.0.1",
-    "smol-toml": "^1.7.1",
+    "smol-toml": "^1.9.0",
     "tauri-plugin-clerk": "^0.1.1",
     "tauri-plugin-mcp": "^0.1.0",
     "tweetnacl": "^1.0.3",
@@ -191,7 +191,7 @@
     "@types/react-dom": "19.0.4",
     "@types/ws": "^8.18.1",
     "@xterm/headless": "5.5.0",
-    "concurrently": "^10.0.3",
+    "concurrently": "^10.0.6",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.10",
@@ -208,7 +208,7 @@
     "esbuild": "0.28.1",
     "postcss": "8.5.26",
     "uuid": "11.1.1",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "metro": "0.84.6"
   }
 }
