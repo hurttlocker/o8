@@ -508,7 +508,11 @@ export async function performSessionTransform(
       throw new SessionTransformError('checkpoint_not_found', 'The selected checkpoint does not belong to this session.', 404);
     }
 
-    const discovered = (await runtime.discoverSessions().catch(() => []))
+    // Import is an explicit request to read provider history. Ordinary
+    // dashboard discovery intentionally returns only o8-owned sessions.
+    const discovered = (await runtime.discoverSessions(
+      request.action === 'import' ? { fresh: true } : undefined,
+    ).catch(() => []))
       .find((session) => session.sessionKey === sessionKey);
     if (request.action === 'import' && !discovered) {
       throw new SessionTransformError('session_not_found', 'The provider session is not currently discoverable.', 404);
