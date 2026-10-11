@@ -5,16 +5,14 @@ import { ChevronDown, GitPullRequest } from '../lucide-shims';
 import { PrActionMenu, prActionButton, type PrMenuItem } from './PrActionMenu';
 import { PrActionConfirm } from './PrActionConfirm';
 import { usePrComment, type PrWriteAction } from './usePrComment';
-import { usePrCheckout } from './usePrCheckout';
 import type { PrComposerMode, PrDetail, PrMergeMethod } from './types';
 
 const methods: Array<{ id: PrMergeMethod; label: string }> = [{ id: 'merge', label: 'Merge' }, { id: 'squash', label: 'Squash and merge' }, { id: 'rebase', label: 'Rebase and merge' }];
-type Confirmation = { action: PrWriteAction | 'checkout'; title: string; head: string; method?: PrMergeMethod };
+type Confirmation = { action: PrWriteAction; title: string; head: string; method?: PrMergeMethod };
 
-export function PrPanelActions({ detail, repoSlug, repoPath, onRefresh, onAsk, onComposerMode }: { detail: PrDetail; repoSlug?: string | null; repoPath?: string | null; onRefresh: () => void; onAsk: (prompt?: string) => void; onComposerMode: (mode: PrComposerMode) => void }) {
+export function PrPanelActions({ detail, repoSlug, onRefresh, onAsk, onComposerMode }: { detail: PrDetail; repoSlug?: string | null; repoPath?: string | null; onRefresh: () => void; onAsk: (prompt?: string) => void; onComposerMode: (mode: PrComposerMode) => void }) {
   const repo = detail.resolvedRepo || repoSlug;
   const write = usePrComment(repo, detail.number);
-  const checkout = usePrCheckout(repo, detail.number, repoPath);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [notice, setNotice] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -22,9 +20,9 @@ export function PrPanelActions({ detail, repoSlug, repoPath, onRefresh, onAsk, o
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Completion state belongs to the hook's repository/PR key; never retarget it.
-  const busy = write.busy || checkout.busy;
+  const busy = write.busy;
   const open = detail.state.toLowerCase() === 'open' && !detail.mergedAt;
-  const blocked = busy || write.uncertain || checkout.uncertain;
+  const blocked = busy || write.uncertain;
   const allowed = methods.filter((method) => !detail.allowedMergeMethods || detail.allowedMergeMethods.includes(method.id));
   const defaultMethod = allowed.find((method) => method.id === 'squash')?.id || allowed[0]?.id;
   const prepare = (action: Confirmation['action'], title: string, method?: PrMergeMethod) => { returnFocus.current = document.activeElement instanceof HTMLButtonElement && root.current?.contains(document.activeElement) ? document.activeElement : null; setConfirmation({ action, title, head: detail.headSha || '', method }); };
@@ -50,26 +48,22 @@ export function PrPanelActions({ detail, repoSlug, repoPath, onRefresh, onAsk, o
   const confirm = async () => {
     if (!confirmation || blocked || !confirmation.head || confirmation.head !== detail.headSha) return;
     const action = confirmation;
-    if (action.action === 'checkout') { await checkout.checkout(action.head); return; }
     const done = await write.post('', action.action, action.head, action.method);
     if (done && mounted.current) { setConfirmation(null); onRefresh(); setNotice(action.action === 'merge' ? 'Pull request merged.' : action.action === 'close' ? 'Pull request closed.' : action.action === 'enable-auto-merge' ? 'Auto-merge enabled.' : action.action === 'disable-auto-merge' ? 'Auto-merge disabled.' : action.action === 'draft' ? 'Converted to draft.' : 'Ready for review.'); }
   };
   return <div ref={root} data-pr-actions style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginLeft: 'auto', maxWidth: '100%' }}>
     <PrActionMenu label="Check out pull request" disabled={busy} items={[
-      { label: 'Create review workspace…', disabled: !repoPath || !detail.headSha || blocked, onSelect: () => prepare('checkout', 'Check out in a new workspace') },
       { label: 'Copy checkout command', disabled: !repo, onSelect: () => void copy(`gh pr checkout ${detail.number} --repo ${repo}`, 'Checkout command copied.') },
-      ...(checkout.workspace ? [{ label: 'Copy workspace path', onSelect: () => void copy(checkout.workspace!.path, 'Workspace path copied.') }] : []),
     ]}><GitPullRequest size={12} aria-hidden="true" />Check out<ChevronDown size={11} aria-hidden="true" /></PrActionMenu>
     {open ? detail.draft ? <button type="button" disabled={blocked || !detail.headSha} onClick={() => prepare('ready', 'Ready for review')} style={{ ...prActionButton, color: 'var(--t-accent)', opacity: blocked ? 0.45 : 1 }}>Ready for review</button> : <PrActionMenu label="Merge pull request" primary disabled={blocked || !detail.headSha || !allowed.length} items={mergeItems}><GitPullRequest size={12} aria-hidden="true" />Merge<ChevronDown size={11} aria-hidden="true" /></PrActionMenu> : null}
     <PrActionMenu label="Pull request actions" disabled={busy} items={items}><span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1, letterSpacing: 1 }}>···</span></PrActionMenu>
-    {confirmation ? <PrActionConfirm title={`${confirmation.title} · #${detail.number}`} label={confirmation.action === 'checkout' ? checkout.workspace?.commitSha === confirmation.head ? 'Workspace ready' : 'Create workspace' : confirmation.title} busy={busy} disabled={blocked || !confirmation.head || confirmation.head !== detail.headSha || (confirmation.action === 'checkout' && checkout.workspace?.commitSha === confirmation.head)} onCancel={cancel} onConfirm={() => void confirm()}>
+    {confirmation ? <PrActionConfirm title={`${confirmation.title} · #${detail.number}`} label={confirmation.title} busy={busy} disabled={blocked || !confirmation.head || confirmation.head !== detail.headSha} onCancel={cancel} onConfirm={() => void confirm()}>
       {confirmation.head !== detail.headSha ? <span role="alert" style={{ color: 'var(--t-danger)' }}>The pull request changed. Cancel and review the latest commit.</span> : <>
-        <div style={{ marginBottom: 8 }}>{confirmation.action === 'checkout' ? 'Create an isolated workspace at the reviewed commit. Your current branch, files and agent workspaces stay in place.' : confirmation.action === 'enable-auto-merge' ? 'GitHub will merge when its rules are satisfied. It may merge immediately if ready.' : confirmation.action === 'merge' ? `Merge into ${detail.baseRefName} using ${confirmation.method}. GitHub checks repository rules before merging.` : confirmation.action === 'close' ? 'Close this pull request on GitHub. Its branch is kept.' : 'Update this pull request on GitHub.'}</div>
+        <div style={{ marginBottom: 8 }}>{confirmation.action === 'enable-auto-merge' ? 'GitHub will merge when its rules are satisfied. It may merge immediately if ready.' : confirmation.action === 'merge' ? `Merge into ${detail.baseRefName} using ${confirmation.method}. GitHub checks repository rules before merging.` : confirmation.action === 'close' ? 'Close this pull request on GitHub. Its branch is kept.' : 'Update this pull request on GitHub.'}</div>
         <span>Commit {confirmation.head.slice(0, 8)}</span>
-        {confirmation.action === 'checkout' && checkout.workspace?.commitSha === confirmation.head ? <div role="status" style={{ marginTop: 8, overflowWrap: 'anywhere' }}>Workspace ready: {checkout.workspace.path}<button type="button" onClick={() => void copy(checkout.workspace!.path, 'Workspace path copied.')} style={{ ...prActionButton, marginTop: 8 }}>Copy path</button></div> : null}
       </>}
     </PrActionConfirm> : null}
     {notice ? <span role="status" style={{ width: '100%', fontSize: 11, color: 'var(--t-text-muted)' }}>{notice}</span> : null}
-    {write.error || checkout.error ? <div role="alert" style={{ width: '100%', fontSize: 11, lineHeight: 1.5, color: 'var(--t-danger)' }}>{write.error || checkout.error}<a href={detail.url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 6, color: 'var(--t-accent)' }}>Check GitHub</a>{write.uncertain || checkout.uncertain ? <button type="button" disabled={busy} onClick={() => { write.acknowledge(); checkout.acknowledge(); onRefresh(); }} style={{ ...prActionButton, marginTop: 6 }}>I’ve checked the result</button> : null}</div> : null}
+    {write.error ? <div role="alert" style={{ width: '100%', fontSize: 11, lineHeight: 1.5, color: 'var(--t-danger)' }}>{write.error}<a href={detail.url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 6, color: 'var(--t-accent)' }}>Check GitHub</a>{write.uncertain ? <button type="button" disabled={busy} onClick={() => { write.acknowledge(); onRefresh(); }} style={{ ...prActionButton, marginTop: 6 }}>I’ve checked the result</button> : null}</div> : null}
   </div>;
 }

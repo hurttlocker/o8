@@ -33,12 +33,18 @@ describe('PR action entry points', () => {
     await render(detail(number)); await click('Merge pull request'); await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role=menu] button')).find((button) => button.textContent === label)!.click()); expect(fetchMock).not.toHaveBeenCalled(); await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role=dialog] button')).find((button) => button.textContent === label)!.click());
     expect(fetchMock).toHaveBeenCalledTimes(1); expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ repo: 'example/repo', action: 'merge', commitSha: sha, mergeMethod: label === 'Merge' ? 'merge' : label === 'Squash and merge' ? 'squash' : 'rebase' });
   });
-  it('does not create a workspace just by inspecting Checkout, and keeps a late receipt scoped to its PR', async () => {
-    let finish!: (value: Response) => void; fetchMock.mockReturnValue(new Promise<Response>((resolve) => { finish = resolve; }));
-    await render(detail(9831)); await click('Check out pull request'); await click('Create review workspace…'); expect(fetchMock).not.toHaveBeenCalled(); await click('Create workspace');
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ repo: 'example/repo', repoPath: '/workspace/repo', commitSha: sha });
-    await render(detail(9832)); await act(async () => finish(Response.json({ ok: true, workspace: { path: '/workspace/review', branch: 'review', commitSha: sha } })));
-    expect(host.textContent).not.toContain('/workspace/review'); expect(host.querySelector('[role=dialog]')).toBeNull();
-    await render(detail(9831)); await click('Check out pull request'); expect(host.textContent).toContain('Copy workspace path');
+  it('offers the manual checkout command without advertising or requesting workspace creation', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    await render(detail(9831)); await click('Check out pull request');
+    expect(host.textContent).not.toContain('Create review workspace');
+    expect(host.textContent).not.toContain('Copy workspace path');
+    expect(host.querySelector('[role=dialog]')).toBeNull(); expect(fetchMock).not.toHaveBeenCalled();
+    await click('Copy checkout command');
+    expect(writeText).toHaveBeenCalledWith('gh pr checkout 9831 --repo example/repo');
+    expect(fetchMock).not.toHaveBeenCalled();
+    await render(detail(9832)); await click('Pull request actions');
+    expect(host.textContent).toContain('Submit a review'); expect(host.textContent).toContain('Discuss review findings');
+    expect(fetchMock).not.toHaveBeenCalled(); expect(host.querySelector('[role=dialog]')).toBeNull();
   });
 });
