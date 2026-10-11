@@ -4430,6 +4430,15 @@
       ]
     },
     {
+      "path": "tests/terminal-state-worktree-restore-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/terminal-visibility-real-path.test.ts",
       "reasons": [
         "child-process",
