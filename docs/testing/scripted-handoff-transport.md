@@ -21,8 +21,8 @@ provider credentials. No worker is dispatched and no model service is called.
 - A cross-backend send without the explicit composer handoff choice is rejected
   before acceptance, receiver invocation, history mutation, or handoff audit
 - The accepted Codex turn receives the packet serialized by the production
-  handoff builder, including prior narrative, measured staged/unstaged/untracked
-  workspace evidence, pending approval, lane status, and consumed retry budget
+  handoff builder, including prior narrative, measured Git-normalized worktree snapshot
+  evidence, pending approval, lane status, and consumed retry budget
 - The operator's new message follows the historical packet and is not included in
   its prior narrative
 - The live handoff event, durable history marker, desktop history projection, and
@@ -41,7 +41,9 @@ The composer path does not supply structured intent in this snapshot. The test
 expects `intent: null` and an omitted carry, rather than inventing intent continuity.
 Workspace freshness is a point-in-time diagnostic. The test does not establish an
 execution lease, close a time-of-check/time-of-use window, or authorize an action
-in a differently targeted worktree. Legacy missing evidence remains legitimate.
+in a differently targeted worktree. Legacy missing evidence remains legitimate. The snapshot does not independently
+fingerprint staged-only index changes, ignored files, filter-normalized raw bytes,
+or dirty submodule contents.
 
 The existing `tests/handoff-packet-real-path.test.ts` covers packet construction
 and freshness diagnostics separately. Neither fixture changes admission rules,

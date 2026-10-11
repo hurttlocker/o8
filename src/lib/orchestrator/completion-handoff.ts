@@ -2,6 +2,7 @@ import 'server-only';
 import { execFileSync } from 'node:child_process';
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import { laneGit, laneGitInvocation } from '@/lib/lane/lane-git';
 import { getSqlite } from '@/lib/db';
 import { findLatestLaneByPacket, getLane, listLanes } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -13,7 +14,7 @@ import { probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
 import { packetSteerHoldReason } from '@/lib/lane/packet-stop-hold';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { readManagedWorkspaceMaterialization } from '@/lib/workspace/managed-materialization-identity';
-import { guardedWorkspaceInvocation, materializationAwareExecFile, withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
+import { guardedWorkspaceInvocation, withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
 import { withWorktreeMetaTransaction } from '@/lib/worktree/metadata-store';
 import { publishCompletionHandoff, readCompletionHandoff, type CompletionHandoffRecord } from '@/lib/workspace/completion-handoff-store';
 import { readOrchestratorControlPlaneState, withControlPlaneLock } from '@/lib/orchestrator/control-plane';
@@ -189,18 +190,11 @@ function bounded(value: string | undefined, limit = 1200): string {
 
 function quote(value: string): string { return "'" + value.replace(/'/g, "'\\''") + "'"; }
 
-function gitEnvironment(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
-  delete env.NODE_OPTIONS;
-  return { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1' };
-}
-
 async function sourceFacts(capture: CompletionHandoffCapture) {
   return withWorktreeMaterializationExecution(capture.lane.worktreePath!, capture.managed.identity, async () => {
     const git = async (args: string[]) => {
-      const { stdout } = await materializationAwareExecFile('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args],
-        { cwd: capture.lane.worktreePath!, env: gitEnvironment(), timeout: 5000, maxBuffer: 512 * 1024 });
+      const { stdout } = await laneGit(capture.lane.worktreePath!, capture.lane.repoPath, args,
+        { timeout: 5000, maxBuffer: 512 * 1024 });
       return stdout.trim();
     };
     const revision = await git(['rev-parse', '--verify', 'HEAD']);
@@ -273,9 +267,10 @@ export async function persistCapturedCompletionHandoff(context: PacketContext, o
         throw new Error('Completion provider owner changed before publication.');
       }
       const git = (args: string[]) => {
-        const invocation = guardedWorkspaceInvocation('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args], capture.managed.identity);
+        const safe = laneGitInvocation(capture.lane.worktreePath!, capture.lane.repoPath, args);
+        const invocation = guardedWorkspaceInvocation('git', safe.args, capture.managed.identity);
         return execFileSync(invocation.command, invocation.args, { cwd: capture.lane.worktreePath!,
-          encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment() }).trim();
+          encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'], env: safe.env }).trim();
       };
       if (git(['rev-parse', 'HEAD', 'HEAD^{tree}']) !== `${facts.revision}\n${facts.treeSha}`
         || git(['status', '--porcelain', '--untracked-files=normal']) !== '') {

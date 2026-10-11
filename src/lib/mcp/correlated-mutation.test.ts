@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pollCorrelatedMcpMutation } from './correlated-mutation';
+import { O8ApiError } from './api-error';
 
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -14,6 +15,23 @@ afterEach(() => {
 });
 
 describe('pollCorrelatedMcpMutation', () => {
+  it('keeps the same correlation body when a typed network error permits retry', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn()
+      .mockRejectedValueOnce(new O8ApiError(null, 'o8 API error (network)'))
+      .mockResolvedValueOnce(response(200, { ok: true, result: { completed: true } }));
+    const receipt = pollCorrelatedMcpMutation({
+      body: { packetId: 'packet-network' },
+      correlationField: 'clientMutationId',
+      send,
+    });
+    const assertion = expect(receipt).resolves.toMatchObject({ ok: true });
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0]).toBe(send.mock.calls[1]?.[0]);
+  });
+
   it.each(['clientMutationId', 'idempotencyKey'] as const)(
     'reuses the exact %s body through transport ambiguity and HTTP 202',
     async (correlationField) => {

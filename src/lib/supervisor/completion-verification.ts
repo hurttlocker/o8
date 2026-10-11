@@ -1,3 +1,4 @@
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -82,7 +83,8 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
 
 export async function runCompletionVerification(
   cwd: string,
-  baseRef = 'main',
+  baseRef: string,
+  repoPath: string,
 ): Promise<CompletionVerificationResult> {
   const typecheck = await runCompletionTypecheck(cwd);
   if (!typecheck.ok) {
@@ -93,7 +95,7 @@ export async function runCompletionVerification(
     };
   }
 
-  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef);
+  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef, repoPath);
   const ruleCheck = await runRuleCheck(cwd, comparisonRef);
   if (!ruleCheck.ok) {
     return {
@@ -106,16 +108,13 @@ export async function runCompletionVerification(
   return { ok: true, kind: 'typecheck', output: '' };
 }
 
-async function resolveCompletionComparisonRef(cwd: string, baseRef: string): Promise<string> {
+async function resolveCompletionComparisonRef(cwd: string, baseRef: string, repoPath: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
-    const resolution = await resolvePacketDiffBase(cwd, baseRef, stdout.trim());
+    const { stdout } = await laneGit(cwd, repoPath, ['rev-parse', 'HEAD'], { maxBuffer: COMMAND_MAX_BUFFER });
+    const resolution = await resolvePacketDiffBase(cwd, baseRef, stdout.trim(), undefined, (args) => laneGit(cwd, repoPath, args));
     return resolution.mergeBase ?? resolution.comparisonRef;
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     console.warn(`[completion-verification] Could not refresh ${baseRef}; using the recorded base ref.`, error);
     return baseRef;
   }
@@ -139,12 +138,8 @@ function normalizeAutoCommitMessage(message?: string | null): string {
   return subject.includes('[via-o8]') ? subject : `${subject} [via-o8]`;
 }
 
-export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: string | null): Promise<boolean> {
-  const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
-    windowsHide: true,
-    cwd,
-    maxBuffer: COMMAND_MAX_BUFFER,
-  });
+export async function autoCommitCompletionWorktree(cwd: string, repoPath: string, commitMessage?: string | null): Promise<boolean> {
+  const { stdout: porcelain } = await laneGit(cwd, repoPath, ['status', '--porcelain'], { maxBuffer: COMMAND_MAX_BUFFER });
   if (!porcelain.trim()) {
     return false;
   }
@@ -155,45 +150,27 @@ export async function autoCommitCompletionWorktree(cwd: string, commitMessage?: 
   // stage everything and then UNSTAGE o8-injected artifacts with `git reset`:
   // the safety-hook `.claude/settings.json` (otherwise blows the diff-budget merge
   // gate) and the `node_modules` symlink (otherwise pollutes the target repo's main).
-  await execFileAsync('git', ['add', '-A', '--', '.'], {
-    windowsHide: true,
-    cwd,
-    maxBuffer: COMMAND_MAX_BUFFER,
-  });
-  await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
-    windowsHide: true,
-    cwd,
-    maxBuffer: COMMAND_MAX_BUFFER,
-  });
+  await laneGit(cwd, repoPath, ['add', '-A', '--', '.'], { maxBuffer: COMMAND_MAX_BUFFER });
+  await laneGit(cwd, repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], { maxBuffer: COMMAND_MAX_BUFFER });
   // If only o8-injected artifacts were dirty, nothing real remains to commit.
   try {
-    await execFileAsync('git', ['diff', '--cached', '--quiet'], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
+    await laneGit(cwd, repoPath, ['diff', '--cached', '--quiet'], { maxBuffer: COMMAND_MAX_BUFFER });
     return false; // exit 0 => no staged changes left after unstaging injected files
-  } catch {
+  } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     // non-zero exit => staged changes exist, proceed to commit
   }
-  await execFileAsync('git', ['commit', '--no-verify', '-m', normalizeAutoCommitMessage(commitMessage)], {
-    windowsHide: true,
-    cwd,
-    maxBuffer: COMMAND_MAX_BUFFER,
-  });
+  await laneGit(cwd, repoPath, ['commit', '--no-verify', '-m', normalizeAutoCommitMessage(commitMessage)], { maxBuffer: COMMAND_MAX_BUFFER });
   return true;
 }
 
-export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main'): Promise<boolean> {
-  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef);
+export async function hasReviewableCompletionDiff(cwd: string, baseRef: string, repoPath: string): Promise<boolean> {
+  const comparisonRef = await resolveCompletionComparisonRef(cwd, baseRef, repoPath);
   try {
-    await execFileAsync('git', ['diff', '--quiet', `${comparisonRef}...HEAD`], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
+    await laneGit(cwd, repoPath, ['diff', '--quiet', `${comparisonRef}...HEAD`], { maxBuffer: COMMAND_MAX_BUFFER });
     return false;
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     const status = (error as { status?: number | string | null; code?: number | string | null }).status
       ?? (error as { code?: number | string | null }).code;
     if (status === 1) {
@@ -202,13 +179,10 @@ export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main')
   }
 
   try {
-    await execFileAsync('git', ['diff', '--quiet', 'HEAD~1..HEAD'], {
-      windowsHide: true,
-      cwd,
-      maxBuffer: COMMAND_MAX_BUFFER,
-    });
+    await laneGit(cwd, repoPath, ['diff', '--quiet', 'HEAD~1..HEAD'], { maxBuffer: COMMAND_MAX_BUFFER });
     return false;
   } catch (error) {
+    if (error instanceof LaneGitMetadataError) throw error;
     const status = (error as { status?: number | string | null; code?: number | string | null }).status
       ?? (error as { code?: number | string | null }).code;
     return status === 1;

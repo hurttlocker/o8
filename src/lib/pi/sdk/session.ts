@@ -6,7 +6,7 @@ import { createPiApproval } from './approval';
 import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
-import { createManagedPiTransport, PI_ALLOWANCE_EXHAUSTED_MESSAGE, type PiModelTransport } from './transport';
+import { createManagedPiTransport, isPiAllowanceMessage, type PiModelTransport } from './transport';
 
 export { requirePiNode, requirePiPlatform } from './platform';
 
@@ -28,6 +28,11 @@ export interface PiSdkSessionOptions {
   approve?: PiApproval;
   /** Checked inside the host-wide lock before every write and command, whatever approval or policy said. */
   authorize?: PiAuthority;
+  /**
+   * Lane rules (#3385): every command runs confined (no network, writes only in
+   * the workspace and a private temp dir), or needs inbox approval where it cannot be.
+   */
+  confineCommands?: boolean;
   onEvent?: (event: Record<string, unknown>) => void;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -41,6 +46,9 @@ export interface PiSdkSessionOptions {
   /** Offer and allow only `read_file` of the file and command tools. */
   readOnly?: boolean;
 }
+/** The largest prompt one Pi run accepts. */
+export const PI_PROMPT_MAX_BYTES = 50_000;
+
 /** `errorMessage` is o8's own failure text; anything else becomes a generic failure. */
 export interface PiRunResult { text?: string; stopReason?: string; errorMessage?: string; messageCount: number }
 
@@ -48,7 +56,7 @@ const PI_FAILURE_TEXT = /^(?:Stopped|Managed inference (?:unavailable|failed|rej
 // Pi core turns internal exceptions (paths, persistence errors) into assistant
 // errorMessage text, so only o8's own failure messages leave the session.
 function o8FailureText(message: unknown): string {
-  return typeof message === 'string' && (message === PI_ALLOWANCE_EXHAUSTED_MESSAGE || PI_FAILURE_TEXT.test(message))
+  return typeof message === 'string' && (isPiAllowanceMessage(message) || PI_FAILURE_TEXT.test(message))
     ? message : 'Pi run failed';
 }
 
@@ -82,7 +90,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     throw new Error('Invalid system prompt');
   }
   let surfaceId = '';
-  const approve: PiApproval = options.approve ?? ((call, signal) => createPiApproval(surfaceId, root)(call, signal));
+  const inbox: PiApproval = (call, signal) => createPiApproval(surfaceId, root)(call, signal);
+  const approve: PiApproval = options.approve ?? inbox;
+  const confine = options.confineCommands ? { inbox } : undefined;
   const transport = options.transport ?? createManagedPiTransport({ model: options.model });
   const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,
@@ -118,7 +128,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       const turn = toolTail.then(() => hostTool
         ? (signal.throwIfAborted(), hostTool.execute(structuredClone(args as Record<string, unknown>), signal))
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
-          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize }));
+          { timeoutMs: options.commandTimeoutMs, authorize: options.authorize, confine }));
       toolTail = turn.catch(() => {});
       return turn;
     }
@@ -159,7 +169,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     get running() { return peer.running; },
     async prompt(message: string): Promise<PiRunResult> {
       if (closed || run) throw new Error('Session is closed or busy');
-      if (!message.trim() || Buffer.byteLength(message) > 50_000) throw new Error('Invalid prompt');
+      if (!message.trim() || Buffer.byteLength(message) > PI_PROMPT_MAX_BYTES) throw new Error('Invalid prompt');
       run = new AbortController(); modelCalls = 0; toolCalls = 0; settled = false;
       const timeoutMs = options.runTimeoutMs ?? 120_000;
       const timeout = setTimeout(() => {

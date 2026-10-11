@@ -20,7 +20,7 @@ import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinki
 import {
   computeCost,
   isSupportedProvider,
-  OPERATOR_FREE_OPENROUTER_MODELS,
+  OPERATOR_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
   OPERATOR_GEMINI_ROLLBACK_MODEL,
   PROVIDERS,
@@ -412,12 +412,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   // o8 Operator — the branded zero-setup model, plan-gated (Q ruling
-  // 2026-07-12): founders/paid auto-ride Gemini Flash ("High"); the free plan
-  // auto-rides the $0 OpenRouter chain ("Low" — nemotron won the bake-off,
-  // gpt-oss-120b:free is the safety net, so o8 ALWAYS has a model). The tier
+  // 2026-07-12): with a local Gemini key, founders/paid auto-ride Gemini Flash
+  // ("High"); otherwise every plan rides the OpenAI-compatible chain: the managed
+  // text model, then the $0 model, so o8 ALWAYS has a model. The tier
   // arrives as thinkingEffort but is SERVER-ENFORCED: a free client asking for
   // high still gets the free chain (fail-closed). Founders draw no metered
   // usage; the abuse limiter below guards the rail against runaway loops.
+  // Text only (#3408): the composer's o8 choice runs on the built-in Pi agent,
+  // and this rail is its fallback where Pi cannot start. It never attaches tools.
   if (provider === 'operator') {
     const abuseError = checkOperatorAbuseLimit();
     if (abuseError) return abuseError;
@@ -435,15 +437,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const wantsLow = requestedThinkingEffort === 'low';
     let geminiQuotaExhausted = false;
 
-    // o8-model file editing (Composer parity). RESTRICTED tool subset — file
-    // ops only, NO shell/github (an adversarial review found a github `pr merge`
-    // path). Tools attach only when the caller asked for them AND a real repo
-    // resolved, so writes never target the app's own cwd.
-    const operatorToolNames = ['read_file', 'create_file', 'edit_file'];
-    const operatorToolsAllowed = !disableTools && repoResolved;
-    const operatorDisableTools = !operatorToolsAllowed;
-    const operatorScopedRepoRoot = operatorToolsAllowed ? effectiveRepoRoot : null;
-
     if (paidPlan && !wantsLow && geminiKey) {
       // Primary then rollback, BOTH through Gemini (Q ruling 2026-07-13):
       // the primary is a preview id Google can re-point or retire, so any
@@ -454,13 +447,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         const geminiResponse = await createGoogleToolResponseStream({
           apiKey: geminiKey,
           auth,
-          disableTools: operatorDisableTools,
+          disableTools: true,
           lastUserContent: lastUserMsg?.content,
           messages,
           model: geminiModel,
-          scopedRepoRoot: operatorScopedRepoRoot,
+          scopedRepoRoot: null,
           tabId,
-          toolNames: operatorToolNames,
         });
         if (geminiResponse.ok) return geminiResponse;
         lastGeminiResponse = geminiResponse;
@@ -478,7 +470,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // OpenRouter and the managed proxy retain the two-model fallback chain.
     if (operatorEndpoint || openRouterKey) {
       let lastFailure: Response | null = null;
-      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_FREE_OPENROUTER_MODELS;
+      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_OPENROUTER_MODELS;
       for (const freeModel of operatorModels) {
         const response = await streamOpenRouterFallback({
           apiKey: openRouterKey ?? '',
@@ -486,11 +478,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           messages,
           model: freeModel,
           auth,
-          // File-editing tools for free + founders-low (Composer parity). The
-          // fallback filters to file ops only (no shell/github) and sandboxes
-          // to the repo — same gate as the Gemini rail.
-          enableTools: operatorToolsAllowed,
-          scopedRepoRoot: operatorScopedRepoRoot,
           // Degradation banner only for a founder whose Gemini quota died —
           // the free plan rides this chain by design, no banner.
           notice: geminiQuotaExhausted
@@ -516,13 +503,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       return createGoogleToolResponseStream({
         apiKey: geminiKey,
         auth,
-        disableTools: operatorDisableTools,
+        disableTools: true,
         lastUserContent: lastUserMsg?.content,
         messages,
         model: OPERATOR_GEMINI_ROLLBACK_MODEL,
-        scopedRepoRoot: operatorScopedRepoRoot,
+        scopedRepoRoot: null,
         tabId,
-        toolNames: operatorToolNames,
       });
     }
 

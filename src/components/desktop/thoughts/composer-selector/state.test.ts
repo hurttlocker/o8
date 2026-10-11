@@ -143,7 +143,7 @@ describe('composer selector state', () => {
     expect(resolved.effort).toBe('low');
     expect(resolved.effortOptions).toEqual(['low']);
     expect(resolved.lockedEffortOptions).toEqual([]);
-    expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
+    expect(composerEffortConsequence('o8', 'low')).toBe('Low · managed model');
     expect(resolved.effortClampedFrom).toBe('high');
   });
 
@@ -179,6 +179,7 @@ describe('composer selector state', () => {
     expect(providerMarkForLead('opencode', 'google/gemini-3-pro')).toBe('gemini');
     expect(providerMarkForRuntime('claude-code')).toBe('anthropic');
     expect(providerMarkForRuntime('deepseek-harness')).toBe('deepseek');
+    expect(providerMarkForRuntime('hermes')).toBe('terminal');
   });
 
   it('resolves in-session over thread over operator default', () => {

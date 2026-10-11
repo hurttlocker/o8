@@ -7,6 +7,7 @@ import { listApprovalsForContext } from '@/lib/approvals/store';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { readLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { readHeadSha } from '@/lib/lane/head-sha-lock';
+import { laneGit } from '@/lib/lane/lane-git';
 import { getLaneSpokenDiffFacts, spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
 import { getLane, getLaneEvents, listLanes } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
@@ -318,7 +319,14 @@ async function buildWorkspace(
   worktreePath: string,
   lane: Lane | null,
 ): Promise<HandoffPacket['workspace']> {
-  const review = await getRuntimeRepoReview(worktreePath);
+  let review;
+  try {
+    review = await getRuntimeRepoReview(worktreePath, (args) => laneGit(worktreePath, repoPath, args));
+  } catch {
+    // Untrusted metadata or unreadable source yields no descriptive workspace
+    // either. Never fall back to a raw Git subprocess before evidence capture.
+    return null;
+  }
   if (!review.branch || !review.head) return null;
   return {
     repoPath,
@@ -363,7 +371,7 @@ async function captureWorkspaceEvidence(lane: Lane): Promise<HandoffWorkspaceEvi
     const facts = await getLaneSpokenDiffFacts(lane, { pinnedCreationBaseCommit });
     // The existing helper checks diff/tree consistency. Close its final HEAD
     // window too; a moving snapshot is unavailable, never asserted current.
-    if (await readHeadSha(lane.worktreePath || lane.repoPath) !== facts.headSha) return null;
+    if (await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath) !== facts.headSha) return null;
     return {
       laneId: lane.id,
       headSha: facts.headSha,
