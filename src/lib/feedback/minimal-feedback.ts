@@ -26,8 +26,6 @@ export async function sendMinimalFeedback(
   const reportId = newReportId();
   const selectedMetadata = body.includeMetadata === true ? metadata : undefined;
   const fields = [
-    // The existing relay preserves this contact field; unknown field names are dropped.
-    ...(email ? [{ name: 'Reported by', value: `Reply email (provided): ${email}`, inline: true }] : []),
     ...(selectedMetadata ? [
       { name: 'Version', value: selectedMetadata.version, inline: true },
       { name: 'OS', value: selectedMetadata.os, inline: true },
@@ -39,7 +37,8 @@ export async function sendMinimalFeedback(
       title: `[REQUEST] ${reportId} · ${reportTitle(message)}`,
       description: message,
       fields,
-      footer: { text: `o8 · report ${reportId} · private intake` },
+      // Keep private reply contact out of the attribution field used by public fix notices.
+      footer: { text: `o8 · report ${reportId} · private intake${email ? ` · Reply email: ${email}` : ''}` },
     }],
   }, reportId);
   if (!posted.ok) return { ...posted, status: 502 };

@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @ts-expect-error — plain .mjs operations script, no types
+import { parseReportEmbed } from '../scripts/sync-reports.mjs';
 import type { CrashRecord } from '@/lib/telemetry/crash-store';
 
 const crashRecords = vi.hoisted(() => ({ current: [] as CrashRecord[] }));
@@ -170,10 +172,13 @@ describe('text-only feedback through POST /api/feedback/report', () => {
     });
     expect(res.status).toBe(200);
     const payload = captured.json as { embeds: Array<{ fields: DiscordEmbedField[] }> };
-    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Reported by', 'Version', 'OS']);
-    expect(payload.embeds[0].fields[0].value).toBe('Reply email (provided): reader@example.test');
-    expect(payload.embeds[0].fields[1].value).toMatch(/^\d+\.\d+\.\d+/);
-    expect(payload.embeds[0].fields[2].value).toBeTruthy();
+    expect(payload.embeds[0].fields.map((field) => field.name)).toEqual(['Version', 'OS']);
+    expect(payload.embeds[0].fields[0].value).toMatch(/^\d+\.\d+\.\d+/);
+    expect(payload.embeds[0].fields[1].value).toBeTruthy();
+    expect(captured.json).toMatchObject({ embeds: [{ footer: { text: expect.stringContaining('Reply email: reader@example.test') } }] });
+    const synced = parseReportEmbed({ ...(captured.json as object), timestamp: new Date().toISOString() });
+    expect(synced).toMatchObject({ reporter: null });
+    expect(JSON.stringify(synced)).not.toContain('reader@example.test');
     expect(JSON.stringify(payload)).not.toContain('injected-');
     expect(ledger.written[0]).toMatchObject({ reporter: null });
     expect(JSON.stringify(ledger.written)).not.toContain('reader@example.test');
@@ -187,7 +192,8 @@ describe('text-only feedback through POST /api/feedback/report', () => {
     expect(res.status).toBe(200);
     expect(captured.json).toMatchObject({ embeds: [{
       description: message,
-      fields: [{ name: 'Reported by', value: `Reply email (provided): ${email}`, inline: true }],
+      fields: [],
+      footer: { text: expect.stringContaining(`Reply email: ${email}`) },
     }] });
   });
 
