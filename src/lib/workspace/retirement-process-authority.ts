@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 
 import { exactWorkspaceOwningLanes } from '@/lib/lane/workspace-ownership-query';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
@@ -36,7 +37,10 @@ export async function assertManagedRetirementQuiescence(input: {
   identity: WorktreeMaterializationIdentity;
   capturedPurge?: CapturedPurgeProcessWitness;
 }): Promise<{ repositoryUuid: string | null; packetId: string | null; laneId: string | null; sessionKey: string | null }> {
-  const sourcePath = path.resolve(input.sourcePath);
+  // The source leaf may already be renamed into an exact retirement claim.
+  // Canonicalize its still-owned parent so configured aliases retain the same
+  // namespace authority before and after rename without following the leaf.
+  const sourcePath = path.join(await realpath(path.dirname(input.sourcePath)), path.basename(input.sourcePath));
   const metadata = (await readWorktreeMetaSnapshot(input.repositoryPath))[input.worktreeId];
   if (!metadata || metadata.claudeManaged || metadata.status !== 'ready'
     || metadata.materializationIdentity?.canonicalPath !== sourcePath
@@ -46,7 +50,7 @@ export async function assertManagedRetirementQuiescence(input: {
     || path.join(metadata.materializationParentIdentity.canonicalPath, input.worktreeId) !== sourcePath) {
     throw new Error('Retirement has no exact ready manager process authority.');
   }
-  const lanes = await owningLanes(input.repositoryPath, sourcePath);
+  const lanes = await owningLanes(input.repositoryPath, input.sourcePath);
   if (lanes.length === 0 && !metadata.sessionKey) {
     const allowed = input.capturedPurge
       ? (await probeLiveProcessInside(input.candidatePath, {
@@ -69,17 +73,22 @@ export async function assertManagedRetirementQuiescence(input: {
   await import('@/lib/runtimes');
   const lifecycle = getOwnedSessionLifecycle(sessionKey);
   const receipt = await lifecycle?.getWorkspaceBinding?.(sessionKey);
-  if (!receipt || receipt.surfaceId !== sessionKey || receipt.sessionState !== 'active'
+  if (!receipt || receipt.surfaceId !== sessionKey || (receipt.sessionState !== 'active' && receipt.sessionState !== 'archived')
     || receipt.binding.packetId !== lane.packetId
     || receipt.binding.logicalWorkspaceId !== `packet:${lane.packetId}`
     || (receipt.binding.repositoryUuid !== null && receipt.binding.repositoryUuid !== repo.id)
-    || path.resolve(receipt.binding.cwd) !== sourcePath) {
-    throw new Error('Retirement owned-session binding is missing, archived, or belongs to another workspace.');
+    || path.join(await realpath(path.dirname(receipt.binding.cwd)), path.basename(receipt.binding.cwd)) !== sourcePath) {
+    throw new Error('Retirement owned-session binding is missing or belongs to another workspace.');
   }
-  const process = await probeOwnedSessionProcessQuiescence(sessionKey, input.candidatePath,
-    input.capturedPurge ? {
+  // Reset archives the owned session before workspace removal to prevent discovery
+  // from relaunching it. The archived binding remains evidence for retirement only;
+  // the complete retained-run ledger and every native process primitive still apply.
+  const process = await probeOwnedSessionProcessQuiescence(sessionKey, input.candidatePath, {
+    allowArchivedRetirement: true,
+    ...(input.capturedPurge ? {
       readCwdSnapshot: () => readCapturedPurgeCwdSnapshot(input.capturedPurge!, input.candidatePath),
-    } : {});
+    } : {}),
+  });
   if (process.state !== 'quiescent') {
     throw new Error(`Retirement owned-workspace process truth is ${process.state}.`);
   }

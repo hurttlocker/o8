@@ -18,6 +18,8 @@ async function fixture() {
   const root = await createRetainedGeneratedOutputFixture('o8-generated-retirement-');
   const repo = path.join(root, 'repo'); const data = path.join(root, 'data');
   await mkdir(repo); await mkdir(data, { mode: 0o700 });
+  const probes = path.join(root, 'native-cwd-probes'); await mkdir(probes, { mode: 0o700 });
+  const observer = pathToFileURL(path.join(source, 'tests/generated-output-native-cwd-observer.mjs')).href;
   // Legacy checkout: the lifecycle marker and claim have no new ignore rules.
   await writeFile(path.join(repo, '.gitignore'), '.next\nnode_modules\n');
   await writeFile(path.join(repo, 'package.json'), '{"private":true}\n');
@@ -25,7 +27,9 @@ async function fixture() {
     ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
       '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'fixture']]) await exec('git', args, { cwd: repo });
   const env = { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
-    CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db'), TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
+    CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db'), TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json'),
+    O8_TEST_NATIVE_CWD_PROBE_ROOT: probes,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${observer}`].filter(Boolean).join(' ') };
   let commandIndex = 0;
   const invoke = async (args: string[], commandEnv: NodeJS.ProcessEnv = env) => {
     const index = ++commandIndex;

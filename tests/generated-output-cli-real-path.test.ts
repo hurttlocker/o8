@@ -72,6 +72,63 @@ async function fixture() {
   return { root, repo, data, env, cold, created, workspace, cli };
 }
 
+it('refuses unsupported managed execve before output reservation while ordinary checkouts still run', async () => {
+  const input = await fixture();
+  const marker = path.join(input.root, 'producer-ran');
+  const result = await input.cold(`
+    const fs = await import('node:fs');
+    const ns = await import(${JSON.stringify(pathToFileURL(path.join(source, 'src/lib/workspace/generated-output-producer.ts')).href)});
+    const database = await import(${JSON.stringify(pathToFileURL(path.join(source, 'src/lib/db/index.ts')).href)});
+    const { runGeneratedOutputProducer } = ns.default ?? ns;
+    const { getSqlite } = database.default ?? database;
+    Object.defineProperty(process, 'execve', { value: undefined });
+    let refused = '';
+    let managedOperationRan = false;
+    try {
+      await runGeneratedOutputProducer({ workspacePath: ${JSON.stringify(input.workspace)}, mode: 'build',
+        operation: async () => { managedOperationRan = true; return 0; } });
+    } catch (error) { refused = error.message; }
+    const unmanagedCode = await runGeneratedOutputProducer({ workspacePath: ${JSON.stringify(input.repo)}, mode: 'build',
+      operation: run => run(process.execPath, ['-e', ${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'native ordinary producer');`)}]) });
+    console.log('O8_GENERATED_RESULT ' + JSON.stringify({ refused, managedOperationRan, unmanagedCode,
+      outputExists: fs.existsSync(${JSON.stringify(path.join(input.workspace, '.next'))}),
+      reservations: getSqlite().prepare('SELECT COUNT(*) AS count FROM workspace_generated_outputs').get().count }));
+  `, 60_000) as { refused: string; managedOperationRan: boolean; unmanagedCode: number;
+    outputExists: boolean; reservations: number };
+  expect(result.refused).toContain('Node.js 22.15+ with process.execve');
+  expect(result).toMatchObject({ managedOperationRan: false, unmanagedCode: 0, outputExists: false, reservations: 0 });
+  expect(await readFile(marker, 'utf8')).toBe('native ordinary producer');
+}, 120_000);
+
+it.each(['SIGINT', 'SIGTERM'] as const)('closes managed child admission when %s arrives before spawn', async signal => {
+  const input = await fixture();
+  const marker = path.join(input.root, 'cancelled-producer-ran');
+  const result = await input.cold(`
+    const fs = await import('node:fs');
+    const ns = await import(${JSON.stringify(pathToFileURL(path.join(source, 'src/lib/workspace/generated-output-producer.ts')).href)});
+    const database = await import(${JSON.stringify(pathToFileURL(path.join(source, 'src/lib/db/index.ts')).href)});
+    const { runGeneratedOutputProducer } = ns.default ?? ns;
+    const { getSqlite } = database.default ?? database;
+    let refused = '';
+    try {
+      await runGeneratedOutputProducer({ workspacePath: ${JSON.stringify(input.workspace)}, mode: 'build', operation: async run => {
+        await new Promise((resolve, reject) => {
+          const deadline = setTimeout(() => reject(new Error('Native cancellation signal was not received')), 2_000);
+          process.once(${JSON.stringify(signal)}, () => { clearTimeout(deadline); resolve(); });
+          process.kill(process.pid, ${JSON.stringify(signal)});
+        });
+        return run(process.execPath, ['-e', ${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'cancelled native producer');`)}]);
+      } });
+    } catch (error) { refused = error.message; }
+    const row = getSqlite().prepare('SELECT payload_json FROM workspace_generated_outputs').get();
+    console.log('O8_GENERATED_RESULT ' + JSON.stringify({ refused, markerExists: fs.existsSync(${JSON.stringify(marker)}),
+      resource: JSON.parse(row.payload_json) }));
+  `, 60_000) as { refused: string; markerExists: boolean; resource: { state: string; attempt: { children: unknown[] } } };
+  expect(result.refused).toContain('admission is closed');
+  expect(result.markerExists).toBe(false);
+  expect(result.resource).toMatchObject({ state: 'failed-held', attempt: { children: [] } });
+}, 120_000);
+
 it('persists ownership before a fast producer, verifies CLI bank/recovery, and cold-replays without the workspace', async () => {
   const input = await fixture();
   const next = path.join(input.workspace, 'node_modules/next/dist/bin');

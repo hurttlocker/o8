@@ -90,6 +90,9 @@ export async function runGeneratedOutputProducer(input: {
   const workspace = await captureWorktreeMaterializationIdentity(input.workspacePath);
   const containingOwner = await generatedOutputOwner(workspace);
   if (!containingOwner) return runUnmanagedProducer(input);
+  if (typeof Reflect.get(process, 'execve') !== 'function') {
+    throw new Error(`Managed generated-output producers require Node.js 22.15+ with process.execve on macOS or Linux; ${process.version} on ${process.platform} cannot preserve native producer identity.`);
+  }
   return withGeneratedOutputExclusion(workspace, containingOwner, async () => {
     const freshOwner = await generatedOutputOwner(workspace);
     if (JSON.stringify(freshOwner) !== JSON.stringify(containingOwner)) throw new Error('Generated-output owner changed before reservation.');
@@ -108,7 +111,7 @@ export async function runGeneratedOutputProducer(input: {
     let activeRun: Promise<number> | null = null;
     let abortRequested = false;
     let requestedStop: NodeJS.Signals | null = null;
-    const forward = (signal: NodeJS.Signals) => { requestedStop = signal; activeChild?.kill(signal); };
+    const forward = (signal: NodeJS.Signals) => { abortRequested = true; requestedStop = signal; activeChild?.kill(signal); };
     const interrupt = () => forward('SIGINT');
     const terminate = () => forward('SIGTERM');
     process.on('SIGINT', interrupt);

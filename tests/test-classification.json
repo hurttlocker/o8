@@ -2264,6 +2264,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "process-signal",
         "real-path",
         "worktree-api"
       ]
