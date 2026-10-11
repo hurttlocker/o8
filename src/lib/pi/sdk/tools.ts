@@ -5,6 +5,8 @@ import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
 import { ConfinementUnavailable } from '@/lib/sandbox/confine';
 
+import type { PiContinuityGuard } from './continuity';
+
 export const PI_SDK_TOOLS = [
   { name: 'read_file', description: 'Read a UTF-8 file in the selected workspace.', parameters: {
     type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false,
@@ -28,6 +30,7 @@ export type PiAuthority = (call: PiToolCall) => Promise<boolean>;
 export interface PiToolOptions extends PiCommandOptions {
   /** When set, a false result refuses the call, whatever approval or policy said. Host-set only. */
   authorize?: PiAuthority;
+  continuity?: PiContinuityGuard;
   /**
    * Lane rules (#3385): every command runs confined, with no network and writes
    * only in the workspace and a private temp dir. Where confinement is
@@ -89,7 +92,7 @@ async function requireAuthority(call: PiToolCall, authorize: PiAuthority | undef
 }
 
 async function executePiCommand(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  { authorize, confine, ...options }: PiToolOptions) {
+  { authorize, confine, continuity, ...options }: PiToolOptions) {
   const args = structuredClone(call.args);
   const command = args.command;
   if (typeof command !== 'string' || !command.trim() || command.includes('\0')
@@ -108,6 +111,8 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
   // The launcher checks the physical working directory at spawn time.
   const run = (confined: boolean) => withPiExclusive(async () => {
     await requireAuthority(call, authorize);
+    await continuity?.assertCurrent(root, { name: 'run_command', command }, signal);
+    if (continuity) await requireAuthority(call, authorize);
     return runPiCommand(root, command, signal, { ...options, confined });
   }, signal);
   let text: string;
@@ -143,7 +148,11 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
     });
     const before = opened ? await snapshot(root, opened) : null;
     if (call.name === 'read_file') {
+      const readPath = relative(root, opened!.realPath);
+      await opened!.handle.close();
+      opened = null;
       signal.throwIfAborted();
+      options.continuity?.observeRead(root, readPath, before!, signal);
       return { content: [{ type: 'text' as const, text: before!.toString('utf8') }] };
     }
     if (typeof args.content !== 'string' || Buffer.byteLength(args.content) > MAX_BYTES) {
@@ -170,6 +179,12 @@ export async function executePiTool(root: string, call: PiToolCall, approve: PiA
           || !before!.equals(await snapshot(root, opened))) throw new Error('File changed during approval');
       }
       await requireAuthority(call, options.authorize);
+      signal.throwIfAborted();
+      // Recheck after approval, lock wait and target checks. This closes those
+      // host scheduling gaps, not arbitrary external filesystem mutation after
+      // inspection. The native commit still enforces its own target invariants.
+      await options.continuity?.assertCurrent(root, { name: 'write_file', path }, signal);
+      if (options.continuity) await requireAuthority(call, options.authorize);
       signal.throwIfAborted();
       await commitPiWrite(root, path, parent, opened, before, content, signal);
       return { content: [{ type: 'text' as const, text: `Wrote ${path}` }] };
