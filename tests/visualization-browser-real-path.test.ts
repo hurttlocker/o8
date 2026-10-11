@@ -31,6 +31,11 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
 
   async function mount(html: string, state: Record<string, unknown> = {}) {
     await page.goto(base);
+    // Attach inspection to the opaque outer target before it creates its nested content frame.
+    await page.locator('#visual').evaluate(frame => {
+      (frame as HTMLIFrameElement).srcdoc = '<p data-fixture-ready>Ready</p>';
+    });
+    await page.frameLocator('#visual').locator('[data-fixture-ready]').waitFor();
     probes = [];
     await page.evaluate(srcdoc => {
       const frame = document.querySelector<HTMLIFrameElement>('#visual')!;
@@ -41,6 +46,7 @@ describe.runIf(Boolean(process.env.O8_VISUALIZATION_BROWSER))('visualization san
       });
     }, await visualizationSrcdoc(html, 'fixture', defaultVisualizationTheme(), state));
     await page.waitForFunction(() => (window as unknown as { heights: number[] }).heights.length > 0);
+    await expect.poll(() => page.frames().some(frame => frame.parentFrame()?.parentFrame() === page.mainFrame())).toBe(true);
     const frame = page.frames().find(frame => frame.parentFrame()?.parentFrame() === page.mainFrame());
     if (!frame) throw new Error(`No content frame: ${JSON.stringify(page.frames().map(item => ({ url: item.url(), parent: item.parentFrame()?.url(), grandparent: item.parentFrame()?.parentFrame()?.url() })))}`);
     return frame;
