@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { apiError } from '@/lib/mcp/api-error';
 import {
   actionReceiptIsInProgress,
   CorrelatedActionUnsettledError,
@@ -82,7 +83,7 @@ export async function pollCorrelatedMcpMutation<
       }
     } catch (error) {
       lastError = error;
-      if (error instanceof Error && 'noRetry' in error) throw error;
+      if (error instanceof Error && 'noRetry' in error && error.noRetry === true) throw error;
     }
 
     if (Date.now() >= deadline) {
@@ -104,7 +105,7 @@ export function pollCorrelatedMcpApiMutation<
         options.requestTimeoutMs ?? 15_000,
       );
       try {
-        return await fetch(options.url, {
+        const response = await fetch(options.url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -113,6 +114,12 @@ export function pollCorrelatedMcpApiMutation<
           body: requestBody,
           signal: controller.signal,
         });
+        if (!response.ok) {
+          apiError(new URL(options.url).pathname, response.status, await response.clone().text());
+        }
+        return response;
+      } catch (error) {
+        throw apiError(new URL(options.url).pathname, null, '', error);
       } finally {
         clearTimeout(timer);
       }

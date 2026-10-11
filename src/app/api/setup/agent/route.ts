@@ -6,7 +6,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store, max-age=0' };
 function failure(error: unknown, status: number) {
-  return NextResponse.json({ ok: false, error: { code: 'setup_failed', message: error instanceof Error ? error.message : 'Setup failed.' } }, { status, headers });
+  console.error('[setup-agent] request failed:', error);
+  return NextResponse.json({ ok: false, error: { code: 'setup_failed', message: status < 500 && error instanceof Error ? error.message : 'Setup failed.' } }, { status, headers });
 }
 // The default-deny API middleware requires the operator credential on this route.
 export async function GET(request: Request) {

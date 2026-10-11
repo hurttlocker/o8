@@ -67,14 +67,21 @@ Ending a command depends on the platform:
   seccomp policy that denies them). It writes a receipt on a separate descriptor that
   the command never sees. A missing or unconfirmed receipt fails the call and
   refuses later commands and writes until o8 restarts.
-- macOS has no subreaper. The host reads the process table every 250 ms while a
-  command runs and tracks the process group and every descendant by pid and
-  start time. Reads may overlap; a result older than the last one applied is
-  dropped. Once a read shows the group empty, its number is no longer used to
-  adopt processes, because it may have been reused. The timeout, the output
-  cap, Stop and a normal exit each send TERM, then KILL on a fixed schedule. If
-  the table cannot be read, the group still gets TERM and KILL, the call fails,
-  and later commands and writes are refused until o8 restarts.
+- macOS uses the same native supervisor (#3358), with kqueue `EVFILT_PROC`
+  watches for `NOTE_FORK`, `NOTE_EXEC` and `NOTE_EXIT`. A fork event triggers
+  `proc_listchildpids` and immediate recursive registration of new descendants.
+  The initial command waits behind a pipe until its watch is installed. The
+  supervisor also watches the host's exit and TERM, INT and HUP signals.
+  Teardown sends TERM to tracked processes, waits 1.5 seconds, then sends KILL
+  for up to 5 seconds. Exit events confirm teardown. A process that exits as it
+  is registered counts as ended when kqueue refuses it with ESRCH, when
+  `kill(pid, 0)` reports ESRCH, or when it is a zombie; it can no longer fork. Setup
+  failure refuses the command before launch with a receipt. A missing helper
+  fails closed, and missing or unconfirmed receipts refuse later commands and
+  writes until restart. Lane lint and test replay use this supervisor too;
+  the `sandbox-exec` confinement prefix runs inside it, after `supervise`. A
+  source checkout that has not built the helper keeps that prefix for lane lint
+  and test replay, without descendant teardown.
 
 Pi runs tool calls from one message in parallel by default. The host runs one
 tool call at a time per session, and one command or write commit at a time
@@ -83,12 +90,12 @@ while an approved write commits. Stop ends a call that is still waiting for its
 turn without running it.
 
 Known limits: approval is the boundary, not a sandbox. An approved command can
-read anything the user can, including files under `HOME`. On macOS, tracking
-comes from process-table snapshots, so a descendant that moves to a new process
-group and outlives its parent can be missed: when it leaves and is reparented
-between two reads, when a read that saw it is dropped as older than teardown's
-read, or when a scan taken around a fork shows the group empty. A missed process
-keeps running after the tool call. On Linux, a process stuck in uninterruptible
+read anything the user can, including files under `HOME`. macOS has no
+subreaper: a parent that forks and exits before its fork event is handled can
+leave an unregistered child reparented to launchd. That child can keep running
+after the tool call, even when the receipt confirms every tracked exit.
+Signals check process start times, but macOS has no pidfd to pin signal delivery
+against reuse between that check and `kill`. On either platform, a process stuck in uninterruptible
 sleep past the 5-second KILL deadline leaves the receipt unconfirmed, which
 refuses later commands and writes. Work handed over IPC to a service outside
 the tree (systemd, an already running daemon) is not ended. After exit, the host
@@ -99,11 +106,9 @@ processes writing the same workspace.
 `tests/pi-sdk-command-real-path.test.ts` covers inbox approval and rejection,
 denial, policy block and operator allow, the working directory, a swapped root,
 the environment, timeout, the output cap (including output that fills it
-exactly), Stop, a TERM-ignoring child in its own group, a late process-table read, a
-reused group number, an unreadable process table, ordering against approved
+exactly), Stop, a TERM-ignoring child in its own group, ordering against approved
 writes in the same and another session, and Stop while waiting for the lock.
-The process-table cases run on macOS only. On Linux, the supervisor cases cover
-an orphaned TERM-ignoring child in its own session at exit, timeout and Stop,
+The supervisor cases cover an orphaned TERM-ignoring child in its own session at exit, timeout and Stop on both platforms,
 the host's death, a host that is gone before launch, and a supervisor that ends
 without a receipt.
 

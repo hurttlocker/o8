@@ -67,6 +67,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     grok: 'x',
     'prime-agent': 'terminal',
     'deepseek-harness': 'deepseek',
+    hermes: 'terminal',
   },
 } as const satisfies {
   leadModelFamilies: readonly { pattern: RegExp; mark: ComposerProviderMark }[];
@@ -96,7 +97,7 @@ export function composerEffortConsequence(
   effort: ThinkingEffort,
 ): string {
   if (backend === 'o8' && effort === 'low') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · free`;
+    return `${THINKING_EFFORT_LABELS[effort].long} · managed model`;
   }
   return THINKING_EFFORT_LABELS[effort].detail;
 }

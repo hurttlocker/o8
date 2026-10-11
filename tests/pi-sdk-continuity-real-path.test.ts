@@ -13,6 +13,22 @@ import { buildPiWriteHelper } from './helpers/pi-write-helper';
 import { byteContinuityPolicy, CONTINUITY_COMMAND } from './helpers/pi-continuity';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
+const confinement = vi.hoisted(() => ({ unavailable: false, started: 0 }));
+vi.mock('@/lib/sandbox/confine', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/sandbox/confine')>();
+  return { ...actual, confinementArgs: async (...args: Parameters<typeof actual.confinementArgs>) => {
+    if (confinement.unavailable) throw new actual.ConfinementUnavailable();
+    return actual.confinementArgs(...args);
+  } };
+});
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => {
+    if (args[1]?.[0] === 'supervise') confinement.started++;
+    return actual.spawn(...args);
+  }) as typeof actual.spawn };
+});
+
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
   provider: 'o8-managed', baseUrl: 'https://o8-host.invalid/v1', reasoning: false, input: ['text'],
@@ -21,6 +37,8 @@ const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 beforeAll(() => { buildPiWriteHelper(); }, 600_000);
 afterEach(async () => {
+  confinement.unavailable = false;
+  confinement.started = 0;
   vi.restoreAllMocks();
   await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
@@ -181,6 +199,37 @@ describe('Pi optional host continuity through real tools and worker', () => {
     if (state === 'fresh') expect(await readFile(join(f.workspace, 'sentinel.txt'), 'utf8')).toBe('ran');
     else await noAct(f);
   }, 20_000);
+
+  it.each(['approve', 'reject', 'change-source'] as const)(
+    'requires fresh inbox approval for unavailable confinement and %s before any command starts', async action => {
+      const f = await fixture(); await allowCommandWithoutApproval(f);
+      confinement.unavailable = true;
+      const approve = vi.fn(async () => true);
+      const { listApprovals } = await import('@/lib/approvals/store');
+      const { resolveApproval } = await import('@/lib/approvals/resolution');
+      const pending = runWorker(f, [command], { approve, confineCommands: true });
+      let approval!: ReturnType<typeof listApprovals>[number];
+      await vi.waitFor(() => {
+        const rows = listApprovals({ status: 'pending' }).filter(row => row.runtime === 'pi'
+          && row.command === CONTINUITY_COMMAND && row.metadata?.RepoPath === f.workspace);
+        expect(rows).toHaveLength(1); approval = rows[0];
+      }, { timeout: 10_000, interval: 50 });
+      expect(approve).not.toHaveBeenCalled();
+      expect(f.inspections).toHaveLength(1);
+      expect(confinement.started).toBe(0); await noAct(f);
+      if (action === 'change-source') await mutate(f);
+      resolveApproval(approval.id, action === 'reject' ? 'reject' : 'approve', 'desktop');
+      const log = await pending;
+      if (action === 'approve') {
+        expect(confinement.started).toBe(1);
+        expect(await readFile(join(f.workspace, 'sentinel.txt'), 'utf8')).toBe('ran');
+        expect(log).not.toContain('Host operation failed');
+      } else {
+        expect(confinement.started).toBe(0); await noAct(f);
+        expect(log).toContain('Host operation');
+      }
+      expect(f.inspections).toHaveLength(action === 'reject' ? 1 : 2);
+    }, 20_000);
 
   it('refuses a policy-waived command whose source changes while waiting for the host lock', async () => {
     const f = await fixture(); await allowCommandWithoutApproval(f);

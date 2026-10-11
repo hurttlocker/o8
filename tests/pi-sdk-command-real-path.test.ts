@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,26 +11,19 @@ import { piCommandCleanupUnconfirmed } from '@/lib/pi/sdk/command';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
-// Test-only seam: make the host's process-table read fail.
-// Test-only seam over the host's process-table reads: fail them, deliver one late,
-// or rewrite their output.
-const ps = vi.hoisted(() => ({ fail: false, delayNext: 0, transform: undefined as undefined | ((stdout: string) => string) }));
+const receipts = vi.hoisted(() => [] as string[]);
+const supervisors = vi.hoisted(() => [] as number[]);
 vi.mock('node:child_process', async importOriginal => {
   const cp = await importOriginal<typeof import('node:child_process')>();
-  return { ...cp, execFile: ((file: string, ...rest: unknown[]) => {
-    if (file !== 'ps') return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest);
-    const callback = rest.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
-    if (ps.fail) {
-      setImmediate(() => callback(new Error('synthetic process table failure'), '', ''));
-      return undefined;
+  return { ...cp, spawn: ((...args: Parameters<typeof cp.spawn>) => {
+    const child = cp.spawn(...args);
+    if (args[1]?.[0] === 'supervise') {
+      supervisors.push(child.pid!);
+      const index = receipts.push('') - 1;
+      (child.stdio[3] as NodeJS.ReadableStream | null)?.on('data', (chunk: Buffer) => { receipts[index] += chunk.toString('utf8'); });
     }
-    const delay = ps.delayNext; ps.delayNext = 0;
-    return (cp.execFile as (...args: unknown[]) => unknown)(file, ...rest.slice(0, -1),
-      (error: Error | null, stdout: string, stderr: string) => {
-        const deliver = () => callback(error, ps.transform ? ps.transform(stdout) : stdout, stderr);
-        if (delay) setTimeout(deliver, delay); else deliver();
-      });
-  }) as typeof cp.execFile };
+    return child;
+  }) as typeof cp.spawn };
 });
 
 const model: Model<'openai-completions'> = { id: 'fixture', name: 'Fixture', api: 'openai-completions',
@@ -42,7 +34,9 @@ beforeAll(() => { helperPath = buildPiWriteHelper(); }, 600_000);
 const roots: string[] = [];
 const clients: Awaited<ReturnType<typeof createPiSdkSession>>[] = [];
 afterEach(async () => {
-  vi.unstubAllEnvs(); ps.delayNext = 0; ps.transform = undefined;
+  receipts.length = 0;
+  supervisors.length = 0;
+  vi.unstubAllEnvs();
   await Promise.all(clients.splice(0).map(client => client.close()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   await rm(join(getDataDir(), 'policies.json'), { force: true });
@@ -82,7 +76,10 @@ async function client(options: Parameters<typeof createPiSdkSession>[0]) {
   const session = await createPiSdkSession(options); clients.push(session); return session;
 }
 function alive(pid: number) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try { process.kill(pid, 0); return true; } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    return false;
+  }
 }
 const TREE_PIDS = ['group.pid', 'job.pid', 'hard.pid'];
 async function pids(dir: string, names = TREE_PIDS) {
@@ -98,13 +95,37 @@ async function allEnded(dir: string, names = TREE_PIDS) {
 const TREE = `sleep 30 & echo $! > group.pid; perl -e 'setpgrp(0,0); sleep 30' & echo $! > job.pid; `
   + `sh -c 'perl -e "\\$SIG{TERM}=q(IGNORE); setpgrp(0,0); sleep 30" & echo $! > hard.pid; wait' & sleep 0.3`;
 
-// macOS ends commands with the host's process-table tracker; Linux uses the
-// native supervisor, which these seams cannot reach.
-const trackerIt = it.skipIf(process.platform === 'linux');
-const supervisorIt = it.runIf(process.platform === 'linux');
+const supervisorIt = it.runIf(process.platform === 'linux' || process.platform === 'darwin');
 let helperPath = '';
 
 describe('Pi governed command tool through the real worker', () => {
+  // The parent stays alive briefly so its fork event can be handled, then exits.
+  // The child closes the output pipes, ignores TERM and leaves the process group.
+  const MAC_ESCAPE = `perl -MPOSIX -e '$p=fork(); die unless defined $p; if ($p) { select undef, undef, undef, 0.15; exit; } $SIG{TERM}=q(IGNORE); $sid=POSIX::setsid(); open(STDOUT, q(>), q(/dev/null)); open(STDERR, q(>), q(/dev/null)); open(my $f, q(>), q(hard.pid)); print $f $$; close $f; open($f, q(>), q(hard.sid)); print $f $sid; close $f; select undef, undef, undef, 0.3; open($f, q(>), q(hard.ppid)); print $f getppid(); close $f; sleep 30'; while [ ! -s hard.ppid ]; do sleep 0.02; done`;
+  it.runIf(process.platform === 'darwin').each(['exit', 'timeout', 'Stop'] as const)(
+    'confirms macOS orphan teardown at %s through the real command tool', async mode => {
+      const paths = await fixture(); const results: string[] = [];
+      const session = await client({ ...paths, model, approve: async () => true, commandTimeoutMs: mode === 'timeout' ? 2_000 : 120_000,
+        transport: scripted([command('mac-escape', `${MAC_ESCAPE}; touch started; ${mode === 'exit' ? 'true' : 'sleep 30'}`)], results) });
+      const run = session.prompt('Run an orphaned child');
+      let hard = 0;
+      try {
+        await vi.waitFor(() => readFile(join(paths.workspace, 'started')), { timeout: 10_000, interval: 50 });
+        [hard] = await pids(paths.workspace, ['hard.pid']);
+        expect(Number(await readFile(join(paths.workspace, 'hard.sid'), 'utf8'))).toBe(hard);
+        expect(Number(await readFile(join(paths.workspace, 'hard.ppid'), 'utf8'))).toBe(1);
+        if (mode === 'Stop') await session.abort();
+        await run;
+        if (mode !== 'Stop') expect(results[0]).toContain(mode === 'exit' ? 'Exit code 0' : 'stopped after 2 seconds');
+        expect(receipts).toHaveLength(1);
+        expect(JSON.parse(receipts[0])).toMatchObject({ confirmed: true });
+        await vi.waitFor(() => expect(alive(hard)).toBe(false), { timeout: 2_000 });
+      } finally {
+        await session.abort(); await run;
+        if (hard && alive(hard)) process.kill(hard, 'SIGKILL');
+      }
+    }, 30000);
+
   it('runs an approved command in the workspace with a cleaned environment', async () => {
     const paths = await fixture(); const results: string[] = []; const approvals: PiToolCall[] = [];
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-synthetic-secret');
@@ -254,41 +275,6 @@ describe('Pi governed command tool through the real worker', () => {
     expect(await readdir(outside)).toEqual([]);
   }, 20000);
 
-  trackerIt('keeps a reparented child tracked when an older process-table read finishes late', async () => {
-    const paths = await fixture();
-    const session = await client({ ...paths, model, approve: async () => true,
-      transport: scripted([command('late', 'perl -e \'$SIG{TERM}="IGNORE"; setpgrp(0,0); sleep 30\' & echo $! > hard.pid; sleep 0.6')]) });
-    // The read taken at spawn, before the child exists, is delivered after the
-    // child was found and its parent exited.
-    ps.delayNext = 1_500;
-    await session.prompt('Run with a late read');
-    await allEnded(paths.workspace, ['hard.pid']);
-  }, 30000);
-
-  trackerIt('stops adopting by group number once the group was seen empty', async () => {
-    const paths = await fixture();
-    const victim = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' }); victim.unref();
-    try {
-      // After the command's group is empty, report an unrelated process as a
-      // member of a reused group with the same number.
-      let sawEmpty = false;
-      ps.transform = stdout => {
-        let leader: number;
-        try { leader = Number(readFileSync(join(paths.workspace, 'leader.pid'), 'utf8')); } catch { return stdout; }
-        const members = stdout.split('\n').filter(line => line.trim().split(/\s+/)[2] === String(leader));
-        if (members.length) return stdout;
-        if (!sawEmpty) { sawEmpty = true; return stdout; }
-        const started = execFileSync('ps', ['-o', 'lstart=', '-p', String(victim.pid)], { encoding: 'utf8' }).trim();
-        return `${stdout}${victim.pid} 1 ${leader} S ${started}\n`;
-      };
-      const session = await client({ ...paths, model, approve: async () => true,
-        transport: scripted([command('reuse', 'echo $$ > leader.pid; sleep 0.3')]) });
-      await session.prompt('Run then exit');
-      expect(sawEmpty).toBe(true);
-      expect(alive(victim.pid!)).toBe(true);
-    } finally { try { process.kill(victim.pid!, 'SIGKILL'); } catch { /* gone */ } }
-  }, 30000);
-
   it('lets Stop end a write that is waiting behind another session\'s command', async () => {
     const paths = await fixture();
     const runner = await client({ ...paths, model, approve: async () => true,
@@ -329,7 +315,7 @@ describe('Pi governed command tool through the real worker', () => {
     expect(alive(hard)).toBe(false);
   }
 
-  supervisorIt.each([
+  it.runIf(process.platform === 'linux').each([
     ['a normal exit', `${ESCAPE}; sleep 0.3`, {}, 'Exit code 0'],
     ['the timeout', `${ESCAPE}; sleep 30`, { commandTimeoutMs: 2_000 }, 'stopped after 2 seconds'],
   ] as const)('ends an orphaned child in its own session at %s', async (_case, text, limits, status) => {
@@ -340,7 +326,7 @@ describe('Pi governed command tool through the real worker', () => {
     await expectEndedNow(paths.workspace);
   }, 30000);
 
-  supervisorIt('ends an orphaned child in its own session on Stop', async () => {
+  it.runIf(process.platform === 'linux')('ends an orphaned child in its own session on Stop', async () => {
     const paths = await fixture();
     const session = await client({ ...paths, model, approve: async () => true,
       transport: scripted([command('escape-stop', `${ESCAPE}; touch started; sleep 30`)]) });
@@ -371,6 +357,18 @@ describe('Pi governed command tool through the real worker', () => {
     expect(await readdir(paths.workspace)).toEqual([]);
   }, 30000);
 
+  supervisorIt('refuses to run a command when the helper is missing', async () => {
+    const paths = await fixture(); const results: string[] = [];
+    vi.stubEnv('O8_PI_WRITE_BIN', join(paths.workspace, 'missing-helper'));
+    const session = await client({ ...paths, model, approve: async () => true,
+      transport: scripted([command('missing', 'touch ran')], results) });
+    await session.prompt('Run without the helper');
+    expect(results[0]).toBe('Host operation failed');
+    expect(receipts).toEqual([]);
+    expect(await readdir(paths.workspace)).toEqual([]);
+  }, 20000);
+
+  // Last: unconfirmed cleanup refuses commands and writes for the rest of the host process.
   supervisorIt('refuses later commands when the supervisor ends without a receipt', async () => {
     const paths = await fixture();
     const session = await client({ ...paths, model, approve: async () => true,
@@ -379,7 +377,7 @@ describe('Pi governed command tool through the real worker', () => {
     const run = session.prompt('Lose the supervisor');
     await vi.waitFor(() => readFile(join(paths.workspace, 'started')), { timeout: 10_000, interval: 50 });
     const [supervisor, commandPid] = await pids(paths.workspace, ['supervisor.pid', 'command.pid']);
-    expect(readFileSync(`/proc/${supervisor}/cmdline`, 'utf8').split('\0')).toContain('supervise');
+    expect(supervisor).toBe(supervisors[0]);
     process.kill(supervisor, 'SIGKILL');
     await run;
     expect(piCommandCleanupUnconfirmed()).toBe(true);
@@ -388,16 +386,5 @@ describe('Pi governed command tool through the real worker', () => {
     process.kill(-commandPid, 'SIGKILL');
   }, 30000);
 
-  // Last: an unconfirmed cleanup refuses commands and writes for the rest of the host process.
-  trackerIt('ends the group and refuses later commands and writes when the process table cannot be read', async () => {
-    const paths = await fixture();
-    const session = await client({ ...paths, model, approve: async () => true,
-      transport: scripted([command('blind', 'sleep 30 & echo $! > group.pid; echo started'),
-        { type: 'toolCall', id: 'write', name: 'write_file', arguments: { path: 'note.txt', content: 'refused' } }]) });
-    ps.fail = true;
-    try { await session.prompt('Run without a process table'); } finally { ps.fail = false; }
-    expect(piCommandCleanupUnconfirmed()).toBe(true);
-    await allEnded(paths.workspace, ['group.pid']);
-    expect(await readdir(paths.workspace)).toEqual(['group.pid']);
-  }, 30000);
+
 });

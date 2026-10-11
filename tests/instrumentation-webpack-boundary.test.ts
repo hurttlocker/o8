@@ -14,6 +14,7 @@ const bootstrapRequests = [
   '@/lib/telemetry/sentry-node',
   '@/lib/mobile/orchestrator-thread-history',
   '@/lib/search/backfill',
+  '@/lib/symon/messages-receiver/loop',
 ];
 
 interface CompilationStats {

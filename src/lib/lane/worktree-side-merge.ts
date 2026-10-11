@@ -475,7 +475,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return { ok: false, laneId: command.laneId, note: formatReviewedHeadMismatchNote(reviewedHead), reason: 'head_moved_since_review', reviewedHeadSha: reviewedHead.reviewedHeadSha, currentHeadSha: reviewedHead.currentHeadSha };
     }
 
-    const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
+    const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha, lane.repoPath);
     if (!headLock.ok) {
       setLaneStatus(command.laneId, 'reviewing', 'system', 'head_sha_drift');
       appendEvent(command.laneId, 'merge_head_drift', actor, {

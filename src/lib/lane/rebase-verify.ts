@@ -1,7 +1,7 @@
 import { resolveMergeTestReplayEnabledSync } from '@/lib/operator/defaults';
-import type { MergeCheckResult } from './preview-merge';
+import { lintPreviewCheck, withCheckNote, type MergeCheckResult } from './preview-merge';
 import { runLaneRebaseLint } from './rebase-lint';
-import { runLaneRebaseTests } from './rebase-tests';
+import { runLaneRebaseTests, UNCONFINED_TESTS_NOTE } from './rebase-tests';
 import { runLaneRebaseTypecheck } from './rebase-typecheck';
 
 export type LaneRebaseVerifyResult =
@@ -42,23 +42,22 @@ export async function runLaneRebaseVerify(input: {
   }];
 
   const lint = await runLaneRebaseLint(input);
+  const lintCheck = lintPreviewCheck(lint);
+  checks.push(lintCheck);
   if (!lint.ok) {
-    checks.push({ name: 'lint', verdict: 'fail', detail: lint.output });
-    return { ok: false, kind: 'lint', output: lint.output, checks };
+    return { ok: false, kind: 'lint', output: lintCheck.detail ?? lint.output, checks };
   }
-  checks.push({
-    name: 'lint',
-    verdict: lint.skipped ? 'skipped' : 'pass',
-    ...(lint.skipped ? { detail: lint.skipped } : lint.detail ? { detail: lint.detail } : {}),
-  });
 
   if (!mergeTestReplayEnabled()) {
     return { ok: true, checks };
   }
 
   const tests = await runLaneRebaseTests(input);
+  // Test replay has no row of its own on the merge card, so an unconfined run
+  // is said on the verification row beside it.
+  if (tests.unconfined) lintCheck.detail = withCheckNote(lintCheck.detail, UNCONFINED_TESTS_NOTE);
   if (!tests.ok) {
-    return { ok: false, kind: 'tests', output: tests.output, checks };
+    return { ok: false, kind: 'tests', output: withCheckNote(tests.output, tests.unconfined && UNCONFINED_TESTS_NOTE)!, checks };
   }
 
   return { ok: true, checks };

@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
+import { ConfinementUnavailable } from '@/lib/sandbox/confine';
 
 import type { PiContinuityGuard } from './continuity';
 
@@ -30,6 +31,13 @@ export interface PiToolOptions extends PiCommandOptions {
   /** When set, a false result refuses the call, whatever approval or policy said. Host-set only. */
   authorize?: PiAuthority;
   continuity?: PiContinuityGuard;
+  /**
+   * Lane rules (#3385): every command runs confined, with no network and writes
+   * only in the workspace and a private temp dir. Where confinement is
+   * unavailable the command needs `inbox` approval and then runs unconfined, as
+   * approved. Host-set only.
+   */
+  confine?: { inbox: PiApproval };
 }
 const MAX_BYTES = 50_000;
 
@@ -84,7 +92,7 @@ async function requireAuthority(call: PiToolCall, authorize: PiAuthority | undef
 }
 
 async function executePiCommand(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,
-  { authorize, ...options }: PiToolOptions) {
+  { authorize, confine, continuity, ...options }: PiToolOptions) {
   const args = structuredClone(call.args);
   const command = args.command;
   if (typeof command !== 'string' || !command.trim() || command.includes('\0')
@@ -101,13 +109,23 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
     throw new Error('Command was not approved');
   }
   // The launcher checks the physical working directory at spawn time.
-  return { content: [{ type: 'text' as const,
-    text: await withPiExclusive(async () => {
-      await requireAuthority(call, authorize);
-      await options.continuity?.assertCurrent(root, { name: 'run_command', command }, signal);
-      if (options.continuity) await requireAuthority(call, authorize);
-      return runPiCommand(root, command, signal, options);
-    }, signal) }] };
+  const run = (confined: boolean) => withPiExclusive(async () => {
+    await requireAuthority(call, authorize);
+    await continuity?.assertCurrent(root, { name: 'run_command', command }, signal);
+    if (continuity) await requireAuthority(call, authorize);
+    return runPiCommand(root, command, signal, { ...options, confined });
+  }, signal);
+  let text: string;
+  try {
+    text = await run(Boolean(confine));
+  } catch (error) {
+    if (!confine || !(error instanceof ConfinementUnavailable)) throw error;
+    // Nothing started. Lane rules cover only a confined command, so the operator approves this one.
+    if (!await confine.inbox({ name: call.name, args: structuredClone(args), risk: policy.risk,
+      policyRuleId: policy.ruleId }, signal)) throw new Error('Command was not approved');
+    text = await run(false);
+  }
+  return { content: [{ type: 'text' as const, text }] };
 }
 
 export async function executePiTool(root: string, call: PiToolCall, approve: PiApproval, signal: AbortSignal,

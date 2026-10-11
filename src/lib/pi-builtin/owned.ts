@@ -67,8 +67,10 @@ const RUNS_DIR = 'runs';
 /** Matches the worker script in a source checkout and in the packaged app. */
 const PROCESS_LABEL = 'pi-sdk/worker.mjs';
 const SYSTEM_PROMPT = 'You are an o8 packet worker in this workspace. Use only the declared tools: read_file, '
-  + 'write_file, and run_command, which runs a shell command at the workspace root. Follow the task\'s '
-  + 'instructions, including how to commit. Do not claim success after a denied or failed action.';
+  + 'write_file, and run_command, which runs a shell command at the workspace root. In a packet lane, '
+  + 'commands have no network access and can write only inside the workspace, never its .git. Do not '
+  + 'commit: o8 commits your work when it goes to review. Follow the task\'s other instructions. Do not '
+  + 'claim success after a denied or failed action.';
 
 type PiSession = Awaited<ReturnType<typeof createPiSdkSession>>;
 
@@ -292,6 +294,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
       sessionFile: await newestPiSessionFile(path.join(stateDir, 'sessions')),
       approve: session.laneId ? createPiLaneApproval(session.cwd, session.laneId) : undefined,
       authorize: session.laneId ? createPiLaneAuthority(session.cwd, session.laneId) : undefined,
+      confineCommands: Boolean(session.laneId),
       systemPrompt: SYSTEM_PROMPT,
       readOnly: session.readOnly,
       onEvent: (event) => { for (const line of piWorkerLogLines(event)) write(line); },

@@ -150,7 +150,7 @@ export async function POST(request: Request) {
       }
       clearAuthSignOutMarker();
       const founder = data.founder;
-      if (data.source === 'founding' && founder && typeof founder.operatorNumber === 'number') {
+      if (founder && typeof founder.operatorNumber === 'number') {
         if (!writeFounderRecord({ operatorNumber: founder.operatorNumber,
           tier: typeof founder.tier === 'number' ? founder.tier : null, syncedAt: new Date().toISOString() })) {
           throw new AccountStateUnavailableError();

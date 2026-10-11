@@ -199,6 +199,9 @@ export function buildToolRegistry(
 ): ToolRegistry {
   const repoSlug = detectRepoSlug(repoPath);
   const apiBase = resolveToolSpineApiBase();
+  const ownedCodexEnv: Record<string, string> = process.env.CORTEX_IDE_OWNED_CODEX_ROOT
+    ? { CORTEX_IDE_OWNED_CODEX_ROOT: process.env.CORTEX_IDE_OWNED_CODEX_ROOT }
+    : {};
 
   const cortexServer = resolveCortexMcpServerPath();
   const operatorProxy = resolveOperatorMcpProxyPath();
@@ -238,6 +241,7 @@ export function buildToolRegistry(
       env: {
         O8_API_BASE: apiBase,
         O8_DATA_DIR: getDataDir(),
+        ...ownedCodexEnv,
       },
     },
   });
@@ -256,6 +260,7 @@ export function buildToolRegistry(
       env: {
         CORTEX_API_BASE: apiBase,
         O8_DATA_DIR: getDataDir(),
+        ...ownedCodexEnv,
         CORTEX_REPO_PATH: repoPath,
         ...(options?.threadId ? { CORTEX_THREAD_ID: options.threadId } : {}),
         ...(options?.threadId?.startsWith('thoughts-')
