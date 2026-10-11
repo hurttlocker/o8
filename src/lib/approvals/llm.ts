@@ -67,7 +67,7 @@ function appendAssistantMessage(
 export async function resumeLlmApproval(
   requestUrl: string,
   approval: ApprovalRecord,
-  options: { actor: 'desktop' | 'mobile'; editedCommand?: string } = { actor: 'desktop' },
+  options: { actor: 'desktop' | 'mobile'; editedCommand?: string; sessionToken?: string } = { actor: 'desktop' },
 ): Promise<ApprovalDecisionResult> {
   const continuation = approval.continuation;
   if (!continuation || continuation.kind !== 'llm-chat') {
@@ -78,6 +78,9 @@ export async function resumeLlmApproval(
   }
 
   const tabId = continuation.tabId;
+  if (continuation.provider === 'chatgpt' && (options.actor !== 'desktop' || !options.sessionToken)) {
+    throw new Error('The ChatGPT plan turn is held. Resume it in the signed-in desktop with the original account.');
+  }
   ensureHistoryContainsMessages(tabId, continuation.messages);
   const approvedArgs = { ...(approval.args ?? {}) };
   if (approval.toolName === 'run_terminal_command' && options.editedCommand?.trim()) {
@@ -108,6 +111,7 @@ export async function resumeLlmApproval(
       Authorization: `Bearer ${getOrCreateWsToken()}`,
       'Content-Type': 'application/json',
       'x-tab-id': tabId,
+      ...(continuation.provider === 'chatgpt' && options.sessionToken ? { 'x-clerk-session-token': options.sessionToken } : {}),
     },
     body: JSON.stringify({
       model: continuation.model,
@@ -115,6 +119,7 @@ export async function resumeLlmApproval(
       messages: continuation.messages,
       repoPath: continuation.repoPath,
       approvalGrant,
+      ...(continuation.provider === 'chatgpt' ? { planAccountId: continuation.planAccountId, planGeneration: continuation.planGeneration, planDesktopEpoch: continuation.planDesktopEpoch } : {}),
     }),
     cache: 'no-store',
   });
@@ -129,50 +134,61 @@ export async function resumeLlmApproval(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let completed = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split('\n');
-    buffer = chunks.pop() ?? '';
-    for (const line of chunks) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (!data || data === '[DONE]') continue;
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (parsed.type === 'content' && typeof parsed.text === 'string') {
-        responseText += parsed.text;
-      } else if (parsed.type === 'usage') {
-        tokens = {
-          input: typeof parsed.inputTokens === 'number' ? parsed.inputTokens : 0,
-          output: typeof parsed.outputTokens === 'number' ? parsed.outputTokens : 0,
-        };
-        costUsd = typeof parsed.costUsd === 'number' ? parsed.costUsd : undefined;
-      } else if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
-        thinkingText += parsed.text;
-      } else if (parsed.type === 'tool_call' && typeof parsed.name === 'string') {
-        toolCalls = [...toolCalls, {
-          name: parsed.name,
-          args: parsed.args && typeof parsed.args === 'object' ? parsed.args as Record<string, unknown> : undefined,
-          status: 'done',
-        }];
-      } else if (parsed.type === 'sources' && Array.isArray(parsed.sources)) {
-        sources = parsed.sources as MobileTranscriptSource[];
-      } else if (parsed.type === 'approval_required') {
-        pendingNote = typeof parsed.summary === 'string' ? parsed.summary : approval.summary;
-        if (typeof parsed.id === 'string') {
-          nextApproval = getApproval(parsed.id);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split('\n');
+      buffer = chunks.pop() ?? '';
+      for (const line of chunks) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') { completed = true; continue; }
+        if (!data) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          if (continuation.provider === 'chatgpt') errorText = 'The ChatGPT plan response could not be read. Inspect the approved action before retrying.';
+          continue;
         }
-      } else if (parsed.type === 'error' && typeof parsed.message === 'string') {
-        errorText = parsed.message;
+        if (parsed.type === 'content' && typeof parsed.text === 'string') {
+          responseText += parsed.text;
+        } else if (parsed.type === 'usage') {
+          tokens = {
+            input: typeof parsed.inputTokens === 'number' ? parsed.inputTokens : 0,
+            output: typeof parsed.outputTokens === 'number' ? parsed.outputTokens : 0,
+          };
+          costUsd = typeof parsed.costUsd === 'number' ? parsed.costUsd : undefined;
+        } else if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+          thinkingText += parsed.text;
+        } else if (parsed.type === 'tool_call' && typeof parsed.name === 'string') {
+          toolCalls = [...toolCalls, {
+            name: parsed.name,
+            args: parsed.args && typeof parsed.args === 'object' ? parsed.args as Record<string, unknown> : undefined,
+            status: 'done',
+          }];
+        } else if (parsed.type === 'sources' && Array.isArray(parsed.sources)) {
+          sources = parsed.sources as MobileTranscriptSource[];
+        } else if (parsed.type === 'approval_required') {
+          pendingNote = typeof parsed.summary === 'string' ? parsed.summary : approval.summary;
+          if (typeof parsed.id === 'string') {
+            nextApproval = getApproval(parsed.id);
+          }
+        } else if (parsed.type === 'error' && typeof parsed.message === 'string') {
+          errorText = parsed.message;
+        }
       }
     }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  if (continuation.provider === 'chatgpt' && !completed) {
+    errorText ??= 'The ChatGPT plan turn ended before completion. Inspect the approved action before retrying.';
+    pendingNote = null;
   }
 
   if (pendingNote) {
@@ -219,6 +235,7 @@ export async function resumeLlmApproval(
     model: continuation.model,
     tokens,
     costUsd,
+    ...(continuation.provider === 'chatgpt' ? { inferenceRoute: { provider: 'chatgpt-plan' as const, billing: 'subscription' as const, allowanceUse: 'unknown' as const, meter: 'provider-tokens' as const } } : {}),
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     sources: sources.length > 0 ? sources : undefined,
     thinking: thinkingText || undefined,

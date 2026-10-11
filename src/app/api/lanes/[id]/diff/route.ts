@@ -82,7 +82,8 @@ export async function GET(
     if (error instanceof ImmutableReviewUnavailableError) {
       return NextResponse.json(immutableReviewUnavailablePayload(error), { status: 409 });
     }
-    const message = error instanceof Error ? error.message : 'Unable to compute diff.';
+    console.error('[api] lanes/[id]/diff failed:', error);
+    const message = 'Unable to compute diff.';
     return NextResponse.json({ ok: false, note: message }, { status: 500 });
   }
 }

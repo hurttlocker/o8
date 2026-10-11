@@ -17,6 +17,7 @@ interface WorkerTokenRow {
   id: string;
   token_hash: string;
   revoked_at: string | null;
+  scope: string;
 }
 
 export function verifyWorkerToken(authHeader: string | null): VerifyOk | VerifyErr {
@@ -25,6 +26,7 @@ export function verifyWorkerToken(authHeader: string | null): VerifyOk | VerifyE
   }
 
   const token = authHeader.slice(7).trim();
+  if (token.startsWith('o8ro_')) return { ok: false, status: 403 };
   if (!token) {
     return { ok: false, status: 401 };
   }
@@ -34,7 +36,7 @@ export function verifyWorkerToken(authHeader: string | null): VerifyOk | VerifyE
   try {
     const row = getSqlite()
       .prepare(`
-        SELECT id, token_hash, revoked_at
+        SELECT id, token_hash, revoked_at, scope
         FROM worker_tokens
         WHERE token_hash = ?
         LIMIT 1
@@ -51,7 +53,7 @@ export function verifyWorkerToken(authHeader: string | null): VerifyOk | VerifyE
       return { ok: false, status: 401 };
     }
 
-    if (row.revoked_at) {
+    if (row.revoked_at || row.scope === 'local-read-only') {
       return { ok: false, status: 403 };
     }
 

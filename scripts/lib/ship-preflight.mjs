@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspectIntakeReconciliation } from './intake-reconciliation.mjs';
+import { resolveReleaseConfig } from './release-config.mjs';
 
 const DEFAULT_MIN_FREE_GIB = 25;
 
@@ -47,6 +48,20 @@ function parseRemoteTagHead(output, tag) {
 function repositoryFromRemote(remoteUrl) {
   const match = remoteUrl.trim().match(/(?:github\.com[/:])([^/\s]+\/[^/\s]+?)(?:\.git)?$/i);
   return match?.[1] ?? null;
+}
+
+// A desktop build without these ships with account sign-in, GitHub sign-in and
+// crash reporting switched off. Values stay out of Git in o8.release.json or the
+// environment; only the key names are reported.
+const REQUIRED_RELEASE_CONFIG = ['clerkPublishableKey', 'githubOAuthClientId', 'sentryDsn'];
+
+function checkReleaseConfig(root, env) {
+  const config = resolveReleaseConfig(root, env);
+  const missing = REQUIRED_RELEASE_CONFIG.filter((key) => !config[key]);
+  if (missing.length > 0) {
+    throw new Error(`missing desktop release configuration: ${missing.join(', ')}; add o8.release.json to the release worktree or set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, GITHUB_OAUTH_CLIENT_ID and SENTRY_DSN`);
+  }
+  return [...REQUIRED_RELEASE_CONFIG];
 }
 
 function checkCredentialNames(env) {
@@ -197,20 +212,59 @@ export function performShipPreflight(options) {
     throw new Error(`remote tag ${tag} points to ${remoteTagHead ?? 'nothing'}, not HEAD ${head}`);
   }
 
-  const release = run('gh', ['release', 'view', tag, '--repo', repo, '--json', 'tagName'], {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+    throw new Error('release repository must be an owner/repository pair');
+  }
+  // Confirm access first: a release 404 alone can also mean a hidden repository.
+  // REST reads do not consume the separately shared GraphQL quota.
+  const requestOptions = { cwd: root, env, timeoutMs: 20_000 };
+  const repositoryResponse = requireSuccess(
+    run('gh', ['api', `repos/${repo}`], requestOptions),
+    `could not verify access to release repository ${repo}`,
+  );
+  let repository;
+  try { repository = JSON.parse(repositoryResponse); } catch {
+    throw new Error(`could not verify access to release repository ${repo}: invalid repository response`);
+  }
+  if (typeof repository?.full_name !== 'string'
+    || repository.full_name.toLowerCase() !== repo.toLowerCase()) {
+    throw new Error(`could not verify access to release repository ${repo}: invalid repository response`);
+  }
+  // Metadata access alone does not prove Contents/read permission on a private
+  // repository. Confirm the releases collection is readable before trusting 404.
+  const collectionResponse = requireSuccess(
+    run('gh', ['api', `repos/${repo}/releases?per_page=1`], requestOptions),
+    `could not verify release-read access for ${repo}`,
+  );
+  let collection;
+  try { collection = JSON.parse(collectionResponse); } catch {
+    throw new Error(`could not verify release-read access for ${repo}: invalid releases response`);
+  }
+  if (!Array.isArray(collection)) {
+    throw new Error(`could not verify release-read access for ${repo}: invalid releases response`);
+  }
+  const release = run('gh', ['api', `repos/${repo}/releases/tags/${encodeURIComponent(tag)}`], {
     cwd: root,
     env,
     timeoutMs: 20_000,
   });
-  if (release.status === 0 && env.O8_RELEASE_CLOBBER !== '1') {
-    throw new Error(`release ${tag} already exists; set O8_RELEASE_CLOBBER=1 only for an intentional replacement`);
+  if (release.status === 0) {
+    let metadata;
+    try { metadata = JSON.parse(release.stdout); } catch {
+      throw new Error(`invalid release response for ${tag}`);
+    }
+    if (metadata?.tag_name !== tag) throw new Error(`invalid release tag response for ${tag}`);
+    if (env.O8_RELEASE_CLOBBER !== '1') {
+      throw new Error(`release ${tag} already exists; set O8_RELEASE_CLOBBER=1 only for an intentional replacement`);
+    }
   }
-  const releaseMissing = release.status === 1 && /(?:HTTP\s+404|not found)/i.test(release.stderr);
+  const releaseMissing = release.status === 1 && /\bHTTP\s+404\b/i.test(release.stderr);
   if (release.status !== 0 && !releaseMissing) {
     throw new Error(`could not verify whether release ${tag} exists: ${release.stderr.trim() || `exit ${release.status}`}`);
   }
 
   const credentialNames = checkCredentialNames(env);
+  const releaseConfigKeys = checkReleaseConfig(root, env);
   const signingKey = join(env.HOME || '', '.tauri', 'cortex-ide.key');
   if (!env.HOME || !existsSync(signingKey)) {
     throw new Error('Tauri updater signing key is missing');
@@ -258,6 +312,7 @@ export function performShipPreflight(options) {
     availableGiB: Number(availableGiB.toFixed(2)),
     minFreeGiB,
     credentialNames,
+    releaseConfigKeys,
     signingKeyPresent: true,
     intakeReconciliation: inspectIntakeReconciliation({ env }),
     toolchains: {

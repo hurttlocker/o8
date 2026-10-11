@@ -73,6 +73,8 @@ import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
 import { runPacketClose } from './commands/packet/close.js';
 import { runPacketWorkspace } from './commands/packet/workspace.js';
+import { runPacketRetention } from './commands/packet/retention.js';
+import { runPacketArtifactRecovery } from './commands/packet/artifact-recovery.js';
 import { runPacketStop } from './commands/packet/stop.js';
 import {
   OPERATOR_PACKET_COMMAND_LINES,
@@ -321,7 +323,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session checkpoint <key> save a durable provider position for later forks
   session fork <key>   create a new provider session from a checkpoint
   session rewind <key> create a new continuation while preserving the original
-  session resume <key> --message <text>  continue a durable provider session
+  session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool
@@ -508,6 +510,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'park' || secondary === 'restore') {
         return runPacketWorkspace(args.mode, secondary, args.rest);
+      }
+      if (secondary === 'restore-artifacts') return runPacketArtifactRecovery(args.mode, args.rest);
+      if (secondary === 'retain' || secondary === 'release-retention') {
+        return runPacketRetention(args.mode, secondary === 'retain' ? 'hold' : 'release', args.rest);
       }
       if (secondary === 'close' || secondary === 'discard') {
         return runPacketClose(args.mode, args.rest, secondary);

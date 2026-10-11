@@ -14,6 +14,7 @@ export interface ShipPreflightReceipt {
   availableGiB: number;
   minFreeGiB: number;
   credentialNames: string[];
+  releaseConfigKeys: string[];
   signingKeyPresent: boolean;
   intakeReconciliation:
     | { schema: 'o8/intake-reconciliation/v1'; status: 'configured'; source: 'environment' | 'runtime-file' }

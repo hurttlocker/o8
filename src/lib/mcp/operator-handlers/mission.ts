@@ -25,7 +25,7 @@ import {
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
-  apiFetch,
+  apiFetch, McpInputError,
   type McpTool,
   type McpToolResult,
   errorText,
@@ -43,14 +43,14 @@ import {
   missionPacketSignature,
   type MinimalMissionStatusShape,
 } from './mission-wait';
-import { QUALITY_SEARCH_INPUT_SCHEMA, TASK_CONTRACT_SETTING_SCHEMA } from './quality-search-input';
+import { MISSION_CONTRACT_INPUT_PROPERTIES, SEALED_TASK_CONTRACT_GUIDANCE } from './quality-search-input';
 import { MISSION_WORKER_PIN_PROPERTIES, WORKER_PROVIDER_OPTIONS } from './mission-worker-input';
 import { CONTRACT_COVERAGE_EVIDENCE_SCHEMA, parseContractCoverageEvidenceInput } from './review-coverage-input';
 export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'create_mission',
     description:
-      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.',
+      'USE THIS WHEN the user wants to delegate one or more coding tasks to autonomous agents — phrasings like "fix issues #X, #Y", "dispatch this bug", "have an agent work on...", "build me a feature for...". Don\'t code it yourself — o8 spawns CLI runtimes in isolated worktrees, runs governance checks, and ships a clean PR. By default packets run in parallel and dispatch immediately. Use `issues` for GitHub refs (any format: 495, "#495", URL), or `issues_inline` for ad-hoc tasks without GitHub issues. Examples: create_mission({issues: [495, 496], repoPath: "/path/to/repo"}) creates from GitHub issues. create_mission({issues_inline: [{title: "Add dark mode"}, {title: "Fix login button"}], repoPath: "/path/to/repo"}) creates from inline descriptions.' + SEALED_TASK_CONTRACT_GUIDANCE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -105,7 +105,7 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         dispatch: {
           type: 'boolean',
-          description: 'When true (default), immediately dispatches all packets after creation. Set false to create without dispatching.',
+          description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
         },
         useBrain: {
           type: 'boolean',
@@ -115,14 +115,13 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
         },
-        taskContract: TASK_CONTRACT_SETTING_SCHEMA,
+        ...MISSION_CONTRACT_INPUT_PROPERTIES,
         readOnly: { type: 'boolean', description: 'When true, the worker inspects and reports without editing. A clean zero-diff exit is recorded as a successful read-only completion.' },
         comparisonModels: {
           type: 'array',
           items: { type: 'string' },
           description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
         },
-        qualitySearch: QUALITY_SEARCH_INPUT_SCHEMA,
         orchestratorThreadId: {
           type: 'string',
           description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
@@ -140,7 +139,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'dispatch_mission',
     description:
-      'USE THIS RARELY — create_mission already dispatches by default. Only call this after reset_packet to relaunch a packet, or if the user explicitly says "redispatch". Example: dispatch_mission() dispatches current mission. dispatch_mission({missionId: "mission-abc123"}) dispatches a specific one.',
+      'Dispatch the existing packets of a prepared mission created with dispatch:false. Pass the exact missionId returned by create_mission: dispatch_mission({missionId: "mission-abc123"}). This starts that mission without creating a new mission or generic delegate packet. Also use after reset_packet or retry_packet when a relaunch is needed, or for explicit redispatch. Omit runtime to preserve the prepared routing and contract. create_mission dispatches by default; do not dispatch it again unless it was prepared or needs relaunch. Omitted missionId selects the current stored mission.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -776,7 +775,7 @@ export async function handleDispatchMission(args: Record<string, unknown>): Prom
       missionId: optionalString(args, 'missionId') || undefined,
       runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} dispatch_mission failed: ${errorText(error)}`);
     return textResult(`Failed to dispatch mission: ${errorText(error)}`, true);
@@ -788,7 +787,7 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
     const includeCost = typeof args.includeCost === 'boolean' ? args.includeCost : false;
     const includeTiming = typeof args.includeTiming === 'boolean' ? args.includeTiming : false;
     const result = await getMissionStatus({ missionId: optionalString(args, 'missionId') || undefined, includeCost, includeTiming });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
     return textResult(`Failed to read mission status: ${errorText(error)}`, true);
@@ -970,7 +969,7 @@ export async function handleTaskBlock(args: Record<string, unknown>): Promise<Mc
   try {
     const code = optionalString(args, 'code') || undefined;
     if (code !== undefined && !isAgentReportReason(code)) {
-      throw new Error('code must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('code must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
     const result = await blockTask(requiredString(args, 'taskId'), {
       actor: 'orchestrator',
@@ -990,13 +989,13 @@ export async function handleTaskReport(args: Record<string, unknown>): Promise<M
   try {
     const reason = optionalString(args, 'reason') || undefined;
     if (reason !== undefined && !isAgentReportReason(reason)) {
-      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
     const metadata = args.metadata === undefined || args.metadata === null
       ? undefined
       : normalizeAgentReportMetadata(args.metadata);
     if (args.metadata !== undefined && args.metadata !== null && !metadata) {
-      throw new Error('metadata must be an object');
+      throw new McpInputError('metadata must be an object');
     }
     const result = await reportTask(requiredString(args, 'taskId'), {
       actor: 'orchestrator',
@@ -1109,7 +1108,7 @@ export async function handleWaitForMissionReady(
 export async function handleSubmitReview(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     if (typeof args.approved !== 'boolean') {
-      throw new Error('approved is required');
+      throw new McpInputError('approved is required');
     }
     const result = await submitPacketReview({
       packetId: requiredString(args, 'packetId'),
@@ -1146,7 +1145,7 @@ async function doResetPacket(
       reason: optionalString(args, 'reason') || undefined,
       clearWorktree,
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} reset/retry failed: ${errorText(error)}`);
     return textResult(`Failed to reset packet: ${errorText(error)}`, true);
@@ -1167,7 +1166,7 @@ export async function handleRerunWithFeedback(args: Record<string, unknown>): Pr
       packetId: requiredString(args, 'packetId'),
       feedback: requiredString(args, 'feedback'),
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} rerun_with_feedback failed: ${errorText(error)}`);
     return textResult(`Failed to rerun with feedback: ${errorText(error)}`, true);
@@ -1184,12 +1183,12 @@ export async function handleReportPacketEvent(args: Record<string, unknown>): Pr
     const packetId = requiredString(args, 'packetId');
     const event = normalizeAgentReportEvent(args.event);
     if (!event) {
-      throw new Error('event is required');
+      throw new McpInputError('event is required');
     }
 
     const reason = optionalString(args, 'reason') || undefined;
     if (reason !== undefined && !isAgentReportReason(reason)) {
-      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
 
     const lanesResult = await apiFetch('/api/lanes?active=false') as { lanes?: ReportLane[] };
@@ -1202,7 +1201,7 @@ export async function handleReportPacketEvent(args: Record<string, unknown>): Pr
       ? undefined
       : normalizeAgentReportMetadata(args.metadata);
     if (args.metadata !== undefined && args.metadata !== null && !metadata) {
-      throw new Error('metadata must be an object');
+      throw new McpInputError('metadata must be an object');
     }
 
     const result = await apiFetch(`/api/lanes/${encodeURIComponent(lane.id)}/events`, {

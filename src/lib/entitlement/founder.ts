@@ -1,6 +1,8 @@
 import 'server-only';
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { mutateAccountState } from '@/lib/auth/account-state';
+import { removeAccountFile, writeAccountFile } from '@/lib/auth/account-state-files';
 import path from 'node:path';
 
 import type { FounderInfo } from './types';
@@ -48,8 +50,7 @@ export function readFounderRecord(): FounderRecord | null {
 export function writeFounderRecord(rec: FounderRecord): boolean {
   try {
     const filePath = founderPath();
-    mkdirSync(path.dirname(filePath), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify(rec, null, 2)}\n`, { mode: 0o600 });
+    mutateAccountState(() => writeAccountFile(filePath, `${JSON.stringify(rec, null, 2)}\n`));
     return true;
   } catch (error) {
     console.error('[founder] failed to write founder.json:', error);
@@ -58,9 +59,5 @@ export function writeFounderRecord(rec: FounderRecord): boolean {
 }
 
 export function clearFounderRecord(): void {
-  try {
-    rmSync(founderPath(), { force: true });
-  } catch (error) {
-    console.error('[founder] failed to clear founder.json:', error);
-  }
+  mutateAccountState(() => removeAccountFile(founderPath()));
 }

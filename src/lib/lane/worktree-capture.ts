@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,21 +29,6 @@ function captureSafeId(value: string): string {
   return value.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'lane';
 }
 
-async function git(cwd: string, args: string[], env?: Record<string, string>) {
-  return execFileAsync('git', args, {
-    windowsHide: true,
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: COMMAND_MAX_BUFFER,
-    env: env ? { ...process.env, ...env } : process.env,
-  });
-}
-
-async function isDirty(worktreePath: string): Promise<boolean> {
-  const { stdout } = await git(worktreePath, ['status', '--porcelain']);
-  return stdout.trim().length > 0;
-}
-
 /**
  * Snapshot the FULL working state (tracked + untracked) of a worktree to an
  * out-of-band ref, without touching the working tree, index, or stash stack.
@@ -62,33 +48,38 @@ export async function captureWorktreeState(
   repoPath?: string | null,
 ): Promise<WorktreeCapture> {
   const wt = worktreePath?.trim();
-  if (!wt) return { captured: false };
+  const repo = repoPath?.trim();
+  if (!wt || !repo) return { captured: false };
 
   try {
-    if (!(await isDirty(wt))) return { captured: false };
+    const status = await laneGit(wt, repo, ['status', '--porcelain']);
+    if (!status.stdout.trim()) return { captured: false };
 
     // Throwaway index so `git add -A` never mutates the real index.
     const tmpIndexDir = mkdtempSync(path.join(tmpdir(), 'o8-capture-'));
-    const env = { ...CAPTURE_IDENTITY, GIT_INDEX_FILE: path.join(tmpIndexDir, 'index') };
+    const options = { indexFile: path.join(tmpIndexDir, 'index'),
+      identity: { name: CAPTURE_IDENTITY.GIT_AUTHOR_NAME, email: CAPTURE_IDENTITY.GIT_AUTHOR_EMAIL },
+      timeout: GIT_TIMEOUT_MS, maxBuffer: COMMAND_MAX_BUFFER };
 
     let sha = '';
     try {
-      await git(wt, ['add', '-A'], env);
-      const tree = (await git(wt, ['write-tree'], env)).stdout.trim();
+      await laneGit(wt, repo, ['add', '-A'], options);
+      const tree = (await laneGit(wt, repo, ['write-tree'], options)).stdout.trim();
       if (!tree) return { captured: false };
 
       // Parent on HEAD when it exists; fresh repos with no commits capture as a
       // root commit instead of failing.
       let parentArgs: string[] = [];
       try {
-        const head = (await git(wt, ['rev-parse', 'HEAD'])).stdout.trim();
+        const head = (await laneGit(wt, repo, ['rev-parse', 'HEAD'])).stdout.trim();
         if (head) parentArgs = ['-p', head];
-      } catch {
+      } catch (error) {
+        if (error instanceof LaneGitMetadataError) throw error;
         // no HEAD yet
       }
 
       sha = (
-        await git(wt, ['commit-tree', tree, ...parentArgs, '-m', `o8-capture: ${laneId}`], env)
+        await laneGit(wt, repo, ['commit-tree', tree, ...parentArgs, '-m', `o8-capture: ${laneId}`], options)
       ).stdout.trim();
     } finally {
       rmSync(tmpIndexDir, { recursive: true, force: true });
@@ -96,17 +87,18 @@ export async function captureWorktreeState(
     if (!sha) return { captured: false };
 
     const ref = `refs/o8-capture/${captureSafeId(laneId)}`;
-    await git(wt, ['update-ref', ref, sha]);
+    await laneGit(wt, repo, ['update-ref', ref, sha]);
 
     // Bank the ref into the main repo when the worktree is a CLONE
     // (apfs-cow-clone isolation): the clone's refs die with rmSync at teardown,
     // and teardown is exactly when this snapshot matters. Mirrors
     // preserveHeadRef's fetch-from-clone pattern. Best-effort — an in-clone
     // capture is still better than none.
-    const repo = repoPath?.trim();
     if (repo && path.resolve(repo) !== path.resolve(wt)) {
       try {
-        await git(repo, ['fetch', wt, `+${ref}:${ref}`]);
+        await execFileAsync('git', ['fetch', wt, `+${ref}:${ref}`], {
+          cwd: repo, windowsHide: true, timeout: GIT_TIMEOUT_MS, maxBuffer: COMMAND_MAX_BUFFER,
+        });
       } catch (error) {
         console.warn(
           `[worktree-capture] Could not bank ${ref} into ${repo}: ${

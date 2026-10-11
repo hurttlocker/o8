@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 import { AlertCircle, Archive, CheckCircle2, Clock } from '../../lucide-shims';
 import { REPO_FOCUS_FONT } from '../utils';
@@ -65,6 +65,9 @@ export function ControlRoomTab({
   const [doneOpen, setDoneOpen] = useState(false);
   const [staleAttentionOpen, setStaleAttentionOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
+  const composerOpener = useRef<HTMLButtonElement | null>(null);
+  const composerTitle = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => { if (composerOpen) composerTitle.current?.focus(); }, [composerOpen]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskSummary, setNewTaskSummary] = useState('');
   const [newTaskRepoPath, setNewTaskRepoPath] = useState(selectedRepo?.localPath ?? repos[0]?.localPath ?? '');
@@ -602,6 +605,7 @@ export function ControlRoomTab({
     >
       {composerOpen ? (
         <NewTaskComposer
+          titleInputRef={composerTitle}
           repos={repos}
           selectedRepo={selectedRepo}
           title={newTaskTitle}
@@ -613,7 +617,7 @@ export function ControlRoomTab({
           onSummaryChange={setNewTaskSummary}
           onRepoPathChange={setNewTaskRepoPath}
           onWorkerIntentChange={setNewTaskIntent}
-          onCancel={() => setComposerOpen(false)}
+          onCancel={() => { setComposerOpen(false); composerOpener.current?.focus(); }}
           onCreate={(runtime, model, effort) => { void createControlTask(false, runtime, model, effort); }}
           onCreateAndDispatch={(runtime, model, effort) => { void createControlTask(true, runtime, model, effort); }}
         />
@@ -648,7 +652,8 @@ export function ControlRoomTab({
         }}
         composerOpen={composerOpen}
         refreshing={refreshing}
-        onCreateTask={() => setComposerOpen((current) => !current)}
+        creating={busyKey === 'create' || busyKey === 'create-dispatch'}
+        onCreateTask={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setComposerOpen((current) => !current); }}
         onRefresh={() => { void refresh(false); }}
       />
 

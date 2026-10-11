@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
@@ -42,6 +42,9 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   const [selection, setSelection] = useState<{ scopeKey: string; id: string } | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>(['done']);
   const [composerOpen, setComposerOpen] = useState(false);
+  const composerOpener = useRef<HTMLButtonElement | null>(null);
+  const composerTitle = useRef<HTMLInputElement | null>(null);
+  useLayoutEffect(() => { if (composerOpen) composerTitle.current?.focus(); }, [composerOpen]);
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [targetRepo, setTargetRepo] = useState(repoPath ?? repos[0]?.localPath ?? '');
@@ -107,7 +110,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
         {(boundSessionKey ? ['threads'] as const : ['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={pool.refresh} disabled={pool.loading} style={smallButtonStyle}>Refresh</button>
-        {!boundSessionKey ? <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={() => { setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
+        {!boundSessionKey ? <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
       </div>
       {notice ? <div role="status" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{notice}</div> : null}
       {pool.error ? <div role="alert" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 12 }}>{pool.error}</div> : null}
@@ -120,7 +123,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
           {view === 'threads' ? <>
             <div style={{ fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px', lineHeight: 1.25 }}>{project?.name || repoPath?.split('/').filter(Boolean).pop() || 'Your threads'}</div>
             <div style={{ marginTop: 6, marginBottom: 20, fontSize: 12, fontWeight: 300, color: 'var(--t-text-muted)' }}>{projects.loading || pool.loading && !tasks.length ? 'Reading project threads…' : waiting ? `${waiting} thread${waiting === 1 ? ' is' : 's are'} waiting on you.` : 'Nothing is waiting on you.'}</div>
-            {composerOpen && canCreate ? <NewTaskComposer repos={availableRepos} selectedRepo={availableRepos.find((repo) => repo.localPath === repoPath)} title={title} summary={summary} repoPath={currentTargetRepo} workerIntent={intent} busy={busyKey === 'create'} onTitleChange={setTitle} onSummaryChange={setSummary} onRepoPathChange={setTargetRepo} onWorkerIntentChange={setIntent} onCancel={() => setComposerOpen(false)} onCreate={(runtime, model, effort) => { void create(false, runtime, model, effort); }} onCreateAndDispatch={(runtime, model, effort) => { void create(true, runtime, model, effort); }} /> : null}
+            {composerOpen && canCreate ? <NewTaskComposer titleInputRef={composerTitle} repos={availableRepos} selectedRepo={availableRepos.find((repo) => repo.localPath === repoPath)} title={title} summary={summary} repoPath={currentTargetRepo} workerIntent={intent} busy={busyKey === 'create'} onTitleChange={setTitle} onSummaryChange={setSummary} onRepoPathChange={setTargetRepo} onWorkerIntentChange={setIntent} onCancel={() => { setComposerOpen(false); composerOpener.current?.focus(); }} onCreate={(runtime, model, effort) => { void create(false, runtime, model, effort); }} onCreateAndDispatch={(runtime, model, effort) => { void create(true, runtime, model, effort); }} /> : null}
             {pool.loading && !tasks.length ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Reading project threads…</p> : null}
             {!pool.loading && !pool.error && !tasks.length ? <p style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Start a thread here or dispatch work from your conversation. Local and remote workers appear here with their recorded status.</p> : null}
             {THREAD_GROUPS.map((group) => {

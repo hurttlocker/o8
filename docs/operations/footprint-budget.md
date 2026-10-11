@@ -4,14 +4,14 @@ The packaged application has a versioned, repeatable resource receipt. The real 
 
 The receipt is written beside the tested application as `footprint-receipt.json`. An authoritative release also stores the summary in the existing pre-ship audit record.
 
-## Budget v2
+## Budget v3
 
 Targets express the product goal. Regression ceilings are temporary hard stops based on the measured 0.1.716 baseline. A build may remain above a target while cleanup proceeds, but it may not become materially worse.
 
 | Metric | Target | Regression ceiling |
 |---|---:|---:|
 | Installed application | 250 MiB | 300 MiB |
-| Update archive | 75 MiB | 75 MiB |
+| Update archive | 75 MiB | 80 MiB |
 | Idle physical footprint | 1 GiB | 1.5 GiB |
 | Idle interval CPU, whole tree | 5% | 15% |
 | Native host idle CPU | 2% | 5% |
@@ -28,6 +28,8 @@ Targets express the product goal. Regression ceilings are temporary hard stops b
 The hard memory ceiling is deliberately above the product target because long-running measurements can exceed the target. Lowering the ceiling before the implementation is lighter would turn the gate into a permanent bypass request instead of a regression check. CPU is budgeted both per component and across the whole tree; the earlier 2% target describes the native host, not the sum of every application and WebKit process.
 
 The installed-app ceiling allows the universal macOS executable while keeping the 250 MiB target. The first universal candidate measured 272.5 MiB on disk, up from about 211 MiB for the Intel release. The updater archive remains under its 75 MiB ceiling.
+
+The update-archive ceiling is 80 MiB so the archive can carry the bundled Pi worker (#3255). The 0.1.782 archive measured 74.1 MiB, and the minified worker adds about 1.9 MB compressed. The 75 MiB target is unchanged.
 
 ## Metric contract
 
@@ -73,7 +75,7 @@ The scenario creates one mission carrying N read-only lanes through `/api/orches
 
 Every route response is read from the `{ ok, result }` envelope the operator routes actually serve, and that contract is exercised through the real handlers with real persisted state in `tests/footprint-load-route-path.test.ts` — creation, scoping, per-packet teardown, residual sweep, and the real `not_found` status response before any mission exists.
 
-Loaded metrics are recorded, not gated. Budget v2 has no loaded ceiling because no loaded baseline exists yet; inventing one from the first run would be a number chosen to pass rather than a measurement.
+Loaded metrics are recorded, not gated. Budget v3 has no loaded ceiling because no loaded baseline exists yet; inventing one from the first run would be a number chosen to pass rather than a measurement.
 
 ### Shortest executable acceptance lane
 

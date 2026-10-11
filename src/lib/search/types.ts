@@ -13,6 +13,7 @@ export interface SearchTarget {
   issueNumber?: number;
   repo?: string;
   filePath?: string;
+  workspace?: string;
   line?: number;
   sessionKey?: string;
   chatTabId?: string;

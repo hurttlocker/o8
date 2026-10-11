@@ -16,6 +16,7 @@ import {
   bindReviewTurnAbortController,
   finishReviewTurn,
   startReviewTurn,
+  recordReviewTurnRuntimeReceipt,
 } from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import {
@@ -86,6 +87,7 @@ async function runAttempt(input: {
   const reviewTurnId = startReviewTurn({
     laneId: input.laneId,
     threadId: input.threadId,
+    sessionThreadId,
     backend: input.backend.id,
     surface: input.surface,
     expectedHeadSha: input.expectedHeadSha,
@@ -109,7 +111,11 @@ async function runAttempt(input: {
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'turn_receipt') {
-        observedRoute = createBackendRoleRouteChoice(input.backend.id, event.leadModel, event.effort);
+        const status = recordReviewTurnRuntimeReceipt({ laneId: input.laneId, reviewTurnId,
+          threadId: input.threadId, sessionThreadId, backend: input.backend.id, surface: input.surface,
+          expectedHeadSha: input.expectedHeadSha ?? null, model: event.leadModel, effort: event.effort });
+        observedRoute = status === 'observed' ? createBackendRoleRouteChoice(input.backend.id, event.leadModel, event.effort) : null;
+        if (status !== 'observed') errors.push(`Review runtime receipt ${status}; execution route is not proven.`);
       }
       if (event.type === 'text') text += event.text;
       if (event.type === 'done' && typeof event.cost === 'number') approximateCost = event.cost;
@@ -187,7 +193,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     override ?? modelForBackend(initialBackend.id),
     defaults.values.thinkingEffort,
   );
-  let effectiveRoute = requestedRoute;
+  let effectiveRoute: RoleRouteChoice | null = null;
   const refuse = (reason: string, reviewTurnId: string | null = null): ReviewFallbackTurnResult => {
     recordRoleRoutingReceiptSafely({
       receiptKey: `review:${reviewTurnId ?? input.threadId}`,
@@ -228,12 +234,12 @@ export async function runReviewerTurnWithQuotaFallback(input: {
       sources: {
         backend: defaults.sources.reviewerBackend,
         runtime: defaults.values.reviewerBackend === 'follow' ? 'derived' : defaults.sources.reviewerBackend,
-        model: override !== undefined && !result.fallback && effectiveRoute.model === override
-          ? 'env' : effectiveRoute.model ? 'derived' : 'runtime-default',
-        effort: effectiveRoute.effort === defaults.values.thinkingEffort ? defaults.sources.thinkingEffort : 'derived',
+        model: override !== undefined && !result.fallback && effectiveRoute?.model === override
+          ? 'env' : effectiveRoute?.model ? 'derived' : 'runtime-default',
+        effort: effectiveRoute?.effort === defaults.values.thinkingEffort ? defaults.sources.thinkingEffort : 'derived',
       },
       reason: result.ok
-        ? `${input.surface} completed on ${result.backend}.`
+        ? `${input.surface} completed on ${result.backend}. ${effectiveRoute ? 'Backend turn receipt observed.' : 'No unambiguous backend turn receipt observed.'}`
         : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`,
       fallbackReason,
       status: result.ok
@@ -261,7 +267,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     onEvent: input.onEvent,
     signal: input.signal,
   });
-  effectiveRoute = first.observedRoute ?? requestedRoute;
+  effectiveRoute = first.observedRoute;
   if (first.unavailableReason) {
     return finalize({
       ok: false,
@@ -290,7 +296,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const policyDecision = resolveCrossHouseFallback({
     role: 'review',
     backend: initialBackend.id,
-    ...(override !== undefined ? { model: effectiveRoute.model } : {}),
+    ...(override !== undefined ? { model: effectiveRoute?.model ?? requestedRoute.model } : {}),
     subscriptionProfile: getOperatorDefaultsSync().values.subscriptionProfile,
   });
   if (!policyDecision) {
@@ -306,7 +312,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     });
   }
 
-  const decision = { ...policyDecision, fromModel: effectiveRoute.model ?? policyDecision.fromModel };
+  const decision = { ...policyDecision, fromModel: effectiveRoute?.model ?? requestedRoute.model ?? policyDecision.fromModel };
   recordLaneEvent(input.laneId, 'review_fallback', 'system', {
     surface: input.surface,
     status: decision.action === 'hold' ? 'held' : 'retrying',
@@ -354,7 +360,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     onEvent: input.onEvent,
     signal: input.signal,
   });
-  effectiveRoute = second.observedRoute ?? targetRoute;
+  effectiveRoute = second.observedRoute;
   if (second.unavailableReason) {
     return finalize({
       ok: false,

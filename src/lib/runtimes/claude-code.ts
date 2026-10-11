@@ -1079,7 +1079,7 @@ export const claudeCodeRuntime: AgentRuntime = {
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     const result = await launchOwnedClaudeCodeSession({
       ...opts,
-      effort: resolveDefaultWorkerEffortSync('claude-code', opts.effort),
+      effort: opts.controlledProvider ? undefined : resolveDefaultWorkerEffortSync('claude-code', opts.effort),
     });
     return {
       ok: result.ok,

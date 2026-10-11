@@ -1,11 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
-import { createApproval } from '@/lib/approvals/store';
-import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
-import { consumeLlmToolGrant } from '@/lib/approvals/llm-tool-grants';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
-import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
+import { getCurrentPeriodCost } from '@/lib/db/usage';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import {
   parseAnthropicStopMetadata,
@@ -17,14 +14,13 @@ import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { getPersonalizedChatFtuxPayload } from '@/lib/llm/personalized-chat-ftux';
 import { anthropicPricingForModel } from '@/lib/llm/pricing';
 import { LLM_REPO_PATH_HEADER } from '@/lib/llm/repo-scope';
-import { canonicalizeTerminalToolArgs, executeTool, terminalApprovalSummary, type ToolResult } from '@/lib/llm/tools';
 import { resolvePromptCachingEnabledSync } from '@/lib/operator/defaults';
 import { resolveRepoPathFromRegistry } from '@/lib/repos/repo-path-registry';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   computeCost,
   isSupportedProvider,
-  OPERATOR_FREE_OPENROUTER_MODELS,
+  OPERATOR_OPENROUTER_MODELS,
   OPERATOR_GEMINI_MODEL,
   OPERATOR_GEMINI_ROLLBACK_MODEL,
   PROVIDERS,
@@ -32,23 +28,22 @@ import {
   type Message,
 } from './provider-config';
 import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
+import { requireDesktopAccount } from '@/lib/auth/desktop-account';
+import { getChatGPTPlanService } from '@/lib/chatgpt-plan/service';
+import { ChatGPTPlanError } from '@/lib/chatgpt-plan/types';
+import { createProviderToolStream, type AnthropicUsageTotals } from './provider-stream';
 import { createGoogleToolResponseStream } from './google-native-tools';
 import { streamOpenRouterFallback } from './operator-fallback';
+import { toolsForOpenAI } from '@/lib/llm/tools';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 const TOKENS_PER_MILLION = 1_000_000;
 const ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1;
 const ANTHROPIC_CACHE_WRITE_MULTIPLIER = 1.25;
 
-type AnthropicUsageTotals = {
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-};
-function jsonError(message: string, status: number) {
+function jsonError(message: string, status: number, code?: string) {
   return new Response(
-    JSON.stringify({ error: message }),
+    JSON.stringify({ error: message, ...(code ? { code } : {}) }),
     { status, headers: { 'Content-Type': 'application/json' } },
   );
 }
@@ -81,17 +76,6 @@ function checkOperatorAbuseLimit(): Response | null {
   }
   operatorCallTimestamps.push(now);
   return null;
-}
-
-function approvalTitleForTool(toolName: string) {
-  if (toolName === 'run_terminal_command') return 'Run terminal command';
-  if (toolName === 'write_file') return 'Write file';
-  if (toolName === 'edit_file') return 'Edit file';
-  if (toolName === 'delete_file') return 'Delete file';
-  if (toolName === 'create_github_issue') return 'Create GitHub issue';
-  if (toolName === 'create_pull_request') return 'Create pull request';
-  if (toolName === 'lane_command') return 'Lane command';
-  return `Execute ${toolName}`;
 }
 
 async function fetchWithTimeout(
@@ -271,7 +255,8 @@ function buildUsageEvent(
     type: 'usage',
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
-    costUsd: computeUsageCost(provider, model, usage),
+    costUsd: provider === 'chatgpt' ? null : computeUsageCost(provider, model, usage),
+    ...(provider === 'chatgpt' ? { route: 'chatgpt-plan', billing: 'subscription', allowanceUse: 'unknown', meter: 'provider-tokens' } : {}),
   };
 
   if (provider === 'anthropic') {
@@ -325,9 +310,28 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     thinkingEffort?: ThinkingEffort;
   };
   const requestedThinkingEffort = parseRequestedThinkingEffort(rawThinkingEffort);
+  const planTextOnly = body.planTextOnly === true;
+  if (body.planTextOnly !== undefined && (!planTextOnly || provider !== 'chatgpt' || disableTools !== true || rawApprovalGrant != null
+    || typeof body.planAccountId !== 'string' || !Number.isSafeInteger(body.planGeneration) || typeof body.planDesktopEpoch !== 'string'
+    || rawMessages.some((message) => !message || !['user', 'assistant'].includes(message.role)))) {
+    return jsonError('Plan text chats require a bound ChatGPT connection, user/assistant text, and disabled tools.', 400);
+  }
 
   if (!isSupportedProvider(provider)) {
     return jsonError(`Unsupported provider: ${provider}`, 400);
+  }
+
+  let planOwner: string | null = null;
+  let planSelection: { accountId: string; generation: number; desktopEpoch: string } | undefined;
+  if (provider === 'chatgpt') {
+    try {
+      if (typeof model !== 'string' || rawMessages.some((message) => !message || typeof message.content !== 'string' || !['user', 'assistant', 'system', 'developer'].includes(message.role))) throw new ChatGPTPlanError('invalid_request', 'ChatGPT plan requests require text messages and an available model.', 400);
+      planOwner = await requireDesktopAccount(request);
+      planSelection = await getChatGPTPlanService().selection(planOwner);
+      if (body.planAccountId !== undefined && body.planAccountId !== planSelection.accountId) throw new ChatGPTPlanError('plan_selection_changed', 'Choose the original ChatGPT account before resuming this approval.', 409);
+      if (body.planGeneration !== undefined && body.planGeneration !== planSelection.generation) throw new ChatGPTPlanError('plan_selection_changed', 'The connection changed. Start a new turn.', 409);
+      if (body.planDesktopEpoch !== undefined && body.planDesktopEpoch !== planSelection.desktopEpoch) throw new ChatGPTPlanError('o8_session_changed', 'The desktop session changed. Start a new turn.', 409);
+    } catch (error) { return jsonError(error instanceof Error ? error.message : 'Sign in to o8.', error instanceof ChatGPTPlanError ? error.status : 403, error instanceof ChatGPTPlanError ? error.code : undefined); }
   }
 
   const anthropicTaskBudgetResult = provider === 'anthropic'
@@ -346,6 +350,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
   const headerRepoPath = request.headers.get(LLM_REPO_PATH_HEADER)?.trim() || '';
   const requestedRepoPath = bodyRepoPath || headerRepoPath;
+  if (planTextOnly && requestedRepoPath) return jsonError('Plan text chats do not accept repository context.', 400);
   let effectiveRepoRoot = process.cwd();
   // Whether effectiveRepoRoot is a REAL registered repo vs the process.cwd()
   // fallback. Tool writes must never target cwd (the app's own dir) — gate on
@@ -368,11 +373,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   const userMessageCount = nonSystemMessages.filter((message) => message.role === 'user').length;
   const isFreshChatTurn = assistantMessageCount === 0 && userMessageCount <= 1;
 
-  let systemPrompt = buildSystemPrompt(getWorkspaceContext(effectiveRepoRoot));
+  let systemPrompt = planTextOnly
+    ? 'You are ChatGPT in o8. Answer using only the conversation supplied by the user. This is a text-only chat without tools or workspace context.'
+    : buildSystemPrompt(getWorkspaceContext(effectiveRepoRoot));
 
   const lastUserMsg = [...nonSystemMessages].reverse().find((message) => message.role === 'user');
 
-  if (isFreshChatTurn) {
+  if (isFreshChatTurn && !planTextOnly) {
     try {
       const ftux = await getPersonalizedChatFtuxPayload({
         userName: auth?.user.name,
@@ -396,7 +403,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   // so the effective-free experience isn't metered against a paid budget. The
   // getEntitlementSync().plan read applies the view-as min-clamp; the auth.user
   // short-circuit keeps it off the hot path for genuine free users.
-  if (auth?.user && auth.user.plan !== 'free' && getEntitlementSync().plan !== 'free') {
+  if (provider !== 'chatgpt' && auth?.user && auth.user.plan !== 'free' && getEntitlementSync().plan !== 'free') {
     const spent = getCurrentPeriodCost(auth.user.id);
     const budget = auth.user.tokenBudgetUsd;
     if (budget != null && spent >= budget) {
@@ -405,12 +412,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   // o8 Operator — the branded zero-setup model, plan-gated (Q ruling
-  // 2026-07-12): founders/paid auto-ride Gemini Flash ("High"); the free plan
-  // auto-rides the $0 OpenRouter chain ("Low" — nemotron won the bake-off,
-  // gpt-oss-120b:free is the safety net, so o8 ALWAYS has a model). The tier
+  // 2026-07-12): with a local Gemini key, founders/paid auto-ride Gemini Flash
+  // ("High"); otherwise every plan rides the OpenAI-compatible chain: the managed
+  // text model, then the $0 model, so o8 ALWAYS has a model. The tier
   // arrives as thinkingEffort but is SERVER-ENFORCED: a free client asking for
   // high still gets the free chain (fail-closed). Founders draw no metered
   // usage; the abuse limiter below guards the rail against runaway loops.
+  // Text only (#3408): the composer's o8 choice runs on the built-in Pi agent,
+  // and this rail is its fallback where Pi cannot start. It never attaches tools.
   if (provider === 'operator') {
     const abuseError = checkOperatorAbuseLimit();
     if (abuseError) return abuseError;
@@ -428,15 +437,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const wantsLow = requestedThinkingEffort === 'low';
     let geminiQuotaExhausted = false;
 
-    // o8-model file editing (Composer parity). RESTRICTED tool subset — file
-    // ops only, NO shell/github (an adversarial review found a github `pr merge`
-    // path). Tools attach only when the caller asked for them AND a real repo
-    // resolved, so writes never target the app's own cwd.
-    const operatorToolNames = ['read_file', 'create_file', 'edit_file'];
-    const operatorToolsAllowed = !disableTools && repoResolved;
-    const operatorDisableTools = !operatorToolsAllowed;
-    const operatorScopedRepoRoot = operatorToolsAllowed ? effectiveRepoRoot : null;
-
     if (paidPlan && !wantsLow && geminiKey) {
       // Primary then rollback, BOTH through Gemini (Q ruling 2026-07-13):
       // the primary is a preview id Google can re-point or retire, so any
@@ -447,13 +447,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         const geminiResponse = await createGoogleToolResponseStream({
           apiKey: geminiKey,
           auth,
-          disableTools: operatorDisableTools,
+          disableTools: true,
           lastUserContent: lastUserMsg?.content,
           messages,
           model: geminiModel,
-          scopedRepoRoot: operatorScopedRepoRoot,
+          scopedRepoRoot: null,
           tabId,
-          toolNames: operatorToolNames,
         });
         if (geminiResponse.ok) return geminiResponse;
         lastGeminiResponse = geminiResponse;
@@ -471,7 +470,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // OpenRouter and the managed proxy retain the two-model fallback chain.
     if (operatorEndpoint || openRouterKey) {
       let lastFailure: Response | null = null;
-      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_FREE_OPENROUTER_MODELS;
+      const operatorModels = localOperatorModel ? [localOperatorModel] : OPERATOR_OPENROUTER_MODELS;
       for (const freeModel of operatorModels) {
         const response = await streamOpenRouterFallback({
           apiKey: openRouterKey ?? '',
@@ -479,11 +478,6 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           messages,
           model: freeModel,
           auth,
-          // File-editing tools for free + founders-low (Composer parity). The
-          // fallback filters to file ops only (no shell/github) and sandboxes
-          // to the repo — same gate as the Gemini rail.
-          enableTools: operatorToolsAllowed,
-          scopedRepoRoot: operatorScopedRepoRoot,
           // Degradation banner only for a founder whose Gemini quota died —
           // the free plan rides this chain by design, no banner.
           notice: geminiQuotaExhausted
@@ -509,13 +503,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       return createGoogleToolResponseStream({
         apiKey: geminiKey,
         auth,
-        disableTools: operatorDisableTools,
+        disableTools: true,
         lastUserContent: lastUserMsg?.content,
         messages,
         model: OPERATOR_GEMINI_ROLLBACK_MODEL,
-        scopedRepoRoot: operatorScopedRepoRoot,
+        scopedRepoRoot: null,
         tabId,
-        toolNames: operatorToolNames,
       });
     }
 
@@ -528,15 +521,15 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     );
   }
 
-  const apiKey = resolveApiKey(provider);
-  if (!apiKey) {
+  const apiKey = provider === 'chatgpt' ? null : resolveApiKey(provider);
+  if (!apiKey && provider !== 'chatgpt') {
     const envKey = provider === 'google' ? 'GOOGLE_AI_API_KEY' : PROVIDERS[provider].envKey;
     return jsonError(`No API key configured for ${provider}. Set ${envKey} in your environment.`, 400);
   }
 
   if (provider === 'google') {
     return createGoogleToolResponseStream({
-      apiKey,
+      apiKey: apiKey!,
       auth,
       disableTools,
       lastUserContent: lastUserMsg?.content,
@@ -548,7 +541,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   const config = PROVIDERS[provider];
-  const headers = config.buildHeaders(apiKey);
+  const headers = provider === 'chatgpt' ? {} : config.buildHeaders(apiKey!);
   const cacheBreakpointEnabled = provider === 'anthropic' ? resolvePromptCachingEnabledSync() : false;
   const explicitThinkingBudget = provider === 'anthropic'
     ? thinkingBudgetForEffort(requestedThinkingEffort)
@@ -572,18 +565,25 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
         + ` source=${anthropicTaskBudget.source}`,
       );
     }
-    if (disableTools) {
+    if (disableTools || (provider === 'chatgpt' && !repoResolved)) {
       delete upstreamBody.tools;
     }
     return upstreamBody;
   };
-  const upstreamBody = buildUpstreamBody(messages);
+  const requestUpstream = async (requestMessages: Message[]) => {
+    if (provider === 'chatgpt') {
+      const owner = await requireDesktopAccount(request);
+      if (owner !== planOwner) throw new ChatGPTPlanError('account_mismatch', 'The o8 account changed during this request.', 403);
+      return getChatGPTPlanService().infer(owner, model, buildUpstreamBody(requestMessages), request.signal, planSelection);
+    }
+    return fetchWithTimeout(config.url, headers, JSON.stringify(buildUpstreamBody(requestMessages)));
+  };
 
   let upstream: globalThis.Response;
   try {
-    upstream = await fetchWithTimeout(config.url, headers, JSON.stringify(upstreamBody));
+    upstream = await requestUpstream(messages);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : 'Proxy request failed', 502);
+    return jsonError(error instanceof Error ? error.message : 'Proxy request failed', error instanceof ChatGPTPlanError ? error.status : 502, error instanceof ChatGPTPlanError ? error.code : undefined);
   }
 
   if (!upstream.ok) {
@@ -591,372 +591,14 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     return jsonError(`${provider} API error (${upstream.status}): ${errText.slice(0, 500)}`, upstream.status);
   }
 
-  let totalUsage: AnthropicUsageTotals = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-  };
-  let latestAnthropicStopMetadata: AnthropicStopMetadata | null = null;
-
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      const enqueue = (data: string) => {
-        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-      };
-
-      async function processStream(response: globalThis.Response): Promise<{
-        toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }>;
-        usage: AnthropicUsageTotals;
-        stopMetadata: AnthropicStopMetadata | null;
-      }> {
-        const reader = response.body?.getReader();
-        if (!reader) {
-          return {
-            toolCalls: [],
-            usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-            },
-            stopMetadata: null,
-          };
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        const toolCalls: Array<{ name: string; id: string; args: Record<string, unknown> }> = [];
-        let currentToolName = '';
-        let currentToolId = '';
-        let currentToolArgs = '';
-        const usage: AnthropicUsageTotals = {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        };
-        let stopMetadata: AnthropicStopMetadata | null = null;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (provider === 'anthropic') {
-              const anthropicUsage = parseAnthropicStreamUsage(line);
-              if (anthropicUsage) {
-                usage.cacheReadTokens = Math.max(usage.cacheReadTokens, anthropicUsage.cacheReadTokens);
-                usage.cacheWriteTokens = Math.max(usage.cacheWriteTokens, anthropicUsage.cacheWriteTokens);
-              }
-              stopMetadata = mergeAnthropicStopState(stopMetadata, parseAnthropicStopMetadata(line));
-            }
-            const parsed = config.parseStream(line);
-            if (!parsed) continue;
-
-            if (parsed.type === 'thinking') {
-              enqueue(JSON.stringify({ type: 'thinking', text: parsed.text }));
-              continue;
-            }
-            if (parsed.type === 'content') {
-              enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
-              continue;
-            }
-            if (parsed.type === 'usage') {
-              usage.inputTokens += parsed.inputTokens;
-              usage.outputTokens += parsed.outputTokens;
-              continue;
-            }
-            if (parsed.type === 'tool_call_start') {
-              currentToolName = parsed.toolName;
-              currentToolId = parsed.toolId;
-              currentToolArgs = '';
-              enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
-              continue;
-            }
-            if (parsed.type === 'tool_call_delta') {
-              currentToolArgs += parsed.json;
-              continue;
-            }
-            if (parsed.type === 'tool_call_end') {
-              try {
-                const args = currentToolArgs ? JSON.parse(currentToolArgs) as Record<string, unknown> : {};
-                toolCalls.push({ name: currentToolName, id: currentToolId, args });
-              } catch {
-                toolCalls.push({ name: currentToolName, id: currentToolId, args: {} });
-              }
-              continue;
-            }
-            if (parsed.type === 'tool_call') {
-              toolCalls.push({ name: parsed.toolName, id: parsed.toolId, args: parsed.args });
-              enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
-            }
-          }
-        }
-
-        return { toolCalls, usage, stopMetadata };
-      }
-
-      try {
-        const initialResult = await processStream(upstream);
-        let toolCalls = initialResult.toolCalls;
-        const { usage, stopMetadata } = initialResult;
-        totalUsage = {
-          inputTokens: totalUsage.inputTokens + usage.inputTokens,
-          outputTokens: totalUsage.outputTokens + usage.outputTokens,
-          cacheReadTokens: totalUsage.cacheReadTokens + usage.cacheReadTokens,
-          cacheWriteTokens: totalUsage.cacheWriteTokens + usage.cacheWriteTokens,
-        };
-        latestAnthropicStopMetadata = mergeAnthropicStopState(latestAnthropicStopMetadata, stopMetadata);
-        if (stopMetadata?.stopReason === 'budget_exhausted') {
-          console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
-        }
-        let loopCount = 0;
-        const allSources: Array<{ title: string; url?: string; path?: string }> = [];
-
-        while (toolCalls.length > 0 && loopCount < 8) {
-          loopCount += 1;
-          const toolResultParts: string[] = [];
-
-          for (const toolCall of toolCalls) {
-            const policyContext = buildPolicyContext(toolCall.name, toolCall.args, {
-              runtime: 'chat',
-              workspacePath: effectiveRepoRoot,
-              sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
-            });
-            const exactCallApproved = consumeLlmToolGrant({
-              token: approvalGrant,
-              tabId,
-              repoPath: effectiveRepoRoot,
-              toolName: toolCall.name,
-              args: toolCall.args,
-            });
-            const policyResult = exactCallApproved
-              ? { requiresApproval: false, risk: 'low' as const, reason: 'Exact one-shot approval', ruleId: 'one-shot-approval', blocked: false }
-              : evaluatePolicy(policyContext);
-
-            if (policyResult.blocked) {
-              const command = (toolCall.args.command as string) || toolCall.name;
-              enqueue(JSON.stringify({
-                type: 'tool_result',
-                name: toolCall.name,
-                status: 'blocked',
-                preview: `Blocked: ${policyResult.reason}`,
-              }));
-              messages.push(
-                { role: 'assistant', content: `I'll run: ${command}` },
-                { role: 'user', content: `Tool "${toolCall.name}" was blocked by policy "${policyResult.ruleId}": ${policyResult.reason}. Suggest a safe alternative.` },
-              );
-              continue;
-            }
-
-            if (policyResult.requiresApproval) {
-              const approvalArgs = toolCall.name === 'run_terminal_command' ? canonicalizeTerminalToolArgs(effectiveRepoRoot, toolCall.args) : toolCall.args;
-              const command = toolCall.name === 'run_terminal_command' ? (toolCall.args.command as string) : '';
-              let summary = `Execute ${toolCall.name}`;
-              let diff: { before?: string; after?: string; path?: string } | undefined;
-
-              if (toolCall.name === 'create_github_issue') {
-                summary = `Create issue: "${toolCall.args.title}" in ${toolCall.args.repo}`;
-              } else if (toolCall.name === 'create_pull_request') {
-                summary = `Create PR: "${toolCall.args.title}" on branch ${toolCall.args.branch}`;
-              } else if (toolCall.name === 'run_terminal_command') {
-                summary = terminalApprovalSummary(effectiveRepoRoot, approvalArgs);
-              } else if (toolCall.name === 'write_file') {
-                const filePath = String(toolCall.args.path || '');
-                const content = String(toolCall.args.content || '');
-                summary = `Write to ${filePath} (${content.split('\n').length} lines)`;
-                diff = { before: '', after: content, path: filePath };
-              } else if (toolCall.name === 'edit_file') {
-                const filePath = String(toolCall.args.path || '');
-                summary = `Edit ${filePath}`;
-                diff = {
-                  before: String(toolCall.args.oldText || ''),
-                  after: String(toolCall.args.newText || ''),
-                  path: filePath,
-                };
-              } else if (toolCall.name === 'delete_file') {
-                summary = `Delete file: ${toolCall.args.path}`;
-              }
-
-              const approval = tabId
-                ? createApproval({
-                    source: 'llm-chat',
-                    runtime: 'chat',
-                    agent: 'Chat',
-                    sessionKey: `llm-chat:${tabId}`,
-                    title: approvalTitleForTool(toolCall.name),
-                    description: summary,
-                    summary,
-                    toolName: toolCall.name,
-                    args: approvalArgs,
-                    command: command || undefined,
-                    editable: toolCall.name === 'run_terminal_command',
-                    diff,
-                    risk: policyResult.risk,
-                    policyRuleId: policyResult.ruleId,
-                    metadata: {
-                      Model: model,
-                      Tool: toolCall.name,
-                      ...(command ? { Command: command } : {}),
-                      ...(!command && toolCall.args.path ? { Path: String(toolCall.args.path) } : {}),
-                    },
-                    continuation: {
-                      kind: 'llm-chat',
-                      tabId,
-                      model,
-                      provider,
-                      messages: rawMessages,
-                      approvedTools: [],
-                      repoPath: effectiveRepoRoot,
-                    },
-                  })
-                : null;
-
-              enqueue(JSON.stringify({
-                type: 'approval_required',
-                id: approval?.id,
-                name: toolCall.name,
-                args: approvalArgs,
-                editable: toolCall.name === 'run_terminal_command',
-                summary,
-                diff,
-              }));
-              enqueue(JSON.stringify({ type: 'content', text: '' }));
-              enqueue(JSON.stringify(buildUsageEvent(provider, model, totalUsage, {
-                stopMetadata: latestAnthropicStopMetadata,
-                taskBudget: anthropicTaskBudget,
-              })));
-              enqueue('[DONE]');
-              controller.close();
-              return;
-            }
-
-            enqueue(JSON.stringify({
-              type: 'tool_call',
-              name: toolCall.name,
-              status: 'running',
-              args: toolCall.args,
-            }));
-
-            const result: ToolResult = await executeTool(toolCall.name, toolCall.args, effectiveRepoRoot);
-            if (result.sources) {
-              allSources.push(...result.sources);
-            }
-
-            enqueue(JSON.stringify({
-              type: 'tool_result',
-              name: toolCall.name,
-              status: 'done',
-              preview: result.content.slice(0, 200),
-            }));
-            toolResultParts.push(`[${toolCall.name}] ${result.content}`);
-          }
-
-          const toolNames = toolCalls.map((toolCall) => toolCall.name).join(', ');
-          messages.push(
-            { role: 'assistant', content: `I used the following tools: ${toolNames}` },
-            {
-              role: 'user',
-              content: `Tool results:\n\n${toolResultParts.join('\n\n---\n\n')}\n\nBased on these results, provide your complete response to the user. Do not call more tools unless absolutely necessary.`,
-            },
-          );
-
-          let followResponse: globalThis.Response;
-          try {
-            followResponse = await fetchWithTimeout(
-              config.url,
-              headers,
-              JSON.stringify(buildUpstreamBody(messages)),
-            );
-          } catch {
-            break;
-          }
-          if (!followResponse.ok) {
-            break;
-          }
-          const followResult = await processStream(followResponse);
-          toolCalls = followResult.toolCalls;
-          totalUsage = {
-            inputTokens: totalUsage.inputTokens + followResult.usage.inputTokens,
-            outputTokens: totalUsage.outputTokens + followResult.usage.outputTokens,
-            cacheReadTokens: totalUsage.cacheReadTokens + followResult.usage.cacheReadTokens,
-            cacheWriteTokens: totalUsage.cacheWriteTokens + followResult.usage.cacheWriteTokens,
-          };
-          latestAnthropicStopMetadata = mergeAnthropicStopState(
-            latestAnthropicStopMetadata,
-            followResult.stopMetadata,
-          );
-          if (followResult.stopMetadata?.stopReason === 'budget_exhausted') {
-            console.info(`[llm-proxy] Anthropic stop_reason=budget_exhausted model=${model}`);
-          }
-        }
-
-        const seen = new Set<string>();
-        const sources = allSources.filter((source) => {
-          const key = `${source.title}|${source.url ?? ''}|${source.path ?? ''}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        if (sources.length > 0) {
-          enqueue(JSON.stringify({
-            type: 'sources',
-            sources: sources.map((source, index) => ({ ...source, index: index + 1 })),
-          }));
-        }
-
-        const usageEvent = buildUsageEvent(provider, model, totalUsage, {
-          stopMetadata: latestAnthropicStopMetadata,
-          taskBudget: anthropicTaskBudget,
-        });
-        enqueue(JSON.stringify(usageEvent));
-        enqueue('[DONE]');
-
-        if (auth?.user && totalUsage.outputTokens > 0) {
-          try {
-            const costUsd = typeof usageEvent.costUsd === 'number' ? usageEvent.costUsd : 0;
-            logUsage({
-              userId: auth.user.id,
-              model,
-              provider,
-              inputTokens: totalUsage.inputTokens,
-              outputTokens: totalUsage.outputTokens,
-              cacheReadTokens: totalUsage.cacheReadTokens,
-              cacheWriteTokens: totalUsage.cacheWriteTokens,
-              costUsd,
-              agentName: 'llm-chat',
-              requestType: 'chat',
-            });
-          } catch (error) {
-            console.error('[proxy/llm] Failed to log usage:', error);
-          }
-        }
-      } catch (error) {
-        enqueue(JSON.stringify({
-          type: 'error',
-          message: error instanceof Error ? error.message : 'Stream error',
-        }));
-      } finally {
-        try {
-          controller.close();
-        } catch {
-          return;
-        }
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
+  return createProviderToolStream({ provider, model, config, auth, upstream, messages, rawMessages, effectiveRepoRoot, tabId, approvalGrant, anthropicTaskBudget,
+    fetchUpstream: (requestMessages) => requestUpstream(requestMessages),
+    buildUsageEvent, parseAnthropicStreamUsage, mergeAnthropicStopState, signal: request.signal, planOwner, planSelection,
+    ...(provider === 'chatgpt' ? { allowedTools: disableTools || !repoResolved ? [] : toolsForOpenAI().map((tool) => tool.function.name) } : {}),
+    ...(planOwner && planSelection ? { toolAdmission: async <T>(action: () => Promise<T>) => {
+      const owner = await requireDesktopAccount(request);
+      if (owner !== planOwner) throw new ChatGPTPlanError('account_mismatch', 'The o8 account changed.', 403);
+      return getChatGPTPlanService().toolAdmission(owner, planSelection!, action);
+    } } : {}),
   });
 });

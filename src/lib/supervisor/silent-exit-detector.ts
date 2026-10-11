@@ -36,6 +36,9 @@
  * anyway, but the label guard is belt-and-suspenders.
  */
 
+import { createCompletionTurnGuard } from './completion-turn';
+import { completionHandoffTurnCheck } from '@/lib/orchestrator/completion-handoff';
+import { acceptSilentExitCompletion } from './silent-exit-completion';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -306,8 +309,9 @@ function appendAncestryWarning(
   return nextPayload;
 }
 
-async function markAlreadyMergedWork(lane: Lane, check: MergedWorkCheck): Promise<void> {
-  setLaneStatus(lane.id, 'completed', 'system', 'silent_exit_already_merged');
+async function markAlreadyMergedWork(lane: Lane, check: MergedWorkCheck, guard: ReturnType<typeof createCompletionTurnGuard>): Promise<void> {
+  await acceptSilentExitCompletion(lane, await guard.wait(() => readLastCommitSubject(lane.worktreePath || lane.repoPath)),
+    'completed', 'silent_exit_already_merged', guard, check.headSha);
   const { appendEvent } = await import('@/lib/lane/registry');
   appendEvent(lane.id, 'silent_exit_already_merged', 'system', {
     headSha: check.headSha,
@@ -327,34 +331,6 @@ function enqueueSilentExitInbox(
     payload,
   });
   console.log(`[silent-exit] Enqueued inbox item ${inboxId} for lane ${lane.id} (${kind})`);
-}
-
-async function captureSilentExitCompletionSummary(lane: Lane, cwd: string): Promise<void> {
-  const packetId = lane.packetId?.trim() ?? '';
-  if (!packetId) return;
-
-  const commitSubject = await readLastCommitSubject(cwd);
-  let completionSummary = commitSubject;
-  if (lane.sessionKey) {
-    try {
-      const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
-      const context = await capturePacketCompletionContext(packetId, lane.sessionKey, {
-        fallbackSummary: commitSubject,
-      });
-      completionSummary = context.selfReview?.outcome?.trim()
-        || context.summary.trim()
-        || commitSubject;
-    } catch (error) {
-      console.warn(`[silent-exit] Failed to capture completion context for lane ${lane.id}:`, error);
-    }
-  }
-  if (!completionSummary) return;
-
-  const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-  await withLockedState((mission) => {
-    const packet = mission.packets.find((candidate) => candidate.id === packetId);
-    if (packet) packet.completionSummary = completionSummary.slice(0, 1_200);
-  });
 }
 
 /**
@@ -400,6 +376,7 @@ async function recordVerificationFailureLearning(
  * when we took any action so the caller can log the outcome.
  */
 async function triageSilentExit(lane: Lane): Promise<boolean> {
+  const guard = createCompletionTurnGuard(lane, { checkCurrent: completionHandoffTurnCheck(lane).check });
   if (findCurrentAuthExit(lane, getLaneEvents(lane.id, 200))) {
     if (lane.status !== 'awaiting_input' || lane.lastEventLabel !== CODEX_AUTH_RECOVERY_LANE_LABEL) {
       setLaneStatus(lane.id, 'awaiting_input', 'system', CODEX_AUTH_RECOVERY_LANE_LABEL);
@@ -416,7 +393,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   if (state.hasUncommittedWork) {
     try {
-      const committed = await commitCrashedWorkerWork(cwd, lane.label);
+      const committed = await commitCrashedWorkerWork(cwd, lane.repoPath, lane.label);
       if (committed) {
         console.log(`[silent-exit] Auto-committed salvaged work in ${cwd} for lane ${lane.id}`);
       }
@@ -437,7 +414,7 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       return true;
     }
 
-    const verification = await runCompletionVerification(cwd, lane.baseBranch);
+    const verification = await runCompletionVerification(cwd, lane.baseBranch, lane.repoPath);
     if (!verification.ok) {
       console.warn(
         `[silent-exit] Lane ${lane.id} post-silent-exit ${verification.kind} failed`,
@@ -461,12 +438,12 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
     const postState = await collectWorktreeState(cwd, lane.baseBranch);
     const mergedCheck = await checkAlreadyMergedWork(cwd, lane.baseBranch);
     if (mergedCheck.alreadyMerged) {
-      await markAlreadyMergedWork(lane, mergedCheck);
+      await markAlreadyMergedWork(lane, mergedCheck, guard);
       return true;
     }
 
-    await captureSilentExitCompletionSummary(lane, cwd);
-    setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
+    await acceptSilentExitCompletion(lane, await guard.wait(() => readLastCommitSubject(cwd)),
+      'reviewing', 'silent_exit_work_present', guard);
     enqueueSilentExitInbox(
       lane,
       'silent_exit_but_work_present',
@@ -496,12 +473,13 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
         try {
           const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
           context = await captureSettledReadOnlyCompletionContext(
-            () => capturePacketCompletionContext(packetId, lane.sessionKey!),
+            () => guard.wait(() => capturePacketCompletionContext(packetId, lane.sessionKey!)),
           );
         } catch (error) {
           console.error(`[silent-exit] Failed to capture read-only completion context for packet ${packetId}:`, error);
         }
       }
+      guard.check();
       const completion = await completeReadOnlyZeroDiffLane(lane, context);
       if (completion.completed || completion.blocked) return true;
       return false;
@@ -534,12 +512,12 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
   // loop can pick it up.
   const mergedCheck = await checkAlreadyMergedWork(cwd, lane.baseBranch);
   if (mergedCheck.alreadyMerged) {
-    await markAlreadyMergedWork(lane, mergedCheck);
+    await markAlreadyMergedWork(lane, mergedCheck, guard);
     return true;
   }
 
-  await captureSilentExitCompletionSummary(lane, cwd);
-  setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
+  await acceptSilentExitCompletion(lane, await guard.wait(() => readLastCommitSubject(cwd)),
+    'reviewing', 'silent_exit_work_present', guard);
   enqueueSilentExitInbox(
     lane,
     'silent_exit_but_work_present',
@@ -565,7 +543,9 @@ async function silentExitTick(): Promise<void> {
   tickInFlight = true;
   try {
     const now = Date.now();
-    const lanes = listActiveLanes().filter((lane) => INTERESTING_LANE_STATUSES.has(lane.status));
+    // Cloud jobs have no local process or in-progress checkout. Their durable
+    // queue owns lease recovery and completion; local salvage cannot judge them.
+    const lanes = listActiveLanes().filter((lane) => lane.runtime !== 'cloud' && INTERESTING_LANE_STATUSES.has(lane.status));
 
     for (const lane of lanes) {
       if (!lane.sessionKey) continue;
@@ -592,6 +572,7 @@ async function silentExitTick(): Promise<void> {
       // bail out rather than stomp their work.
       const refreshed = getLane(lane.id);
       if (!refreshed) continue;
+      if (refreshed.runtime === 'cloud') continue;
       if (!INTERESTING_LANE_STATUSES.has(refreshed.status)) continue;
       if (refreshed.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX)) continue;
 

@@ -39,6 +39,7 @@
     "node_modules",
     "tests/e2e",
     "playwright.config.ts",
-    "cli"
+    "cli",
+    "src-tauri/vendor"
   ]
 }

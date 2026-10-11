@@ -24,11 +24,17 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
-import { appendEvent, findLaneByPacket } from '@/lib/lane/registry';
+import { appendEvent, findLaneByPacket, getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { checkWorktreeRemoval } from '@/lib/worktree/live-process-guard';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
+import { listWorkspaceSnapshotsByOriginalPath } from '@/lib/worktree/snapshot-state';
+import { readManagedWorkspaceMaterialization } from '@/lib/workspace/managed-materialization-identity';
+import { getWorkspaceRetirementAction } from '@/lib/workspace/workspace-materialization-retirement';
 
 const execFileAsync = promisify(execFile);
 
@@ -39,6 +45,8 @@ export type RemoveMergedWorktreeReason =
   | 'dirty'
   | 'remove-failed'
   | 'status-failed'
+  | 'ownership-unavailable'
+  | 'retirement-refused'
   // The live-process guard refused removal (#2493): a process is inside, or
   // the probe could not tell. The worktree stays for the reconcile sweep.
   | 'live-process'
@@ -55,10 +63,11 @@ function formatError(error: unknown): string {
 
 async function pathExists(targetPath: string): Promise<boolean> {
   try {
-    await access(targetPath);
+    await lstat(targetPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
   }
 }
 
@@ -87,6 +96,7 @@ async function isWorktreeDirty(worktreePath: string): Promise<'clean' | 'dirty' 
  */
 export async function removeMergedWorktree(
   lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>,
+  options: { preserveUncommittedSource?: true } = {},
 ): Promise<RemoveMergedWorktreeResult> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -95,8 +105,8 @@ export async function removeMergedWorktree(
 
   // Safety guard: never touch the main working tree. An un-isolated lane
   // has worktreePath === repoPath; removing that would destroy the repo.
-  const normalizedRepo = lane.repoPath.replace(/\/+$/, '');
-  const normalizedWorktree = worktreePath.replace(/\/+$/, '');
+  const normalizedRepo = canonicalRepoRoot(lane.repoPath);
+  const normalizedWorktree = path.resolve(worktreePath);
   if (normalizedWorktree === normalizedRepo) {
     console.log(
       '[worktree-cleanup]',
@@ -105,99 +115,55 @@ export async function removeMergedWorktree(
     return { removed: false, reason: 'worktree-equals-repo' };
   }
 
-  // Idempotency: if the path is already gone, prune stale metadata and bail.
-  if (!(await pathExists(worktreePath))) {
-    try {
-      await execFileAsync('git', ['worktree', 'prune'], {
-        windowsHide: true,
-        cwd: lane.repoPath,
-        timeout: 10_000,
-      });
-    } catch (error) {
-      // Prune is cleanup-of-cleanup; failure is non-fatal.
+  try {
+    const currentLane = getLane(lane.id);
+    const repo = await findRepoByLocalPath(normalizedRepo);
+    if (!repo || !currentLane?.packetId
+      || canonicalRepoRoot(currentLane.repoPath) !== normalizedRepo) {
+      return { removed: false, reason: 'ownership-unavailable' };
+    }
+    // A captured pre-merge lane is only a locator. Replay success requires
+    // durable terminal truth for this exact packet plus confirmed absence.
+    if (!(await pathExists(worktreePath))) {
+      const snapshots = listWorkspaceSnapshotsByOriginalPath(normalizedWorktree);
+      const snapshot = snapshots.length === 1 ? snapshots[0] : null;
+      const retired = snapshot?.state === 'retired' && snapshot.repositoryUuid === repo.id
+        && snapshot.packetId === currentLane.packetId && snapshot.laneId === currentLane.id;
+      return retired ? { removed: true, reason: 'already-removed' }
+        : { removed: false, reason: 'ownership-unavailable' };
+    }
+    if (!currentLane.worktreePath || path.resolve(currentLane.worktreePath) !== normalizedWorktree) {
+      return { removed: false, reason: 'ownership-unavailable' };
+    }
+    const managed = await readManagedWorkspaceMaterialization(normalizedRepo, normalizedWorktree);
+    if (!currentLane.sessionKey || managed.metadata.sessionKey !== currentLane.sessionKey) {
+      return { removed: false, reason: 'ownership-unavailable' };
+    }
+
+    // Post-merge callers require clean source. Explicit unmerged Close uses
+    // the manager's exact-owner preservation boundary to bank source first.
+    const cleanliness = await isWorktreeDirty(worktreePath);
+    if (cleanliness === 'dirty' && options.preserveUncommittedSource !== true) {
       console.log(
         '[worktree-cleanup]',
-        `Prune failed for ${lane.repoPath}: ${formatError(error)}`,
+        `Lane ${lane.id} worktree at ${worktreePath} has uncommitted changes — skipping force-remove.`,
       );
+      return { removed: false, reason: 'dirty' };
     }
-    return { removed: true, reason: 'already-removed' };
-  }
-
-  // Dirty guard: a post-merge worktree should be clean. If it isn't,
-  // preserve the work and let the reconcile sweep deal with it rather
-  // than force-removing and losing uncommitted changes.
-  const cleanliness = await isWorktreeDirty(worktreePath);
-  if (cleanliness === 'dirty') {
-    console.log(
-      '[worktree-cleanup]',
-      `Lane ${lane.id} worktree at ${worktreePath} has uncommitted changes — skipping force-remove.`,
-    );
-    return { removed: false, reason: 'dirty' };
-  }
-  if (cleanliness === 'unknown') {
-    // `git status` failed — the worktree may be corrupt. Fall through to
-    // force-remove; if it's truly corrupt we want it gone.
-    console.log(
-      '[worktree-cleanup]',
-      `Lane ${lane.id} worktree status unknown — proceeding with force-remove.`,
-    );
-  }
-
-  // Force-remove the worktree. Branch may already be deleted by the merge
-  // path — `git worktree remove --force` tolerates a missing branch.
-  const removal = await checkWorktreeRemoval(worktreePath, { logPrefix: 'worktree-cleanup' });
-  if (!removal.allowed) {
-    return { removed: false, reason: removal.refusal === 'live' ? 'live-process' : 'inconclusive' };
-  }
-  try {
-    await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
-      windowsHide: true,
-      cwd: lane.repoPath,
-      timeout: 15_000,
-    });
-  } catch (error) {
-    const message = formatError(error);
-    // If the directory vanished between our check and the remove, treat
-    // that as success — another cleanup path beat us to it.
-    if (
-      message.includes('is not a working tree')
-      || message.includes('not a working tree')
-      || message.includes('No such file or directory')
-    ) {
-      try {
-        await execFileAsync('git', ['worktree', 'prune'], {
-          windowsHide: true,
-          cwd: lane.repoPath,
-          timeout: 10_000,
-        });
-      } catch {
-        // Already-pruned is fine.
-      }
-      return { removed: true, reason: 'already-removed' };
+    if (cleanliness === 'unknown') {
+      return { removed: false, reason: 'status-failed' };
     }
 
-    console.log(
-      '[worktree-cleanup]',
-      `Force-remove failed for lane ${lane.id} at ${worktreePath}: ${message}`,
-    );
-    return { removed: false, reason: 'remove-failed' };
-  }
-
-  // Prune stale worktree list entries so `git worktree list` stays clean.
-  try {
-    await execFileAsync('git', ['worktree', 'prune'], {
-      windowsHide: true,
-      cwd: lane.repoPath,
-      timeout: 10_000,
+    const removed = await getWorktreeManager(normalizedRepo).cleanup(managed.metadata.id, {
+      force: true,
+      deleteBranch: false,
+      workspaceRetirementAction: getWorkspaceRetirementAction(normalizedWorktree) ?? 'cleanup',
     });
+    return removed ? { removed: true } : { removed: false, reason: 'retirement-refused' };
   } catch (error) {
-    console.log(
-      '[worktree-cleanup]',
-      `Prune after remove failed for ${lane.repoPath}: ${formatError(error)}`,
-    );
+    console.warn(`[worktree-cleanup] Retirement refused for lane ${lane.id}: ${formatError(error)}`);
+    return { removed: false, reason: 'ownership-unavailable' };
   }
-
-  return { removed: true };
 }
 
 /**

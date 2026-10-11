@@ -23,6 +23,8 @@ const config = [
       'coverage/**',
       'electron/**',
       'src-tauri/target/**',
+      // Native Cargo dependencies retain upstream tooling, not app TypeScript.
+      'src-tauri/vendor/**',
       'test-results/**',
       'tmp/**',
       'next-env.d.ts',

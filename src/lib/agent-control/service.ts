@@ -239,6 +239,7 @@ async function performSessionControl(
     runId: action.kind === 'send' || action.kind === 'interrupt' ? action.runId : undefined,
     auditSteer: action.kind === 'send' ? action.auditSteer : undefined,
     steerSource: action.kind === 'send' ? action.steerSource : undefined,
+    automaticRecoveryRunId: action.kind === 'send' ? action.automaticRecoveryRunId : undefined,
   });
 
   return baseResult(request, {
@@ -480,6 +481,7 @@ function legacySessionAction(payload: RuntimeActionRequest): SessionControlActio
       attachments: payload.attachments,
       auditSteer: payload.auditSteer,
       steerSource: payload.steerSource,
+      automaticRecoveryRunId: payload.automaticRecoveryRunId,
     };
   }
   if (payload.action === 'stop' || payload.action === 'interrupt') {

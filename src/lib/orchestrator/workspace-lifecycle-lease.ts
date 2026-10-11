@@ -131,6 +131,7 @@ function waitBriefly(): Promise<void> {
 
 export async function acquireWorkspaceLifecycleLease(
   rawPacketId: string,
+  options: { waitForLiveOwner?: boolean } = {},
 ): Promise<WorkspaceLifecycleLease> {
   const packetId = rawPacketId.trim();
   if (!packetId) {
@@ -152,7 +153,7 @@ export async function acquireWorkspaceLifecycleLease(
       // The row vanished between the insert and the read: somebody else owned
       // and released it. That is a competing intent, not an abandoned lease.
       contendedByLiveOwner = true;
-      if (Date.now() >= deadline) break;
+      if (options.waitForLiveOwner === false || Date.now() >= deadline) break;
       await waitBriefly();
       continue;
     }
@@ -166,7 +167,7 @@ export async function acquireWorkspaceLifecycleLease(
       continue;
     }
     contendedByLiveOwner = true;
-    if (Date.now() >= deadline) break;
+    if (options.waitForLiveOwner === false || Date.now() >= deadline) break;
     await waitBriefly();
   }
   throw new WorkspaceLifecycleLeaseUnavailableError(

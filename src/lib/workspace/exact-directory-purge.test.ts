@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,6 +16,21 @@ afterEach(() => {
 });
 
 describe('exact directory purge', () => {
+  it.skipIf(process.platform === 'win32')('refuses every unsupported node before truncating an earlier file', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-unknown-node-'));
+    roots.push(root);
+    const directoryPath = path.join(root, 'retired-workspace');
+    mkdirSync(directoryPath);
+    const sourcePath = path.join(directoryPath, 'a-first.txt');
+    writeFileSync(sourcePath, 'unique bytes must survive');
+    execFileSync('mkfifo', [path.join(directoryPath, 'z-unsupported-node')]);
+    const stat = await lstat(directoryPath);
+    await expect(purgeExactDirectory(directoryPath, { device: stat.dev, inode: stat.ino }))
+      .rejects.toThrow('non-file workspace entries');
+    expect(readFileSync(sourcePath, 'utf8')).toBe('unique bytes must survive');
+    expect(existsSync(directoryPath)).toBe(true);
+  });
+
   it('refuses a hard link created after tree capture without truncating either name', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-hardlink-'));
     roots.push(root);

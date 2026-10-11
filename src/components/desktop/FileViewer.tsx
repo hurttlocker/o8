@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FileText } from './lucide-shims';
+import { FileLoadError } from './file-viewer/FileLoadError';
 import { loader } from '@monaco-editor/react';
 import { useTheme } from '@/lib/theme/context';
 import { renderDiffLines } from './diff-utils';
@@ -28,6 +29,8 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
   const [diff, setDiff] = useState<string>('');
   const [hasDiff, setHasDiff] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saveNote, setSaveNote] = useState<string | null>(null);
@@ -46,6 +49,8 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError(null);
+    setContent(null);
     setDirty(false);
     setSaveNote(null);
     setSaveConflict(null);
@@ -55,13 +60,26 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
     const wsParam = workspace ? `&workspace=${encodeURIComponent(workspace)}` : '';
     Promise.all([
       fetch(`/api/panel/file-content?path=${encodeURIComponent(filePath)}${wsParam}`)
-        .then(r => r.json()).catch(() => ({ content: null })),
+        .then(async (response) => {
+          const data = await response.json() as Record<string, unknown>;
+          if (!response.ok || typeof data.content !== 'string') {
+            throw new Error(typeof data.error === 'string' ? data.error : 'Could not read file.');
+          }
+          return data;
+        }).catch((error: unknown): Record<string, unknown> => ({
+          content: null, error: error instanceof Error ? error.message : 'Could not read file.',
+        })),
       fetch(`/api/panel/file-diff?path=${encodeURIComponent(filePath)}${wsParam}`)
         .then(r => r.json()).catch(() => ({ diff: '', hasDiff: false })),
     ]).then(([contentData, diffData]) => {
       if (!cancelled) {
-        const loadedContent = contentData.content ?? '';
-        setContent(contentData.content ?? null);
+        const loadedContent = typeof contentData.content === 'string' ? contentData.content : null;
+        if (loadedContent === null) {
+          setLoadError(typeof contentData.error === 'string' ? contentData.error : 'Could not read file.');
+          setLoading(false);
+          return;
+        }
+        setContent(loadedContent);
         setEditContent(loadedContent);
         setFileHash(typeof contentData.contentHash === 'string' ? contentData.contentHash : null);
         richMarkdown.loadSource(`${workspace ?? ''}\u0000${filePath}`, loadedContent);
@@ -77,7 +95,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
       tabCompleteDisposableRef.current?.dispose();
       tabCompleteAbortRef.current?.abort();
     };
-  }, [filePath, workspace]);
+  }, [filePath, workspace, loadAttempt]);
 
   // Save file via API
   const handleSave = useCallback(async (force = false) => {
@@ -370,6 +388,13 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
+  }
+
+  if (loadError) {
+    return <FileLoadError filePath={filePath} error={loadError} onRetry={() => {
+      setLoading(true);
+      setLoadAttempt((attempt) => attempt + 1);
+    }} />;
   }
 
   const fileName = filePath.split('/').pop() ?? filePath;
@@ -710,6 +735,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
           </div>
         ) : content !== null ? (
           <MarkdownEditorMount
+            filePath={filePath}
             controller={richMarkdown}
             language={getMonacoLanguage(filePath)}
             value={editContent}

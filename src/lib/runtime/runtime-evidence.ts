@@ -171,6 +171,7 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
   'cursor',
   'grok',
   'pi',
+  'pi-builtin',
   'prime-agent',
   'deepseek-harness',
 ]);
@@ -303,6 +304,11 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
   aider: unknownEvidence('aider', ['text'], 'configured-provider'),
   '3code': unknownEvidence('3code', ['text'], 'configured-provider'),
   pi: unknownEvidence('pi', ['stdio-json-rpc'], 'configured-provider'),
+  // One managed model on o8's relay, under the plan or the free allowance.
+  'pi-builtin': {
+    ...unknownEvidence('pi-builtin', ['stdio-json-rpc'], 'fixed'),
+    advertisedModelIds: ['openai/gpt-6-luna'],
+  },
   cursor: unknownEvidence('cursor', ['stream-json'], 'provider-native'),
   grok: {
     carriers: [{
@@ -337,6 +343,21 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
     ],
   },
   'prime-agent': unknownEvidence('prime-agent', ['jsonl'], 'configured-provider'),
+  hermes: {
+    ...unknownEvidence('hermes', ['acp'], 'configured-provider'),
+    sources: [
+      internalSource('hermes'),
+      {
+        id: 'hermes-agent-upstream',
+        label: 'Hermes Agent upstream runtime',
+        url: 'https://github.com/NousResearch/hermes-agent',
+        observedAt: '2026-10-07',
+        maxAgeDays: 30,
+        confidence: 'verified',
+        scope: 'runtime-upstream',
+      },
+    ],
+  },
   'deepseek-harness': {
     carriers: [{
       os: 'darwin',

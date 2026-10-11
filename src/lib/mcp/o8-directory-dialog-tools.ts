@@ -1,3 +1,4 @@
+import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
 import { isAbsolute } from 'node:path';
 import type { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 
@@ -8,7 +9,7 @@ export type DirectoryResolve =
 type Result = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
 
 function invalid(message: string): never {
-  throw Object.assign(new Error(message), { code: 'invalid_schema' });
+  throw Object.assign(new McpInputError(message), { code: 'invalid_schema' });
 }
 
 export function parseDirectoryResolve(args: Record<string, unknown>): DirectoryResolve {
@@ -54,7 +55,7 @@ export function createDirectoryDialogHandlers(getClient: () => O8WebviewClient):
     try {
       return { content: [{ type: 'text', text: JSON.stringify(await action()) }] };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = safeErrorText(error);
       const code = (error as { code?: string })?.code ?? (/^[a-z_]+$/.test(message) ? message : 'directory_dialog_error');
       return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message }) }] };
     }

@@ -1,3 +1,4 @@
+import { isReadOnlyWorkerBearer, resolveReadOnlyWorkerToken } from './read-only-worker-token';
 import { isLegacyLocalWorkerToken, isPacketWorkerToken } from './worker-token';
 import { resolvePacketWorkerToken } from './packet-worker-token';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -5,13 +6,16 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { resolveSpectatorTokenRecord } from '@/lib/broadcast/spectator-token-store';
+import { resolvePluginToken, type PluginPrincipal } from './plugin-token';
 
-export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'anonymous';
+export type RequestPrincipal = 'operator' | 'worker' | 'device' | 'spectator' | 'plugin' | 'anonymous';
 
 export type RequestPrincipalContext =
   | { role: 'operator' }
+  | PluginPrincipal
   | {
       role: 'worker';
+      readOnly?: true;
       packetId: string | null;
       tokenId: string | null;
       leaseProcessMarker: string | null;
@@ -65,6 +69,13 @@ export function resolveRequestPrincipal(req: Request): RequestPrincipal {
 export function resolveRequestPrincipalContext(req: Request): RequestPrincipalContext {
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (isReadOnlyWorkerBearer(bearer)) {
+    const identity = resolveReadOnlyWorkerToken(bearer);
+    return identity ? { role: 'worker', readOnly: true, packetId: null, tokenId: identity.tokenId,
+      leaseProcessMarker: identity.runId, leaseProcessPid: null, leaseProcessGroupId: null } : { role: 'anonymous' };
+  }
+  const plugin = resolvePluginToken(bearer);
+  if (plugin) return plugin;
   if (isPacketWorkerToken(bearer)) {
     const worker = resolvePacketWorkerToken(bearer);
     return worker

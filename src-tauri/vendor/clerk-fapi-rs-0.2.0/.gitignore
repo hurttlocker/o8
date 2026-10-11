@@ -1,0 +1,26 @@
+# Environment variables
+.envrc
+.env
+.env.local
+.env*.local
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Rust
+/target
+Cargo.lock
+**/*.rs.bk
+
+# Debug files
+*.pdb
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test directories
+javascript/

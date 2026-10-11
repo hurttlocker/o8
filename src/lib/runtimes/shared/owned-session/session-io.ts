@@ -1,5 +1,10 @@
-import { readdir } from 'node:fs/promises';
+import { revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
+import { executionRunIsClear } from '@/lib/mcp/task-execution-admission';
+import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { saveRestrictedOwnedSession } from './restricted-session-persistence';
+import { readOwnedSessionMetadata } from './metadata-read';
+import { worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from '@/lib/worktree/maintenance-budget';
 
 import {
   archiveOwnedSessionDir,
@@ -11,7 +16,6 @@ import {
   metadataPath,
   nowIso,
   pathExists,
-  readJsonFile,
   writeJsonFile,
 } from './helpers';
 import type {
@@ -50,15 +54,40 @@ export function createOwnedSessionIo({
   }
 
   async function loadSession(sessionDir: string) {
-    return readJsonFile<OwnedSessionRecord>(metadataPath(sessionDir));
+    return readOwnedSessionMetadata<OwnedSessionRecord>(metadataPath(sessionDir));
   }
 
   async function saveSession(session: OwnedSessionRecord) {
     session.updatedAt = nowIso();
+    if (session.executionPolicy !== undefined) {
+      for (const run of session.recentRuns) {
+        if (run.outcome !== 'running' || run.interruptRequestedAt) revokeReadOnlyWorkerToken(run.id);
+      }
+      saveRestrictedOwnedSession(metadataPath(session.sessionDir), session);
+      return;
+    }
     await writeJsonFile(metadataPath(session.sessionDir), session, { mode: 0o600 });
   }
 
   async function findSession(surfaceId: string) {
+    if (worktreeMetadataReadLimit() !== undefined) {
+      const name = surfaceId.startsWith(surfacePrefix) ? surfaceId.slice(surfacePrefix.length) : '';
+      if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name)) {
+        throw new WorktreeMaintenanceHeldError(surfaceId, 'owned session has no exact directory association');
+      }
+      const sessionDir = path.join(root, name);
+      const directory = await lstat(sessionDir).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (!directory) return null;
+      if (!directory.isDirectory() || directory.isSymbolicLink()) {
+        throw new WorktreeMaintenanceHeldError(surfaceId, 'owned session directory is redirected or invalid');
+      }
+      const session = await loadSession(sessionDir);
+      if (session.surfaceId !== surfaceId) throw new WorktreeMaintenanceHeldError(surfaceId, 'owned session association changed');
+      return session;
+    }
     for (const sessionDir of await listSessionDirs()) {
       const filePath = metadataPath(sessionDir);
       if (!(await pathExists(filePath))) continue;
@@ -99,6 +128,10 @@ export function createOwnedSessionIo({
       return { archived: false, note: 'Session was not found.' };
     }
 
+    if (session.controlledTask && (!session.recentRuns.length
+      || !(await Promise.all(session.recentRuns.map(executionRunIsClear))).every(Boolean))) {
+      return { archived: false, note: 'Controlled task process evidence is not clear. Stop and verify it before archive.' };
+    }
     const result = await archiveOwnedSessionDir(root, session);
     if (result.archived) {
       invalidateFleetCache();

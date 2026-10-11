@@ -6,6 +6,7 @@ import {
 } from './materialization-execution';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
 import { resolveStorageVolumeId } from './storage-telemetry';
+import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit } from './maintenance-budget';
 
 export interface PinnedWorkspaceFileIdentity {
   device: number;
@@ -258,14 +259,23 @@ async function main() {
   }
   if (operation === 'read') {
     try {
-      const handle = fs.openSync(prepared.target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const handle = fs.openSync(prepared.target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
       try {
         const identity = fs.fstatSync(handle);
         if (!identity.isFile() || identity.nlink !== 1) {
           throw new Error('Pinned workspace target is not an exclusive regular file.');
         }
+        const limit = process.argv[3] === undefined ? Infinity : Number(process.argv[3]);
+        if (!Number.isSafeInteger(identity.size) || identity.size > limit) {
+          throw new Error('Pinned workspace metadata exceeds the automatic read allowance.');
+        }
+        const content = readExactHandle(handle, identity.size);
+        const after = fs.fstatSync(handle);
+        if (after.size !== identity.size || after.mtimeMs !== identity.mtimeMs) {
+          throw new Error('Pinned workspace metadata changed during bounded read.');
+        }
         process.stdout.write(JSON.stringify({
-          content: fs.readFileSync(handle).toString('base64'),
+          content: content.toString('base64'),
           device: identity.dev,
           inode: identity.ino,
           canonicalPath: fs.realpathSync(prepared.target),
@@ -607,7 +617,9 @@ export async function readPinnedWorkspaceFileReceipt(
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
 ): Promise<{ content: string } & Required<PinnedWorkspaceFileIdentity> | null> {
-  const receipt = await runPinnedLeaf(workspacePath, identity, 'read', relativePath);
+  const limit = relativePath === '.meta.json' ? worktreeMetadataReadLimit() : undefined;
+  const receipt = await runPinnedLeaf(workspacePath, identity, 'read', relativePath,
+    limit === undefined ? undefined : String(limit));
   if (receipt.code === 44) return null;
   const parsed = JSON.parse(receipt.stdout) as {
     content?: unknown; device?: unknown; inode?: unknown; canonicalPath?: unknown;
@@ -620,6 +632,9 @@ export async function readPinnedWorkspaceFileReceipt(
     throw new Error('Pinned workspace read returned an invalid file receipt.');
   }
   const canonicalPath = parsed.canonicalPath;
+  if (relativePath === '.meta.json') {
+    chargeWorktreeMetadataRead(canonicalPath, Buffer.from(parsed.content, 'base64').length);
+  }
   return {
     content: Buffer.from(parsed.content, 'base64').toString('utf8'),
     device: parsed.device as number,

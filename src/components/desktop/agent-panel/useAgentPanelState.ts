@@ -5,7 +5,6 @@ import { useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '../hooks/useDesktopWebSocket';
 import { isTauri } from '@/lib/tauri/bridge';
 import { fetchOnce, getSWR, setSWR } from '@/lib/panel/fetch-cache';
-import { REQUEST_ADD_REPO_EVENT } from '@/lib/desktop/events';
 import {
   correlatedActionIsUnsettled,
   fetchCorrelatedActionReceipt,
@@ -156,7 +155,6 @@ export function useAgentPanelState({
   const [gatewayWarming, setGatewayWarming] = useState(false);
   const [fleetMeta, setFleetMeta] = useState<Record<string, unknown> | null>(null);
   const [reposOpen, setReposOpen] = useState(true);
-  const [addRepoIntentNonce, setAddRepoIntentNonce] = useState(0);
   const [repoRegistryState, setRepoRegistryState] = useState<RepoRegistryState>({
     loading: true,
     count: 0,
@@ -173,23 +171,6 @@ export function useAgentPanelState({
   const refreshNow = useCallback(() => {
     fetchNowRef.current();
   }, []);
-
-  const requestAddRepo = useCallback(() => {
-    setReposOpen(true);
-    setAddRepoIntentNonce((current) => current + 1);
-  }, []);
-
-  // The global DesktopStatusBar's "+" button dispatches this window event so
-  // the add-repo intent can be triggered from outside the AgentPanel's own
-  // state scope. Same local handler, different entry point.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handler = () => requestAddRepo();
-    window.addEventListener(REQUEST_ADD_REPO_EVENT, handler as EventListener);
-    return () => {
-      window.removeEventListener(REQUEST_ADD_REPO_EVENT, handler as EventListener);
-    };
-  }, [requestAddRepo]);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {
@@ -521,25 +502,6 @@ export function useAgentPanelState({
         : null;
 
 
-  const [addRepoIntentMode, setAddRepoIntentMode] = useState<'scratch' | 'existing' | null>(null);
-  const addRepoIntent = addRepoIntentNonce > 0
-    ? { nonce: addRepoIntentNonce, mode: addRepoIntentMode }
-    : null;
-  // Listen for the empty-state Project picker's "Add new project" action.
-  // The submenu detail carries `mode: 'scratch' | 'existing'` so the
-  // dialog can auto-pop the folder picker (existing) or focus the path
-  // input with a "new folder" hint (scratch). Other call sites (status
-  // bar, etc.) bump setAddRepoIntentNonce directly without a mode.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ mode?: 'scratch' | 'existing' }>).detail;
-      setAddRepoIntentMode(detail?.mode ?? null);
-      setAddRepoIntentNonce((n) => n + 1);
-    };
-    window.addEventListener('o8:open-add-repo-flow', onOpen as EventListener);
-    return () => window.removeEventListener('o8:open-add-repo-flow', onOpen as EventListener);
-  }, []);
   const [titlebarSpacerHeight, setTitlebarSpacerHeight] = useState(10);
   useEffect(() => { if (isTauri()) setTitlebarSpacerHeight(38); }, []);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
@@ -557,10 +519,8 @@ export function useAgentPanelState({
     effectiveScopedRepo,
     currentLaunchRepoPath,
     workspacesSummary,
-    addRepoIntent,
     titlebarSpacerHeight,
     refreshNow,
-    requestAddRepo,
     launchRepoTask,
   };
 }

@@ -18,11 +18,16 @@ const nextConfig: NextConfig = {
       // available to the compiler, but never copy it into the runtime bundle.
       './.next/cache/**/*',
       './.next/dev/**/*',
+      './.next/trace',
+      './.next/trace-build',
       '**/node_modules/sharp/**/*',
       '**/node_modules/@img/**/*',
     ],
   },
-  serverExternalPackages: ['better-sqlite3'], // Native module — must be bundled explicitly
+  // better-sqlite3 is a native module. The Pi packages load Node built-ins
+  // (node:sqlite, node:fs) through dynamic imports a bundler stubs out, so
+  // Node loads them as published.
+  serverExternalPackages: ['better-sqlite3', '@earendil-works/pi-ai', '@earendil-works/pi-durable', '@earendil-works/chord'],
   reactStrictMode: true,
   devIndicators: false,
   images: {

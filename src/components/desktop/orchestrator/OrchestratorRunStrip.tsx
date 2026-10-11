@@ -24,11 +24,14 @@ interface ManagedRun {
   command: string;
   title?: string | null;
   startedAt?: string | null;
-  status: 'running' | 'finished' | 'gone';
+  status: 'running' | 'settling' | 'finished' | 'gone' | 'killed';
+  settlement?: { stopRequestId?: string | null } | null;
 }
 
 export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean; workspaceId?: string }) {
   const [runs, setRuns] = useState<ManagedRun[]>([]);
+  const [stopping, setStopping] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const wsConnected = useWsConnectionState() === 'connected';
 
   useEffect(() => {
@@ -39,7 +42,7 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
         const response = await fetch('/api/panel/managed-runs');
         const data = await response.json() as { runs?: ManagedRun[] };
         if (cancelled) return;
-        setRuns((data.runs ?? []).filter((run) => run.status === 'running'));
+        setRuns((data.runs ?? []).filter((run) => run.status === 'running' || run.status === 'settling'));
       } catch {
         // The lifecycle event or fallback timer will repair a transient miss.
       }
@@ -80,15 +83,28 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
     }));
   };
 
-  const stop = (session: string) => {
-    setRuns((prev) => prev.filter((r) => r.session !== session));
-    fetch('/api/panel/managed-runs', {
+  const stop = async (session: string) => {
+    setStopping((prev) => new Set(prev).add(session));
+    setErrors((prev) => ({ ...prev, [session]: '' }));
+    try {
+      const response = await fetch('/api/panel/managed-runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'kill', session }),
-    })
-      .catch(() => {})
-      .finally(() => window.dispatchEvent(new Event('o8:agent-lifecycle')));
+      });
+      const data = await response.json() as { ok?: boolean; run?: ManagedRun };
+      if (data.ok && data.run && data.run.status !== 'running' && data.run.status !== 'settling') {
+        setRuns((prev) => prev.filter((run) => run.session !== session));
+      }
+      else {
+        if (data.run) setRuns((prev) => prev.map((run) => run.session === session ? data.run! : run));
+        setErrors((prev) => ({ ...prev, [session]: 'Stop unverified' }));
+      }
+    } catch { setErrors((prev) => ({ ...prev, [session]: 'Stop unverified' })); }
+    finally {
+      setStopping((prev) => { const next = new Set(prev); next.delete(session); return next; });
+      window.dispatchEvent(new Event('o8:lifecycle-reconcile'));
+    }
   };
 
   // Slim-line grammar (2026-07-13 redesign): live runs render as shimmering
@@ -133,7 +149,7 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
           <button
             type="button"
             onClick={() => watch(run)}
-            title={`Watch the live terminal: ${run.command}`}
+            title={`Inspect the command terminal: ${run.command}`}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -152,7 +168,8 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
             onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
           >
             <ShimmerLine>
-              {'Running '}
+              {stopping.has(run.session) ? 'Stopping and verifying ' : errors[run.session]
+                ? `${errors[run.session]}: ` : run.status === 'settling' ? 'Settlement unverified: ' : 'Running '}
               <span style={{ fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: TURN_LINE_FONT_SIZE - 1 }}>
                 {deriveManagedRunLabel(run)}
               </span>
@@ -161,9 +178,10 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
           <button
             type="button"
             data-run-stop=""
-            onClick={() => stop(run.session)}
+            onClick={() => { void stop(run.session); }}
+            disabled={stopping.has(run.session)}
             title={`Stop run: ${run.command}`}
-            aria-label="Stop run"
+            aria-label={run.status === 'settling' ? 'Verify stop' : 'Stop run'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -179,7 +197,7 @@ export function OrchestratorRunStrip({ active, workspaceId }: { active: boolean;
               borderRadius: 5,
               background: 'transparent',
               color: 'var(--t-text-muted)',
-              cursor: 'pointer',
+              cursor: stopping.has(run.session) ? 'wait' : 'pointer',
               opacity: 0,
               transition: 'opacity 120ms ease',
             }}

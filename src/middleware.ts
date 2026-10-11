@@ -40,6 +40,7 @@ import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 import { isLocalWorkerToken } from '@/lib/auth/worker-token';
 import { readActiveSpectatorTokenHashes } from '@/lib/broadcast/spectator-token-file';
 import { O8_BROADCAST_SURFACE_HEADER } from '@/lib/broadcast/surface';
+import { resolvePluginToken } from '@/lib/auth/plugin-token';
 
 migrateDataDirOnce();
 
@@ -112,6 +113,7 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 ];
 
 const DEVICE_CAPABILITIES: Array<{ methods: ReadonlySet<string>; path: RegExp }> = [
+  { methods: new Set(['POST']), path: /^\/api\/mobile\/ripple\/resolve\/?$/ },
   // Phone-facing routes only. Keep internal desktop/ws-server routes out of
   // this list: devices*, push-url, symon/tool, and ws-token all require the
   // operator credential. New mobile routes fail closed until named here.
@@ -393,6 +395,13 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   // credential handshake there.
   const auth = req.headers.get('authorization');
   const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (bearer.startsWith('o8ro_')) {
+    return NextResponse.json({ error: 'Read-only worker has no API capability.' }, { status: 403 });
+  }
+  if (resolvePluginToken(bearer)) {
+    if (pathname === '/api/plugins/mcp' && method === 'POST') return NextResponse.next();
+    return NextResponse.json({ error: 'Plugin token is not authorized for this endpoint.' }, { status: 403 });
+  }
   if (isActiveSpectatorToken(bearer)) {
     if (spectatorMayAccess(pathname, method)) return NextResponse.next();
     return NextResponse.json({ error: 'Spectator token is not authorized for this endpoint.' }, { status: 403 });

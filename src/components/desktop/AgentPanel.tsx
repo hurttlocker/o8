@@ -12,7 +12,6 @@ import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
 import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
-import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { refreshProjectsFromExternalMutation, useProjects, type ProjectRecord } from './repo-registry/useProjects';
@@ -71,7 +70,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onCreateWorkspaceOrchestrator,
     onCreateWorkspaceChat,
     onCreateWorkspaceTerminal,
-    onRepoAdded,
     onRepoRemoved,
     onOpenSpecInWorkspace,
     orchestratorPackets = [],
@@ -98,10 +96,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     effectiveScopedRepo,
     currentLaunchRepoPath,
     workspacesSummary,
-    addRepoIntent,
     titlebarSpacerHeight,
     refreshNow,
-    requestAddRepo,
     launchRepoTask,
   } = useAgentPanelState({
     selectedRepo,
@@ -195,26 +191,14 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const handleCreateTerminal = useCallback(() => {
     onCreateWorkspaceTerminal?.();
   }, [onCreateWorkspaceTerminal]);
-  const [addRepoDialogOpen, setAddRepoDialogOpen] = useState(false);
-  const handledAddRepoIntentNonceRef = useRef<number | null>(null);
   const handleOpenProjectManagement = useCallback(() => {
     setProjectsMenuOpen(false);
     onOpenProjectManagement?.();
   }, [onOpenProjectManagement]);
   const handleOpenAddRepoDialog = useCallback(() => {
     setProjectsMenuOpen(false);
-    setAddRepoDialogOpen(true);
+    window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow'));
   }, []);
-  const handleRepoAdded = useCallback(async (repo: RepoRegistryEntry) => {
-    await projects.refresh();
-    await onRepoAdded?.(repo);
-    onSelectRepo?.(repo.id);
-    // Tell the dashboard's global repo state to refetch so the new repo shows
-    // in the workspace targets immediately (no manual reload) — 2026-06-22.
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('o8:repos-changed'));
-    }
-  }, [onRepoAdded, onSelectRepo, projects]);
   // Clicking a repo selects that specific repo so the right side shows it — no
   // auto control room, and the drawer stays open for repo-to-repo navigation.
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
@@ -229,25 +213,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     setProjectsMenuOpen(false);
     onOpenProjectManagement?.(project.id);
   }, [onOpenProjectManagement]);
-
-  useEffect(() => {
-    const nonce = addRepoIntent?.nonce ?? null;
-    if (nonce === null || handledAddRepoIntentNonceRef.current === nonce) return;
-    handledAddRepoIntentNonceRef.current = nonce;
-    window.setTimeout(handleOpenAddRepoDialog, 0);
-  }, [addRepoIntent?.nonce, handleOpenAddRepoDialog]);
-
-  const addRepoDialog = (
-    <AddRepoDialog
-      open={addRepoDialogOpen}
-      projects={projects.ledger?.projects ?? []}
-      activeProjectId={projects.ledger?.activeProjectId ?? null}
-      onClose={() => setAddRepoDialogOpen(false)}
-      onRepoAdded={handleRepoAdded}
-      onProjectsChanged={projects.refresh}
-      initialMode={addRepoIntent?.mode ?? undefined}
-    />
-  );
 
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
@@ -296,7 +261,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         <FixedReportCard />
         <UpdateCard />
         <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
-        {addRepoDialog}
       </div>
     );
   }
@@ -490,7 +454,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       <FixedReportCard />
       <UpdateCard />
       <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
-      {addRepoDialog}
     </div>
   );
 });
@@ -621,6 +584,7 @@ function MiniAgentPanelHeader({
               title="Add repository"
               onClick={(event) => {
                 event.stopPropagation();
+                event.currentTarget.focus();
                 onAddRepo();
               }}
               onKeyDown={(event) => {

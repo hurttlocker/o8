@@ -228,7 +228,7 @@ async function probeRetainedRun(
     : processProbe('descendants', 'unknown', 'The retained run has no valid PID for descendant traversal.'));
 
   if (runIdentity.processMarker) {
-    const marker = await run('ps', ['eww', '-axo', 'pid=,command='], 3_000);
+    const marker = await run('ps', ['axeww', '-o', 'pid=,command='], 3_000);
     if (commandUnavailable(marker)) {
       probes.push(processProbe('owned_marker', 'unknown', 'ps cannot scan inherited owned-run markers.'));
     } else if (marker.code !== 0) {

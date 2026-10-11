@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getSqlite } from '@/lib/db';
+import { assertNoActiveWorkspaceArtifactRestore } from '@/lib/workspace/artifact-restore-state';
 import {
   getWorkspaceSnapshot,
   prepareWorkspaceSnapshotTruth,
@@ -75,6 +76,7 @@ export function beginWorkspaceSnapshotGeneration(
   }
   const sqlite = getSqlite();
   const execute = sqlite.transaction((): BeginWorkspaceSnapshotGenerationResult => {
+    assertNoActiveWorkspaceArtifactRestore(input.packetId, input.originalPath);
     const current = getWorkspaceSnapshot(input.repositoryUuid, input.packetId);
     if (!current) return { status: 'missing', record: null };
     const nextGeneration = expectedGeneration + 1;
