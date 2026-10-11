@@ -39,6 +39,20 @@ Source: `src/lib/symon/durable/`.
 whose streams call `createManagedPiTransport()`. The route and its credential
 headers are resolved by the host for each call and never enter the store.
 
+## o8 commands
+
+The brain has the three catalog tools the Pi orchestrator uses: `o8_commands`,
+`o8_command_help` and `o8_run` (`src/lib/symon/durable/o8-tools.ts`). They are
+backed by the `propose` tool profile, so the operator server, which dispatches
+and merges, is not opened and cortex runs read-only. The brain can report what
+is running, waiting for review or approval, and the state of projects, issues,
+pull requests and CI. It cannot start, approve, merge or change anything, and
+its prompt says so.
+
+The servers open on the first command and close after 15 idle minutes; the next
+command reopens them. A command a restart interrupts is reported to the model
+as interrupted and is not run again.
+
 ## Brain selection
 
 `<data dir>/symon/text-brain.json` holds the mode, read for each new turn and
@@ -83,15 +97,34 @@ Panel-authenticated routes over the same store, for the Symon tab:
 | `GET /api/panel/symon/conversations/transcript?key=&limit=` | One thread's user and assistant text, oldest first. `404` for an unknown key. |
 | `POST /api/panel/symon/conversations/continue` | Body `{ key, requestId, text }`. Continues a known thread, or starts one under an `app:` key. A repeated `requestId` returns the same turn. `202` while the turn runs. |
 
+| `POST /api/panel/symon/conversations/record` | Body `{ key, requestId, entries }` with a `voice:` key and up to 20 `{ role, text }` lines. Records voice transcript lines without asking the model. |
+
 An answer to a thread continued in o8 stays in o8; it is not sent back to the
 phone or the messaging thread.
 
+## Recorded exchanges
+
+Turns another surface answers are written into the brain's thread as
+`symon.relay` entries, without a model call: managed-message turns the native
+planner answered, native phone turns, and voice lines sent to the record route.
+They appear in the transcript as user and assistant lines, and a later Pi turn
+sees them as earlier conversation. Recording is best effort and never delays or
+fails the reply. A thread the brain has never seen still receives the managed
+store's last twelve turns as data on its first Pi turn.
+
+The desktop voice session records itself: `RealtimeVoiceHost` passes realtime
+events to `createSymonVoiceTranscriptRecorder()`
+(`src/lib/symon/voice-transcript-recorder.ts`), which posts each finished line
+to the record route. The operator's line is written when its input
+transcription completes and Symon's when its audio transcript is done. Each
+voice session is one `voice:` thread, and the event's item id is the request
+id, so a repeated event records nothing new.
+
 ## Current limits
 
-- The Pi brain has no tools yet. It cannot act on the computer or change o8, and
-  its prompt says so.
-- Voice transcripts do not use the store yet.
-- The conversations API lists only threads the Pi brain has answered.
+- The Pi brain only reads o8. It cannot act on the computer or change o8.
+- Voice sessions the phone hosts are not recorded; only the desktop voice session is.
+- Limited-access shared group turns are not recorded.
 
 ## Tests
 
@@ -105,3 +138,9 @@ phone or the messaging thread.
   mismatch refused; repeated polls; Stop.
 - `tests/symon-conversations-api-real-path.test.ts`: list, transcript,
   continue, a repeated request id, refusals, and bounded failure text.
+- `tests/symon-brain-o8-commands-real-path.test.ts`: a command answered from
+  its result, the offered tools and prompt, the read-only projection, an
+  interrupted command after a restart, and idle close and reopen.
+- `tests/symon-voice-record-real-path.test.ts`: a desktop voice session from
+  the voice host through the record route into one voice thread, one thread
+  per session, and skipped or failed lines.

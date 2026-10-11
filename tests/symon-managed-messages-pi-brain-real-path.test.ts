@@ -195,4 +195,26 @@ describe('managed messages on the durable Pi brain (#3453)', () => {
     expect(secondFaux.state.callCount).toBe(1);
     expect(store.getConversation('imessage:direct:+15555550100').transcript.filter((entry) => entry.role === 'user')).toHaveLength(1);
   });
+
+  it('records planner-answered turns into the brain thread and builds on them', async () => {
+    const { brain, faux } = await installBrain();
+    const contexts: string[] = [];
+    faux.setResponses([(context) => { contexts.push(JSON.stringify(context.messages)); return fauxAssistantMessage('Pi follow-up.'); }]);
+    h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', tools: [] });
+    h.pollTurn.mockResolvedValue({ state: 'done', result: { status: 'done', text: 'Planner answer.', model: 'gpt-6.1-sol', effort: 'high' } });
+    const POST = await route();
+
+    expect(await (await POST(request({ text: 'Planner question' }))).json()).toMatchObject({ text: 'Planner answer.' });
+    await vi.waitFor(async () => expect(await brain.transcript('imessage:direct:+15555550100')).toHaveLength(2));
+
+    // The thread's planner session is still live, so the operator switches the brain.
+    writeSymonTextBrainMode('pi');
+    expect(await (await POST(request({ eventId: 'imessage:message-2', messageId: 'message-2', text: 'Pi question' }))).json())
+      .toMatchObject({ text: 'Pi follow-up.' });
+
+    expect(contexts[0]).toContain('Planner answer.');
+    expect(contexts[0]).not.toContain('Earlier in this thread');
+    expect((await brain.transcript('imessage:direct:+15555550100'))?.map((entry) => entry.text))
+      .toEqual(['Planner question', 'Planner answer.', 'Pi question', 'Pi follow-up.']);
+  });
 });

@@ -4176,6 +4176,18 @@
       ]
     },
     {
+      "path": "tests/symon-brain-o8-commands-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-brain-without-node-sqlite-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-conversations-api-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -4219,6 +4231,12 @@
         "child-process",
         "network-listener",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/symon-voice-record-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

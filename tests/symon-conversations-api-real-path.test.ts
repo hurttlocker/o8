@@ -8,6 +8,7 @@ import { SymonBrain } from '@/lib/symon/durable/brain';
 import { GET as listConversations } from '@/app/api/panel/symon/conversations/route';
 import { GET as readTranscript } from '@/app/api/panel/symon/conversations/transcript/route';
 import { POST as continueConversation } from '@/app/api/panel/symon/conversations/continue/route';
+import { POST as recordConversation } from '@/app/api/panel/symon/conversations/record/route';
 
 type BrainGlobal = { __o8SymonBrain?: Promise<SymonBrain> };
 const TOKEN = 'symon-conversations-test-token';
@@ -118,5 +119,40 @@ describe('Symon conversations API (#3455)', () => {
 
     expect(failed).toEqual({ ok: true, state: 'failed', text: 'Symon could not answer right now. Please try again.' });
     expect(JSON.stringify(transcript)).not.toContain('provider body');
+  });
+
+  it('records voice transcript lines as a voice thread without asking the model', async () => {
+    const record = (body: unknown) => recordConversation(new NextRequest('http://o8.example.test/api/panel/symon/conversations/record', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify(body),
+    }));
+    const lines = { key: 'voice:session-1', requestId: 'utterance-1', entries: [{ role: 'user', text: 'Open my mission' }, { role: 'assistant', text: 'Opening it now.' }] };
+
+    expect((await record(lines)).status).toBe(200);
+    expect((await record(lines)).status).toBe(200);
+    expect((await record({ ...lines, key: 'imessage:direct:+15555550100' })).status).toBe(400);
+    expect((await record({ ...lines, entries: [] })).status).toBe(400);
+
+    const listed = await (await listConversations(get('/api/panel/symon/conversations'))).json();
+    expect(listed.conversations).toEqual([expect.objectContaining({ key: 'voice:session-1', source: 'voice' })]);
+    const transcript = await (await readTranscript(get('/api/panel/symon/conversations/transcript?key=voice%3Asession-1'))).json();
+    expect(transcript.transcript.map(({ role, text }: { role: string; text: string }) => `${role}: ${text}`)).toEqual([
+      'user: Open my mission',
+      'assistant: Opening it now.',
+    ]);
+    expect(faux.state.callCount).toBe(0);
+  });
+
+  it('gives a later model turn the exchanges recorded from another surface', async () => {
+    const seen: string[] = [];
+    faux.setResponses([(context) => { seen.push(JSON.stringify(context.messages)); return fauxAssistantMessage('Continuing.'); }]);
+    await brain.record({ key: 'app:thread-5', source: 'app', title: 'o8', requestId: 'relay-1',
+      entries: [{ role: 'user', text: 'Book the tour' }, { role: 'assistant', text: 'Booked for Friday.' }] });
+
+    await continueConversation(post({ key: 'app:thread-5', requestId: 'next', text: 'What day?' }));
+
+    expect(seen[0]).toContain('Booked for Friday.');
+    expect((await brain.transcript('app:thread-5'))?.map((entry) => entry.text)).toEqual(['Book the tour', 'Booked for Friday.', 'What day?', 'Continuing.']);
   });
 });

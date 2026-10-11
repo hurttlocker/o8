@@ -77,6 +77,23 @@ function sharedPrompt(
   ].filter(Boolean).join('\n\n');
 }
 
+/**
+ * Records a turn the native planner answered into the brain's thread, so the
+ * Symon tab lists it and a later Pi turn has its context. Best effort: the
+ * reply never waits on it or fails because of it.
+ */
+function recordPlannerTurn(turn: ManagedSymonTurn, userText: string, answer: string): void {
+  void getSymonBrain()
+    .then((brain) => brain.record({
+      key: turn.conversationId,
+      source: 'messages',
+      title: turn.conversationId.startsWith(FULL_GROUP_CONVERSATION_PREFIX) ? 'Messages group' : 'Messages',
+      requestId: `relay:${turn.eventId}`,
+      entries: [{ role: 'user', text: userText }, { role: 'assistant', text: answer }],
+    }))
+    .catch(() => {});
+}
+
 function final(text: string) {
   return NextResponse.json({ ok: true, state: 'done', text });
 }
@@ -88,9 +105,12 @@ type ManagedStore = ReturnType<typeof getManagedSymonMessagesStore>;
  * planner answered ride along as data, so switching brains keeps the thread's
  * context.
  */
-function beginPiTurn(store: ManagedStore, turn: ManagedSymonTurn, userEntry: string, reference: string): ManagedSymonTurn {
+async function beginPiTurn(store: ManagedStore, turn: ManagedSymonTurn, userEntry: string, reference: string): Promise<ManagedSymonTurn> {
   const conversation = store.getConversation(turn.conversationId);
-  const earlier = conversation.sessionId?.startsWith(PI_SESSION_PREFIX)
+  // Planner-answered turns are recorded into the brain's thread as they finish;
+  // only a thread the brain has never seen needs them passed here.
+  const known = await getSymonBrain().then((brain) => brain.summary(turn.conversationId)).catch(() => null);
+  const earlier = conversation.sessionId?.startsWith(PI_SESSION_PREFIX) || known
     ? []
     : conversation.transcript.slice(-12).map((entry) => `${entry.role === 'user' ? 'User' : 'Symon'}: ${entry.text}`);
   const prompt = [
@@ -257,7 +277,7 @@ export async function handleManagedMessage(inbound: ManagedMessageBody): Promise
     const userEntry = fullGroup ? `${inbound.sender}: ${turn.requestText}` : turn.requestText;
     const brainMode = readSymonTextBrainMode();
     if (brainMode === 'pi') {
-      return runPiTurn(store, beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
+      return runPiTurn(store, await beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
     }
     const conversation = store.getConversation(turn.conversationId);
     let session = conversation.sessionId && !conversation.sessionId.startsWith(PI_SESSION_PREFIX)
@@ -270,7 +290,7 @@ export async function handleManagedMessage(inbound: ManagedMessageBody): Promise
       } catch (error) {
         // No desktop bridge: on auto, the built-in brain answers instead.
         if (brainMode === 'auto') {
-          return runPiTurn(store, beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
+          return runPiTurn(store, await beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
         }
         return NextResponse.json({
           ok: false,
@@ -282,7 +302,7 @@ export async function handleManagedMessage(inbound: ManagedMessageBody): Promise
       if (!info.available || !info.engine || !info.model || !info.effort) {
         // No installed planner CLI: on auto, the built-in brain answers instead.
         if (brainMode === 'auto') {
-          return runPiTurn(store, beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
+          return runPiTurn(store, await beginPiTurn(store, turn, userEntry, inbound.context), fullGroup);
         }
         return NextResponse.json({
           ok: false,
@@ -380,6 +400,7 @@ export async function handleManagedMessage(inbound: ManagedMessageBody): Promise
       now: Date.now(),
     });
     store.complete(turn.eventId, responseText, Date.now());
+    recordPlannerTurn(turn, fullGroup ? `${turn.senderHandle}: ${turn.requestText}` : turn.requestText, responseText);
     return final(responseText);
   }
 

@@ -148,4 +148,16 @@ describe('phone text sessions on the durable Pi brain (#3453)', () => {
     const after = await (await runTextTurn(turnRequest({ sessionId, turnId: 'slow', prompt: 'p', text: 'Take your time', planner: { engine, model, effort } }))).json();
     expect(after.state).toBe('error');
   });
+
+  it('records a native phone answer into the brain thread for the Symon tab', async () => {
+    h.readPlanner.mockResolvedValue({ available: true, engine: 'codex', model: 'gpt-6.1-sol', effort: 'high', tools: [] });
+    const { sessionId, engine, model, effort } = (await mint()).body.session;
+    h.pollTurn.mockResolvedValue({ state: 'done', result: { status: 'done', text: 'Native answer.', model, effort } });
+
+    await runTextTurn(turnRequest({ sessionId, turnId: 'n1', prompt: 'formatted prompt', text: 'Native question', planner: { engine, model, effort } }));
+
+    await vi.waitFor(async () => expect((await brain.transcript(`phone:${sessionId}`))?.map((entry) => entry.text))
+      .toEqual(['Native question', 'Native answer.']));
+    expect(faux.state.callCount).toBe(0);
+  });
 });
