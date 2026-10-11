@@ -15,8 +15,86 @@ const capturedPurgeProcesses = new WeakMap<CapturedPurgeProcessWitness, {
   candidatePath: string;
   device: number;
   inode: number;
+  namespace: PurgeNamespace;
 }>();
 type AfterTreeCapture = (candidatePath: string, witness: CapturedPurgeProcessWitness) => Promise<void>;
+
+interface PurgeNamespace {
+  requestedPath: string;
+  canonicalPath: string;
+  parentIdentity: { device: number; inode: number; canonicalPath: string };
+  ancestors: Array<{ path: string; device: number; inode: number; symlink: boolean }>;
+}
+
+async function assertPurgeNamespace(
+  namespace: PurgeNamespace,
+  identity: { device: number; inode: number },
+): Promise<void> {
+  for (const parent of [path.dirname(namespace.requestedPath), namespace.parentIdentity.canonicalPath]) {
+    const stat = await lstat(parent);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || stat.dev !== namespace.parentIdentity.device || stat.ino !== namespace.parentIdentity.inode) {
+      throw new Error('Exact purge parent ownership changed after admission.');
+    }
+  }
+  for (const candidate of [namespace.requestedPath, namespace.canonicalPath]) {
+    const stat = await lstat(candidate);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || stat.dev !== identity.device || stat.ino !== identity.inode
+      || await realpath(candidate) !== namespace.canonicalPath) {
+      throw new Error('Exact purge captured an unexpected directory identity.');
+    }
+  }
+  for (const ancestor of namespace.ancestors) {
+    const stat = await lstat(ancestor.path);
+    if (stat.dev !== ancestor.device || stat.ino !== ancestor.inode
+      || stat.isSymbolicLink() !== ancestor.symlink
+      || (!stat.isDirectory() && !stat.isSymbolicLink())) {
+      throw new Error('Exact purge ancestor namespace changed after admission.');
+    }
+  }
+  if (await realpath(path.dirname(namespace.requestedPath)) !== namespace.parentIdentity.canonicalPath) {
+    throw new Error('Exact purge parent namespace changed after admission.');
+  }
+}
+
+async function capturePurgeNamespace(
+  candidatePath: string,
+  identity: { device: number; inode: number },
+): Promise<PurgeNamespace> {
+  const requestedPath = path.resolve(candidatePath);
+  const parentPath = path.dirname(requestedPath);
+  const parentStat = await lstat(parentPath);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
+    throw new Error('Exact purge parent is not a regular directory.');
+  }
+  const canonicalParent = await realpath(parentPath);
+  // Pin the lexical alias and canonical ancestry before invoking caller hooks.
+  // A replacement alias, even one targeting the same inode, is new authority.
+  const namespace: PurgeNamespace = {
+    requestedPath,
+    canonicalPath: path.join(canonicalParent, path.basename(requestedPath)),
+    parentIdentity: { device: parentStat.dev, inode: parentStat.ino, canonicalPath: canonicalParent },
+    ancestors: [],
+  };
+  const ancestors = new Set<string>();
+  for (const parent of [parentPath, canonicalParent]) {
+    let ancestor = parent;
+    while (true) {
+      ancestors.add(ancestor);
+      const next = path.dirname(ancestor);
+      if (next === ancestor) break;
+      ancestor = next;
+    }
+  }
+  for (const ancestor of ancestors) {
+    const stat = await lstat(ancestor);
+    namespace.ancestors.push({ path: ancestor, device: stat.dev, inode: stat.ino,
+      symlink: stat.isSymbolicLink() });
+  }
+  await assertPurgeNamespace(namespace, identity);
+  return namespace;
+}
 
 /** Only the currently paused, birth-verified native helper may be excluded. */
 export async function readCapturedPurgeCwdSnapshot(
@@ -24,11 +102,12 @@ export async function readCapturedPurgeCwdSnapshot(
   scopePath: string,
 ): Promise<ProcessCwdSnapshot> {
   const captured = capturedPurgeProcesses.get(witness);
-  const scope = path.resolve(scopePath);
+  const scope = await realpath(path.resolve(scopePath));
   if (!captured || scope === path.parse(scope).root
     || (captured.candidatePath !== scope && !captured.candidatePath.startsWith(scope + path.sep))) {
     throw new Error('Purge process witness is not live authority for this workspace.');
   }
+  await assertPurgeNamespace(captured.namespace, captured);
   const stat = await lstat(captured.candidatePath);
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== captured.device
     || stat.ino !== captured.inode || await realpath(captured.candidatePath) !== captured.candidatePath) {
@@ -41,6 +120,7 @@ export async function readCapturedPurgeCwdSnapshot(
     || capturedPurgeProcesses.get(witness) !== captured) {
     throw new Error('Captured purge process truth is unknown or no longer live.');
   }
+  await assertPurgeNamespace(captured.namespace, captured);
   const rows = snapshot.rows.filter(row => row.pid === captured.pid);
   if (rows.length !== 1 || path.resolve(rows[0].cwd) !== captured.candidatePath) {
     throw new Error('Captured purge process has no exact native cwd observation.');
@@ -267,10 +347,11 @@ async function runCapturedPurge(
   identity: { device: number; inode: number },
   expectedFingerprint: string | undefined,
   expectedManifest: ExactDirectoryManifestEntry[] | undefined,
-  afterTreeCapture?: AfterTreeCapture,
+  afterTreeCapture: AfterTreeCapture | undefined,
+  namespace: PurgeNamespace,
 ): Promise<void> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
-    cwd: candidatePath,
+    cwd: namespace.canonicalPath,
     env: {
       ...process.env,
       O8_PURGE_EXPECTED_DEVICE: String(identity.device),
@@ -308,17 +389,19 @@ async function runCapturedPurge(
         }
       });
     });
-    const stat = await lstat(candidatePath);
+    await assertPurgeNamespace(namespace, identity);
+    const stat = await lstat(namespace.canonicalPath);
     const probe = child.pid ? await probeMetadataLockProcessIdentity(child.pid) : null;
     if (!probe || probe.state !== 'live' || !child.pid || !stat.isDirectory() || stat.isSymbolicLink()
       || stat.dev !== identity.device || stat.ino !== identity.inode
-      || await realpath(candidatePath) !== path.resolve(candidatePath)) {
+      || await realpath(namespace.canonicalPath) !== namespace.canonicalPath) {
       throw new Error('Exact purge could not attest its paused native process and namespace.');
     }
     witness = Object.freeze({ [capturedPurgeBrand]: true as const });
     capturedPurgeProcesses.set(witness, { pid: child.pid, identity: probe.identity,
-      candidatePath: path.resolve(candidatePath), device: identity.device, inode: identity.inode });
+      candidatePath: namespace.canonicalPath, device: identity.device, inode: identity.inode, namespace });
     await afterTreeCapture?.(candidatePath, witness);
+    await assertPurgeNamespace(namespace, identity);
   } catch (error) {
     // EOF refuses release. Settle the captured child before reporting refusal,
     // so the caller cannot race an authorized writer after seeing an error.
@@ -381,26 +464,22 @@ export async function purgeExactDirectory(
   expectedFingerprint?: string,
   expectedManifest?: ExactDirectoryManifestEntry[],
 ): Promise<void> {
-  const parentPath = path.dirname(candidatePath);
-  const parentStat = await lstat(parentPath);
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
-    throw new Error('Exact purge parent is not a regular directory.');
-  }
-  const parentIdentity = {
-    device: parentStat.dev,
-    inode: parentStat.ino,
-    canonicalPath: await realpath(parentPath),
-  };
+  const namespace = await capturePurgeNamespace(candidatePath, identity);
   await beforeCapture?.(candidatePath);
+  await assertPurgeNamespace(namespace, identity);
   await runCapturedPurge(
     candidatePath,
     identity,
     expectedFingerprint,
     expectedManifest,
     afterTreeCapture,
+    namespace,
   );
   await afterContentRelease?.(candidatePath);
+  await assertPurgeNamespace(namespace, identity);
   // The caller already journals this exact namespace. Keep it replayable until
   // final removal and never infer authority over similarly named siblings.
-  await removeExactEmptyChildDirectory(parentPath, parentIdentity, candidatePath, identity);
+  await removeExactEmptyChildDirectory(
+    namespace.parentIdentity.canonicalPath, namespace.parentIdentity, namespace.canonicalPath, identity,
+  );
 }
