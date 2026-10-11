@@ -40,6 +40,7 @@ import {
   SETTINGS_WIDE_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { SettingsNavItem } from './settings/SettingsNavItem';
+import { FeedbackSettingsEntry } from '@/components/desktop/FeedbackSheet';
 import { useSettingsSectionNavigation } from './settings/useSettingsSectionNavigation';
 import { GeneralTab } from './settings/GeneralTab';
 import { ProvidersTab } from './settings/ProvidersTab';
@@ -587,6 +588,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           </>
           )}
           {notice ? <p role="status" style={{ fontSize: 12, lineHeight: 1.4, padding: 10, color: 'var(--t-text-secondary)' }}>{notice}</p> : null}
+          <FeedbackSettingsEntry />
         </div>
 
         {/* Center the actual tab width, not a wide frame around narrow cards.
