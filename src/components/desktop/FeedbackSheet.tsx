@@ -87,7 +87,7 @@ export function FeedbackSheet({ onClose }: { onClose: () => void }) {
   }
 
   return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 2147483600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--t-shell-backdrop)' }}>
+    <div data-o8-settings-portal data-o8-settings-escape-scope style={{ position: 'fixed', inset: 0, zIndex: 2147483600, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--t-shell-backdrop)' }}>
       <form ref={dialog} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-privacy`} onSubmit={(event) => { void send(event); }}
         style={{ width: 440, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', scrollbarWidth: 'none', padding: 24, borderRadius: 16, background: 'var(--t-popover-surface)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-panel-border)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 13, fontWeight: 300, display: 'flex', flexDirection: 'column', gap: 16 }}>
         <h2 id={`${id}-title`} style={{ margin: 0, fontSize: 18, fontWeight: 400 }}>Send feedback</h2>

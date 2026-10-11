@@ -39,6 +39,8 @@ export function useSettingsOverlayDismiss({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // A nested portaled surface owns the first Escape.
+      if (document.querySelector('[data-o8-settings-escape-scope]')) return;
       // Let section menus and body-portaled Settings pickers consume Escape first.
       if (document.querySelector('[data-o8-settings-escape-scope]')) return;
       event.preventDefault();
