@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, realpa
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
 import { listLanes } from '@/lib/lane/registry';
-import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
+import { buildRepoStateScope, persistedTabStateSavedAt, stripPersistedTabs } from '@/lib/terminal/tab-state';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { restoreFileTabContext } from '@/lib/terminal/restore-file-tabs';
 
@@ -264,7 +264,9 @@ export async function GET(request: Request) {
           const canonicalFile = getStateFile(canonicalScope);
           if (existsSync(canonicalFile)) {
             const canonicalData = sanitizeRestoredState(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
-            if (canonicalData) {
+            // A cross-repo conversation can save only the primary scope. Do
+            // not replace that selection with an older repo-scope snapshot.
+            if (canonicalData && persistedTabStateSavedAt(canonicalData) >= persistedTabStateSavedAt(data)) {
               return NextResponse.json(canonicalData);
             }
           }

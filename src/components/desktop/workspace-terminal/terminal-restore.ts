@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  persistedTabStateSavedAt,
   sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
@@ -734,9 +735,20 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
+  const selectedTab = saved?.tabs.find((tab) => tab.id === saved.activeTabId);
+  const selectedConversation = selectedTab?.kind === 'orchestrator'
+    ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
+    : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);
+  // The primary conversation follows sidebar selection independently of the
+  // global repo preference. Keep a newer, explicitly bound selection; other
+  // workspace scopes retain their repo-specific restore behavior.
+  const newerPrimaryConversation = options.stateScope === 'tile-root'
+    && selectedConversation && persistedTabStateSavedAt(saved) > 0
+    && persistedTabStateSavedAt(saved) >= persistedTabStateSavedAt(repoSaved);
+
   if (
     !options.splitCreated
-    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs && !newerPrimaryConversation))
     && currentStableRepoScope
   ) {
     saved = repoSaved;
