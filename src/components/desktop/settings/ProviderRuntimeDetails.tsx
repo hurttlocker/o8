@@ -35,6 +35,16 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
   const effortField = runtimeId === 'codex' ? 'codexWorkerEffort' : runtimeId === 'claude-code' ? 'claudeWorkerEffort' : null;
   const locked = effortField ? data?.sources[effortField] === 'env' : false;
 
+  if (runtimeId === 'pi-builtin') {
+    const readiness = data?.dispatchableRuntimes?.find(item => item.id === runtimeId);
+    return <SettingsGroup header="Built-in worker">
+      <SettingsRow label="Availability" value={loading ? 'Checking…' : readiness?.available ? 'Ready' : 'Unavailable'} subtitle={readiness?.detail ?? 'Could not read readiness. Reopen Settings to retry.'} divider />
+      <SettingsRow label="Managed model" subtitle="Included with o8. No separate CLI or API key needed." divider />
+      <SettingsRow label="Use in a conversation" subtitle="Choose o8 for the orchestrator, or Pi (built-in) for workers." divider />
+      {!readiness?.available && readiness?.fix ? <SettingsRow label="Setup" subtitle={readiness.fix} /> : null}
+    </SettingsGroup>;
+  }
+
   return <div style={{ display: 'grid', gap: 24 }}>
     <SettingsGroup header={`${runtime.label} runtime`}>
       <SettingsRow label="Account status" subtitle={tool?.authHint ?? 'Sign in through the provider’s own CLI.'} value={checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(tool)} divider />

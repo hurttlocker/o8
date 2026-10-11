@@ -8,7 +8,7 @@
  * separate machine-scoped relay attach used by the future web surface.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { OPEN_MOBILE_PAIRING_EVENT } from '@/lib/desktop/events';
 import { Monitor, Smartphone } from '../lucide-shims';
 import {
@@ -20,6 +20,7 @@ import {
 import { SettingsGroup, SettingsRow } from './grouped';
 import { PairedDevicesSection } from './PairedDevicesSection';
 import { SymonIMessageAccessSection } from './SymonIMessageAccessSection';
+import { SymonMessagesReceiverSection } from './SymonMessagesReceiverSection';
 
 type AttachSettingResponse = {
   ok: boolean;
@@ -38,6 +39,28 @@ type ManagedMessagesResponse = {
 };
 
 export function ConnectionsTab() {
+  const [nativeReceiverEnabled, setNativeReceiverEnabled] = useState<boolean | null>(null);
+  const [receiverMutationLocked, setReceiverMutationLocked] = useState(false);
+  const [receiverRevision, setReceiverRevision] = useState(0);
+  const [receiverError, setReceiverError] = useState<string | null>(null);
+  const receiverLock = useRef(false);
+  const acquireReceiverMutation = useCallback(() => {
+    if (receiverLock.current) return false;
+    receiverLock.current = true;
+    setReceiverError(null);
+    setReceiverMutationLocked(true);
+    return true;
+  }, []);
+  const releaseReceiverMutation = useCallback(() => {
+    receiverLock.current = false;
+    setReceiverMutationLocked(false);
+  }, []);
+  const reconcileReceivers = useCallback((error: string | null = null) => {
+    // Re-read both receivers after any write, including an uncertain outcome.
+    setNativeReceiverEnabled(null);
+    setReceiverError(error);
+    setReceiverRevision((current) => current + 1);
+  }, []);
   const [connectEnabled, setConnectEnabled] = useState(false);
   const [connectLocked, setConnectLocked] = useState(false);
   const [connectLoading, setConnectLoading] = useState(true);
@@ -196,13 +219,13 @@ export function ConnectionsTab() {
             ?? (messagesEnabled && messagesNumber
               ? `Text ${messagesNumber}. This Mac must be online; tool approvals still happen inside o8.`
               : messagesConnected
-                ? 'Give Symon a managed number for CLI-backed conversations. Voice stays inside the o8 app.'
+                ? 'Give Symon a managed number for conversations with saved history. Voice stays inside the o8 app.'
                 : 'Connect this Mac first. Managed Messages uses its authenticated outbound connection.')}
         >
           <SettingsRow
             icon={<Smartphone size={14} />}
             label="Text Symon"
-            subtitle={messagesNumber ?? 'Managed number, durable history, and CLI-backed replies'}
+            subtitle={messagesNumber ?? 'Managed replies and saved history'}
             checked={messagesEnabled}
             onToggle={toggleManagedMessages}
             disabled={messagesLoading || messagesSaving}
@@ -257,7 +280,13 @@ export function ConnectionsTab() {
         </SettingsGroup>
       </section>
 
-      <SymonIMessageAccessSection />
+      {receiverError ? <p role="alert" style={{ marginTop: 28, marginBottom: 0, color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.5 }}>{receiverError}</p> : null}
+      <SymonMessagesReceiverSection key={`native-${receiverRevision}`} onEnabledChange={setNativeReceiverEnabled}
+        mutationLocked={receiverMutationLocked} acquireMutation={acquireReceiverMutation}
+        releaseMutation={releaseReceiverMutation} onWriteSettled={reconcileReceivers} />
+      <SymonIMessageAccessSection key={`bridge-${receiverRevision}`} nativeReceiverEnabled={nativeReceiverEnabled}
+        mutationLocked={receiverMutationLocked} acquireMutation={acquireReceiverMutation}
+        releaseMutation={releaseReceiverMutation} onWriteSettled={reconcileReceivers} />
 
       <section style={{ marginTop: 28 }}>
         <SettingsGroup header="Pairing">

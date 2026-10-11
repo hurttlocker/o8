@@ -103,7 +103,7 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
   const allItems = useMemo<ProviderItem[]>(() => [
     ...Object.entries(ORCHESTRATOR_RUNTIMES).filter(([, runtime]) => runtime.dispatchable).map(([runtimeId, runtime]) => ({
       id: `runtime:${runtimeId}`, runtimeId: runtimeId as keyof typeof ORCHESTRATOR_RUNTIMES, label: runtime.label, group: 'Connections',
-      status: checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(tools[runtimeId]),
+      status: runtimeId === 'pi-builtin' ? (settings.loading ? 'Checking…' : settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.available ? 'Ready · managed' : 'Check setup') : checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(tools[runtimeId]),
     })),
     { id: 'chatgpt', label: 'ChatGPT plan', group: 'Connections', status: 'Subscription connection' },
     ...[...keys].sort((a, b) => Number(b.id === 'openrouter') - Number(a.id === 'openrouter')).map(key => ({ id: `key:${key.id}`, keyId: key.id, label: key.label, group: 'API providers', status: 'API key' })),
@@ -112,10 +112,10 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
     { id: 'local-acp', label: 'Local ACP', group: 'Setup', status: 'Launch configuration' },
     { id: 'voice', label: 'Voice keys', group: 'Setup', status: 'Desktop services' },
     { id: 'defaults', label: 'Model defaults', group: 'Setup', status: 'App routing & Brain' },
-  ], [keys, tools, checking, detectionError, keyError]);
+  ], [keys, tools, checking, detectionError, keyError, settings.loading, settings.data]);
 
 
-  const isPrimary = (item: ProviderItem) => !item.runtimeId || ['codex', 'claude-code'].includes(item.runtimeId) || tools[item.runtimeId]?.detected || visited.has(item.id);
+  const isPrimary = (item: ProviderItem) => !item.runtimeId || ['codex', 'claude-code', 'pi-builtin'].includes(item.runtimeId) || tools[item.runtimeId]?.detected || visited.has(item.id);
   const available = allItems.filter(item => !isPrimary(item));
   const items = allItems.filter(item => showAvailable || isPrimary(item));
 

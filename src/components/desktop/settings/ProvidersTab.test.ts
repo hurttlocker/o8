@@ -3,9 +3,9 @@ import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const defaults = vi.hoisted(() => ({ updateField: vi.fn() }));
+const defaults = vi.hoisted(() => ({ updateField: vi.fn(), builtInReady: true }));
 vi.mock('./useModelSettings', () => ({ useModelSettings: () => ({
-  data: { values: { codexWorkerEffort: 'high', claudeWorkerEffort: 'high', orchestratorModel: 'sonnet' }, sources: {} },
+  data: { dispatchableRuntimes: [{ id: 'pi-builtin', available: defaults.builtInReady, detail: defaults.builtInReady ? 'Bundled and ready' : 'Requires Node 22.19 or newer', fix: 'Update the runtime' }], values: { codexWorkerEffort: 'high', claudeWorkerEffort: 'high', orchestratorModel: 'sonnet' }, sources: {} },
   loading: false, notice: null, busyField: null, updateField: defaults.updateField,
 }) }));
 vi.mock('./APIKeysTab', () => ({
@@ -34,6 +34,7 @@ const keyProviders = [{ id: 'openrouter', label: 'OpenRouter', configured: true 
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   defaults.updateField.mockClear();
+  defaults.builtInReady = true;
   request.mockReset();
   request.mockImplementation(async (url: string) => Response.json(url === '/api/v2/keys' ? { providers: keyProviders }
     : url === '/api/setup/detect' ? { tools: [{ id: 'codex', detected: true, ready: true, path: '/fixture/codex', version: '1.2.3' }] }
@@ -198,4 +199,17 @@ it('keeps provider details below a horizontal keyboard rail in a narrow panel', 
   await act(async () => root.unmount());
   expect(disconnect).toHaveBeenCalledTimes(1);
   root = createRoot(container);
+});
+
+
+it.each([true, false])('keeps the bundled worker discoverable with truthful readiness=%s', async ready => {
+  defaults.builtInReady = ready;
+  await act(async () => root.render(createElement(ProvidersTab)));
+  expect(tab('Pi (built-in)')).toBeDefined();
+  await act(async () => tab('Pi (built-in)').click());
+  const pane = container.querySelector('[role="tabpanel"]:not([hidden])')!;
+  expect(pane.textContent).toContain(ready ? 'Bundled and ready' : 'Requires Node 22.19 or newer');
+  expect(pane.textContent).not.toContain('Binary path');
+  expect(pane.textContent).not.toContain('Sign in through');
+  expect(request.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
