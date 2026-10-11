@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, wr
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -12,6 +12,9 @@ vi.mock('@/lib/realtime/publisher', () => ({
 }));
 
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+const priorOwnedRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+const ownedRoot = realpathSync(mkdtempSync(join(os.tmpdir(), 'o8-canonical-owned-')));
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
 
 const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
@@ -132,14 +135,30 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     chmodSync(tscPath, 0o755);
   }
 
-  await addRepo(realpathSync.native(canonicalRepo));
+  const registeredRepo = await addRepo(realpathSync.native(canonicalRepo));
+  // Declare a real idle owned session. No provider runs were launched; the
+  // persisted complete empty run ledger permits native quiescence proof.
+  const sessionId = `codex-owned-${packetId}`;
+  const sessionKey = `codex-owned:${sessionId}`;
+  const sessionDir = join(ownedRoot, sessionId);
+  mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+  const now = new Date().toISOString();
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+    surfaceId: sessionKey, packetId, sessionDir, cwd: packetClone, repoPath: packetClone,
+    branch, head: packetSha, title: 'Idle publication fixture', createdAt: now, updatedAt: now,
+    recentRuns: [], latestPrompt: 'Verify canonical publication and retirement.',
+    latestSummary: 'Idle fixture; zero provider executions.',
+    runIdentityLedger: { version: 1, totalRuns: 0, complete: true },
+    workspaceBinding: { logicalWorkspaceId: `packet:${packetId}`, repositoryUuid: registeredRepo.id,
+      packetId, cwd: packetClone, version: 1, verifiedAt: now },
+  }), { flag: 'wx', mode: 0o600 });
   const worktreeId = `packet-${packetId}`;
   const materializationIdentity = await captureWorktreeMaterializationIdentity(packetClone);
   const materializationParentIdentity = await captureWorktreeMaterializationIdentity(relocatedBase);
   await withWorktreeMetaTransaction(canonicalRepo, (transaction) => transaction.save(worktreeId, {
     id: worktreeId,
     agentType: 'codex',
-    sessionKey: `codex:${packetId}`,
+    sessionKey,
     baseBranch: 'main',
     createdAt: Date.now(),
     claudeManaged: false,
@@ -157,7 +176,7 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
     baseBranch: 'main',
     runtime: 'codex',
     packetId,
-    sessionKey: `codex:${packetId}`,
+    sessionKey,
     label: `Canonical merge ${label}`,
   });
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
@@ -186,7 +205,8 @@ async function createRelocatedCloneMission(label: string, incompleteDependencies
   });
   writeOrchestratorControlPlaneState(mission);
 
-  return { baseSha, branch, canonicalRepo, lane, missionId, packetClone, packetId, packetSha, typecheckMarker };
+  return { baseSha, branch, canonicalRepo, lane, missionId, packetClone, packetId, packetSha, typecheckMarker,
+    canonicalPacketPath: materializationIdentity.canonicalPath };
 }
 
 async function reviewAndMerge(fixture: Awaited<ReturnType<typeof createRelocatedCloneMission>>) {
@@ -207,6 +227,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+afterAll(() => {
+  if (priorOwnedRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  else process.env.CORTEX_IDE_OWNED_CODEX_ROOT = priorOwnedRoot;
+  rmSync(ownedRoot, { recursive: true, force: true });
 });
 
 describe('direct merge publishes through the canonical mission repository', () => {
@@ -230,7 +256,7 @@ describe('direct merge publishes through the canonical mission repository', () =
         .map((event) => event.payload.status)
         .filter((status) => status === 'completed' || status === 'archived');
       const mission = await getMissionStatus({ missionId: fixture.missionId, includeCost: false });
-      const snapshots = listWorkspaceSnapshotsByOriginalPath(fixture.packetClone);
+      const snapshots = listWorkspaceSnapshotsByOriginalPath(fixture.canonicalPacketPath);
       const creation = snapshots[0]
         ? listWorkspaceSnapshotTransitions(snapshots[0].repositoryUuid, snapshots[0].packetId)[0]
         : undefined;
@@ -238,7 +264,7 @@ describe('direct merge publishes through the canonical mission repository', () =
       expect(result.merged).toBe(true);
       expect(git(fixture.canonicalRepo, ['merge-base', '--is-ancestor', fixture.packetSha, 'main'])).toBe('');
       expect(git(fixture.canonicalRepo, ['rev-parse', 'main'])).toBe(fixture.packetSha);
-      expect(existsSync(fixture.packetClone)).toBe(false);
+      expect(existsSync(fixture.packetClone), diagnostics.join('\n')).toBe(false);
       expect(snapshots).toHaveLength(1);
       expect(snapshots[0]).toMatchObject({
         state: 'retired',

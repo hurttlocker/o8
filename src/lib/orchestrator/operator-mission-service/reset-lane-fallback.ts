@@ -77,6 +77,20 @@ export async function resetPacketViaLaneFallback(
         ?? storageOwnerGenerationForLane(lane.id, input.packetId),
       overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
     });
+  }
+  let worktreePruned = false;
+  let branchDeleted = false;
+  if (input.clearWorktree) {
+    try {
+      const cleanup = await cleanupResetPacketTargets(cleanupTargets, input.packetId);
+      worktreePruned = cleanup.worktreePruned;
+      branchDeleted = cleanup.branchDeleted;
+    } catch (error) {
+      throw resetRetirementFailure(input, referenceLabel, 'worktree cleanup was not confirmed', error);
+    }
+  }
+  // Retain exact ownership through cleanup; only confirmed removal releases it.
+  for (const lane of bound) {
     if (!persistedIds.has(lane.id)) continue;
     try {
       const updated = updateLane(lane.id, {
@@ -93,17 +107,7 @@ export async function resetPacketViaLaneFallback(
     }
   }
 
-  let worktreePruned = false;
-  let branchDeleted = false;
   if (input.clearWorktree) {
-    try {
-      const cleanup = await cleanupResetPacketTargets(cleanupTargets, input.packetId);
-      worktreePruned = cleanup.worktreePruned;
-      branchDeleted = cleanup.branchDeleted;
-    } catch (error) {
-      throw resetRetirementFailure(input, referenceLabel, 'worktree cleanup was not confirmed', error);
-    }
-
     if (!input.scope) try {
       const { readdir } = await import('node:fs/promises');
       const path = await import('node:path');

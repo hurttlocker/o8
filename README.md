@@ -70,6 +70,8 @@ node cli/dist/o8.mjs mission create --title "First packet" --body "Add one READM
 
 Use the returned mission and packet IDs with `mission dispatch`, `mission wait`, `packet diff`, and `packet review --approve --packet <id>`. If review creates an operator card, finish it with `inbox list` and `inbox approve <id>`. The native app installs the global `o8` command after it runs once.
 
+Managed source builds register generated output before the compiler runs. The [generated-output lifecycle](docs/operations/generated-output-lifecycle.md) describes preservation, recovery and journaled retirement.
+
 `npm run tauri:dev` builds the native shell (a much longer first build). After a hard kill, `node scripts/dev.mjs cleanup` recovers the ports. Bring at least one agent CLI you already use (`claude`, `codex`, `grok`, `opencode`, `gemini`); no API keys are needed to start, and [`.env.example`](./.env.example) documents every optional one.
 
 - **Phone:** pair by QR. The mobile web surface ships in this repo and works from any phone on your network; the iPhone app is below.

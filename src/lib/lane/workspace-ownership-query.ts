@@ -31,7 +31,9 @@ export function exactWorkspaceOwningLanes(
   const canonicalSource = metadata?.materializationIdentity?.canonicalPath ?? canonicalRepoRoot(source);
   const lanes = indexedWorkspaceLaneCandidates(source, canonicalSource, path.basename(source))
     .filter((lane) => lane.worktreePath !== null
-      && [source, canonicalSource].includes(path.resolve(lane.worktreePath))
+      && [source, canonicalSource].includes(path.join(
+        canonicalRepoRoot(path.dirname(lane.worktreePath)), path.basename(lane.worktreePath),
+      ))
       && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repositoryPath));
   if (metadata?.laneId && metadata.packetId && metadata.sessionKey
     && metadata.materializationIdentity?.canonicalPath === source

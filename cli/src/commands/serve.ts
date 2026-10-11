@@ -16,6 +16,7 @@ import {
   prepareServeLog,
   readServeSupervisorPid,
   runServeAgentCommand,
+  sourceServeApiLaunch,
   superviseServeDaemon,
   waitForSupervisorRestart,
 } from './serve-lifecycle.js';
@@ -334,10 +335,7 @@ function resolveLaunchPlan(): LaunchPlan {
   return {
     mode: 'development',
     root: projectRoot,
-    api: {
-      command: process.execPath,
-      args: [join(projectRoot, 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev'],
-    },
+    api: sourceServeApiLaunch(projectRoot),
     ws: {
       command: process.execPath,
       args: [join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'src/ws-server.ts'],
