@@ -978,6 +978,12 @@
       ]
     },
     {
+      "path": "src/lib/workspace/exact-managed-directory-retirement-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/workspace/hibernator-restorer.test.ts",
       "reasons": [
         "apfs-tool",
@@ -1911,6 +1917,12 @@
       ]
     },
     {
+      "path": "tests/contributor-credits.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "tests/control-plane-lock-slow-holder-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2153,6 +2165,20 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/exact-purge-authorization-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/exact-purge-finalization-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
@@ -4215,10 +4241,52 @@
       ]
     },
     {
+      "path": "tests/symon-brain-o8-commands-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-brain-without-node-sqlite-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-conversations-api-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-durable-brain-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-managed-messages-pi-brain-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/symon-mcp-real-path.test.ts",
       "reasons": [
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-messages-receiver-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/symon-phone-pi-brain-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -4228,6 +4296,12 @@
         "child-process",
         "network-listener",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/symon-voice-record-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

@@ -12,13 +12,18 @@ vi.mock('@/lib/panel/auth', () => ({
 }));
 
 import { GET, POST } from './route';
+import { POST as configureReceiver } from '../messages-receiver/route';
+import { readMessagesReceiverFile } from '@/lib/symon/messages-receiver/receiver';
 
 let root: string;
 let configPath: string;
+let previousDataDir: string | undefined;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'o8-imessage-access-'));
   configPath = join(root, 'bridge.json');
+  previousDataDir = process.env.CORTEX_IDE_DATA_DIR;
+  process.env.CORTEX_IDE_DATA_DIR = join(root, 'data');
   process.env.O8_SYMON_IMESSAGE_TEST_CONFIG = configPath;
   process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG = join(root, 'openclaw.json');
   h.deny = false;
@@ -36,7 +41,31 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.O8_SYMON_IMESSAGE_TEST_CONFIG;
   delete process.env.O8_SYMON_IMESSAGE_TEST_OPENCLAW_CONFIG;
+  if (previousDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
+  else process.env.CORTEX_IDE_DATA_DIR = previousDataDir;
   rmSync(root, { recursive: true, force: true });
+});
+
+it('lets only one receiver answer messages: o8 or the external connector (#3454)', async () => {
+  const bridgeEnabled = () => (JSON.parse(readFileSync(configPath, 'utf8')) as { enabled: boolean }).enabled;
+  expect(bridgeEnabled()).toBe(true);
+
+  const enableNative = await configureReceiver(new NextRequest('http://localhost/api/panel/symon/messages-receiver', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true, handles: ['+15555550101'] }),
+  }));
+  expect(enableNative.status).toBe(200);
+  expect(readMessagesReceiverFile().enabled).toBe(true);
+  expect(bridgeEnabled()).toBe(false);
+
+  expect((await POST(request('POST', { enabled: true }))).status).toBe(200);
+  expect(bridgeEnabled()).toBe(true);
+  expect(readMessagesReceiverFile()).toMatchObject({ enabled: false, handles: ['+15555550101'] });
+
+  const noHandles = await configureReceiver(new NextRequest('http://localhost/api/panel/symon/messages-receiver', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: true, handles: [] }),
+  }));
+  expect(noHandles.status).toBe(400);
+  expect(bridgeEnabled()).toBe(true);
 });
 
 it('offers the native backend only when the selected agent owns the iMessage binding', async () => {

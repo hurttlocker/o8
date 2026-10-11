@@ -52,9 +52,9 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{
 "#;
 
 #[cfg(unix)]
-struct CodexFixture {
+pub(crate) struct CodexFixture {
     dir: std::path::PathBuf,
-    binary: std::path::PathBuf,
+    pub(crate) binary: std::path::PathBuf,
     capture: std::path::PathBuf,
     previous_codex_home: Option<std::ffi::OsString>,
     previous_app_server: Option<std::ffi::OsString>,
@@ -116,15 +116,15 @@ impl CodexFixture {
         fixture
     }
 
-    fn binary(&self) -> &str {
+    pub(crate) fn binary(&self) -> &str {
         self.binary.to_str().unwrap()
     }
 
-    fn captured(&self) -> String {
+    pub(crate) fn captured(&self) -> String {
         std::fs::read_to_string(&self.capture).unwrap_or_default()
     }
 
-    fn spawn_count(&self) -> usize {
+    pub(crate) fn spawn_count(&self) -> usize {
         self.captured()
             .lines()
             .filter(|line| *line == "__SPAWN__")
@@ -209,7 +209,10 @@ fn resident_app_server_serves_both_turns_from_one_process() {
         .lines()
         .find(|line| line.contains("\"thread/start\""))
         .expect("thread/start request recorded");
-    assert!(thread_start.contains("\"model\":\"gpt-5.6-sol\""), "{thread_start}");
+    assert!(
+        thread_start.contains("\"model\":\"gpt-5.6-sol\""),
+        "{thread_start}"
+    );
     assert!(
         thread_start.contains("\"model_reasoning_effort\":\"high\""),
         "{thread_start}"
@@ -234,7 +237,8 @@ fn resident_app_server_serves_both_turns_from_one_process() {
     ] {
         // Each override must ride its own `-c`, or the CLI never sees it.
         assert!(
-            argv.windows(2).any(|pair| pair[0] == "-c" && pair[1] == expected),
+            argv.windows(2)
+                .any(|pair| pair[0] == "-c" && pair[1] == expected),
             "missing `-c {expected}`: {argv:?}"
         );
     }
@@ -322,4 +326,139 @@ fn mcp_server_names_come_only_from_declared_bare_key_tables() {
 
     std::fs::remove_file(home.join("config.toml")).unwrap();
     assert!(config_mcp_server_names().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_new_session_retries_only_the_rejected_model_and_keeps_effective_model() {
+    let fixture = CodexFixture::new(true);
+    // Reject before a prompt is accepted. A single-quoted model avoids JSON escaping.
+    let rejection = r#"      *'"thread/start"'*)
+        case "$line" in *gpt-6.1-sol*) printf '{"id":%s,"error":{"message":"The '\''gpt-6.1-sol'\'' model is not supported when using Codex with a ChatGPT account."}}\n' "$id"; continue;; esac"#;
+    let script = CODEX_FIXTURE.replace("      *'\"thread/start\"'*)", rejection);
+    std::fs::write(&fixture.binary, script).unwrap();
+    let mut session =
+        CodexSession::new(fixture.binary(), "gpt-6.1-sol", "high").with_default_fallback(true);
+    session.send_planner_turn("Hello", None).unwrap();
+    assert_eq!(session.model, "gpt-5.6-sol");
+    session.send_planner_turn("Follow-up", None).unwrap();
+    assert_eq!(fixture.spawn_count(), 2);
+    assert!(!fixture.invocations().iter().any(|args| args[0] == "exec"));
+}
+
+#[cfg(unix)]
+pub(crate) fn rejection_fixture(app_server: bool, partial: bool, diagnostic: &str) -> CodexFixture {
+    let fixture = CodexFixture::new(app_server);
+    let error = serde_json::to_string(&json!({ "message": diagnostic })).unwrap();
+    let progress = if partial {
+        if app_server {
+            r#"printf '%s\n' '{"method":"item/agentMessage/delta","params":{"delta":"Partial"}}'"#
+        } else {
+            r#"printf '%s\n' '{"type":"item.started","item":{"type":"command_execution"}}'"#
+        }
+    } else {
+        ""
+    };
+    let rejection = if app_server {
+        format!(
+            r#"      *'"turn/start"'*)
+        if [ "$new_model" = 1 ]; then
+          {progress}
+          printf '{{"id":%s,"error":%s}}\n' "$id" '{error}'
+          continue
+        fi"#
+        )
+    } else {
+        format!(
+            r#"if [ "$new_model" = 1 ]; then
+          printf '%s\n' '{{"type":"thread.started","thread_id":"rejected-thread"}}'
+          {progress}
+          printf '%s\n' '{{"type":"error","message":{}}}'
+          exit 1
+        fi
+has_skip=0"#,
+            serde_json::to_string(diagnostic).unwrap()
+        )
+    };
+    let script = CODEX_FIXTURE.replace(
+        "#!/bin/sh",
+        r#"#!/bin/sh
+new_model=0
+for arg in "$@"; do case "$arg" in *gpt-6.1-sol*) new_model=1;; esac; done"#,
+    );
+    let script = script.replace(
+        if app_server {
+            "      *'\"turn/start\"'*)"
+        } else {
+            "has_skip=0"
+        },
+        &rejection,
+    );
+    std::fs::write(&fixture.binary, script).unwrap();
+    fixture
+}
+
+pub(crate) const UNSUPPORTED: &str =
+    "The \"gpt-6.1-sol\" model is not supported when using Codex with a ChatGPT account.";
+
+#[cfg(unix)]
+#[test]
+fn new_default_retries_pre_execution_rejection_on_both_transports() {
+    for resident in [true, false] {
+        let fixture = rejection_fixture(resident, false, UNSUPPORTED);
+        let mut session =
+            CodexSession::new(fixture.binary(), "gpt-6.1-sol", "high").with_default_fallback(true);
+        session.send_planner_turn("Hello", None).unwrap();
+        assert_eq!(session.effective_model(), Some("gpt-5.6-sol"));
+        session.send_planner_turn("Follow-up", None).unwrap();
+        if !resident {
+            let calls = fixture.invocations();
+            let execs: Vec<_> = calls.iter().filter(|args| args[0] == "exec").collect();
+            assert!(
+                !execs[1].contains(&"resume".to_string()),
+                "rejected thread must be discarded"
+            );
+            assert_eq!(execs[2][..3], ["exec", "resume", "thread-1"]);
+            assert!(execs[2].contains(&"model=gpt-5.6-sol".to_string()));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn pins_partial_execution_and_unrelated_errors_never_change_models() {
+    for resident in [true, false] {
+        for (automatic, partial, error) in [
+            (false, false, UNSUPPORTED),
+            (true, true, UNSUPPORTED),
+            (true, false, "authentication failed"),
+            (true, false, "connection reset by peer"),
+            (true, false, "model service overloaded"),
+        ] {
+            let fixture = rejection_fixture(resident, partial, error);
+            let mut session = CodexSession::new(fixture.binary(), "gpt-6.1-sol", "high")
+                .with_default_fallback(automatic);
+            assert!(session.send_planner_turn("Hello", None).is_err());
+            assert_eq!(session.effective_model(), Some("gpt-6.1-sol"));
+            assert!(!fixture.captured().contains("gpt-5.6-sol"));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn accepted_new_default_stays_61_and_a_later_turn_cannot_retry() {
+    let fixture = rejection_fixture(true, false, UNSUPPORTED);
+    let script = std::fs::read_to_string(&fixture.binary).unwrap().replace(
+        "        if [ \"$new_model\" = 1 ]; then",
+        "        turn_count=$(( ${turn_count:-0} + 1 ))\n        if [ \"$new_model\" = 1 ] && [ \"$turn_count\" -gt 1 ]; then",
+    );
+    std::fs::write(&fixture.binary, script).unwrap();
+    let mut session =
+        CodexSession::new(fixture.binary(), "gpt-6.1-sol", "high").with_default_fallback(true);
+    session.send_planner_turn("Hello", None).unwrap();
+    assert_eq!(session.effective_model(), Some("gpt-6.1-sol"));
+    assert!(session.send_planner_turn("Tool result", None).is_err());
+    assert_eq!(fixture.spawn_count(), 1);
+    assert!(!fixture.captured().contains("gpt-5.6-sol"));
 }

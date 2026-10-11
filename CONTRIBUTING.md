@@ -99,6 +99,8 @@ AI-assisted pull requests are welcome. The person submitting the pull request is
 
 Review may take time because o8 has a solo maintainer. Opening a pull request does not create a review deadline or guarantee acceptance. Focused fixes with a reproduction and complete verification will be reviewed before speculative or broad changes.
 
+When your pull request ships, the release notes and the public changelog thank you by your GitHub handle.
+
 ## Repository layout
 
 - [`.agents/`](./.agents/) — repository-local agent skills.
