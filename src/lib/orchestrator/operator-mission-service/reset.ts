@@ -461,6 +461,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
   // null packet.lane while leaving the SQLite row in a non-terminal status.
   let worktreePath: string | null = null;
   const cleanupTargets: ResetCleanupTarget[] = [];
+  let worktreePruned = false;
+  let branchDeleted = false;
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
     const persisted = listLanes().filter((lane) => lane.packetId === packet.id);
@@ -508,6 +510,17 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
           overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
         });
       }
+    }
+    // Keep exact packet/session bindings until preservation-bound removal confirms.
+    // Session archival above must succeed before any workspace can be destroyed.
+    if (input.clearWorktree && packet.branchTarget && repoPath) {
+      const cleanup = await cleanupResetPacketTargets(cleanupTargets, packet.id);
+      worktreePruned = cleanup.worktreePruned;
+      branchDeleted = cleanup.branchDeleted;
+      log(`[lane-reset] Cleared packet-owned cleanup targets for packet ${packet.referenceLabel}`, cleanup);
+    }
+    for (const lane of bound) {
+      const terminal = lane.status === 'archived' || lane.status === 'completed';
       if (!persistedIds.has(lane.id)) continue;
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
@@ -539,8 +552,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
           partial: true,
           packetId: input.packetId,
           referenceLabel: packet.referenceLabel,
-          worktreePruned: false,
-          branchDeleted: false,
+          worktreePruned,
+          branchDeleted,
           note: `Packet ${packet.referenceLabel} worker was stopped, but lane ${lane.id} could not be retired. The packet remains held and must not be relaunched: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
@@ -582,41 +595,15 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
       partial: true,
       packetId: input.packetId,
       referenceLabel: packet.referenceLabel,
-      worktreePruned: false,
-      branchDeleted: false,
+      worktreePruned,
+      branchDeleted,
       note: `Packet ${packet.referenceLabel} worker retirement could not be confirmed. The packet remains held and must not be relaunched: ${detail}`,
     });
   }
 
   // If clearWorktree requested, prune the old worktree directory and delete
   // the packet branch so the next dispatch starts from the base branch.
-  let worktreePruned = false;
-  let branchDeleted = false;
   if (input.clearWorktree && packet.branchTarget && repoPath) {
-    try {
-      const cleanup = await cleanupResetPacketTargets(cleanupTargets, packet.id);
-      worktreePruned = cleanup.worktreePruned;
-      branchDeleted = cleanup.branchDeleted;
-      log(`[lane-reset] Cleared packet-owned cleanup targets for packet ${packet.referenceLabel}`, cleanup);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      await mutateResetPacketGeneration(
-        retryScopedInput,
-        missionId,
-        markPacketResetCleanupFailed,
-      );
-      throw new ResetCleanupFailedError({
-        reset: false,
-        salvaged: false,
-        partial: true,
-        packetId: input.packetId,
-        referenceLabel: packet.referenceLabel,
-        worktreePruned,
-        branchDeleted,
-        note: `Packet ${packet.referenceLabel} worker was stopped, but worktree cleanup was not confirmed. The packet remains held and must not be relaunched: ${detail}`,
-      });
-    }
-
     // F33 fallback (#1025): cleanupIssueBranch can miss orphan worktree dirs
     // when their meta is gone and git doesn't list them against the target
     // branch (e.g. a -<suffix> dir left on `main` after a prior bad reset).

@@ -11,7 +11,9 @@ import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-p
 export type ExactWorkspaceClaimKind =
   | 'restore-creation'
   | 'worktree-quarantine'
-  | 'managed-retirement';
+  | 'managed-retirement'
+  | 'generated-output-retirement'
+  | 'generated-output-recovery-retirement';
 export type ExactWorkspaceClaimState = 'prepared' | 'claimed' | 'published' | 'purging';
 
 export interface ExactWorkspaceClaimRecord {
@@ -116,8 +118,28 @@ export function prepareExactWorkspaceClaim(
   };
   const sqlite = getSqlite();
   return sqlite.transaction(() => {
-    if (candidate.kind === 'managed-retirement') {
+    if (candidate.kind !== 'generated-output-retirement') {
       assertWorkspaceRetentionReleased(candidate.sourcePath, candidate.sourceIdentity ?? undefined);
+      const output = sqlite.prepare(`
+        SELECT resource_id FROM workspace_generated_outputs
+        WHERE workspace_path = ? AND state != 'retired' LIMIT 1
+      `).get(candidate.sourcePath);
+      if (output) throw new Error('Containing workspace has generated output with unresolved retention.');
+    }
+    if (candidate.kind === 'generated-output-retirement') {
+      assertWorkspaceRetentionReleased(candidate.sourcePath, candidate.sourceIdentity ?? undefined);
+      assertWorkspaceRetentionReleased(candidate.parentIdentity.canonicalPath, candidate.parentIdentity);
+      const conflicting = sqlite.prepare(`
+        SELECT operation_id FROM workspace_exact_claims WHERE kind != 'generated-output-retirement'
+          AND (expected_path = ? OR source_path = ? OR claim_path = ?
+            OR (source_device = ? AND source_inode = ?)) LIMIT 1
+      `).get(candidate.parentIdentity.canonicalPath, candidate.parentIdentity.canonicalPath,
+        candidate.parentIdentity.canonicalPath, candidate.parentIdentity.device, candidate.parentIdentity.inode);
+      const snapshot = sqlite.prepare(`
+        SELECT packet_id FROM workspace_snapshots WHERE original_path = ?
+          AND state NOT IN ('materialized') LIMIT 1
+      `).get(candidate.parentIdentity.canonicalPath);
+      if (conflicting || snapshot) throw new Error('Containing workspace is changing materialization.');
     }
     sqlite.prepare(`
       INSERT OR IGNORE INTO workspace_exact_claims (

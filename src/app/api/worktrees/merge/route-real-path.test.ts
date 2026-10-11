@@ -9,11 +9,11 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { NextRequest } from 'next/server';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -31,6 +31,17 @@ writeFileSync(
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
+const probes = path.join(root, 'native-cwd-probes');
+mkdirSync(probes, { mode: 0o700 });
+writeFileSync(path.join(process.env.O8_TEST_RUN_DATA_ROOT!, '.o8-test-run-retain.json'),
+  JSON.stringify({ schema: 'o8/native-publication-fixture-retention/v1', reason: 'Preserve exact publication retirement evidence' }) + '\n',
+  { mode: 0o600 });
+const previousProbeRoot = process.env.O8_TEST_NATIVE_CWD_PROBE_ROOT;
+const previousNodeOptions = process.env.NODE_OPTIONS;
+process.env.O8_TEST_NATIVE_CWD_PROBE_ROOT = probes;
+const observer = pathToFileURL(path.join(process.cwd(), 'tests/generated-output-native-cwd-observer.mjs')).href;
+process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, `--import=${observer}`].filter(Boolean).join(' ');
+await import(/* @vite-ignore */ observer);
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -56,6 +67,7 @@ const {
 } = await import('@/lib/worktree/snapshot-state');
 const { panelGateMiddleware } = await import('@/middleware');
 const { createWorktreeMergePostForTesting } = await import('./handler');
+const { discardExactManagedWorktree } = await import('@/lib/workspace/exact-discard');
 
 const repo = await addRepo(repoPath);
 if (getRepoRegistryPath() !== path.join(dataDir, 'repos.json')) {
@@ -134,6 +146,10 @@ async function createOwnedWorkspace(label: string, createSnapshot = true) {
   });
   ownedWorkspaceBindings.set(lane.sessionKey!, { packetId, workspacePath, live: false });
   const head = git(workspacePath, 'rev-parse', 'HEAD');
+  const recoveryRef = `refs/o8/recovery/${packetId}`;
+  // A previously restored snapshot must have its actual preserved commit,
+  // not only a declared recovery-ref name in the snapshot row.
+  if (createSnapshot) git(repoPath, 'update-ref', recoveryRef, head);
   let snapshot = createSnapshot ? createWorkspaceSnapshot({
     repositoryUuid: repo.id,
     packetId,
@@ -143,7 +159,7 @@ async function createOwnedWorkspace(label: string, createSnapshot = true) {
     baseCommit: head,
     headCommit: head,
     treeSha: git(workspacePath, 'rev-parse', 'HEAD^{tree}'),
-    recoveryRef: `refs/o8/recovery/${packetId}`,
+    recoveryRef,
     diffFingerprint: `${packetId}-diff`,
     sessionIdentities: [{ kind: 'owned-session', identity: lane.sessionKey! }],
     creationId: `${packetId}-created`,
@@ -170,6 +186,7 @@ async function createOwnedWorkspace(label: string, createSnapshot = true) {
   await withWorktreeMetaTransaction(repoPath, (transaction) => transaction.save(worktreeId, {
     id: worktreeId,
     agentType: 'codex',
+    sessionKey: lane.sessionKey!,
     baseBranch: 'main',
     createdAt: Date.now(),
     claudeManaged: false,
@@ -193,7 +210,11 @@ async function createOwnedWorkspace(label: string, createSnapshot = true) {
 
 afterAll(() => {
   closeDb();
-  rmSync(root, { recursive: true, force: true });
+  if (previousProbeRoot === undefined) delete process.env.O8_TEST_NATIVE_CWD_PROBE_ROOT;
+  else process.env.O8_TEST_NATIVE_CWD_PROBE_ROOT = previousProbeRoot;
+  if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+  else process.env.NODE_OPTIONS = previousNodeOptions;
+  console.error(`[publication-fixture] retained native evidence at ${root}`);
 });
 
 describe('paired-device publication uses the captured managed workspace', () => {
@@ -324,7 +345,8 @@ describe('paired-device publication uses the captured managed workspace', () => 
         getWorkspaceSnapshot(repo.id, fixture.packetId)!.laneId!,
       )).toMatchObject({ status: 'archived', worktreePath: null });
     },
-    30_000,
+    // Exact native retirement repeats process, preservation and parent probes.
+    120_000,
   );
 
   it('replays exact terminal truth after cleanup completed before the response', async () => {
@@ -347,22 +369,28 @@ describe('paired-device publication uses the captured managed workspace', () => 
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toMatchObject({ action: 'pr', ok: true });
-  }, 30_000);
+  }, 120_000);
 
   it('rolls a pre-removal discard failure back to materialized and allows an exact retry', async () => {
     const fixture = await createOwnedWorkspace('discard-reset-failure');
-    const lockPath = path.join(fixture.workspacePath, '.git', 'index.lock');
-    const retainedLock = `${lockPath}.retained`;
-    writeFileSync(lockPath, 'block reset\n');
-
-    const refused = await createWorktreeMergePostForTesting({})(
+    let processChecks = 0;
+    const refused = await createWorktreeMergePostForTesting({
+      discardExact: input => discardExactManagedWorktree({
+        ...input,
+        processProbe: async (...args) => {
+          const receipt = await input.processProbe(...args);
+          // Interrupt after the actual native check, before the source rename.
+          if (++processChecks === 2) throw new Error('fixture pre-removal interruption');
+          return receipt;
+        },
+      }),
+    })(
       request(fixture.worktreeId, 'discard'),
     );
     expect(refused.status).toBe(500);
     expect(getWorkspaceSnapshot(repo.id, fixture.packetId)).toMatchObject({ state: 'materialized' });
     expect(existsSync(fixture.workspacePath)).toBe(true);
 
-    renameSync(lockPath, retainedLock);
     const retry = await createWorktreeMergePostForTesting({})(
       request(fixture.worktreeId, 'discard'),
     );
@@ -371,7 +399,7 @@ describe('paired-device publication uses the captured managed workspace', () => 
     expect(body.ok, body.note ?? body.error).toBe(true);
     expect(getWorkspaceSnapshot(repo.id, fixture.packetId)).toMatchObject({ state: 'retired' });
     expect(existsSync(fixture.workspacePath)).toBe(false);
-  }, 60_000);
+  }, 120_000);
 
   it('imports a never-parked copy-on-write head into the canonical recovery ref before retirement', async () => {
     const fixture = await createOwnedWorkspace('apfs-terminal-bootstrap', false);

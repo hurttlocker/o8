@@ -21,6 +21,8 @@ interface CommandReceipt {
 }
 
 export interface OwnedProcessProbeOptions {
+  /** Exact terminal retirement only; archival never grants execution authority. */
+  allowArchivedRetirement?: true;
   run?: (command: string, args: string[], timeoutMs: number) => Promise<CommandReceipt>;
   readCwdSnapshot?: () => Promise<ProcessCwdSnapshot>;
   now?: () => Date;
@@ -293,7 +295,10 @@ export async function probeOwnedSessionProcessQuiescence(
     );
   }
   const receipt = await lifecycle.getWorkspaceBinding(surfaceId).catch(() => null);
-  if (!receipt || receipt.sessionState !== 'active') {
+  if (!receipt || (receipt.sessionState !== 'active'
+    && !(options.allowArchivedRetirement && receipt.sessionState === 'archived'
+      && receipt.activeRun === null && Array.isArray(receipt.retainedRuns)
+      && receipt.retainedRuns.every(runIdentity => runIdentity.outcome !== 'running')))) {
     return synthesizeProcessQuiescence(
       { ownership: receipt ? 'owned' : 'unknown', pidIdentity: 'unknown', sessionKey: surfaceId },
       [],

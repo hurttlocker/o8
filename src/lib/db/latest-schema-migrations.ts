@@ -34,6 +34,7 @@ import { ensureV67WorkspacePreservationSchema } from '@/lib/db/v67-workspace-pre
 import { ensureV68TranscriptVisualizationsSchema } from '@/lib/db/v68-transcript-visualizations-migration';
 import { ensureV69VisualizationVersionsSchema } from '@/lib/db/v69-visualization-versions-migration';
 import { ensureV68ExactFinalizationSchema } from '@/lib/db/v68-exact-finalization-migration';
+import { ensureV69GeneratedOutputSchema } from '@/lib/db/v69-generated-output-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -79,4 +80,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV68TranscriptVisualizationsSchema(sqlite);
   ensureV69VisualizationVersionsSchema(sqlite);
   ensureV68ExactFinalizationSchema(sqlite);
+  ensureV69GeneratedOutputSchema(sqlite);
 }

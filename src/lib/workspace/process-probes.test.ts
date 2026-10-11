@@ -54,6 +54,32 @@ function binding(surfaceId: string, processGroupId?: number): OwnedWorkspaceBind
 }
 
 describe('owned process probes', () => {
+  it('uses archived completed runs only for explicit retirement and keeps incomplete or live truth held', async () => {
+    const surfaceId = 'probe-archived:session';
+    const sourceReceipt = binding(surfaceId, 4242);
+    const archived: OwnedWorkspaceBindingReceipt = { ...sourceReceipt, sessionState: 'archived', activeRun: null,
+      retainedRuns: [{ ...sourceReceipt.retainedRuns[0], outcome: 'interrupted' }] };
+    register('probe-archived:', archived);
+    const absent = async (command: string, args: string[]) => ({
+      code: command === 'ps' && args[0] === 'axeww' ? 0 : 1, stdout: '', stderr: '',
+    });
+    expect((await probeOwnedSessionProcessQuiescence(surfaceId, archived.binding.cwd, { run: absent })).state).toBe('unknown');
+    expect((await probeOwnedSessionProcessQuiescence(surfaceId, archived.binding.cwd,
+      { run: absent, allowArchivedRetirement: true })).state).toBe('quiescent');
+    archived.retainedRunsComplete = false;
+    expect((await probeOwnedSessionProcessQuiescence(surfaceId, archived.binding.cwd,
+      { run: absent, allowArchivedRetirement: true })).state).toBe('unknown');
+    archived.retainedRunsComplete = true;
+    expect((await probeOwnedSessionProcessQuiescence(surfaceId, archived.binding.cwd, {
+      allowArchivedRetirement: true,
+      run: async (command, args) => command === 'pgrep'
+        ? { code: 0, stdout: '4999\n', stderr: '' } : absent(command, args),
+    })).state).toBe('live');
+    archived.retainedRuns[0].outcome = 'running';
+    expect((await probeOwnedSessionProcessQuiescence(surfaceId, archived.binding.cwd,
+      { run: absent, allowArchivedRetirement: true })).state).toBe('unknown');
+  });
+
   it('detects orphaned process-group children after the recorded leader exits', async () => {
     const surfaceId = 'probe-orphan:session';
     register('probe-orphan:', binding(surfaceId, 4242));

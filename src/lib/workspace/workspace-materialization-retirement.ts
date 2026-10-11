@@ -1,4 +1,5 @@
 import { lstat } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
@@ -114,8 +115,16 @@ function certifiesMergeEvidence(
   return recordedCandidate === undefined || recordedCandidate === evidence.mergeCandidateSha;
 }
 
+function canonicalWorkspaceNamespace(workspacePath: string): string {
+  const resolved = path.resolve(workspacePath);
+  return path.join(realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+}
+
 function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
-  const matches = listWorkspaceSnapshotsByOriginalPath(path.resolve(workspacePath));
+  const resolved = path.resolve(workspacePath);
+  const canonical = canonicalWorkspaceNamespace(resolved);
+  const matches = [...new Map([resolved, canonical].flatMap(listWorkspaceSnapshotsByOriginalPath)
+    .map(snapshot => [`${snapshot.repositoryUuid}:${snapshot.packetId}`, snapshot])).values()];
   if (matches.length > 1) {
     throw new Error('Workspace retirement found ambiguous durable materialization truth.');
   }
@@ -203,7 +212,7 @@ function archiveTerminalLane(snapshot: WorkspaceSnapshotRecord, action: Workspac
   if (!lane || lane.status === 'archived') return;
   if (lane.packetId !== snapshot.packetId) return;
   if (lane.worktreePath
-    && path.resolve(lane.worktreePath) !== path.resolve(snapshot.originalPath)) return;
+    && canonicalWorkspaceNamespace(lane.worktreePath) !== canonicalWorkspaceNamespace(snapshot.originalPath)) return;
   const endings = {
     pr: { outcome: 'pr_opened' as const, outcomeNote: 'Pull request opened; local workspace retired.' },
     merge: { outcome: 'merged' as const, outcomeNote: 'Merged; local workspace retired.' },
@@ -365,7 +374,7 @@ export async function captureWorkspaceMaterializationSnapshot(
       repositoryUuid: repo.id,
       packetId,
       laneId: lane.id,
-      originalPath: path.resolve(workspacePath),
+      originalPath: canonicalWorkspaceNamespace(workspacePath),
       branch,
       baseCommit,
       headCommit,
