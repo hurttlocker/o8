@@ -1,10 +1,20 @@
 import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
+import { WebviewMutationUncertainError } from '@/lib/mcp/o8-webview-command-transport';
 import { isAbsolute } from 'node:path';
 import type { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 
 export type DirectoryResolve =
   | { dialog_id: string; operation: 'select'; path: string }
   | { dialog_id: string; operation: 'cancel' };
+
+// Native directory tools emit these fixed outcomes. Never relay arbitrary native text or codes.
+const DIRECTORY_OUTCOMES: ReadonlySet<string> = new Set([
+  'invalid_schema', 'invalid_identity', 'invalid_operation', 'unknown_command',
+  'wrong_window', 'invalid_path', 'wrong_dialog_type', 'stale_dialog',
+  'already_accepted', 'selection_not_supported', 'request_expired',
+  'validation_unavailable', 'unsupported_os', 'lifecycle_unavailable',
+  'no_dialog', 'missing_window', 'main_thread_unavailable', 'outcome_unknown',
+]);
 
 type Result = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
 
@@ -55,8 +65,10 @@ export function createDirectoryDialogHandlers(getClient: () => O8WebviewClient):
     try {
       return { content: [{ type: 'text', text: JSON.stringify(await action()) }] };
     } catch (error) {
-      const message = safeErrorText(error);
-      const code = (error as { code?: string })?.code ?? (/^[a-z_]+$/.test(message) ? message : 'directory_dialog_error');
+      const nativeOutcome = error instanceof Error && DIRECTORY_OUTCOMES.has(error.message) ? error.message : null;
+      const uncertain = error instanceof WebviewMutationUncertainError;
+      const message = uncertain ? error.message : nativeOutcome ?? safeErrorText(error);
+      const code = uncertain ? 'outcome_unknown' : nativeOutcome ?? (error instanceof McpInputError ? 'invalid_schema' : 'directory_dialog_error');
       return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message }) }] };
     }
   }
