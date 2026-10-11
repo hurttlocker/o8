@@ -26,7 +26,7 @@ export function useOrchestratorModelState(input: {
     if (repoPathRef.current !== repoPath) {
       repoPathRef.current = repoPath;
       const storedModel = isolated ? null : readStoredOrchestratorModel(repoPath);
-      sourceRef.current = storedModel ? 'stored' : 'default';
+      sourceRef.current = storedModel !== null ? 'stored' : 'default';
       // Persisted repo state is an external source that must be synchronized after render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setModel(storedModel ?? operatorDefaultModel);

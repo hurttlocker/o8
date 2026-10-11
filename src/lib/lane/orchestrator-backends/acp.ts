@@ -45,6 +45,9 @@ import type {
 /** Hang watchdog (not a work budget) — mirrors the other backends' 4h ceiling. */
 const ACP_PROCESS_TIMEOUT_MS = 14_400_000;
 
+/** A refused model reset must not destroy an established conversation. */
+class AcpDefaultModelResetError extends Error {}
+
 interface AcpSession {
   key: string;
   sessionName: string;
@@ -58,6 +61,8 @@ interface AcpSession {
   createdAt: number;
   /** `session/new`'s configOptions — the agent's own model/mode catalogue. */
   configOptions: AcpConfigOption[];
+  /** Startup model retained separately so an explicit default can undo a pin. */
+  initialModel: string | null;
   /** Last model pushed via `session/set_model`, so we only switch on change. */
   appliedModel: string | null;
   /**
@@ -196,6 +201,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       status: 'ready',
       createdAt: Date.now(),
       configOptions: [],
+      initialModel: null,
       appliedModel: null,
       completedTurns: 0,
       launchFingerprint: acpLaunchFingerprint(launch),
@@ -234,7 +240,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     session.configOptions = created.configOptions;
     // The agent reports what it booted with, so a composer pick that already
     // matches costs no set_model round-trip on the first turn.
-    session.appliedModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
+    session.initialModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
+    session.appliedModel = session.initialModel;
     if (session.configOptions.length) {
       sessionConfigCache.set(id, session.configOptions);
     }
@@ -256,7 +263,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     // Precedence: the composer's per-turn pick, then the operator's pinned
     // default, then whatever the agent booted with. The last one is a real
     // option, not a failure — an unpinned backend still runs.
-    const requested = (model?.trim() || defaultModelFor(id)) ?? undefined;
+    const restoringDefault = model !== undefined && !model.trim();
+    const resetError = () => new AcpDefaultModelResetError(`${label} could not restore its agent default. Choose a model or start a new conversation. This conversation was preserved.`);
+    const requested = restoringDefault ? session.initialModel ?? undefined : (model?.trim() || defaultModelFor(id)) ?? undefined;
+    if (restoringDefault && !requested && session.appliedModel !== null) throw resetError();
     if (!requested || requested === session.appliedModel) return;
     const previous = session.appliedModel;
     try {
@@ -275,6 +285,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       }
       session.appliedModel = requested;
     } catch (err) {
+      if (restoringDefault) throw resetError();
       console.log(`[acp-orchestrator] ${label} refused model ${requested}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -355,8 +366,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         const errorEvent: OrchestratorEvent = { type: 'error', error: err instanceof Error ? err.message : String(err) };
         onEvent(errorEvent);
         publishAcpLifecycle(id, session, errorEvent);
-        session.status = 'dead';
-        session.client.kill();
+        if (!(err instanceof AcpDefaultModelResetError)) {
+          session.status = 'dead';
+          session.client.kill();
+        }
       } finally {
         clearTimeout(watchdog);
         options?.signal?.removeEventListener('abort', onAbort);

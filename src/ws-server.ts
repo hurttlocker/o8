@@ -156,6 +156,7 @@ import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
+import { normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
@@ -5415,9 +5416,7 @@ async function handleOrchestratorSendMsgOnce(
     ? msg.thinkingEffort
     : undefined;
   const serviceTier = isOrchestratorServiceTier(msg.serviceTier) ? msg.serviceTier : undefined;
-  const model = typeof msg.model === 'string' && msg.model.trim()
-    ? msg.model.trim()
-    : undefined;
+  const model = normalizeOrchestratorTurnModel(msg.model);
   const crossHouseRole = msg.surface === 'canvas-agent' ? 'canvas-agent' : 'orchestrator';
   const requestedBackendId = resolveMsgBackendId(msg);
   const requestedBackend = getOrchestratorBackend(requestedBackendId);

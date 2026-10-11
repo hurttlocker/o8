@@ -30,6 +30,12 @@ const EFFORTS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh',
 describe('composer selector state', () => {
   beforeEach(() => localStorage.clear());
 
+  it('preserves explicit model choices while retaining the fallback for absent choices', () => {
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '' }).model).toBe('');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '  agent-model  ' }).model).toBe('agent-model');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp' }).model).toBe(MODEL_IDS.orchestratorDefault);
+  });
+
   it('keeps mode, wire directive, execution mode, and effort in one resolved state', () => {
     for (const mode of MODES) {
       for (const effort of EFFORTS) {

@@ -216,7 +216,7 @@ export function useComposerSelectorState(input: {
   useEffect(() => {
     if (!enabled || !repoPath || isolated) return;
     const storedModel = readStoredOrchestratorModel(repoPath);
-    if (storedModel && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
+    if (storedModel !== null && storedModel !== modelIdRef.current) restoreModelRef.current?.(storedModel);
   }, [enabled, isolated, repoPath, threadId]);
 
   const storedEffortKey = `${threadId ?? ''}:${modelId ?? ''}`;

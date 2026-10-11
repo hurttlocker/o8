@@ -9,6 +9,7 @@ import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/typ
 import { readStoredOrchestratorModel, writeStoredOrchestratorModel } from '@/lib/orchestrator/store';
 import { THOUGHTS_OPERATOR_DEFAULTS_FALLBACK } from './operator-defaults';
 import { useBackendSwitchChoice, resolveFreshComposerTurnOptions } from './useBackendSwitchChoice';
+import { prepareOrchestratorTurn } from './use-orchestrator-stream/turn-option-resolution';
 
 let currentSwitch: ReturnType<typeof useBackendSwitchChoice> | null = null;
 const REPO_PATH = '/repo/backend-switch';
@@ -76,6 +77,7 @@ describe('useBackendSwitchChoice', () => {
     expect(readStoredOrchestratorModel(REPO_PATH)).toBe('');
     const outgoing = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'acp', backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() });
     expect(outgoing).toEqual({ backend: 'acp', model: '' });
+    expect(prepareOrchestratorTurn('fixture', outgoing).model).toBe('');
   });
 
   it('runs the lead-change reset only when a deferred backend switch applies', async () => {

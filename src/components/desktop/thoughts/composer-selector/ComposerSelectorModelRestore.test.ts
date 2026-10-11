@@ -11,6 +11,7 @@ import { ComposerArea } from '../chat-panel/ComposerArea';
 import { composerModeStorageKey, writeStoredComposerMode } from '../composer-mode-storage';
 import { readComposerEffortMaps, writeComposerModelEffort, type ComposerSelectorMode } from './state';
 import { useComposerSelectorState } from './useComposerSelectorState';
+import { useOrchestratorModelState } from './useOrchestratorModelState';
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
@@ -68,6 +69,10 @@ function StoredModelRestoreHarness({ repoPath, isolated = false, threadId = 'sto
 }
 
 let isolatedControls: ReturnType<typeof useComposerSelectorState>;
+function LeadModelHarness({ operatorDefaultModel }: { operatorDefaultModel: string }) {
+  const { model } = useOrchestratorModelState({ repoPath: '/repo/alpha', operatorDefaultModel });
+  return createElement('output', null, model);
+}
 function IsolatedSelector({ threadId = null }: { threadId?: string | null }) {
   const [model, setModel] = useState('gpt-6-luna');
   const [effort, setEffort] = useState<ThinkingEffort>('low');
@@ -130,6 +135,21 @@ describe('composer selector model restore', () => {
     expect(container.querySelector('[data-testid="stored-model-value"]')?.textContent).toBe('gpt-5.6-luna');
     expect(container.querySelector('[data-testid="stored-model-mode"]')?.textContent).toBe('fusion');
     expect(localStorage.getItem(composerModeStorageKey(STORED_MODEL_TAB_ID))).toBe('fusion');
+  });
+  it('keeps a stored agent-default choice when operator defaults refresh', async () => {
+    writeStoredOrchestratorModel('/repo/alpha', '');
+    await act(async () => root.render(createElement(LeadModelHarness, { operatorDefaultModel: 'model-a' })));
+    expect(container.querySelector('output')?.textContent).toBe('');
+    await act(async () => root.render(createElement(LeadModelHarness, { operatorDefaultModel: 'model-b' })));
+    expect(container.querySelector('output')?.textContent).toBe('');
+  });
+
+  it('restores an empty agent-default choice without resetting the composer mode', async () => {
+    writeStoredComposerMode(STORED_MODEL_TAB_ID, 'fusion');
+    writeStoredOrchestratorModel('/repo/alpha', '');
+    await act(async () => root.render(createElement(StoredModelRestoreHarness, { repoPath: '/repo/alpha' })));
+    expect(container.querySelector('[data-testid="stored-model-value"]')?.textContent).toBe('');
+    expect(container.querySelector('[data-testid="stored-model-mode"]')?.textContent).toBe('fusion');
   });
   it('keeps a reply model isolated when its conversation acquires a thread id', async () => {
     writeStoredOrchestratorModel('/repo/alpha', 'gpt-6-astra');
