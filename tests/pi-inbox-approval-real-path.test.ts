@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     if (input.startsWith('/api/panel/approvals')) {
-      const req = new NextRequest(`http://localhost${input}`, { ...init, headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' } });
+      const req = new NextRequest(`http://localhost${input}`, { ...init, signal: init?.signal ?? undefined, headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' } });
       return init?.method === 'POST' ? POST(req) : GET(req);
     }
     return Response.json({ items: [], maintainer: { replies: [], contributions: [], sources: [] } });
