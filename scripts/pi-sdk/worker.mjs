@@ -117,7 +117,9 @@ process.stdin.on('data', chunk => {
         () => send({ id: frame.id, error: { code: -32000, message: 'Worker command failed' } }));
     } else {
       const waiter = pending.get(frame.id); pending.delete(frame.id);
-      if (frame.error) waiter?.reject(new Error('Host operation failed'));
+      // o8's own refusal text (code -32002) reaches the model; any other host error stays generic.
+      if (frame.error) waiter?.reject(new Error(frame.error.code === -32002 && typeof frame.error.message === 'string'
+        ? frame.error.message.slice(0, 300) : 'Host operation failed'));
       else waiter?.resolve(frame.result);
     }
   }

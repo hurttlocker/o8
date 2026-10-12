@@ -8,6 +8,7 @@ import { piSdkScriptPath } from './scripts';
 import { createPiContinuityGuard, type PiContinuityPolicy } from './continuity';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
 import { createManagedPiTransport, isPiAllowanceMessage, type PiModelTransport } from './transport';
+import { PI_TOOL_REFUSAL_CODE, PiToolRefusal } from './refusal';
 
 export { requirePiNode, requirePiPlatform } from './platform';
 
@@ -123,14 +124,14 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     const signal = run?.signal;
     if (!signal || signal.aborted) throw new Error('No active authorized run');
     if (request.method === 'tool') {
-      if (++toolCalls > (options.maxToolCalls ?? 16)) throw new Error('Tool-call budget exhausted');
+      if (++toolCalls > (options.maxToolCalls ?? 16)) throw new PiToolRefusal('Tool-call budget exhausted');
       const name = request.params.name;
       const args = request.params.args;
       if (typeof name !== 'string' || !args || typeof args !== 'object' || Array.isArray(args)) {
         throw new Error('Invalid tool request');
       }
       const hostTool = hostTools.get(name);
-      if (!hostTool && !fileTools.some(tool => tool.name === name)) throw new Error('Tool is not available');
+      if (!hostTool && !fileTools.some(tool => tool.name === name)) throw new PiToolRefusal('Tool is not available');
       const turn = toolTail.then(() => hostTool
         ? (signal.throwIfAborted(), hostTool.execute(structuredClone(args as Record<string, unknown>), signal))
         : executePiTool(root, { name, args: args as Record<string, unknown> }, approve, signal,
@@ -153,9 +154,12 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   peer.on('request', (request: StdioJsonRpcInboundRequest) => {
     void handleRequest(request).then(result => {
       if (peer.running) peer.respond(request.id, result);
-    }, () => {
+    }, (error: unknown) => {
       // Do not send host paths, credentials, raw provider bodies or stack traces to the worker.
-      if (peer.running) peer.respondError(request.id, -32001, 'Host operation denied or unavailable');
+      // o8's own fixed refusal text is none of those, and the model needs it to correct a call.
+      if (!peer.running) return;
+      if (error instanceof PiToolRefusal) peer.respondError(request.id, PI_TOOL_REFUSAL_CODE, error.message);
+      else peer.respondError(request.id, -32001, 'Host operation denied or unavailable');
     }).catch(() => { run?.abort(); });
   });
   let ready: { sessionFile: string; sessionId: string; tools: string[]; messageCount: number };

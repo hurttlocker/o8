@@ -36,6 +36,19 @@ their stop reason and cannot reuse text from a previous turn. Stop cancels host
 model/tool work before asking the worker to abort; close uses the shared
 cooperative-to-forced child shutdown ladder.
 
+## Tool errors and paths
+
+A refusal o8 raises with a fixed message of its own (`PiToolRefusal`, for
+example "Command is blocked by policy", "Command was not approved", "File write
+was not approved", "File not found" or "Invalid workspace path") reaches the
+model as that text, so it can correct the call (#3556). The host sends it with
+JSON-RPC code -32002 and the worker passes at most 300 characters of it. Any
+other host error, which can carry paths or provider text, still reaches the
+model as "Host operation failed".
+
+File tools take workspace-relative paths. An absolute path that resolves inside
+the workspace is treated as its relative path; one outside is refused.
+
 ## Command tool
 
 `run_command` (#3257) goes through `evaluatePolicy`, the same rules as every other

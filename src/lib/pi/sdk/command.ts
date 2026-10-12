@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { confinementArgs, ConfinementUnavailable } from '@/lib/sandbox/confine';
 import { piWriteHelperPath } from './scripts';
+import { PiToolRefusal } from './refusal';
 
 export const PI_COMMAND_OUTPUT_BYTES = 50_000;
 export const PI_COMMAND_TIMEOUT_MS = 120_000;
@@ -104,7 +105,7 @@ export async function runPiCommand(root: string, command: string, abort: AbortSi
 async function runCommand(root: string, command: string, abort: AbortSignal, options: PiCommandOptions,
   confined?: { tmp: string; args: string[] }) {
   abort.throwIfAborted();
-  if (cleanupUnconfirmed) throw new Error('Earlier command processes could not be confirmed stopped. Restart o8 before running more commands.');
+  if (cleanupUnconfirmed) throw new PiToolRefusal('Earlier command processes could not be confirmed stopped. Restart o8 before running more commands.');
   const timeoutMs = options.timeoutMs ?? PI_COMMAND_TIMEOUT_MS;
   const maxOutputBytes = options.maxOutputBytes ?? PI_COMMAND_OUTPUT_BYTES;
   const env = confined ? { ...piCommandEnv(), TMPDIR: confined.tmp } : piCommandEnv();
@@ -173,12 +174,12 @@ async function runCommand(root: string, command: string, abort: AbortSignal, opt
       stopping.then(endTree).then(ended => (ended ? exited : { code: null, error: false, lost: true }))]);
     if (!await endTree()) {
       cleanupUnconfirmed = true;
-      throw new Error('The command processes could not be confirmed stopped. Restart o8 before running more commands.');
+      throw new PiToolRefusal('The command processes could not be confirmed stopped. Restart o8 before running more commands.');
     }
     abort.throwIfAborted();
     // A confined command the supervisor refused to start never ran unconfined.
     if (confined && notStarted) throw new ConfinementUnavailable();
-    if (result.error || notStarted) throw new Error('Command could not start');
+    if (result.error || notStarted) throw new PiToolRefusal('Command could not start');
     // Exit can arrive before the last buffered output; with no writer left, the
     // pipes end promptly.
     await Promise.race([Promise.all([drained(child.stdout), drained(child.stderr)]), sleep(1_000)]);

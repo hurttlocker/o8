@@ -115,7 +115,7 @@ describe('managed Pi SDK real worker', () => {
       transport: async function* (context) {
         calls++;
         if (calls === 1) yield* events(message([{ type: 'toolCall', id: 'deny', name: 'write_file', arguments: { path: 'denied.txt', content: 'no' } }], 'toolUse'));
-        else if (calls === 2) { expect(JSON.stringify(context)).toContain('Host operation'); yield* events(message([{ type: 'toolCall', id: 'escape', name: 'read_file', arguments: { path: 'link' } }], 'toolUse')); }
+        else if (calls === 2) { expect(JSON.stringify(context)).toContain('File write was not approved'); yield* events(message([{ type: 'toolCall', id: 'escape', name: 'read_file', arguments: { path: 'link' } }], 'toolUse')); }
         else { expect(JSON.stringify(context)).not.toContain('private fixture'); yield* events(message([{ type: 'text', text: 'Denied' }])); }
       } });
     await session.prompt('Try denied operations');

@@ -3453,6 +3453,13 @@
       ]
     },
     {
+      "path": "tests/pi-sdk-tool-refusal-real-path.test.ts",
+      "reasons": [
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-worker-real-path.test.ts",
       "reasons": [
         "native-build",

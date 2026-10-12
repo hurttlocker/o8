@@ -226,7 +226,8 @@ describe('Pi optional host continuity through real tools and worker', () => {
         expect(log).not.toContain('Host operation failed');
       } else {
         expect(confinement.started).toBe(0); await noAct(f);
-        expect(log).toContain('Host operation');
+        // o8's own refusal reaches the model (#3556); a continuity failure stays generic.
+        expect(log).toContain(action === 'reject' ? 'Command was not approved' : 'Host operation');
       }
       expect(f.inspections).toHaveLength(action === 'reject' ? 1 : 2);
     }, 20_000);
