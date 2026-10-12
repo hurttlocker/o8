@@ -27,11 +27,13 @@ import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
-import { prepareCodexHome } from './codex-orchestrator-config';
+import { codexAppThreadConfig, prepareCodexHome, userCodexHome } from './codex-orchestrator-config';
+import { CODEX_USER_MESSAGE_MARKER, splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
+import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
-import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { resolveCodexAppThreadsSync, resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
@@ -284,12 +286,11 @@ export function buildCodexOrchestratorPrompt(
 ): string {
   // Single mode launches Codex with `mcp_servers={}` (codexOrchestrationModeFlags).
   const mcpServers = scope.orchestrationMode !== 'single';
-  return [
+  const instructions = [
     buildOrchestratorSystemPrompt(repoPath, { backend: 'codex', toolProfile: scope.toolProfile, mcpServers }),
     codexBrainFirstSection(mcpServers),
-    '## USER MESSAGE',
-    message,
   ].join('\n\n');
+  return `${instructions}${CODEX_USER_MESSAGE_MARKER}${message}`;
 }
 
 // ── Event mapping (codex JSON → OrchestratorEvent) ───────────────────────────
@@ -486,6 +487,10 @@ async function sendToCodexOrchestratorAttempt(
     if (settleBeforeSpawnIfAborted()) return;
   }
   const serviceTierArgs = serviceTier ? ['-c', `service_tier="${serviceTier}"`] : [];
+  // #3573: with "Show chats in the Codex app" on, the turn runs through the
+  // app-server bridge in the operator's own Codex home, so the Codex app lists
+  // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
+  const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
@@ -535,6 +540,33 @@ async function sendToCodexOrchestratorAttempt(
   let spawnArgs = args;
   let spawnEnv = baseEnv;
   let cleanupSingleLaunch = () => {};
+  if (codexApp) {
+    try {
+      const prompt = splitCodexOrchestratorPrompt(message);
+      const specPath = writeCodexAppBridgeSpec({
+        codexBin,
+        cwd: session.repoPath,
+        threadId: session.threadId,
+        developerInstructions: prompt.instructions,
+        message: prompt.message,
+        imagePaths,
+        model,
+        effort: reasoningEffort,
+        serviceTier: serviceTier ?? null,
+        sandbox: permissionMode === 'plan' ? 'read-only' : 'danger-full-access',
+        config: codexAppThreadConfig(session.repoPath, options.toolProfile ?? 'full', session.historyThreadId),
+      });
+      const bridge = codexAppBridgeLaunch();
+      spawnBinary = bridge.command;
+      spawnArgs = [...bridge.args, specPath];
+      spawnEnv = { ...baseEnv, CODEX_HOME: userCodexHome() };
+    } catch (err) {
+      session.status = 'dead';
+      onEvent({ type: 'error', error: `Codex app mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      return;
+    }
+  }
   if (options.orchestrationMode === 'single') {
     try {
       const prepared = await prepareSingleOrchestratorLaunch({

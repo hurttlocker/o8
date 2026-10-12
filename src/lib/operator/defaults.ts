@@ -90,6 +90,7 @@ import { applyMeteredPacketCapUpdate, METERED_PACKET_CAP_FALLBACK, resolveMetere
 import { applyUiLoopUpdate, resolveStoredUiLoopDefaults, resolveUiLoopSettings, UI_LOOP_FALLBACK, type UiLoopDefaults } from './ui-loop-defaults';
 import { applyBroadcastCommentaryUpdate, BROADCAST_COMMENTARY_FALLBACK, broadcastCommentarySettingSources, resolveBroadcastCommentaryDefaults, resolveStoredBroadcastCommentary, type BroadcastCommentaryDefaults } from './broadcast-commentary-defaults';
 import { applyPresentationUpdate, PRESENTATION_FALLBACK, presentationSettingSources, resolvePresentationDefaults, resolveStoredPresentation, type PresentationDefaults } from './presentation-defaults';
+import { applyCodexAppThreadsUpdate, CODEX_APP_THREADS_FALLBACK, resolveStoredCodexAppThreads, type CodexAppThreadsDefault } from './codex-app-threads-default';
 import { applyReviewContinuationUpdate, REVIEW_CONTINUATION_FALLBACK, resolveStoredReviewContinuation, type ReviewContinuationDefault } from './review-continuation-default';
 import { applyWorkspaceManifestPolicyUpdate, resolveStoredWorkspaceManifestPolicy, resolveWorkspaceManifestPolicySettings, WORKSPACE_MANIFEST_POLICY_FALLBACK, type WorkspaceManifestPolicyDefault } from './workspace-manifest-policy-default';
 import { applySymonVoiceUpdate, resolveStoredSymonVoice, resolveSymonVoiceSettings, SYMON_VOICE_FALLBACK, type SymonVoiceDefault } from './symon-voice-default';
@@ -125,7 +126,7 @@ export type SettingSource = 'env' | 'file' | 'profile' | 'default';
 export type RequireApproval = 'high-risk' | 'surface' | 'always' | 'never';
 export function isRequireApproval(value: unknown): value is RequireApproval { return value === 'high-risk' || value === 'surface' || value === 'always' || value === 'never'; }
 
-export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
+export interface OperatorDefaults extends StorageReserveDefaults, WorkspaceParkingDefaults, ApfsDependencyImagesDefaults, MeteredPacketCapDefaults, UiLoopDefaults, BroadcastCommentaryDefaults, PresentationDefaults, ReviewContinuationDefault, CodexAppThreadsDefault, WorkspaceManifestPolicyDefault, SymonVoiceDefault, JudgmentProviderDefault, JudgmentAllowanceDefaults, BrainDefaults {
   subscriptionProfile: SubscriptionProfile;
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -328,6 +329,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   healBotEnabled: true,
   supervisorAutoEscalate: false,
   ...REVIEW_CONTINUATION_FALLBACK,
+  ...CODEX_APP_THREADS_FALLBACK,
   ...BROADCAST_COMMENTARY_FALLBACK,
   ...PRESENTATION_FALLBACK,
   ...APFS_DEPENDENCY_IMAGES_FALLBACK,
@@ -394,7 +396,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   worktreeMaxTotalGb: 20,
   ...STORAGE_RESERVE_FALLBACK, ...WORKSPACE_PARKING_FALLBACK, ...METERED_PACKET_CAP_FALLBACK, ...UI_LOOP_FALLBACK, ...SYMON_VOICE_FALLBACK, ...JUDGMENT_PROVIDER_FALLBACK, ...JUDGMENT_ALLOWANCE_FALLBACK,
 };
-interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults>, Partial<BrainDefaults> {
+interface StoredOperatorDefaults extends Partial<StorageReserveDefaults>, Partial<WorkspaceParkingDefaults>, Partial<ApfsDependencyImagesDefaults>, Partial<MeteredPacketCapDefaults>, Partial<UiLoopDefaults>, Partial<BroadcastCommentaryDefaults>, Partial<PresentationDefaults>, Partial<ReviewContinuationDefault>, Partial<CodexAppThreadsDefault>, Partial<WorkspaceManifestPolicyDefault>, Partial<SymonVoiceDefault>, Partial<JudgmentProviderDefault>, Partial<JudgmentAllowanceDefaults>, Partial<BrainDefaults> {
   subscriptionProfile?: SubscriptionProfile;
   parallelCap?: number;
   overlapGate?: OverlapGateMode;
@@ -476,6 +478,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
     result.supervisorAutoEscalate = stored.supervisorAutoEscalate;
   }
   Object.assign(result, resolveStoredReviewContinuation(stored));
+  Object.assign(result, resolveStoredCodexAppThreads(stored));
   Object.assign(result, resolveStoredBroadcastCommentary(stored));
   Object.assign(result, resolveStoredPresentation(stored));
   Object.assign(result, resolveStoredApfsDependencyImages(stored));
@@ -689,6 +692,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     supervisorAutoEscalate:
       envEsc ?? fileValues.supervisorAutoEscalate ?? OPERATOR_DEFAULTS_FALLBACK.supervisorAutoEscalate,
     reviewContinuation: fileValues.reviewContinuation ?? OPERATOR_DEFAULTS_FALLBACK.reviewContinuation,
+    codexAppThreads: fileValues.codexAppThreads ?? OPERATOR_DEFAULTS_FALLBACK.codexAppThreads,
     ...resolveBroadcastCommentaryDefaults(fileValues),
     ...resolvePresentationDefaults(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages ?? OPERATOR_DEFAULTS_FALLBACK.apfsDependencyImages,
@@ -767,6 +771,7 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     supervisorAutoEscalate:
       envEsc !== null ? 'env' : fileValues.supervisorAutoEscalate !== undefined ? 'file' : 'default',
     reviewContinuation: fileValues.reviewContinuation !== undefined ? 'file' : 'default',
+    codexAppThreads: fileValues.codexAppThreads !== undefined ? 'file' : 'default',
     ...broadcastCommentarySettingSources(fileValues),
     ...presentationSettingSources(fileValues),
     apfsDependencyImages: fileValues.apfsDependencyImages !== undefined ? 'file' : 'default',
@@ -893,6 +898,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>): Pr
     stored.supervisorAutoEscalate = Boolean(update.supervisorAutoEscalate);
   }
   applyReviewContinuationUpdate(stored, update);
+  applyCodexAppThreadsUpdate(stored, update);
   applyBroadcastCommentaryUpdate(stored, update);
   applyPresentationUpdate(stored, update);
   applyApfsDependencyImagesUpdate(stored, update);
@@ -1134,6 +1140,7 @@ export function resolveOverlapGateSync(): OverlapGateMode { return getOperatorDe
 export function resolveSupervisorAutoEscalateSync(): boolean { return getOperatorDefaultsSync().values.supervisorAutoEscalate; }
 
 export function resolveReviewContinuationSync(): boolean { return getOperatorDefaultsSync().values.reviewContinuation; }
+export function resolveCodexAppThreadsSync(): boolean { return getOperatorDefaultsSync().values.codexAppThreads; }
 
 export function resolveHealBotEnabledSync(): boolean { return getOperatorDefaultsSync().values.healBotEnabled; }
 

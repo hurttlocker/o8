@@ -162,6 +162,22 @@ export function ModelDefaultsContent({ settings, onNavigateTab }: { settings: Re
         </SettingsGroup>
       </section>
 
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Codex app"
+          footnote="Multitask and Fusion chats on Codex run in your own Codex home, so you can open them in the Codex app. o8 keeps its own tools, model and access mode for these turns and does not change your Codex settings. Solo chats stay private to o8. Switching this starts a new Codex thread for each chat."
+        >
+          <SettingsRow
+            icon={<CpuIcon />}
+            label="Show chats in the Codex app"
+            subtitle={lockedSub('codexAppThreads', 'Read and continue o8 orchestrator chats in Codex on desktop and mobile')}
+            checked={values.codexAppThreads}
+            disabled={envLocked('codexAppThreads') || busyField === 'codexAppThreads'}
+            onToggle={(next) => { updateField('codexAppThreads', next); }}
+          />
+        </SettingsGroup>
+      </section>
+
       <ModelRoutingControls data={data!} busyField={busyField} updateField={updateField} advanced />
       <DispatchFoundersSection values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={false} />
       <SettingsAdvanced label="Routing details" description="See which provider handles each job and the result of recent routing decisions.">

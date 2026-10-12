@@ -73,6 +73,7 @@ export interface OperatorDefaults {
   healBotEnabled: boolean;
   supervisorAutoEscalate: boolean;
   reviewContinuation: boolean;
+  codexAppThreads: boolean;
   apfsDependencyImages: boolean;
   requireApproval: RequireApproval;
   thinkingEffort: ThinkingEffort;

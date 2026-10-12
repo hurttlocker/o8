@@ -325,6 +325,7 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   judgmentManagedOptionVisible: booleanField('judgment', 'managed_option_visible'),
   workspaceManifestPolicy: enumField('operator', 'workspace_manifest_policy', 'one of "disabled", "one-approval", or "auto"', isWorkspaceManifestPolicy),
   crossHouseWorkerFallback: booleanField('models', 'cross_house_worker_fallback'),
+  codexAppThreads: booleanField('orchestrator', 'codex_app_threads'),
   orchestratorBackend: enumField('orchestrator', 'backend', 'a supported orchestrator backend', isOrchestratorBackendSetting),
   reviewerBackend: enumField('review', 'backend', 'one of "follow", "codex", or "claude"', isReviewerBackendSetting),
   packetExplainerEnabled: booleanField('review', 'packet_explainer_enabled'),

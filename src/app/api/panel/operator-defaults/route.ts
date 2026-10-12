@@ -210,6 +210,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.supervisorAutoEscalate = body.supervisorAutoEscalate;
   }
 
+  if (body.codexAppThreads !== undefined) {
+    if (typeof body.codexAppThreads !== 'boolean') {
+      throw new Error('codexAppThreads must be boolean.');
+    }
+    update.codexAppThreads = body.codexAppThreads;
+  }
   if (body.reviewContinuation !== undefined) {
     if (typeof body.reviewContinuation !== 'boolean') {
       throw new Error('reviewContinuation must be boolean.');

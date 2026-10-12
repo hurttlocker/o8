@@ -672,6 +672,9 @@ compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts',
 compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
 compilePureNodeBundle('operator-mcp-proxy', 'src/lib/mcp/operator-mcp-proxy.ts');
+// Codex app-server bridge (#3573): runs Codex orchestrator turns in the operator's
+// Codex home when "Show chats in the Codex app" is on. Node built-ins only.
+compilePureNodeBundle('codex-app-bridge', 'src/lib/codex/app-server-exec-bridge.ts');
 compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
 
 // ── Bundle the Pi SDK worker (#3255) ──
