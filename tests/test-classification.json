@@ -2764,6 +2764,15 @@
       ]
     },
     {
+      "path": "tests/managed-worktree-admission-busy-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/managed-worktree-admission-real-path.test.ts",
       "reasons": [
         "child-process",
