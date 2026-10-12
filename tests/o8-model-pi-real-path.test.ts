@@ -193,7 +193,7 @@ function inbox(decide: (approval: { toolName?: string; command?: string }) => 'a
 }
 
 describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => {
-  it('runs an o8 turn on Pi: an o8 command, run_command held for inbox approval, an approved edit', async () => {
+  it('runs an o8 Full access turn on Pi without redundant command or edit approvals', async () => {
     const repo = join(root, 'repo');
     await mkdir(repo);
     relay.requests.length = 0;
@@ -201,14 +201,9 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
       callTool('c1', 'o8_run', { name: 'o8_list_repos', arguments: '{}' }),
       callTool('c2', 'run_command', { command: 'touch ran-by-command.txt' }),
       callTool('c3', 'write_file', { path: 'notes.md', content: 'from the o8 model' }),
-      say('Listed the repos, skipped the declined command, and wrote notes.md.'),
+      say('Listed the repos, ran the command, and wrote notes.md.'),
     );
-    let commandRanBeforeDecision = false;
-    const operator = inbox((approval) => {
-      if (approval.toolName !== 'run_command') return 'approve';
-      commandRanBeforeDecision = existsSync(join(repo, 'ran-by-command.txt'));
-      return 'reject';
-    });
+    const operator = inbox(() => 'reject');
     const { backend, events } = await composerO8Turn(repo, 'List the repos, run the setup command, then write notes.md',
       'thoughts-o8-model-pi');
     await operator.stop();
@@ -228,19 +223,16 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
     expect(results.map(result => result.name)).toEqual(['o8_run', 'run_command', 'write_file']);
     // The o8 command ran through the operator server over /api/mcp.
     expect(JSON.parse(results[0].output)).toMatchObject({ count: expect.any(Number), repos: expect.any(Array) });
-    // run_command waited for the inbox and did not run when the operator declined it.
-    expect(operator.seen).toEqual([
-      { toolName: 'run_command', command: 'touch ran-by-command.txt', runtime: 'pi', action: 'reject' },
-      { toolName: 'write_file', command: undefined, runtime: 'pi', action: 'approve' },
-    ]);
-    expect(commandRanBeforeDecision).toBe(false);
-    expect(results[1].isError).toBe(true);
-    expect(existsSync(join(repo, 'ran-by-command.txt'))).toBe(false);
+    // Full access authorizes routine tools without a second Inbox decision.
+    // Gated approval and rejection are exercised by pi-sdk-worker-real-path.
+    expect(operator.seen).toEqual([]);
+    expect(results[1].isError).not.toBe(true);
+    expect(existsSync(join(repo, 'ran-by-command.txt'))).toBe(true);
     // The approved edit landed.
     expect(results[2].output).toBe('Wrote notes.md');
     expect(await readFile(join(repo, 'notes.md'), 'utf8')).toBe('from the o8 model');
     expect(events.filter(event => event.type === 'text').map(event => (event as { text: string }).text).join(''))
-      .toBe('Listed the repos, skipped the declined command, and wrote notes.md.');
+      .toBe('Listed the repos, ran the command, and wrote notes.md.');
     expect(events.at(-1)).toMatchObject({ type: 'done' });
   }, 300_000);
 
@@ -324,8 +316,8 @@ describe('the composer o8 model on the built-in Pi orchestrator (#3408)', () => 
       registerAbort: () => () => {}, publish: () => {},
     });
     await reviewer.stop();
-    // The review turn ran on Pi with its usual approval: the write waited for the inbox.
-    expect(reviewer.seen).toEqual([{ toolName: 'write_file', command: undefined, runtime: 'pi', action: 'approve' }]);
+    // Review continuation uses Full access, matching the originating composer turn.
+    expect(reviewer.seen).toEqual([]);
     expect(await readFile(join(repo, 'review.md'), 'utf8')).toBe('reviewed');
     const messages = readPersistedLlmChat(threadId)!.history.messages;
     expect(messages.at(-2)).toMatchObject({ role: 'user', content: '[FLEET] Lane reached review-ready' });

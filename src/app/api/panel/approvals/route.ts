@@ -72,6 +72,8 @@ export async function GET(request: NextRequest) {
   const laneId = request.nextUrl.searchParams.get('laneId')?.trim() || undefined;
   const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
   const status = statusParam === 'all' ? 'all' : 'pending';
+  // The shared Inbox explicitly spans projects; other callers retain active-project scoping.
+  const projectId = request.nextUrl.searchParams.get('scope') === 'all' ? null : undefined;
   const isContextQuery = Boolean(packetId || laneId);
   const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
   const ownershipRefusal = workerPacketRefusal(
@@ -86,10 +88,10 @@ export async function GET(request: NextRequest) {
       .filter((approval) => status === 'all' || approval.status === status)
     : status === 'pending'
       ? [
-          ...listApprovals({ status, sessionKey }),
-          ...listUnsettledApprovalContinuations({ sessionKey }),
+          ...listApprovals({ status, sessionKey, projectId }),
+          ...listUnsettledApprovalContinuations({ sessionKey, projectId }),
         ]
-      : listApprovals({ status, sessionKey });
+      : listApprovals({ status, sessionKey, projectId });
 
   return NextResponse.json({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),

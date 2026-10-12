@@ -235,8 +235,15 @@ function ApprovalRequestCard({
         </summary>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, paddingLeft: 12 }}>
           <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{copy.subline}</div>
+          {typeof approval.metadata?.RepoPath === 'string' ? <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>Workspace: <span style={{ fontFamily: MONO_FONT }}>{approval.metadata.RepoPath}</span></div> : null}
           <div style={{ fontSize: 10, lineHeight: 1.4 }}>Tool: <span style={{ fontFamily: MONO_FONT }}>{tool}</span></div>
           {isUnreviewedMerge ? <div style={{ fontSize: 10, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{approval.description}</div> : null}
+          {approval.source === 'runtime' && approval.runtime === 'pi' && approval.toolName === 'write_file' && typeof approval.args?.content === 'string' ? (
+            <div>
+              <div style={{ fontSize: 10, marginBottom: 4 }}>Proposed file content</div>
+              <pre style={{ margin: 0, maxHeight: 180, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: MONO_FONT, fontSize: 11 }}>{approval.args.content}</pre>
+            </div>
+          ) : null}
           {approval.referee ? <O8RefereeRow referee={approval.referee} /> : null}
         </div>
       </details>
