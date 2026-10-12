@@ -63,6 +63,54 @@ describe('CustomizePage skills', () => {
     }));
   });
 
+  it('distinguishes unmatched instructions from empty inventory and restores rows across scopes', async () => {
+    const previous = vi.mocked(fetch).getMockImplementation()!;
+    const personal = { id: 'personal', title: 'Personal guide', scope: 'global', repoName: null, body: 'Personal rules', projects: [], priority: null, file: null };
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname !== '/api/cortex/directives') return previous(input, init);
+      const path = url.searchParams.get('repoPath');
+      return Promise.resolve(Response.json({ directives: [personal, ...(path ? [{ ...personal, id: path, title: 'Repository guide', scope: 'repo', repoName: 'o8' }] : [])] }));
+    });
+    await act(async () => root.render(createElement(CustomizePage, {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
+    })));
+    const search = host.querySelector<HTMLInputElement>('[aria-label="Search Instructions"]')!;
+    const enter = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const tab = () => [...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Instructions'))!;
+    expect(host.textContent).toContain('Repository guide');
+    expect(tab().textContent).toContain('2');
+    enter('ZZqv');
+    expect(host.textContent).toContain('No matching instructions');
+    expect(host.textContent).toContain('ZZqv');
+    expect(host.textContent).not.toContain('No additional rules');
+    expect(tab().textContent).toContain('2');
+    const view = host.querySelector<HTMLSelectElement>('[aria-label="Customization view"]')!;
+    for (const scope of ['/repo/o8', 'personal', 'all']) {
+      await act(async () => { view.value = scope; view.dispatchEvent(new Event('change', { bubbles: true })); });
+      expect(host.textContent).toContain('No matching instructions');
+      expect(tab().textContent).toContain(scope === 'personal' ? '1' : '2');
+      enter('');
+      expect(host.textContent).toContain('Personal guide');
+      expect(host.textContent?.includes('Repository guide')).toBe(scope !== 'personal');
+      enter('ZZqv');
+    }
+    enter('');
+    expect(host.textContent).toContain('Repository guide');
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
+  it('keeps empty-inventory guidance when no instructions exist', async () => {
+    await act(async () => root.render(createElement(CustomizePage)));
+    expect(host.textContent).toContain('No additional rules');
+    expect(host.textContent).toContain('Rules appear here with their source and scope.');
+    expect(host.textContent).not.toContain('No matching instructions');
+  });
+
   it('keeps the dedicated Plugins page separate from customization navigation', async () => {
     const props = {
       project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
