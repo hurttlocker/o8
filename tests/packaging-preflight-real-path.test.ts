@@ -177,7 +177,7 @@ export function spawnSync(command, args) {
     mkdirSync(dirname(sentinel), { recursive: true });
     writeFileSync(sentinel, 'previous-output');
     for (const file of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs',
-      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs']) {
+      'run-lib.mjs', 'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs']) {
       const destination = join(f.root, 'scripts', file);
       mkdirSync(dirname(destination), { recursive: true });
       cpSync(join(sourceRoot, 'scripts', file), destination);
@@ -211,6 +211,20 @@ export function spawnSync(command, args) {
     writeFileSync(archive, 'final-archive');
     truncateSync(archive, FOOTPRINT_BUDGET.regressionCeilings.updaterArchiveBytes + 1);
     expect(() => assertMacPackageSize(f.app, archive)).toThrow('updaterArchiveBytes');
+    expect(existsSync(archive)).toBe(true);
+  });
+
+  it('bounds the approved release allowance and keeps other versions strict', () => {
+    const f = fixture();
+    const archive = `${f.app}.tar.gz`;
+    writeFileSync(archive, 'final-archive');
+    truncateSync(archive, 81 * 1024 * 1024);
+    for (const releaseVersion of [undefined, '0.1.788', '0.1.790', '0.1.789-preview.1']) {
+      expect(() => assertMacPackageSize(f.app, archive, { releaseVersion })).toThrow('updaterArchiveBytes');
+    }
+    expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' }).allowance).toBe('release-0.1.789');
+    truncateSync(archive, 88 * 1024 * 1024 + 1);
+    expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' })).toThrow('updaterArchiveBytes');
     expect(existsSync(archive)).toBe(true);
   });
 
@@ -277,12 +291,13 @@ export function execFileSync(command, args) {
     const log = join(f.root, 'calls.jsonl');
     // Real app/archive/filesystem validation runs. Only signing/notary and
     // platform process edges are simulated; no Apple tool or credential is used.
-    const childProcess = `import { appendFileSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
+    const childProcess = `import { appendFileSync, cpSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const real = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
   appendFileSync(process.env.O8_DMG_TEST_LOG, JSON.stringify({ command, args }) + '\\n');
   if (['cat', 'du', 'tar'].includes(command)) return real.execFileSync(command, args, options);
+  if (command === '/usr/bin/ditto') { cpSync(args[0], args[1], { recursive: true }); return ''; }
   if (command === 'hdiutil') {
     if (args[0] !== 'create') throw new Error('unexpected image operation');
     const destination = args.at(-1);
@@ -325,7 +340,8 @@ export async function load(url, context, nextLoad) {
     const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { command: string; args: string[] });
     const image = calls.findIndex(call => call.command === 'hdiutil');
     expect(calls[image].args).toEqual(['create', '-volname', 'o8 0.1.742', '-srcfolder', join(bundle, 'dmg-staging'), '-ov', '-format', 'UDZO', dmg]);
-    expect(calls[image - 1].command).toBe('cargo');
+    expect(calls[image - 2].command).toBe('cargo');
+    expect(calls[image - 1]).toEqual({ command: '/usr/bin/ditto', args: [f.app, join(bundle, 'dmg-staging', 'o8.app')] });
     expect(calls.slice(image + 1).map(call => [call.command, ...call.args.slice(0, 2)])).toEqual([
       ['codesign', '--force', '--sign'],
       ['xcrun', 'notarytool', 'submit'],

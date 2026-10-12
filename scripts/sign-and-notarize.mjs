@@ -76,7 +76,7 @@ try {
 }
 
 // Reject cache contamination and size regressions before signing or uploading.
-console.log('[sign-and-notarize] package size preflight', assertMacPackageSize(APP));
+console.log('[sign-and-notarize] package size preflight', assertMacPackageSize(APP, undefined, { releaseVersion: version }));
 
 // #1163: the gate launches a DISPOSABLE 2nd copy of o8.app from /tmp to test
 // it, and that child intermittently PANICS (resource-dir resolution / wry event
@@ -220,7 +220,7 @@ execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], {
 console.log('[sign-and-notarize] verified updater archive', verifyUniversalMacUpdaterArchive(APP, TAR));
 
 // Recheck the final signed/stapled bytes before updater signing or DMG upload.
-console.log('[sign-and-notarize] final package size', assertMacPackageSize(APP, TAR));
+console.log('[sign-and-notarize] final package size', assertMacPackageSize(APP, TAR, { releaseVersion: version }));
 
 console.log('[sign-and-notarize] minisign-signing the new tar.gz');
 // Newer cargo-tauri-cli rejects `--private-key-path` when

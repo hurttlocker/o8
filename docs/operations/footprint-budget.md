@@ -31,6 +31,12 @@ The installed-app ceiling allows the universal macOS executable while keeping th
 
 The update-archive ceiling is 80 MiB so the archive can carry the bundled Pi worker (#3255). The 0.1.782 archive measured 74.1 MiB, and the minified worker adds about 1.9 MB compressed. The 75 MiB target is unchanged.
 
+### Temporary 0.1.789 package allowance
+
+Release 0.1.789 has an approved package-only ceiling of 312 MiB installed and 88 MiB for the update archive, tracked in #3545. This follows removal of copied file-tracing metadata, generated type output, native compilation inputs, and Windows-only terminal assets from the macOS export. Runtime dependencies, both macOS architectures, native prebuilds, and license files remain included.
+
+The allowance is matched to the exact release version in the signing gate. Other versions retain the 300/80 MiB ceilings above; memory, CPU, integrity, signing, and notarization checks are unchanged. The original unpruned candidate exceeds even this allowance. Dependency reduction and a return to the standard package ceilings remain follow-up work.
+
 ## Metric contract
 
 - Physical memory comes from the macOS `footprint` tool, not RSS. The native host and its process descendants are included.

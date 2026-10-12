@@ -13,6 +13,7 @@ import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
 import { assertTauriExportInputsSafe } from './lib/tauri-export-safety.mjs';
+import { prunePackagedBuildInputs } from './lib/packaged-build-inputs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -821,6 +822,7 @@ if (/\b(?:import|require)\s*\(\s*['\"]@sentry\/node['\"]\s*\)/.test(wsImplementa
 }
 
 let size = '';
+console.log('📦 Removed packaged build inputs', prunePackagedBuildInputs(server));
 try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\t')[0]; } catch { size = '(size n/a on this platform)'; }
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
