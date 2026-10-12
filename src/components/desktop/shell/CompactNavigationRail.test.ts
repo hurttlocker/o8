@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CompactNavigationRail } from './CompactNavigationRail';
 import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { setCustomizeTab } from '../customize/navigation';
-import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
+import { checkAllUpdates, publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
 
 const auth = vi.hoisted(() => ({ isLoaded: true, signedIn: false, clerkEnabled: true, user: { name: 'Private account', email: 'private@example.test' }, signIn: vi.fn(), openManageAccount: vi.fn() }));
 const updateCheck = vi.hoisted(() => vi.fn(async () => ({ version: null as string | null })));
@@ -157,7 +157,7 @@ it('opens cached release notes from the updater and restores focus on Escape wit
   const root = createRoot(host);
   const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
   const install = vi.fn();
-  window.addEventListener('o8:install-all-updates', install);
+  window.addEventListener('o8:install-app-update', install);
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: false })));
     const updates = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
@@ -175,7 +175,7 @@ it('opens cached release notes from the updater and restores focus on Escape wit
     expect(document.activeElement).toBe(updates);
     expect(updates.getAttribute('aria-expanded')).toBe('false');
   } finally {
-    window.removeEventListener('o8:install-all-updates', install);
+    window.removeEventListener('o8:install-app-update', install);
     await act(async () => root.unmount());
     host.remove();
   }
@@ -189,7 +189,7 @@ it('checks updates on click, reports through notifications, and waits for hover 
     ? Response.json({ tools: ['codex', 'claude-code', 'grok'].map(runtimeId => ({ runtimeId, label: runtimeId, status: 'not-installed' })) })
     : Response.json({ entries: [], summary: 'Published changes' }));
   const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
-  const install = vi.fn(); window.addEventListener('o8:install-all-updates', install);
+  const install = vi.fn(); window.addEventListener('o8:install-app-update', install);
   try {
     await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', glassSurface: true })));
     const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
@@ -201,15 +201,15 @@ it('checks updates on click, reports through notifications, and waits for hover 
     expect(install).not.toHaveBeenCalled();
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
     await act(async () => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-    expect(document.querySelector('[aria-label="Updates and release notes"]')).not.toBeNull();
-  } finally { unregister(); window.removeEventListener('o8:install-all-updates', install); await act(async () => root.unmount()); host.remove(); }
+    expect(document.querySelector('[aria-label="Updates and release notes"]')?.textContent).toContain('You’re up to date.');
+  } finally { unregister(); window.removeEventListener('o8:install-app-update', install); await act(async () => root.unmount()); host.remove(); }
 });
 
-it('shows ready updates in blue, folds current CLIs, and offers one compact update action', async () => {
+it('shows ready updates in blue, folds current CLIs, and offers separate app and CLI update actions', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
-  const install = vi.fn(); window.addEventListener('o8:install-all-updates', install);
+  const install = vi.fn(); window.addEventListener('o8:install-app-update', install);
   const cli = (runtimeId: string, status: string) => ({ runtimeId, label: runtimeId, status, installedVersion: '1.0', latestVersion: '1.1' });
   vi.mocked(fetch).mockImplementation(async input => String(input).startsWith('/api/setup/cli-updates')
     ? Response.json({ tools: [cli('codex', 'update-available'), cli('claude-code', 'current'), cli('grok', 'not-installed'), cli('gemini', 'current')] })
@@ -231,12 +231,24 @@ it('shows ready updates in blue, folds current CLIs, and offers one compact upda
     act(() => current.click());
     expect(popup.textContent).toContain('claude-code');
     expect(current.getAttribute('aria-expanded')).toBe('true');
-    const update = [...popup.querySelectorAll('button')].find(button => button.textContent === 'Update all')!;
+    const update = [...popup.querySelectorAll('button')].find(button => button.textContent === 'Update o8')!;
     expect(update.style.minHeight).toBe('30px');
+    const unregister = registerAppUpdateCheck(async () => {
+      publishAppUpdateView({ version: '0.1.901', outcome: 'available', installing: false, message: null, error: null, downloadOnly: false });
+      return { version: '0.1.901' };
+    });
+    await act(async () => { await checkAllUpdates(); }); unregister();
+    expect(popup.textContent).toContain('Updates are ready.');
     act(() => update.click()); expect(install).toHaveBeenCalledOnce();
+    expect([...popup.querySelectorAll('button')].some(button => button.textContent === 'Update connected CLIs')).toBe(true);
+    expect(popup.querySelector('[aria-label="Update codex"]')).not.toBeNull();
+    expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+    await act(async () => publishAppUpdateView({ version: '0.1.901', outcome: 'available', installing: false, message: 'Restart is waiting for lanes and terminals to become idle.', error: null, downloadOnly: false }));
+    expect(popup.textContent).toContain('Restart is waiting');
+    expect(popup.textContent).not.toContain('You’re up to date.');
   } finally {
     publishAppUpdateView({ version: null, outcome: 'never', installing: false, message: null, error: null, downloadOnly: false });
-    window.removeEventListener('o8:install-all-updates', install); await act(async () => root.unmount()); host.remove();
+    window.removeEventListener('o8:install-app-update', install); await act(async () => root.unmount()); host.remove();
   }
 });
 

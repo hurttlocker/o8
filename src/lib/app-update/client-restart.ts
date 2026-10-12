@@ -65,6 +65,8 @@ async function isVersionPulled(version: string): Promise<{ pulled: boolean; note
 }
 
 export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+  const { waitForConnectedCliUpdates } = await import('./update-hub-client');
+  await waitForConnectedCliUpdates();
   if (options.beforeRestart && !(await options.beforeRestart())) return false;
   await releaseCloudJobLeasesForRestart();
   try {
@@ -102,10 +104,6 @@ export async function installUpdateAndRestart(
     return { installed: false, blocked: { version: result.version, note: health.note } };
   }
 
-  // Verify connected stable CLIs while the old server is still available.
-  // A busy, unsupported or unverified installation defers this update.
-  const { synchronizeConnectedClis } = await import('./update-hub-client');
-  await synchronizeConnectedClis();
   await result.downloadAndInstall();
   const restarted = await relaunchInstalledUpdate(options);
   return { installed: true, restartDeferred: !restarted };

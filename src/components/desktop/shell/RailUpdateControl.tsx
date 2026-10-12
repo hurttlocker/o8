@@ -33,6 +33,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
   const [currentExpanded, setCurrentExpanded] = useState(false);
   const [allNotes, setAllNotes] = useState(false);
   const pending = hub.app.installing || hub.syncing;
+  const status = hub.cliMessage || hub.checkMessage || hub.app.message;
   const visibleTools = hub.tools.filter(tool => tool.runtimeId !== 'gemini' && tool.status !== 'not-installed');
   const available = Boolean(hub.app.version) || visibleTools.some(tool => tool.status === 'update-available');
   const cliUpdates = visibleTools.filter(tool => ['codex', 'claude-code', 'grok'].includes(tool.runtimeId) && tool.status === 'update-available');
@@ -114,7 +115,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
             {hub.app.version ? <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-muted)' }}>o8 {hub.app.version}</div> : null}</div>
           <button type="button" aria-label="Refresh updates" disabled={hub.checking || hub.checkingAll || pending} onClick={() => { void check(); }} style={{ ...button, width: 32, padding: 0 }}><RefreshCw size={14} strokeWidth={1.7} /></button>
         </div>
-        {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} /> : null}
+        {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} disabled={pending || hub.checkingAll} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
         {currentTools.length ? <div>
           <button type="button" aria-expanded={currentExpanded} aria-controls={`${id}-current`} onClick={() => setCurrentExpanded(value => !value)}
             style={{ ...button, minHeight: 26, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -123,15 +124,18 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           </button>
           {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} /></div> : null}
         </div> : null}
-        {(error || hub.app.message) ? <div role={error ? 'alert' : 'status'} style={{ fontSize: 11.5, lineHeight: 1.5, color: error ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{error || hub.app.message}</div> : null}
+        {(error || status) ? <div role={error ? 'alert' : 'status'} style={{ fontSize: 11.5, lineHeight: 1.5, color: error ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{error || status}</div> : null}
         {hub.app.version || cliUpdates.length ? <div style={{ display: 'grid', justifyItems: 'start', gap: 6 }}>
-          <button type="button" disabled={pending} onClick={() => { setPinned(true); if (hub.app.version) window.dispatchEvent(new Event('o8:install-all-updates')); else void synchronizeConnectedClis().catch(() => {}); }}
-            style={{ ...button, minHeight: 30, color: '#fff', background: '#3b82f6', opacity: pending ? 0.65 : 1 }}>
-            {pending ? 'Updating…' : hub.app.version ? hub.app.downloadOnly ? 'Download o8' : 'Update all' : 'Update connected CLIs'}
-          </button>
-          <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>{hub.app.downloadOnly
-            ? 'o8 opens its installer; CLI updates are separate.' : 'Connected CLIs included. Active sessions wait.'}</span>
-          {hub.app.downloadOnly && cliUpdates.length ? <button type="button" disabled={pending} onClick={() => { setPinned(true); void synchronizeConnectedClis().catch(() => {}); }} style={button}>Update connected CLIs</button> : null}
+          {hub.app.version ? <button type="button" disabled={pending || hub.checkingAll}
+            onClick={() => { setPinned(true); window.dispatchEvent(new Event('o8:install-app-update')); }}
+            style={{ ...button, minHeight: 30, color: 'var(--t-accent-contrast, #fff)', background: 'var(--t-accent)', opacity: pending ? 0.65 : 1 }}>
+            {hub.app.installing ? 'Updating o8…' : hub.app.downloadOnly ? 'Download o8' : 'Update o8'}
+          </button> : null}
+          {cliUpdates.length ? <button type="button" disabled={pending || hub.checkingAll}
+            onClick={() => { setPinned(true); void synchronizeConnectedClis().catch(() => {}); }} style={button}>
+            {hub.syncing ? 'Updating CLIs…' : 'Update connected CLIs'}
+          </button> : null}
+          <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>App and CLI updates are separate. Active sessions wait.</span>
         </div> : null}
         <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 14 }}>
           <div style={{ fontSize: 12.5, fontWeight: 500 }}>{notes?.source === 'changelog' ? 'Latest published changes' : 'What’s changed'}</div>

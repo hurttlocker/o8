@@ -465,8 +465,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, [checkUpdateIdle]);
   useEffect(() => {
     const install = () => { void handleInstall({ userInitiated: true, requireIdle: true }); };
-    window.addEventListener('o8:install-all-updates', install);
-    return () => window.removeEventListener('o8:install-all-updates', install);
+    window.addEventListener('o8:install-app-update', install);
+    return () => window.removeEventListener('o8:install-app-update', install);
   }, [handleInstall]);
 
   useEffect(() => {

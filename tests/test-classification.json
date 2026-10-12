@@ -1726,6 +1726,13 @@
       ]
     },
     {
+      "path": "tests/cli-update-node-runtime-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-usage-api-real-path.test.ts",
       "reasons": [
         "real-path"

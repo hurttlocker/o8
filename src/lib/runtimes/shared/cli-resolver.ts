@@ -24,6 +24,7 @@ import { promisify } from 'node:util';
 
 import { ensureCliSymlink, wellKnownCliDirs } from './cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 const execFileAsync = promisify(execFile);
 const statAsync = promisify(stat);
@@ -219,7 +220,7 @@ async function probeVersion(
       windowsHide: true,
       timeout: spec.versionTimeoutMs ?? 5_000,
       maxBuffer: 64 * 1024,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: { ...process.env, PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1' },
     });
     const combined = `${stdout}\n${stderr}`;
     const match = combined.match(pattern);

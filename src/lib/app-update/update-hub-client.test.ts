@@ -13,7 +13,7 @@ describe('the connected CLI synchronization gate', () => {
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls[1]?.[1]).toMatchObject({ method: 'POST', body: '{"runtime":"codex"}' });
   });
-  it.each(['failed', 'outdated', 'disappeared'])('rejects a %s final check so an app install cannot proceed', async failure => {
+  it.each(['failed', 'outdated', 'disappeared'])('rejects a %s final check without claiming CLI success', async failure => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('update-available')))
       .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
       .mockResolvedValueOnce(failure === 'failed' ? new Response(null, { status: 503 }) : Response.json(report(failure === 'outdated' ? 'update-available' : 'not-installed')));
@@ -25,6 +25,40 @@ describe('the connected CLI synchronization gate', () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('unknown')));
     await expect(synchronizeConnectedClis()).rejects.toThrow('release');
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
+  });
+  it('updates other verified CLIs when one release is unknown', async () => {
+    const tools = [record('codex', 'unknown'), record('claude-code', 'update-available'), record('grok', 'not-installed')];
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))
+      .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
+      .mockResolvedValueOnce(Response.json({ tools: tools.map(t => t.runtimeId === 'claude-code' ? { ...t, status: 'current' } : t) }));
+    await expect(synchronizeConnectedClis()).rejects.toThrow('codex');
+    expect(vi.mocked(fetch).mock.calls[1]?.[1]?.body).toBe('{"runtime":"claude-code"}');
+  });
+  it('continues after an installer refuses and refreshes partial success', async () => {
+    const tools = [record('codex', 'update-available'), record('claude-code', 'update-available'), record('grok', 'not-installed')];
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))
+      .mockResolvedValueOnce(Response.json({ error: 'Active sessions' }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
+      .mockResolvedValueOnce(Response.json({ tools: tools.map(t => t.runtimeId === 'claude-code' ? { ...t, status: 'current' } : t) }));
+    await expect(synchronizeConnectedClis()).rejects.toThrow('Active sessions');
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === 'POST').map(([, options]) => options?.body))
+      .toEqual(['{"runtime":"codex"}', '{"runtime":"claude-code"}']);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+  it('updates only the requested CLI even when another provider is unverifiable', async () => {
+    const tools = [record('codex', 'update-available'), record('claude-code', 'unknown'), record('grok', 'not-installed')];
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))
+      .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
+      .mockResolvedValueOnce(Response.json({ tools: tools.map(t => t.runtimeId === 'codex' ? { ...t, status: 'current' } : t) }));
+    await synchronizeConnectedClis('codex');
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === 'POST').map(([, options]) => options?.body))
+      .toEqual(['{"runtime":"codex"}']);
+  });
+  it('does not reinstall a requested CLI that is already current', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json(report()));
+    await synchronizeConnectedClis('codex');
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.method).toBeUndefined();
   });
   it('keeps a read-only refresh separate from the install action', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('update-available')));

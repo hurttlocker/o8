@@ -27,17 +27,41 @@ beforeEach(() => {
   }));
 });
 describe('unified updates through the existing app install entry point', () => {
-  it('verifies connected CLI updates before downloading o8, then retains the final restart gate', async () => {
+  it('installs only o8 without checking or modifying connected CLIs', async () => {
     expect(await installUpdateAndRestart()).toMatchObject({ installed: true, restartDeferred: false });
-    expect(fixture.calls).toEqual(['release-health', 'cli-check', 'cli-update', 'cli-check', 'app-download', 'lease-drain', 'restart']);
+    expect(fixture.calls).toEqual(['release-health', 'app-download', 'lease-drain', 'restart']);
   });
-  it.each(['failInstall', 'failFinal'] as const)('defers app download and restart when %s prevents synchronization', async key => {
-    fixture[key] = true; await expect(installUpdateAndRestart()).rejects.toThrow();
-    expect(fixture.download).not.toHaveBeenCalled(); expect(fixture.restart).not.toHaveBeenCalled();
+  it.each(['failInstall', 'failFinal'] as const)('does not let a CLI failure block the app (%s)', async key => {
+    fixture[key] = true;
+    expect(await installUpdateAndRestart()).toMatchObject({ installed: true });
+    expect(fixture.calls).not.toContain('cli-check');
   });
-  it('checks connected current CLIs without reinstalling them', async () => {
-    fixture.outdated = false; await installUpdateAndRestart();
-    expect(fixture.calls).not.toContain('cli-update'); expect(fixture.download).toHaveBeenCalledOnce();
+  it('retains the final idle gate after download', async () => {
+    expect(await installUpdateAndRestart(undefined, { beforeRestart: async () => false }))
+      .toEqual({ installed: true, restartDeferred: true });
+    expect(fixture.calls).toEqual(['release-health', 'app-download']);
+  });
+  it('waits for an already running CLI update before the final idle check and restart', async () => {
+    const { synchronizeConnectedClis } = await import('@/lib/app-update/update-hub-client');
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    let started!: () => void;
+    const postStarted = new Promise<void>(resolve => { started = resolve; });
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (String(url) === '/api/setup/cli-updates' && options?.method === 'POST') {
+        started(); return new Promise<Response>(resolve => { finish = resolve; });
+      }
+      return original(url, options);
+    });
+    const cli = synchronizeConnectedClis();
+    await postStarted;
+    const idle = vi.fn(async () => true);
+    const app = installUpdateAndRestart(undefined, { beforeRestart: idle });
+    await vi.waitFor(() => expect(fixture.download).toHaveBeenCalledOnce());
+    expect(idle).not.toHaveBeenCalled(); expect(fixture.restart).not.toHaveBeenCalled();
+    finish(Response.json({ status: 'succeeded' }));
+    await cli; await app;
+    expect(idle).toHaveBeenCalledOnce(); expect(fixture.restart).toHaveBeenCalledOnce();
   });
   it.each(['hasUpdate', 'pulled'])('does not touch CLIs when the app update is absent or pulled (%s)', async key => {
     if (key === 'hasUpdate') fixture.hasUpdate = false; else fixture.pulled = true;

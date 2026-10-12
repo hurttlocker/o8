@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const resolver = vi.hoisted(() => vi.fn());
+const invalidate = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
   resolveCli: resolver,
+  invalidateCliCache: invalidate,
   compareCliVersions: (a: string, b: string) => {
     const left = a.split('.').map(Number);
     const right = b.split('.').map(Number);
@@ -16,11 +18,22 @@ vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
 import { GET } from './route';
 
 afterEach(() => {
-  resolver.mockReset();
+  resolver.mockReset(); invalidate.mockReset();
   vi.unstubAllGlobals();
 });
 
 describe('GET /api/setup/cli-updates', () => {
+  it('reprobes a cached unknown installed version on an explicit refresh', async () => {
+    let version: string | undefined;
+    resolver.mockImplementation(async () => ({ path: '/selected/codex', version, source: 'env' }));
+    invalidate.mockImplementation(() => { version = '0.157.1'; });
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ version: '0.157.1' })));
+    const first = await GET(new Request('http://localhost/api/setup/cli-updates?runtime=codex'));
+    expect((await first.json()).tools[0].status).toBe('unknown');
+    const refreshed = await GET(new Request('http://localhost/api/setup/cli-updates?runtime=codex&refresh=1'));
+    expect((await refreshed.json()).tools[0].status).toBe('current');
+    expect(invalidate).toHaveBeenCalledWith('codex');
+  });
   it('compares the selected launch binary with a newer package release', async () => {
     resolver.mockImplementation(async ({ runtimeId }: { runtimeId: string }) => {
       if (runtimeId !== 'codex') throw new Error('not installed');

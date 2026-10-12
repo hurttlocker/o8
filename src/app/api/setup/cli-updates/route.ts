@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { CodexUpdateRefusal } from '@/lib/setup/codex-cli-update';
 import { updateSelectedStableCli } from '@/lib/setup/stable-cli-update';
+import { invalidateCliCache } from '@/lib/runtimes/shared/cli-resolver';
 import { checkCliUpdates } from '@/lib/setup/cli-updates';
 
 export const runtime = 'nodejs';
@@ -13,6 +14,9 @@ export async function GET(request: Request) {
     const refresh = params.get('refresh') === '1';
     const runtimeId = params.get('runtime') ?? undefined;
     if (runtimeId && !['codex', 'claude-code', 'grok', 'gemini', 'antigravity'].includes(runtimeId)) return NextResponse.json({ error: 'Unknown CLI.' }, { status: 400 });
+    if (refresh) {
+      for (const id of runtimeId ? [runtimeId] : ['codex', 'claude-code', 'grok', 'gemini', 'antigravity']) invalidateCliCache(id);
+    }
     return NextResponse.json({ tools: await checkCliUpdates(refresh, runtimeId), checkedAt: new Date().toISOString() });
   } catch {
     return NextResponse.json({ error: 'Unable to check CLI updates.' }, { status: 503 });

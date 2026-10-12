@@ -20,10 +20,12 @@ interface UpdateHub {
   cliBusy: string | null;
   syncing: boolean;
   cliError: string | null;
+  cliMessage: string | null;
+  checkMessage: string | null;
   checkedAt: number;
 }
 const initial: UpdateHub = { app: { version: null, outcome: 'never', installing: false, message: null, error: null, downloadOnly: false },
-  tools: [], checking: false, checkingAll: false, cliBusy: null, syncing: false, cliError: null, checkedAt: 0 };
+  tools: [], checking: false, checkingAll: false, cliBusy: null, syncing: false, cliError: null, cliMessage: null, checkMessage: null, checkedAt: 0 };
 type AppCheckResult = { version: string | null; error?: string };
 export type UpdateCheckResult = { hasUpdates: boolean; incomplete: boolean };
 const global = globalThis as typeof globalThis & { __o8UpdateHub?: { snapshot: UpdateHub; listeners: Set<() => void>;
@@ -31,7 +33,10 @@ const global = globalThis as typeof globalThis & { __o8UpdateHub?: { snapshot: U
 const hub = global.__o8UpdateHub ??= { snapshot: initial, listeners: new Set() };
 function patch(value: Partial<UpdateHub>) { hub.snapshot = { ...hub.snapshot, ...value }; for (const listener of hub.listeners) listener(); }
 export function publishAppUpdateView(app: AppUpdateView) {
-  if (JSON.stringify(hub.snapshot.app) !== JSON.stringify(app)) patch({ app });
+  if (JSON.stringify(hub.snapshot.app) !== JSON.stringify(app)) {
+    const newAction = (app.installing && !hub.snapshot.app.installing) || (app.message && app.message !== hub.snapshot.app.message);
+    patch({ app, ...(newAction ? { checkMessage: null, cliMessage: null } : {}) });
+  }
 }
 export function useUpdateHub() {
   return useSyncExternalStore(listener => { hub.listeners.add(listener); return () => hub.listeners.delete(listener); }, () => hub.snapshot, () => initial);
@@ -45,7 +50,7 @@ export function registerAppUpdateCheck(check: () => Promise<AppCheckResult>) {
 /** An explicit check combines app and installed CLI results without installing. */
 export function checkAllUpdates(): Promise<UpdateCheckResult> {
   if (hub.allCheck) return hub.allCheck;
-  patch({ checkingAll: true });
+  patch({ checkingAll: true, checkMessage: 'Checking o8 and connected CLIs…', cliMessage: null });
   hub.allCheck = (async () => {
     const [app] = await Promise.all([
       hub.appCheck ? hub.appCheck().catch(() => ({ version: null, error: 'o8 update check failed.' }))
@@ -54,15 +59,24 @@ export function checkAllUpdates(): Promise<UpdateCheckResult> {
     ]);
     const installed = hub.snapshot.tools.filter(tool => tool.runtimeId !== 'gemini' && tool.status !== 'not-installed');
     const incompleteReport = ['codex', 'claude-code', 'grok'].some(runtime => hub.snapshot.tools.filter(tool => tool.runtimeId === runtime).length !== 1);
-    return { hasUpdates: Boolean(app.version) || installed.some(tool => tool.status === 'update-available'),
+    const result = { hasUpdates: Boolean(app.version) || installed.some(tool => tool.status === 'update-available'),
       incomplete: incompleteReport || Boolean(app.error || hub.snapshot.cliError) || installed.some(tool => tool.status === 'unknown') };
+    patch({ checkMessage: result.incomplete ? 'Some update checks could not finish. Check again.'
+      : result.hasUpdates ? app.version ? 'Updates are ready.' : 'o8 is up to date. CLI updates are ready.'
+        : 'You’re up to date. o8 and connected CLIs are current.' });
+    return result;
   })().finally(() => { patch({ checkingAll: false }); hub.allCheck = undefined; });
   return hub.allCheck;
 }
 
 /** One shared check; opening a hover never installs or starts a model turn. */
 export async function refreshCliUpdateView(fresh = false): Promise<void> {
-  if (hub.check) return hub.check;
+  if (hub.check) {
+    await hub.check;
+    if (!fresh) return;
+    // A manual retry must not reuse an older hover check.
+    return refreshCliUpdateView(true);
+  }
   const ttl = hub.snapshot.tools.some(tool => tool.status === 'unknown') ? 60_000 : 30 * 60_000;
   if (!fresh && Date.now() - hub.snapshot.checkedAt < ttl) return;
   hub.check = (async () => {
@@ -79,38 +93,57 @@ export async function refreshCliUpdateView(fresh = false): Promise<void> {
   return hub.check;
 }
 
-/** Run from the explicit install path while the old server is still available. */
-export async function synchronizeConnectedClis(): Promise<void> {
+/** Wait only for an explicitly started batch; never start an installer for an app update. */
+export async function waitForConnectedCliUpdates(): Promise<void> {
+  await hub.sync?.catch(() => {});
+}
+
+/** Explicit CLI action; each server installer retains its own idle and ownership checks. */
+export async function synchronizeConnectedClis(runtimeId?: 'codex' | 'claude-code' | 'grok'): Promise<void> {
   if (hub.sync) return hub.sync;
   hub.sync = (async () => {
-    patch({ syncing: true });
+    patch({ syncing: true, cliError: null, cliMessage: 'Checking installed CLIs…', checkMessage: null });
     await refreshCliUpdateView(true);
     if (hub.snapshot.cliError) throw new Error(hub.snapshot.cliError);
-    const connected = ['codex', 'claude-code', 'grok'].map(runtime => {
+    const connected = (runtimeId ? [runtimeId] : ['codex', 'claude-code', 'grok']).map(runtime => {
       const matches = hub.snapshot.tools.filter(item => item.runtimeId === runtime);
       if (matches.length !== 1) throw new Error('The connected CLI report is incomplete. Check again before updating.');
       return matches[0]!;
     });
+    const failures: string[] = [];
+    const updated: CliUpdateRecord[] = [];
     for (const tool of connected) {
       if (tool.status === 'not-installed' || tool.status === 'current') continue;
-      if (tool.status === 'unknown') throw new Error(`${tool.label}: the release could not be verified. Check again before updating.`);
-      patch({ cliBusy: tool.runtimeId, cliError: null });
+      if (tool.status === 'unknown') {
+        failures.push(`${tool.label}: the installed version or release could not be verified. Check again.`);
+        continue;
+      }
+      patch({ cliBusy: tool.runtimeId, cliMessage: `Updating ${tool.label}…` });
       try {
         const response = await fetch('/api/setup/cli-updates', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ runtime: tool.runtimeId }), signal: AbortSignal.timeout(200_000) });
         const result = await response.json() as { status?: string; error?: string };
-        if (!response.ok || result.status !== 'succeeded') throw new Error(`${tool.label}: ${result.error ?? 'The update could not be verified.'}`);
+        if (!response.ok || result.status !== 'succeeded') throw new Error(result.error ?? 'The update could not be verified.');
+        updated.push(tool);
+      } catch (error) {
+        failures.push(`${tool.label}: ${error instanceof Error ? error.message : 'The update could not finish.'}`);
       } finally { patch({ cliBusy: null }); }
     }
-    await refreshCliUpdateView(true);
-    if (hub.snapshot.cliError) throw new Error(hub.snapshot.cliError);
-    for (const tool of connected.filter(item => item.status !== 'not-installed')) {
-      const matches = hub.snapshot.tools.filter(item => item.runtimeId === tool.runtimeId);
-      if (matches.length !== 1 || matches[0]?.status !== 'current') {
-        throw new Error(`${tool.label}: the final version check did not confirm this CLI is current. Check again before updating o8.`);
+    // Refresh even after a partial failure so completed updates are visible.
+    if (connected.some(tool => tool.status === 'update-available')) {
+      await refreshCliUpdateView(true);
+      if (hub.snapshot.cliError) failures.push(hub.snapshot.cliError);
+      for (const tool of updated) {
+        const matches = hub.snapshot.tools.filter(item => item.runtimeId === tool.runtimeId);
+        if (matches.length !== 1 || matches[0]?.status !== 'current') {
+          failures.push(`${tool.label}: the final version check could not confirm it is current. Check again.`);
+        }
       }
     }
-  })().catch(error => { patch({ cliBusy: null, cliError: error instanceof Error ? error.message : 'CLI updates could not finish.' }); throw error; })
+    if (failures.length) throw new Error(failures.join(' '));
+    patch({ cliMessage: connected.every(tool => tool.status === 'not-installed') ? 'No supported CLIs are installed.'
+      : runtimeId ? `${connected[0]!.label} is up to date.` : 'Connected CLIs are up to date.' });
+  })().catch(error => { patch({ cliBusy: null, cliMessage: null, cliError: error instanceof Error ? error.message : 'CLI updates could not finish.' }); throw error; })
     .finally(() => { patch({ syncing: false }); hub.sync = undefined; });
   return hub.sync;
 }
