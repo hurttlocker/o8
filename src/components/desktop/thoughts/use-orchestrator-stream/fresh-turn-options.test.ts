@@ -92,7 +92,7 @@ async function releaseAndSettleFreshFetch() {
   });
 }
 
-async function persistDefaults(orchestratorModel: string, orchestratorBackend: 'claude' | 'codex') {
+async function persistDefaults(orchestratorModel: string, orchestratorBackend: 'claude' | 'codex' | 'o8') {
   const response = await POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -508,6 +508,34 @@ describe('composer fresh operator defaults at the send seam', () => {
     expect(payload.message).toContain('[Mode: Fusion]');
     expect(localStorage.getItem(composerModeStorageKey(composerModeStorageId))).toBe('fusion');
     expect(localStorage.getItem(legacySwarmStorageKey(composerModeStorageId))).toBe('0');
+  });
+
+  it('sends a new o8 workspace turn with its own model despite a stale provider model pin', async () => {
+    await act(async () => root.unmount()); root = createRoot(host);
+    invalidateOperatorDefaultsValuesSnapshot();
+    await persistDefaults('claude-opus-5', 'o8');
+    writeStoredOrchestratorModel(repoPath, 'claude-opus-5');
+    const panelRef = createRef<ThoughtsChatPanelHandle>();
+    await act(async () => {
+      root.render(createElement(ThoughtsChatPanel, {
+        ref: panelRef, open: true, agents: [],
+        missionState: { version: 2, prompt: '', summary: '', packets: [], updatedAt: new Date(0).toISOString() },
+        preferredRuntime: 'codex', sessionTargets: [], workspaceTargets: [], repoPath,
+        initialMode: 'fleet', lockedMode: 'fleet', suppressAutoRestore: true, suppressRuntimePrewarm: true,
+        thoughtsBodyBackground: 'transparent', thoughtsElevatedSurface: 'transparent', thoughtsElevatedBorder: 'none',
+        thoughtsElevatedShadow: 'none', thoughtsMutedGlass: 'transparent', onMissionStateChange: () => {}, onChromeChange: () => {},
+      }));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    });
+    let payload: Record<string, unknown> = {};
+    await act(async () => {
+      expect(panelRef.current?.sendNow('Help me draft a reply.')).toBe(true);
+      payload = await waitForPayload(1);
+    });
+    expect(payload).toMatchObject({ backend: 'o8', model: 'o8-free', displayMessage: 'Help me draft a reply.' });
+    expect(readStoredOrchestratorModel(repoPath)).toBe('claude-opus-5');
+    const defaults = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await defaults.json()).values).toMatchObject({ orchestratorBackend: 'o8', orchestratorModel: 'claude-opus-5' });
   });
 
   it('sends a new reply through managed inference without inheriting or overwriting the workspace model', async () => {

@@ -18,6 +18,7 @@
  * the gate authorizes by token — the loopback heuristic alone intermittently 401'd.
  */
 
+import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
 import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readFile } from 'node:fs/promises';
@@ -172,7 +173,7 @@ export function o8BuiltInAgentBlocker(): string | null {
 
 /** The receipt names the o8 model the turn was sent with, the same id ws-server persists for the turn. */
 function o8ReceiptModel(options: OrchestratorTurnOptions): string {
-  return options.model ?? 'o8-free';
+  return resolveBackendTurnModel('o8', options.model)!;
 }
 
 async function sendTextOnlyTurn(

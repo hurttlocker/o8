@@ -108,6 +108,13 @@ describe('o8 backend event mapping', () => {
     expect(init.headers.Authorization).toBe('Bearer test-ws-token-abc');
   });
 
+  it('does not label a text fallback with a stale model from another provider', async () => {
+    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
+    const { events, onEvent } = collect();
+    await o8Backend.sendTurn('/repo', 'hi', onEvent, { model: 'claude-opus-5' });
+    expect(events[0]).toMatchObject({ type: 'turn_receipt', leadModel: 'o8-free' });
+  });
+
   it('surfaces an in-stream proxy error frame as an error event, then done', async () => {
     mockFetch.mockResolvedValue(sseResponse([
       contentFrame('partial'),
@@ -215,7 +222,7 @@ describe('o8 backend runs the built-in Pi agent', () => {
       onEvent({ type: 'text', text: 'ok' });
     });
     const backend = createO8Backend({ pi: fakePi, blocker: () => null });
-    for (const [model, leadModel] of [['o8-next', 'o8-next'], [undefined, 'o8-free']] as const) {
+    for (const [model, leadModel] of [['o8-next', 'o8-next'], [undefined, 'o8-free'], ['claude-opus-5', 'o8-free'], ['gpt-6.1-sol', 'o8-free'], ['', 'o8-free']] as const) {
       const { events, onEvent } = collect();
       await backend.sendTurn('/repo', 'hi', onEvent, { threadId: 'thoughts-1', thinkingEffort: 'low', model });
       expect(events).toEqual([{ type: 'turn_receipt', leadModel, effort: 'low' }, { type: 'text', text: 'ok' }]);

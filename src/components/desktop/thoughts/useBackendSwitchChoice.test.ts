@@ -69,6 +69,21 @@ describe('useBackendSwitchChoice', () => {
     vi.unstubAllGlobals();
   });
 
+  it('normalizes captured o8 options when a defaults refresh cannot complete', () => {
+    expect(prepareOrchestratorTurn('fixture', { backend: 'o8', model: 'claude-opus-5' }).model).toBe('o8-free');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'o8', model: 'o8-next' }).model).toBe('o8-next');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '' }).model).toBe('');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'codex', model: 'gpt-6.1-sol' }).model).toBe('gpt-6.1-sol');
+  });
+
+  it('preserves the comparison provider model across refresh and preparation', async () => {
+    writeStoredOrchestratorModel(REPO_PATH, 'claude-opus-5');
+    const outgoing = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'o8', collide: true, backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() });
+    const turn = prepareOrchestratorTurn('fixture', { ...outgoing, collide: true, orchestrationMode: 'fleet' });
+    expect(turn).toMatchObject({ backend: 'collide', model: 'claude-opus-5', collideBaseBackend: 'o8' });
+    expect(prepareOrchestratorTurn('fixture', { ...outgoing, collide: true, orchestrationMode: 'single' })).toMatchObject({ backend: 'o8', model: 'o8-free' });
+  });
+
   it('clears a prior model pin when choosing a local agent default', async () => {
     await act(async () => { root.render(createElement(Harness, { onBeforeApply: vi.fn(), persistSelection: true })); });
     writeStoredOrchestratorModel(REPO_PATH, 'gpt-5.6-sol');
