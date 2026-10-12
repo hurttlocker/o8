@@ -82,6 +82,7 @@ function statusGlyph(status: ReviewChangedFile['status']) {
 }
 
 interface WorkspaceChangesSnapshot {
+  errorCode?: string | null;
   files: ReviewChangedFile[];
   loading: boolean;
   error: string | null;
@@ -183,12 +184,16 @@ function getWorkspaceChangesController(repoPath: string): WorkspaceChangesContro
           // view reads only changedFiles/branch/repoSlug, all local git data (#1340).
           const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}&changesOnly=1`;
           const response = await fetch(`/api/review/workspace${workspaceQuery}`);
-          if (!response.ok) throw new Error('Failed to load workspace changes');
+          if (!response.ok) {
+            const failure = await response.json().catch(() => ({}));
+            throw Object.assign(new Error(typeof failure.error === 'string' ? failure.error : 'Failed to load workspace changes'), { code: failure.code });
+          }
           const data = await response.json() as WorkspaceReviewResponse;
           setSnapshot({
             files: Array.isArray(data.changedFiles) ? data.changedFiles : [],
             loading: false,
             error: null,
+            errorCode: null,
             branch: typeof data.branch === 'string' ? data.branch : null,
             repoSlug: typeof data.repoSlug === 'string' ? data.repoSlug : null,
             worktrees: Array.isArray(data.worktrees) ? data.worktrees : [],
@@ -198,6 +203,7 @@ function getWorkspaceChangesController(repoPath: string): WorkspaceChangesContro
             files: [],
             loading: false,
             error: err instanceof Error ? err.message : 'Unable to load workspace changes',
+            errorCode: err && typeof err === 'object' && 'code' in err && typeof err.code === 'string' ? err.code : null,
             branch: null,
             repoSlug: null,
             worktrees: [],
@@ -254,6 +260,7 @@ export function useWorkspaceChanges(repoPath?: string | null, { active = true }:
     files: snapshot.files,
     loading: snapshot.loading,
     error: snapshot.error,
+    errorCode: snapshot.errorCode,
     totalAdditions,
     totalDeletions,
     dirtyFileSet,
