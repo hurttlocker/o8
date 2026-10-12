@@ -78,10 +78,12 @@ describe('useBackendSwitchChoice', () => {
 
   it('preserves the comparison provider model across refresh and preparation', async () => {
     writeStoredOrchestratorModel(REPO_PATH, 'claude-opus-5');
-    const outgoing = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'o8', collide: true, backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() });
+    const outgoing = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'o8', backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() }, undefined, { collide: true, orchestrationMode: 'fleet' });
     const turn = prepareOrchestratorTurn('fixture', { ...outgoing, collide: true, orchestrationMode: 'fleet' });
     expect(turn).toMatchObject({ backend: 'collide', model: 'claude-opus-5', collideBaseBackend: 'o8' });
     expect(prepareOrchestratorTurn('fixture', { ...outgoing, collide: true, orchestrationMode: 'single' })).toMatchObject({ backend: 'o8', model: 'o8-free' });
+    const single = await resolveFreshComposerTurnOptions({ repoPath: REPO_PATH, backend: 'o8', backendSourceRef: { current: 'user' }, setBackend: vi.fn(), setModel: vi.fn(), setOperatorDefaults: vi.fn() }, undefined, { collide: true, orchestrationMode: 'single' });
+    expect(single).toMatchObject({ backend: 'o8', model: 'o8-free' });
   });
 
   it('clears a prior model pin when choosing a local agent default', async () => {

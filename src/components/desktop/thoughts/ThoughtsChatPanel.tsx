@@ -1512,10 +1512,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         repoPath: resolvedRepoPath,
         backend: orchestratorBackend,
         localModel: contextualConversation ? orchestratorModel : undefined,
-        collide: options.collide === true && options.orchestrationMode !== 'single',
         backendSourceRef, setBackend: setOrchestratorBackend,
         setModel: setOrchestratorModel, setOperatorDefaults,
-      }, signal),
+      }, signal, options),
     });
   }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, orchestratorModel, resolvedRepoPath, setOrchestratorModel, contextualConversation]);
 

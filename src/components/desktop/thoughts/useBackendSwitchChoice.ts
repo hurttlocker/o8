@@ -28,20 +28,21 @@ export async function resolveFreshComposerTurnOptions(input: {
   repoPath: string | null;
   backend: OrchestratorBackendSetting;
   localModel?: string;
-  collide?: boolean;
   backendSourceRef: MutableRefObject<'default' | 'thread' | 'user'>;
   setBackend: Dispatch<SetStateAction<OrchestratorBackendSetting>>;
   setModel: Dispatch<SetStateAction<string>>;
   setOperatorDefaults: Dispatch<SetStateAction<ThoughtsOperatorDefaults>>;
-}, signal?: AbortSignal) {
+}, signal?: AbortSignal, mode: { collide?: boolean; orchestrationMode?: string } = {}) {
+  const effectiveBackend = (backend: OrchestratorBackendSetting) =>
+    mode.collide === true && mode.orchestrationMode !== 'single' ? 'collide' : backend;
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (input.localModel !== undefined) return { model: resolveBackendTurnModel(input.collide ? 'collide' : input.backend, input.localModel)!, backend: composerBackendTurnOverride(input.backend) };
+  if (input.localModel !== undefined) return { model: resolveBackendTurnModel(effectiveBackend(input.backend), input.localModel)!, backend: composerBackendTurnOverride(input.backend) };
   const defaults = await fetchFreshThoughtsOperatorDefaults(signal);
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   const backend = input.backendSourceRef.current === 'default'
     ? resolveActiveComposerBackend(defaults)
     : input.backend;
-  const model = resolveBackendTurnModel(input.collide ? 'collide' : backend, readStoredOrchestratorModel(input.repoPath) ?? defaults.orchestratorModel)!;
+  const model = resolveBackendTurnModel(effectiveBackend(backend), readStoredOrchestratorModel(input.repoPath) ?? defaults.orchestratorModel)!;
   input.setOperatorDefaults(defaults);
   input.setModel(model);
   if (input.backendSourceRef.current === 'default') input.setBackend(backend);
