@@ -3399,6 +3399,12 @@
       ]
     },
     {
+      "path": "tests/pi-inbox-approval-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
         "network-listener",

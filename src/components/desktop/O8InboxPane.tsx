@@ -116,7 +116,7 @@ export function O8InboxPane({ active = true, repoPath = null, repos = [] }: { ac
               const body = await response.json();
               return Array.isArray(body?.items) ? { items: body.items as SupervisorInboxItem[], maintainer: body.maintainer as MaintainerFeed | undefined, maintainerError: body.maintainerError as string | null } : null;
             }),
-          fetch('/api/panel/approvals?status=pending', { cache: 'no-store' })
+          fetch('/api/panel/approvals?status=pending&scope=all', { cache: 'no-store' })
             .then(async (response) => {
               if (!response.ok) return null;
               const body = await response.json();
