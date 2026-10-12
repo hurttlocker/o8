@@ -12,16 +12,13 @@ import type {
 } from '@/lib/fleet/types';
 import { parseRecentCommits } from '@/lib/git/recent-commits';
 import { parseWorktrees } from './worktrees';
+import { assertReviewWorkspace, requireReviewGit } from './workspace-status';
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || '';
-// In the PACKAGED app, `process.cwd()` is the bundled server directory inside
-// /Applications/o8.app — not a git repo. Without this guard the review-snapshot
-// pollers spent 2-10s per cycle git-scanning the app's own bundle (node_modules
-// included) for zero files, forever (prod-perf audit 2026-07-11). `.git` may be
-// a file (linked worktree), so existsSync covers both shapes. Checked once.
+// Avoid scanning the packaged server directory when no workspace is selected.
 let _defaultRootIsRepoCache: boolean | null = null;
 function defaultReviewRootIsRepo(): boolean {
   if (_defaultRootIsRepoCache === null) {
@@ -621,6 +618,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const runInContext = async (command: string, args: string[]) => {
     const { stdout } = await execFileAsync(command, args, { windowsHide: true,
       cwd: repoRoot,
+      env: { ...process.env, LC_ALL: 'C' },
       maxBuffer: 4 * 1024 * 1024,
     });
     return stdout.trim();
@@ -633,11 +631,15 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     }
   };
 
+  await assertReviewWorkspace(repoRoot, runInContext);
+  const requiredGit = (args: string[]) => requireReviewGit(runInContext, args);
   const remoteUrl = options.repoSlug ? null : await tryRunInContext('git', ['remote', 'get-url', 'origin']);
   const repoSlug = options.repoSlug || normalizeRepoSlug(remoteUrl) || REVIEW_REPO_SLUG;
 
-  const branchStatusRaw = await tryRunInContext('git', ['status', '--branch', '--porcelain=v2']);
+  const branchStatusRaw = await requiredGit(['status', '--branch', '--porcelain=v2']);
   const { branch, upstream, ahead, behind } = parseBranchStatus(branchStatusRaw);
+  const initial = branchStatusRaw.includes('# branch.oid (initial)');
+  const diffBase = [initial ? await requiredGit(['hash-object', '-t', 'tree', os.devNull]) : 'HEAD'];
 
   const [
     nameStatusRaw,
@@ -652,10 +654,10 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     stagedNameStatusRaw,
     unstagedNameStatusRaw,
   ] = await Promise.all([
-    tryRunInContext('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
-    tryRunInContext('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
-    tryRunInContext('git', ['ls-files', '--others', '--exclude-standard']),
-    tryRunInContext('git', ['diff', '--stat=120', '--relative', 'HEAD']),
+    requiredGit(['diff', '--name-status', '--relative', '-M', ...diffBase]),
+    requiredGit(['diff', '--numstat', '--relative', '-M', ...diffBase]),
+    requiredGit(['ls-files', '--others', '--exclude-standard']),
+    requiredGit(['diff', '--stat=120', '--relative', ...diffBase]),
     tryRunInContext('git', ['log', '--format=%H%x09%h%x09%s', '-8']),
     tryRunInContext('git', ['rev-parse', 'HEAD']),
     tryRunInContext('git', ['worktree', 'list', '--porcelain']),
@@ -687,8 +689,8 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
           'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
         ])
       : Promise.resolve(''),
-    tryRunInContext('git', ['diff', '--name-status', '--cached', '--relative', '-M', 'HEAD']),
-    tryRunInContext('git', ['diff', '--name-status', '--relative', '-M']),
+    requiredGit(['diff', '--name-status', '--cached', '--relative', '-M', ...(initial ? [] : ['HEAD'])]),
+    requiredGit(['diff', '--name-status', '--relative', '-M']),
   ]);
 
   const stagedPaths = changedPathSet(stagedNameStatusRaw);
