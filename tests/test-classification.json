@@ -4046,6 +4046,22 @@
       ]
     },
     {
+      "path": "tests/review-workspace-panel-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/review-workspace-status-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/reviewer-concurrency-real-path.test.ts",
       "reasons": [
         "child-process",
