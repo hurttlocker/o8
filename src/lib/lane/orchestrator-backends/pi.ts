@@ -5,9 +5,11 @@
  *
  * Pi gets the same built-in o8 servers as the Claude orchestrator (operator and
  * cortex, projected by the turn's tool profile) through three catalog tools, so
- * every o8 command is reachable without sending every schema on every call. Its
- * own file writes and commands in the repo keep per-call approval in the inbox.
- * A plan-mode turn gets the proposer projection and only `read_file`.
+ * every o8 command is reachable without sending every schema on every call. In
+ * Full access its own file writes and commands in the repo run without asking,
+ * as the Claude orchestrator's do (#3555); policy-blocked commands, workspace
+ * path checks and command limits still apply. A plan-mode turn gets the
+ * proposer projection and only `read_file`.
  *
  * One turn at a time per repo and thread, and one resident Pi process for it.
  * The session file lives under the o8 data directory, so a new process after a
@@ -56,10 +58,13 @@ export function piSurfaceForTurn(options: OrchestratorTurnOptions): PiSurface {
   return { profile, readOnly: plan || profile === 'propose' };
 }
 
+/** Full access: the operator chose "can edit files and run actions" for this turn. */
+const fullAccess: NonNullable<PiSdkSessionOptions['approve']> = async () => true;
+
 /** Start failures o8 itself explains; anything else stays in the host log. */
 const PI_START_FAILURE_TEXT = /^The Pi prototype (?:needs Node|does not support)/;
 
-/** Trusted seams for tests. Production uses the managed transport, the inbox and /api/mcp. */
+/** Trusted seams for tests. Production uses the managed transport, Full access approval and /api/mcp. */
 export interface PiOrchestratorDeps {
   transport?: PiSdkSessionOptions['transport'];
   approve?: PiSdkSessionOptions['approve'];
@@ -143,7 +148,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         model: O8_MANAGED_PI_MODEL,
         sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
         transport: deps.transport,
-        approve: deps.approve,
+        approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
         hostTools: commands.length ? createO8CommandTools(commands) : [],
         systemPrompt,
         readOnly: surface.readOnly,

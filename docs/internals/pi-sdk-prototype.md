@@ -154,8 +154,11 @@ any API error text the server put in it (#3373).
 A start failure is shown only when o8 itself explains it (unsupported Node or
 platform).
 
-Pi's own `write_file` and `run_command` in the repo keep per-call approval in the
-inbox. Per-turn limits are 40 model calls, 80 tool calls and 30 minutes.
+In Full access, Pi's own `write_file` and `run_command` in the repo run without
+asking, as the Claude orchestrator's do with Full access (#3555). A command the
+policy blocks still never starts, writes stay inside the workspace, and commands
+keep their clean environment and time and output limits. Plan only gives Pi only
+`read_file`. Per-turn limits are 40 model calls, 80 tool calls and 30 minutes.
 
 `tests/pi-orchestrator-real-path.test.ts` serves the real `/api/mcp` route over a
 local HTTP server behind the real middleware gate, which refuses a request

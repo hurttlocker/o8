@@ -21,6 +21,14 @@ import { PI_ALLOWANCE_EXHAUSTED_MESSAGE } from '@/lib/pi/sdk/transport';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
+// The inbox bridge, recorded and refused, so a Full access turn that still asks shows up as a refusal.
+const inboxCalls = vi.hoisted(() => [] as string[]);
+vi.mock('@/lib/pi/sdk/approval', () => ({
+  createPiApproval: () => async (call: { name: string; args: Record<string, unknown> }) => {
+    inboxCalls.push(`${call.name}:${String(call.args.path ?? call.args.command)}`);
+    return false;
+  },
+}));
 
 // The real app routes behind a local HTTP server and the real middleware gate:
 // /api/mcp, so the operator stdio proxy (Claude's path) and Pi's HTTP client
@@ -288,6 +296,30 @@ describe('Pi orchestrator (#3258)', () => {
     expect(result?.isError).toBe(true);
     expect(approvals).toBe(0);
     await expect(readFile(join(repo, 'plan.md'), 'utf8')).rejects.toThrow();
+  }, 180_000);
+
+  it('writes and runs without asking in Full access, as the Claude orchestrator does, and still refuses blocked commands (#3555)', async () => {
+    const { repo, stateRoot } = await fixture();
+    inboxCalls.length = 0;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
+      transport: script([
+        call('w1', 'write_file', { path: 'notes.txt', content: 'count = 2\n' }),
+        call('r1', 'run_command', { command: 'touch ran.txt && cat notes.txt' }),
+        call('b1', 'run_command', { command: 'eval "touch blocked.txt"' }),
+        message([{ type: 'text', text: 'Done.' }]),
+      ]) });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    await backend.sendTurn(repo, 'Set the count to 2', event => out.push(event), { threadId: 'thoughts-pi-full', permissionMode: 'full' });
+
+    expect(inboxCalls).toEqual([]);
+    expect(await readFile(join(repo, 'notes.txt'), 'utf8')).toBe('count = 2\n');
+    expect(await readFile(join(repo, 'ran.txt'), 'utf8')).toBe('');
+    await expect(readFile(join(repo, 'blocked.txt'))).rejects.toThrow();
+    const results = out.filter((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> => event.type === 'tool_result');
+    expect(results.map(result => result.name)).toEqual(['write_file', 'run_command', 'run_command']);
+    expect(results[1].output).toContain('count = 2');
+    expect(out.at(-1)).toMatchObject({ type: 'done' });
   }, 180_000);
 
   it('runs one turn per thread: an overlapping message is refused and Pi starts once', async () => {

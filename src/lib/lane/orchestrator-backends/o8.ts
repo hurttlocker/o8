@@ -421,7 +421,7 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
     },
     sendTurn(repoPath, message, onEvent, options) {
       const reason = blocker();
-      // Pi's own default approval stays in force: repo writes and commands ask in the inbox.
+      // The composer's access mode reaches Pi: Full access writes and runs without asking, Plan only is read-only.
       if (!reason) {
         const carried = carriedThreadPrelude(pi, repoPath, message, options ?? {}).catch((error: unknown) => {
           console.warn('[o8] Earlier turns could not be carried into Pi:', error);
