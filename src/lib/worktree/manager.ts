@@ -1464,7 +1464,7 @@ export class WorktreeManager {
   private async captureCreationOwner(): Promise<NonNullable<WorktreeMetaEntry['creationOwner']>> {
     const probe = await probeMetadataLockProcessIdentity(process.pid);
     if (probe.state !== 'live') {
-      throw new Error('Managed worktree creation could not prove its process owner.');
+      throw new Error(`Managed worktree creation could not prove its process owner${probe.state === 'unknown' ? `: ${probe.detail.replace(/\.$/, '')}` : ''}.`);
     }
     return { pid: process.pid, identity: probe.identity };
   }

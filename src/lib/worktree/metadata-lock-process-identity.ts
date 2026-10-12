@@ -161,6 +161,7 @@ export async function probeMetadataLockProcessIdentity(
   if (!Number.isInteger(pid) || pid <= 0) {
     return { state: 'unknown', detail: 'The metadata-lock PID is invalid.' };
   }
+  if (pid === process.pid) return probeOwnProcess();
   const presence = processPresence(pid);
   if (presence === 'absent') return { state: 'absent' };
   if (presence === 'unknown') {
@@ -192,6 +193,28 @@ export function probeMetadataLockProcessIdentitySync(pid: number): MetadataLockP
   if (!Number.isInteger(pid) || pid <= 0) {
     return { state: 'unknown', detail: 'The metadata-lock PID is invalid.' };
   }
+  if (pid === process.pid) return probeOwnProcess();
+  return probeProcessIdentitySync(pid);
+}
+
+let ownProcessIdentity: MetadataLockProcessIdentity | null = null;
+
+/**
+ * This process's boot session and start time cannot change while it runs, so its first live
+ * identity stands for its lifetime. It is read synchronously: on a busy event loop the async
+ * execFile timer can fire before the child's exit is handled, which drops output from a
+ * command that already succeeded and refused every managed worktree launch (#3564).
+ */
+function probeOwnProcess(): MetadataLockProcessProbe {
+  if (!ownProcessIdentity) {
+    const probe = probeProcessIdentitySync(process.pid);
+    if (probe.state !== 'live') return probe;
+    ownProcessIdentity = probe.identity;
+  }
+  return { state: 'live', identity: { ...ownProcessIdentity } };
+}
+
+function probeProcessIdentitySync(pid: number): MetadataLockProcessProbe {
   const presence = processPresence(pid);
   if (presence === 'absent') return { state: 'absent' };
   if (presence === 'unknown') return { state: 'unknown', detail: 'The metadata-lock PID could not be probed.' };
