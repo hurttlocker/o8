@@ -57,6 +57,7 @@ let releaseFreshFetch: (() => void) | null = null;
 let historyResponse: Record<string, unknown> | null = null;
 let useRealHistoryRoute = false;
 let historyPatchGate: Promise<void> | null = null;
+let historyPostGate: Promise<void> | null = null;
 let runtimeInventoryAgents: Array<{ sessionKey: string; runtime: string; status: string; workspace: string }> = [];
 
 interface ComposerTestWindow extends Window {
@@ -221,7 +222,10 @@ beforeEach(async () => {
         if (historyPatchGate) await historyPatchGate;
         return PATCH_CHAT(request);
       }
-      if (init?.method === 'POST') return POST_CHAT(request);
+      if (init?.method === 'POST') {
+        if (historyPostGate) await historyPostGate;
+        return POST_CHAT(request);
+      }
       return GET_CHAT(request);
     }
     return new Response('{}', { headers: { 'Content-Type': 'application/json' } });
@@ -233,6 +237,7 @@ beforeEach(async () => {
   historyResponse = null;
   useRealHistoryRoute = false;
   historyPatchGate = null;
+  historyPostGate = null;
   runtimeInventoryAgents = [];
   host = document.createElement('div');
   document.body.append(host);
@@ -316,6 +321,10 @@ describe('composer fresh operator defaults at the send seam', () => {
     useRealHistoryRoute = true;
     let releasePatch: () => void = () => {};
     historyPatchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+    // Keep the debounced transcript POST distinct from the repository PATCH
+    // notification, even when the machine takes longer than the debounce.
+    let releasePost: () => void = () => {};
+    historyPostGate = new Promise<void>((resolve) => { releasePost = resolve; });
     const historyUpdates: string[] = [];
     const onHistoryUpdate = (event: Event) => {
       historyUpdates.push((event as CustomEvent<{ threadId: string }>).detail.threadId);
@@ -378,6 +387,7 @@ describe('composer fresh operator defaults at the send seam', () => {
         await waitForPayload(1);
       });
       expect(historyUpdates).toEqual([tabId]);
+      releasePost();
       expect(sentTurnPayloads()[0]?.threadId).toBe(tabId);
       expect(sentTurnPayloads()[0]?.repoPath).toBe(newRepo);
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
@@ -390,7 +400,9 @@ describe('composer fresh operator defaults at the send seam', () => {
       expect(host.querySelector('button[aria-label^="Project target"]')).toBeNull();
     } finally {
       releasePatch();
+      releasePost();
       historyPatchGate = null;
+      historyPostGate = null;
       window.removeEventListener('o8:chat-history-updated', onHistoryUpdate);
       await DELETE_CHAT(new NextRequest(`http://127.0.0.1/api/v2/chat-history?tabId=${tabId}`));
     }
