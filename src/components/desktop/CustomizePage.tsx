@@ -176,7 +176,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         ) : inventoryError ? (
           <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
-          <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <RulesTab query={query.trim()} inventoryCount={directives.length} directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (
@@ -210,7 +210,9 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
 
 // ── Tabs ──
 
-function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
+function RulesTab({ directives, query, inventoryCount, expandedRow, onToggleRow, onOpenFile }: {
+  query: string;
+  inventoryCount: number;
   directives: DirectiveSummary[];
   expandedRow: string | null;
   onToggleRow: (id: string | null) => void;
@@ -221,8 +223,10 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   if (directives.length === 0) {
     return (
       <EmptyState
-        title="No additional rules"
-        body="Rules appear here with their source and scope. Shared project instructions are managed separately in the project view."
+        title={query && inventoryCount > 0 ? 'No matching instructions' : 'No additional rules'}
+        body={query && inventoryCount > 0
+          ? `No instructions match “${query}”. Change or clear the search to see your rules.`
+          : 'Rules appear here with their source and scope. Shared project instructions are managed separately in the project view.'}
       />
     );
   }
