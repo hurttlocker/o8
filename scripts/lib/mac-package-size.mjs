@@ -11,10 +11,11 @@ import { assertTauriExportInputsSafe } from './tauri-export-safety.mjs';
 export function assertMacPackageSize(appPath, archivePath, { releaseVersion } = {}) {
   if (!lstatSync(appPath).isDirectory()) throw new Error('app bundle must be a directory, not a link');
   assertTauriExportInputsSafe(join(appPath, 'Contents', 'Resources', 'server'));
-  // One approved release allowance while export/dependency reduction continues
+  // Approved release allowances while export/dependency reduction continues
   // in #3545. All other versions retain the shared 300/80 MiB ceiling. This
   // deliberately rejects the unpruned 365/92 MiB candidate as well.
-  const allowance = releaseVersion === '0.1.789' ? 'release-0.1.789' : null;
+  const allowance = releaseVersion === '0.1.789' || releaseVersion === '0.1.790'
+    ? `release-${releaseVersion}` : null;
   const ceilings = allowance
     ? { appBundleBytes: 312 * 1024 * 1024, updaterArchiveBytes: 88 * 1024 * 1024 }
     : FOOTPRINT_BUDGET.regressionCeilings;

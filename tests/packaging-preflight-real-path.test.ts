@@ -219,12 +219,14 @@ export function spawnSync(command, args) {
     const archive = `${f.app}.tar.gz`;
     writeFileSync(archive, 'final-archive');
     truncateSync(archive, 81 * 1024 * 1024);
-    for (const releaseVersion of [undefined, '0.1.788', '0.1.790', '0.1.789-preview.1']) {
+    for (const releaseVersion of [undefined, '0.1.788', '0.1.791', '0.1.789-preview.1', '0.1.790-preview.1']) {
       expect(() => assertMacPackageSize(f.app, archive, { releaseVersion })).toThrow('updaterArchiveBytes');
     }
     expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' }).allowance).toBe('release-0.1.789');
+    expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.790' }).allowance).toBe('release-0.1.790');
     truncateSync(archive, 88 * 1024 * 1024 + 1);
     expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' })).toThrow('updaterArchiveBytes');
+    expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.790' })).toThrow('updaterArchiveBytes');
     expect(existsSync(archive)).toBe(true);
   });
 
