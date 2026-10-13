@@ -23,7 +23,9 @@ function assertQuietManagedResource(resource) {
   if (resource.origin !== 'managed-creation' || !uuid.test(resource.resourceId)
     || !integer(resource.version, 1) || !integer(resource.createdAt, 1)
     || !integer(resource.updatedAt, resource.createdAt)
-    || !absolute(resource.owner?.repositoryPath)
+    || !(resource.owner ? absolute(resource.owner.repositoryPath)
+      : resource.creationAuthority?.kind === 'prebuild' && integer(resource.creationAuthority.pid, 1)
+        && processIdentity(resource.creationAuthority.identity))
     || !resource.revision || !/^[0-9a-f]{40,64}$/.test(resource.revision.head)
     || !/^[0-9a-f]{40,64}$/.test(resource.revision.tree)
     || typeof resource.revision.dirty !== 'boolean' || !sha.test(resource.revision.workingDigest)
@@ -138,8 +140,8 @@ function assertOwnedOutput(workspace, output) {
     if (resource.schema !== 'o8/generated-output-resource/v1' || resource.resourceId !== row.resource_id
       || resource.state !== row.state || resource.version !== row.version
       || resource.createdAt !== row.created_at || resource.updatedAt !== row.updated_at
-      || !resource.owner || !path.isAbsolute(resource.owner.repositoryPath || '')
-      || resource.owner.worktreeId !== path.basename(workspace)
+      || (resource.owner && (!path.isAbsolute(resource.owner.repositoryPath || '')
+        || resource.owner.worktreeId !== path.basename(workspace)))
       || !['ready', 'succeeded'].includes(resource.state) || resource.bank || resource.bankCapture
       || resource.recovery || resource.retirement) {
       throw new Error('generated output has unresolved producer or retention authority');

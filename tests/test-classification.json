@@ -4485,7 +4485,8 @@
     {
       "path": "tests/tauri-prebuild-profile.test.ts",
       "reasons": [
-        "child-process"
+        "child-process",
+        "git-cli"
       ]
     },
     {

@@ -1,11 +1,17 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { runGeneratedOutputProducer } from '../src/lib/workspace/generated-output-producer';
+import { boundBuildEnvironment } from './lib/release-build-profile.mjs';
 
 async function main(): Promise<number> {
   const require = createRequire(path.join(process.cwd(), 'package.json'));
   const [mode, ...args] = process.argv.slice(2);
+  if (mode !== 'prebuild') Object.assign(process.env, boundBuildEnvironment(process.cwd()));
+  const { runGeneratedOutputPrebuild, runGeneratedOutputProducer } = await import('../src/lib/workspace/generated-output-producer');
+  if (mode === 'prebuild') {
+    const { prebuildPreflight, runPrebuild } = await import('./lib/prebuild-continuation.mjs');
+    return runGeneratedOutputPrebuild({ workspacePath: process.cwd(), preflight: prebuildPreflight, operation: runPrebuild });
+  }
   if (mode !== 'build' && mode !== 'dev' && mode !== 'start') {
     throw new Error('Generated-output runner requires build, dev or start.');
   }

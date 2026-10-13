@@ -283,3 +283,16 @@ describe('preship production CLI preserves producers and locks', () => {
     expect(released.run().status).toBe(0);
   });
 });
+
+
+describe('ordinary output creation authority', () => {
+  it.each([undefined, { kind: 'unknown', pid: 1, identity: {} },
+    { kind: 'prebuild', pid: 0, identity: {} },
+    { kind: 'prebuild', pid: 1, identity: { version: 1, platform: 'linux', bootId: '', startId: '' } },
+  ])('refuses ownerless output without valid prebuild creation evidence (%j)', creationAuthority => {
+    const input = fixture('ready');
+    input.update({ owner: undefined, creationAuthority });
+    expect(input.run().status).not.toBe(0);
+    expect(lstatSync(path.join(input.workspace, '.next')).ino).toBe(input.resource.output!.inode);
+  });
+});

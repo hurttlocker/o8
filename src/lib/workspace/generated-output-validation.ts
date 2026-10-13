@@ -60,6 +60,11 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
     || resource.owner.worktreeId !== path.basename(resource.workspace.canonicalPath))) {
     throw new Error('Generated-output resource has invalid containing ownership.');
   }
+  if (resource.creationAuthority && (resource.creationAuthority.kind !== 'prebuild'
+    || resource.origin !== 'managed-creation' || !integer(resource.creationAuthority.pid, 1)
+    || !processIdentity(resource.creationAuthority.identity))) {
+    throw new Error('Generated-output prebuild creation authority is invalid.');
+  }
   if (resource.attempt) {
     const attempt = resource.attempt;
     if (!uuid.test(attempt.id) || !['build', 'dev', 'start'].includes(attempt.mode)

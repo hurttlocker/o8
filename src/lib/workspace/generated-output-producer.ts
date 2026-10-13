@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { lstat } from 'node:fs/promises';
+import path from 'node:path';
 
-import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
-  registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion } from './generated-output-state';
+  currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
+  type GeneratedOutputResource } from './generated-output-state';
 
 export type GeneratedOutputSpawn = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>;
 
@@ -89,113 +92,186 @@ export async function runGeneratedOutputProducer(input: {
 }): Promise<number> {
   const workspace = await captureWorktreeMaterializationIdentity(input.workspacePath);
   const containingOwner = await generatedOutputOwner(workspace);
-  if (!containingOwner) return runUnmanagedProducer(input);
+  if (!containingOwner) {
+    const marker = await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (!marker) {
+      if (currentGeneratedOutputResource(workspace.canonicalPath)?.creationAuthority) {
+        throw new Error('Prebuild lifecycle store binding is missing; preserve output for recovery.');
+      }
+      return runUnmanagedProducer(input);
+    }
+    if (!currentGeneratedOutputResource(workspace.canonicalPath)?.creationAuthority) {
+      throw new Error('Bound ordinary output requires its original prebuild lifecycle profile.');
+    }
+  }
   if (typeof Reflect.get(process, 'execve') !== 'function') {
     throw new Error(`Managed generated-output producers require Node.js 22.15+ with process.execve on macOS or Linux; ${process.version} on ${process.platform} cannot preserve native producer identity.`);
   }
   return withGeneratedOutputExclusion(workspace, containingOwner, async () => {
     const freshOwner = await generatedOutputOwner(workspace);
     if (JSON.stringify(freshOwner) !== JSON.stringify(containingOwner)) throw new Error('Generated-output owner changed before reservation.');
-    let resource = await registerGeneratedOutputLocked(workspace, containingOwner);
-    assertGeneratedOutputClaimsReleased(workspace);
-    if (!resource.output || resource.state === 'active' || resource.state === 'planned'
-      || resource.state === 'failed-held' || resource.bankCapture?.state === 'failed-held'
-      || resource.bank) throw new Error('Generated output has unresolved producer or retention authority.');
-    assertWorkspaceRetentionReleased(resource.output.canonicalPath, resource.output);
-    const owner = await probeMetadataLockProcessIdentity(process.pid);
-    if (owner.state !== 'live') throw new Error('Generated-output producer identity is unknown.');
-    const previousState = resource.state;
-    resource = saveGeneratedOutputResource(resource, { state: 'active', revision: await generatedOutputRevision(workspace),
-      attempt: { id: randomUUID(), mode: input.mode, ownerPid: process.pid, ownerIdentity: owner.identity, children: [] } });
-    let activeChild: ReturnType<typeof spawn> | null = null;
-    let activeRun: Promise<number> | null = null;
-    let abortRequested = false;
-    let requestedStop: NodeJS.Signals | null = null;
-    const forward = (signal: NodeJS.Signals) => { abortRequested = true; requestedStop = signal; activeChild?.kill(signal); };
-    const interrupt = () => forward('SIGINT');
-    const terminate = () => forward('SIGTERM');
-    process.on('SIGINT', interrupt);
-    process.on('SIGTERM', terminate);
-    const runChild: GeneratedOutputSpawn = async (command, args, env = process.env) => {
-      if (abortRequested) throw new Error('Generated-output producer admission is closed.');
-      if (activeChild) throw new Error('Generated-output child spawns must be serial.');
-      if (resource.attempt!.children.length >= 16) throw new Error('Generated-output child count exceeded its bound.');
-      await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
-      if (abortRequested) throw new Error('Generated-output producer admission is closed.');
-      const child = spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output: resource.output, command, args })], {
-        cwd: workspace.canonicalPath, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-      });
-      activeChild = child;
-      let spawnError: Error | undefined;
-      const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
-        child.once('error', error => { spawnError = error; });
-        child.once('close', (code, signal) => resolve({ code, signal, error: spawnError }));
-      });
-      const index = resource.attempt!.children.length;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          child.once('message', message => {
-            if ((message as { phase?: string })?.phase === 'ready') resolve();
-            else reject(new Error('Generated-output producer returned an invalid ready receipt.'));
-          });
-          void closed.then(() => reject(new Error('Generated-output producer closed before ownership admission.')));
-        });
-        if (!child.pid) throw new Error('Generated-output child spawn has uncertain ownership.');
-        const probe = await probeMetadataLockProcessIdentity(child.pid);
-        if (probe.state !== 'live') throw new Error('Generated-output producer birth is unknown.');
-        resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children: [...resource.attempt!.children,
-          { pid: child.pid, identity: probe.identity, exitCode: null, signal: null, observedClosed: false }] } });
-        if (abortRequested) throw new Error('Generated-output producer admission is closed.');
-        child.send({ continue: true });
-      } catch (error) {
-        if (child.connected) child.disconnect();
-        await closed;
-        activeChild = null;
-        throw error;
-      }
-      const result = await closed;
-      if (result.error) throw result.error;
-      const children = [...resource.attempt!.children];
-      children[index] = { ...children[index], exitCode: result.code, signal: result.signal, observedClosed: true };
-      resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children } });
-      activeChild = null;
-      await assertWorktreeMaterializationIdentity(workspace.canonicalPath, workspace);
-      await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
-      return result.code ?? 1;
-    };
-    const run: GeneratedOutputSpawn = (command, args, env) => {
-      if (activeRun) return Promise.reject(new Error('Generated-output child spawns must be serial.'));
-      const pending = runChild(command, args, env);
-      activeRun = pending;
-      void pending.then(() => { if (activeRun === pending) activeRun = null; },
-        () => { if (activeRun === pending) activeRun = null; });
-      return pending;
-    };
-    const settleFailedRun = async () => {
-      abortRequested = true;
-      const unsettled = activeRun;
-      activeChild?.kill('SIGTERM');
-      if (unsettled) await unsettled.catch(() => {});
-    };
+    const resource = await registerGeneratedOutputLocked(workspace, containingOwner);
+    return runReservedProducer(workspace, resource, input);
+  });
+}
+
+async function runReservedProducer(workspace: WorktreeMaterializationIdentity, resource: GeneratedOutputResource,
+  input: { mode: 'build' | 'dev' | 'start'; operation: (run: GeneratedOutputSpawn) => Promise<number> }): Promise<number> {
+  assertGeneratedOutputClaimsReleased(workspace);
+  if (!resource.output || resource.state === 'active' || resource.state === 'planned'
+    || resource.state === 'failed-held' || resource.bankCapture?.state === 'failed-held'
+    || resource.bank) throw new Error('Generated output has unresolved producer or retention authority.');
+  assertWorkspaceRetentionReleased(resource.output.canonicalPath, resource.output);
+  const owner = await probeMetadataLockProcessIdentity(process.pid);
+  if (owner.state !== 'live') throw new Error('Generated-output producer identity is unknown.');
+  const previousState = resource.state;
+  resource = saveGeneratedOutputResource(resource, { state: 'active', revision: await generatedOutputRevision(workspace),
+    attempt: { id: randomUUID(), mode: input.mode, ownerPid: process.pid, ownerIdentity: owner.identity, children: [] } });
+  let activeChild: ReturnType<typeof spawn> | null = null;
+  let activeRun: Promise<number> | null = null;
+  let abortRequested = false;
+  let requestedStop: NodeJS.Signals | null = null;
+  const forward = (signal: NodeJS.Signals) => { abortRequested = true; requestedStop = signal; activeChild?.kill(signal); };
+  const interrupt = () => forward('SIGINT');
+  const terminate = () => forward('SIGTERM');
+  process.on('SIGINT', interrupt);
+  process.on('SIGTERM', terminate);
+  const runChild: GeneratedOutputSpawn = async (command, args, env = process.env) => {
+    if (abortRequested) throw new Error('Generated-output producer admission is closed.');
+    if (activeChild) throw new Error('Generated-output child spawns must be serial.');
+    if (resource.attempt!.children.length >= 16) throw new Error('Generated-output child count exceeded its bound.');
+    await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
+    if (abortRequested) throw new Error('Generated-output producer admission is closed.');
+    const child = spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output: resource.output, command, args })], {
+      cwd: workspace.canonicalPath, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+    });
+    activeChild = child;
+    let spawnError: Error | undefined;
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>((resolve) => {
+      child.once('error', error => { spawnError = error; });
+      child.once('close', (code, signal) => resolve({ code, signal, error: spawnError }));
+    });
+    const index = resource.attempt!.children.length;
     try {
-      const code = await input.operation(run);
-      if (activeRun || activeChild || !resource.attempt!.children.length || resource.attempt!.children.some(child => !child.observedClosed)) {
-        throw new Error('Generated-output attempt lacks complete observed child exits.');
-      }
-      const controlledStop = input.mode !== 'build' && requestedStop !== null
-        && resource.attempt!.children.every(child => child.identity && child.observedClosed
-          && (child.exitCode === 0 || child.signal === requestedStop));
-      const success = code === 0 && resource.attempt!.children.every(child => child.identity && child.exitCode === 0 && !child.signal);
-      resource = saveGeneratedOutputResource(resource, { state: success
-        ? (input.mode === 'start' ? previousState : resource.origin === 'legacy-observation' ? 'legacy-held' : 'succeeded')
-        : controlledStop ? previousState : 'failed-held' });
-      return success || controlledStop ? 0 : code || 1;
+      await new Promise<void>((resolve, reject) => {
+        child.once('message', message => {
+          if ((message as { phase?: string })?.phase === 'ready') resolve();
+          else reject(new Error('Generated-output producer returned an invalid ready receipt.'));
+        });
+        void closed.then(() => reject(new Error('Generated-output producer closed before ownership admission.')));
+      });
+      if (!child.pid) throw new Error('Generated-output child spawn has uncertain ownership.');
+      const probe = await probeMetadataLockProcessIdentity(child.pid);
+      if (probe.state !== 'live') throw new Error('Generated-output producer birth is unknown.');
+      resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children: [...resource.attempt!.children,
+        { pid: child.pid, identity: probe.identity, exitCode: null, signal: null, observedClosed: false }] } });
+      if (abortRequested) throw new Error('Generated-output producer admission is closed.');
+      child.send({ continue: true });
     } catch (error) {
-      await settleFailedRun();
-      saveGeneratedOutputResource(resource, { state: 'failed-held' });
+      if (child.connected) child.disconnect();
+      await closed;
+      activeChild = null;
       throw error;
-    } finally {
-      process.off('SIGINT', interrupt); process.off('SIGTERM', terminate);
     }
+    const result = await closed;
+    if (result.error) throw result.error;
+    const children = [...resource.attempt!.children];
+    children[index] = { ...children[index], exitCode: result.code, signal: result.signal, observedClosed: true };
+    resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children } });
+    activeChild = null;
+    await assertWorktreeMaterializationIdentity(workspace.canonicalPath, workspace);
+    await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
+    return result.code ?? 1;
+  };
+  const run: GeneratedOutputSpawn = (command, args, env) => {
+    if (activeRun) return Promise.reject(new Error('Generated-output child spawns must be serial.'));
+    const pending = runChild(command, args, env);
+    activeRun = pending;
+    void pending.then(() => { if (activeRun === pending) activeRun = null; },
+      () => { if (activeRun === pending) activeRun = null; });
+    return pending;
+  };
+  const settleFailedRun = async () => {
+    abortRequested = true;
+    const unsettled = activeRun;
+    activeChild?.kill('SIGTERM');
+    if (unsettled) await unsettled.catch(() => {});
+  };
+  try {
+    const code = await input.operation(run);
+    if (activeRun || activeChild || !resource.attempt!.children.length || resource.attempt!.children.some(child => !child.observedClosed)) {
+      throw new Error('Generated-output attempt lacks complete observed child exits.');
+    }
+    const controlledStop = input.mode !== 'build' && requestedStop !== null
+      && resource.attempt!.children.every(child => child.identity && child.observedClosed
+        && (child.exitCode === 0 || child.signal === requestedStop));
+    const success = code === 0 && resource.attempt!.children.every(child => child.identity && child.exitCode === 0 && !child.signal);
+    resource = saveGeneratedOutputResource(resource, { state: success
+      ? (input.mode === 'start' ? previousState : resource.origin === 'legacy-observation' ? 'legacy-held' : 'succeeded')
+      : controlledStop ? previousState : 'failed-held' });
+    return success || controlledStop ? 0 : code || 1;
+  } catch (error) {
+    await settleFailedRun();
+    saveGeneratedOutputResource(resource, { state: 'failed-held' });
+    throw error;
+  } finally {
+    process.off('SIGINT', interrupt); process.off('SIGTERM', terminate);
+  }
+
+}
+
+/** Prebuild alone may own fresh output in an ordinary checkout, never the checkout itself. */
+export async function runGeneratedOutputPrebuild(input: {
+  workspacePath: string;
+  preflight: () => void;
+  operation: (context: { canReuse: boolean;
+    runBuild: (operation: (run: GeneratedOutputSpawn) => Promise<number>) => Promise<number> }) => Promise<number>;
+}): Promise<number> {
+  const workspace = await captureWorktreeMaterializationIdentity(input.workspacePath);
+  const containingOwner = await generatedOutputOwner(workspace);
+  if (typeof Reflect.get(process, 'execve') !== 'function') {
+    throw new Error('Generated-output prebuild requires Node.js 22.15+ with process.execve.');
+  }
+  if (!containingOwner && !(await lstat(path.join(workspace.canonicalPath, '.git'))).isDirectory()) {
+    throw new Error('Prebuild requires proved containing ownership for a linked or ambiguous checkout.');
+  }
+  // Refuse unknown output or lost authority before exclusion could create a marker.
+  const current = currentGeneratedOutputResource(workspace.canonicalPath);
+  if (current && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  })) throw new Error('Prebuild lifecycle store binding is missing; preserve output for recovery.');
+  if (!current) {
+    const existing = await lstat(path.join(workspace.canonicalPath, '.next')).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (existing) throw new Error('Prebuild cannot acquire unknown existing generated output.');
+  }
+  return withGeneratedOutputExclusion(workspace, containingOwner, async () => {
+    if (JSON.stringify(await generatedOutputOwner(workspace)) !== JSON.stringify(containingOwner)) {
+      throw new Error('Generated-output owner changed before prebuild admission.');
+    }
+    assertGeneratedOutputClaimsReleased(workspace);
+    input.preflight();
+    const creator = await probeMetadataLockProcessIdentity(process.pid);
+    if (creator.state !== 'live') throw new Error('Prebuild creation process identity is unknown.');
+    const resource = await registerGeneratedOutputLocked(workspace, containingOwner,
+      { kind: 'prebuild', pid: process.pid, identity: creator.identity });
+    if (!resource.output || (!resource.owner && !resource.creationAuthority)
+      || resource.origin !== 'managed-creation' || !['ready', 'succeeded'].includes(resource.state)
+      || resource.bank || resource.bankCapture || resource.adoption || resource.recovery || resource.retirement) {
+      throw new Error('Generated output has unresolved prebuild or retention authority.');
+    }
+    assertWorkspaceRetentionReleased(resource.output.canonicalPath, resource.output);
+    let invoked = false;
+    return input.operation({ canReuse: resource.state === 'succeeded', runBuild: async operation => {
+      if (invoked) throw new Error('Prebuild producer may run only once per exclusion.');
+      invoked = true;
+      return runReservedProducer(workspace, resource, { mode: 'build', operation });
+    } });
   });
 }

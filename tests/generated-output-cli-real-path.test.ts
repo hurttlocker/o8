@@ -150,6 +150,11 @@ it('persists ownership before a fast producer, verifies CLI bank/recovery, and c
   await exec(process.execPath, [path.join(source, 'scripts/build.mjs')], {
     cwd: input.workspace, env: input.env, timeout: 30_000, maxBuffer: 1024 ** 2,
   });
+  // A second ordinary build must retain the established managed runtime profile.
+  // Its marker must not redirect this known owner to a new private build DB.
+  await exec(process.execPath, [path.join(source, 'scripts/build.mjs')], {
+    cwd: input.workspace, env: input.env, timeout: 30_000, maxBuffer: 1024 ** 2,
+  });
   const registered = await input.cli('register', '--workspace', input.workspace);
   const id = registered.resource.resourceId;
   expect(registered.resource.state).toBe('succeeded');

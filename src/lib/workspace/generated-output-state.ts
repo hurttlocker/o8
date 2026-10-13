@@ -53,6 +53,7 @@ export interface GeneratedOutputResource {
   updatedAt: number;
   revision: { head: string; tree: string; dirty: boolean; workingDigest: string };
   owner?: { repositoryPath: string; worktreeId: string };
+  creationAuthority?: { kind: 'prebuild'; pid: number; identity: MetadataLockProcessIdentity };
   attempt?: { id: string; mode: string; ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
     children: Array<{ pid: number; identity: MetadataLockProcessIdentity | null; exitCode: number | null;
       signal: string | null; observedClosed: boolean }> };
@@ -139,6 +140,7 @@ export function saveGeneratedOutputResource(resource: GeneratedOutputResource,
   if (JSON.stringify(next.workspace) !== JSON.stringify(resource.workspace) || next.createdAt !== resource.createdAt
     || (resource.output && JSON.stringify(next.output) !== JSON.stringify(resource.output))
     || JSON.stringify(next.owner) !== JSON.stringify(resource.owner)
+    || JSON.stringify(next.creationAuthority) !== JSON.stringify(resource.creationAuthority)
     || (resource.bank && JSON.stringify(next.bank) !== JSON.stringify(resource.bank))
     || (resource.retirement && (next.state !== 'retired'
       || JSON.stringify(next.retirement) !== JSON.stringify(resource.retirement)))) {
@@ -287,7 +289,8 @@ export function assertGeneratedOutputClaimsReleased(workspace: WorktreeMateriali
 
 /** Caller already holds generated-output exclusion. Planned state precedes creation. */
 export async function registerGeneratedOutputLocked(workspace: WorktreeMaterializationIdentity,
-  owner?: GeneratedOutputResource['owner']): Promise<GeneratedOutputResource> {
+  owner?: GeneratedOutputResource['owner'],
+  creationAuthority?: GeneratedOutputResource['creationAuthority']): Promise<GeneratedOutputResource> {
   await assertWorktreeMaterializationIdentity(workspace.canonicalPath, workspace);
   if (JSON.stringify(await generatedOutputOwner(workspace)) !== JSON.stringify(owner)) {
     throw new Error('Generated-output containing owner changed at registration.');
@@ -304,11 +307,12 @@ export async function registerGeneratedOutputLocked(workspace: WorktreeMateriali
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return null;
   });
+  if (creationAuthority && existing) throw new Error('Prebuild cannot acquire unknown existing generated output.');
   const output = existing ? await captureWorktreeMaterializationIdentity(outputPath) : null;
   if (output && output.canonicalPath !== outputPath) throw new Error('Generated output escapes its containing workspace.');
   const now = Date.now();
   let resource: GeneratedOutputResource = { schema: 'o8/generated-output-resource/v1', resourceId: randomUUID(),
-    workspace, output, owner, state: existing ? 'legacy-held' : 'planned',
+    workspace, output, owner, ...(creationAuthority ? { creationAuthority } : {}), state: existing ? 'legacy-held' : 'planned',
     origin: existing ? 'legacy-observation' : 'managed-creation', version: 1,
     createdAt: now, updatedAt: now, revision: await generatedOutputRevision(workspace) };
   validateGeneratedOutputResource(resource);

@@ -14,7 +14,8 @@ export function generatedOutputLaunch(mode, args = []) {
 
 export async function runGeneratedOutputLaunch(mode, args = [], env = process.env) {
   const invocation = generatedOutputLaunch(mode, args);
-  const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), env, stdio: 'inherit' });
+  const child = spawn(invocation.command, invocation.args, { cwd: process.cwd(), stdio: 'inherit',
+    env: { ...env, TSX_TSCONFIG_PATH: fileURLToPath(new URL('../../tsconfig.json', import.meta.url)) } });
   const interrupt = () => child.kill('SIGINT');
   const terminate = () => child.kill('SIGTERM');
   process.on('SIGINT', interrupt);

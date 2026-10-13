@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { acquireReleaseLock } from './ship-preflight.mjs';
+import { releaseBuildProfile } from './release-build-profile.mjs';
 
 const WORKER_FLAG = '--broadcast-worker';
 const DEFAULT_POST_TIMEOUT_MS = 5_000;
@@ -298,7 +299,7 @@ function operatorDataDir(env) {
 /**
  * The environment every ship step runs under.
  *
- * O8_DATA_DIR is redirected at a throwaway directory so the release cannot
+ * O8_DATA_DIR is redirected at a retained build lifecycle directory so the release cannot
  * read or write the operator's live runtime state. O8_OPERATOR_DATA_DIR then
  * names where that state actually lives, because the publish step still has to
  * find one operator credential — the external intake read token. Before it
@@ -319,7 +320,7 @@ export async function runShipWorkflow({ root, version }) {
   const lock = acquireReleaseLock();
   let buildDataDir;
   try {
-    buildDataDir = mkdtempSync(join(tmpdir(), 'o8-release-build-data-'));
+    buildDataDir = releaseBuildProfile(root, process.env, { release: true }).profile;
   } catch (error) {
     lock.release();
     throw error;
@@ -411,11 +412,8 @@ export async function runShipWorkflow({ root, version }) {
       }
     }
     broadcast.close();
-    try {
-      rmSync(buildDataDir, { recursive: true, force: true });
-    } finally {
-      lock.release();
-    }
+    // Generated output, holds and banks still reference this lifecycle profile.
+    lock.release();
   }
 }
 
