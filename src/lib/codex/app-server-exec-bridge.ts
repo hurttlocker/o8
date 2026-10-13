@@ -226,6 +226,8 @@ async function main(): Promise<void> {
       ...(spec.serviceTier ? { serviceTier: spec.serviceTier } : {}),
     });
     turnId = text(asObject(turn.turn)?.id) || null;
+    // Lets o8 tell its own turns from turns added in the Codex app.
+    if (turnId) out({ type: 'turn.started', thread_id: threadId, turn_id: turnId });
     if (stopping && turnId) send({ id: ++nextId, method: 'turn/interrupt', params: { threadId, turnId } });
   };
   run().catch((error: unknown) => {

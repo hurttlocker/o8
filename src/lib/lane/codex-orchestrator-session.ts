@@ -30,6 +30,7 @@ import {
 import { codexAppThreadConfig, prepareCodexHome, userCodexHome } from './codex-orchestrator-config';
 import { CODEX_USER_MESSAGE_MARKER, splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
+import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
@@ -653,6 +654,7 @@ async function sendToCodexOrchestratorAttempt(
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
     const handleCodexLine = (line: string) => {
+      if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
       const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
       if (parsed) {
         sawFirstEvent = true;

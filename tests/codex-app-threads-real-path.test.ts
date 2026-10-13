@@ -178,6 +178,15 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(resumed).toContainEqual({ type: 'text', text: 'Answer from the Codex app thread' });
   }, 60_000);
 
+  it('records the Codex turns o8 runs for a chat so the Codex app sync never imports them', async () => {
+    const { readCodexAppSyncState } = await import('@/lib/codex/app-thread-sync');
+    const cwd = repo('recorded');
+    await turn(cwd, 'Record this turn', { threadId: 'thoughts-codex-app-recorded' });
+    const state = readCodexAppSyncState('thoughts-codex-app-recorded');
+    expect(state).toMatchObject({ repoPath: cwd, threadId: expect.stringMatching(/^app-thread-/), turnIds: ['turn-1'] });
+    expect(state!.threadId).toBe(getCodexOrchestratorSession(cwd, 'thoughts-codex-app-recorded')!.threadId);
+  }, 60_000);
+
   it('starts a fresh Codex app thread when the saved one is gone', async () => {
     const cwd = repo('gone-thread');
     await turn(cwd, 'First');

@@ -32,4 +32,15 @@ The model, reasoning effort and service tier go on the thread and turn requests.
 - Solo stays on the private home. It runs the whole Codex process in o8's sandbox with its own Codex home and blocked credentials.
 - Local models (`ollama:`, `lmstudio:`) stay on `codex exec --oss`.
 - Switching the setting starts a new Codex thread for an existing chat. The saved thread belongs to the other home, so resume reports a missing rollout and the session starts fresh.
-- A turn the operator continues in the Codex app uses the operator's own Codex settings, not o8's tools. o8 sees those turns as thread history on its next turn, but its own chat view does not show them.
+- A turn the operator continues in the Codex app uses the operator's own Codex settings, not o8's tools. o8 sees those turns as thread history on its next turn.
+
+## Turns added in the Codex app
+
+The o8 chat also shows turns the operator adds from the Codex app, on desktop or phone (`src/lib/codex/app-thread-sync.ts`).
+
+1. After `turn/start`, the bridge prints a `turn.started` line with the thread and turn ids. The session records each turn o8 runs in `<data dir>/codex-app-sync/<chat id>.json`. That file is separate from chat history, so a history save cannot drop it.
+2. Every 4 seconds while the setting is on, the ws-server checks each recorded chat. It skips a chat while o8 is running a turn for it. It stats the thread's rollout file, whose path comes once from `thread/read`. When the file changed, it calls `thread/turns/list` (newest first, summary items) until it reaches a recorded turn.
+3. Each completed turn that o8 did not run is appended to the o8 chat as the operator's message and the agent's final reply, with ids `codex-app-user-<turn>` and `codex-app-assistant-<turn>`. The turn is then recorded. A turn still in progress waits for the next pass.
+4. The ws-server broadcasts `orchestrator-threads` / `external-turns` for that chat. An open chat reloads from history unless a turn is streaming in it.
+
+Tool calls made in the Codex app are not copied; the o8 chat shows the message and the final reply.

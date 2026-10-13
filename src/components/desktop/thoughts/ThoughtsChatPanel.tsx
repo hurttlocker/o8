@@ -1333,6 +1333,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     lastLoadAtRef.current = 0;
     void handleLoadThread(activeThreadId);
   };
+  // Turns the operator adds in the Codex app (#3573) reach history through the
+  // ws-server. Reload this chat when one arrives for it, unless a turn is
+  // streaming here; that turn's own settle reloads the thread.
+  const orchestratorBusyRef = useRef(false);
+  orchestratorBusyRef.current = orchStream.status === 'busy';
+  useEffect(() => {
+    const onThreadEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{ event?: string; data?: { threadId?: string } }>).detail;
+      if (detail?.event !== 'external-turns' || detail.data?.threadId !== threadIdRef.current) return;
+      if (orchestratorBusyRef.current) return;
+      settledAssistantRefetchRef.current();
+    };
+    window.addEventListener('o8:orchestrator-threads', onThreadEvent);
+    return () => window.removeEventListener('o8:orchestrator-threads', onThreadEvent);
+  }, []);
   const suggestions = useMemo(
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
     [agents, sessionTargets],

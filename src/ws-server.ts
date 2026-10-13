@@ -174,7 +174,8 @@ import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
-import { rehydrateCodexOrchestratorTurns } from './lib/lane/codex-orchestrator-session';
+import { getCodexOrchestratorSession, rehydrateCodexOrchestratorTurns } from './lib/lane/codex-orchestrator-session';
+import { openCodexAppThreadReader, syncCodexAppThreads } from './lib/codex/app-thread-sync';
 import {
   getActiveOrchestratorBackend,
   getOrchestratorBackend,
@@ -233,6 +234,7 @@ import {
 } from './lib/supervisor/silent-exit-detector';
 import {
   getOperatorDefaultsSync,
+  resolveCodexAppThreadsSync,
   resolveHealBotEnabledSync,
   resolveInAppOrchestratorEnabledSync,
 } from './lib/operator/defaults';
@@ -2390,6 +2392,7 @@ function orchestratorThreadFingerprint(thread: MobileOrchestratorThread): string
   });
 }
 
+const CODEX_APP_SYNC_INTERVAL_MS = 4_000;
 let lastOrchestratorThreadFingerprints = new Map<string, string>();
 let lastOrchestratorRevealCursor = new Date(Date.now() - 3000).toISOString();
 let lastOrchestratorThreadHistoryStatToken: string | null = null;
@@ -6705,6 +6708,24 @@ function startPollingLoops() {
       orchestratorThreadSyncInFlight = false;
     });
   }, 1_000);
+
+  // Codex app turns (#3573): with "Show chats in the Codex app" on, copy turns
+  // the operator adds from the Codex app (desktop or phone) into the o8 chat,
+  // then tell an open chat to reload. The history poll above pushes the update.
+  let codexAppSyncInFlight = false;
+  setInterval(() => {
+    if (codexAppSyncInFlight || !resolveCodexAppThreadsSync()) return;
+    codexAppSyncInFlight = true;
+    void syncCodexAppThreads({
+      isBusy: (state) => getCodexOrchestratorSession(state.repoPath, state.tabId)?.status === 'busy',
+      openReader: openCodexAppThreadReader,
+      onImported: (tabId) => broadcast({ channel: 'orchestrator-threads', event: 'external-turns', data: { threadId: tabId } }),
+    }).catch((error: unknown) => {
+      console.warn(`[codex-app-sync] ${error instanceof Error ? error.message : String(error)}`);
+    }).finally(() => {
+      codexAppSyncInFlight = false;
+    });
+  }, CODEX_APP_SYNC_INTERVAL_MS).unref?.();
 
   // Conflict scan — poll every 5s, push updates to all clients when conflicts change
   // TODO: Track repo per client session for multi-repo support (currently uses process.cwd())

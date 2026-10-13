@@ -1,0 +1,254 @@
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { CodexAppServerClient } from '@/lib/codex/app-server-client';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { userCodexHome } from '@/lib/lane/codex-orchestrator-config';
+import {
+  appendMobileOrchestratorUserMessage,
+  upsertMobileOrchestratorAssistantMessage,
+} from '@/lib/mobile/orchestrator-thread-history';
+
+/**
+ * Turns the operator adds to an o8 chat from the Codex app (#3573 follow-up).
+ * With "Show chats in the Codex app" on, an o8 chat runs in a Codex thread the
+ * Codex app can continue, on desktop or phone. o8 records every Codex turn it
+ * runs; any other completed turn in that thread came from the Codex app and is
+ * copied into the o8 chat, so its transcript stays whole.
+ */
+
+export interface CodexAppSyncState {
+  tabId: string;
+  repoPath: string;
+  threadId: string;
+  rolloutPath: string | null;
+  /** Codex turns already in the o8 chat: run by o8 or imported. */
+  turnIds: string[];
+}
+
+export interface CodexAppTurn {
+  id: string;
+  status: string;
+  startedAt: number | null;
+  completedAt: number | null;
+  userText: string;
+  agentText: string;
+}
+
+export interface CodexAppThreadReader {
+  rolloutPath(threadId: string): Promise<string | null>;
+  /** Newest first, stopping once a turn in `known` is reached. */
+  recentTurns(threadId: string, known: ReadonlySet<string>): Promise<CodexAppTurn[]>;
+  close(): Promise<void>;
+}
+
+const MAX_TURN_IDS = 1_000;
+
+function stateDir(): string {
+  return join(getDataDir(), 'codex-app-sync');
+}
+
+function statePath(tabId: string): string {
+  return join(stateDir(), `${tabId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`);
+}
+
+function readState(file: string): CodexAppSyncState | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<CodexAppSyncState>;
+    if (typeof parsed.tabId !== 'string' || typeof parsed.repoPath !== 'string' || typeof parsed.threadId !== 'string') return null;
+    return {
+      tabId: parsed.tabId,
+      repoPath: parsed.repoPath,
+      threadId: parsed.threadId,
+      rolloutPath: typeof parsed.rolloutPath === 'string' ? parsed.rolloutPath : null,
+      turnIds: Array.isArray(parsed.turnIds) ? parsed.turnIds.filter((id): id is string => typeof id === 'string') : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeState(state: CodexAppSyncState): void {
+  mkdirSync(stateDir(), { recursive: true });
+  const file = statePath(state.tabId);
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify({ ...state, turnIds: state.turnIds.slice(-MAX_TURN_IDS) }), { mode: 0o600 });
+  renameSync(temporary, file);
+}
+
+export function readCodexAppSyncState(tabId: string): CodexAppSyncState | null {
+  return readState(statePath(tabId));
+}
+
+/** Record a Codex turn that o8 itself started, so the sync never imports it. */
+export function noteCodexAppTurn(input: { tabId: string | null; repoPath: string; threadId: string; turnId: string }): void {
+  if (!input.tabId?.startsWith('thoughts-')) return;
+  const existing = readCodexAppSyncState(input.tabId);
+  const sameThread = existing?.threadId === input.threadId;
+  writeState({
+    tabId: input.tabId,
+    repoPath: input.repoPath,
+    threadId: input.threadId,
+    rolloutPath: sameThread ? existing.rolloutPath : null,
+    turnIds: [...(existing?.turnIds ?? []).filter((id) => id !== input.turnId), input.turnId],
+  });
+}
+
+/** Read one bridge output line; record the turn when it is the bridge's `turn.started`. */
+export function noteCodexAppTurnLine(line: string, input: { tabId: string | null; repoPath: string }): void {
+  if (!line.includes('"turn.started"')) return;
+  try {
+    const parsed = JSON.parse(line) as { type?: unknown; turn_id?: unknown; thread_id?: unknown };
+    if (parsed.type !== 'turn.started' || typeof parsed.turn_id !== 'string' || typeof parsed.thread_id !== 'string') return;
+    noteCodexAppTurn({ ...input, threadId: parsed.thread_id, turnId: parsed.turn_id });
+  } catch {
+    // Not a bridge line.
+  }
+}
+
+export interface CodexAppSyncDeps {
+  /** True while o8 is running a turn for this chat; its turn is not imported. */
+  isBusy(state: CodexAppSyncState): boolean;
+  openReader(): Promise<CodexAppThreadReader>;
+  onImported?(tabId: string, count: number): void;
+}
+
+const lastSeen = new Map<string, string>();
+
+/** One sync pass over every o8 chat linked to a Codex thread. Returns turns imported per chat. */
+export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<string, number>> {
+  const imported = new Map<string, number>();
+  let files: string[];
+  try {
+    files = readdirSync(stateDir()).filter((file) => file.endsWith('.json'));
+  } catch {
+    return imported;
+  }
+  let reader: CodexAppThreadReader | null = null;
+  const open = async () => (reader ??= await deps.openReader());
+  try {
+    for (const file of files) {
+      const state = readState(join(stateDir(), file));
+      if (!state || deps.isBusy(state)) continue;
+      if (!state.rolloutPath) {
+        state.rolloutPath = await (await open()).rolloutPath(state.threadId);
+        if (!state.rolloutPath) continue;
+        writeState(state);
+      }
+      let marker: string;
+      try {
+        const stat = statSync(state.rolloutPath);
+        marker = `${state.threadId}:${stat.mtimeMs}:${stat.size}`;
+      } catch {
+        continue;
+      }
+      if (lastSeen.get(state.tabId) === marker) continue;
+      const known = new Set(state.turnIds);
+      const turns = (await (await open()).recentTurns(state.threadId, known))
+        .filter((turn) => !known.has(turn.id) && turn.status !== 'inProgress' && turn.userText.trim())
+        .reverse();
+      for (const turn of turns) {
+        appendMobileOrchestratorUserMessage({
+          tabId: state.tabId,
+          repoPath: state.repoPath,
+          message: turn.userText,
+          messageId: `codex-app-user-${turn.id}`,
+          backend: 'codex',
+          timestampMs: turn.startedAt ? turn.startedAt * 1_000 : undefined,
+        });
+        upsertMobileOrchestratorAssistantMessage({
+          tabId: state.tabId,
+          repoPath: state.repoPath,
+          messageId: `codex-app-assistant-${turn.id}`,
+          content: turn.agentText.trim() || `(Codex turn ${turn.status} without a reply)`,
+          backend: 'codex',
+          sessionId: state.threadId,
+          timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
+        });
+        state.turnIds.push(turn.id);
+      }
+      if (turns.length > 0) {
+        writeState(state);
+        imported.set(state.tabId, turns.length);
+        deps.onImported?.(state.tabId, turns.length);
+      }
+      lastSeen.set(state.tabId, marker);
+    }
+  } finally {
+    await (reader as CodexAppThreadReader | null)?.close();
+  }
+  return imported;
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function toTurn(raw: unknown): CodexAppTurn | null {
+  const turn = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null;
+  if (!turn || typeof turn.id !== 'string') return null;
+  const items = Array.isArray(turn.items) ? turn.items as Array<Record<string, unknown>> : [];
+  const user = items.find((item) => item?.type === 'userMessage');
+  const userText = Array.isArray(user?.content)
+    ? (user.content as Array<Record<string, unknown>>).map((part) => text(part?.text)).filter(Boolean).join('\n')
+    : '';
+  const agentText = [...items].reverse().find((item) => item?.type === 'agentMessage');
+  return {
+    id: turn.id,
+    status: text(turn.status),
+    startedAt: typeof turn.startedAt === 'number' ? turn.startedAt : null,
+    completedAt: typeof turn.completedAt === 'number' ? turn.completedAt : null,
+    userText,
+    agentText: text(agentText?.text),
+  };
+}
+
+const TURN_PAGE = 20;
+const MAX_TURN_PAGES = 5;
+
+/** Read-only access to the operator's Codex threads through `codex app-server`. */
+export async function openCodexAppThreadReader(): Promise<CodexAppThreadReader> {
+  const { resolveCli } = await import('@/lib/runtimes/shared/cli-resolver');
+  const cli = await resolveCli({
+    runtimeId: 'codex',
+    binaryName: 'codex',
+    envOverride: 'O8_CODEX_BIN',
+    extraEnvOverrides: ['CODEX_HOME'],
+  });
+  const client = new CodexAppServerClient({ binaryPath: cli.path, codexHome: userCodexHome(), requestTimeoutMs: 15_000 });
+  try {
+    await client.initialize('o8');
+  } catch (error) {
+    await client.close();
+    throw error;
+  }
+  return {
+    async rolloutPath(threadId) {
+      try {
+        const result = await client.request('thread/read', { threadId }) as { thread?: { path?: unknown } };
+        return typeof result.thread?.path === 'string' ? result.thread.path : null;
+      } catch {
+        return null;
+      }
+    },
+    async recentTurns(threadId, known) {
+      const turns: CodexAppTurn[] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < MAX_TURN_PAGES; page += 1) {
+        const result = await client.request('thread/turns/list', {
+          threadId, limit: TURN_PAGE, sortDirection: 'desc', itemsView: 'summary', ...(cursor ? { cursor } : {}),
+        }) as { data?: unknown[]; nextCursor?: unknown };
+        for (const raw of result.data ?? []) {
+          const turn = toTurn(raw);
+          if (!turn) continue;
+          if (known.has(turn.id)) return turns;
+          turns.push(turn);
+        }
+        cursor = typeof result.nextCursor === 'string' ? result.nextCursor : null;
+        if (!cursor) break;
+      }
+      return turns;
+    },
+    close: () => client.close(),
+  };
+}
