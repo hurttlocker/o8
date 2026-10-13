@@ -1,0 +1,1 @@
+- See turns you add to an o8 chat from the Codex app, on desktop or phone, in the o8 chat. Requires Settings > Models > Codex app > Show chats in the Codex app, which stays off by default.
