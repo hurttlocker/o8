@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
 import type { PrDetail, PrDetailResponse } from './types';
-import { readPrJson } from './read-pr-json';
+import { PrReadDeferredError, readPrJson } from './read-pr-json';
 
 type Snapshot = PrDetail & { loadedAt: number };
 
@@ -41,17 +41,20 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
     const repoQuery = repoSlug ? `?repo=${encodeURIComponent(repoSlug)}` : '';
     const url = `/api/panel/prs/${prNumber}${repoQuery}`;
 
-    const fetchDetail = async () => {
-      const data = await readPrJson<PrDetailResponse>(url);
+    let retryAt = 0;
+    const fetchDetail = async (background: boolean) => {
+      const data = await readPrJson<PrDetailResponse>(`${url}${background ? `${repoQuery ? '&' : '?'}poll=1` : ''}`);
       return { ...data.pr, loadedAt: Date.now() };
     };
-    async function fetchOnce() {
+    async function fetchOnce(background = false) {
       if (!active) return;
+      if (background && (document.visibilityState === 'hidden' || Date.now() < retryAt)) return;
       setFailure(null);
       try {
-        await refreshSWR(selectionKey, fetchDetail);
+        await refreshSWR(selectionKey, () => fetchDetail(background));
       } catch (err) {
         if (!active) return;
+        if (err instanceof PrReadDeferredError) retryAt = Date.now() + err.retryAfterMs;
         setFailure({ key: selectionKey, nonce: reloadNonce, message: err instanceof Error ? err.message : 'Failed to load PR' });
       }
     }
@@ -62,9 +65,9 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
       const current = getSWR<PrDetail>(selectionKey).data ?? null;
       const isOpen = (current?.state ?? '').toLowerCase() === 'open';
       const fast = isOpen && hasRunningChecks(current);
-      const intervalMs = fast ? 10_000 : 30_000;
+      const intervalMs = Math.max(fast ? 30_000 : 120_000, retryAt - Date.now());
       timeoutId = setTimeout(() => {
-        void fetchOnce().finally(scheduleNext);
+        void fetchOnce(true).finally(scheduleNext);
       }, intervalMs);
     }
     const cached = getSWR<Snapshot>(selectionKey).data;
@@ -73,8 +76,11 @@ export function usePrDetail(prNumber: number | null, repoSlug?: string | null, v
     if (!reloadNonce && cached && Date.now() - cached.loadedAt < 20_000) scheduleNext();
     else void fetchOnce().finally(scheduleNext);
 
+    const onVisible = () => { if (document.visibilityState !== 'hidden') void fetchOnce(true); };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
+      document.removeEventListener('visibilitychange', onVisible);
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [visible, prNumber, repoSlug, key, reloadNonce]);

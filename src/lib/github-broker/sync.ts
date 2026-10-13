@@ -22,7 +22,7 @@ import {
   type GitHubThreadSyncState,
   type GitHubThreadAttentionSnapshot,
 } from './store';
-import { githubInstallationFetch } from './auth';
+import { githubInstallationFetch as installationFetch } from './auth';
 import { hasGitHubBrokerAccess } from './auth';
 import {
   isGitHubBotLogin,
@@ -37,6 +37,7 @@ import {
 import { resolveVerifiedClosedOutsideHumanWaitingThread } from '@/lib/supervisor/outsider-inbox-builder';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
+const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint, init, { priority: 'background' });
 
 const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
 const MAX_ATTENTION_COMMENT_PAGES = 5;

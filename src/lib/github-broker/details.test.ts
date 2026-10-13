@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { githubInstallationFetch } = vi.hoisted(() => ({ githubInstallationFetch: vi.fn() }));
 vi.mock('./auth', () => ({ githubInstallationFetch }));
 import { fetchGitHubPullRequestDetail } from './details';
-import { readPullRequestChecks } from './pull-request-checks';
+import { readPullRequestChecks as readScopedChecks } from './pull-request-checks';
+const readPullRequestChecks = (repo: string, head: string, installation?: number) => readScopedChecks(repo, head, installation, 'interactive', installation ? 'fixture-authority' : undefined);
 
 const pull = { number: 7, title: 'Change', state: 'open', draft: true, html_url: 'https://github.com/example/repo/pull/7', user: { login: 'author', avatar_url: 'https://avatars.githubusercontent.com/u/1' }, labels: [{ name: 'ui' }], requested_reviewers: [{ login: 'reviewer' }], head: { sha: 'head', ref: 'work' }, base: { ref: 'main' } };
 beforeEach(() => vi.clearAllMocks());
@@ -36,7 +37,7 @@ describe('pull request detail reads', () => {
 
 describe('conditional pull request checks', () => {
   const checks = { check_runs: [{ name: 'unit', status: 'completed', conclusion: 'success' }] };
-  const fetched = (response: Response, id = 901) => ({ response, installation: { id } });
+  const fetched = (response: Response, id = 901) => ({ response, installation: { id }, scope: 'fixture-authority' });
 
   it('revalidates checks after fresh metadata and observes changes on the same head', async () => {
     const headers: Array<HeadersInit | undefined> = [];

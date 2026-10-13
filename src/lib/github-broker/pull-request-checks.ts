@@ -2,6 +2,7 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { getGitHubAppConfig } from './env';
+import type { GitHubReadPriority } from './request-budget';
 
 interface Check {
   name: string;
@@ -20,9 +21,9 @@ const entries = new Map<string, Entry>();
 const MAX_ENTRIES = 32;
 
 /** Call after fresh PR metadata authorizes this installation and head. */
-export function readPullRequestChecks(repo: string, head: string, installationId?: number): Promise<Check[]> {
+export function readPullRequestChecks(repo: string, head: string, installationId?: number, priority: GitHubReadPriority = 'interactive', authorizedScope?: string): Promise<Check[]> {
   const host = getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
-  const key = installationId ? JSON.stringify([host, repo.toLowerCase(), installationId, head]) : null;
+  const key = authorizedScope && installationId ? JSON.stringify([authorizedScope, host, repo.toLowerCase(), installationId, head]) : null;
   const entry = (key ? entries.get(key) : undefined) ?? {};
   if (entry.pending) return entry.pending;
   if (key) {
@@ -37,7 +38,8 @@ export function readPullRequestChecks(repo: string, head: string, installationId
   const pending = githubInstallationFetch(repo, `/repos/${repo}/commits/${head}/check-runs?per_page=100`, {
     signal: AbortSignal.timeout(18_000),
     headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
-  }).then(async ({ response, installation }) => {
+  }, { priority }).then(async ({ response, installation, scope }) => {
+    if (authorizedScope && scope !== authorizedScope) { void response.body?.cancel().catch(() => {}); throw new Error('GitHub authorization changed while reading pull request checks. Retry.'); }
     if (installationId && installation?.id !== installationId) {
       void response.body?.cancel().catch(() => {});
       throw new Error('GitHub installation changed while reading pull request checks. Retry.');

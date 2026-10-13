@@ -33,6 +33,30 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
 
 describe('pull request selection', () => {
+  it('backs off a quota refusal while retaining the current view and labels scheduled reads as background', async () => {
+    vi.useFakeTimers();
+    try {
+      const current = { ...detail(9801), statusCheckRollup: [{ name: 'test', status: 'in_progress' }] };
+      fetchMock.mockResolvedValueOnce(Response.json({ pr: current })).mockResolvedValueOnce(Response.json({ error: 'GitHub refresh is paused.' }, { status: 429, headers: { 'retry-after': '120' } })).mockResolvedValue(Response.json({ pr: current }));
+      await render(9801);
+      await act(async () => vi.advanceTimersByTimeAsync(30_000));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][0]).toContain('&poll=1');
+      expect(host.textContent).toContain('Change 9801'); expect(host.textContent).toContain('GitHub refresh is paused.');
+      await act(async () => vi.advanceTimersByTimeAsync(90_000)); expect(fetchMock).toHaveBeenCalledTimes(2);
+      await act(async () => vi.advanceTimersByTimeAsync(31_000)); expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not poll a hidden document and refreshes on return', async () => {
+    vi.useFakeTimers(); const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    try {
+      fetchMock.mockImplementation(async () => Response.json({ pr: detail(9802) }));
+      await render(9802); visibility.mockReturnValue('hidden');
+      await act(async () => vi.advanceTimersByTimeAsync(120_000)); expect(fetchMock).toHaveBeenCalledTimes(1);
+      visibility.mockReturnValue('visible');
+      await act(async () => document.dispatchEvent(new Event('visibilitychange'))); expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally { visibility.mockRestore(); vi.useRealTimers(); }
+  });
   it('keeps collapsed rows clean and retains diff layout and folder state while the tree navigates within Changes', async () => {
     const files = [{ path: 'src/a.ts', status: 'modified', additions: 1, deletions: 0, patch: '' }, { path: 'tests/b.ts', status: 'modified', additions: 1, deletions: 1, patch: '' }];
     fetchMock.mockImplementation(async (url: string) => Response.json({ pr: { ...detail(Number(url.match(/prs\/(\d+)/)?.[1])), files, changedFiles: 2 } }));

@@ -2,6 +2,8 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { upsertGitHubIssue } from './store';
+import { recordOwnPrRemark } from './pr-watch';
+import { beginPrRemarkWrite } from './pr-watch-writes';
 
 function buildGitHubError(response: Response, bodyText: string) {
   const reset = response.headers.get('x-ratelimit-reset');
@@ -186,7 +188,9 @@ export async function reviewGitHubPullRequest(
   prNumber: number,
   input: { event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'; body?: string; commitSha?: string },
 ) {
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
+  const finish = beginPrRemarkWrite(repoFullName, prNumber);
+  try {
+  const { response, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -194,13 +198,23 @@ export async function reviewGitHubPullRequest(
       ...(input.commitSha ? { commit_id: input.commitSha } : {}),
       body: input.body ?? '',
     }),
+    signal: AbortSignal.timeout(18_000),
   });
 
-  return parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  const review = await parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  try { recordOwnPrRemark(scope, repoFullName, prNumber, 'reviews', review.id); } catch { /* Posting succeeded even if local watch bookkeeping failed. */ }
+  return review;
+  } finally { finish(); }
 }
 
 export async function commentOnGitHubPullRequest(repoFullName: string, prNumber: number, body: string) {
-  return commentOnGitHubIssue(repoFullName, prNumber, body);
+  const finish = beginPrRemarkWrite(repoFullName, prNumber);
+  try {
+  const { response, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }), signal: AbortSignal.timeout(18_000) });
+  const comment = await parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  try { recordOwnPrRemark(scope, repoFullName, prNumber, 'comments', comment.id); } catch { /* Keep the confirmed posting result authoritative. */ }
+  return comment;
+  } finally { finish(); }
 }
 
 export async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: number) {

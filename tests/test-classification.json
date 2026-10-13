@@ -2448,6 +2448,12 @@
       ]
     },
     {
+      "path": "tests/github-pr-watch-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/global-test-data-dir.test.ts",
       "reasons": [
         "fixture-lifecycle"

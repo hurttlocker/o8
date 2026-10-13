@@ -89,6 +89,9 @@ export interface PrDetail {
   statusCheckRollup: PrCheck[];
   url: string;
   files: PrFile[];
+  checksUnavailable?: boolean;
+  discussionIncomplete?: boolean;
+  watch?: { changes: Array<'head' | 'checks' | 'state' | 'comments' | 'reviews'>; commentUpdatesPaused: boolean };
   resolvedRepo?: string;
   reviewComments: PrReviewComment[];
   issueComments: PrIssueComment[];

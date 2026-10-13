@@ -15,6 +15,9 @@ import {
 import { listRepos } from '@/lib/repos/registry';
 import { getCachedRepoReadiness } from '@/lib/repos/readiness';
 import { deriveWorkflowStage } from '@/lib/workflows/status';
+import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
+import { beginPrWatchRead, recordPrWatchSnapshot } from '@/lib/github-broker/pr-watch';
+import { waitForPrRemarkWrites } from '@/lib/github-broker/pr-watch-writes';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null;
@@ -43,13 +46,24 @@ export async function GET(
   }
 
   try {
-    const comments = fetchGitHubPullRequestComments(repo, prNum);
+    const readOrder = beginPrWatchRead();
+    const priority = searchParams.get('poll') === '1' ? 'background' : 'interactive';
+    const comments = fetchGitHubPullRequestComments(repo, prNum, priority);
     const [pr, commentsData] = await Promise.all([
-      fetchGitHubPullRequestDetail(repo, prNum, comments.then((data) => [...data.reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED')?.state ?? null).catch(() => null)),
+      fetchGitHubPullRequestDetail(repo, prNum, comments.then((data) => [...data.reviews].reverse().find((review) => review.state && review.state !== 'COMMENTED')?.state ?? null).catch(() => null), priority),
       comments,
     ]);
     const localRepo = (await listRepos().catch(() => []))
       .find((entry) => normalizeRepoSlug(entry.remoteUrl) === repo) ?? null;
+    const { githubScope, ...publicPr } = pr;
+    if (githubScope && commentsData.githubScope !== githubScope) throw new Error('GitHub authorization changed during the read.');
+    await waitForPrRemarkWrites(repo, prNum);
+    const watch = githubScope ? recordPrWatchSnapshot({ scope: githubScope, repo, number: prNum, head: pr.headSha, state: pr.mergedAt ? 'merged' : pr.state,
+      checks: [...pr.statusCheckRollup].sort((a, b) => a.name.localeCompare(b.name)), checksUnavailable: pr.checksUnavailable,
+      comments: [...commentsData.comments.map(comment => ({ ...comment, kind: 'inline' as const })), ...commentsData.issueComments.map(comment => ({ id: comment.id, author: comment.user, body: comment.body })),
+        ...commentsData.reviews.filter(review => review.state === 'COMMENTED').map(review => ({ ...review, kind: 'reviews' as const }))],
+      reviews: commentsData.reviews.filter(review => review.state !== 'COMMENTED'), discussionIncomplete: commentsData.discussionIncomplete, repoPath: localRepo?.localPath, readOrder }) : undefined;
+    if (watch?.superseded) return NextResponse.json({ error: 'A newer pull request read completed. Refresh to see it.' }, { status: 409 });
     // Reading a PR must not start workspace setup/Git probes. Safety-sensitive
     // workspace actions still obtain exact readiness at their own entry point.
     const readiness = localRepo ? getCachedRepoReadiness(localRepo) ?? null : null;
@@ -70,7 +84,9 @@ export async function GET(
 
     return NextResponse.json({
       pr: {
-        ...pr,
+        ...publicPr,
+        watch,
+        discussionIncomplete: commentsData.discussionIncomplete,
         resolvedRepo: repo,
         readiness,
         workflowStage,
@@ -79,7 +95,8 @@ export async function GET(
         diffStat,
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof GitHubRequestDeferredError) return NextResponse.json({ error: error.message }, { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.ceil((error.retryAt - Date.now()) / 1000))) } });
     return NextResponse.json({ error: 'Pull request could not be read. Check the connection or GitHub access and retry.' }, { status: 502 });
   }
 }
