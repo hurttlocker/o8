@@ -220,7 +220,8 @@ async function probeVersion(
       windowsHide: true,
       timeout: spec.versionTimeoutMs ?? 5_000,
       maxBuffer: 64 * 1024,
-      env: { ...process.env, PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: { ...process.env, PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1',
+        ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) },
     });
     const combined = `${stdout}\n${stderr}`;
     const match = combined.match(pattern);

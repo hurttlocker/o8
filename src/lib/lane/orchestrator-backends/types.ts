@@ -34,7 +34,7 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  * `pi` is the bundled Pi SDK session on the managed model route (pi.ts), with
  * the same built-in o8 servers as the Claude orchestrator.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi' | 'muse';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -45,7 +45,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
     || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode' || value === 'pi';
+    || value === 'opencode' || value === 'pi' || value === 'muse';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

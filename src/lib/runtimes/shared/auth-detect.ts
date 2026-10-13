@@ -33,11 +33,11 @@ import {
 import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
 import { hermesReadiness } from './hermes-readiness';
 import { piBuiltinReadiness } from './pi-builtin-readiness';
+import { museAvailability } from '@/lib/muse/availability';
 import { detectPiUserSetup, type PiUserSetup } from '@/lib/pi/user-setup';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
-
 const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const UNKNOWN_CLAUDE_CACHE_TTL_MS = 5_000;
@@ -603,6 +603,7 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
     case 'hermes': return hermesReadiness().then(status => nowStatus('hermes', 'hermes', status));
+    case 'muse': return museAvailability().then(status => nowStatus('muse', 'muse', status));
     case 'deepseek-harness': return detectDeepSeekHarness();
     case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);

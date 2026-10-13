@@ -566,6 +566,12 @@
       ]
     },
     {
+      "path": "src/lib/muse/host.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
       "reasons": [
         "executable-fixture"
@@ -1223,6 +1229,21 @@
     {
       "path": "tests/acp-orchestrator-turn-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/acp-registry-authz-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/acp-registry-preparation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
         "real-path"
       ]
     },
@@ -3108,6 +3129,30 @@
     {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-host-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-orchestrator-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-worker-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },

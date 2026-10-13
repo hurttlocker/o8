@@ -83,13 +83,13 @@ export function ComposerPicker({ state, defaults, composerModelGroups, onModelCh
     : installed.map((item) => ({ id: item.id, label: composerRuntimeLabel(item.id), ready: ready(item.id), runtime: item.id }))
       .sort((a, b) => (WORKER_HOUSE_ORDER.indexOf(a.id) < 0 ? WORKER_HOUSE_ORDER.length : WORKER_HOUSE_ORDER.indexOf(a.id)) - (WORKER_HOUSE_ORDER.indexOf(b.id) < 0 ? WORKER_HOUSE_ORDER.length : WORKER_HOUSE_ORDER.indexOf(b.id)));
   const house = houses.find((item) => item.id === houseId);
-  const searchable = house?.group?.searchable || house?.runtime === 'opencode' || house?.runtime === '3code';
+  const searchable = house?.group?.searchable || house?.runtime === 'opencode' || house?.runtime === '3code' || house?.runtime === 'muse';
   const normalizedQuery = query.trim().toLowerCase();
   const modelLocked = (runtime: OrchestratorRuntime) => (workerLocks?.runtime && runtime !== defaults.defaultDispatchRuntime) || (runtime === 'opencode' ? workerLocks?.opencode : runtime === '3code' ? workerLocks?.threecode : workerLocks?.defaultModel);
   const nativePicks: Pick[] = houses.flatMap((item): Pick[] => {
     if (item.group) return item.group.options.map((option) => ({ option, group: item.group, favorite: { house: option.backend, id: option.model ?? option.value, label: option.label } }));
     const runtime = item.runtime!;
-    if (runtime === 'opencode' || runtime === '3code') return [];
+    if (runtime === 'opencode' || runtime === '3code' || runtime === 'muse') return [];
     // Lead groups can contain a paid carrier model. Native worker choices retain
     // their own identity even while Claude Code uses another provider.
     const group = (runtime === 'claude-code' ? COMPOSER_MODEL_GROUPS : composerModelGroups).find((entry) => entry.key === (runtime === 'claude-code' ? 'claude' : runtime));
@@ -103,7 +103,7 @@ export function ComposerPicker({ state, defaults, composerModelGroups, onModelCh
       const native = nativePicks.find((pick) => modelFavoriteKey(pick.favorite) === modelFavoriteKey(favorite));
       if (native) return [native];
       if (favorite.house === CLAUDE_OPENROUTER_HOUSE && houses.some((item) => item.runtime === 'claude-code')) return [{ favorite, runtime: 'claude-code' }];
-      const source = houses.find((item) => item.id === favorite.house && (item.group?.searchable || item.runtime === 'opencode' || item.runtime === '3code'));
+      const source = houses.find((item) => item.id === favorite.house && (item.group?.searchable || item.runtime === 'opencode' || item.runtime === '3code' || item.runtime === 'muse'));
       return source ? [{ favorite, group: source.group, runtime: source.runtime }] : [];
     })
     : nativePicks.filter((pick) => normalizedQuery || (target === 'lead' ? pick.group?.key === houseId : pick.runtime === houseId));
@@ -154,7 +154,7 @@ export function ComposerPicker({ state, defaults, composerModelGroups, onModelCh
     const version = ++generation.current;
     setPending(modelFavoriteKey(pick.favorite)); setError(null);
     try {
-      if ((!pick.option && (!pick.runtime || pick.runtime === 'opencode' || pick.runtime === '3code')) || pick.favorite.house === CLAUDE_OPENROUTER_HOUSE) {
+      if ((!pick.option && (!pick.runtime || pick.runtime === 'opencode' || pick.runtime === '3code' || pick.runtime === 'muse')) || pick.favorite.house === CLAUDE_OPENROUTER_HOUSE) {
         const url = pick.favorite.house === CLAUDE_OPENROUTER_HOUSE ? '/api/runtime/claude-code-models' : pick.runtime === '3code' ? '/api/runtime/threecode-models' : `/api/orchestrator/backend-models?backend=${encodeURIComponent(pick.favorite.house)}`;
         const response = await fetch(url, { cache: 'no-store' });
         const data = await response.json() as { groups?: CatalogueGroup[]; available?: boolean; error?: string };
@@ -199,7 +199,7 @@ export function ComposerPicker({ state, defaults, composerModelGroups, onModelCh
         <div ref={contentRef} onKeyDown={keyDown} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingTop: 8, paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 24, paddingRight: 8, paddingLeft: 8, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}><span>{target === 'lead' ? 'Orchestrator' : 'Workers'}</span><span>{houseId === 'favorites' ? 'Favorites' : house?.label}</span></div>
           {target === 'lead' && house?.id === 'acp' ? <ModelPickerRow label="Use agent default" testId="lead-acp-default" selected={state.leadBackend === 'acp' && !state.leadModelId} disabled={!house.ready || saving || Boolean(pending)} onSelect={() => { void commit({ group: house.group, favorite: { house: 'acp', id: '', label: 'Agent default' } }); }} /> : null}
-          {target === 'workers' && house?.runtime === 'claude-code' ? <ClaudeWorkerModels controller={claude} favorites={favorites} onToggleFavorite={toggleFavorite} nativeModel={workerModelForDisplay('claude-code', defaults)} nativeReady={ready('claude-code')} disabled={saving || Boolean(pending) || Boolean(modelLocked('claude-code')) || !claudeInstalled} onSelect={(source, model) => { void selectClaude(source, model); }} /> : searchable && house ? <AcpModelPicker key={`${target}:${house.id}`} backend={house.id} catalogueUrl={house.runtime === '3code' ? '/api/runtime/threecode-models' : undefined} width={310} embedded defaultProvider="openrouter" allowEffortVariants={target === 'lead'} favorites={favorites.filter((favorite) => favorite.house === house.id)} onToggleFavorite={toggleFavorite} value={target === 'lead' ? state.leadModelId : workerModelForDisplay(house.runtime!, defaults)} disabled={saving || Boolean(pending) || (house.runtime ? Boolean(modelLocked(house.runtime)) : !house.ready)}
+          {target === 'workers' && house?.runtime === 'claude-code' ? <ClaudeWorkerModels controller={claude} favorites={favorites} onToggleFavorite={toggleFavorite} nativeModel={workerModelForDisplay('claude-code', defaults)} nativeReady={ready('claude-code')} disabled={saving || Boolean(pending) || Boolean(modelLocked('claude-code')) || !claudeInstalled} onSelect={(source, model) => { void selectClaude(source, model); }} /> : searchable && house ? <AcpModelPicker key={`${target}:${house.id}`} backend={house.id} catalogueUrl={house.runtime === '3code' ? '/api/runtime/threecode-models' : undefined} width={310} embedded defaultProvider={house.id === 'muse' ? 'meta' : 'openrouter'} allowEffortVariants={target === 'lead'} favorites={favorites.filter((favorite) => favorite.house === house.id)} onToggleFavorite={toggleFavorite} value={target === 'lead' ? state.leadModelId : workerModelForDisplay(house.runtime!, defaults)} disabled={saving || Boolean(pending) || (house.runtime ? Boolean(modelLocked(house.runtime)) : !house.ready)}
             onSelect={(id) => { void select({ favorite: { house: house.id, id, label: id }, runtime: house.runtime, group: house.group }); }} /> : <>
             <input ref={searchRef} data-testid="composer-selector-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={houseId === 'favorites' ? 'Search favorites' : 'Search models'} aria-label="Search models" autoComplete="off" style={{ boxSizing: 'border-box', width: '100%', minHeight: 30, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, marginBottom: 4, borderWidth: 0, borderBottom: '1px solid var(--t-border)', background: 'transparent', outline: 'none', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300 }} />
             <div data-testid={target === 'lead' ? 'composer-selector-lead-scroll' : 'composer-selector-workers-scroll'} style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none', maxHeight: 320 }}>

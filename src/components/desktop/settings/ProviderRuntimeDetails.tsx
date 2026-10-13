@@ -7,6 +7,7 @@ import { PickerMenu, CODEX_WORKER_EFFORT_OPTIONS, CLAUDE_WORKER_EFFORT_OPTIONS, 
 import type { useModelSettings } from './useModelSettings';
 import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
 import { ProviderUsageSection } from './ProviderUsageSection';
+import { MuseConnectionSection } from './MuseConnectionSection';
 
 export interface ProviderTool {
   id: string;
@@ -52,6 +53,7 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
       <SettingsRow label="Binary path" subtitle={tool?.path ?? runtime.binaryName} />
     </SettingsGroup>
     {notice ? <p role="alert" style={{ margin: 0, color: 'var(--t-text)' }}>{notice}</p> : null}
+    {runtimeId === 'muse' ? <MuseConnectionSection /> : null}
     {effortField || runtimeId === 'opencode' ? <SettingsGroup header={`${runtime.label} models`}>
       <SettingsRow label="Model selection" subtitle="Choose conversation models in the composer. App routing is in Model defaults." divider />
       {effortField && data ? <SettingsRow label="Worker effort" subtitle={locked ? ENV_LOCKED_REASON : 'Used when a worker has no effort choice.'} accessory={

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RamsButton } from './shared';
+import { AcpRegistryPicker } from './AcpRegistryPicker';
 
 const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, border: '1px solid var(--t-border)', borderRadius: 8, padding: 10, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12 };
 export function LocalAcpSection() {
@@ -17,6 +18,12 @@ export function LocalAcpSection() {
   const [checking, setChecking] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [configured, setConfigured] = useState(false);
+  const [registryOpen, setRegistryOpen] = useState(false);
+  const action = useRef<AbortController | null>(null);
+  const commandField = useRef<HTMLInputElement>(null);
+  const begin = () => { if (action.current) return null; const controller = new AbortController(); action.current = controller; return controller; };
+  const finish = (controller: AbortController) => { if (action.current === controller) action.current = null; };
+  useEffect(() => () => action.current?.abort(), []);
   useEffect(() => {
     let alive = true;
     fetch('/api/runtime/acp-connection').then(async response => {
@@ -33,46 +40,56 @@ export function LocalAcpSection() {
     return () => { alive = false; };
   }, []);
   const save = async () => {
-    if (busy || locked) return;
+    if (locked) return;
+    const controller = begin(); if (!controller) return;
     setBusy(true); setNotice('Saving connection…');
     try {
-      const response = await fetch('/api/runtime/acp-connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: { name, command, args: args ? args.split('\n') : [], useOpenRouter } }) });
+      const response = await fetch('/api/runtime/acp-connection', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: { name, command, args: args ? args.split('\n') : [], useOpenRouter } }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not save connection.');
+      if (controller.signal.aborted) return;
       setSaved(true); setConfigured(true); setNotice('Saved. Choose Local ACP in the composer for a new conversation.');
       window.dispatchEvent(new Event('o8:acp-connection-changed'));
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not save connection.'); }
-    finally { setBusy(false); }
+    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : 'Could not save connection.'); }
+    finally { finish(controller); if (!controller.signal.aborted) setBusy(false); }
   };
   const dirty = () => { setSaved(false); setConfirmRemove(false); };
   const checkModels = async () => {
+    const controller = begin(); if (!controller) return;
     setChecking(true); setNotice('Starting the agent to check its connection…');
     try {
-      const response = await fetch('/api/orchestrator/backend-models?backend=acp&refresh=1');
+      const response = await fetch('/api/orchestrator/backend-models?backend=acp&refresh=1', { signal: controller.signal });
       const data = await response.json();
       if (!response.ok || data.error || !data.available) throw new Error(data.error || 'The agent could not connect. Check its command and sign-in.');
+      if (controller.signal.aborted) return;
       setNotice(data.total ? `Connected. The agent offers ${data.total} models in the composer.` : 'Connected. This agent uses its own default model.');
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not check the connection.'); }
-    finally { setChecking(false); }
+    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : 'Could not check the connection.'); }
+    finally { finish(controller); if (!controller.signal.aborted) setChecking(false); }
   };
   const remove = async () => {
+    const controller = begin(); if (!controller) return;
     setBusy(true);
     try {
-      const response = await fetch('/api/runtime/acp-connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: null }) });
+      const response = await fetch('/api/runtime/acp-connection', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ connection: null }) });
       if (!response.ok) throw new Error('Could not disconnect the agent.');
+      if (controller.signal.aborted) return;
       setConfigured(false); setSaved(false); setConfirmRemove(false); setCommand(''); setArgs('');
       setNotice('Disconnected for new conversations. Existing conversations keep their running agent.');
       window.dispatchEvent(new Event('o8:acp-connection-changed'));
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not disconnect.'); }
-    finally { setBusy(false); }
+    } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : 'Could not disconnect.'); }
+    finally { finish(controller); if (!controller.signal.aborted) setBusy(false); }
   };
   return <div style={{ marginTop: 20, color: 'var(--t-text)', fontSize: 12 }}>
     <p style={{ color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Connect an installed ACP agent for conversations. The agent manages its tools, sign-in, and permissions. Saving does not start it.</p>
-    <a href="https://agentclientprotocol.com/get-started/registry" target="_blank" rel="noreferrer" style={{ color: 'var(--t-accent)' }}>Browse ACP agents</a>
+    <RamsButton variant="ghost" disabled={loading || busy || checking || locked} onClick={() => setRegistryOpen(value => !value)}>Browse agents</RamsButton>
+    {registryOpen ? <AcpRegistryPicker onClose={() => { setRegistryOpen(false); queueMicrotask(() => commandField.current?.focus()); }} onChoose={connection => {
+      setName(connection.name); setCommand(connection.command); setArgs(connection.args.join('\n')); setUseOpenRouter(false);
+      setSaved(false); setRegistryOpen(false); setNotice('Prepared. Save this connection, then check it. Your current connection stays active until you save.');
+    }} /> : null}
     {locked ? <p>Controlled by O8_ACP_COMMAND in your environment.</p> : null}
-    <fieldset disabled={loading || busy || checking || locked} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 12 }}>
+    <fieldset disabled={loading || busy || checking || locked || registryOpen} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 12 }}>
       <label>Name<input style={fieldStyle} value={name} onChange={event => { setName(event.target.value); dirty(); }} /></label>
-      <label>Executable<input style={fieldStyle} value={command} placeholder="agent executable or full path" onChange={event => { setCommand(event.target.value); dirty(); }} /></label>
+      <label>Executable<input ref={commandField} style={fieldStyle} value={command} placeholder="agent executable or full path" onChange={event => { setCommand(event.target.value); dirty(); }} /></label>
       <label>Arguments, one per line<textarea style={{ ...fieldStyle, minHeight: 76 }} value={args} placeholder="acp" onChange={event => { setArgs(event.target.value); dirty(); }} /></label>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={useOpenRouter} onChange={event => { setUseOpenRouter(event.target.checked); dirty(); }} />Share the saved OpenRouter key with this agent</label>
       <p style={{ color: 'var(--t-text-muted)', margin: 0 }}>Use one literal argument per line. Keep secrets out of arguments. OpenRouter credentials are excluded unless you enable sharing.</p>

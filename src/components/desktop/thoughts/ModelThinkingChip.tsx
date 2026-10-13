@@ -59,7 +59,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp' | 'muse';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -131,6 +131,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     ],
   },
   { key: 'acp', label: 'Local ACP', options: [], searchable: true },
+  { key: 'muse', label: 'Muse Code', options: [], searchable: true },
 ];
 
 export interface ComposerModelCatalogue {
@@ -424,7 +425,7 @@ export function ModelThinkingChip({
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
-    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
+    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode' || activeBackend === 'muse'
       ? activeBackend
       : activeBackend === 'pi' ? 'o8' : 'claude',
   );

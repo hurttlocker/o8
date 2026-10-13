@@ -27,7 +27,7 @@ const nextConfig: NextConfig = {
   // better-sqlite3 is a native module. The Pi packages load Node built-ins
   // (node:sqlite, node:fs) through dynamic imports a bundler stubs out, so
   // Node loads them as published.
-  serverExternalPackages: ['better-sqlite3', '@earendil-works/pi-ai', '@earendil-works/pi-durable', '@earendil-works/chord'],
+  serverExternalPackages: ['better-sqlite3', '@earendil-works/pi-ai', '@earendil-works/pi-durable', '@earendil-works/chord', '@muse-code/sdk'],
   reactStrictMode: true,
   devIndicators: false,
   images: {

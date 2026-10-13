@@ -343,6 +343,13 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
     ],
   },
   'prime-agent': unknownEvidence('prime-agent', ['jsonl'], 'configured-provider'),
+  muse: {
+    ...unknownEvidence('muse', ['stdio-json-rpc', 'jsonl'], 'live-catalog'),
+    billingModes: ['unknown'],
+    sources: [internalSource('muse'), { id: 'muse-session-protocol', label: 'Muse Code session protocol',
+      url: 'https://dev.meta.ai/docs/muse-code', observedAt: '2026-10-13', maxAgeDays: 30,
+      confidence: 'reported', scope: 'runtime-upstream' }],
+  },
   hermes: {
     ...unknownEvidence('hermes', ['acp'], 'configured-provider'),
     sources: [
