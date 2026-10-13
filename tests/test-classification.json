@@ -4001,6 +4001,16 @@
       ]
     },
     {
+      "path": "tests/retirement-process-refusal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/retry-salvage-lock-reentry-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -13,6 +13,7 @@ import {
   type ProcessQuiescenceReceipt,
   type ProcessProbeReceipt,
 } from './process-quiescence';
+import { summarizeProcessProbeDetails } from './retirement-refusal-diagnostics';
 
 interface CommandReceipt {
   code: number;
@@ -146,12 +147,9 @@ function aggregateRunProbe(
       : 'clear';
   const relevant = receipts.filter((entry) => entry.receipt?.state === state);
   const pids = relevant.flatMap((entry) => entry.receipt?.pids ?? []);
-  const runIds = relevant.map((entry) => entry.runId).join(', ');
   const detail = state === 'clear'
     ? `All ${runProbes.length} retained owned runs are clear for ${primitive}.`
-    : state === 'live'
-      ? `Retained owned run evidence is live for ${primitive}: ${runIds}.`
-      : `Retained owned run evidence is uncertain for ${primitive}: ${runIds}.`;
+    : summarizeProcessProbeDetails(receipts.flatMap((entry) => entry.receipt?.state !== 'clear' && entry.receipt ? [entry.receipt] : []));
   return processProbe(primitive, state, detail, pids.length > 0 ? pids : undefined);
 }
 
