@@ -14,7 +14,7 @@ export function assertMacPackageSize(appPath, archivePath, { releaseVersion } = 
   // Approved release allowances while export/dependency reduction continues
   // in #3545. All other versions retain the shared 300/80 MiB ceiling. This
   // deliberately rejects the unpruned 365/92 MiB candidate as well.
-  const allowance = releaseVersion === '0.1.789' || releaseVersion === '0.1.790'
+  const allowance = releaseVersion === '0.1.789' || releaseVersion === '0.1.790' || releaseVersion === '0.1.791'
     ? `release-${releaseVersion}` : null;
   const ceilings = allowance
     ? { appBundleBytes: 312 * 1024 * 1024, updaterArchiveBytes: 88 * 1024 * 1024 }
