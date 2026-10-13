@@ -3578,6 +3578,14 @@
       ]
     },
     {
+      "path": "tests/preship-cleanup-safety.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/principal-authz.test.ts",
       "reasons": [
         "child-process",
@@ -4472,6 +4480,12 @@
       "path": "tests/task-pool-history-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/tauri-prebuild-profile.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {

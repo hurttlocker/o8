@@ -23,13 +23,14 @@ import { resolveReleaseConfig } from './lib/release-config.mjs';
 const root = process.cwd();
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
 const releaseConfig = resolveReleaseConfig(root);
-const ownedDataDir = !process.env.O8_DATA_DIR || !process.env.CORTEX_IDE_DATA_DIR
+const explicitDataDir = process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR;
+const ownedDataDir = !explicitDataDir
   ? mkdtempSync(join(tmpdir(), 'o8-tauri-build-data-'))
   : null;
 const env = {
   ...process.env,
-  O8_DATA_DIR: process.env.O8_DATA_DIR || ownedDataDir,
-  CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR || ownedDataDir,
+  O8_DATA_DIR: process.env.O8_DATA_DIR || explicitDataDir || ownedDataDir,
+  CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR || explicitDataDir || ownedDataDir,
 };
 if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
   env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = releaseConfig.clerkPublishableKey;
