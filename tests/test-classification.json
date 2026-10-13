@@ -930,6 +930,15 @@
       ]
     },
     {
+      "path": "src/lib/workspace/dependency-cache-acquisition-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "fixture-lifecycle",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/workspace/dependency-cache-retention-real-path.test.ts",
       "reasons": [
         "child-process",

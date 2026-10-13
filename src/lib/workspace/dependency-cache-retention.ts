@@ -9,6 +9,7 @@ import {
   captureWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity,
 } from '@/lib/worktree/materialization-identity';
+import { probeMetadataLockProcessIdentity, type MetadataLockProcessProbe } from '@/lib/worktree/metadata-lock-process-identity';
 import { measureDirectoryStorage } from '@/lib/worktree/storage-telemetry';
 import { purgeExactDirectory } from './exact-directory-purge';
 import { readExactChildFile, renameExactChildDirectory, retireExactChildFile, writeExactChildFile } from './exact-parent-operation';
@@ -46,6 +47,20 @@ interface CacheRecord {
   identity: WorktreeMaterializationIdentity;
   lastUsedAt: number;
   allocatedBytes: number | null;
+}
+
+interface CacheReservation {
+  schema: 'o8/dependency-cache-reservation/v1';
+  leaseId: string;
+  key: string;
+  manager: string;
+  cacheAuthorityId: string;
+  identity: WorktreeMaterializationIdentity;
+  cacheIdentity: WorktreeMaterializationIdentity;
+  pid: number;
+  ownerProcess: MetadataLockProcessProbe;
+  acquiredAt: number;
+  retentionState: 'active-or-unresolved-installer';
 }
 
 const MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];
@@ -154,16 +169,26 @@ export async function acquireDependencyCache(
   const managerRoot = path.join(managed, recipe.packageManager);
   const root = path.join(managerRoot, recipe.key);
   const cache = path.join(root, 'cache');
-  const leaseName = `${ACTIVE}${randomUUID()}`;
-  const identity = await withPacketLifecycleMutationLock(cacheLock(managed), async () => {
+  const leaseId = randomUUID();
+  const leaseName = `${ACTIVE}${leaseId}`;
+  const { identity, cacheIdentity } = await withPacketLifecycleMutationLock(cacheLock(managed), async () => {
     await assertCacheStoreBinding(managed);
     await ensurePrivateDirectory(managerRoot, managed);
     await ensurePrivateDirectory(root, managerRoot);
     await ensurePrivateDirectory(cache, root);
     const captured = await captureWorktreeMaterializationIdentity(root);
+    const cacheIdentity = await captureWorktreeMaterializationIdentity(cache);
+    const reservation: CacheReservation = {
+      schema: 'o8/dependency-cache-reservation/v1', leaseId, key: recipe.key, manager: recipe.packageManager,
+      cacheAuthorityId: recipe.cacheAuthorityId, identity: captured, cacheIdentity, pid: process.pid,
+      ownerProcess: await probeMetadataLockProcessIdentity(process.pid), acquiredAt: Date.now(),
+      retentionState: 'active-or-unresolved-installer',
+    };
+    // Publish identity and retention before installer use. Unknown birth evidence remains explicit.
     // Crashes retain the reservation: parent death or age cannot prove installer children stopped.
-    await writeExactChildFile(root, captured, path.join(root, leaseName), JSON.stringify({ pid: process.pid }), 0o600);
-    return captured;
+    await writeExactChildFile(root, captured, path.join(root, leaseName), JSON.stringify(reservation), 0o600);
+    await assertWorktreeMaterializationIdentity(cache, cacheIdentity);
+    return { identity: captured, cacheIdentity };
   });
   let released = false;
   return {
@@ -174,6 +199,7 @@ export async function acquireDependencyCache(
       released = true;
       return withPacketLifecycleMutationLock(cacheLock(managed), async () => {
         await assertWorktreeMaterializationIdentity(root, identity);
+        await assertWorktreeMaterializationIdentity(cache, cacheIdentity);
         await removeRecordFile(root, identity, leaseName);
         if (!(await readdir(root)).some(name => name.startsWith(ACTIVE))) {
           const storage = await measureDirectoryStorage(cache);
