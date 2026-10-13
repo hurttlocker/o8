@@ -1855,6 +1855,13 @@
       ]
     },
     {
+      "path": "tests/codex-discovery-readonly-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-config-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
