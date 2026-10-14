@@ -87,15 +87,17 @@ function assertUniversalDarwinArtifact(artifact) {
 }
 
 function cpuDarwinPlatforms(artifacts, universal, version, downloadBase) {
-  if (!Array.isArray(artifacts) || artifacts.length !== 2
-    || new Set(artifacts.map((artifact) => artifact.architecture)).size !== 2
-    || !['x86_64', 'arm64'].every((architecture) => artifacts.some((artifact) => artifact.architecture === architecture))) {
-    throw new Error('CPU packages require exactly one x86_64 and one arm64 artifact');
+  if (!Array.isArray(artifacts) || ![1, 2].includes(artifacts.length)
+    || new Set(artifacts.map((artifact) => artifact?.architecture)).size !== artifacts.length
+    || !artifacts.some((artifact) => artifact?.architecture === 'x86_64')
+    || artifacts.some((artifact) => !['x86_64', 'arm64'].includes(artifact?.architecture))) {
+    throw new Error('CPU packages require exactly one x86_64 artifact, optionally with one arm64 artifact');
   }
   const platforms = {};
   const uploadAssets = [];
   for (const architecture of ['x86_64', 'arm64']) {
     const artifact = artifacts.find((candidate) => candidate.architecture === architecture);
+    if (!artifact) continue;
     const identity = artifact.identity;
     if (identity?.kind !== 'macos-cpu-app' || identity.architectures?.length !== 1
       || identity.architectures[0] !== architecture
@@ -153,7 +155,7 @@ export function buildReleaseManifest({
   let cpuUploadAssets = [];
   if (darwinCpuArtifacts !== undefined) {
     const cpu = cpuDarwinPlatforms(darwinCpuArtifacts, darwinArtifact, version, downloadBase);
-    platforms = cpu.platforms;
+    platforms = { ...platforms, ...cpu.platforms };
     cpuUploadAssets = cpu.uploadAssets;
   }
 

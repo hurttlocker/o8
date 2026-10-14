@@ -177,8 +177,22 @@ describe('release updater manifest', () => {
     ]);
   });
 
+  it('routes Intel to its CPU package while Apple Silicon retains the universal signature and archive', () => {
+    const f = cpuPlan(['x86_64']);
+    const plan = buildReleaseManifest(f.options);
+    expect(plan.latestJson.platforms).toEqual({
+      'darwin-x86_64': { signature: 'x86_64-signature', url: 'https://example.test/v0.1.999/o8_x86_64.app.tar.gz' },
+      'darwin-aarch64': { signature: 'universal-signature', url: 'https://example.test/v0.1.999/o8.app.tar.gz' },
+    });
+    expect(plan.uploadArgs).toEqual([
+      ...f.bundle.macosAssets,
+      ...f.cpus.flatMap((cpu) => [cpu.dmgPath, cpu.archivePath, cpu.signaturePath]),
+    ]);
+    expect(plan.uploadArgs.some(path => path.includes('o8_arm64.'))).toBe(false);
+  });
+
   it.each([{ architectures: ['arm64'] }, { architectures: ['x86_64', 'x86_64'] }, { architectures: [] }] as Array<{ architectures: Array<'x86_64' | 'arm64'> }>)('rejects a partial or duplicate CPU set $architectures', ({ architectures }) => {
-    expect(() => buildReleaseManifest(cpuPlan(architectures).options)).toThrow('exactly one x86_64 and one arm64');
+    expect(() => buildReleaseManifest(cpuPlan(architectures).options)).toThrow('exactly one x86_64');
   });
 
   it('rejects a CPU artifact derived from another universal build', () => {

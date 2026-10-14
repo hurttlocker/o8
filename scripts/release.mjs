@@ -39,7 +39,7 @@ import {
   verifyMacosDmgMatchesApp,
   verifyUniversalMacUpdaterArchive,
 } from './lib/macos-release-artifacts.mjs';
-import { assertCpuPreparationCurrent } from './lib/macos-cpu-packages.mjs';
+import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
@@ -59,10 +59,7 @@ const PING_ALWAYS_RE = /\b(security|vulnerabilit|CVE|breaking change|breaking:|d
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const CHECKOUT_NATIVE_MODULES = ['better-sqlite3', 'node-pty'];
 const root = process.cwd();
-const cpuPackagesEnabled = process.env.O8_MACOS_CPU_PACKAGES === '1';
-if (process.env.O8_MACOS_CPU_PACKAGES && !['0', '1'].includes(process.env.O8_MACOS_CPU_PACKAGES)) {
-  throw new Error('O8_MACOS_CPU_PACKAGES must be 0 or 1');
-}
+const cpuArchitectures = macosCpuPackageArchitectures(process.env.O8_MACOS_CPU_PACKAGES);
 
 function runCheckoutNativeModuleGate(checkoutRoot) {
   const script = `
@@ -290,9 +287,9 @@ if (process.env.O8_PRESHIP_GATE_ENABLED === '1') {
 
 const signature = readFileSync(APP_SIG, 'utf8').trim();
 let darwinCpuArtifacts;
-if (cpuPackagesEnabled) {
+if (cpuArchitectures.length) {
   try {
-    darwinCpuArtifacts = ['x86_64', 'arm64'].map((architecture) => {
+    darwinCpuArtifacts = cpuArchitectures.map((architecture) => {
       const cpu = resolveMacosCpuArtifacts(root, version, architecture);
       assertCpuPreparationCurrent(root, version, architecture);
       const identity = verifyMacCpuUpdaterArchive(cpu.app, cpu.updaterArchive, architecture);

@@ -76,7 +76,7 @@ describe('CPU-specific macOS artifact boundaries', () => {
     expect(() => verifyMacCpuUpdaterArchive(app, archive, 'arm64')).toThrow('unsafe symlink');
   });
 
-  it.runIf(process.platform === 'darwin')('prepares both packages through the CLI without changing source resources or overwriting prior output', () => {
+  it.runIf(process.platform === 'darwin').each(['1', 'x86_64'])('prepares the selected %s packages through the CLI without changing source resources or overwriting prior output', (mode) => {
     const root = mkdtempSync(join(tmpdir(), 'o8-cpu-cli-'));
     roots.push(root);
     writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.1.999' }));
@@ -102,10 +102,13 @@ describe('CPU-specific macOS artifact boundaries', () => {
       '--entitlements', entitlements, '--sign', '-', source,
     ]);
     const original = readFileSync(join(source, 'Contents/MacOS/o8'));
-    const run = () => spawnSync(process.execPath, [script, '--root', root], { encoding: 'utf8', timeout: 30_000 });
+    const run = () => spawnSync(process.execPath, [script, '--root', root], {
+      encoding: 'utf8', timeout: 30_000, env: { ...process.env, O8_MACOS_CPU_PACKAGES: mode },
+    });
     const first = run();
     expect(first.status, first.stderr).toBe(0);
-    for (const arch of ['x86_64', 'arm64'] as const) {
+    const architectures = mode === 'x86_64' ? ['x86_64'] as const : ['x86_64', 'arm64'] as const;
+    for (const arch of architectures) {
       const paths = resolveMacosCpuArtifacts(root, '0.1.999', arch);
       expect(verifyMacCpuApp(paths.app, arch).architectures).toEqual([arch]);
       expect(readFileSync(join(paths.app, 'Contents/Resources/server/runtime.js'), 'utf8')).toBe('same runtime');
@@ -116,21 +119,23 @@ describe('CPU-specific macOS artifact boundaries', () => {
       ]);
       expect(verifyMacCpuDerivation(source, paths.app, arch).sharedResourcesSha256).toHaveLength(64);
     }
+    if (mode === 'x86_64') expect(existsSync(resolveMacosCpuArtifacts(root, '0.1.999', 'arm64').app)).toBe(false);
     expect(readFileSync(join(source, 'Contents/MacOS/o8'))).toEqual(original);
     const second = run();
     expect(second.status).toBe(1);
     expect(second.stderr).toContain('already exists');
     expect(readFileSync(join(source, 'Contents/MacOS/o8'))).toEqual(original);
     expect(dirname(resolveMacosCpuArtifacts(root, '0.1.999', 'arm64').app)).toContain('/cpu/arm64/macos');
-    const arm = resolveMacosCpuArtifacts(root, '0.1.999', 'arm64').app;
+    const rejectedArchitecture = mode === 'x86_64' ? 'x86_64' : 'arm64';
+    const arm = resolveMacosCpuArtifacts(root, '0.1.999', rejectedArchitecture).app;
     const emptyEntitlements = join(root, 'empty-entitlements.plist');
     writeFileSync(emptyEntitlements, '<plist><dict/></plist>');
     execFileSync('/usr/bin/codesign', [
       '--force', '--preserve-metadata=identifier,requirements,flags,runtime',
       '--entitlements', emptyEntitlements, '--sign', '-', join(arm, 'Contents/MacOS/speech_recognizer'),
     ]);
-    expect(() => verifyMacCpuDerivation(source, arm, 'arm64')).toThrow('signing policy differs');
-    const rejectedSign = spawnSync(process.execPath, [join(process.cwd(), 'scripts/sign-and-notarize.mjs'), '--architecture', 'arm64'], {
+    expect(() => verifyMacCpuDerivation(source, arm, rejectedArchitecture)).toThrow('signing policy differs');
+    const rejectedSign = spawnSync(process.execPath, [join(process.cwd(), 'scripts/sign-and-notarize.mjs'), '--architecture', rejectedArchitecture], {
       cwd: root, encoding: 'utf8', timeout: 30_000,
       env: {
         ...process.env, APPLE_SIGNING_IDENTITY: 'fixture', APPLE_ID: 'fixture.invalid',
@@ -140,10 +145,10 @@ describe('CPU-specific macOS artifact boundaries', () => {
     expect(rejectedSign.status, rejectedSign.stderr).toBe(1);
     expect(rejectedSign.stderr).toContain('signing policy differs');
     expect(rejectedSign.stdout).not.toContain('submitting to Apple');
-    expect(existsSync(resolveMacosCpuArtifacts(root, '0.1.999', 'arm64').updaterSignature)).toBe(false);
+    expect(existsSync(resolveMacosCpuArtifacts(root, '0.1.999', rejectedArchitecture).updaterSignature)).toBe(false);
     const changed = readFileSync(join(arm, 'Contents/MacOS/o8'));
     changed[4096] ^= 1;
     writeFileSync(join(arm, 'Contents/MacOS/o8'), changed);
-    expect(() => verifyMacCpuDerivation(source, arm, 'arm64')).toThrow('executable payload differs');
+    expect(() => verifyMacCpuDerivation(source, arm, rejectedArchitecture)).toThrow('executable payload differs');
   });
 });

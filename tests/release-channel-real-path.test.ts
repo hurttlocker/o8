@@ -218,10 +218,10 @@ function expectNoPublicationMutation(f: ReturnType<typeof fixture>) {
   expect(existsSync(join(f.bundle, 'macos', 'latest.json'))).toBe(false);
 }
 
-function addCpuFixtures(f: ReturnType<typeof fixture>) {
+function addCpuFixtures(f: ReturnType<typeof fixture>, architectures: Array<'x86_64' | 'arm64'> = ['x86_64', 'arm64']) {
   const source = join(f.bundle, 'macos/o8.app');
   const dmgApps: Record<string, string> = {};
-  for (const architecture of ['x86_64', 'arm64'] as const) {
+  for (const architecture of architectures) {
     const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
     mkdirSync(join(cpu.app, '..'), { recursive: true });
     cpSync(source, cpu.app, { recursive: true, preserveTimestamps: true });
@@ -239,7 +239,7 @@ function addCpuFixtures(f: ReturnType<typeof fixture>) {
   }
   const allArchives = [
     [join(f.bundle, 'macos/o8.app.tar.gz'), join(f.bundle, 'macos/o8.app.tar.gz.sig')],
-    ...(['x86_64', 'arm64'] as const).map(architecture => {
+    ...architectures.map(architecture => {
       const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
       return [cpu.updaterArchive, cpu.updaterSignature];
     }),
@@ -256,6 +256,54 @@ afterEach(() => {
 });
 
 describe('release channels through the publication entry point', () => {
+  it.each([
+    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
+  ])('publishes Intel-only delivery through the $channel fixture without requiring an arm64 package', ({ channel, version, manifest }) => {
+    const f = fixture(version);
+    const env = { ...addCpuFixtures(f, ['x86_64']), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const result = run(f, channel, [], env);
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'));
+    expect(plan.platforms['darwin-x86_64'].url).toMatch(/o8_x86_64\.app\.tar\.gz$/);
+    expect(plan.platforms['darwin-aarch64']).toEqual({
+      url: `https://github.com/hurttlocker/o8-releases/releases/download/v${version}/o8.app.tar.gz`,
+      signature: readFileSync(join(f.bundle, 'macos/o8.app.tar.gz.sig'), 'utf8').trim(),
+    });
+    const uploads = effects(f).filter(c => c.name === 'gh' && ['create', 'upload'].includes(c.args[1]));
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8.app.tar.gz')))).toBe(true);
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8_x86_64.app.tar.gz')))).toBe(true);
+    expect(uploads.some(c => c.args.some(arg => arg.includes('/cpu/arm64/')))).toBe(false);
+    if (channel === 'preview') expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+  });
+
+  it('does not route or upload an unselected arm64 package during Intel-only delivery', () => {
+    const f = fixture('0.1.741');
+    const env = { ...addCpuFixtures(f), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const arm = resolveMacosCpuArtifacts(f.root, f.version, 'arm64');
+    writeFileSync(arm.updaterSignature, 'unaccepted arm64 package');
+    const result = run(f, 'stable', [], env);
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos/latest.json'), 'utf8'));
+    expect(plan.platforms['darwin-aarch64'].url).toMatch(/\/o8\.app\.tar\.gz$/);
+    expect(effects(f).some(c => c.args.some(arg => arg.includes('/cpu/arm64/')))).toBe(false);
+  });
+
+  it.each(['missing', 'wrong-cpu', 'changed-runtime', 'bad-signature', 'not-notarized'])('refuses Intel-only publication for %s before any publication write', (failure) => {
+    const f = fixture('0.1.741');
+    const env: Record<string, string> = { ...addCpuFixtures(f, ['x86_64']), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const cpu = resolveMacosCpuArtifacts(f.root, f.version, 'x86_64');
+    if (failure === 'missing') rmSync(cpu.updaterArchive);
+    if (failure === 'wrong-cpu') writeFileSync(join(cpu.app, 'Contents/MacOS/speech-local'), thinMachO(CPU_TYPE_ARM64));
+    if (failure === 'changed-runtime') writeFileSync(join(cpu.app, 'Contents/runtime.txt'), 'changed runtime');
+    if (failure === 'bad-signature') writeFileSync(cpu.updaterSignature, 'invalid signature');
+    if (failure === 'not-notarized') env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY = '1';
+    const result = run(f, 'stable', [], env);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('CPU package verification failed');
+    expectNoPublicationMutation(f);
+  });
+
   it.each([
     { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
     { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },

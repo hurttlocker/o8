@@ -13,6 +13,13 @@ import {
   verifyUniversalMacApp,
 } from './macos-release-artifacts.mjs';
 
+export function macosCpuPackageArchitectures(mode) {
+  if (mode === undefined || mode === '' || mode === '0') return [];
+  if (mode === 'x86_64') return ['x86_64'];
+  if (mode === '1') return [...MACOS_RELEASE_ARCHITECTURES];
+  throw new Error('O8_MACOS_CPU_PACKAGES must be 0, 1 or x86_64');
+}
+
 function inspectSignature(path, architecture, options) {
   const result = spawnSync('/usr/bin/codesign', ['-d', '--arch', architecture, ...options, path], {
     encoding: 'utf8', timeout: 30_000,
@@ -76,7 +83,9 @@ export function verifyMacCpuDerivation(universalApp, cpuApp, architecture) {
   return { ...identity, sharedResourcesSha256 };
 }
 
-export function prepareMacosCpuPackages(root, version) {
+export function prepareMacosCpuPackages(root, version, mode = '1') {
+  const architectures = macosCpuPackageArchitectures(mode);
+  if (!architectures.length) throw new Error('CPU preparation requires a selected architecture');
   if (process.platform !== 'darwin') throw new Error('macOS CPU preparation requires macOS');
   const universal = resolveMacosReleaseArtifacts(root, version);
   verifyUniversalMacApp(universal.app);
@@ -93,7 +102,7 @@ export function prepareMacosCpuPackages(root, version) {
   // Failed preparation is retained in its unique staging directory. Never
   // overwrite or retire another preparation's artifacts.
   const identities = [];
-  for (const architecture of MACOS_RELEASE_ARCHITECTURES) {
+  for (const architecture of architectures) {
     const app = join(staging, architecture, 'macos', 'o8.app');
     mkdirSync(dirname(app), { recursive: true });
     execFileSync('/usr/bin/ditto', [universal.app, app], { stdio: 'pipe' });
@@ -117,7 +126,7 @@ export function prepareMacosCpuPackages(root, version) {
   // A concurrent preparation may have completed since the first existence check.
   if (lstatSync(destination, { throwIfNoEntry: false })) throw new Error('CPU package output already exists');
   renameSync(staging, destination);
-  return MACOS_RELEASE_ARCHITECTURES.map((architecture, index) => ({
+  return architectures.map((architecture, index) => ({
     ...resolveMacosCpuArtifacts(root, version, architecture), identity: identities[index],
   }));
 }

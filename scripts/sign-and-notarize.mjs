@@ -34,7 +34,7 @@ import {
   verifyUniversalMacApp,
   verifyUniversalMacUpdaterArchive,
 } from './lib/macos-release-artifacts.mjs';
-import { assertCpuPreparationCurrent, prepareMacosCpuPackages } from './lib/macos-cpu-packages.mjs';
+import { assertCpuPreparationCurrent, macosCpuPackageArchitectures, prepareMacosCpuPackages } from './lib/macos-cpu-packages.mjs';
 
 const args = process.argv.slice(2);
 let architecture;
@@ -44,9 +44,7 @@ if (args.length) {
   }
   architecture = assertMacosArchitecture(args[1]);
 }
-if (process.env.O8_MACOS_CPU_PACKAGES && !['0', '1'].includes(process.env.O8_MACOS_CPU_PACKAGES)) {
-  throw new Error('O8_MACOS_CPU_PACKAGES must be 0 or 1');
-}
+const cpuArchitectures = macosCpuPackageArchitectures(process.env.O8_MACOS_CPU_PACKAGES);
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -309,9 +307,9 @@ stapleAndValidate(DMG);
 
 console.log('[sign-and-notarize] done. app and DMG are notarized; now run scripts/release.mjs to publish');
 
-if (!architecture && process.env.O8_MACOS_CPU_PACKAGES === '1') {
-  prepareMacosCpuPackages(root, version);
-  for (const cpu of ['x86_64', 'arm64']) {
+if (!architecture && cpuArchitectures.length) {
+  prepareMacosCpuPackages(root, version, process.env.O8_MACOS_CPU_PACKAGES);
+  for (const cpu of cpuArchitectures) {
     execFileSync(process.execPath, [join(root, 'scripts/sign-and-notarize.mjs'), '--architecture', cpu], {
       cwd: root, stdio: 'inherit', env: process.env,
     });

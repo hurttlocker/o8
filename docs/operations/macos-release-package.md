@@ -31,8 +31,10 @@ and import checks still apply.
 ## CPU-specific packages in development
 
 CPU delivery is off by default. [#3646](https://github.com/hurttlocker/o8/issues/3646)
-tracks signed-package and installed update acceptance on Intel and Apple Silicon.
-Do not enable this mode for a release until both acceptance records exist.
+tracks signed-package and installed update acceptance. Intel delivery can be
+accepted separately while Apple Silicon remains on the universal package.
+[#3656](https://github.com/hurttlocker/o8/issues/3656) tracks Apple Silicon
+installed acceptance before enabling a dedicated arm64 package.
 
 Both CPU apps come from the same final universal app. Only the four native
 executables are thinned. A derivation receipt binds the source bundle; comparison
@@ -46,22 +48,37 @@ For an unsigned development preparation in a release checkout:
 node scripts/macos-cpu-packages.mjs
 ```
 
+Set `O8_MACOS_CPU_PACKAGES=x86_64` for Intel-only preparation. Without a
+selection, this development command prepares both CPU copies.
 The output is under the universal bundle's `cpu/x86_64` and `cpu/arm64`
 directories. It is not an installer or accepted release. Preparation does not
 change the universal app, start a server or launch a model.
 
-After installed acceptance and a separately approved release, the normal ship
-entry point can build all three distributions:
+After Intel installed acceptance and a separately approved release, the normal
+ship entry point can build universal and Intel distributions:
+
+```sh
+O8_MACOS_CPU_PACKAGES=x86_64 TAR_WRITER_OPTIONS=gzip:compression-level=9 npm run ship
+```
+
+In this mode, `darwin-x86_64` uses the Intel archive and its signature, while
+`darwin-aarch64` keeps the universal archive and signature. No arm64 package
+is required, signed or published. Unselected output is never included in the
+release. Each selected package must pass all existing integrity gates;
+an invalid or missing Intel package stops publication.
+
+Only after installed acceptance on both CPUs and a separately approved release,
+the normal ship entry point can build all three distributions:
 
 ```sh
 O8_MACOS_CPU_PACKAGES=1 TAR_WRITER_OPTIONS=gzip:compression-level=9 npm run ship
 ```
 
-The signing pass notarizes the universal app first, derives both CPU copies,
-and signs and notarizes each copy and installer. It preserves sidecar
+The signing pass notarizes the universal app first, derives the selected CPU
+copies, and signs and notarizes each selected copy and installer. It preserves sidecar
 entitlements, signing requirements and runtime flags. Unchanged addon binaries
 retain their signatures. All archive contents, updater signatures, installer
-contents, native prebuilds and notarization tickets must verify before either
+contents, native prebuilds and notarization tickets must verify before a selected
 CPU entry can be published. A missing or mismatched package stops publication.
 
 The updater maps `darwin-x86_64` to `o8_x86_64.app.tar.gz` and
@@ -72,5 +89,5 @@ No website download selection or saved user setting changes in this mode.
 
 Installed acceptance must cover first launch, update from universal to CPU
 packages, update back to universal, relaunch/Dock behavior, workers, terminals,
-settings, voice sidecars and native addon loading on each CPU. Static slice or
+settings, voice sidecars and native addon loading on each selected CPU. Static slice or
 signature checks cannot substitute for these checks.

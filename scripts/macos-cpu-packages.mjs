@@ -11,7 +11,7 @@ try {
   const root = resolve(args[1] || process.cwd());
   const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   console.log(JSON.stringify({
-    packages: prepareMacosCpuPackages(root, version),
+    packages: prepareMacosCpuPackages(root, version, process.env.O8_MACOS_CPU_PACKAGES ?? '1'),
     acceptance: 'prepared only; unsigned and unpublished',
   }, null, 2));
 } catch (error) {
