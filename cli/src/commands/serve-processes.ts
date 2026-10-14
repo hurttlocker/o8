@@ -155,7 +155,8 @@ export function sameServeGeneration(
   current: { pid?: number; generation?: string; startedAt?: string } | null,
 ): boolean {
   return current !== null && current.pid === expected.pid
-    && (expected.generation ? current.generation === expected.generation : current.startedAt === expected.startedAt);
+    && current.generation === expected.generation
+    && (expected.generation !== undefined || current.startedAt === expected.startedAt);
 }
 
 export function mergeServeClaims(...sets: Array<ServeProcessClaim[] | undefined>): ServeProcessClaim[] | undefined {

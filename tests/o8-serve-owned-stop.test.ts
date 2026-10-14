@@ -125,15 +125,15 @@ describe.skipIf(process.platform === 'win32')('serve stop process ownership entr
     expect(JSON.parse(readFileSync(join(f.dir, 'serve-state.json'), 'utf8')).pid).toBe(f.state.pid);
   }, 25_000);
 
-  it('does not overwrite or delete a successor published by a retiring legacy daemon', async () => {
+  it.each([false, true])('does not overwrite or delete a successor generation (same PID: %s)', async (samePid) => {
     const f = await fixture(false, 'successor');
     const next = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
     children.push(next); pids.add(next.pid!);
-    const successor = { ...f.state, pid: next.pid, generation: 'successor-generation', startedAt: 'successor' };
+    const successor = { ...f.state, pid: samePid ? f.state.pid : next.pid, generation: 'successor-generation', startedAt: samePid ? f.state.startedAt : 'successor' };
     writeFileSync(join(f.dir, 'successor.json'), JSON.stringify(successor));
     const result = await stop(f.dir);
     expect(result.code, 'stale stop must refuse successor cleanup').not.toBe(0);
-    expect(readFileSync(join(f.dir, 'serve.pid'), 'utf8')).toBe(String(next.pid));
+    expect(readFileSync(join(f.dir, 'serve.pid'), 'utf8')).toBe(String(successor.pid));
     expect(JSON.parse(readFileSync(join(f.dir, 'serve-state.json'), 'utf8'))).toEqual(successor);
     expect(alive(next.pid!)).toBe(true);
   }, 25_000);
