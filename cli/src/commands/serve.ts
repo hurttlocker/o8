@@ -540,12 +540,24 @@ async function stopServe(mode: OutputMode, report = true): Promise<number> {
 }
 
 async function restartServe(mode: OutputMode): Promise<number> {
+  const requestedMode = validateReviewMode();
   const paths = servePaths();
   const state = readState(paths);
   const supervisorPid = readServeSupervisorPid(paths.stateFile);
   if (supervisorPid && processAlive(supervisorPid)) {
-    const previousPid = readOwnerPid(paths) ?? state?.pid ?? null;
-    process.kill(supervisorPid, 'SIGHUP');
+    const admitted = await withServeOperation(paths.dataDir, async () => withServeStateMutation(paths.stateFile, () => {
+      const current = readState(paths);
+      if (!state || !sameServeGeneration(state, current) || current?.supervisorPid !== supervisorPid || current.shutdownOwner) {
+        throw new CliError('serve_restart_conflict', 'Runtime ownership changed before restart admission.', EXIT.CONFLICT);
+      }
+      const reviewMode = current.reviewMode ?? 'automatic';
+      if (process.env.O8_REVIEW_MODE !== undefined && requestedMode !== reviewMode) {
+        throw new CliError('serve_review_mode_change_requires_stop', 'Stop the supervised profile before starting it with a different review mode.', EXIT.CONFLICT);
+      }
+      const previousPid = readOwnerPid(paths) ?? current.pid;
+      process.kill(supervisorPid, 'SIGHUP');
+      return { previousPid, reviewMode };
+    }));
     const restarted = await waitForSupervisorRestart({
       supervisorPid,
       timeoutMs: START_TIMEOUT_MS,
@@ -555,11 +567,14 @@ async function restartServe(mode: OutputMode): Promise<number> {
       readReadyState: async () => {
         const pid = readOwnerPid(paths);
         const current = readState(paths);
-        if (!pid || pid === previousPid || current?.pid !== pid) return null;
+        if (!pid || pid === admitted.previousPid || current?.pid !== pid) return null;
         if (current.supervisorPid !== supervisorPid || current.status !== 'ready') return null;
         return await apiIsReady(current.apiPort) && await portAcceptsConnections(current.wsPort) ? current : null;
       },
     });
+    if ((restarted.reviewMode ?? 'automatic') !== admitted.reviewMode) {
+      throw new CliError('serve_review_mode_mismatch', 'The restarted profile did not retain its admitted review mode.', EXIT.CONFLICT);
+    }
     outputServeState(mode, restarted, true, true);
     return EXIT.OK;
   }
