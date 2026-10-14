@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { Socket } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { withServeOperation, withServeStateMutation } from './serve-processes.js';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
 import { printHumanKv, printJson, type OutputMode } from '../output.js';
@@ -44,27 +45,35 @@ export async function renewServeToken(mode: OutputMode): Promise<number> {
   if (!existsSync(join(dataDir, 'serve-instance-id')) || !existsSync(tokenPath) || !lstatSync(tokenPath).isFile()) {
     refused('An existing headless profile with a regular token file is required.');
   }
-  const pidPath = join(dataDir, 'serve.pid');
-  const statePath = join(dataDir, 'serve-state.json');
-  if (existsSync(statePath)) refused('Retained runtime state requires ownership reconciliation before renewal.');
-  try { writeFileSync(pidPath, String(process.pid), { flag: 'wx', mode: 0o600 }); } catch {
-    refused('The profile has an owner or cannot be exclusively locked.');
-  }
-  const temporary = join(dataDir, `.ws-token-renew-${process.pid}-${randomBytes(8).toString('hex')}`);
-  try {
-    if (existsSync(statePath)) refused('Runtime state appeared during renewal.');
-    await assertPortStopped(join(dataDir, 'api-port'));
-    await assertPortStopped(join(dataDir, 'ws-port'));
-    if (existsSync(statePath) || readFileSync(pidPath, 'utf8') !== String(process.pid)) {
-      refused('Profile ownership changed during renewal.');
+  return withServeOperation(dataDir, async () => {
+    const pidPath = join(dataDir, 'serve.pid');
+    const statePath = join(dataDir, 'serve-state.json');
+    withServeStateMutation(statePath, () => {
+      if (existsSync(statePath)) refused('Retained runtime state requires ownership reconciliation before renewal.');
+      try { writeFileSync(pidPath, String(process.pid), { flag: 'wx', mode: 0o600 }); } catch {
+        refused('The profile has an owner or cannot be exclusively locked.');
+      }
+    });
+    const temporary = join(dataDir, `.ws-token-renew-${process.pid}-${randomBytes(8).toString('hex')}`);
+    try {
+      if (existsSync(statePath)) refused('Runtime state appeared during renewal.');
+      await assertPortStopped(join(dataDir, 'api-port'));
+      await assertPortStopped(join(dataDir, 'ws-port'));
+      withServeStateMutation(statePath, () => {
+        if (existsSync(statePath) || readFileSync(pidPath, 'utf8') !== String(process.pid)) {
+          refused('Profile ownership changed during renewal.');
+        }
+        writeFileSync(temporary, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+        renameSync(temporary, tokenPath);
+      });
+      if (mode.human) printHumanKv([['renewed', 'true']]);
+      else printJson({ schema: 'o8/cli/serve-token-renewal/v1', renewed: true });
+      return EXIT.OK;
+    } finally {
+      rmSync(temporary, { force: true });
+      withServeStateMutation(statePath, () => {
+        if (existsSync(pidPath) && readFileSync(pidPath, 'utf8') === String(process.pid)) rmSync(pidPath);
+      });
     }
-    writeFileSync(temporary, randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
-    renameSync(temporary, tokenPath);
-    if (mode.human) printHumanKv([['renewed', 'true']]);
-    else printJson({ schema: 'o8/cli/serve-token-renewal/v1', renewed: true });
-    return EXIT.OK;
-  } finally {
-    rmSync(temporary, { force: true });
-    if (existsSync(pidPath) && readFileSync(pidPath, 'utf8') === String(process.pid)) rmSync(pidPath);
-  }
+  });
 }

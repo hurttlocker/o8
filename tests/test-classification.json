@@ -3254,7 +3254,8 @@
       "path": "tests/o8-serve-token-renewal.test.ts",
       "reasons": [
         "child-process",
-        "network-listener"
+        "network-listener",
+        "process-signal"
       ]
     },
     {

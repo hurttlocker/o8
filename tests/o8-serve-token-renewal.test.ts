@@ -1,9 +1,10 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeAll, expect, it } from 'vitest';
+import { probeMetadataLockProcessIdentity } from '../src/lib/worktree/metadata-lock-process-identity';
 
 const root = resolve(import.meta.dirname, '..');
 const cli = join(root, 'cli/dist/o8.mjs');
@@ -55,3 +56,47 @@ it('refuses a listening runtime even without a serve owner file', async () => {
     expect(readFileSync(join(dir, 'ws-token'), 'utf8')).toBe('fixture-original-token');
   } finally { await new Promise<void>((done) => server.close(() => done())); }
 });
+
+it.skipIf(process.platform === 'win32')('refuses renewal while a stop owns the profile even after legacy state files disappear', async () => {
+  const dir = fixture();
+  const marker = join(dir, 'term-observed');
+  const child = spawn(process.execPath, ['-e', `
+    const {spawn}=require('node:child_process'); const fs=require('node:fs');
+    process.on('SIGTERM',()=>{
+      fs.rmSync(${JSON.stringify(join(dir, 'serve.pid'))},{force:true});
+      fs.rmSync(${JSON.stringify(join(dir, 'serve-state.json'))},{force:true});
+      fs.writeFileSync(${JSON.stringify(marker)},'1'); process.exit(0);
+    });
+    const leaf=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});process.send('ready');setInterval(()=>{},1000)"],{detached:true,stdio:['ignore','ignore','ignore','ipc']});
+    leaf.once('message',()=>process.send({leaf:leaf.pid}));
+    setInterval(()=>{},1000);
+  `], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  const leaf = await new Promise<number>((done) => child.once('message', (m) => done((m as {leaf:number}).leaf)));
+  try {
+    const probe = await probeMetadataLockProcessIdentity(child.pid!);
+    if (probe.state !== 'live') throw new Error('Missing fixture birth identity');
+    writeFileSync(join(dir, 'serve.pid'), String(child.pid));
+    writeFileSync(join(dir, 'serve-state.json'), JSON.stringify({schema:'o8/serve-state/v1',pid:child.pid,
+      generation:'fixture-generation',processIdentity:probe.identity,children:[],status:'ready',startedAt:'fixture'}));
+    const stopped = new Promise<number>((done) => {
+      execFile(process.execPath, [cli, 'serve', 'stop'], {
+        cwd: dir, env: { ...process.env, O8_DATA_DIR: dir, CORTEX_IDE_DATA_DIR: dir }, timeout: 15_000,
+      }, (error) => done(error ? Number(error.code) || 1 : 0));
+    });
+    const deadline = Date.now() + 8_000;
+    while (!existsSync(marker) && Date.now() < deadline) await new Promise((done) => setTimeout(done, 20));
+    const result = await renew(dir);
+    const stopCode = await stopped;
+    expect(existsSync(marker)).toBe(true);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain('serve_operation_busy');
+    expect(stopCode).toBe(0);
+    expect(readFileSync(join(dir, 'ws-token'), 'utf8')).toBe('fixture-original-token');
+  } finally {
+    try { process.kill(leaf, 'SIGKILL'); } catch {}
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      child.kill('SIGKILL'); await exited;
+    }
+  }
+}, 25_000);
