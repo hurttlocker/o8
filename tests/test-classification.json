@@ -3805,8 +3805,10 @@
       "path": "tests/release-build-cache.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli",
-        "native-build"
+        "native-build",
+        "process-signal"
       ]
     },
     {

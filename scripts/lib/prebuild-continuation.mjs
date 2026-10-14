@@ -66,7 +66,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
     try {
       identity = collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions);
       cacheSource = identity.source;
-      restore = await restoreReleaseBuildCache(root, cachePhase, { cacheRoot, identity });
+      restore = await restoreReleaseBuildCache(root, cachePhase, { cacheRoot, identity, runId: cacheRunId });
     } catch (error) {
       if (isReleaseBuildCacheSafetyError(error)) throw error;
       restore = {
@@ -92,6 +92,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
       identity = identity ?? collectReleaseBuildCacheIdentity(root, cachePhase, identityOptions);
       capture = await captureReleaseBuildCache(root, cachePhase, {
         cacheRoot,
+        runId: cacheRunId,
         identity,
         buildDurationMs,
       });
@@ -153,7 +154,7 @@ export async function runPrebuild({ runBuild, canReuse }) {
   } finally {
     if (ownsCacheRun) {
       try {
-        const finalized = finalizeReleaseBuildCacheReceipt(cacheRoot, cacheRunId, {
+        const finalized = await finalizeReleaseBuildCacheReceipt(cacheRoot, cacheRunId, {
           outcome: cacheOutcome,
           source: cacheSource,
           buildDurationMs: Date.now() - prebuildStartedAt,

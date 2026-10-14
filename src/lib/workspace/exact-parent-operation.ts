@@ -6,7 +6,6 @@ import { promisify } from 'node:util';
 import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
-import { bindExactWorkspaceClaimCreator } from './exact-workspace-claim-state';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +30,41 @@ function requireChildName(name) {
     throw new Error('Exact parent operation refused an invalid child name.');
   }
 }
-if (operation.kind === 'write') {
+if (operation.kind === 'promote') {
+  requireChildName(operation.source);
+  requireChildName(operation.destination);
+  function parent(expected) {
+    const stat = fs.lstatSync(expected.canonicalPath);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.device
+      || stat.ino !== expected.inode || fs.realpathSync(expected.canonicalPath) !== expected.canonicalPath) {
+      throw new Error('Exact promotion refused a changed parent identity.');
+    }
+  }
+  parent(operation.sourceParent);
+  parent(operation.destinationParent);
+  if (operation.sourceParent.device !== operation.destinationParent.device) {
+    throw new Error('Exact promotion refused a cross-device transfer.');
+  }
+  const destination = require('node:path').join(operation.destinationParent.canonicalPath, operation.destination);
+  try {
+    fs.lstatSync(destination);
+    throw new Error('Exact promotion refused an occupied destination.');
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const source = fs.lstatSync(operation.source);
+  if (source.dev !== operation.device || source.ino !== operation.inode
+    || kindOf(source) !== operation.entryKind || (source.isFile() && source.nlink !== 1)) {
+    throw new Error('Exact promotion refused a changed source identity.');
+  }
+  parent(operation.sourceParent);
+  parent(operation.destinationParent);
+  fs.renameSync(operation.source, destination);
+  parent(operation.sourceParent);
+  parent(operation.destinationParent);
+  const moved = fs.lstatSync(destination);
+  if (moved.dev !== operation.device || moved.ino !== operation.inode || kindOf(moved) !== operation.entryKind) {
+    throw new Error('Exact promotion moved an unexpected identity.');
+  }
+} else if (operation.kind === 'write') {
   requireChildName(operation.name);
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
   const fd = fs.openSync(operation.name, flags, operation.mode);
@@ -326,6 +359,7 @@ export async function createExactChildDirectoryWithReceipt(
   beforeClaimCas?: () => Promise<void>,
   mode = 0o700,
 ): Promise<{ device: number; inode: number }> {
+  const { bindExactWorkspaceClaimCreator } = await import('./exact-workspace-claim-state');
   const operation = {
     kind: 'mkdir-held',
     name: childName(parentPath, directoryPath),
@@ -413,6 +447,23 @@ export async function createExactChildDirectoryWithReceipt(
     child.stdin.end('receipt-published\n');
     await closed;
   }
+}
+
+/** Captured source cwd and checked destination parent; not an atomic no-replace syscall. */
+export async function promoteExactChild(
+  sourceParent: WorktreeMaterializationIdentity,
+  destinationParent: WorktreeMaterializationIdentity,
+  sourcePath: string,
+  destinationPath: string,
+  identity: { device: number; inode: number },
+  entryKind: 'file' | 'directory',
+): Promise<void> {
+  await runExactParentOperation(sourceParent.canonicalPath, sourceParent, {
+    kind: 'promote', sourceParent, destinationParent,
+    source: childName(sourceParent.canonicalPath, sourcePath),
+    destination: childName(destinationParent.canonicalPath, destinationPath),
+    device: identity.device, inode: identity.inode, entryKind,
+  });
 }
 
 export async function renameExactChildDirectory(
