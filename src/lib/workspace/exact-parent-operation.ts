@@ -96,7 +96,8 @@ if (operation.kind === 'promote') {
     phase: 'created', device: created.dev, inode: created.ino,
   }) + '\n');
   if (readSignal() !== 'claim') process.exit(0);
-  const Database = require(operation.claimAuthority.sqliteModulePath);
+  const runtimeRequire = require('node:module').createRequire(operation.claimAuthority.sqliteModuleAnchor);
+  const Database = runtimeRequire('better-sqlite3');
   const sqlite = new Database(operation.claimAuthority.databasePath);
   try {
     sqlite.pragma('busy_timeout = 5000');
@@ -348,7 +349,7 @@ export async function createExactChildDirectoryWithReceipt(
   parentIdentity: WorktreeMaterializationIdentity,
   directoryPath: string,
   claimAuthority: {
-    sqliteModulePath: string;
+    sqliteModuleAnchor: string;
     databasePath: string;
     repositoryPath: string;
     worktreeId: string;

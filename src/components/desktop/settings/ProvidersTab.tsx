@@ -11,7 +11,7 @@ import { CliUpdatePrompt } from './CliUpdatePrompt';
 import { LocalAcpSection } from './LocalAcpSection';
 import { LocalModelsContent } from './LocalModelsTab';
 import { ModelDefaultsContent } from './ModelsTab';
-import { OpenRouterModelsSection } from './OpenRouterModelsSection';
+import { OpenRouterProviderPanel } from './OpenRouterConnectionCard';
 import { ProviderRuntimeDetails, providerToolStatus, type ProviderTool } from './ProviderRuntimeDetails';
 
 function itemMark(item: ProviderItem): ProviderMark {
@@ -162,7 +162,7 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
           {item.keyId ? <>
             <h3 data-settings-section={item.id === selected && section === 'Provider keys' ? section : `${item.label} key`} style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text-secondary)' }}>Environment & API key</h3>
             <ApiKeysProviderList providerId={item.keyId} />
-            {item.keyId === 'openrouter' ? <OpenRouterModelsSection /> : null}
+            {item.keyId === 'openrouter' ? <OpenRouterProviderPanel /> : null}
             <p data-settings-section={item.id === selected && section === 'Key storage' ? section : `${item.label} key storage`} style={{ fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.6 }}>Keys use the app’s encrypted store. Runtime environment variables remain managed by each CLI.</p>
           </> : null}
           {item.id === 'chatgpt' ? <ChatGPTPlanConnection /> : null}

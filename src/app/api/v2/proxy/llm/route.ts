@@ -35,6 +35,7 @@ import { createProviderToolStream, type AnthropicUsageTotals } from './provider-
 import { createGoogleToolResponseStream } from './google-native-tools';
 import { streamOpenRouterFallback } from './operator-fallback';
 import { toolsForOpenAI } from '@/lib/llm/tools';
+import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 const TOKENS_PER_MILLION = 1_000_000;
@@ -425,7 +426,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     if (abuseError) return abuseError;
 
     const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
-    const openRouterKey = process.env.OPENROUTER_API_KEY ?? null;
+    const openRouterKey = isOpenRouterEnabled() ? process.env.OPENROUTER_API_KEY ?? null : null;
     // Resolve the same OpenAI-compatible route the Brain uses: managed proxy,
     // local runtime, or an encrypted stored BYOK key. Credentials stay inside
     // the resolver-provided headers, so this route never needs to unwrap them.
