@@ -188,4 +188,3 @@ export function readOrCreateServeId(path: string): string {
     throw error;
   }
 }
-

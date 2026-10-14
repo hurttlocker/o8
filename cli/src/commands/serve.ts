@@ -166,6 +166,7 @@ function cleanStaleOwner(paths: ServePaths): void {
 }
 
 async function assertServeAgentInstallAvailable(paths: ServePaths): Promise<void> {
+  mkdirSync(paths.dataDir, { recursive: true });
   return withServeOperation(paths.dataDir, async () => {
     cleanStaleOwner(paths);
     const supervisorPid = readServeSupervisorPid(paths.stateFile);
