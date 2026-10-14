@@ -43,6 +43,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  experimental: {
+    // Runtime response caches must not mutate the signed standalone app.
+    // Compiled responses remain readable and the in-memory cache stays enabled.
+    isrFlushToDisk: false,
+  },
   async headers() {
     return [
       {

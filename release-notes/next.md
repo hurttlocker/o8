@@ -4,3 +4,4 @@
 - Start a review guide tied to the exact pull request commit, with file references you can open in Review.
 - See clearer provider model availability, capability limits and session recovery messages.
 - Keep drafts and attachments after recoverable send failures. Queued messages stay paused after reload until you resume them.
+- Keep runtime response caches from changing the signed macOS app.
