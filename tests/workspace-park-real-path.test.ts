@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -24,6 +25,31 @@ const priorOwnedCodexRoot = process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
 const ownedCodexRoot = path.join(root, 'owned-codex');
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedCodexRoot;
 
+const moduleResolution = vi.hoisted(() => ({ bundled: false }));
+const bundledSqliteId = '[externals]/better-sqlite3 [external] (better-sqlite3, cjs, [project]/node_modules/better-sqlite3)';
+
+// Bundlers rewrite the parent resolver; the spawned Node child has no module registry.
+// Keep the real SQLite database, child process, claim CAS and Restore route.
+vi.mock('node:module', async original => {
+  const actual = await original<typeof import('node:module')>();
+  return {
+    ...actual,
+    createRequire: (filename: string | URL) => {
+      const nativeRequire = actual.createRequire(filename);
+      return new Proxy(nativeRequire, {
+        get(target, property, receiver) {
+          if (property === 'resolve' && moduleResolution.bundled) {
+            return Object.assign((id: string, options?: { paths?: string[] }) => (
+              id === 'better-sqlite3' ? bundledSqliteId : target.resolve(id, options)
+            ), { paths: target.resolve.paths });
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+    },
+  };
+});
+
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => null }));
 vi.mock('@/lib/auth/principal', () => ({
   resolveRequestPrincipal: () => 'operator',
@@ -40,7 +66,7 @@ const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-s
 const { measureWorkspaceStorage } = await import('@/lib/workspace/hibernator');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
-const { listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
+const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -62,8 +88,12 @@ afterAll(() => {
 });
 
 describe('workspace park production route', () => {
-  it('parks, survives a DB reopen, serves immutable review, and restores the exact session binding', async () => {
-    const repoPath = path.join(root, 'repo');
+  it.each(['native', 'bundled'])('parks and restores the exact persisted session binding with %s module resolution', async mode => {
+    moduleResolution.bundled = mode === 'bundled';
+    if (moduleResolution.bundled) {
+      expect(createRequire(import.meta.url).resolve('better-sqlite3')).toBe(bundledSqliteId);
+    }
+    const repoPath = path.join(root, 'repo-' + mode);
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, 'init', '-q', '-b', 'main');
     git(repoPath, 'config', 'user.email', 'o8-test@example.test');
@@ -74,10 +104,11 @@ describe('workspace park production route', () => {
     git(repoPath, 'commit', '-qm', 'base');
 
     const repo = await addRepo(repoPath);
-    const packetId = 'packet-real-park';
-    const surfaceId = 'codex-owned:codex-owned-real-path-test';
-    const worktreeId = 'packet-real-park';
-    const branch = 'inline/packet-real-park';
+    const packetId = 'packet-real-park-' + mode;
+    const sessionId = 'codex-owned-real-path-test-' + mode;
+    const surfaceId = 'codex-owned:' + sessionId;
+    const worktreeId = packetId;
+    const branch = 'inline/' + packetId;
     const registeredRepoPath = repo.localPath;
     const worktreePath = path.join(resolveWorktreeRootLayout(registeredRepoPath).primaryBase, worktreeId);
     mkdirSync(path.dirname(worktreePath), { recursive: true });
@@ -115,7 +146,7 @@ describe('workspace park production route', () => {
       },
     }));
 
-    const sessionDir = path.join(ownedCodexRoot, 'codex-owned-real-path-test');
+    const sessionDir = path.join(ownedCodexRoot, sessionId);
     mkdirSync(sessionDir, { recursive: true });
     const session: OwnedSessionRecord = {
       surfaceId,
@@ -162,7 +193,7 @@ describe('workspace park production route', () => {
     setLaneStatus(lane.id, 'reviewing');
 
     const parkStartedAt = performance.now();
-    const parked = await POST(post('park', packetId, 'real-park-1'));
+    const parked = await POST(post('park', packetId, mode + '-park-1'));
     const parkDurationMs = Math.round(performance.now() - parkStartedAt);
     const parkedBody = await parked.json();
     expect(parked.status, JSON.stringify(parkedBody)).toBe(200);
@@ -173,11 +204,11 @@ describe('workspace park production route', () => {
     expect(JSON.stringify(parkedBody)).not.toContain(worktreePath);
     expect(JSON.stringify(parkedBody)).not.toContain(surfaceId);
     expect(existsSync(worktreePath)).toBe(false);
-    const replayedPark = await POST(post('park', packetId, 'real-park-1'));
+    const replayedPark = await POST(post('park', packetId, mode + '-park-1'));
     expect(replayedPark.status).toBe(200);
     expect((await replayedPark.json()).result).toMatchObject({ status: 'parked', state: 'parked' });
     const parkedTransition = listWorkspaceSnapshotTransitions(repo.id, packetId)
-      .find((transition) => transition.transitionId === 'real-park-1:parked');
+      .find((transition) => transition.transitionId === mode + '-park-1:parked');
     const logicalBytesBefore = parkedTransition?.receipt?.logicalBytesBefore;
     const reclaimedAvailableBytes = parkedTransition?.receipt?.reclaimedAvailableBytes;
     expect(typeof logicalBytesBefore).toBe('number');
@@ -193,13 +224,18 @@ describe('workspace park production route', () => {
     });
 
     const restoreStartedAt = performance.now();
-    const restored = await POST(post('restore', packetId, 'real-restore-1'));
+    const restored = await POST(post('restore', packetId, mode + '-restore-1'));
     const restoreDurationMs = Math.round(performance.now() - restoreStartedAt);
     const restoredBody = await restored.json();
-    expect(restored.status).toBe(200);
+    expect(restored.status, JSON.stringify(restoredBody)).toBe(200);
     expect(restoredBody).toMatchObject({
       ok: true,
       result: { status: 'restored', state: 'materialized', reviewable: true },
+    });
+    closeDb();
+    expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({
+      state: 'materialized',
+      headCommit: reviewedHead,
     });
     expect(git(worktreePath, 'rev-parse', 'HEAD')).toBe(reviewedHead);
     expect(await resolveLaneReviewSource(findLatestLaneByPacket(packetId)!)).toMatchObject({
@@ -238,7 +274,7 @@ describe('workspace park production route', () => {
       expectedVersion: 2,
     })).resolves.toMatchObject({ status: 'conflict' });
     expect(JSON.parse(readFileSync(metadataPath, 'utf8')).workspaceBinding).toEqual(restoredSession.workspaceBinding);
-    const replayedRestore = await POST(post('restore', packetId, 'real-restore-1'));
+    const replayedRestore = await POST(post('restore', packetId, mode + '-restore-1'));
     expect(replayedRestore.status).toBe(200);
     expect(JSON.parse(readFileSync(metadataPath, 'utf8')).workspaceBinding).toEqual(restoredSession.workspaceBinding);
     const restoredStorage = await measureWorkspaceStorage(worktreePath);
