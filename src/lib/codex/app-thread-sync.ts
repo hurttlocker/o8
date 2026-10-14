@@ -24,6 +24,8 @@ export interface CodexAppSyncState {
   rolloutPath: string | null;
   /** Codex turns already in the o8 chat: run by o8 or imported. */
   turnIds: string[];
+  /** Imported turns that had no reply yet; a later reply replaces the placeholder. */
+  placeholderTurnIds: string[];
 }
 
 export interface CodexAppTurn {
@@ -62,6 +64,9 @@ function readState(file: string): CodexAppSyncState | null {
       threadId: parsed.threadId,
       rolloutPath: typeof parsed.rolloutPath === 'string' ? parsed.rolloutPath : null,
       turnIds: Array.isArray(parsed.turnIds) ? parsed.turnIds.filter((id): id is string => typeof id === 'string') : [],
+      placeholderTurnIds: Array.isArray(parsed.placeholderTurnIds)
+        ? parsed.placeholderTurnIds.filter((id): id is string => typeof id === 'string')
+        : [],
     };
   } catch {
     return null;
@@ -91,6 +96,7 @@ export function noteCodexAppTurn(input: { tabId: string | null; repoPath: string
     threadId: input.threadId,
     rolloutPath: sameThread ? existing.rolloutPath : null,
     turnIds: [...(existing?.turnIds ?? []).filter((id) => id !== input.turnId), input.turnId],
+    placeholderTurnIds: sameThread ? existing.placeholderTurnIds : [],
   });
 }
 
@@ -114,6 +120,14 @@ export interface CodexAppSyncDeps {
 }
 
 const lastSeen = new Map<string, string>();
+const recheckAt = new Map<string, number>();
+
+/**
+ * Read from a second app-server, a turn still running in the Codex app reports
+ * `interrupted` with no reply until it ends (#3628). Such a turn is imported
+ * only once its thread has been quiet this long.
+ */
+const UNSETTLED_TURN_QUIET_MS = 5 * 60_000;
 
 /** One sync pass over every o8 chat linked to a Codex thread. Returns turns imported per chat. */
 export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<string, number>> {
@@ -136,18 +150,44 @@ export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<s
         writeState(state);
       }
       let marker: string;
+      let quiet: boolean;
       try {
         const stat = statSync(state.rolloutPath);
         marker = `${state.threadId}:${stat.mtimeMs}:${stat.size}`;
+        quiet = Date.now() - stat.mtimeMs >= UNSETTLED_TURN_QUIET_MS;
       } catch {
         continue;
       }
-      if (lastSeen.get(state.tabId) === marker) continue;
-      const known = new Set(state.turnIds);
-      const turns = (await (await open()).recentTurns(state.threadId, known))
-        .filter((turn) => !known.has(turn.id) && turn.status !== 'inProgress' && turn.userText.trim())
-        .reverse();
+      const due = recheckAt.get(state.tabId);
+      if (lastSeen.get(state.tabId) === marker && (due === undefined || Date.now() < due)) continue;
+      const placeholders = new Set(state.placeholderTurnIds);
+      const known = new Set(state.turnIds.filter((id) => !placeholders.has(id)));
+      const turns = (await (await open()).recentTurns(state.threadId, known)).reverse();
+      let changed = 0;
+      let unsettled = false;
       for (const turn of turns) {
+        const reply = turn.agentText.trim();
+        if (placeholders.has(turn.id)) {
+          if (!reply) continue;
+          upsertMobileOrchestratorAssistantMessage({
+            tabId: state.tabId,
+            repoPath: state.repoPath,
+            messageId: `codex-app-assistant-${turn.id}`,
+            content: reply,
+            backend: 'codex',
+            sessionId: state.threadId,
+            timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
+          });
+          placeholders.delete(turn.id);
+          changed += 1;
+          continue;
+        }
+        if (known.has(turn.id) || !turn.userText.trim()) continue;
+        const ended = turn.status === 'completed' || turn.status === 'failed';
+        if (!reply && !ended && (turn.status === 'inProgress' || !quiet)) {
+          unsettled = true;
+          continue;
+        }
         appendMobileOrchestratorUserMessage({
           tabId: state.tabId,
           repoPath: state.repoPath,
@@ -160,19 +200,26 @@ export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<s
           tabId: state.tabId,
           repoPath: state.repoPath,
           messageId: `codex-app-assistant-${turn.id}`,
-          content: turn.agentText.trim() || `(Codex turn ${turn.status} without a reply)`,
+          content: reply || `(Codex turn ${turn.status} without a reply)`,
           backend: 'codex',
           sessionId: state.threadId,
           timestampMs: turn.completedAt ? turn.completedAt * 1_000 : undefined,
         });
         state.turnIds.push(turn.id);
+        if (!reply && !ended) placeholders.add(turn.id);
+        changed += 1;
       }
-      if (turns.length > 0) {
+      if (changed > 0) {
+        state.placeholderTurnIds = [...placeholders];
         writeState(state);
-        imported.set(state.tabId, turns.length);
-        deps.onImported?.(state.tabId, turns.length);
+        imported.set(state.tabId, changed);
+        deps.onImported?.(state.tabId, changed);
       }
       lastSeen.set(state.tabId, marker);
+      // An unfinished turn may end without touching its rollout again; look
+      // once more when the quiet window closes.
+      if (unsettled) recheckAt.set(state.tabId, Date.now() + UNSETTLED_TURN_QUIET_MS);
+      else recheckAt.delete(state.tabId);
     }
   } finally {
     await (reader as CodexAppThreadReader | null)?.close();

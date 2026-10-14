@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -119,5 +119,51 @@ describe.skipIf(process.platform === 'win32')('Codex app turns in the o8 chat (#
       { role: 'assistant', content: 'Second reply' },
     ]);
     expect(imported.at(-1)).toEqual([tabId, 1]);
+  }, 30_000);
+
+  // #3628: read from a second app-server, a turn still running in the Codex app
+  // reports `interrupted` with no reply until it finishes.
+  it('keeps a running turn that reads as interrupted out of the chat until it completes', async () => {
+    setTurns([
+      turn('turn-phone-3', 'interrupted', 'Third phone message', null),
+      turn('turn-phone-2', 'completed', 'Second phone message', 'Second reply'),
+    ]);
+    await sync.syncCodexAppThreads(deps());
+    expect(transcript()).toHaveLength(6);
+
+    setTurns([
+      turn('turn-phone-3', 'completed', 'Third phone message', 'Third reply'),
+      turn('turn-phone-2', 'completed', 'Second phone message', 'Second reply'),
+    ]);
+    await sync.syncCodexAppThreads(deps());
+    expect(transcript().slice(-2)).toEqual([
+      { role: 'user', content: 'Third phone message' },
+      { role: 'assistant', content: 'Third reply' },
+    ]);
+  }, 30_000);
+
+  it('imports a turn that stays interrupted once its thread is quiet, then fills in a late reply', async () => {
+    setTurns([
+      turn('turn-phone-4', 'interrupted', 'Fourth phone message', null),
+      turn('turn-phone-3', 'completed', 'Third phone message', 'Third reply'),
+    ]);
+    await sync.syncCodexAppThreads(deps());
+    expect(transcript()).toHaveLength(8);
+
+    const quietSince = new Date(Date.now() - 6 * 60_000);
+    utimesSync(rollout, quietSince, quietSince);
+    await sync.syncCodexAppThreads(deps());
+    expect(transcript().slice(-2)).toEqual([
+      { role: 'user', content: 'Fourth phone message' },
+      { role: 'assistant', content: '(Codex turn interrupted without a reply)' },
+    ]);
+
+    setTurns([
+      turn('turn-phone-4', 'completed', 'Fourth phone message', 'Fourth reply'),
+      turn('turn-phone-3', 'completed', 'Third phone message', 'Third reply'),
+    ]);
+    await sync.syncCodexAppThreads(deps());
+    expect(transcript()).toHaveLength(10);
+    expect(transcript().at(-1)).toEqual({ role: 'assistant', content: 'Fourth reply' });
   }, 30_000);
 });

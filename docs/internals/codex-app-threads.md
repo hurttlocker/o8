@@ -1,6 +1,6 @@
 # Codex orchestrator chats in the Codex app
 
-Setting: **Settings > Models > Codex app > Show chats in the Codex app** (`codexAppThreads`, `[orchestrator] codex_app_threads` in `settings.toml`). Off by default. Issue #3573.
+Setting: **Settings > Providers > Model defaults > Codex app > Show chats in the Codex app** (`codexAppThreads`, `[orchestrator] codex_app_threads` in `settings.toml`). Off by default. Issue #3573.
 
 ## Why the chats are hidden by default
 
@@ -40,7 +40,7 @@ The o8 chat also shows turns the operator adds from the Codex app, on desktop or
 
 1. After `turn/start`, the bridge prints a `turn.started` line with the thread and turn ids. The session records each turn o8 runs in `<data dir>/codex-app-sync/<chat id>.json`. That file is separate from chat history, so a history save cannot drop it.
 2. Every 4 seconds while the setting is on, the ws-server checks each recorded chat. It skips a chat while o8 is running a turn for it. It stats the thread's rollout file, whose path comes once from `thread/read`. When the file changed, it calls `thread/turns/list` (newest first, summary items) until it reaches a recorded turn.
-3. Each completed turn that o8 did not run is appended to the o8 chat as the operator's message and the agent's final reply, with ids `codex-app-user-<turn>` and `codex-app-assistant-<turn>`. The turn is then recorded. A turn still in progress waits for the next pass.
+3. Each completed turn that o8 did not run is appended to the o8 chat as the operator's message and the agent's final reply, with ids `codex-app-user-<turn>` and `codex-app-assistant-<turn>`. The turn is then recorded. A turn still in progress waits for the next pass. Read from o8's own `app-server`, a turn still running in the Codex app reports `interrupted` with no reply, so a turn without a reply that is not `completed` or `failed` waits until the thread has been quiet for five minutes. It is then imported with a placeholder reply, and a later read that shows a reply replaces the placeholder (#3628).
 4. The ws-server broadcasts `orchestrator-threads` / `external-turns` for that chat. An open chat reloads from history unless a turn is streaming in it.
 
 Tool calls made in the Codex app are not copied; the o8 chat shows the message and the final reply.
