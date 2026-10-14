@@ -316,9 +316,30 @@ pub fn get_groq_key() -> Option<String> {
         .or_else(|| stored_secret("groq_api_key"))
 }
 
+/// The OpenRouter connection record the server writes (#3583). Holds no secret.
+fn openrouter_connection_path() -> PathBuf {
+    o8_data_dir().join("providers").join("openrouter.json")
+}
+
+/// False only after the operator turns the OpenRouter connection off in
+/// Providers. A missing or unreadable record means on, matching the server.
+pub fn openrouter_enabled() -> bool {
+    openrouter_enabled_from(std::fs::read_to_string(openrouter_connection_path()).ok().as_deref())
+}
+
+fn openrouter_enabled_from(raw: Option<&str>) -> bool {
+    raw.and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+        .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+        .unwrap_or(true)
+}
+
 /// Resolve the OpenRouter API key. Env-first (`OPENROUTER_API_KEY`), then the
-/// o8 config file. UN-GATED — works in release.
+/// o8 config file. Returns None while the OpenRouter connection is turned off,
+/// whatever the key's source; otherwise works in release.
 pub fn get_openrouter_key() -> Option<String> {
+    if !openrouter_enabled() {
+        return None;
+    }
     std::env::var("OPENROUTER_API_KEY")
         .ok()
         .map(|s| s.trim().to_string())
@@ -356,5 +377,19 @@ mod tests {
         assert!(keychain_delete_error_is_ignorable(ERR_SEC_ITEM_NOT_FOUND));
         assert!(!keychain_delete_error_is_ignorable(-25293));
         assert!(!keychain_delete_error_is_ignorable(-50));
+    }
+}
+
+#[cfg(test)]
+mod openrouter_connection_tests {
+    use super::openrouter_enabled_from;
+
+    #[test]
+    fn only_an_explicit_off_record_disables_openrouter() {
+        assert!(openrouter_enabled_from(None));
+        assert!(openrouter_enabled_from(Some("not json")));
+        assert!(openrouter_enabled_from(Some(r#"{"version":1}"#)));
+        assert!(openrouter_enabled_from(Some(r#"{"enabled":true}"#)));
+        assert!(!openrouter_enabled_from(Some(r#"{"version":1,"enabled":false}"#)));
     }
 }

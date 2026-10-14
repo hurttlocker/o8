@@ -20,6 +20,7 @@ import 'server-only';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -96,7 +97,16 @@ export function updateManagedOpenRouterKey(value: string | null): void {
   if (value) process.env.OPENROUTER_API_KEY = value;
   else delete process.env.OPENROUTER_API_KEY;
 }
+/**
+ * Turning the OpenRouter connection off (#3583) stops every o8 caller, whatever
+ * the key's source. A value this module injected also leaves process.env so
+ * later child processes cannot inherit it; a shell key is left in place.
+ */
 export async function resolveOpenRouterKey(): Promise<string | null> {
+  if (!isOpenRouterEnabled()) {
+    if (managedOpenRouterValue && process.env.OPENROUTER_API_KEY === managedOpenRouterValue) updateManagedOpenRouterKey(null);
+    return null;
+  }
   const envKey = process.env.OPENROUTER_API_KEY?.trim() ?? '';
   if (envKey && envKey !== managedOpenRouterValue) return envKey;
   const raw = parseRawEnvFileSync().get('OPENROUTER_API_KEY');

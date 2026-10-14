@@ -190,6 +190,15 @@ function gitWithInput(
         reject(new Error(stderr.trim() || `git ${args.join(' ')} exited ${code ?? 'unknown'}`));
       }
     });
+    // #3627: git can exit (or be killed on timeout) before reading all of a
+    // large diff. The pending write then fails with EPIPE on stdin; without a
+    // listener that error is uncaught and takes down the whole server. The
+    // close or timeout path above already settles the promise.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE') return;
+      clearTimeout(timer);
+      reject(error);
+    });
     child.stdin.end(input);
   });
 }
