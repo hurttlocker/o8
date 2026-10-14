@@ -138,7 +138,10 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => undefined) }));
-vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => undefined) }));
+vi.mock('@/lib/realtime/publisher', () => ({
+  publishRealtimeMutation: vi.fn(async () => undefined),
+  requestRealtimeRefresh: vi.fn(async () => undefined),
+}));
 
 function message(content: AssistantMessage['content'], stopReason: AssistantMessage['stopReason'] = 'stop'): AssistantMessage {
   return { role: 'assistant', content, stopReason, model: 'openai/gpt-6-luna', api: 'openai-completions',
@@ -473,10 +476,11 @@ describe('bundled Pi worker (#3258)', () => {
     expect(transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text)).toEqual(['Start something long', 'Continue']);
 
     // Outside a packet lane, a write keeps per-call inbox approval; a rejected one never lands.
+    // The approval is filed under its repo's project, so read it across projects as the shared Inbox does.
     model.answers.push(call('w2', 'write_file', { path: 'scratch.txt', content: 'no' }),
       message([{ type: 'text', text: 'The write was not approved.' }]));
     await expect(runtime.resume(sessionKey, 'Write scratch.txt')).resolves.toMatchObject({ ok: true });
-    const pending = await waitFor(() => listApprovals({ status: 'pending' })
+    const pending = await waitFor(() => listApprovals({ status: 'pending', projectId: null })
       .find((approval) => approval.runtime === 'pi' && approval.toolName === 'write_file') ?? null, 'inbox approval');
     resolveApproval(pending.id, 'reject', 'desktop', 'Not this one');
     await waitFor(async () => ((await getOwnedPiBuiltinReviewPacket(sessionKey)).summary === 'The write was not approved.' ? true : null),
@@ -605,7 +609,7 @@ describe('bundled Pi worker (#3258)', () => {
     );
     try {
       const { sessionKey, workspacePath } = await delegate(repo.repoPath, 'Touch two files.');
-      const pendingCommand = (command: string) => waitFor(() => listApprovals({ status: 'pending' })
+      const pendingCommand = (command: string) => waitFor(() => listApprovals({ status: 'pending', projectId: null })
         .find((approval) => approval.runtime === 'pi' && approval.command === command) ?? null, `inbox approval of ${command}`);
       // Nothing ran before the operator answered.
       resolveApproval((await pendingCommand('touch rejected.txt')).id, 'reject', 'desktop', 'No');
