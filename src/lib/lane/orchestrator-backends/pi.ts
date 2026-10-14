@@ -25,7 +25,10 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
+import type { PiModelRoute } from '@/lib/pi/openrouter-choice';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
+import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
+import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
@@ -45,6 +48,11 @@ interface PiSurface {
 
 interface ResidentPi extends PiSurface {
   name: string;
+  /** The model route this process was started on; another route needs a new process. */
+  routeId: string;
+  /** This turn's OpenRouter call receipts (#3584). Empty on the managed route. */
+  receipts: OpenRouterPiReceipt[];
+  ceiling?: OpenRouterSpendCeiling;
   session: PiSession;
   servers: O8ServerSet;
   emit?: (event: OrchestratorEvent) => void;
@@ -71,6 +79,35 @@ export interface PiOrchestratorDeps {
   openServers?: typeof openO8Servers;
   stateRoot?: () => string;
   idleMs?: number;
+  /** Resolves an explicit model choice; production checks the OpenRouter catalogue. */
+  resolveRoute?: (requested?: string | null) => Promise<PiModelRoute>;
+  /** Spend ceiling for one OpenRouter lead turn; production uses the operator's packet cap. */
+  openRouterTurnCeilingUsd?: () => number;
+  /** Network seam for the OpenRouter route in tests. */
+  openRouterFetch?: typeof fetch;
+}
+
+const MANAGED_ROUTE: PiModelRoute = { carrier: 'managed', model: O8_MANAGED_PI_MODEL, label: O8_MANAGED_PI_MODEL.name };
+
+/** The managed route needs no lookup; only an explicit OpenRouter choice loads the OpenRouter code. */
+async function resolveLeadRoute(deps: PiOrchestratorDeps, requested?: string | null): Promise<PiModelRoute> {
+  if (deps.resolveRoute) return deps.resolveRoute(requested);
+  if (!isOpenRouterPiModelChoice(requested)) return MANAGED_ROUTE;
+  const { resolvePiModelRoute } = await import('@/lib/pi/openrouter-choice');
+  return resolvePiModelRoute(requested);
+}
+
+async function leadTurnCeilingUsd(deps: PiOrchestratorDeps): Promise<number> {
+  if (deps.openRouterTurnCeilingUsd) return deps.openRouterTurnCeilingUsd();
+  const { getOperatorDefaultsSync } = await import('@/lib/operator/defaults');
+  return getOperatorDefaultsSync().values.meteredPacketCostCapUsd;
+}
+
+/** A turn's cost when every OpenRouter call reported one; unknown stays null rather than zero. */
+export function piTurnCost(receipts: readonly OpenRouterPiReceipt[]): number | null {
+  const calls = receipts.filter(receipt => receipt.status !== 'refused');
+  if (!calls.length || calls.some(receipt => receipt.costUsd === null)) return null;
+  return Number(calls.reduce((sum, receipt) => sum + (receipt.costUsd ?? 0), 0).toFixed(10));
 }
 
 function textOf(result: unknown): string {
@@ -129,7 +166,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     await Promise.allSettled([pi.session.close(), pi.servers.close()]);
   }
 
-  async function start(name: string, repoPath: string, options: OrchestratorTurnOptions, surface: PiSurface): Promise<ResidentPi> {
+  async function start(name: string, repoPath: string, options: OrchestratorTurnOptions, surface: PiSurface,
+    route: PiModelRoute): Promise<ResidentPi> {
     const stateDir = stateDirFor(name);
     const signal = options.signal ?? new AbortController().signal;
     const servers = await (deps.openServers ?? openO8Servers)(repoPath, { profile: surface.profile, threadId: options.threadId });
@@ -139,15 +177,28 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         buildOrchestratorSystemPrompt(repoPath, { backend: 'pi', toolProfile: surface.profile }),
         commands.length ? o8CommandPrompt(commands) : '',
       ].filter(Boolean).join('\n\n');
-      const pi = { name, servers, ...surface } as ResidentPi;
+      const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
+      const pi = { name, servers, routeId, receipts: [], ...surface } as unknown as ResidentPi;
+      let transport = deps.transport;
+      if (!transport && route.carrier === 'openrouter') {
+        const { createPiOpenRouterRouteTransport } = await import('@/lib/pi/openrouter-choice');
+        const routed = createPiOpenRouterRouteTransport(route, {
+          ceilingUsd: await leadTurnCeilingUsd(deps),
+          attribution: { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath },
+          onReceipt: (receipt) => { pi.receipts.push(receipt); },
+          fetch: deps.openRouterFetch,
+        });
+        transport = routed.transport;
+        pi.ceiling = routed.ceiling;
+      }
       // Loaded on the first Pi turn, so ws-server startup never evaluates the Pi SDK.
       const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
       pi.session = await createPiSdkSession({
         workspace: repoPath,
         stateDir,
-        model: O8_MANAGED_PI_MODEL,
+        model: route.model,
         sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
-        transport: deps.transport,
+        transport,
         approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
         hostTools: commands.length ? createO8CommandTools(commands) : [],
         systemPrompt,
@@ -167,17 +218,29 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   async function runTurn(name: string, repoPath: string, message: string, onEvent: (event: OrchestratorEvent) => void,
     options: OrchestratorTurnOptions) {
     let sessionId: string | null = null;
-    const done = () => onEvent({ type: 'done', sessionId, cost: null });
+    let turnReceipts: readonly OpenRouterPiReceipt[] = [];
+    const done = () => onEvent({ type: 'done', sessionId, cost: piTurnCost(turnReceipts) });
     const surface = piSurfaceForTurn(options);
+    let route: PiModelRoute;
+    try {
+      route = await resolveLeadRoute(deps, options.model);
+    } catch (error) {
+      // An explicit model that cannot run fails visibly; it never falls back to another payer.
+      const { PiModelChoiceError } = await import('@/lib/pi/openrouter-choice');
+      onEvent({ type: 'error', error: error instanceof PiModelChoiceError ? error.message : 'Pi could not resolve the selected model.' });
+      done();
+      return;
+    }
+    const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
     let pi = resident.get(name);
-    // A different tool surface needs a different process; the session file keeps the conversation.
-    if (pi && (pi.profile !== surface.profile || pi.readOnly !== surface.readOnly || !pi.session.running)) {
+    // A different tool surface or model route needs a different process; the session file keeps the conversation.
+    if (pi && (pi.profile !== surface.profile || pi.readOnly !== surface.readOnly || pi.routeId !== routeId || !pi.session.running)) {
       await close(pi);
       pi = undefined;
     }
     if (!pi) {
       try {
-        pi = await start(name, repoPath, options, surface);
+        pi = await start(name, repoPath, options, surface, route);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         if (!PI_START_FAILURE_TEXT.test(detail)) console.warn('[pi-orchestrator] Pi could not start:', error);
@@ -198,7 +261,10 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     sessionId = current.session.sessionId;
     clearTimeout(current.idle);
     current.emit = onEvent;
-    onEvent({ type: 'turn_receipt', leadModel: 'pi', effort: options.thinkingEffort ?? 'medium' });
+    current.receipts = [];
+    turnReceipts = current.receipts;
+    current.ceiling?.reset();
+    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium' });
     const stop = () => { void current.session.abort(); };
     options.signal?.addEventListener('abort', stop, { once: true });
     try {

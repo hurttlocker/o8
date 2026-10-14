@@ -498,10 +498,11 @@ export const ORCHESTRATOR_RUNTIMES = {
     binaryName: 'o8-pi-worker',
     workerProvider: 'pi-builtin',
     authHouse: 'pi-builtin',
-    modelIdPattern: /^openai\/gpt-6-luna$/,
+    // The managed model, or an explicit OpenRouter model on the user's connection (#3584).
+    modelIdPattern: /^(?:openai\/gpt-6-luna|openrouter\/[A-Za-z0-9._-]+\/[A-Za-z0-9._:+-]+)$/,
     reasoningEffort: false,
     tier: 'standard',
-    description: 'Pi SDK bundled with o8 on the managed model route (your plan or the free daily allowance). Writes and commands stay in the packet worktree.',
+    description: 'Pi SDK bundled with o8 on the managed model route (your plan or the free daily allowance), or on an OpenRouter model you pick. Writes and commands stay in the packet worktree.',
   },
   cursor: {
     label: 'Cursor',

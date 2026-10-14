@@ -26,6 +26,7 @@ import { buildPiWriteHelper } from './helpers/pi-write-helper';
 // has to a model. The scripted stand-in records the model it was built for.
 const model = vi.hoisted(() => ({
   managedModels: [] as string[],
+  openRouterModels: [] as string[],
   answers: [] as unknown[],
   seen: [] as Array<{ messages: unknown[]; tools: string[] }>,
   block: null as null | Promise<void>,
@@ -50,6 +51,32 @@ vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
       yield* events(answer);
     };
   },
+}));
+
+// #3584: an OpenRouter pin builds the OpenRouter transport instead. The scripted
+// stand-in shares the answer queue and reports one provider receipt per call.
+vi.mock('@/lib/pi/sdk/openrouter-transport', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/pi/sdk/openrouter-transport')>(),
+  createOpenRouterPiTransport: (options: { model: { id: string }; onReceipt?: (receipt: Record<string, unknown>) => void }) => {
+    model.openRouterModels.push(options.model.id);
+    return async function* (context: { messages: unknown[] }) {
+      model.seen.push({ messages: context.messages, tools: [] });
+      const answer = model.answers.shift() as AssistantMessage | undefined;
+      if (!answer) throw new Error('No scripted answer left');
+      yield* events(answer);
+      options.onReceipt?.({ generationId: `gen-${model.openRouterModels.length}-${model.seen.length}`, model: options.model.id,
+        status: 'completed', inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, costUsd: 0.0002, reservedUsd: 0.006,
+        startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() });
+    };
+  },
+}));
+vi.mock('@/lib/orchestrator/openrouter-model-metadata', () => ({
+  getOpenRouterModelMetadata: async () => new Map([['openrouter/deepseek/deepseek-v4.1-flash',
+    { rank: 0, label: 'DeepSeek V4.1 Flash', compatible: true, contextLength: 64_000, inputPricePerMillion: 0.3, outputPricePerMillion: 1.2 }]]),
+}));
+vi.mock('@/lib/cortex/qa/llm/byok-keys', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/cortex/qa/llm/byok-keys')>(),
+  resolveOpenRouterKey: async () => 'fixture-openrouter-key',
 }));
 
 // Records each lane-rules answer, and can hold Pi's startup, without changing either.
@@ -355,6 +382,67 @@ describe('bundled Pi worker (#3258)', () => {
     const approve = createPiLaneApproval(realpathSync(workspacePath), laneId);
     expect(await approve({ name: 'run_command', args: { command: 'true' } }, new AbortController().signal)).toBe(false);
   }, 240_000);
+
+  it('runs two packets pinned to an OpenRouter model in separate worktrees, records each call and lands both (#3584)', async () => {
+    const target = await makeRepo('openrouter-target');
+    const pin = 'openrouter/deepseek/deepseek-v4.1-flash';
+    const managedBefore = model.managedModels.length;
+    const workers = [];
+    for (const [index, file] of ['left.txt', 'right.txt'].entries()) {
+      model.answers.push(call(`or${index}`, 'write_file', { path: file, content: `${file}\n` }),
+        message([{ type: 'text', text: `Wrote ${file}.` }]));
+      const worker = await delegate(target.repoPath, `Add ${file}.`, { model: pin });
+      expect(getLane(worker.laneId)?.runtime).toBe('pi-builtin');
+      expect(getLane(worker.laneId)?.model).toBe(pin);
+      await lastRunOutcome(worker.sessionKey, 'finished');
+      workers.push({ ...worker, file });
+    }
+    // Only the OpenRouter route served these workers, pinned to the exact model; the managed route never did.
+    expect(model.managedModels.length).toBe(managedBefore);
+    expect(model.openRouterModels.slice(-2)).toEqual(['deepseek/deepseek-v4.1-flash', 'deepseek/deepseek-v4.1-flash']);
+    expect(workers[0].workspacePath).not.toBe(workers[1].workspacePath);
+
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const rows = getDb()!.select().from(usageLogs).all().filter((row) => row.provider === 'openrouter');
+    for (const worker of workers) {
+      const own = rows.filter((row) => row.packetId === worker.packetId);
+      // Two calls per worker (tool call, then answer), each one row with its own generation id.
+      expect(own).toHaveLength(2);
+      for (const row of own) {
+        expect(row).toMatchObject({ model: pin, role: 'worker', laneId: worker.laneId, sessionKey: worker.sessionKey, costUsd: 0.0002 });
+        expect(JSON.parse(row.metadataJson!)).toMatchObject({ runtime: 'pi', carrier: 'openrouter', costSource: 'provider_response', status: 'completed' });
+      }
+      expect(new Set(own.map((row) => JSON.parse(row.metadataJson!).generationId)).size).toBe(2);
+      expect(JSON.stringify(own)).not.toContain('fixture-openrouter-key');
+    }
+
+    for (const worker of workers) {
+      expect(git(worker.workspacePath, ['status', '--porcelain'])).toBe(`?? ${worker.file}`);
+      expect((await dispatch({ verb: 'request_review', laneId: worker.laneId, actor: 'system' })).ok).toBe(true);
+      const reviewedHeadSha = git(worker.workspacePath, ['rev-parse', 'HEAD']);
+      await submitPacketReview({ packetId: worker.packetId, approved: true, findings: [], reviewedHeadSha });
+      const merged = await approveAndMergePacket({ packetId: worker.packetId, expectedHeadSha: reviewedHeadSha, actor: 'user' });
+      expect({ merged: merged.merged, note: merged.note }).toMatchObject({ merged: true });
+    }
+    expect(git(target.repoPath, ['ls-tree', '-r', '--name-only', 'main']).split('\n')).toEqual(expect.arrayContaining(['left.txt', 'right.txt']));
+  }, 240_000);
+
+  it('fails an OpenRouter pin visibly when the model cannot run Pi, without falling back', async () => {
+    const target = await makeRepo('openrouter-refused');
+    const managedBefore = model.managedModels.length;
+    const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientMutationId: `pi-builtin-${randomUUID()}`, prompt: 'Add nothing.', taskName: 'unusable pin',
+        repoPath: target.repoPath, runtime: 'pi-builtin', model: 'openrouter/unknown/no-tools-model' }),
+    }));
+    // The launch refuses before Pi starts, and the delegate call reports it.
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ ok: false,
+      error: 'unknown/no-tools-model cannot run Pi on OpenRouter: Pi needs a text model with tool support.' });
+    expect(model.managedModels.length).toBe(managedBefore);
+  }, 120_000);
 
   it('stops a running turn, resumes the same Pi session, and keeps inbox approval outside a lane', async () => {
     const scratch = await makeRepo('scratch');

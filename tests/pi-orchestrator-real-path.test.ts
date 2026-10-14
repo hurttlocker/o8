@@ -21,6 +21,11 @@ import { PI_ALLOWANCE_EXHAUSTED_MESSAGE } from '@/lib/pi/sdk/transport';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
 vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
+// #3584: the connected OpenRouter key, resolved in the host on each call.
+vi.mock('@/lib/cortex/qa/llm/byok-keys', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/cortex/qa/llm/byok-keys')>(),
+  resolveOpenRouterKey: async () => 'fixture-openrouter-key',
+}));
 // The inbox bridge, recorded and refused, so a Full access turn that still asks shows up as a refusal.
 const inboxCalls = vi.hoisted(() => [] as string[]);
 vi.mock('@/lib/pi/sdk/approval', () => ({
@@ -224,6 +229,57 @@ describe('Pi orchestrator (#3258)', () => {
     const doneIds = [out.at(-1), next.at(-1)].map(event => (event as { sessionId: string | null }).sessionId);
     expect(doneIds[0]).toBeTruthy();
     expect(doneIds[1]).toBe(doneIds[0]);
+  }, 180_000);
+
+  it('runs the lead on an explicit OpenRouter model and reports its exact model and provider cost (#3584)', async () => {
+    const { repo, stateRoot } = await fixture();
+    const { openRouterPiModel, OPENROUTER_CHAT_COMPLETIONS_URL } = await import('@/lib/pi/sdk/openrouter-transport');
+    const pricing = { inputPerMillion: 0.3, outputPerMillion: 1.2 };
+    const pin = 'openrouter/deepseek/deepseek-v4.1-flash';
+    const replies = [0.0000456, null];
+    const requests: Array<{ url: string; authorization?: string; model?: string }> = [];
+    const openRouterFetch = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { model?: string };
+      requests.push({ url, authorization: (init?.headers as Record<string, string>).Authorization, model: body.model });
+      const cost = replies.shift();
+      const chunk = (extra: Record<string, unknown>) => `data: ${JSON.stringify({ id: `gen-lead-${requests.length}`, object: 'chat.completion.chunk',
+        created: 1, model: 'deepseek/deepseek-v4.1-flash', ...extra })}\n\n`;
+      return new Response(chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Planned.' }, finish_reason: null }] })
+        + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 900, completion_tokens: 12, total_tokens: 912, ...(cost === null ? {} : { cost }) } })
+        + 'data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot, openRouterFetch,
+      openRouterTurnCeilingUsd: () => 1,
+      resolveRoute: async (requested) => {
+        expect(requested).toBe(pin);
+        return { carrier: 'openrouter', choice: pin, pricing, model: openRouterPiModel('deepseek/deepseek-v4.1-flash', pricing), label: 'DeepSeek V4.1 Flash (OpenRouter)' };
+      } });
+    backends.push(backend);
+    const send = async (text: string) => {
+      const out: OrchestratorEvent[] = [];
+      await backend.sendTurn(repo, text, event => out.push(event), { threadId: 'thoughts-pi-openrouter', model: pin });
+      return out;
+    };
+
+    const first = await send('Plan the next mission');
+    expect(first.filter(event => event.type === 'error')).toEqual([]);
+    expect(first.find(event => event.type === 'turn_receipt')).toMatchObject({ leadModel: pin });
+    expect(first.at(-1)).toMatchObject({ type: 'done', cost: 0.0000456 });
+    expect(requests[0]).toEqual({ url: OPENROUTER_CHAT_COMPLETIONS_URL, authorization: 'Bearer fixture-openrouter-key', model: 'deepseek/deepseek-v4.1-flash' });
+
+    // A call with no reported cost leaves the turn's cost unknown, not zero.
+    const second = await send('And then?');
+    expect(second.at(-1)).toMatchObject({ type: 'done', cost: null });
+
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const rows = getDb()!.select().from(usageLogs).all().filter(row => row.agentName === 'pi-orchestrator' && row.model === pin);
+    expect(rows.map(row => [row.role, row.provider, row.costUsd, JSON.parse(row.metadataJson!).costSource])).toEqual([
+      ['orchestrator', 'openrouter', 0.0000456, 'provider_response'],
+      ['orchestrator', 'openrouter', 0, 'unknown'],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('fixture-openrouter-key');
   }, 180_000);
 
   it('ends the turn with the allowance message when the daily allowance is used up', async () => {
