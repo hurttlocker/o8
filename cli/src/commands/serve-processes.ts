@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { CliError, EXIT } from '../api.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -104,4 +108,83 @@ export async function stopServeProcesses(
     }
   }
   return { confirmedDead: false, processes: claims };
+}
+
+/** No timed stealing: an interrupted owner leaves evidence and blocks new mutations. */
+function acquireFileLock(path: string, waitMs = 0): { id: string; release: () => void } {
+  const id = randomUUID();
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try { mkdirSync(path, { mode: 0o700 }); break; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline) {
+        throw new CliError('serve_operation_busy', 'Another lifecycle owner holds this profile; retained locks require ownership reconciliation.', EXIT.CONFLICT);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  const ownerFile = join(path, 'owner.json');
+  try { writeFileSync(ownerFile, JSON.stringify({ id, pid: process.pid }), { flag: 'wx', mode: 0o600 }); } catch (error) {
+    // Leave an incomplete claim held rather than deleting uncertain ownership.
+    throw error;
+  }
+  return { id, release: () => {
+    const owner = JSON.parse(readFileSync(ownerFile, 'utf8')) as { id: string };
+    if (owner.id !== id) throw new Error('Lifecycle lock ownership changed.');
+    unlinkSync(ownerFile); rmdirSync(path);
+  } };
+}
+
+export function acquireServeOperation(dataDir: string): { id: string; release: () => void } {
+  return acquireFileLock(join(dataDir, 'serve-operation.lock'));
+}
+
+export async function withServeOperation<T>(dataDir: string, operation: (id: string) => Promise<T>): Promise<T> {
+  const lease = acquireServeOperation(dataDir);
+  try { return await operation(lease.id); } finally { lease.release(); }
+}
+
+/** Only synchronous state mutation is allowed inside this short critical section. */
+export function withServeStateMutation<T>(stateFile: string, mutation: () => T): T {
+  const lease = acquireFileLock(`${stateFile}.lock`, 2_000);
+  try { return mutation(); } finally { lease.release(); }
+}
+
+export function sameServeGeneration(
+  expected: { pid?: number; generation?: string; startedAt?: string },
+  current: { pid?: number; generation?: string; startedAt?: string } | null,
+): boolean {
+  return current !== null && current.pid === expected.pid
+    && (expected.generation ? current.generation === expected.generation : current.startedAt === expected.startedAt);
+}
+
+export function mergeServeClaims(...sets: Array<ServeProcessClaim[] | undefined>): ServeProcessClaim[] | undefined {
+  if (sets.every((set) => set === undefined)) return undefined;
+  const claims = new Map<number, ServeProcessClaim>();
+  for (const claim of sets.flatMap((set) => set ?? [])) {
+    const prior = claims.get(claim.pid);
+    if (prior?.identity && claim.identity && !sameMetadataLockProcessIdentity(prior.identity, claim.identity)) {
+      throw new Error(`Conflicting birth claims for process ${claim.pid}.`);
+    }
+    if (!prior?.identity) claims.set(claim.pid, claim);
+  }
+  return [...claims.values()];
+}
+
+export function readOrCreateServeId(path: string): string {
+  try {
+    const existing = readFileSync(path, 'utf8').trim();
+    if (existing) return existing;
+  } catch {}
+  const id = randomUUID();
+  try {
+    writeFileSync(path, id, { flag: 'wx', mode: 0o600 });
+    return id;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const existing = readFileSync(path, 'utf8').trim();
+      if (existing) return existing;
+    }
+    throw error;
+  }
 }

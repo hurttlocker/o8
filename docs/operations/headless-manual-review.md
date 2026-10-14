@@ -3,7 +3,9 @@
 Start a headless profile with `O8_REVIEW_MODE=manual o8 serve` to hold background
 review work for that process lifetime. `o8 serve status` reports `reviewMode`.
 The default is `automatic`; values other than these two are rejected at startup.
-Use the same environment on a subsequent restart to retain the hold.
+Use the same environment on a subsequent restart to retain the hold. A supervised
+restart retains its existing mode and refuses an explicitly different or invalid
+mode before signaling. Stop the profile, then start it again to change its mode.
 
 Manual mode does not reclaim abandoned review attempts, claim queued reviews,
 start packet explainers, or enqueue review continuations. The headless children

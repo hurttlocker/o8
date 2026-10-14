@@ -3230,6 +3230,7 @@
       "path": "tests/o8-serve-owned-stop.test.ts",
       "reasons": [
         "child-process",
+        "network-listener",
         "process-signal"
       ]
     },
@@ -3240,6 +3241,13 @@
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8-serve-review-mode.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
       ]
     },
     {
