@@ -241,6 +241,7 @@ commands:
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines
   serve                start the headless API, WebSocket layer, and supervisor daemon
+  O8_REVIEW_MODE=manual o8 serve  hold background reviews and continuations for this run
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
   serve restart        stop and restart the daemon with the invoking CLI version

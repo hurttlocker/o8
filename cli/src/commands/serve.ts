@@ -21,6 +21,7 @@ import {
   waitForSupervisorRestart,
 } from './serve-lifecycle.js';
 import { serveProcessClaim, stopServeProcesses, type ServeProcessClaim } from './serve-processes.js';
+import { validateReviewMode } from '../../../src/lib/lane/review-mode.js';
 import { CLI_VERSION } from './version.js';
 import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
 
@@ -47,6 +48,7 @@ interface ServeState {
   apiPort: number;
   wsPort: number;
   mode: ServeMode;
+  reviewMode?: 'automatic' | 'manual';
   root: string;
   startedAt: string;
   status: ServeStatus;
@@ -388,6 +390,7 @@ async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<Serve
 }
 
 async function startServe(mode: OutputMode): Promise<number> {
+  validateReviewMode();
   const paths = servePaths();
   mkdirSync(dirname(paths.logFile), { recursive: true });
   cleanStaleOwner(paths);
@@ -582,6 +585,12 @@ async function runDaemon(): Promise<number> {
     WS_TOKEN: token,
     NODE_ENV: plan.mode === 'packaged' ? 'production' : 'development',
   };
+  if (validateReviewMode() === 'manual') {
+    env.O8_HEAL_BOT_ENABLED = '0';
+    env.O8_SUPERVISOR_AUTO_ESCALATE = '0';
+    env.O8_EXPLAINER = '0';
+    env.O8_BRAIN_WARMUP = '0';
+  }
   if (plan.mode === 'packaged') {
     env.O8_PACKAGED_APP = '1';
     env.NODE_COMPILE_CACHE = join(paths.dataDir, 'compile-cache');
@@ -601,6 +610,7 @@ async function runDaemon(): Promise<number> {
     apiPort,
     wsPort,
     mode: plan.mode,
+    reviewMode: validateReviewMode(),
     root: plan.root,
     startedAt,
     status: 'starting',

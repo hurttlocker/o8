@@ -1,4 +1,5 @@
 /** Review-ready routing preserves a persisted chat origin before considering legacy defaults. */
+import { manualReviewRequested } from '@/lib/lane/review-mode';
 import { resolveReviewContinuationSync } from '@/lib/operator/defaults';
 import { resolveReviewChatOrigin, type ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import { startWakeTriage } from '@/lib/orchestrator/wake-triage';
@@ -11,6 +12,7 @@ export function routeReviewContinuation(
   enqueuePersistentLead: (lane: ReviewContinuationLane & { packetId: string }) => boolean,
   enqueueOrigin?: (lane: ReviewContinuationLane, origin: ReviewChatOrigin) => void,
 ): void {
+  if (manualReviewRequested()) return;
   if (lane.packetId && enqueuePersistentLead({ ...lane, packetId: lane.packetId })) return;
   if (!lane.packetId) return;
   const resolution = resolveReviewChatOrigin(lane);
@@ -40,6 +42,7 @@ export function queueReviewContinuation(
   enqueue: (repoPath: string, message: string, label: string) => void,
   dedupe: 'memory' | 'durable' = 'memory',
 ): void {
+  if (manualReviewRequested()) return;
   if (!lane.packetId) return; // ad-hoc lanes have no mission contract to continue
   if (!resolveReviewContinuationSync()) return;
   const last = dedupe === 'memory' ? reviewContinuationQueuedAt.get(lane.id) : undefined;

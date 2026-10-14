@@ -253,6 +253,7 @@ import {
   waitForLead,
 } from './lib/orchestrator/lead-lifecycle';
 import { resolveLeadRepoPath, validateLeadAttachments } from './lib/orchestrator/lead-contract';
+import { manualReviewRequested } from './lib/lane/review-mode';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
@@ -504,6 +505,7 @@ async function fetchRuntimeTranscript(sessionKey: string, limit: number) {
 }
 
 async function triggerHeadlessSprintTick() {
+  if (manualReviewRequested()) return { ok: true };
   return fetchNextJson<{ ok: boolean }>('/api/orchestrator/headless-tick', {
     method: 'POST',
     body: {},
@@ -1380,6 +1382,7 @@ function enqueueOrchestratorAutoMessage(
 }
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  if (manualReviewRequested()) return;
   if (queueLeadSupervisorReturn(repoPath, message)) return;
   queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);
 }
