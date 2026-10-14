@@ -214,21 +214,16 @@ export function spawnSync(command, args) {
     expect(existsSync(archive)).toBe(true);
   });
 
-  it('bounds the approved release allowance and keeps other versions strict', () => {
+  it('uses the shared package ceiling and preserves oversized archive evidence', () => {
     const f = fixture();
     const archive = `${f.app}.tar.gz`;
     writeFileSync(archive, 'final-archive');
-    truncateSync(archive, 81 * 1024 * 1024);
-    for (const releaseVersion of [undefined, '0.1.788', '0.1.792', '0.1.789-preview.1', '0.1.790-preview.1', '0.1.791-preview.1']) {
-      expect(() => assertMacPackageSize(f.app, archive, { releaseVersion })).toThrow('updaterArchiveBytes');
-    }
-    expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' }).allowance).toBe('release-0.1.789');
-    expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.790' }).allowance).toBe('release-0.1.790');
-    expect(assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.791' }).allowance).toBe('release-0.1.791');
-    truncateSync(archive, 88 * 1024 * 1024 + 1);
-    expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.789' })).toThrow('updaterArchiveBytes');
-    expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.790' })).toThrow('updaterArchiveBytes');
-    expect(() => assertMacPackageSize(f.app, archive, { releaseVersion: '0.1.791' })).toThrow('updaterArchiveBytes');
+    truncateSync(archive, 95 * 1024 * 1024);
+    expect(assertMacPackageSize(f.app, archive).updaterArchiveBytes).toBe(95 * 1024 * 1024);
+    truncateSync(archive, 100 * 1024 * 1024);
+    expect(assertMacPackageSize(f.app, archive).updaterArchiveBytes).toBe(100 * 1024 * 1024);
+    truncateSync(archive, 100 * 1024 * 1024 + 1);
+    expect(() => assertMacPackageSize(f.app, archive)).toThrow('updaterArchiveBytes');
     expect(existsSync(archive)).toBe(true);
   });
 

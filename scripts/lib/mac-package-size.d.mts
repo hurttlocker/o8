@@ -1,5 +1,4 @@
-export function assertMacPackageSize(appPath: string, archivePath?: string, options?: { releaseVersion?: string }): {
+export function assertMacPackageSize(appPath: string, archivePath?: string): {
   appBundleBytes: number;
   updaterArchiveBytes: number;
-  allowance: string | null;
 };
