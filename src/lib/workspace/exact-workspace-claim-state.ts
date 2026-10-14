@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { getSqlite } from '@/lib/db';
@@ -278,12 +277,14 @@ export function removeExactWorkspaceClaim(
 
 /** Child-only CAS config; the child never receives a filesystem capability. */
 export function exactWorkspaceClaimChildAuthority(): {
-  sqliteModulePath: string;
+  sqliteModuleAnchor: string;
   databasePath: string;
 } {
   const sqlite = getSqlite();
   return {
-    sqliteModulePath: createRequire(import.meta.url).resolve('better-sqlite3'),
+    // Both server launchers use the application root as cwd. Let the unbundled
+    // child resolve SQLite here instead of serializing a bundler module ID.
+    sqliteModuleAnchor: path.join(process.cwd(), 'package.json'),
     databasePath: sqlite.name,
   };
 }
