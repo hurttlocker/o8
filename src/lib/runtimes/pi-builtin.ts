@@ -92,6 +92,8 @@ export const piBuiltinRuntime: AgentRuntime = {
       laneId: opts.laneId,
       packetId: opts.packetId,
       workMode: opts.workMode,
+      // Only an OpenRouter pin changes the route (#3584); anything else stays on the managed model.
+      model: opts.model,
     });
     return { ok: result.ok, note: result.note, sessionKey: result.surfaceId || undefined, sideEffect: result.sideEffect };
   },

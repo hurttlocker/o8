@@ -21,6 +21,7 @@ import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createPiLaneApproval, createPiLaneAuthority } from '@/lib/pi/sdk/lane-approval';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
+import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import type { createPiSdkSession } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
 import { escalateInterrupt } from '@/lib/runtime/interrupt-escalation';
@@ -287,10 +288,27 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     // Loaded on the first Pi turn, so runtime registration never evaluates the Pi SDK.
     const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
     const stateDir = path.join(session.sessionDir, 'pi');
+    let model = O8_MANAGED_PI_MODEL;
+    let transport: Parameters<typeof createPiSdkSession>[0]['transport'];
+    if (isOpenRouterPiModelChoice(session.model)) {
+      // An explicit OpenRouter pin runs only on that model, bounded by the operator's packet cap.
+      const choice = await import('@/lib/pi/openrouter-choice');
+      const { getOperatorDefaultsSync } = await import('@/lib/operator/defaults');
+      const route = await choice.resolvePiModelRoute(session.model);
+      if (route.carrier === 'openrouter') {
+        model = route.model;
+        transport = choice.createPiOpenRouterRouteTransport(route, {
+          ceilingUsd: getOperatorDefaultsSync().values.meteredPacketCostCapUsd,
+          attribution: { role: 'worker', agentName: 'pi-builtin', sessionKey: surfaceId, repoPath: session.repoPath,
+            laneId: session.laneId ?? null, packetId: session.packetId ?? null, runId: run.id },
+        }).transport;
+      }
+    }
     turn.session = await createPiSdkSession({
       workspace: session.cwd,
       stateDir,
-      model: O8_MANAGED_PI_MODEL,
+      model,
+      transport,
       sessionFile: await newestPiSessionFile(path.join(stateDir, 'sessions')),
       approve: session.laneId ? createPiLaneApproval(session.cwd, session.laneId) : undefined,
       authorize: session.laneId ? createPiLaneAuthority(session.cwd, session.laneId) : undefined,
@@ -302,7 +320,8 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const known = /^The Pi prototype (?:needs Node|does not support)/.test(detail);
+    const known = /^The Pi prototype (?:needs Node|does not support)/.test(detail)
+      || (error instanceof Error && error.name === 'PiModelChoiceError');
     if (!known) console.warn('[pi-builtin] Pi could not start:', error);
     const note = known ? detail : 'Pi could not start. Details are in the o8 log.';
     if (live.get(surfaceId) === turn) live.delete(surfaceId);
@@ -364,8 +383,8 @@ async function launch(request: OwnedLaunchRequest & { workMode?: WorkerWorkMode 
     updatedAt: nowIso(),
     latestPrompt: prompt,
     latestSummary: compactText(prompt, 140),
-    // One managed model; a requested model does not change the route.
-    model: O8_MANAGED_PI_MODEL.id,
+    // The managed model unless the packet pins an OpenRouter model (#3584); any other request keeps the managed route.
+    model: isOpenRouterPiModelChoice(request.model) ? request.model : O8_MANAGED_PI_MODEL.id,
     readOnly: request.workMode === 'read-only',
     reviewDisposition: 'watching',
     reviewDispositionUpdatedAt: nowIso(),

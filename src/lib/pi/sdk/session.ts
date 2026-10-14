@@ -8,6 +8,7 @@ import { piSdkScriptPath } from './scripts';
 import { createPiContinuityGuard, type PiContinuityPolicy } from './continuity';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
 import { createManagedPiTransport, isPiAllowanceMessage, type PiModelTransport } from './transport';
+import { OPENROUTER_PI_FAILURE_TEXT } from './openrouter-transport';
 import { PI_TOOL_REFUSAL_CODE, PiToolRefusal } from './refusal';
 
 export { requirePiNode, requirePiPlatform } from './platform';
@@ -62,7 +63,8 @@ const PI_FAILURE_TEXT = /^(?:Stopped|Managed inference (?:unavailable|failed|rej
 // Pi core turns internal exceptions (paths, persistence errors) into assistant
 // errorMessage text, so only o8's own failure messages leave the session.
 function o8FailureText(message: unknown): string {
-  return typeof message === 'string' && (isPiAllowanceMessage(message) || PI_FAILURE_TEXT.test(message))
+  return typeof message === 'string' && (isPiAllowanceMessage(message) || PI_FAILURE_TEXT.test(message)
+    || OPENROUTER_PI_FAILURE_TEXT.test(message))
     ? message : 'Pi run failed';
 }
 
