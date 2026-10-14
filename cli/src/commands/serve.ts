@@ -704,7 +704,7 @@ async function runDaemon(): Promise<number> {
       state.shutdownProcesses ??= [{ pid: state.pid, identity: state.processIdentity! }, ...state.children as ServeProcessClaim[]];
       state.status = 'failed';
       state.error = 'Owned descendant shutdown is unconfirmed; ownership evidence retained.';
-      try { writeState(paths, state, lease.id); } finally { lease.release(); }
+      try { writeState(paths, state, lease.id); } catch { /* preserve a successor record */ } finally { lease.release(); }
       process.exit(EXIT.CONFLICT);
     }
     lease.release();
