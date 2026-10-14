@@ -2,6 +2,7 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 
 const CACHE_TTL_MS = 60_000;
@@ -57,7 +58,7 @@ function providerRoute(): HarnessProvider {
       'O8_DEEPSEEK_HARNESS_PROVIDER must be "deepseek-official" or "openrouter".',
     );
   }
-  if (process.env.OPENROUTER_API_KEY?.trim()) return 'openrouter';
+  if (isOpenRouterEnabled() && process.env.OPENROUTER_API_KEY?.trim()) return 'openrouter';
   return process.env.DEEPSEEK_API_KEY?.trim() ? 'deepseek-official' : 'openrouter';
 }
 

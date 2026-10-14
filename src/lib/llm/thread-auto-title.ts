@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { logUsage } from '@/lib/db/usage';
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 
 /**
  * Chats receive a short title after the first exchange, refreshed once as the
@@ -142,7 +143,8 @@ function recordTitleAttempt(input: {
 }
 
 async function llmTitle(firstUser: string, lastAssistant: string, tabId: string): Promise<string | null> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  // Free title models only; the resolver honours a disabled OpenRouter connection (#3583).
+  const apiKey = (await resolveOpenRouterKey())?.trim();
   if (!apiKey) return null;
   const runId = randomUUID();
   const prompt = [

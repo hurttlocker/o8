@@ -17,7 +17,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 
-import { OpenRouterModelsSection } from './OpenRouterModelsSection';
+import { OpenRouterProviderPanel } from './OpenRouterConnectionCard';
 import { GroupHeader } from './grouped';
 
 // ── Types ──
@@ -39,6 +39,8 @@ interface NativeKeyConfig {
   placeholder: string;
   docsUrl: string;
   description: string;
+  /** Set when Providers owns this key and the native slot only mirrors it (#3583). */
+  followsProvider?: string;
 }
 
 const NATIVE_KEYS: NativeKeyConfig[] = [
@@ -56,7 +58,8 @@ const NATIVE_KEYS: NativeKeyConfig[] = [
     envVar: 'OPENROUTER_API_KEY',
     placeholder: 'sk-or-...',
     docsUrl: 'https://openrouter.ai/keys',
-    description: 'Direct OpenRouter access for Symon and cloud transcription. This is the native Keychain slot, available separately for an existing voice setup. Saving OpenRouter above can also update this slot.',
+    description: 'Symon and cloud transcription use your OpenRouter connection from Providers. Saving or removing the key there updates this Mac too.',
+    followsProvider: 'openrouter',
   },
   {
     id: 'groq_api_key',
@@ -94,7 +97,6 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [removingProvider, setRemovingProvider] = useState<string | null>(null);
-  const [syncVoice, setSyncVoice] = useState(true);
   const nativeKeychain = isTauri() && !isNonMacShell();
   const mutationRef = useRef(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
@@ -144,7 +146,8 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
       if (res.ok) {
         let partialFailure = false;
         let message = data.warning || 'Saved. New sessions use this key; running sessions keep their connection.';
-        if (providerId === 'openrouter' && nativeKeychain && syncVoice) {
+        // One OpenRouter key for everything (#3583): Symon and voice always follow it.
+        if (providerId === 'openrouter' && nativeKeychain) {
           try {
             await voicePrefsSet('openrouter_api_key', keyInput.trim());
             const prefs = await voicePrefsGet();
@@ -157,6 +160,7 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
           }
         }
         setFeedback({ provider: providerId, type: data.warning || partialFailure ? 'error' : 'success', message });
+        if (providerId === 'openrouter') window.dispatchEvent(new Event('o8:openrouter-connection-changed'));
         setEditingProvider(null);
         setKeyInput('');
         void loadKeys();
@@ -168,7 +172,7 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
     }
     mutationRef.current = false;
     setSaving(false);
-  }, [keyInput, loadKeys, nativeKeychain, syncVoice]);
+  }, [keyInput, loadKeys, nativeKeychain]);
 
   const handleRemove = useCallback(async (providerId: string) => {
     if (mutationRef.current) return;
@@ -181,8 +185,23 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
         body: JSON.stringify({ provider: providerId }),
       });
       if (res.ok) {
+        let message = 'Removed from app storage. External environment keys are unchanged.';
+        let failed = false;
+        if (providerId === 'openrouter') {
+          if (nativeKeychain) {
+            try {
+              await voicePrefsSet('openrouter_api_key', '');
+              window.dispatchEvent(new Event('o8:voice-key-changed'));
+              message = 'Removed for o8, Symon and voice. External environment keys are unchanged.';
+            } catch {
+              failed = true;
+              message = 'Removed from app storage, but Symon and voice could not be updated. Remove it in the voice key section below.';
+            }
+          }
+          window.dispatchEvent(new Event('o8:openrouter-connection-changed'));
+        }
         setRemovingProvider(null);
-        setFeedback({ provider: providerId, type: 'success', message: 'Removed from app storage. Separate voice keys and external environment keys are unchanged.' });
+        setFeedback({ provider: providerId, type: failed ? 'error' : 'success', message });
         void loadKeys();
       } else {
         setFeedback({ provider: providerId, type: 'error', message: 'Could not remove this key. Try again.' });
@@ -190,7 +209,7 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
     } catch { setFeedback({ provider: providerId, type: 'error', message: 'Network error. Key removal was not confirmed.' }); }
     mutationRef.current = false;
     setSaving(false);
-  }, [loadKeys]);
+  }, [loadKeys, nativeKeychain]);
 
   if (loading) {
     return (
@@ -422,10 +441,9 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
                     e.currentTarget.style.borderBottomColor = RAMS_HAIRLINE_SOFT;
                   }}
                 />
-                {p.id === 'openrouter' && nativeKeychain ? <label style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, fontSize: 12 }}>
-                  <input type="checkbox" checked={syncVoice} disabled={saving} onChange={event => setSyncVoice(event.target.checked)} />
-                  Also use this key for Symon and voice on this Mac
-                </label> : null}
+                {p.id === 'openrouter' && nativeKeychain ? <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>
+                  Symon and voice on this Mac use this key too.
+                </div> : null}
                 <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     type="button"
@@ -603,7 +621,9 @@ export function NativeKeysList() {
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 560 }}>{key.description}</div>
                 <div style={{ fontSize: 12, color: RAMS_INK_QUIET, lineHeight: 1.5 }}>
-                  {nativeKeychain
+                  {key.followsProvider
+                    ? 'Managed in Providers. Remove it here only to clear a key saved on this Mac before that change.'
+                    : nativeKeychain
                     ? 'This editor manages the native Keychain value. A matching environment variable takes precedence when present.'
                     : 'Open o8 Desktop on macOS to manage this native Keychain value.'}
                 </div>
@@ -611,7 +631,7 @@ export function NativeKeysList() {
               </div>
               {nativeKeychain && bridgeAvailable && !editing ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => { setRemovingKey(null); setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>
+                  {key.followsProvider ? null : <button type="button" onClick={() => { setRemovingKey(null); setEditingKey(key.id); setKeyInput(''); }} style={accentLinkStyle(false)}>{configured ? 'update key' : 'add key'}</button>}
                   {configured ? <RamsButton variant="danger" disabled={busy} onClick={() => setRemovingKey(key.id)}>Remove</RamsButton> : null}
                 </div>
               ) : null}
@@ -675,7 +695,7 @@ export function APIKeysTab() {
         <ApiKeysProviderList />
       </section>
 
-      <OpenRouterModelsSection />
+      <OpenRouterProviderPanel />
 
       <section style={{ marginBottom: 32 }}>
         <GroupHeader>Symon &amp; voice keys</GroupHeader>

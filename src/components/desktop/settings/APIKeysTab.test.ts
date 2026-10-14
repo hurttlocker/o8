@@ -73,7 +73,7 @@ it('shows the four app-service keys and five distinct native Keychain slots', as
     expect(container.textContent).toContain('Groq transcription');
     expect(container.textContent).toContain('ElevenLabs voice');
     expect(container.textContent).toContain('Google Cloud TTS');
-    expect(container.textContent).toContain('available separately for an existing voice setup');
+    expect(container.textContent).toContain('Symon and cloud transcription use your OpenRouter connection from Providers');
   } finally {
     act(() => root.unmount());
   }
@@ -179,7 +179,8 @@ it('shows an unavailable inventory error and retries the provider request', asyn
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'retry')!;
     await act(async () => { retry.click(); });
     expect(container.textContent).toContain('OpenRouter');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Inventory twice (load + retry) and the OpenRouter connection panel once.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   } finally {
     act(() => root.unmount());
   }
@@ -232,5 +233,29 @@ it('limits a provider editor to its own key and saves only that provider', async
     expect(writes).toHaveLength(1);
     expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ provider: 'anthropic', key: 'fixture-anthropic-key' });
     expect(native.writes).toHaveLength(0);
+  } finally { act(() => root.unmount()); }
+});
+
+it('keeps one OpenRouter key: the voice slot has no separate editor and removal clears it too', async () => {
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  native.prefs.openrouter_api_key_set = true;
+  const configured = providers.map(provider => provider.id === 'openrouter' ? { ...provider, configured: true, maskedKey: 'sk-o••••abcd' } : provider);
+  const request = vi.fn(async (_url: string, options?: RequestInit) => ({ ok: true, status: 200, json: async () => options?.method === 'DELETE' ? ({ success: true }) : ({ providers: configured }) }));
+  vi.stubGlobal('fetch', request);
+  try {
+    await act(async () => { root.render(createElement(APIKeysTab)); });
+    let nativeRow = [...container.querySelectorAll('span')].find(node => node.textContent === 'OpenRouter (Symon & voice)')!.parentElement!;
+    while (!nativeRow.querySelector('button')) nativeRow = nativeRow.parentElement!;
+    expect(nativeRow.textContent).not.toContain('Groq transcription');
+    expect([...nativeRow.querySelectorAll('button')].map(button => button.textContent)).toContain('Remove');
+    expect([...nativeRow.querySelectorAll('button')].map(button => button.textContent)).not.toContain('add key');
+    expect([...nativeRow.querySelectorAll('button')].map(button => button.textContent)).not.toContain('update key');
+    const row = rowFor(container, 'OpenRouter');
+    await act(async () => { [...row.querySelectorAll('button')].find(button => /remove/i.test(button.textContent ?? ''))!.click(); });
+    await act(async () => { [...container.querySelectorAll('button')].find(button => /confirm|remove key/i.test(button.textContent ?? '') && button.closest('div') !== null)!.click(); });
+    expect(request.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(1);
+    expect(native.writes).toContainEqual(['openrouter_api_key', '']);
+    expect(container.textContent).toContain('Removed for o8, Symon and voice');
   } finally { act(() => root.unmount()); }
 });

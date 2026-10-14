@@ -126,20 +126,44 @@ pub enum GeminiTarget {
     Proxy { url: String, token: String },
 }
 
-/// Resolve a Gemini `generateContent` route: local key → direct; else plan
-/// token → proxy; else None (no key and not signed in).
+/// Who pays for a voice call (#3583): a paid plan first, then the user's own
+/// key, then a free-plan token. A free plan never outranks the user's key.
+#[derive(Debug, PartialEq, Eq)]
+enum Payer {
+    Plan(String),
+    Key(String),
+}
+
+fn choose_payer(paid_token: Option<String>, key: Option<String>, any_token: Option<String>) -> Option<Payer> {
+    paid_token
+        .map(Payer::Plan)
+        .or_else(|| key.map(Payer::Key))
+        .or_else(|| any_token.map(Payer::Plan))
+}
+
+/// The license token, only when the effective plan is paid.
+fn paid_plan_token() -> Option<String> {
+    match read_plan() {
+        Some(plan) if plan != "free" => read_license_token(),
+        _ => None,
+    }
+}
+
+/// Resolve a Gemini `generateContent` route: paid plan → proxy; else local key
+/// → direct; else free-plan token → proxy; else None.
 pub fn resolve_gemini(model: &str) -> Option<GeminiTarget> {
-    if let Some(key) = crate::stt::keys::get_gemini_key() {
-        return Some(GeminiTarget::Direct {
+    let paid = paid_plan_token();
+    let key = if paid.is_some() { None } else { crate::stt::keys::get_gemini_key() };
+    match choose_payer(paid, key, read_license_token())? {
+        Payer::Key(key) => Some(GeminiTarget::Direct {
             url: format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"),
             api_key: key,
-        });
+        }),
+        Payer::Plan(token) => Some(GeminiTarget::Proxy {
+            url: format!("{}/v1/gemini", proxy_base_url()),
+            token,
+        }),
     }
-    let token = read_license_token()?;
-    Some(GeminiTarget::Proxy {
-        url: format!("{}/v1/gemini", proxy_base_url()),
-        token,
-    })
 }
 
 /// A resolved Bearer-auth HTTP target (OpenRouter audio / transcribe).
@@ -149,21 +173,43 @@ pub struct BearerTarget {
     pub managed: bool,
 }
 
-/// Resolve the Whisper transcription route: local OpenRouter key → direct; else
-/// plan token → proxy `/v1/transcribe`; else None. Body + headers are identical
-/// either way — only the URL + bearer change.
+/// Resolve the Whisper transcription route: paid plan → proxy `/v1/transcribe`;
+/// else local OpenRouter key → direct; else free-plan token → proxy; else None.
+/// Body + headers are identical either way — only the URL + bearer change.
 pub fn resolve_transcribe() -> Option<BearerTarget> {
-    if let Some(key) = crate::stt::keys::get_openrouter_key() {
-        return Some(BearerTarget {
+    let paid = paid_plan_token();
+    let key = if paid.is_some() { None } else { crate::stt::keys::get_openrouter_key() };
+    match choose_payer(paid, key, read_license_token())? {
+        Payer::Key(key) => Some(BearerTarget {
             url: "https://openrouter.ai/api/v1/audio/transcriptions".to_string(),
             bearer: key,
             managed: false,
-        });
+        }),
+        Payer::Plan(token) => Some(BearerTarget {
+            url: format!("{}/v1/transcribe", proxy_base_url()),
+            bearer: token,
+            managed: true,
+        }),
     }
-    let token = read_license_token()?;
-    Some(BearerTarget {
-        url: format!("{}/v1/transcribe", proxy_base_url()),
-        bearer: token,
-        managed: true,
-    })
+}
+
+#[cfg(test)]
+mod payer_tests {
+    use super::{choose_payer, Payer};
+
+    fn some(value: &str) -> Option<String> {
+        Some(value.to_string())
+    }
+
+    #[test]
+    fn a_paid_plan_pays_before_the_users_key() {
+        assert_eq!(choose_payer(some("paid"), some("key"), some("paid")), Some(Payer::Plan("paid".into())));
+    }
+
+    #[test]
+    fn the_users_key_outranks_a_free_plan_token() {
+        assert_eq!(choose_payer(None, some("key"), some("free")), Some(Payer::Key("key".into())));
+        assert_eq!(choose_payer(None, None, some("free")), Some(Payer::Plan("free".into())));
+        assert_eq!(choose_payer(None, None, None), None);
+    }
 }
