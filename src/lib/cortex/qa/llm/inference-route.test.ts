@@ -33,6 +33,7 @@ import {
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
   resolveOpenRouterRoute,
+  resolveTranscribeRoute,
 } from '@/lib/cortex/qa/llm/inference-route';
 import {
   resolveLocalChatModelSync,
@@ -426,6 +427,33 @@ describe('inference-route', () => {
     it('returns null when neither a Gemini key nor a token is present', () => {
       setEnt(null);
       expect(resolveEmbedRoute('gemini-embedding-001')).toBeNull();
+    });
+  });
+
+  describe('resolveTranscribeRoute', () => {
+    it('lets a paid plan pay for dictation even when an OpenRouter key is connected', async () => {
+      mockKey.mockResolvedValue('sk-local-key');
+      setEnt({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
+      const route = await resolveTranscribeRoute();
+      expect(route?.via).toBe('proxy');
+      expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/transcribe`);
+      expect(route?.headers.Authorization).toBe('Bearer aaa.bbb.ccc');
+      expect(mockKey).not.toHaveBeenCalled();
+    });
+
+    it('uses the connected key when no paid plan covers dictation', async () => {
+      mockKey.mockResolvedValue('sk-local-key');
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
+      const route = await resolveTranscribeRoute();
+      expect(route?.via).toBe('direct');
+      expect(route?.url).toBe('https://openrouter.ai/api/v1/audio/transcriptions');
+      expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
+    });
+
+    it('returns null without a paid plan or a usable key', async () => {
+      mockKey.mockResolvedValue(null);
+      setEnt(null);
+      expect(await resolveTranscribeRoute()).toBeNull();
     });
   });
 });

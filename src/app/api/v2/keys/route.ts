@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
  * GET  /api/v2/keys — list configured providers (keys masked)
  * POST /api/v2/keys — set/update a provider key
  * DELETE /api/v2/keys — remove a provider key
+ * PATCH /api/v2/keys — OpenRouter only: turn the connection on/off or re-check the key
  *
  * Keys are AES-256-GCM encrypted at rest inside ~/.o8/.env.local.
  * The encryption master key lives in the macOS Keychain (Tauri builds) or
@@ -23,7 +24,15 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { encryptValue, decryptValue } from '@/lib/db/master-key';
-import { updateManagedOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterKey, updateManagedOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import {
+  checkOpenRouterKey,
+  clearOpenRouterCheck,
+  openRouterConnectionView,
+  readOpenRouterConnection,
+  recordOpenRouterCheck,
+  setOpenRouterEnabled,
+} from '@/lib/providers/openrouter-connection';
 import { invalidateRuntimeAuthCache } from '@/lib/runtimes/shared/auth-detect';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -274,6 +283,7 @@ export async function GET(request: NextRequest) {
   if (denied) return denied;
 
   const envVars = await parseEnvFile();
+  const connection = readOpenRouterConnection();
   // Also check process.env (may be set outside .env.local)
   const providers = PROVIDERS.map((p) => {
     const envValue = envVars.get(p.envVar) || process.env[p.envVar] || '';
@@ -285,6 +295,7 @@ export async function GET(request: NextRequest) {
       docsUrl: p.docsUrl,
       configured: !!envValue,
       maskedKey: envValue ? maskKey(envValue) : null,
+      ...(p.id === 'openrouter' ? { connection: openRouterConnectionView(envValue || null, connection) } : {}),
     };
   });
 
@@ -311,10 +322,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Key cannot be empty' }, { status: 400 });
   }
 
-  // Validate key against provider API before saving
-  const validation = await validateKey(config, key);
+  // Validate key against provider API before saving. OpenRouter keeps the
+  // check result (#3583) so the connection can show verified, unverified or failing.
+  const openRouterCheck = config.id === 'openrouter' ? await checkOpenRouterKey(key) : null;
+  const validation = openRouterCheck
+    ? { valid: openRouterCheck.status !== 'invalid', error: openRouterCheck.status === 'ok' ? undefined : `${openRouterCheck.error} The key is saved and marked unverified.` }
+    : await validateKey(config, key);
   if (!validation.valid) {
-    return NextResponse.json({ error: validation.error || 'Invalid API key' }, { status: 400 });
+    return NextResponse.json({ error: openRouterCheck?.error || validation.error || 'Invalid API key' }, { status: 400 });
   }
 
   // Read existing plaintext map (decrypted), update, then re-encrypt all entries.
@@ -325,6 +340,7 @@ export async function POST(request: NextRequest) {
   // Also set in process.env so it takes effect immediately (no restart needed)
   if (config.id === 'openrouter') updateManagedOpenRouterKey(key);
   else process.env[config.envVar] = key;
+  const connection = openRouterCheck ? openRouterConnectionView(key, recordOpenRouterCheck(key, openRouterCheck)) : undefined;
   invalidateRuntimeAuthCache();
 
   return NextResponse.json({
@@ -332,6 +348,7 @@ export async function POST(request: NextRequest) {
     provider: config.id,
     maskedKey: maskKey(key),
     warning: validation.error || undefined,
+    ...(connection ? { connection } : {}),
   });
 }
 
@@ -356,9 +373,45 @@ export async function DELETE(request: NextRequest) {
   await writeEnvFile(envVars, new Set([config.envVar]));
 
   // Clear from process.env
-  if (config.id === 'openrouter') updateManagedOpenRouterKey(null);
-  else delete process.env[config.envVar];
+  if (config.id === 'openrouter') {
+    updateManagedOpenRouterKey(null);
+    clearOpenRouterCheck();
+  } else delete process.env[config.envVar];
   invalidateRuntimeAuthCache();
 
   return NextResponse.json({ success: true, provider: config.id, warning: 'External environment and project-local keys are managed separately.' });
+}
+
+// PATCH — OpenRouter connection controls (#3583). Turning it off keeps the key
+// but stops every o8 OpenRouter call; Check re-reads the key's status.
+export async function PATCH(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
+  const body = await request.json().catch(() => null);
+  if (body?.provider !== 'openrouter') {
+    return NextResponse.json({ error: 'Only the OpenRouter connection supports this action' }, { status: 400 });
+  }
+  const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
+  if (enabled === undefined && body.check !== true) {
+    return NextResponse.json({ error: 'enabled (boolean) or check (true) is required' }, { status: 400 });
+  }
+
+  if (enabled !== undefined) {
+    setOpenRouterEnabled(enabled);
+    // Resolving applies the new state to this process's environment.
+    await resolveOpenRouterKey();
+    invalidateRuntimeAuthCache();
+  }
+
+  const key = await resolveOpenRouterKey();
+  if (body.check === true) {
+    if (!readOpenRouterConnection().enabled) {
+      return NextResponse.json({ error: 'Turn the OpenRouter connection on before checking it' }, { status: 409 });
+    }
+    if (!key) return NextResponse.json({ error: 'No OpenRouter key is connected' }, { status: 409 });
+    recordOpenRouterCheck(key, await checkOpenRouterKey(key));
+  }
+
+  return NextResponse.json({ success: true, provider: 'openrouter', connection: openRouterConnectionView(key) });
 }

@@ -370,11 +370,21 @@ export function resolveEmbedRoute(
 }
 
 /**
- * Whisper transcription route (OpenRouter audio/transcriptions). Direct (the
- * user's OpenRouter key) → proxy (plan token) → null. The request body is
- * identical either way, so the caller only swaps url + headers.
+ * Whisper transcription route (OpenRouter audio/transcriptions). A paid plan
+ * pays first (#3583): proxy (plan token) → direct (the user's OpenRouter key)
+ * → null. The request body is identical either way, so the caller only swaps
+ * url + headers.
  */
 export async function resolveTranscribeRoute(): Promise<InferenceRoute | null> {
+  const paidToken = planToken();
+  if (paidToken) {
+    return {
+      url: `${proxyBaseUrl()}/v1/transcribe`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${paidToken}` },
+      via: 'proxy',
+    };
+  }
+
   const localKey = await resolveOpenRouterKey();
   if (localKey) {
     return {

@@ -29,3 +29,21 @@ it('preserves an explicit ambient credential when the saved key changes', async 
   siblingWrite(null);
   expect(await resolveOpenRouterKey()).toBe('fixture-shell');
 });
+function siblingConnection(enabled: boolean) {
+  execFileSync(process.execPath, ['-e', 'const fs=require("node:fs");fs.mkdirSync(process.argv[1],{recursive:true});fs.writeFileSync(process.argv[1]+"/openrouter.json",process.argv[2])', join(state.dir, 'providers'), JSON.stringify({ version: 1, enabled })]);
+}
+it('stops resolving any OpenRouter key while another process has turned the connection off', async () => {
+  const { resolveOpenRouterKey } = await import('./byok-keys');
+  siblingWrite('fixture-stored');
+  expect(await resolveOpenRouterKey()).toBe('fixture-stored');
+  siblingConnection(false);
+  expect(await resolveOpenRouterKey()).toBeNull();
+  // The injected value leaves this process so later child processes cannot inherit it.
+  expect(process.env.OPENROUTER_API_KEY).toBeUndefined();
+  vi.stubEnv('OPENROUTER_API_KEY', 'fixture-shell');
+  expect(await resolveOpenRouterKey()).toBeNull();
+  expect(process.env.OPENROUTER_API_KEY).toBe('fixture-shell');
+  siblingConnection(true);
+  expect(await resolveOpenRouterKey()).toBe('fixture-shell');
+  siblingWrite(null);
+});
