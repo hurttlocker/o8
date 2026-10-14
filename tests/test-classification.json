@@ -3243,6 +3243,13 @@
       ]
     },
     {
+      "path": "tests/o8-serve-token-renewal.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"

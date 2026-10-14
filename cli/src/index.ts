@@ -244,6 +244,7 @@ commands:
   O8_REVIEW_MODE=manual o8 serve  hold background reviews and continuations for this run
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
+  serve renew-token    renew a stopped private profile credential without printing it
   serve restart        stop and restart the daemon with the invoking CLI version
   serve agent install  install and load the per-user headless service
   serve agent uninstall  unload and remove the per-user headless service

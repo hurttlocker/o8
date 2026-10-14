@@ -22,6 +22,7 @@ import {
 } from './serve-lifecycle.js';
 import { serveProcessClaim, stopServeProcesses, type ServeProcessClaim } from './serve-processes.js';
 import { validateReviewMode } from '../../../src/lib/lane/review-mode.js';
+import { renewServeToken } from './serve-token.js';
 import { CLI_VERSION } from './version.js';
 import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
 
@@ -724,6 +725,7 @@ export async function runServe(
   }
   if (!subcommand) return startServe(mode);
   if (subcommand === 'status') return statusServe(mode);
+  if (subcommand === 'renew-token') return renewServeToken(mode);
   if (subcommand === 'stop') return stopServe(mode);
   if (subcommand === 'restart') return restartServe(mode);
   if (subcommand === '__launch_agent') return runLaunchAgent();

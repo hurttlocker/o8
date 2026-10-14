@@ -15,3 +15,17 @@ The hold is a startup recovery control. It does not cancel already-running turns
 or prohibit explicitly requested tasks. Stop the previous runtime and verify its
 owned processes have exited before starting a profile in manual mode. Inspect the
 preserved review state before returning that profile to automatic mode.
+
+## Renew a stopped private profile token
+
+Use `O8_DATA_DIR=<private-profile> o8 serve renew-token` after stopping the profile.
+This atomically replaces only its local runtime token and prints a success receipt,
+never the credential. The command requires an existing headless profile and refuses
+the default desktop directories, workers, retained owner/state files, and listening
+runtime ports. It does not clear stale ownership evidence. Reconcile an unresolved
+shutdown before retrying. Account authentication is separate and remains unchanged.
+
+Keep the private profile stopped throughout renewal. Headless starts contend on
+its owner file; do not open that profile in a desktop app concurrently. Start the
+same profile with the new credential only after the ownership and review controls
+have been verified.
