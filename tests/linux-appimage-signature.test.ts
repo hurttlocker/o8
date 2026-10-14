@@ -104,6 +104,16 @@ describe('linux AppImage updater signature', () => {
     expect(latest.platforms['linux-x86_64']).toBeUndefined();
   });
 
+  it('keeps CPU-specific Darwin entries when adding the Linux signature', () => {
+    const latest = publishedLatest();
+    latest.platforms['darwin-x86_64'] = { signature: 'intel-sig', url: `${BASE}/o8_x86_64.app.tar.gz` };
+    latest.platforms['darwin-aarch64'] = { signature: 'arm-sig', url: `${BASE}/o8_arm64.app.tar.gz` };
+    const next = withLinuxPlatform({ latest, version: VERSION, signature: 'linux-sig' });
+    expect(next.platforms['darwin-x86_64']).toEqual(latest.platforms['darwin-x86_64']);
+    expect(next.platforms['darwin-aarch64']).toEqual(latest.platforms['darwin-aarch64']);
+    expect(next.platforms['linux-x86_64']?.url).toBe(`${BASE}/${ASSET}`);
+  });
+
   it('fails closed when the release is missing, a draft, or has no AppImage', async () => {
     const missing = harness({ fetchRelease: () => null });
     await expect(signLinuxAppImage({ tag: TAG, repos: ['o/r'], workDir: '/work', deps: missing.deps }))

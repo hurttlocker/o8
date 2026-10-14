@@ -135,6 +135,64 @@ function releasePlan(bundle: ReturnType<typeof makeReleaseBundle>) {
 }
 
 describe('release updater manifest', () => {
+  function cpuPlan(architectures: Array<'x86_64' | 'arm64'> = ['x86_64', 'arm64']) {
+    const bundle = makeReleaseBundle(false);
+    const universal = {
+      kind: 'macos-universal-app' as const, architectures: ['x86_64', 'arm64'] as Array<'x86_64' | 'arm64'>,
+      binaries: [], bundleSha256: 'a'.repeat(64),
+    };
+    const cpus = architectures.map((architecture) => ({
+      architecture,
+      signature: `${architecture}-signature`,
+      identity: {
+        kind: 'macos-cpu-app' as const, architectures: [architecture] as ['x86_64' | 'arm64'], sourceBundleSha256: 'a'.repeat(64),
+        binaries: ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write'].map((name) => ({
+          relativePath: `Contents/MacOS/${name}`, architectures: [architecture] as Array<'x86_64' | 'arm64'>, sha256: 'b'.repeat(64),
+        })),
+        updaterArchiveSha256: 'c'.repeat(64), bundleSha256: 'd'.repeat(64),
+      },
+      archivePath: join(bundle.bundleDir, `o8_${architecture}.app.tar.gz`),
+      signaturePath: join(bundle.bundleDir, `o8_${architecture}.app.tar.gz.sig`),
+      dmgPath: join(bundle.bundleDir, `o8_0.1.999_${architecture}.dmg`),
+    }));
+    return { bundle, cpus, options: {
+      bundleDir: bundle.bundleDir, version: '0.1.999', notes: 'o8', pubDate: '2026-10-14T00:00:00Z',
+      downloadBase: 'https://example.test/v0.1.999',
+      darwinArtifact: { signature: 'universal-signature', identity: universal },
+      darwinCpuArtifacts: cpus,
+      baseUploadAssets: bundle.macosAssets,
+    } };
+  }
+
+  it('routes each CPU to its own signature and archive while retaining universal assets', () => {
+    const f = cpuPlan();
+    const plan = buildReleaseManifest(f.options);
+    expect(plan.latestJson.platforms).toEqual({
+      'darwin-x86_64': { signature: 'x86_64-signature', url: 'https://example.test/v0.1.999/o8_x86_64.app.tar.gz' },
+      'darwin-aarch64': { signature: 'arm64-signature', url: 'https://example.test/v0.1.999/o8_arm64.app.tar.gz' },
+    });
+    expect(plan.uploadArgs).toEqual([
+      ...f.bundle.macosAssets,
+      ...f.cpus.flatMap((cpu) => [cpu.dmgPath, cpu.archivePath, cpu.signaturePath]),
+    ]);
+  });
+
+  it.each([{ architectures: ['arm64'] }, { architectures: ['x86_64', 'x86_64'] }, { architectures: [] }] as Array<{ architectures: Array<'x86_64' | 'arm64'> }>)('rejects a partial or duplicate CPU set $architectures', ({ architectures }) => {
+    expect(() => buildReleaseManifest(cpuPlan(architectures).options)).toThrow('exactly one x86_64 and one arm64');
+  });
+
+  it('rejects a CPU artifact derived from another universal build', () => {
+    const f = cpuPlan();
+    f.cpus[1].identity.sourceBundleSha256 = 'e'.repeat(64);
+    expect(() => buildReleaseManifest(f.options)).toThrow('universal source identity');
+  });
+
+  it('rejects a signature or CPU identity assigned to the wrong platform', () => {
+    const f = cpuPlan();
+    f.cpus[1].identity.architectures = ['x86_64'];
+    expect(() => buildReleaseManifest(f.options)).toThrow('CPU artifact identity');
+  });
+
   it('keeps the macOS-only platforms and upload list unchanged', () => {
     const bundle = makeReleaseBundle(false);
     const plan = releasePlan(bundle);
