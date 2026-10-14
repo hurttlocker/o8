@@ -3227,6 +3227,13 @@
       ]
     },
     {
+      "path": "tests/o8-serve-owned-stop.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/o8-serve-real-path.test.ts",
       "reasons": [
         "child-process",

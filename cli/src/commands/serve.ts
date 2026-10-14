@@ -20,13 +20,13 @@ import {
   superviseServeDaemon,
   waitForSupervisorRestart,
 } from './serve-lifecycle.js';
+import { serveProcessClaim, stopServeProcesses, type ServeProcessClaim } from './serve-processes.js';
 import { CLI_VERSION } from './version.js';
 import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
 const START_TIMEOUT_MS = 60_000;
-const STOP_TIMEOUT_MS = 8_000;
 const POLL_MS = 100;
 
 type ServeMode = 'development' | 'packaged';
@@ -35,12 +35,15 @@ type ServeStatus = 'starting' | 'ready' | 'stopping' | 'failed';
 interface ServeChildState {
   role: 'api' | 'ws';
   pid: number;
+  identity?: ServeProcessClaim['identity'];
 }
 
 interface ServeState {
   schema: 'o8/serve-state/v1';
   pid: number;
   pgid: number;
+  processIdentity?: ServeProcessClaim['identity'];
+  shutdownProcesses?: ServeProcessClaim[];
   apiPort: number;
   wsPort: number;
   mode: ServeMode;
@@ -49,6 +52,7 @@ interface ServeState {
   status: ServeStatus;
   children: ServeChildState[];
   supervisorPid?: number;
+  supervisorIdentity?: ServeProcessClaim['identity'];
   version?: string;
   error?: string;
 }
@@ -105,32 +109,6 @@ function processAlive(pid: number): boolean {
   }
 }
 
-function uniquePids(pids: number[]): number[] {
-  return [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))];
-}
-
-function signalPids(pids: number[], signal: NodeJS.Signals): void {
-  for (const pid of uniquePids(pids)) {
-    if (!processAlive(pid)) continue;
-    try { process.kill(pid, signal); } catch {}
-  }
-}
-
-function signalProcessGroup(pgid: number | undefined, signal: NodeJS.Signals): void {
-  if (process.platform === 'win32' || !pgid || pgid <= 0) return;
-  try { process.kill(-pgid, signal); } catch {}
-}
-
-function processGroupAlive(pgid: number | undefined): boolean {
-  if (process.platform === 'win32' || !pgid || pgid <= 0) return false;
-  try {
-    process.kill(-pgid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function readState(paths: ServePaths): ServeState | null {
   try {
     const parsed = JSON.parse(readFileSync(paths.stateFile, 'utf8')) as ServeState;
@@ -147,6 +125,8 @@ function writeState(paths: ServePaths, state: ServeState): void {
 }
 
 function cleanStaleOwner(paths: ServePaths): void {
+  const retained = readState(paths);
+  if (retained?.processIdentity || retained?.shutdownProcesses?.length || retained?.children?.some((child) => processAlive(child.pid))) return;
   const supervisorPid = readServeSupervisorPid(paths.stateFile);
   if (supervisorPid && processAlive(supervisorPid)) return;
   const pid = readOwnerPid(paths);
@@ -175,30 +155,6 @@ async function assertServeAgentInstallAvailable(paths: ServePaths): Promise<void
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
-
-async function waitForPidsToExit(pids: number[], timeoutMs: number): Promise<boolean> {
-  const trackedPids = uniquePids(pids);
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (trackedPids.every((pid) => !processAlive(pid))) return true;
-    await wait(POLL_MS);
-  }
-  return trackedPids.every((pid) => !processAlive(pid));
-}
-
-async function terminateTrackedPids(
-  pids: number[],
-  pgid: number | undefined,
-  termTimeoutMs: number,
-): Promise<boolean> {
-  const trackedPids = uniquePids(pids);
-  signalPids(trackedPids, 'SIGTERM');
-  const trackedExited = await waitForPidsToExit(trackedPids, termTimeoutMs);
-  if (trackedExited && !processGroupAlive(pgid)) return true;
-  signalProcessGroup(pgid, 'SIGKILL');
-  signalPids(trackedPids, 'SIGKILL');
-  return await waitForPidsToExit(trackedPids, 1_000) && !processGroupAlive(pgid);
 }
 
 async function portAcceptsConnections(port: number): Promise<boolean> {
@@ -239,6 +195,10 @@ function readPort(path: string): number | null {
 }
 
 async function assertDataDirAvailableForServe(paths: ServePaths): Promise<void> {
+  const retained = readState(paths);
+  if (retained?.shutdownProcesses?.length || (retained?.processIdentity && !processAlive(retained.pid))) {
+    throw new CliError('serve_stop_unconfirmed', 'Prior shutdown requires ownership reconciliation before restart.', EXIT.CONFLICT);
+  }
   if (existsSync(paths.pidFile)) return;
   const apiPort = readPort(paths.apiPortFile);
   if (!apiPort || !await apiIsReady(apiPort)) return;
@@ -507,7 +467,7 @@ async function statusServe(mode: OutputMode): Promise<number> {
   const pid = readOwnerPid(paths);
   const state = readState(paths);
   if (!pid || !state || state.pid !== pid || !processAlive(pid)) {
-    const hasRecoverableChildren = Boolean(state?.children.some((child) => processAlive(child.pid)));
+    const hasRecoverableChildren = Boolean(state?.children?.some((child) => processAlive(child.pid)));
     if (!hasRecoverableChildren) cleanStaleOwner(paths);
     return outputServeNotRunning(mode);
   }
@@ -522,64 +482,30 @@ async function stopServe(mode: OutputMode, report = true): Promise<number> {
   const paths = servePaths();
   const pid = readOwnerPid(paths);
   const state = readState(paths);
-  const supervisorPid = readServeSupervisorPid(paths.stateFile);
-  const stateMatchesOwner = state && (!pid || state.pid === pid) ? state : null;
-  const leaderPid = pid ?? stateMatchesOwner?.pid ?? null;
-  const liveSupervisorPid = supervisorPid && processAlive(supervisorPid) ? supervisorPid : null;
-  const resultPid = leaderPid ?? liveSupervisorPid;
-  if (!resultPid) {
-    cleanStaleOwner(paths);
-    throw new CliError('serve_not_running', 'Headless o8 is not running.', EXIT.NOT_FOUND);
+  if (!state || (pid && pid !== state.pid)) {
+    throw new CliError('serve_not_running', 'No matching headless ownership record exists.', EXIT.NOT_FOUND);
   }
-  const childPids = stateMatchesOwner?.children.map((child) => child.pid) ?? [];
-  const trackedPids = uniquePids([liveSupervisorPid ?? 0, leaderPid ?? 0, ...childPids]);
-  if (!liveSupervisorPid && (!leaderPid || !processAlive(leaderPid))) {
-    const stopped = await terminateTrackedPids(childPids, stateMatchesOwner?.pgid, 1_000);
-    cleanStaleOwner(paths);
-    if (stopped && trackedPids.every((trackedPid) => !processAlive(trackedPid)) && !existsSync(paths.pidFile)) {
-      return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
-    }
-    throw new CliError(
-      'serve_stop_failed',
-      `Headless o8 pid ${resultPid} died, but one or more recorded children could not be stopped.`,
-      EXIT.CONFLICT,
-      `Inspect ${paths.logFile}.`,
-    );
+  if (!state.shutdownProcesses?.length && ![state.pid, state.supervisorPid, ...state.children.map((child) => child.pid)]
+    .some((owner) => owner && processAlive(owner))) {
+    throw new CliError('serve_stop_unconfirmed', 'The recorded ancestors exited before a descendant census was retained.', EXIT.CONFLICT);
   }
-  signalPids([liveSupervisorPid ?? leaderPid ?? 0], 'SIGTERM');
-  const startedAt = Date.now();
-  const deadline = startedAt + STOP_TIMEOUT_MS;
-  const escalationAt = startedAt + Math.floor(STOP_TIMEOUT_MS / 2);
-  let childrenSignaled = false;
-  while (Date.now() < deadline) {
-    if (!childrenSignaled && Date.now() >= escalationAt) {
-      signalPids(trackedPids, 'SIGTERM');
-      childrenSignaled = true;
-    }
-    if (
-      trackedPids.every((trackedPid) => !processAlive(trackedPid))
-      && !processGroupAlive(stateMatchesOwner?.pgid)
-      && !existsSync(paths.pidFile)
-    ) {
-      return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
-    }
-    await wait(POLL_MS);
+  const seeds = state.shutdownProcesses ?? [
+    ...(state.supervisorPid ? [{ pid: state.supervisorPid, identity: state.supervisorIdentity }] : []),
+    { pid: state.pid, identity: state.processIdentity }, ...state.children,
+  ].map(({ pid: owner, identity }) => ({ pid: owner, identity })) as ServeProcessClaim[];
+  try {
+    const receipt = await stopServeProcesses(seeds, (claims) => {
+      state.shutdownProcesses = claims;
+      writeState(paths, state);
+    });
+    writeFileSync(join(paths.dataDir, 'serve-stop.json'), `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+    if (!receipt.confirmedDead) throw new Error('Owned descendants remain unconfirmed.');
+    if (readOwnerPid(paths) === state.pid) rmSync(paths.pidFile, { force: true });
+    rmSync(paths.stateFile, { force: true });
+    return report ? outputServeStopped(mode, state.pid) : EXIT.OK;
+  } catch (error) {
+    throw new CliError('serve_stop_failed', error instanceof Error ? error.message : 'Process ownership is unverified.', EXIT.CONFLICT);
   }
-  signalProcessGroup(stateMatchesOwner?.pgid, 'SIGKILL');
-  signalPids(trackedPids, 'SIGKILL');
-  await waitForPidsToExit(trackedPids, 1_000);
-  const allProcessesStopped = trackedPids.every((trackedPid) => !processAlive(trackedPid))
-    && !processGroupAlive(stateMatchesOwner?.pgid);
-  if (allProcessesStopped) cleanStaleOwner(paths);
-  if (allProcessesStopped && !existsSync(paths.pidFile)) {
-    return report ? outputServeStopped(mode, resultPid) : EXIT.OK;
-  }
-  throw new CliError(
-    'serve_stop_failed',
-    `Headless o8 pid ${resultPid} did not stop before the shutdown deadline.`,
-    EXIT.CONFLICT,
-    `Inspect ${paths.logFile}.`,
-  );
 }
 
 async function restartServe(mode: OutputMode): Promise<number> {
@@ -607,7 +533,7 @@ async function restartServe(mode: OutputMode): Promise<number> {
     return EXIT.OK;
   }
   const ownerPid = readOwnerPid(paths);
-  const recoverableChildren = state?.children.some((child) => processAlive(child.pid)) ?? false;
+  const recoverableChildren = state?.children?.some((child) => processAlive(child.pid)) ?? false;
   if ((!ownerPid || !processAlive(ownerPid)) && !recoverableChildren) {
     cleanStaleOwner(paths);
     return startServe(mode);
@@ -671,6 +597,7 @@ async function runDaemon(): Promise<number> {
     schema: 'o8/serve-state/v1',
     pid: process.pid,
     pgid: process.pid,
+    processIdentity: (await serveProcessClaim(process.pid)).identity,
     apiPort,
     wsPort,
     mode: plan.mode,
@@ -678,17 +605,16 @@ async function runDaemon(): Promise<number> {
     startedAt,
     status: 'starting',
     children: [],
-    ...(supervisorPid ? { supervisorPid } : {}),
+    ...(supervisorPid ? { supervisorPid, supervisorIdentity: (await serveProcessClaim(supervisorPid)).identity } : {}),
     version: CLI_VERSION,
   };
   writeState(paths, state);
 
   const apiChild = spawnService('api', plan.api, plan, env, apiPort);
   const wsChild = spawnService('ws', plan.ws, plan, env, apiPort);
-  if (!apiChild.pid || !wsChild.pid) throw new Error('Failed to start one or more server children.');
   state.children = [
-    { role: 'api', pid: apiChild.pid },
-    { role: 'ws', pid: wsChild.pid },
+    ...(apiChild.pid ? [{ role: 'api' as const, pid: apiChild.pid }] : []),
+    ...(wsChild.pid ? [{ role: 'ws' as const, pid: wsChild.pid }] : []),
   ];
   writeState(paths, state);
 
@@ -699,27 +625,22 @@ async function runDaemon(): Promise<number> {
     state.status = reason ? 'failed' : 'stopping';
     if (reason) state.error = reason;
     writeState(paths, state);
-    for (const child of [apiChild, wsChild]) {
-      if (child.pid && processAlive(child.pid)) {
-        try { child.kill('SIGTERM'); } catch {}
-      }
+    try {
+      if (state.children.some((child) => !child.identity)) throw new Error('Child birth identity was not captured.');
+      const receipt = await stopServeProcesses(state.children as ServeProcessClaim[], (claims) => {
+        state.shutdownProcesses = [
+          { pid: state.pid, identity: state.processIdentity! }, ...claims,
+        ];
+        writeState(paths, state);
+      });
+      if (!receipt.confirmedDead) throw new Error('Owned descendants remain unconfirmed.');
+    } catch {
+      state.shutdownProcesses ??= [{ pid: state.pid, identity: state.processIdentity! }, ...state.children as ServeProcessClaim[]];
+      state.status = 'failed';
+      state.error = 'Owned descendant shutdown is unconfirmed; ownership evidence retained.';
+      writeState(paths, state);
+      process.exit(EXIT.CONFLICT);
     }
-    const deadline = Date.now() + 3_000;
-    while (
-      Date.now() < deadline
-      && [apiChild, wsChild].some((child) => child.pid && processAlive(child.pid))
-    ) {
-      await wait(50);
-    }
-    for (const child of [apiChild, wsChild]) {
-      if (child.pid && processAlive(child.pid)) {
-        try { child.kill('SIGKILL'); } catch {}
-      }
-    }
-    await Promise.all([apiChild, wsChild].map((child) => new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) resolve();
-      else child.once('exit', () => resolve());
-    })));
     if (readOwnerPid(paths) === process.pid) {
       rmSync(paths.pidFile, { force: true });
       rmSync(paths.stateFile, { force: true });
@@ -739,11 +660,22 @@ async function runDaemon(): Promise<number> {
   process.once('uncaughtException', (error) => { fatalShutdown('uncaughtException', error); });
   process.once('unhandledRejection', (reason) => { fatalShutdown('unhandledRejection', reason); });
   for (const [role, child] of [['api', apiChild], ['ws', wsChild]] as const) {
+    child.once('error', (error) => { fatalShutdown(`${role} spawn`, error); });
     child.once('exit', (code, signal) => {
       if (!shuttingDown) {
         void shutdown(EXIT.CONNECTION_REFUSED, `${role} child exited code=${String(code)} signal=${String(signal)}`);
       }
     });
+  }
+
+  try {
+    if (!apiChild.pid || !wsChild.pid) throw new Error('Failed to start one or more server children.');
+    for (const child of state.children) child.identity = (await serveProcessClaim(child.pid)).identity;
+    if (shuttingDown) return EXIT.CONNECTION_REFUSED;
+    writeState(paths, state);
+  } catch (error) {
+    await shutdown(EXIT.CONNECTION_REFUSED, error instanceof Error ? error.message : 'Child identity unavailable.');
+    return EXIT.CONNECTION_REFUSED;
   }
 
   const readyDeadline = Date.now() + START_TIMEOUT_MS;
