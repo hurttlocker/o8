@@ -83,6 +83,8 @@ Local worker adapters launch the coding-agent CLIs you already pay for and reuse
 
 Hermes worker dispatch is implemented through the shared owned ACP path in [#3391](https://github.com/hurttlocker/o8/pull/3391). Entry-point fixtures cover model selection, launch, interrupt, reconnect, and persisted transcripts. Installed provider acceptance remains open in [#3388](https://github.com/hurttlocker/o8/issues/3388).
 
+Native Muse Code worker and orchestrator support is implemented in [#3602](https://github.com/hurttlocker/o8/pull/3602), and explicit ACP registry preparation and local onboarding in [#3603](https://github.com/hurttlocker/o8/pull/3603). Model-switch refusal and uncertainty, session isolation, saved model identity, and capability reporting are tracked in [#3597](https://github.com/hurttlocker/o8/issues/3597). Local protocol and process fixtures establish source behavior; signed-in provider, paid-model and installed-app acceptance remain separate gates.
+
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | open | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
@@ -105,6 +107,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 ## 5. Smooth for people and for agents
 
 Two lanes, one pillar. The people lane covers the surfaces a person works in. The agents lane covers whether another program can drive o8 through a real interface instead of imitating a mouse.
+
+Shared GitHub quota and durable PR watching are implemented in [#3606](https://github.com/hurttlocker/o8/pull/3606), and commit-pinned review guides in [#3607](https://github.com/hurttlocker/o8/pull/3607). Paused queue restoration, acknowledged delivery, draft recovery, repository-scoped attachments and narrow-layout corrections are tracked in [#3598](https://github.com/hurttlocker/o8/issues/3598). Browser and route fixtures cover reload, dismissal, repeat actions and uncertain receipts. Queued intent never replays automatically after reload; released-build acceptance remains open.
 
 | Arc | Lane | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- | --- |

@@ -54,6 +54,29 @@ function binding(surfaceId: string, processGroupId?: number): OwnedWorkspaceBind
 }
 
 describe('owned process probes', () => {
+  it('retains the underlying unknown run reason when another retained run is live', async () => {
+    const surfaceId = 'probe-original-reason:session';
+    const receipt = binding(surfaceId, 4241);
+    receipt.retainedRuns.push({ ...receipt.retainedRuns[0], id: 'second-run', pid: 5252, processGroupId: 5252 });
+    receipt.retainedRunTotal = 2;
+    register('probe-original-reason:', receipt);
+    const result = await probeOwnedSessionProcessQuiescence(surfaceId, '/tmp/probe-workspace', {
+      run: async (command, args) => {
+        if (command === 'pgrep' && args[0] === '-g') return args[1] === '4241'
+          ? { code: 2, stdout: '', stderr: 'SECRET stderr /private/unrelated' }
+          : { code: 0, stdout: '5999\n', stderr: '' };
+        return { code: command === 'ps' && args[0] === 'axeww' ? 0 : 1, stdout: '', stderr: '' };
+      },
+      now: () => new Date('2026-10-13T01:02:03.004Z'),
+    });
+    expect(result.state).toBe('live');
+    expect(result.checkedAt).toBe('2026-10-13T01:02:03.004Z');
+    const group = result.probes.find((probe) => probe.primitive === 'process_group');
+    expect(group?.detail).toContain('probe_exit_2');
+    expect(group?.detail).toContain('owned_process_live');
+    expect(group?.detail).not.toMatch(/SECRET|private|second-run/);
+  });
+
   it('uses archived completed runs only for explicit retirement and keeps incomplete or live truth held', async () => {
     const surfaceId = 'probe-archived:session';
     const sourceReceipt = binding(surfaceId, 4242);

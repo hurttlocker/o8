@@ -185,6 +185,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
   if (stopReason === 'refusal') {
     return { type: 'error', error: 'ACP agent refused the turn (no model/provider configured, or the request was declined).' };
   }
+  if (!['end_turn', 'max_tokens', 'max_turn_requests', 'cancelled'].includes(stopReason)) return { type: 'error', code: 'acp_unknown_stop_reason', error: 'The agent returned an unrecognized completion status. This turn could not be confirmed.' };
   return { type: 'done', sessionId, cost: null };
 }
 
@@ -197,7 +198,7 @@ export interface AcpClientOptions {
   /** Remove inherited credentials for explicitly disconnected providers. */
   omitEnv?: string[];
   /** Called for every session/update notification's OrchestratorEvent (mapped). */
-  onEvent?: (event: OrchestratorEvent) => void;
+  onEvent?: (event: OrchestratorEvent, sessionId?: string) => void;
   /** Raw stderr lines from the agent (logs) — optional, for diagnostics. */
   onStderr?: (chunk: string) => void;
   /** Every raw ACP notification, before any optional OrchestratorEvent mapping. */
@@ -223,7 +224,7 @@ export class AcpClient {
     timeout: ReturnType<typeof setTimeout>;
   }>();
   private buf = '';
-  private readonly onEvent?: (event: OrchestratorEvent) => void;
+  private readonly onEvent?: (event: OrchestratorEvent, sessionId?: string) => void;
   private readonly onNotification?: (notification: AcpRawNotification) => void;
   private readonly onRequest?: (request: AcpInboundRequest) => unknown | Promise<unknown>;
   private readonly requestTimeoutMs: number;
@@ -283,7 +284,7 @@ export class AcpClient {
       this.pending.delete(msg.id);
       clearTimeout(entry.timeout);
       const res = msg as unknown as JsonRpcResponse;
-      if (res.error) entry.reject(new Error(`ACP error ${res.error.code}: ${res.error.message}`));
+      if (res.error) entry.reject(new AcpRequestError(res.error.code, `ACP error ${res.error.code}: ${res.error.message}`, res.error.data));
       else entry.resolve(res.result);
       return;
     }
@@ -325,7 +326,7 @@ export class AcpClient {
       this.onNotification?.({ method: msg.method, params });
       if (msg.method !== 'session/update') return;
       const event = params ? mapAcpUpdate(params.update) : null;
-      if (event && this.onEvent) this.onEvent(event);
+      if (event && this.onEvent) this.onEvent(event, typeof params.sessionId === 'string' ? params.sessionId : undefined);
     }
   }
 
@@ -412,18 +413,17 @@ export class AcpClient {
    * with the OpenCode 2 preview during migration.
    *
    * Agents that don't implement the method reject with "Method not found";
-   * callers treat that as "this agent has no model axis" rather than fatal.
+   * callers can preserve the established session while reporting the refusal.
    */
-  async setModel(sessionId: string, modelId: string): Promise<void> {
+  async setModel(sessionId: string, modelId: string, configId = 'model'): Promise<void> {
     try {
       await this.request('session/set_config_option', {
         sessionId,
-        configId: 'model',
+        configId,
         value: modelId,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes('ACP error -32601') && !message.includes('Method not found')) throw err;
+      if (!(err instanceof AcpRequestError) || err.code !== -32601) throw err;
       await this.request('session/set_model', { sessionId, modelId });
     }
   }

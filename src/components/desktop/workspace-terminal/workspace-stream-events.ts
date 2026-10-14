@@ -4,6 +4,7 @@ export type ClaudePermissionDecision = 'approve' | 'deny';
 
 export interface WorkspaceStreamEvent {
   type: string;
+  delivery?: 'accepted' | 'rejected';
   id?: string | null;
   name?: string;
   status?: 'calling' | 'running' | 'done' | 'pending' | 'active' | 'complete';
@@ -20,6 +21,15 @@ export interface WorkspaceStreamEvent {
   costUsd?: number;
   factCount?: number;
   sources?: Array<{ title: string; url?: string; path?: string; index?: number }>;
+}
+
+/** Transport headers alone cannot prove that a CLI accepted a prompt. */
+export function workspaceStreamDelivery(event: WorkspaceStreamEvent): 'accepted' | 'rejected' | null {
+  if (event.delivery) return event.delivery;
+  if (event.type === 'done' || (event.type === 'session' && (event.threadId || event.sessionId))) return 'accepted';
+  if (['delta', 'content', 'thinking', 'tool_call', 'tool_result', 'tool_use', 'permission_request'].includes(event.type)) return 'accepted';
+  if (event.type === 'usage' && ((event.inputTokens ?? 0) > 0 || (event.outputTokens ?? 0) > 0)) return 'accepted';
+  return null;
 }
 
 export type WorkspaceUsageTokens = { input: number; output: number; cacheRead?: number; cacheWrite?: number };

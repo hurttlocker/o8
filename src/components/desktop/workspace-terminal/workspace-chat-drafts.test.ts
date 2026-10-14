@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_QUEUED_CONTEXT_CARDS_PER_DRAFT,
   MAX_WORKSPACE_CHAT_DRAFTS,
@@ -12,9 +12,35 @@ import {
   writeWorkspaceChatDraftState,
 } from './workspace-chat-drafts';
 
-afterEach(resetWorkspaceChatDraftStatesForTests);
+afterEach(() => { vi.restoreAllMocks(); resetWorkspaceChatDraftStatesForTests(); });
 
 describe('workspace chat draft retention', () => {
+  it('keeps a full memory draft and reports unavailable browser storage', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Quota'); });
+    const host = document.createElement('div'); const root = createRoot(host);
+    function Harness() { const value = useWorkspaceChatDraftRetention('full'); return createElement('button', { onClick: () => value.setDraft('retain in memory') }, value.retentionWarning); }
+    await act(async () => root.render(createElement(Harness)));
+    await act(async () => host.querySelector<HTMLButtonElement>('button')!.click());
+    expect(readWorkspaceChatDraftState('full').draft).toBe('retain in memory'); expect(host.textContent).toContain('Keep this tab open');
+    await act(async () => root.unmount());
+  });
+  it('restores drafts and context after a cold reload', () => {
+    writeWorkspaceChatDraftState('cold', { draft: 'after reload', queuedContextCards: [{ id: 'ctx', title: 'Issue', text: 'context', meta: ['repo'] }] });
+    resetWorkspaceChatDraftStatesForTests(false);
+    expect(readWorkspaceChatDraftState('cold')).toEqual({ draft: 'after reload', queuedContextCards: [{ id: 'ctx', title: 'Issue', text: 'context', meta: ['repo'] }] });
+  });
+  it('rebinds the retention hook without copying a previous tab draft into another conversation', async () => {
+    let retained: ReturnType<typeof useWorkspaceChatDraftRetention>;
+    function Harness({ id }: { id: string }) { const current = useWorkspaceChatDraftRetention(id); useEffect(() => { retained = current; }, [current]); return createElement('div', null, current.draft); }
+    const host = document.createElement('div'); const root = createRoot(host);
+    await act(async () => root.render(createElement(Harness, { id: 'first' })));
+    await act(async () => retained!.setDraft('first draft'));
+    await act(async () => root.render(createElement(Harness, { id: 'second' })));
+    expect(host.textContent).toBe(''); await act(async () => retained!.setDraft('second draft'));
+    await act(async () => root.render(createElement(Harness, { id: 'first' })));
+    expect(host.textContent).toBe('first draft'); expect(readWorkspaceChatDraftState('second').draft).toBe('second draft');
+    await act(async () => root.unmount());
+  });
   it('restores an unsent draft after its heavy tab surface is evicted', () => {
     writeWorkspaceChatDraftState('chat-1', {
       draft: 'keep this unsent thought',

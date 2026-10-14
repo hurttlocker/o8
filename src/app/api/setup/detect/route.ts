@@ -17,6 +17,7 @@ import {
 import { opencodeAuthenticatedProviders } from '@/lib/runtimes/shared/opencode-readiness';
 import { hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { resolveMuseBinary } from '@/lib/muse/host';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,6 +72,7 @@ function safeExec(cmd: string, args: string[], timeoutMs = 2000, deadlineAt?: nu
       encoding: 'utf-8',
       timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, MUSE_NO_AUTO_UPDATE: '1' },
     }).trim();
   } catch {
     return '';
@@ -564,7 +566,7 @@ function buildDetectionResult(
   codexVoiceCapability?: CodexVoiceCapability,
 ): DetectionResult {
   const hasAgentSurface = false;
-  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'magnitude', 'cursor', 'grok', 'pi'].includes(t.id) && t.detected);
+  const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'antigravity', 'opencode', '3code', 'magnitude', 'cursor', 'grok', 'pi', 'muse'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasEmbeddings = tools.some(t => t.id === 'ollama' && t.detected);
   const hasAnything = hasAgentSurface || hasCliAgent || hasApiKey;
@@ -622,6 +624,12 @@ export async function GET() {
   if (!isPastDeadline(deadlineAt)) tools.push(detectCursor(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectGrok(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectPi(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) {
+    const binary = await resolveMuseBinary().catch(() => null);
+    tools.push({ id: 'muse', name: 'Muse Code', detected: Boolean(binary), path: binary ?? undefined,
+      version: binary ? safeExec(binary, ['--version'], 2_000, deadlineAt) : undefined,
+      authHint: 'Account and model access are checked by Muse when work starts.' });
+  }
   if (!isPastDeadline(deadlineAt)) tools.push(await detectOllama(deadlineAt));
   if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());
 

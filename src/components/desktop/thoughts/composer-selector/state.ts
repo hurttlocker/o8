@@ -43,6 +43,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     o8: 'o8',
     opencode: 'opencode',
     pi: 'terminal',
+    muse: 'terminal',
     acp: 'terminal',
   },
   workerRuntimes: {
@@ -69,6 +70,7 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     'prime-agent': 'terminal',
     'deepseek-harness': 'deepseek',
     hermes: 'terminal',
+    muse: 'terminal',
   },
 } as const satisfies {
   leadModelFamilies: readonly { pattern: RegExp; mark: ComposerProviderMark }[];

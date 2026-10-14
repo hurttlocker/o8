@@ -325,8 +325,16 @@ export interface OwnedRuntimeAdapter {
    */
   extraSpawnEnv?: (session: OwnedSessionRecord) => Record<string, string> | Promise<Record<string, string>>;
 
+  /** Capture trusted adapter state before initial persistence, never during spawn preparation. */
+  captureRuntimeConfig?: (config?: Record<string, string>) => Record<string, string>;
+
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
+  /** A runtime state folder below a shared configuration root, so sandbox grants stay narrow. */
+  configStateSubdir?: string;
+  /** Separate mutable session-data root for CLIs using XDG configuration and data directories. */
+  sessionDataHomeEnv?: string;
+  sessionDataSubdir?: string;
 
   /** How this adapter attaches operator-registered MCP servers to packet workers. */
   workerMcpInjection?: 'config-file' | 'config-override';

@@ -312,7 +312,8 @@ describe('desktop and preview packet mutation callers construct correlated bodie
     expect(caller).toContain('fetchOwnedRuntimeSteerReceipt(');
     expect(helper).toContain("from '@/lib/orchestrator/action-receipt'");
     expect(helper).toContain("'/api/runtime/action'");
-    expect(helper).toContain('clientMutationId: crypto.randomUUID()');
+    expect(helper).toContain('clientMutationId = crypto.randomUUID()');
+    expect(helper).toContain('clientMutationId,');
     expect(helper).toContain('const requestBody = JSON.stringify');
     expect(helper).toContain('body: requestBody');
     expect(helper).toContain('fetchCorrelatedActionReceipt');
@@ -327,7 +328,7 @@ describe('desktop and preview packet mutation callers construct correlated bodie
 
     const workspaceChat = readFileSync(join(ROOT, 'src/components/desktop/workspace-terminal/useWorkspaceChatPane.ts'), 'utf8');
     expect(workspaceChat).toContain('ownedDeliveryUnsettled = true');
-    expect(workspaceChat).toContain('if (!ownedDeliveryUnsettled) setSending(false)');
+    expect(workspaceChat).toMatch(/if \(!ownedDeliveryUnsettled\) \{[^}]*setSending\(false\)/);
 
     const agentPanel = readFileSync(join(ROOT, 'src/components/desktop/agent-panel/useAgentPanelState.ts'), 'utf8');
     expect(agentPanel).toContain('pendingRuntimeLaunches.get(launchKey)');

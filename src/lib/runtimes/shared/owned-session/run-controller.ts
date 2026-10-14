@@ -546,9 +546,7 @@ export function createOwnedRunController({
           // paths come from the SAME git probe prepareWorkerSandbox uses to
           // grant access, and it throws if that probe resolves nothing.
           enforceReadOnly: readOnlySandbox.enforced,
-          finalAllowReadWritePaths: runtimeState.configHome
-            ? [runtimeState.configHome]
-            : undefined,
+          finalAllowReadWritePaths: runtimeState.writablePaths,
           finalImmutableWritePaths: runtimeState.immutablePaths,
         });
         spawnBinary = prepared.binary;

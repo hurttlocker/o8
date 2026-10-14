@@ -1,4 +1,7 @@
 /** A shared read can survive a tab switch, but must never pin Retry forever. */
+export class PrReadDeferredError extends Error {
+  constructor(message: string, readonly retryAfterMs: number) { super(message); }
+}
 export async function readPrJson<T>(url: string): Promise<T> {
   const controller = new AbortController();
   // Hot reload can compile this route on its first read; the installed app
@@ -7,6 +10,10 @@ export async function readPrJson<T>(url: string): Promise<T> {
   try {
     const response = await fetch(url, { signal: controller.signal });
     const data = await response.json() as T & { error?: string };
+    if (response.status === 429) {
+      const delay = Number(response.headers.get('retry-after'));
+      throw new PrReadDeferredError(data.error || 'GitHub refresh is paused.', Number.isFinite(delay) && delay > 0 ? Math.min(delay * 1000, 24 * 60 * 60_000) : 60_000);
+    }
     if (!response.ok) throw new Error(data.error || 'Pull request could not be read. Retry.');
     return data;
   } catch (error) {

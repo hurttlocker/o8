@@ -16,6 +16,12 @@
       ]
     },
     {
+      "path": "src/app/api/codex/send/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/customize/actions/github-source.test.ts",
       "reasons": [
         "child-process",
@@ -566,6 +572,12 @@
       ]
     },
     {
+      "path": "src/lib/muse/host.test.ts",
+      "reasons": [
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/auto-compact-excerpt.test.ts",
       "reasons": [
         "executable-fixture"
@@ -930,6 +942,15 @@
       ]
     },
     {
+      "path": "src/lib/workspace/dependency-cache-acquisition-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "fixture-lifecycle",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/workspace/dependency-cache-retention-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1212,8 +1233,29 @@
       ]
     },
     {
+      "path": "tests/acp-model-identity-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/acp-orchestrator-turn-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/acp-registry-authz-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/acp-registry-preparation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
         "real-path"
       ]
     },
@@ -1846,6 +1888,13 @@
       ]
     },
     {
+      "path": "tests/codex-discovery-readonly-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-config-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2407,6 +2456,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/github-pr-watch-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -3092,6 +3147,30 @@
     {
       "path": "tests/mobile-ripple-device-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-host-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-orchestrator-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/muse-worker-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -3997,6 +4076,16 @@
         "git-cli",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/retirement-process-refusal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
       ]
     },
     {

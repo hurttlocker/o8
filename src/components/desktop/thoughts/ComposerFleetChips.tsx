@@ -37,7 +37,7 @@ import {
   type ComposerWorkerDefaults,
 } from './composer-selector/worker-settings';
 
-type FleetPickerView = 'runtimes' | 'opencode-model' | 'threecode-model';
+type FleetPickerView = 'runtimes' | 'opencode-model' | 'threecode-model' | 'muse-model';
 
 export type DispatchDefaults = ComposerWorkerDefaults;
 export const FALLBACK_DISPATCH_DEFAULTS = FALLBACK_COMPOSER_WORKER_DEFAULTS;
@@ -225,11 +225,13 @@ export function FleetWorkerChip({
     onRuntimeChange?.(runtime);
     if (runtime === 'opencode') setView('opencode-model');
     else if (runtime === '3code') setView('threecode-model');
+    else if (runtime === 'muse') setView('muse-model');
     else setOpen(false);
   };
   const selectWorkerModel = (modelId: string | null) => {
     if (workerModelLocked) return;
     if (view === 'threecode-model') onWorkerModelChange?.(modelId, '3code');
+    else if (view === 'muse-model') onWorkerModelChange?.(modelId, 'muse');
     else onWorkerModelChange?.(modelId);
     setOpen(false);
   };
@@ -469,9 +471,9 @@ export function FleetWorkerChip({
                   <BackGlyph />
                 </button>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans-system)', fontSize: 11.5, color: 'var(--t-text)' }}>
-                  {view === 'threecode-model' ? '3code worker model' : 'OpenCode worker model'}
+                  {view === 'threecode-model' ? '3code worker model' : view === 'muse-model' ? 'Muse worker model' : 'OpenCode worker model'}
                 </div>
-                {(view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel) ? (
+                {(view === 'threecode-model' ? defaults.threecodeWorkerModel : view === 'muse-model' ? defaults.defaultDispatchModel : defaults.opencodeWorkerModel) ? (
                   <button
                     type="button"
                     disabled={workerModelLocked || saving}
@@ -499,9 +501,9 @@ export function FleetWorkerChip({
                 </div>
               ) : (
                 <AcpModelPicker
-                  backend={view === 'threecode-model' ? '3code' : 'opencode'}
+                  backend={view === 'threecode-model' ? '3code' : view === 'muse-model' ? 'muse' : 'opencode'}
                   catalogueUrl={view === 'threecode-model' ? '/api/runtime/threecode-models' : undefined}
-                  value={view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel}
+                  value={view === 'threecode-model' ? defaults.threecodeWorkerModel : view === 'muse-model' ? defaults.defaultDispatchModel : defaults.opencodeWorkerModel}
                   width={258}
                   onSelect={(modelId) => { void selectWorkerModel(modelId); }}
                 />

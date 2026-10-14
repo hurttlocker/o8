@@ -18,6 +18,8 @@ import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types'
 import { probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
 import { buildModelCatalogue, catalogueSize } from '@/lib/orchestrator/acp-model-catalogue';
 import { getOpenRouterModelMetadata, type OpenRouterModelSort } from '@/lib/orchestrator/openrouter-model-metadata';
+import { probeMuseModels } from '@/lib/muse/models';
+import { resolveMuseBinary } from '@/lib/muse/host';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +34,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'unknown backend' }, { status: 400 });
   }
 
+  if (backend === 'muse') {
+    try {
+      await resolveMuseBinary();
+    } catch { return NextResponse.json({ backend, available: false, groups: [], total: 0 }); }
+    try {
+      const catalog = await probeMuseModels(params.get('repoPath')?.trim() || process.cwd(), params.get('refresh') === '1');
+      return NextResponse.json({ backend, available: true, authStatus: catalog.authStatus,
+        groups: [{ provider: 'meta', models: catalog.models.map(model => ({ ...model, efforts: [] })) }],
+        total: catalog.models.length, source: catalog.source, probedAt: catalog.observedAt });
+    } catch {
+      return NextResponse.json({ backend, available: true, groups: [], total: 0,
+        error: 'Muse could not report its models. Check its installation and retry.' });
+    }
+  }
   const launch = resolveAcpLaunch(backend);
   if (!launch) {
     // Not installed is a normal state, not an error — the picker renders an

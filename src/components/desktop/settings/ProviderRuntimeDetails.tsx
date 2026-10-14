@@ -7,6 +7,8 @@ import { PickerMenu, CODEX_WORKER_EFFORT_OPTIONS, CLAUDE_WORKER_EFFORT_OPTIONS, 
 import type { useModelSettings } from './useModelSettings';
 import { ClaudeCodeHarnessSection } from './ClaudeCodeHarnessSection';
 import { ProviderUsageSection } from './ProviderUsageSection';
+import { MuseConnectionSection } from './MuseConnectionSection';
+import { ProviderCapabilitiesSection } from './ProviderCapabilitiesSection';
 
 export interface ProviderTool {
   id: string;
@@ -41,6 +43,7 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
       <SettingsRow label="Availability" value={loading ? 'Checking…' : readiness?.available ? 'Ready' : 'Unavailable'} subtitle={readiness?.detail ?? 'Could not read readiness. Reopen Settings to retry.'} divider />
       <SettingsRow label="Managed model" subtitle="Included with o8. No separate CLI or API key needed." divider />
       <SettingsRow label="Use in a conversation" subtitle="Choose o8 for the orchestrator, or Pi (built-in) for workers." divider />
+      <SettingsRow label="Usage and limits" subtitle="Read current managed usage from the Usage control. A ready runtime does not prove remaining allowance." divider />
       {!readiness?.available && readiness?.fix ? <SettingsRow label="Setup" subtitle={readiness.fix} /> : null}
     </SettingsGroup>;
   }
@@ -52,6 +55,8 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
       <SettingsRow label="Binary path" subtitle={tool?.path ?? runtime.binaryName} />
     </SettingsGroup>
     {notice ? <p role="alert" style={{ margin: 0, color: 'var(--t-text)' }}>{notice}</p> : null}
+    <ProviderCapabilitiesSection runtimeId={runtimeId} />
+    {runtimeId === 'muse' ? <MuseConnectionSection /> : null}
     {effortField || runtimeId === 'opencode' ? <SettingsGroup header={`${runtime.label} models`}>
       <SettingsRow label="Model selection" subtitle="Choose conversation models in the composer. App routing is in Model defaults." divider />
       {effortField && data ? <SettingsRow label="Worker effort" subtitle={locked ? ENV_LOCKED_REASON : 'Used when a worker has no effort choice.'} accessory={

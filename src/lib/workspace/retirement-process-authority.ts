@@ -11,6 +11,7 @@ import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
 import { readCapturedPurgeCwdSnapshot, type CapturedPurgeProcessWitness } from './exact-directory-purge';
+import { persistRetirementProcessRefusal } from './retirement-refusal-diagnostics';
 
 async function owningLanes(repositoryPath: string, sourcePath: string) {
   const metadata = (await readWorktreeMetaSnapshot(repositoryPath))[path.basename(sourcePath)];
@@ -90,7 +91,17 @@ export async function assertManagedRetirementQuiescence(input: {
     } : {}),
   });
   if (process.state !== 'quiescent') {
-    throw new Error(`Retirement owned-workspace process truth is ${process.state}.`);
+    let eventId: string;
+    try {
+      const diagnostic = await persistRetirementProcessRefusal({
+        laneId: lane.id, repositoryUuid: repo.id, packetId: lane.packetId, sessionKey,
+        sourceDevice: input.identity.device, sourceInode: input.identity.inode, process,
+      });
+      eventId = diagnostic.eventId;
+    } catch {
+      throw new Error(`Retirement owned-workspace process truth is ${process.state}; diagnostic persistence failed.`);
+    }
+    throw new Error(`Retirement owned-workspace process truth is ${process.state}; diagnostic event ${eventId}.`);
   }
   return { repositoryUuid: repo.id, packetId: lane.packetId, laneId: lane.id, sessionKey };
 }

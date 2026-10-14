@@ -60,6 +60,7 @@ import { piBuiltinRuntime } from './pi-builtin';
 import { primeAgentRuntime } from './prime-agent';
 import { deepSeekHarnessRuntime } from './deepseek-harness';
 import { hermesRuntime } from './hermes';
+import { museRuntime } from './muse';
 import { declarativeWorkerRuntimes, invalidateDeclarativeWorkerFleets } from './declarative-workers';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateOwnedClaudeCodeFleetCache } from '@/lib/claude-code/owned';
@@ -79,6 +80,7 @@ import './pi-builtin-cost-parser';
 import './prime-agent-cost-parser';
 import './deepseek-harness-cost-parser';
 import './hermes-cost-parser';
+import './muse-cost-parser';
 
 /**
  * Flush the fleet cache across all owned-session stores. Callers (e.g. the
@@ -132,6 +134,7 @@ registerRuntime(primeAgentRuntime);
 // provider branch; o8 owns only the normalized worker lifecycle around it.
 registerRuntime(deepSeekHarnessRuntime);
 registerRuntime(hermesRuntime);
+registerRuntime(museRuntime);
 for (const runtime of declarativeWorkerRuntimes) registerRuntime(runtime);
 // #514 — Cloud runtime adapter (self-hosted worker pool).
 // Always registered so dispatch UI can target it; actual execution requires

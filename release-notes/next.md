@@ -1,1 +1,6 @@
-- See turns you add to an o8 chat from the Codex app, on desktop or phone, in the o8 chat. Requires Settings > Models > Codex app > Show chats in the Codex app, which stays off by default.
+- Connect Muse Code and choose the models your installed CLI reports, including Wonder Full when your account provides it.
+- Browse ACP providers in Settings and explicitly prepare supported adapters before connecting them.
+- Keep linked pull request watches across restarts, with shared GitHub refreshes and rate-limit cooldowns.
+- Start a review guide tied to the exact pull request commit, with file references you can open in Review.
+- See clearer provider model availability, capability limits and session recovery messages.
+- Keep drafts and attachments after recoverable send failures. Queued messages stay paused after reload until you resume them.

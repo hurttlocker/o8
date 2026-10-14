@@ -24,6 +24,12 @@ describe('ModelThinkingChip Claude Code carrier truth', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not read a different provider profile for a static worker label', async () => {
+    const request = vi.fn(); vi.stubGlobal('fetch', request);
+    await act(async () => root.render(createElement(ModelThinkingChip, { modelLabel: 'Muse Code Agent default', activeBackend: 'muse', effort: 'high', adaptiveEnabled: false })));
+    expect(request).not.toHaveBeenCalled(); expect(container.querySelector('button')?.disabled).toBe(true);
+  });
+
   it('shows the effective Codex model instead of the stale native Claude selection', async () => {
     const fetchProfile = vi.fn(async () => ({
       ok: true,

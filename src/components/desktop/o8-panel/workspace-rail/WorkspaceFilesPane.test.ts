@@ -25,6 +25,11 @@ function Harness() {
   return createElement(WorkspaceFilesPane, { repoPath: '/workspace/files', selectedFile: file, dirtyFiles: new Set<string>(), onSelectFile: setFile });
 }
 
+async function settled(check: () => boolean) {
+  for (let i = 0; i < 100 && !check(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+  expect(check()).toBe(true);
+}
+
 it('gives a file the full pane without losing edits or expanded folders', async () => {
   await act(async () => root.render(createElement(Harness)));
   expect(host.querySelector('[data-file-code-view]')).not.toBeNull();
@@ -39,6 +44,8 @@ it('gives a file the full pane without losing edits or expanded folders', async 
   expect(host.textContent).toContain('Modified');
   const hide = host.querySelector<HTMLButtonElement>('[aria-label="Hide file tree"]')!;
   const tree = document.getElementById(hide.getAttribute('aria-controls')!)!;
+  // The lazy tree and its shadow root finish rendering independently of the editor.
+  await settled(() => tree.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path="src/"]')?.getAttribute('aria-expanded') === 'true');
   const directory = tree.querySelector('file-tree-container')?.shadowRoot?.querySelector('[data-item-path="src/"]');
   expect(directory?.getAttribute('aria-expanded')).toBe('true');
   await act(async () => { hide.focus(); hide.click(); });

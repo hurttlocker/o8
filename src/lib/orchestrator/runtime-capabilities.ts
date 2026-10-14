@@ -547,6 +547,12 @@ export const ORCHESTRATOR_RUNTIMES = {
     tier: 'standard',
     description: "Open-source RLM coding harness CLI (json-mode JSONL output); runs on the operator's own provider keys.",
   },
+  muse: {
+    label: 'Muse Code', shortLabel: 'Muse', dispatchable: true, requiresModel: false,
+    accentColor: '#0866ff', binaryName: 'muse', workerProvider: 'muse', authHouse: 'muse',
+    reasoningEffort: true, tier: 'frontier',
+    description: 'Native Muse Code worker with durable sessions. Uses the installed CLI account and its available models; sandbox remains enabled.',
+  },
   hermes: {
     label: 'Hermes',
     shortLabel: 'Hermes',

@@ -59,7 +59,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp' | 'muse';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -131,6 +131,7 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
     ],
   },
   { key: 'acp', label: 'Local ACP', options: [], searchable: true },
+  { key: 'muse', label: 'Muse Code', options: [], searchable: true },
 ];
 
 export interface ComposerModelCatalogue {
@@ -138,9 +139,10 @@ export interface ComposerModelCatalogue {
   carrier: { source: 'native' | 'openrouter' | 'codex-subscription'; model: string | null } | null;
 }
 
-export function useComposerModelCatalogue(): ComposerModelCatalogue {
+export function useComposerModelCatalogue(enabled = true): ComposerModelCatalogue {
   const [carrier, setCarrier] = useState<ComposerModelCatalogue['carrier']>(null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const load = () => {
       void fetch('/api/runtime/claude-code-profile', { cache: 'no-store' })
@@ -157,7 +159,7 @@ export function useComposerModelCatalogue(): ComposerModelCatalogue {
     load();
     window.addEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load);
     return () => { cancelled = true; window.removeEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load); };
-  }, []);
+  }, [enabled]);
   const carrierModel = carrier?.model ?? null;
   const carrierSource = carrier?.source;
   const groups = carrierSource && carrierSource !== 'native' && carrierModel
@@ -386,7 +388,7 @@ export function ModelThinkingChip({
   };
   const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || (key === 'acp' && acpAvailable)
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
-  const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
+  const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue(Boolean(onEffortChange || onModelChange || onBackendChange));
   const ultraEnabled = useUltraEffortPreference();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
@@ -424,7 +426,7 @@ export function ModelThinkingChip({
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
   const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
-    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
+    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode' || activeBackend === 'muse'
       ? activeBackend
       : activeBackend === 'pi' ? 'o8' : 'claude',
   );

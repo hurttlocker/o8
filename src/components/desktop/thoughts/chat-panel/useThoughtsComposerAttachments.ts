@@ -105,6 +105,10 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     clearPendingFiles();
   }, [clearPendingFiles]);
 
+  const consumeAttachedImages = useCallback((images: ThoughtsAttachedImage[]) => {
+    setAttachedImages(current => current.filter(image => !images.includes(image)));
+  }, []);
+
   return {
     attachedImages,
     attachedFiles,
@@ -116,5 +120,6 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     replaceAttachedImage,
     removeAttachedFile,
     clearAttachments,
+    consumeAttachedImages,
   };
 }

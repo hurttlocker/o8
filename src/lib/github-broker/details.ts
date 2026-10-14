@@ -3,6 +3,7 @@ import 'server-only';
 import { githubInstallationFetch } from './auth';
 import { readPullRequestFiles } from './pull-request-files';
 import { readPullRequestChecks } from './pull-request-checks';
+import { GitHubRequestDeferredError, type GitHubReadPriority } from './request-budget';
 
 async function parseGithubJson<T>(response: Response) {
   const text = await response.text();
@@ -45,8 +46,8 @@ export async function fetchGitHubIssueDetail(repoFullName: string, issueNumber: 
   };
 }
 
-export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>) {
-  const { response, installation } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) });
+export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumber: number, suppliedReviewDecision?: Promise<string | null>, priority: GitHubReadPriority = 'interactive') {
+  const { response, installation, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true });
   const pr = await parseGithubJson<{
     number: number;
     title: string;
@@ -72,10 +73,11 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
 
   // Once the head SHA is known these reads are independent. A large diff must
   // not delay starting the checks and reviews requests.
-  const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha);
+  const filesPromise = readPullRequestFiles(repoFullName, prNumber, installation?.id, pr.head?.sha, pr.base?.sha, priority, scope);
 
+  let checksUnavailable = false;
   const checksPromise = pr.head?.sha
-    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id).catch(() => [])
+    ? readPullRequestChecks(repoFullName, pr.head.sha, installation?.id, priority, scope).catch(error => { if (error instanceof GitHubRequestDeferredError || (error instanceof Error && error.message.includes('authorization changed'))) throw error; checksUnavailable = true; return []; })
     : Promise.resolve([]);
 
   const reviewsPromise = suppliedReviewDecision ?? githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) })
@@ -86,6 +88,8 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
   const [files, statusCheckRollup, reviewDecision] = await Promise.all([filesPromise, checksPromise, reviewsPromise]);
 
   return {
+    githubScope: scope,
+    checksUnavailable,
     number: pr.number,
     title: pr.title ?? '',
     body: pr.body ?? '',
@@ -123,11 +127,11 @@ export async function fetchGitHubPullRequestDetail(repoFullName: string, prNumbe
   };
 }
 
-export async function fetchGitHubPullRequestComments(repoFullName: string, prNumber: number) {
+export async function fetchGitHubPullRequestComments(repoFullName: string, prNumber: number, priority: GitHubReadPriority = 'interactive') {
   const [reviewCommentsResponse, reviewsResponse, issueCommentsResponse] = await Promise.all([
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
-    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true }),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews?per_page=100`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true }),
+    githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`, { signal: AbortSignal.timeout(18_000) }, { priority, share: true }),
   ]);
 
   const [reviewComments, reviews, issueComments] = await Promise.all([
@@ -158,6 +162,8 @@ export async function fetchGitHubPullRequestComments(repoFullName: string, prNum
   ]);
 
   return {
+    githubScope: [reviewCommentsResponse.scope, reviewsResponse.scope, issueCommentsResponse.scope].every(scope => scope === reviewCommentsResponse.scope) ? reviewCommentsResponse.scope : null,
+    discussionIncomplete: [reviewCommentsResponse, reviewsResponse, issueCommentsResponse].some(({ response }) => /rel="next"/.test(response.headers.get('link') ?? '')),
     comments: reviewComments.map((comment) => ({
       id: comment.id,
       author: comment.user?.login ?? 'unknown',

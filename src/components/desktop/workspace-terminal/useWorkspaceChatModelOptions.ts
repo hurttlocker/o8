@@ -26,10 +26,9 @@ export function useWorkspaceChatModelOptions(
 
   useEffect(() => {
     if (chatRuntime !== 'opencode' || openCodeProvidersLoadedRef.current) return;
-    openCodeProvidersLoadedRef.current = true;
     let cancelled = false;
     void loadOpenCodeProviders().then((providers) => {
-      if (!cancelled) setOpenCodeProviders(providers);
+      if (!cancelled) { openCodeProvidersLoadedRef.current = true; setOpenCodeProviders(providers); }
     });
     return () => {
       cancelled = true;
@@ -41,12 +40,13 @@ export function useWorkspaceChatModelOptions(
       if (chatRuntime === 'claude-code') return CLAUDE_CLI_MODELS;
       if (chatRuntime === 'gemini') return GEMINI_CLI_MODELS;
       if (chatRuntime === 'opencode') return getOpenCodeModels(openCodeProviders);
-      return CODEX_CLI_MODELS;
+      if (chatRuntime === 'codex' || chatRuntime === undefined) return CODEX_CLI_MODELS;
+      return [];
     },
     [chatRuntime, openCodeProviders],
   );
   const selectedModel = useMemo(
-    () => availableModels.find((model) => model.id === selectedModelId) ?? availableModels[0] ?? CODEX_CLI_MODELS[0],
+    () => availableModels.find((model) => model.id === selectedModelId) ?? (selectedModelId ? { id: selectedModelId, label: selectedModelId, color: 'var(--t-text-secondary)' } : availableModels[0] ?? { id: '', label: 'Agent default', color: 'var(--t-text-secondary)' }),
     [availableModels, selectedModelId],
   );
 
