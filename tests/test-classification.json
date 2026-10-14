@@ -3230,6 +3230,7 @@
       "path": "tests/o8-serve-owned-stop.test.ts",
       "reasons": [
         "child-process",
+        "network-listener",
         "process-signal"
       ]
     },
