@@ -159,7 +159,30 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
       resource.retirement.operationId, resource.resourceId, resource.workspace, resource.output, '.o8-retired-generated-'))) {
     throw new Error('Generated-output retirement receipt is invalid.');
   }
-  if (resource.state === 'retired' && !resource.retirement) {
+  if (resource.disposal) {
+    const { claim, retiredAt } = resource.disposal;
+    const fingerprint = (claim?.authority?.purgeManifest as { fingerprint?: string } | undefined)?.fingerprint;
+    if (resource.disposal.kind !== 'postship' || resource.state !== 'retired' || !integer(retiredAt, 1)
+      || resource.origin !== 'managed-creation' || !resource.creationAuthority || resource.owner
+      || resource.bank || resource.bankCapture || resource.adoption || resource.recovery || resource.retirement
+      || resource.attempt?.mode !== 'build' || !resource.attempt.children.length
+      || resource.attempt.children.some(child => !child.identity || !child.observedClosed || child.exitCode !== 0 || child.signal)
+      || !claim || claim.kind !== 'generated-output-retirement' || claim.state !== 'purging'
+      || !uuid.test(claim.operationId) || claim.repositoryPath !== resource.workspace.canonicalPath
+      || claim.worktreeId !== resource.resourceId || claim.expectedPath !== outputPath
+      || claim.sourcePath !== outputPath || claim.claimPath !== outputPath
+      || claim.parentIdentity.canonicalPath !== resource.workspace.canonicalPath
+      || claim.parentIdentity.device !== resource.workspace.device || claim.parentIdentity.inode !== resource.workspace.inode
+      || claim.sourceIdentity?.device !== resource.output?.device || claim.sourceIdentity?.inode !== resource.output?.inode
+      || claim.claimIdentity?.device !== resource.output?.device || claim.claimIdentity?.inode !== resource.output?.inode
+      || claim.authority?.purpose !== 'postship' || claim.authority.resourceId !== resource.resourceId
+      || claim.authority.resourceVersion !== resource.version - 1
+      || !sha.test(String(claim.authority.artifactRecipeSha256)) || !sha.test(fingerprint ?? '')
+      || claim.contentDigest !== fingerprint) {
+      throw new Error('Generated-output postship disposal has no exact successful producer and finalization authority.');
+    }
+  }
+  if (resource.state === 'retired' && !resource.retirement && !resource.disposal) {
     throw new Error('Retired generated output has no completed recovery and retirement receipt.');
   }
 }

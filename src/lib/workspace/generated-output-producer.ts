@@ -8,7 +8,7 @@ import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-p
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
   currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
-  type GeneratedOutputResource } from './generated-output-state';
+  lastDisposedPrebuildOutput, type GeneratedOutputResource } from './generated-output-state';
 
 export type GeneratedOutputSpawn = (command: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<number>;
 
@@ -240,7 +240,7 @@ export async function runGeneratedOutputPrebuild(input: {
   }
   // Refuse unknown output or lost authority before exclusion could create a marker.
   const current = currentGeneratedOutputResource(workspace.canonicalPath);
-  if (current && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
+  if ((current || lastDisposedPrebuildOutput(workspace.canonicalPath)) && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
     if (error.code !== 'ENOENT') throw error;
     return null;
   })) throw new Error('Prebuild lifecycle store binding is missing; preserve output for recovery.');
@@ -257,21 +257,31 @@ export async function runGeneratedOutputPrebuild(input: {
     }
     assertGeneratedOutputClaimsReleased(workspace);
     input.preflight();
+    const disposed = !currentGeneratedOutputResource(workspace.canonicalPath)
+      ? lastDisposedPrebuildOutput(workspace.canonicalPath) : null;
+    if (disposed) {
+      await assertWorktreeMaterializationIdentity(workspace.canonicalPath, disposed.workspace);
+      assertWorkspaceRetentionReleased(disposed.output!.canonicalPath, disposed.output!);
+    }
     const creator = await probeMetadataLockProcessIdentity(process.pid);
     if (creator.state !== 'live') throw new Error('Prebuild creation process identity is unknown.');
-    const resource = await registerGeneratedOutputLocked(workspace, containingOwner,
-      { kind: 'prebuild', pid: process.pid, identity: creator.identity });
-    if (!resource.output || (!resource.owner && !resource.creationAuthority)
-      || resource.origin !== 'managed-creation' || !['ready', 'succeeded'].includes(resource.state)
-      || resource.bank || resource.bankCapture || resource.adoption || resource.recovery || resource.retirement) {
-      throw new Error('Generated output has unresolved prebuild or retention authority.');
-    }
-    assertWorkspaceRetentionReleased(resource.output.canonicalPath, resource.output);
+    const register = async () => {
+      const resource = await registerGeneratedOutputLocked(workspace, containingOwner,
+        { kind: 'prebuild', pid: process.pid, identity: creator.identity });
+      if (!resource.output || (!resource.owner && !resource.creationAuthority)
+        || resource.origin !== 'managed-creation' || !['ready', 'succeeded'].includes(resource.state)
+        || resource.bank || resource.bankCapture || resource.adoption || resource.recovery || resource.retirement) {
+        throw new Error('Generated output has unresolved prebuild or retention authority.');
+      }
+      assertWorkspaceRetentionReleased(resource.output.canonicalPath, resource.output);
+      return resource;
+    };
+    const resource = disposed ? null : await register();
     let invoked = false;
-    return input.operation({ canReuse: resource.state === 'succeeded', runBuild: async operation => {
+    return input.operation({ canReuse: Boolean(disposed) || resource?.state === 'succeeded', runBuild: async operation => {
       if (invoked) throw new Error('Prebuild producer may run only once per exclusion.');
       invoked = true;
-      return runReservedProducer(workspace, resource, { mode: 'build', operation });
+      return runReservedProducer(workspace, resource ?? await register(), { mode: 'build', operation });
     } });
   });
 }

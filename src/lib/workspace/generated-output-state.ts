@@ -66,6 +66,7 @@ export interface GeneratedOutputResource {
     producerOutcome?: 'terminal-failure' };
   retirement?: { operationId: string; retiredAt: number; expandedBytes: number; bankDigest: string;
     verifiedRecoveryOperationId: string; claim: ExactWorkspaceClaimRecord };
+  disposal?: { kind: 'postship'; retiredAt: number; claim: ExactWorkspaceClaimRecord };
   recovery?: GeneratedOutputRecovery;
 }
 
@@ -124,7 +125,19 @@ export function readGeneratedOutputResource(resourceId: string): GeneratedOutput
       throw new Error('Generated-output verified recovery lost its retirement finalization.');
     }
   }
+  if (resource.disposal && readExactManagedFinalization(resource.disposal.claim)?.state !== 'complete') {
+    throw new Error('Generated-output disposal lost its exact finalization.');
+  }
   return resource;
+}
+
+/** Completed disposal retains successful producer history without owning a new output generation. */
+export function lastDisposedPrebuildOutput(workspacePath: string): GeneratedOutputResource | null {
+  const row = getSqlite().prepare(`SELECT resource_id FROM workspace_generated_outputs
+    WHERE workspace_path = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+    .get(path.resolve(workspacePath)) as { resource_id: string } | undefined;
+  const resource = row ? readGeneratedOutputResource(row.resource_id) : null;
+  return resource?.disposal ? resource : null;
 }
 
 export function currentGeneratedOutputResource(workspacePath: string): GeneratedOutputResource | null {
@@ -142,6 +155,9 @@ export function saveGeneratedOutputResource(resource: GeneratedOutputResource,
     || JSON.stringify(next.owner) !== JSON.stringify(resource.owner)
     || JSON.stringify(next.creationAuthority) !== JSON.stringify(resource.creationAuthority)
     || (resource.bank && JSON.stringify(next.bank) !== JSON.stringify(resource.bank))
+    || (resource.disposal && (next.state !== 'retired'
+      || JSON.stringify(next.disposal) !== JSON.stringify(resource.disposal)
+      || JSON.stringify(next.attempt) !== JSON.stringify(resource.attempt)))
     || (resource.retirement && (next.state !== 'retired'
       || JSON.stringify(next.retirement) !== JSON.stringify(resource.retirement)))) {
     throw new Error('Generated-output immutable ownership or completed preservation changed.');
@@ -303,6 +319,7 @@ export async function registerGeneratedOutputLocked(workspace: WorktreeMateriali
     return current;
   }
   const outputPath = path.join(workspace.canonicalPath, '.next');
+  assertWorkspaceRetentionReleased(outputPath);
   const existing = await lstat(outputPath).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return null;

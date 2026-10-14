@@ -7,6 +7,13 @@ async function main(): Promise<number> {
   const require = createRequire(path.join(process.cwd(), 'package.json'));
   const [mode, ...args] = process.argv.slice(2);
   if (mode !== 'prebuild') Object.assign(process.env, boundBuildEnvironment(process.cwd()));
+  if (mode === 'postship') {
+    const { disposeSuccessfulPrebuildOutput } = await import('../src/lib/workspace/generated-output-disposal');
+    const { version } = require(path.join(process.cwd(), 'package.json'));
+    const status = await disposeSuccessfulPrebuildOutput(process.cwd(), version);
+    process.stdout.write(`[postship-generated-output] ${status}\n`);
+    return 0;
+  }
   const { runGeneratedOutputPrebuild, runGeneratedOutputProducer } = await import('../src/lib/workspace/generated-output-producer');
   if (mode === 'prebuild') {
     const { prebuildPreflight, runPrebuild } = await import('./lib/prebuild-continuation.mjs');

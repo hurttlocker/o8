@@ -2,7 +2,13 @@
 /** Reclaim generated native-release outputs after publication finishes. */
 import { lstat, readFile, readdir, readlink, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
+import { boundBuildEnvironment } from './lib/release-build-profile.mjs';
+
+const runFile = promisify(execFile);
 
 export const POSTSHIP_GENERATED_DIRS = [
   '.next',
@@ -76,7 +82,7 @@ async function assertInternalLink(root, rootAlias, link) {
   if (await realpath(link) !== current) throw new Error('link resolution is uncertain');
 }
 
-async function assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath) {
+export async function assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath) {
   const pending = [target];
   while (pending.length > 0) {
     const directory = pending.pop();
@@ -105,6 +111,33 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
 
   for (const relativePath of POSTSHIP_GENERATED_DIRS) {
     const target = path.resolve(root, relativePath);
+    if (relativePath === '.next') {
+      try {
+        const env = boundBuildEnvironment(root);
+        const marker = await lstat(path.join(root, '.o8-generated-output-store')).catch(error => {
+          if (error.code !== 'ENOENT') throw error;
+          return null;
+        });
+        if (!marker) {
+          if (await lstat(target).catch(error => { if (error.code !== 'ENOENT') throw error; return null; })) {
+            throw new Error('Postship output has unknown lifecycle ownership.');
+          }
+          result.skipped.push(relativePath);
+          continue;
+        }
+        const invocation = generatedOutputLaunch('postship');
+        const completed = await runFile(invocation.command, invocation.args, { cwd: root,
+          env: { ...env, TSX_TSCONFIG_PATH: fileURLToPath(new URL('../tsconfig.json', import.meta.url)) },
+          maxBuffer: 2 * 1024 ** 2 });
+        const status = /\[postship-generated-output\] (removed|skipped)\s*$/.exec(completed.stdout)?.[1];
+        if (!status) throw new Error('Postship output has no completed lifecycle receipt.');
+        result[status].push(relativePath);
+      } catch (error) {
+        result.refused.push({ path: relativePath, reason: error instanceof Error ? error.message : String(error) });
+        break;
+      }
+      continue;
+    }
     if (!isInside(root, target)) {
       result.refused.push({ path: relativePath, reason: 'outside repo root' });
       break;
@@ -160,5 +193,5 @@ async function main() {
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  await main();
+  void main();
 }

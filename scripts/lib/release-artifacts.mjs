@@ -32,6 +32,8 @@ const RECIPE_FILES = [
   'src/lib/workspace/generated-output-producer.ts',
   'src/lib/workspace/generated-output-state.ts',
   'src/lib/workspace/generated-output-validation.ts',
+  'src/lib/workspace/generated-output-disposal.ts',
+  'scripts/postship-cleanup.mjs',
   'scripts/preship-cleanup.mjs',
   'scripts/packaged-server-smoke.mjs',
   'scripts/lib/packaged-server-smoke.mjs',

@@ -13,7 +13,7 @@ function project(resource: GeneratedOutputResource) {
       entries: resource.bank.entries.length, expandedBytes: resource.bank.expandedBytes,
       compressedBytes: resource.bank.compressedBytes } : null,
     bankCapture: resource.bankCapture ?? null, recovery: resource.recovery ?? null,
-    retirement: resource.retirement ?? null };
+    retirement: resource.retirement ?? null, disposal: resource.disposal ?? null };
 }
 
 async function main() {
