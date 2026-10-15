@@ -1,7 +1,7 @@
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
@@ -24,6 +24,7 @@ const expectedSessionName = dashSessionNameForOwnerKey(ownerKey)!;
 const beforeMarker = `O8_BEFORE_RESTART_${process.pid}`;
 const afterMarker = `O8_AFTER_RESTART_${process.pid}`;
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-dash-terminal-restart-'));
+const repoDir = join(dataDir, 'repository');
 const token = 'dash-terminal-restart-token';
 const dashboardServerName = `o8-dashboard-restart-test-${process.pid}`;
 const tmuxArgs = (...args: string[]) => ['-L', dashboardServerName, ...args];
@@ -79,6 +80,8 @@ async function startWsServer() {
     env: {
       ...process.env,
       CORTEX_IDE_DATA_DIR: dataDir,
+      O8_DATA_DIR: dataDir,
+      CORTEX_IDE_REVIEW_REPO_ROOT: repoDir,
       O8_API_PORT: String(apiPort),
       O8_WS_PORT: String(wsPort),
       O8_PERSISTENT_TERMINALS: '1',
@@ -94,7 +97,7 @@ async function startWsServer() {
     } catch {
       return false;
     }
-  }, 'ws server health', 30_000);
+  }, 'ws server health', 60_000);
 }
 
 async function stopWsServer() {
@@ -138,6 +141,9 @@ function capturePane() {
 beforeAll(async () => {
   if (!tmuxAvailable) return;
   mkdirSync(dataDir, { recursive: true });
+  mkdirSync(repoDir);
+  execFileSync('git', ['init', '-q', repoDir]);
+  execFileSync('git', ['-C', repoDir, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Fixture']);
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
   apiPort = await freePort();
   wsPort = await freePort();
@@ -160,7 +166,7 @@ beforeAll(async () => {
   apiServer.listen(apiPort, '127.0.0.1');
   await once(apiServer, 'listening');
   await startWsServer();
-}, 40_000);
+}, 70_000);
 
 afterAll(async () => {
   for (const socket of sockets) socket.close();
@@ -173,7 +179,7 @@ afterAll(async () => {
 });
 
 describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSocket path', () => {
-  it('reclaims one owned tmux session with readable scrollback after server loss', async () => {
+  it('reclaims one owned tmux session with scrollback and the same running interactive program after server loss', async () => {
     const first = await connectClient();
     first.socket.send(JSON.stringify({
       type: 'terminal-create',
@@ -210,10 +216,40 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
     }));
     await waitFor(() => capturePane().includes(beforeMarker), 'pre-restart terminal output');
 
+    const identityPath = join(dataDir, 'interactive-program.json');
+    const heartbeatPath = join(dataDir, 'interactive-program-heartbeat');
+    const programPath = join(dataDir, 'interactive-program.cjs');
+    const nonce = `restart-${process.pid}-${Date.now()}`;
+    writeFileSync(programPath, `
+      const fs = require('node:fs');
+      const readline = require('node:readline');
+      const nonce = ${JSON.stringify(nonce)};
+      fs.writeFileSync(${JSON.stringify(identityPath)}, JSON.stringify({ pid: process.pid, nonce }));
+      const timer = setInterval(() => fs.writeFileSync(${JSON.stringify(heartbeatPath)}, String(Date.now())), 100);
+      console.log('O8_PROGRAM_READY_' + nonce + '_' + process.pid);
+      readline.createInterface({ input: process.stdin }).on('line', line => {
+        if (line === 'probe') console.log('O8_PROGRAM_REPLY_' + nonce + '_' + process.pid);
+        if (line === 'quit') { clearInterval(timer); process.exit(0); }
+      });
+    `);
+    const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    first.socket.send(JSON.stringify({
+      type: 'terminal-input', sessionName: expectedSessionName,
+      data: `${shellQuote(process.execPath)} ${shellQuote(programPath)}\n`,
+    }));
+    await waitFor(() => existsSync(identityPath) && existsSync(heartbeatPath), 'interactive program startup');
+    const program = JSON.parse(readFileSync(identityPath, 'utf8')) as { pid: number; nonce: string };
+    expect(program.nonce).toBe(nonce);
+    const readyMarker = `O8_PROGRAM_READY_${nonce}_${program.pid}`;
+    await waitFor(() => capturePane().includes(readyMarker), 'interactive program ready output');
+
     first.socket.close();
     await once(first.socket, 'close');
     await stopWsServer();
     expect(capturePane()).toContain(beforeMarker);
+    const stoppedAt = Date.now();
+    await waitFor(() => Number(readFileSync(heartbeatPath, 'utf8')) > stoppedAt, 'program keeps running with the server stopped');
+    expect(() => process.kill(program.pid, 0)).not.toThrow();
 
     await startWsServer();
     const second = await connectClient();
@@ -244,6 +280,21 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
     );
     const restoredLines = await renderTerminalBytes([terminalText(second.frames, expectedSessionName)], { cols: 120, rows: 30, scrollback: 50_000 });
     expect(restoredLines.join('\n')).toContain(beforeMarker);
+    expect(restoredLines.join('\n')).toContain(readyMarker);
+    expect(JSON.parse(readFileSync(identityPath, 'utf8'))).toEqual(program);
+    second.socket.send(JSON.stringify({
+      type: 'terminal-input', sessionName: expectedSessionName, data: 'probe\n',
+    }));
+    await waitFor(
+      () => terminalText(second.frames, expectedSessionName).includes(`O8_PROGRAM_REPLY_${nonce}_${program.pid}`),
+      'the original interactive program answers after reconnect',
+    );
+    second.socket.send(JSON.stringify({
+      type: 'terminal-input', sessionName: expectedSessionName, data: 'quit\n',
+    }));
+    await waitFor(() => {
+      try { process.kill(program.pid, 0); return false; } catch { return true; }
+    }, 'fixture program exits before returning to the shell');
 
     second.socket.send(JSON.stringify({
       type: 'terminal-input',
@@ -256,5 +307,5 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
       .split('\n')
       .filter((name) => name === expectedSessionName);
     expect(matchingSessions).toEqual([expectedSessionName]);
-  }, 60_000);
+  }, 100_000);
 });
