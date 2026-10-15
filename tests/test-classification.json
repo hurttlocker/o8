@@ -2649,6 +2649,15 @@
       ]
     },
     {
+      "path": "tests/lane-git-event-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-guard.test.ts",
       "reasons": [
         "child-process",
@@ -3044,6 +3053,14 @@
         "child-process",
         "git-cli",
         "real-git"
+      ]
+    },
+    {
+      "path": "tests/metadata-lock-probe-busy-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
       ]
     },
     {

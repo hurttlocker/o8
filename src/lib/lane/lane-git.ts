@@ -1,4 +1,4 @@
-import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
+import { execFile, execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { devNull } from 'node:os';
 import path from 'node:path';
@@ -40,13 +40,60 @@ export interface LaneGitOptions {
   identity?: { name: string; email: string };
 }
 
-function configEntries(cwd: string, env: NodeJS.ProcessEnv, scope: 'effective' | 'system' | 'global', pattern: string): Array<[string, string]> {
-  try {
-    const output = execFileSync('git', [...laneGitArguments([]), 'config',
-      ...(scope === 'effective' ? [] : [`--${scope}`, '--includes']), '--null', '--get-regexp', pattern], {
-      cwd, env, encoding: 'utf8', timeout: 5000, maxBuffer: 512 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
+/** One host Git read the invocation checks need. Its stdout comes back to the plan. */
+interface GitRead {
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  maxBuffer?: number;
+}
+type GitPlan<T> = Generator<GitRead, T, string>;
+
+const GIT_READ_TIMEOUT_MS = 5000;
+
+/** Runs a plan with blocking reads, for synchronous callers. */
+function runGitPlanSync<T>(plan: GitPlan<T>): T {
+  let step = plan.next();
+  while (!step.done) {
+    let output: string;
+    try {
+      output = execFileSync('git', step.value.args, { cwd: step.value.cwd, env: step.value.env, encoding: 'utf8',
+        timeout: GIT_READ_TIMEOUT_MS, maxBuffer: step.value.maxBuffer, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      step = plan.throw(error);
+      continue;
+    }
+    step = plan.next(output);
+  }
+  return step.value;
+}
+
+/**
+ * Runs the same plan without holding the event loop (#3565). A failed read
+ * reaches the plan as `execFileSync` reports it: the exit code is `status`.
+ */
+async function runGitPlan<T>(plan: GitPlan<T>): Promise<T> {
+  let step = plan.next();
+  while (!step.done) {
+    const read = step.value;
+    const result = await new Promise<{ output: string } | { error: unknown }>((resolve) => {
+      execFile('git', read.args, { cwd: read.cwd, env: read.env, encoding: 'utf8', timeout: GIT_READ_TIMEOUT_MS,
+        maxBuffer: read.maxBuffer }, (error, stdout) => {
+        if (!error) { resolve({ output: stdout }); return; }
+        const code = (error as { code?: unknown }).code;
+        resolve({ error: Object.assign(error, { status: typeof code === 'number' ? code : null }) });
+      }).stdin?.end();
     });
+    step = 'error' in result ? plan.throw(result.error) : plan.next(result.output);
+  }
+  return step.value;
+}
+
+function* configEntries(cwd: string, env: NodeJS.ProcessEnv, scope: 'effective' | 'system' | 'global', pattern: string): GitPlan<Array<[string, string]>> {
+  try {
+    const output: string = yield { args: [...laneGitArguments([]), 'config',
+      ...(scope === 'effective' ? [] : [`--${scope}`, '--includes']), '--null', '--get-regexp', pattern],
+    cwd, env, maxBuffer: 512 * 1024 };
     return output.split('\0').filter(Boolean).map((entry) => {
       const split = entry.indexOf('\n');
       if (split < 0) throw new LaneGitMetadataError();
@@ -59,21 +106,21 @@ function configEntries(cwd: string, env: NodeJS.ProcessEnv, scope: 'effective' |
 }
 
 /** Reset executable transport config, then restore only trusted system and global credentials. */
-function transportArguments(cwd: string, env: NodeJS.ProcessEnv): string[] {
+function* transportArguments(cwd: string, env: NodeJS.ProcessEnv): GitPlan<string[]> {
   const pattern = '^(core\\.(sshcommand|askpass)|credential(\\..*)?\\.helper)$';
-  if (configEntries(cwd, env, 'effective', '^remote\\..*\\.vcs$').length) {
+  if ((yield* configEntries(cwd, env, 'effective', '^remote\\..*\\.vcs$')).length) {
     // A vcs value can select a lane-owned git-remote-* executable even for a
     // file URL. There is no command flag that safely clears this setting.
     throw new LaneGitMetadataError();
   }
   // System config (for example a platform keychain helper) is read explicitly,
   // since lane Git runs with GIT_CONFIG_NOSYSTEM; Git applies it before global.
-  const trusted = [...configEntries(cwd, env, 'system', pattern), ...configEntries(cwd, env, 'global', pattern)];
-  const effective = configEntries(cwd, env, 'effective', pattern);
+  const trusted = [...yield* configEntries(cwd, env, 'system', pattern), ...yield* configEntries(cwd, env, 'global', pattern)];
+  const effective = yield* configEntries(cwd, env, 'effective', pattern);
   const args = ['-c', 'protocol.allow=never', '-c', 'protocol.ext.allow=never', '-c', 'core.sshCommand=ssh', '-c', 'core.askPass=',
     '-c', 'credential.helper='];
   const protocols = new Set(['file', 'git', 'ssh', 'http', 'https']);
-  for (const [key] of configEntries(cwd, env, 'effective', '^protocol\\..*\\.allow$')) {
+  for (const [key] of yield* configEntries(cwd, env, 'effective', '^protocol\\..*\\.allow$')) {
     args.push('-c', `${key}=never`);
   }
   for (const protocol of protocols) args.push('-c', `protocol.${protocol}.allow=always`);
@@ -104,14 +151,15 @@ function readPointer(file: string, prefix = ''): string {
 }
 
 /** Find linked administration from host backlinks, never from the lane's pointer. */
-function resolveGitDirectories(worktreePath: string, repoPath: string, env: NodeJS.ProcessEnv) {
+function* resolveGitDirectories(worktreePath: string, repoPath: string, env: NodeJS.ProcessEnv): GitPlan<{ worktree: string; admin: string; common: string }> {
   try {
     const worktree = realDirectory(worktreePath);
     const dotGit = path.join(worktree, '.git');
     const host = realDirectory(repoPath);
-    const common = realDirectory(execFileSync('git', laneGitArguments([
+    const commonOutput: string = yield { args: laneGitArguments([
       'rev-parse', '--path-format=absolute', '--git-common-dir',
-    ]), { cwd: host, env, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim());
+    ]), cwd: host, env };
+    const common = realDirectory(commonOutput.trim());
     const matches: string[] = [];
     const entries = path.join(common, 'worktrees');
     let names: string[] = [];
@@ -152,9 +200,12 @@ function resolveGitDirectories(worktreePath: string, repoPath: string, env: Node
   }
 }
 
-export function laneGitInvocation(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig = false, options: LaneGitOptions = {}) {
+interface LaneGitInvocation { args: string[]; env: NodeJS.ProcessEnv; cwd: string }
+
+function* laneGitInvocationPlan(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig: boolean,
+  options: LaneGitOptions): GitPlan<LaneGitInvocation> {
   const env = laneGitEnvironment(ignoreGlobalConfig);
-  const directories = resolveGitDirectories(worktreePath, repoPath, env);
+  const directories = yield* resolveGitDirectories(worktreePath, repoPath, env);
   Object.assign(env, { GIT_DIR: directories.admin, GIT_COMMON_DIR: directories.common,
     GIT_WORK_TREE: directories.worktree });
   if (options.indexFile) env.GIT_INDEX_FILE = options.indexFile;
@@ -165,11 +216,8 @@ export function laneGitInvocation(worktreePath: string, repoPath: string, args: 
   const safe = laneGitArguments([]);
   let keys = '';
   try {
-    keys = execFileSync('git', [...safe, 'config', '--null', '--name-only', '--get-regexp',
-      '^filter\..*\.(clean|smudge|process|required)$'], {
-      cwd: directories.worktree, env, encoding: 'utf8', timeout: 5000, maxBuffer: 512 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    keys = yield { args: [...safe, 'config', '--null', '--name-only', '--get-regexp',
+      '^filter\..*\.(clean|smudge|process|required)$'], cwd: directories.worktree, env, maxBuffer: 512 * 1024 };
   } catch (error) {
     if ((error as { status?: number }).status !== 1) throw error;
   }
@@ -187,10 +235,10 @@ export function laneGitInvocation(worktreePath: string, repoPath: string, args: 
   }
   // Revalidate after enumeration. Command-line routing pins these directories,
   // but a concurrently introduced filter driver remains an enumeration race.
-  const repeated = resolveGitDirectories(worktreePath, repoPath, laneGitEnvironment(ignoreGlobalConfig));
+  const repeated = yield* resolveGitDirectories(worktreePath, repoPath, laneGitEnvironment(ignoreGlobalConfig));
   if (JSON.stringify(repeated) !== JSON.stringify(directories)) throw new LaneGitMetadataError();
   const isTransport = ['fetch', 'push', 'ls-remote', 'credential'].includes(args[0]);
-  const transport = isTransport ? transportArguments(directories.worktree, env) : [];
+  const transport = isTransport ? yield* transportArguments(directories.worktree, env) : [];
   if (isTransport) env.GIT_PROXY_COMMAND = '';
   // Remote upload/receive-pack config is first-value wins. Command flags take
   // precedence even when a later -c remote.* override would be ignored.
@@ -198,6 +246,15 @@ export function laneGitInvocation(worktreePath: string, repoPath: string, args: 
     : args[0] === 'push' ? ['--receive-pack=git-receive-pack'] : [];
   return { args: [...filters, ...transport, ...laneGitArguments(program.length ? [args[0], ...program, ...args.slice(1)] : args)],
     env, cwd: directories.worktree };
+}
+
+export function laneGitInvocation(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig = false, options: LaneGitOptions = {}) {
+  return runGitPlanSync(laneGitInvocationPlan(worktreePath, repoPath, args, ignoreGlobalConfig, options));
+}
+
+/** The same checks as `laneGitInvocation`, with its Git reads off the event loop (#3565). */
+export function laneGitInvocationAsync(worktreePath: string, repoPath: string, args: readonly string[], ignoreGlobalConfig = false, options: LaneGitOptions = {}) {
+  return runGitPlan(laneGitInvocationPlan(worktreePath, repoPath, args, ignoreGlobalConfig, options));
 }
 
 export function laneGitSync(worktreePath: string, repoPath: string, args: readonly string[], options: ExecFileSyncOptions & LaneGitOptions = {}): string {
@@ -208,7 +265,7 @@ export function laneGitSync(worktreePath: string, repoPath: string, args: readon
 
 export async function laneGit(worktreePath: string, repoPath: string, args: readonly string[],
   options: LaneGitOptions = {}) {
-  const invocation = laneGitInvocation(worktreePath, repoPath, args, false, options);
+  const invocation = await laneGitInvocationAsync(worktreePath, repoPath, args, false, options);
   return materializationAwareExecFile('git', invocation.args, { windowsHide: true, timeout: 15_000,
     maxBuffer: 10 * 1024 * 1024, ...options, cwd: invocation.cwd, env: invocation.env });
 }
