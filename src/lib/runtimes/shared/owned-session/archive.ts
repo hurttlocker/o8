@@ -1,5 +1,7 @@
 import path from 'node:path';
-import { mkdir, readdir, rename } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readOwnedSessionMetadata } from './metadata-read';
+import { lstat, mkdir, readdir, realpath, rename } from 'node:fs/promises';
 
 import { metadataPath, nowIso, pathExists, readJsonFile, writeJsonFile } from './helpers';
 import type { OwnedSessionRecord, OwnedSessionState } from './types';
@@ -53,6 +55,40 @@ export async function readOwnedSessionState(
   return 'missing';
 }
 
+export function ownedSessionRecordFingerprint(record: OwnedSessionRecord): string {
+  return createHash('sha256').update(JSON.stringify(record)).digest('hex');
+}
+
+/** Read-only preflight, repeated under the session lock immediately before rename. */
+export async function assertArchivedWorkspaceSessionRestorable(
+  root: string, surfaceId: string, surfacePrefix: string, expectedFingerprint: string,
+): Promise<void> {
+  const name = surfaceId.startsWith(surfacePrefix) ? surfaceId.slice(surfacePrefix.length) : '';
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name) || !expectedFingerprint) {
+    throw new Error('Archived session has no exact directory identity.');
+  }
+  const activePath = path.join(root, name);
+  try {
+    await lstat(activePath);
+    throw new Error('The active session path is occupied.');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const archiveRoot = archiveRootForOwnedSessionRoot(root);
+  const archivePath = path.join(archiveRoot, name);
+  const node = await lstat(archivePath);
+  if (!node.isDirectory() || node.isSymbolicLink()
+    || await realpath(archivePath) !== path.join(await realpath(archiveRoot), name)) {
+    throw new Error('Archived session directory is redirected or invalid.');
+  }
+  const record = await readOwnedSessionMetadata<OwnedSessionRecord>(metadataPath(archivePath));
+  if (record.surfaceId !== surfaceId || record.activeRun || record.detachedAt
+    || path.resolve(record.sessionDir) !== path.resolve(archivePath)
+    || ownedSessionRecordFingerprint(record) !== expectedFingerprint) {
+    throw new Error('Archived session identity or revision changed.');
+  }
+}
+
 export interface RestoreOwnedSessionResult {
   restored: boolean;
   sessionPath?: string;
@@ -70,6 +106,7 @@ export async function restoreArchivedOwnedSessionDir(
   root: string,
   surfaceId: string,
   surfacePrefix: string,
+  strictRecordFingerprint?: string,
 ): Promise<RestoreOwnedSessionResult> {
   const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
   if (!archivePath) {
@@ -80,6 +117,9 @@ export async function restoreArchivedOwnedSessionDir(
     return { restored: false, note: `Active session path already exists: ${activePath}` };
   }
   await mkdir(root, { recursive: true });
+  if (strictRecordFingerprint) {
+    await assertArchivedWorkspaceSessionRestorable(root, surfaceId, surfacePrefix, strictRecordFingerprint);
+  }
   await rename(archivePath, activePath);
 
   try {
@@ -91,6 +131,7 @@ export async function restoreArchivedOwnedSessionDir(
       updatedAt: nowIso(),
     }, { mode: 0o600 });
   } catch (error) {
+    if (strictRecordFingerprint) throw error;
     console.warn(
       `[owned-store] Restored ${surfaceId} from archive but failed to update metadata:`,
       error instanceof Error ? error.message : error,

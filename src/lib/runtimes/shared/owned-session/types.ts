@@ -148,6 +148,9 @@ export interface OwnedWorkspaceBinding {
 }
 
 export interface OwnedWorkspaceBindingReceipt {
+  /** Exact persisted record proof for quiescent archive recovery. */
+  recordFingerprint?: string;
+  detached?: boolean;
   surfaceId: string;
   runtimeId: string;
   sessionState: OwnedSessionState;
@@ -479,6 +482,9 @@ export interface OwnedSessionStore {
   } | null>;
   getSessionIdentityId(surfaceId: string): Promise<string | null>;
   getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  recoverArchivedWorkspace?(
+    surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void,
+  ): Promise<OwnedWorkspaceBindingReceipt>;
   rebindWorkspace?(
     surfaceId: string,
     input: RebindOwnedWorkspaceInput,
