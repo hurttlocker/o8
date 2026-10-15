@@ -71,6 +71,7 @@ interface SharedWsCommands {
 interface SharedWsState {
   connectionState: WsConnectionState;
   isConnected: boolean;
+  connectionEpoch: number;
 }
 
 type ListenerId = number;
@@ -130,10 +131,16 @@ export function useWsConnectionState(): WsConnectionState {
   return ctx?.connectionState ?? 'disconnected';
 }
 
+/** Changes once for each opened transport, including recovery after an offline mount. */
+export function useWsConnectionEpoch(): number {
+  return useContext(SharedWsContext)?.connectionEpoch ?? 0;
+}
+
 // ── Provider ──
 
 export function DesktopWebSocketProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -458,6 +465,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
         const isReconnect = hasOpenedRef.current;
         hasOpenedRef.current = true;
         wsRef.current = ws;
+        setConnectionEpoch((epoch) => epoch + 1);
         // Keep durable inbox/transcript streams connected while a hidden
         // dashboard stops requesting background Git review scans.
         lastReviewVisible = undefined;
@@ -523,6 +531,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
   const value = useMemo<SharedWsContextValue>(() => ({
     connectionState,
+    connectionEpoch,
     isConnected: connectionState === 'connected',
     addListener,
     addLegacySessionSubscription,
@@ -536,7 +545,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     sendTerminalDetach,
     sendAgentKill,
   }), [
-    connectionState, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
+    connectionState, connectionEpoch, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
     switchSession, sendTerminalCreate, sendTerminalAttach,
     sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach,
     sendAgentKill,

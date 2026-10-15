@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
+import { renderTerminalBytes } from './helpers/headless-terminal';
 
 type WireFrame = {
   channel?: string;
@@ -24,6 +25,8 @@ const beforeMarker = `O8_BEFORE_RESTART_${process.pid}`;
 const afterMarker = `O8_AFTER_RESTART_${process.pid}`;
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-dash-terminal-restart-'));
 const token = 'dash-terminal-restart-token';
+const dashboardServerName = `o8-dashboard-restart-test-${process.pid}`;
+const tmuxArgs = (...args: string[]) => ['-L', dashboardServerName, ...args];
 const sockets = new Set<WebSocket>();
 let apiServer: Server;
 let apiPort = 0;
@@ -79,6 +82,7 @@ async function startWsServer() {
       O8_API_PORT: String(apiPort),
       O8_WS_PORT: String(wsPort),
       O8_PERSISTENT_TERMINALS: '1',
+      O8_DASH_TMUX_SERVER_NAME: dashboardServerName,
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
     },
   });
@@ -126,7 +130,7 @@ function terminalText(frames: WireFrame[], sessionName: string) {
 }
 
 function capturePane() {
-  return execFileSync('tmux', ['capture-pane', '-p', '-S', '-', '-t', expectedSessionName], {
+  return execFileSync('tmux', tmuxArgs('capture-pane', '-p', '-S', '-', '-t', expectedSessionName), {
     encoding: 'utf8',
   });
 }
@@ -163,7 +167,7 @@ afterAll(async () => {
   await stopWsServer().catch(() => undefined);
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   try {
-    execFileSync('tmux', ['kill-session', '-t', expectedSessionName], { stdio: 'ignore' });
+    execFileSync('tmux', tmuxArgs('kill-server'), { stdio: 'ignore' });
   } catch { /* the assertion may fail before the backing session is created */ }
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -238,6 +242,8 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
       () => terminalText(second.frames, expectedSessionName).includes(beforeMarker),
       'restored terminal scrollback',
     );
+    const restoredLines = await renderTerminalBytes([terminalText(second.frames, expectedSessionName)], { cols: 120, rows: 30, scrollback: 50_000 });
+    expect(restoredLines.join('\n')).toContain(beforeMarker);
 
     second.socket.send(JSON.stringify({
       type: 'terminal-input',
@@ -246,7 +252,7 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
     }));
     await waitFor(() => capturePane().includes(afterMarker), 'post-restart terminal output');
     expect(capturePane()).toContain(beforeMarker);
-    const matchingSessions = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8' })
+    const matchingSessions = execFileSync('tmux', tmuxArgs('list-sessions', '-F', '#{session_name}'), { encoding: 'utf8' })
       .split('\n')
       .filter((name) => name === expectedSessionName);
     expect(matchingSessions).toEqual([expectedSessionName]);

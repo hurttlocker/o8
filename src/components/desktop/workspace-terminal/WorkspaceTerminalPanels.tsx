@@ -17,6 +17,7 @@ import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/re
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { useWsConnectionEpoch } from '@/components/desktop/hooks/DesktopWebSocketContext';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -571,6 +572,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   active: boolean;
 }) {
   const { workspaceGlass } = useTheme();
+  const connectionEpoch = useWsConnectionEpoch();
   const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
@@ -614,6 +616,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
           tmuxSession={tmuxSession}
           readOnly={readOnly}
           inputLocked={inputLocked}
+          connectionEpoch={connectionEpoch}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
           sendTerminalResize={sendTerminalResize}
