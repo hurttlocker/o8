@@ -3,6 +3,7 @@ import {
   createProject,
   reconcileProjectsWithRegistry,
 } from '@/lib/repos/projects';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,7 +21,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as { name?: string } | null;
   const name = body?.name?.trim();
   if (!name) {
@@ -35,3 +36,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }
+
+export const POST = withRepoInventoryChange('project-create', handlePOST);
