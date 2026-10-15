@@ -148,8 +148,8 @@ beforeAll(async () => {
   if (!tmuxAvailable) return;
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(repoDir);
-  const gitEnv = {
-    PATH: process.env.PATH, HOME: dataDir, TMPDIR: dataDir,
+  const gitEnv: NodeJS.ProcessEnv = {
+    NODE_ENV: 'test', PATH: process.env.PATH, HOME: dataDir, TMPDIR: dataDir,
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
   };
   execFileSync('git', ['init', '--template=', '-q', repoDir], { env: gitEnv });
