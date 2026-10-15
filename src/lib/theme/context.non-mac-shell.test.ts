@@ -112,12 +112,12 @@ describe('ThemeProvider on a non-macOS shell', () => {
     localStorage.setItem('cortex-theme-palette', palette);
     const theme = render();
     const promptBackground = () => document.documentElement.style.getPropertyValue('--t-chat-user-bg');
-    expect(promptBackground()).toBe('rgba(255, 255, 255, 0.06)');
+    expect(promptBackground()).toBe('var(--t-glass-muted-strong)');
 
     act(() => theme?.setWorkspaceGlass(false));
     expect(promptBackground()).toBe(resolveTheme(getPalette(palette), 'glass').cssVars['--t-chat-user-bg']);
     act(() => theme?.setWorkspaceGlass(true));
-    expect(promptBackground()).toBe('rgba(255, 255, 255, 0.06)');
+    expect(promptBackground()).toBe('var(--t-glass-muted-strong)');
   });
 
   it('treats an unstamped host (browser, pre-#1743 shell) as macOS', () => {
