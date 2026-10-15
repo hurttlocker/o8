@@ -18,6 +18,7 @@ import type {
   TileSplitDirection,
 } from '@/lib/tiles/types';
 import { WORKSPACE_TAB_DRAG_TYPE, workspaceTabDropZone, type WorkspaceTabDragKind, type WorkspaceTabDropZone } from '@/lib/tiles/workspace-tab-drag';
+import { getActiveWorkspacePaneDrag, WORKSPACE_PANE_DRAG_EVENT, type WorkspacePaneDrag } from '@/lib/tiles/workspace-pane-drag';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -124,6 +125,35 @@ export function TileContainer({
   const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? LEAF_GAP / 2 : 0;
   const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
   const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
+
+  useEffect(() => {
+    const update = (drag: WorkspacePaneDrag) => {
+      const container = containerRef.current;
+      const target = drag.phase === 'cancel' || interactionDisabled || !container ? null
+        : Array.from(container.querySelectorAll<HTMLElement>(':scope > [data-tile-kind="terminal"]')).find((element) => {
+          if (element.style.visibility === 'hidden') return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && drag.clientX >= rect.left && drag.clientX <= rect.right
+            && drag.clientY >= rect.top && drag.clientY <= rect.bottom;
+        });
+      const drop = target ? {
+        tileId: target.dataset.tileId!,
+        zone: workspaceTabDropZone(target.getBoundingClientRect(), drag.clientX, drag.clientY),
+      } : null;
+      setPaneDragging(drag.phase === 'move');
+      setTabDrop(current => drag.phase !== 'move' ? null
+        : current?.tileId === drop?.tileId && current?.zone === drop?.zone ? current : drop);
+      if (drag.phase !== 'drop' || !drop) return;
+      const { tileId, zone } = drop;
+      onSplitTile(tileId, zone === 'above' || zone === 'below' ? 'horizontal' : 'vertical', drag.kind,
+        zone === 'left' || zone === 'above', true);
+    };
+    const handler = (event: Event) => update((event as CustomEvent<WorkspacePaneDrag>).detail);
+    window.addEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+    const active = getActiveWorkspacePaneDrag();
+    if (active) update(active);
+    return () => window.removeEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+  }, [interactionDisabled, onSplitTile, layout.root, focusedPaneId]);
 
   const handlePaneDragOver = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
