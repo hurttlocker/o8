@@ -6,7 +6,6 @@ import { CompactNavigationRail } from './CompactNavigationRail';
 import { TileContainer, type TileContentRegistry } from '../TileContainer';
 import { useTileLayout, TILE_LAYOUT_STORAGE_KEY } from '@/app/dashboard/hooks/useTileLayout';
 import { collectLeafNodes, computeTileLayout, createDefaultTileLayout, deserializeTileLayout, getFirstLeaf } from '@/lib/tiles/operations';
-import { WORKSPACE_TAB_DRAG_TYPE } from '@/lib/tiles/workspace-tab-drag';
 import type { TileLayout } from '@/lib/tiles/types';
 import type { TerminalTabHandle } from '../workspace-terminal/types';
 import type { ContextualPanelHandle } from '../ContextualPanel';
@@ -56,10 +55,10 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-function transferEvent(type: string, transfer: object, x = 0, y = 0) {
-  const event = new Event(type, { bubbles: true, cancelable: true });
-  Object.defineProperties(event, { dataTransfer: { value: transfer }, clientX: { value: x }, clientY: { value: y } });
-  return event;
+function pointer(target: EventTarget, type: string, x: number, y: number) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+  Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true } });
+  target.dispatchEvent(event);
 }
 
 const cases = (['orchestrator', 'terminal'] as const).flatMap(kind => [
@@ -73,18 +72,12 @@ const cases = (['orchestrator', 'terminal'] as const).flatMap(kind => [
 it.each(cases)('drags $kind from the rail into the real $zone split and preserves it on reload', async ({ kind, x, y, direction, before }) => {
   await act(async () => root.render(createElement(Harness)));
   const button = host.querySelector<HTMLButtonElement>(`[aria-label="Run ${kind}"]`)!;
-  const data = new Map<string, string>();
-  const transfer = { types: [] as string[], effectAllowed: '', dropEffect: '', setData(type: string, value: string) { data.set(type, value); this.types.push(type); }, getData: (type: string) => data.get(type) ?? '' };
-  await act(async () => button.dispatchEvent(transferEvent('dragstart', transfer)));
-  expect(transfer.effectAllowed).toBe('copy');
-  expect(transfer.getData(WORKSPACE_TAB_DRAG_TYPE)).toBe(kind);
-  const target = host.querySelector<HTMLElement>('[data-workspace-drop-target="tile-root"]')!;
+  const target = host.querySelector<HTMLElement>('[data-tile-id="tile-root"]')!;
   expect(target).not.toBeNull();
-  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 300, height: 300 } as DOMRect);
-  await act(async () => target.dispatchEvent(transferEvent('dragover', transfer, x, y)));
+  vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 300));
+  await act(async () => { pointer(button, 'pointerdown', -20, 150); pointer(document, 'pointermove', x, y); });
   expect(host.textContent).toContain('Open');
-  await act(async () => target.dispatchEvent(transferEvent('drop', transfer, x, y)));
-  await act(async () => button.dispatchEvent(transferEvent('dragend', transfer)));
+  await act(async () => pointer(document, 'pointerup', x, y));
   expect(latest.root).toMatchObject({ type: 'split', direction, ratio: 0.5, userArranged: true });
   if (latest.root.type !== 'split') throw new Error('Expected a split');
   expect(latest.root.children[before ? 0 : 1]).toMatchObject({ type: 'leaf', content: { kind: 'terminal', initialTab: kind, createdFromSplit: true } });
@@ -98,10 +91,9 @@ it.each(cases)('drags $kind from the rail into the real $zone split and preserve
 it('removes the iframe drop covers when a drag is cancelled and keeps both click entries working', async () => {
   await act(async () => root.render(createElement(Harness)));
   const button = host.querySelector<HTMLButtonElement>('[aria-label="Run orchestrator"]')!;
-  const transfer = { types: [WORKSPACE_TAB_DRAG_TYPE], setData: noop, effectAllowed: '' };
-  await act(async () => button.dispatchEvent(transferEvent('dragstart', transfer)));
+  await act(async () => { pointer(button, 'pointerdown', -20, 150); pointer(document, 'pointermove', 150, 150); });
   expect(host.querySelector('[data-workspace-drop-target]')).not.toBeNull();
-  await act(async () => button.dispatchEvent(transferEvent('dragend', transfer)));
+  await act(async () => pointer(document, 'pointercancel', 150, 150));
   expect(host.querySelector('[data-workspace-drop-target]')).toBeNull();
   expect(collectLeafNodes(latest.root)).toHaveLength(1);
   await act(async () => button.click());
