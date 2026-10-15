@@ -4,6 +4,7 @@ import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/r
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertControlledLaunchGrantCurrent, withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
 import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
+import { withOwnedArtifactAdmission } from './artifact-admission';
 import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn } from './execution-policy';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -81,6 +82,7 @@ export interface OwnedRunController {
 }
 
 export function createOwnedRunController({
+  root,
   adapter,
   runtimeId,
   humanLabel,
@@ -91,6 +93,7 @@ export function createOwnedRunController({
   workspaceSpawnGuard,
   invalidateFleetCache,
 }: {
+  root: string;
   adapter: OwnedRuntimeAdapter;
   runtimeId: string;
   humanLabel: string;
@@ -459,8 +462,10 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
-    return withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
-      spawnOwnedRunInner(session, prompt, mode)
+    return withOwnedArtifactAdmission(root, () => (
+      withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
+        spawnOwnedRunInner(session, prompt, mode)
+      ))
     ));
   }
 
