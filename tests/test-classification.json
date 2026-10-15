@@ -2722,7 +2722,8 @@
         "child-process",
         "git-cli",
         "process-signal",
-        "real-path"
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -3577,6 +3578,7 @@
     {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
+        "git-cli",
         "network-listener",
         "real-path"
       ]
