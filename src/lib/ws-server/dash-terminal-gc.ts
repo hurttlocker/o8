@@ -11,7 +11,7 @@ export function listDashTmuxSessionsWithAge(): (DashSessionInfo & { profileOwner
   try {
     const output = execFileSync(
       resolveTmuxBinary(), dashTmuxArgs('list-sessions', '-F', `#{session_name}\t#{session_created}\t#{${DASH_PROFILE_OWNER_OPTION}}`),
-      { windowsHide: true, timeout: 4000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() },
+      { windowsHide: true, timeout: 4000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
     );
     return output.split('\n').flatMap((line) => {
       const [name, created, profileOwner] = line.split('\t');
@@ -54,7 +54,7 @@ export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): nu
     options.beforeKill(name);
     try {
       execFileSync(resolveTmuxBinary(), dashTmuxArgs('kill-session', '-t', `=${name}`), {
-        windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv(),
+        windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv,
       });
       killed += 1;
     } catch { /* already gone */ }
