@@ -269,7 +269,7 @@ export async function postAgentMessage(
     claimCodexInboxWake: ({ target: wakeTarget, throughSequence }) => (
       claimAgentInboxWake({ agent: wakeTarget, throughSequence }, sqlite)
     ),
-    releaseCodexInboxWake: (wakeTarget) => releaseAgentInboxWake(wakeTarget, sqlite),
+    releaseCodexInboxWake: (wakeTarget, reservationId) => releaseAgentInboxWake(wakeTarget, reservationId, sqlite),
   };
   try {
     const result = await deliverAgentMessage(message, target, seams, wakeSeams);

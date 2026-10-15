@@ -163,8 +163,8 @@ export interface AgentInboxWakeSeams {
   claimCodexInboxWake: (input: {
     target: AgentPresence;
     throughSequence: number;
-  }) => boolean | Promise<boolean>;
-  releaseCodexInboxWake: (target: AgentPresence) => void | Promise<void>;
+  }) => string | null | Promise<string | null>;
+  releaseCodexInboxWake: (target: AgentPresence, reservationId: string) => void | Promise<void>;
 }
 
 export function nativeAgentMessageText(message: AgentMessage): string {
@@ -247,9 +247,9 @@ export const defaultAgentInboxWakeSeams: AgentInboxWakeSeams = {
     const { claimAgentInboxWake } = await import('./store');
     return claimAgentInboxWake({ agent: target, throughSequence });
   },
-  releaseCodexInboxWake: async (target) => {
+  releaseCodexInboxWake: async (target, reservationId) => {
     const { releaseAgentInboxWake } = await import('./store');
-    releaseAgentInboxWake(target);
+    releaseAgentInboxWake(target, reservationId);
   },
 };
 
@@ -282,7 +282,7 @@ export async function deliverAgentMessage(
         note: 'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',
       };
     } catch (error) {
-      await wakeSeams.releaseCodexInboxWake(target);
+      await wakeSeams.releaseCodexInboxWake(target, claimedWake);
       throw error;
     }
   }
