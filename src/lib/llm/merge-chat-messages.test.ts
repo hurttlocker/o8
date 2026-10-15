@@ -154,3 +154,28 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     expect(mergeChatMessages([first], [second]).map((message) => message.id)).toEqual(['u1', 'u2']);
   });
 });
+
+describe('confirmed orchestrator delivery warnings', () => {
+  const user = msg('orch-user-send-1', 'user', 100, { deliveryConfirmed: true });
+  const warning = msg('orch-delivery-error-send-1', 'system', 104);
+
+  it('does not let an explicit stale false confirmation revive the warning', () => {
+    const staleUser = { ...user, deliveryConfirmed: false };
+    const merged = mergeChatMessages([user], [staleUser, warning]);
+    expect(merged).toEqual([user]);
+  });
+
+  it('requires a confirmed matching user and only removes system warnings', () => {
+    const unrelated = msg('orch-delivery-error-other', 'system', 105);
+    const wrongRole = { ...warning, id: warning.id, role: 'assistant' };
+    expect(mergeChatMessages([user], [wrongRole, unrelated]).map((entry) => entry.id))
+      .toEqual([user.id, warning.id, unrelated.id]);
+    expect(mergeChatMessages([{ ...user, id: user.id, role: 'assistant' }], [warning])).toContainEqual(warning);
+  });
+
+  it('does not infer delivery from an ordinary assistant reply or similar identifier', () => {
+    const reply = msg('reply', 'assistant', 106);
+    const otherUser = { ...user, id: 'orch-user-send-10' };
+    expect(mergeChatMessages([warning], [reply, otherUser])).toContainEqual(warning);
+  });
+});

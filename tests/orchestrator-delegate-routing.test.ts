@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/lane/commands', () => ({ dispatch: mocks.dispatch }));
+// Routing is under test, not this machine's installs (#3657 refuses a runtime that is not installed).
+vi.mock('@/lib/runtimes/shared/runtime-installed', () => ({ runtimeNotInstalledReason: vi.fn(async () => null) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));

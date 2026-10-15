@@ -11,6 +11,7 @@ import path from 'node:path';
 import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
 import { randomUUID } from 'node:crypto';
+import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
 
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
@@ -113,6 +114,7 @@ export function createOwnedSessionStore(
   registerOwnedStopHandler(surfacePrefix, io, withSurfaceLock, invalidateFleetCache);
   registerOwnedRecoveryStore(surfacePrefix, io, withSurfaceLock);
   const runController = createOwnedRunController({
+    root,
     adapter,
     runtimeId,
     humanLabel,
@@ -156,9 +158,23 @@ export function createOwnedSessionStore(
     const repoPath = await validateWorkspace(request.cwd);
     const repo = await resolveRepoContext(repoPath);
     const id = `${sessionIdPrefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
-    await bindControlledTaskSession(request, runtimeId, `${surfacePrefix}${id}`);
-    const sessionDir = path.join(await io.ensureRoot(), id);
-    await ensureDir(sessionDir);
+    try {
+      return await withSurfaceLock(`${surfacePrefix}${id}`, () => withOwnedArtifactAdmission(root, () => (
+        launchAdmitted(request, repoPath, repo, id, executionPolicy, prompt)
+      )));
+    } catch (error) {
+      if (error instanceof OwnedArtifactAdmissionError) return {
+        ok: false, runtime: runtimeId, surfaceId: `${surfacePrefix}${id}`, note: error.message, sideEffect: error.sideEffect,
+      };
+      throw error;
+    }
+  }
+
+  async function launchAdmitted(
+    request: OwnedLaunchRequest, repoPath: string, repo: Awaited<ReturnType<typeof resolveRepoContext>>,
+    id: string, executionPolicy: ReturnType<typeof createOwnedExecutionPolicy>, prompt: string,
+  ): Promise<OwnedLaunchResponse> {
+    const sessionDir = path.join(root, id);
     let selectedIdentity: Awaited<ReturnType<typeof getSelectedRuntimeIdentity>> = null;
     if (adapter.isolatedConfigHomeEnv && adapter.defaultConfigHome && request.packetId) {
       const defaultConfigHome = adapter.defaultConfigHome();
@@ -235,14 +251,14 @@ export function createOwnedSessionStore(
       runIdentityLedger: { version: 1 as const, totalRuns: 0, complete: true },
     };
 
-    await io.saveSession(session);
     let run;
     try {
-      run = await withSurfaceLock(session.surfaceId, () => (
-        runController.spawnOwnedRun(session, prompt, 'launch')
-      ));
+      await bindControlledTaskSession(request, runtimeId, session.surfaceId);
+      await ensureDir(sessionDir);
+      await io.saveSession(session);
+      run = await runController.spawnOwnedRun(session, prompt, 'launch');
     } catch (error) {
-      if (error instanceof OwnedWorkspaceUnavailableError) {
+      if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError) {
         return {
           ok: false, runtime: runtimeId, surfaceId: session.surfaceId,
           note: error.message, sideEffect: error.sideEffect,
@@ -264,8 +280,13 @@ export function createOwnedSessionStore(
     };
   }
 
-  function resume(surfaceId: string, prompt: string) {
-    return withSurfaceLock(surfaceId, () => resumeInner(surfaceId, prompt));
+  async function resume(surfaceId: string, prompt: string) {
+    try {
+      return await withSurfaceLock(surfaceId, () => withOwnedArtifactAdmission(root, () => resumeInner(surfaceId, prompt)));
+    } catch (error) {
+      if (error instanceof OwnedArtifactAdmissionError) return { ok: false, note: error.message, sideEffect: error.sideEffect };
+      throw error;
+    }
   }
 
   async function resumeInner(surfaceId: string, prompt: string) {
@@ -335,7 +356,7 @@ export function createOwnedSessionStore(
       };
     } catch (error) {
       await rollbackColdRestore();
-      if (error instanceof OwnedWorkspaceUnavailableError) {
+      if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError) {
         return { ok: false, note: error.message, sideEffect: error.sideEffect };
       }
       throw error;

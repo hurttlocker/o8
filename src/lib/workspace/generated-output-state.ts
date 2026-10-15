@@ -21,6 +21,7 @@ import { readExactManagedFinalization } from './exact-managed-finalization-state
 import { readGeneratedOutputRecoveryHistory, recordGeneratedOutputRecoveryHistory } from './generated-output-recovery-history';
 import { validateGeneratedOutputResource } from './generated-output-validation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import type { LinkedGitBuildCustody } from './linked-git-build-custody';
 import { withManagedRetirementOwnership } from './retirement-process-authority';
 
 export type GeneratedOutputState = 'planned' | 'legacy-held' | 'ready' | 'active'
@@ -53,7 +54,7 @@ export interface GeneratedOutputResource {
   updatedAt: number;
   revision: { head: string; tree: string; dirty: boolean; workingDigest: string };
   owner?: { repositoryPath: string; worktreeId: string };
-  creationAuthority?: { kind: 'prebuild'; pid: number; identity: MetadataLockProcessIdentity };
+  creationAuthority?: { kind: 'prebuild'; pid: number; identity: MetadataLockProcessIdentity; linkedGit?: LinkedGitBuildCustody };
   attempt?: { id: string; mode: string; ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
     children: Array<{ pid: number; identity: MetadataLockProcessIdentity | null; exitCode: number | null;
       signal: string | null; observedClosed: boolean }> };
@@ -296,6 +297,9 @@ export async function withGeneratedOutputBankExclusion<T>(resource: GeneratedOut
 }
 
 export function assertGeneratedOutputClaimsReleased(workspace: WorktreeMaterializationIdentity): void {
+  const parking = getSqlite().prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+    WHERE workspace_path = ? AND state IN ('prepared', 'restoring') LIMIT 1`).get(workspace.canonicalPath);
+  if (parking) throw new Error('Generated output is blocked by pending legacy parking or restoration.');
   assertWorkspaceRetentionReleased(workspace.canonicalPath, workspace);
   const claims = getSqlite().prepare(`SELECT operation_id FROM workspace_exact_claims
     WHERE expected_path = ? OR source_path = ? OR claim_path = ? OR parent_canonical_path = ? LIMIT 1`)

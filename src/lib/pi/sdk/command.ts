@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { confinementArgs, ConfinementUnavailable } from '@/lib/sandbox/confine';
+import { confinementArgs, ConfinementUnavailable, type ConfinementRules } from '@/lib/sandbox/confine';
 import { piWriteHelperPath } from './scripts';
 import { PiToolRefusal } from './refusal';
 
@@ -53,6 +53,8 @@ export interface PiCommandOptions {
   timeoutMs?: number; maxOutputBytes?: number;
   /** Lane rules (#3385): no network, and writes only in the workspace and a private temp dir. Host-set only. */
   confined?: boolean;
+  /** Replaces lane rules for a confined command, such as the orchestrator's workspace rules (#3658). Host-set only. */
+  rules?: ConfinementRules;
 }
 
 // The outer shell checks that its working directory is still the workspace
@@ -96,7 +98,7 @@ export async function runPiCommand(root: string, command: string, abort: AbortSi
   abort.throwIfAborted();
   const tmp = await mkdtemp(join(await realpath(tmpdir()), 'o8-pi-command-'));
   try {
-    return await runCommand(root, command, abort, options, { tmp, args: await confinementArgs(root, tmp) });
+    return await runCommand(root, command, abort, options, { tmp, args: await confinementArgs(root, tmp, process.platform, options.rules) });
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }

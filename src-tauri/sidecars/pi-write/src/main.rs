@@ -40,6 +40,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use base64::Engine;
 
 mod supervise;
+mod directory_move;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -720,6 +721,9 @@ fn run() -> io::Result<bool> {
 fn main() {
     // `supervise` runs one approved command and ends every process it starts (#3350).
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.len() == 2 && args[1] == "move-directory-no-replace" {
+        std::process::exit(directory_move::run());
+    }
     if args.get(1).map(|arg| arg == "supervise").unwrap_or(false) {
         std::process::exit(supervise::run(&args[2..]));
     }

@@ -283,7 +283,8 @@ export interface MobileTranscriptToolCall {
   id?: string | null;
   name: string;
   args?: Record<string, unknown>;
-  status?: 'calling' | 'running' | 'done' | 'error';
+  /** `stopped`: the operator's Stop ended the call before it reported a result (#3659). */
+  status?: 'calling' | 'running' | 'done' | 'error' | 'stopped';
   preview?: string;
   result?: string;
   sideEffectClass?: ToolSideEffectClass;
@@ -351,6 +352,8 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  /** Matching send acknowledgement or live turn activity; not turn completion. */
+  deliveryConfirmed?: boolean;
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
