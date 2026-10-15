@@ -48,6 +48,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -319,7 +320,12 @@ const TOOLS: McpTool[] = [
         isolate: { type: 'boolean', description: 'Legacy isolation flag. False is accepted only with checkoutMode: "shared" from an o8 orchestrator chat.' },
         checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Fast mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
         assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Fast mode: exact non-overlapping relative files or directories this worker owns.' },
-        runtime: { type: 'string', description: 'Optional worker runtime override.' },
+        runtime: {
+          type: 'string',
+          enum: listDispatchableRuntimes(),
+          description: 'Optional worker runtime id; omit it to use the operator\'s saved dispatch default. '
+            + '"pi-builtin" is the built-in Pi worker that ships with o8. "pi" is the operator\'s own Pi CLI and runs only when it is installed.',
+        },
         model: { type: 'string', description: 'Optional runtime-specific model id.' },
         workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
         readOnly: {

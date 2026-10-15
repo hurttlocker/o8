@@ -313,6 +313,29 @@ describe('Pi orchestrator (#3258)', () => {
     expect(next.some(event => event.type === 'text' && event.text === 'Next answer.')).toBe(true);
   }, 180_000);
 
+  it('reports a command the operator stopped as stopped, not as a host failure (#3659)', async () => {
+    const { repo, stateRoot } = await fixture();
+    const stop = new AbortController();
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
+      transport: script([call('s1', 'run_command', { command: 'sleep 30 && echo finished-sleep' }),
+        message([{ type: 'text', text: 'Not reached.' }])]) });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    let stoppedAt = 0;
+    await backend.sendTurn(repo, 'Wait for the sleep', (event) => {
+      out.push(event);
+      if (event.type === 'tool_use') setTimeout(() => { stoppedAt = Date.now(); stop.abort(); }, 500);
+    }, { threadId: 'thoughts-pi-stop', permissionMode: 'full', signal: stop.signal });
+
+    // The turn ends promptly after Stop rather than waiting out the 30 s command.
+    expect(stoppedAt).toBeGreaterThan(0);
+    expect(Date.now() - stoppedAt).toBeLessThan(10_000);
+    const result = out.find((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> => event.type === 'tool_result');
+    expect(result).toMatchObject({ name: 'run_command', isError: true, output: 'Stopped by the operator.' });
+    expect(out.filter(event => event.type === 'error')).toEqual([]);
+    expect(out.at(-1)).toMatchObject({ type: 'done' });
+  }, 180_000);
+
   it('closes an idle thread\'s processes and resumes on the next message', async () => {
     const { repo, stateRoot } = await fixture();
     const seen: Array<{ messages: unknown[]; tools: string[] }> = [];

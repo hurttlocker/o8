@@ -38,6 +38,8 @@ vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),
   requestRealtimeRefresh: vi.fn(),
 }));
+// The stale-write race is under test, not this machine's installs (#3657 refuses a runtime that is not installed).
+vi.mock('@/lib/runtimes/shared/runtime-installed', () => ({ runtimeNotInstalledReason: vi.fn(async () => null) }));
 vi.mock('@/lib/runtime/inventory', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/runtime/inventory')>(),
   getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [], runtimes: [] })),
