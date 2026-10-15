@@ -30,8 +30,17 @@ A record in `workspace_legacy_output_parks` binds the operation UUID, original
 `.next` path, exact sibling `.o8-retained-legacy-<UUID>` destination, workspace and
 output identities, reciprocal linked Git custody, intent, evidence hashes, and a
 bounded content manifest. The manifest records file bytes and identities without
-copying them. Links, special nodes, unsafe evidence, and oversized inventories
-refuse admission. The original `dev/lock` is retained byte for byte.
+copying them. Legacy-only inventory also records the inode, mode and raw text of
+bounded generated dependency links under `dev/node_modules`. Only the generated
+package-name plus 16-hex suffix shape and exact relative target into the checkout's
+`node_modules` are accepted, including scoped packages. The lexical target must
+remain identical after sibling relocation. Targets are never followed, opened,
+scanned or copied; this preserves link nodes without granting dependency custody.
+Absolute, external, ambiguous or changed targets, replaced link nodes, redirected
+ancestors, special nodes, unsafe evidence, and oversized inventories refuse.
+File-bank capture, restoration and disposal continue to reject all symbolic links.
+Existing file/directory-only legacy journals retain their original field shape
+and are verified with the same identity and content requirements. The original `dev/lock` is retained byte for byte.
 
 Admission requires a fresh clear workspace process snapshot. Any present producer
 lock must have supported JSON with a PID freshly observed absent; unknown formats,
