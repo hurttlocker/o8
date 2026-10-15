@@ -401,6 +401,33 @@ describe('Pi orchestrator (#3258)', () => {
     expect(out.at(-1)).toMatchObject({ type: 'done' });
   }, 180_000);
 
+  it('keeps Full access command writes in the workspace and a private temp dir, and keeps git and network (#3658)', async () => {
+    const { repo, stateRoot } = await fixture();
+    const outside = join(repo, '..', 'outside.txt');
+    const { port } = api.address() as AddressInfo;
+    inboxCalls.length = 0;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot,
+      transport: script([
+        call('o1', 'run_command', { command: `printf hi > '${outside}'` }),
+        call('i1', 'run_command', { command: 'printf hi > inside.txt && printf t > "$TMPDIR/scratch" && git init -q '
+          + '&& git add inside.txt && git -c user.name=o8 -c user.email=o8@example.test commit -qm inside && echo committed' }),
+        call('n1', 'run_command', { command: `/usr/bin/curl -s -o /dev/null -w 'status=%{http_code}' http://127.0.0.1:${port}/missing` }),
+        message([{ type: 'text', text: 'Done.' }]),
+      ]) });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    await backend.sendTurn(repo, 'Write hi in my home folder', event => out.push(event), { threadId: 'thoughts-pi-confined', permissionMode: 'full' });
+
+    expect(inboxCalls).toEqual([]);
+    await expect(readFile(outside)).rejects.toThrow();
+    expect(await readFile(join(repo, 'inside.txt'), 'utf8')).toBe('hi');
+    const results = out.filter((event): event is Extract<OrchestratorEvent, { type: 'tool_result' }> => event.type === 'tool_result');
+    expect(results.map(result => result.name)).toEqual(['run_command', 'run_command', 'run_command']);
+    expect(results[0].output).toMatch(/only in the workspace and a private temp directory/);
+    expect(results[1].output).toContain('committed');
+    expect(results[2].output).toContain('status=404');
+  }, 180_000);
+
   it('runs one turn per thread: an overlapping message is refused and Pi starts once', async () => {
     const { repo, stateRoot } = await fixture();
     let opens = 0;

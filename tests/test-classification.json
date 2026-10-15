@@ -3568,6 +3568,7 @@
     {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
+        "git-cli",
         "network-listener",
         "real-path"
       ]
