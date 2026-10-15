@@ -37,7 +37,8 @@ async function readIdleWindow(): Promise<UpdateIdleWindow> {
 
 export async function GET() {
   const idle = await readIdleWindow();
-  return response({ ok: true, idle });
+  // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
+  return response({ ok: true, idle, state: getAppUpdateState() });
 }
 
 export async function POST(request: Request) {

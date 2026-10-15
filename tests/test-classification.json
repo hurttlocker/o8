@@ -4867,6 +4867,12 @@
       ]
     },
     {
+      "path": "tests/update-apply-failure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-check-state-real-path.test.ts",
       "reasons": [
         "child-process",
