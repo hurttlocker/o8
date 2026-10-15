@@ -100,6 +100,34 @@ describe('CommandPalette file mode', () => {
     act(() => button!.click());
   }
 
+  it('shows a retryable provider failure through the search route and recovers without hiding an empty result', async () => {
+    searchFiles.mockRejectedValueOnce(new Error('fixture file provider unavailable'));
+    await mount();
+    await typeQuery('readme'); await settleSearch();
+    expect(container.textContent).toContain('File search is unavailable.');
+    expect(container.textContent).not.toContain('No files for');
+    searchFiles.mockResolvedValueOnce([fileResult]);
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Retry search"]')!.click());
+    await settleSearch();
+    expect(container.textContent).not.toContain('File search is unavailable.');
+    expect(container.textContent).toContain('README.md');
+    searchFiles.mockResolvedValueOnce([]);
+    await typeQuery('missing'); await settleSearch();
+    expect(container.textContent).toContain('No files for');
+    expect(container.querySelector('[aria-label="Retry search"]')).toBeNull();
+  });
+
+  it('does not restore an obsolete provider failure after a new query completes', async () => {
+    let resolveOld: ((response: Response) => void) | undefined;
+    fetcher.mockImplementationOnce(() => new Promise<Response>(resolve => { resolveOld = resolve; }));
+    await mount();
+    await typeQuery('old'); await settleSearch();
+    await typeQuery('readme'); await settleSearch();
+    await act(async () => resolveOld?.(Response.json({ groups: emptySearchGroups(), providerErrors: { file: 'fixture old failure' } })));
+    expect(container.textContent).toContain('README.md');
+    expect(container.querySelector('[aria-label="Retry search"]')).toBeNull();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
