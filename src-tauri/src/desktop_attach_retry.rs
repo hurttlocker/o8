@@ -23,7 +23,7 @@ pub(crate) fn prompt_retry() -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        use crate::no_window::CommandNoWindow;
+        use crate::no_window::NoWindow;
         let script = format!(
             "Add-Type -AssemblyName System.Windows.Forms; if ([System.Windows.Forms.MessageBox]::Show('{}','{}','RetryCancel','Warning') -eq 'Retry') {{ exit 0 }} else {{ exit 1 }}",
             body.replace('\'', "''"), title.replace('\'', "''")
