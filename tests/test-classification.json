@@ -2481,6 +2481,12 @@
       ]
     },
     {
+      "path": "tests/github-pr-sync-pagination-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/github-pr-watch-real-path.test.ts",
       "reasons": [
         "real-path"
