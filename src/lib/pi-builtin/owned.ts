@@ -53,6 +53,7 @@ import type { WorkerWorkMode } from '@/lib/orchestrator/types';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { piWorkerFleet, piWorkerReviewPacket, piWorkerTail, reviewDispositionNote } from './presentation';
 import { piWorkerLogLines } from './run-log';
+import { getOwnedPiBuiltinTelemetrySources } from './telemetry';
 import {
   PI_BUILTIN_RUNTIME_ID,
   PI_BUILTIN_SURFACE_PREFIX,
@@ -519,11 +520,7 @@ const store: OwnedSessionStore = {
     }
     return archived;
   },
-  async getTelemetrySources(surfaceId) {
-    const session = await findSession(surfaceId, true);
-    return session ? { threadId: session.threadId, model: session.model,
-      stdoutPaths: [...session.recentRuns].reverse().map((run) => run.stdoutPath) } : null;
-  },
+  getTelemetrySources: getOwnedPiBuiltinTelemetrySources,
   getSessionIdentityId: async () => null,
   async setReviewDisposition(surfaceId, disposition) {
     const session = await findSession(surfaceId, false);
@@ -552,4 +549,5 @@ export const interruptOwnedPiBuiltinSession = store.interrupt.bind(store);
 export const getOwnedPiBuiltinFleetAdditions = store.getFleetAdditions.bind(store);
 export const getOwnedPiBuiltinRuntimeTail = store.getRuntimeTail.bind(store);
 export const getOwnedPiBuiltinReviewPacket = store.getReviewPacket.bind(store);
+export { getOwnedPiBuiltinTelemetrySources } from './telemetry';
 export const archiveOwnedPiBuiltinSession = store.archiveSession.bind(store);
