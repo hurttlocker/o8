@@ -72,6 +72,8 @@ let journalDelayMs = 0;
 let fixtureRuntime: 'codex' | 'claude-code' = 'codex';
 let store: ReturnType<typeof createOwnedSessionStore>;
 const accountId = 'user_fixture_task_draft';
+// Reconciliation can await a three-second process scan before returning its snapshot.
+const completionPoll = { timeout: 10_000 };
 
 async function account(subject = accountId, expiry = 3600) {
   await withAccountStateLease(() => {
@@ -335,7 +337,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
     expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'held', completed: false,
       completion: { available: false, reason: 'not_launched' } });
     await decision(draft);
-    await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+    await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
     const before = readFileSync(executionFile(draft), 'utf8');
     const result = await taskResult(draft.taskId);
     expect(result.status).toBe(200);
@@ -385,7 +387,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
       persistent = false;
       const draft = await prepare();
       await decision(draft);
-      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
       const session = savedSession();
       const run = session.recentRuns[0]!;
       if (kind === 'binding') session.controlledTask!.attemptId = randomUUID();
@@ -415,7 +417,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
     await decision(draft);
     await vi.waitFor(() => expect(runs()).toHaveLength(1));
     if (state === 'completed') {
-      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
     }
     const execution = readTaskExecution(draft)!;
     const replay = await call('o8_prepare_task', args);
