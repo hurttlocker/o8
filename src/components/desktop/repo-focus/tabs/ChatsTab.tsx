@@ -637,7 +637,6 @@ export function ChatsTab({
           <SectionLabel
             label="Merged"
             compact={compact}
-            count={visibleMergedPackets.length}
             collapsed={collapsedGroups.merged}
             onToggle={() => toggleGroup('merged')}
           />
@@ -654,7 +653,6 @@ export function ChatsTab({
           <SectionLabel
             label={group.label}
             compact={compact}
-            count={group.items.length}
             collapsed={collapsedGroups[group.key]}
             onToggle={() => toggleGroup(group.key)}
           />
