@@ -301,10 +301,12 @@ export async function assertGeneratedOutputStoreBinding(workspace: WorktreeMater
 
 /** Lock order: containing packet first, generated-output resource second. */
 export async function withGeneratedOutputExclusion<T>(workspace: WorktreeMaterializationIdentity,
-  owner: GeneratedOutputResource['owner'], operation: () => Promise<T>, options: { requireExistingStore?: boolean } = {}): Promise<T> {
+  owner: GeneratedOutputResource['owner'], operation: () => Promise<T>): Promise<T> {
   const execute = () => withPacketLifecycleSpawnLock(
     `generated-output:${createHash('sha256').update(workspace.canonicalPath).digest('hex')}`, async () => {
-      await assertGeneratedOutputStoreBinding(workspace, options.requireExistingStore);
+      const registered = getSqlite().prepare('SELECT resource_id FROM workspace_generated_outputs WHERE workspace_path = ? LIMIT 1')
+        .get(workspace.canonicalPath);
+      await assertGeneratedOutputStoreBinding(workspace, Boolean(registered));
       return operation();
     });
   return owner ? withManagedRetirementOwnership(owner.repositoryPath, workspace.canonicalPath, execute) : execute();

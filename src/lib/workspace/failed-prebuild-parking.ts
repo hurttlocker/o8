@@ -179,7 +179,7 @@ export async function parkFailedPrebuild(input: { resourceId: string; intent: st
         .run(operationId, resource.resourceId, workspace.canonicalPath, JSON.stringify(record));
     }).immediate();
     return finish(record);
-  }, { requireExistingStore: true });
+  });
 }
 
 export async function resumeFailedPrebuild(operationId: string): Promise<FailedPrebuildPark> {
@@ -190,5 +190,5 @@ export async function resumeFailedPrebuild(operationId: string): Promise<FailedP
     // Completed replay checks retained bytes without touching a newer generation.
     await verifyRetainedFailedPrebuild(record);
     return record;
-  }, { requireExistingStore: true });
+  });
 }

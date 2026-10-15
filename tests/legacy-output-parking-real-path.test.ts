@@ -114,6 +114,11 @@ it('retains terminal failed prebuild bytes and history before admitting a linked
   expect(lstatSync(record.retainedPath).ino).toBe(identity.ino); expect(existsSync(f.output)).toBe(false);
   expect(readFileSync(path.join(record.retainedPath, 'proof'), 'utf8')).toBe('generation-17');
   expect(resources()).toEqual([original]);
+  const marker = path.join(f.workspace, '.o8-generated-output-store'); const savedMarker = path.join(f.root, 'retained-store-binding');
+  renameSync(marker, savedMarker);
+  expect(f.cli('register', '--workspace', f.workspace).status).not.toBe(0);
+  expect(existsSync(marker)).toBe(false); expect(build(0).status).not.toBe(0);
+  renameSync(savedMarker, marker);
   writeFileSync(path.join(record.retainedPath, 'proof'), 'changed retained generation');
   expect(build(0).status).not.toBe(0); expect(resources()).toEqual([original]);
   writeFileSync(path.join(record.retainedPath, 'proof'), 'generation-17');
