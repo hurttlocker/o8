@@ -12,6 +12,8 @@
  * - Stored messages whose id is NOT present in the inbound array are PRESERVED,
  *   so no client can ever drop a turn it simply never saw. An empty/partial
  *   inbound can no longer wipe the file.
+ * - A confirmed orchestrator user entry retires only its matching delivery
+ *   warning. Confirmation survives stale writes; it does not mean turn success.
  * - Result is ordered chronologically by numeric `timestamp` (handles the
  *   interleaved case where a preserved reply belongs *between* two inbound
  *   messages). Missing/invalid timestamps carry the prior message's value so
@@ -25,6 +27,7 @@
  * to the route for a full replace, because a shorter array can't be told apart
  * from a partial-loss array by inspection.
  */
+import { areDistinctOrchestratorSends, preserveDeliveryConfirmation, removeConfirmedDeliveryWarnings } from '@/lib/transcripts/delivery-confirmation';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
 import { mergeMobileTurnReceipts } from '@/lib/mobile/turn-receipt';
 
@@ -37,6 +40,7 @@ export interface ChatMessageLike {
   persistedVersion?: unknown;
   type?: unknown;
   handoff?: unknown;
+  deliveryConfirmed?: unknown;
 }
 
 const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media'] as const;
@@ -45,6 +49,8 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
   const existingRecord = existing as Record<string, unknown>;
   const inboundRecord = inbound as Record<string, unknown>;
   let next: Record<string, unknown> | null = null;
+  const confirmed = preserveDeliveryConfirmation(existingRecord, inboundRecord);
+  if (confirmed !== inboundRecord) next = confirmed;
   for (const field of SERVER_METADATA_FIELDS) {
     if (inboundRecord[field] !== undefined || existingRecord[field] === undefined) continue;
     next ??= { ...inboundRecord };
@@ -68,6 +74,7 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
+  if (areDistinctOrchestratorSends(leftRecord, rightRecord)) return false;
   const leftMedia = Array.isArray(leftRecord.media) ? leftRecord.media : [];
   const rightMedia = Array.isArray(rightRecord.media) ? rightRecord.media : [];
   return typeof leftRecord.role === 'string' && leftRecord.role === rightRecord.role
@@ -144,7 +151,7 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   // to be pinned (the normal full-transcript POST) — return it untouched, no
   // reordering. If we pinned anything we must fall through to the sort so the
   // corrected timestamps actually reorder the thread.
-  if (preserved.length === 0 && !normalizedAny) return collapseAdjacentDuplicates(inboundList);
+  if (preserved.length === 0 && !normalizedAny) return removeConfirmedDeliveryWarnings(collapseAdjacentDuplicates(inboundList));
 
   const concat: T[] = [...normalizedInbound, ...preserved];
   const decorated = concat.map((message, index) => ({ message, index, ts: timestampOf(message) }));
@@ -156,5 +163,5 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
     else carry = entry.ts;
   }
   decorated.sort((a, b) => (a.ts! - b.ts!) || (a.index - b.index));
-  return collapseAdjacentDuplicates(decorated.map((entry) => entry.message));
+  return removeConfirmedDeliveryWarnings(collapseAdjacentDuplicates(decorated.map((entry) => entry.message)));
 }

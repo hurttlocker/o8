@@ -70,6 +70,11 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
     if (resource.owner) throw new Error('Linked Git build custody is not containing manager authority.');
     validateLinkedGitBuildCustody(resource.creationAuthority.linkedGit);
   }
+  if (resource.continuedFrom && (!uuid.test(resource.continuedFrom.resourceId)
+    || !uuid.test(resource.continuedFrom.operationId) || resource.continuedFrom.resourceId === resource.resourceId
+    || resource.owner || !resource.creationAuthority?.linkedGit)) {
+    throw new Error('Generated-output continuation authority is invalid.');
+  }
   if (resource.attempt) {
     const attempt = resource.attempt;
     if (!uuid.test(attempt.id) || !['build', 'dev', 'start'].includes(attempt.mode)

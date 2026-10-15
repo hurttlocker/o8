@@ -352,6 +352,8 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  /** Matching send acknowledgement or live turn activity; not turn completion. */
+  deliveryConfirmed?: boolean;
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;

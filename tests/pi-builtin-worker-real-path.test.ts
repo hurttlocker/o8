@@ -172,6 +172,16 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 // here and never reaches another o8 on this machine.
 const pushes: Array<{ url?: string; authorization?: string; body: string }> = [];
 const host: Server = createServer((req, res) => {
+  // #3666: the operator command reads packet transcripts through the real route.
+  if (req.method === 'GET' && req.url?.startsWith('/api/orchestrator/packet-transcript')) {
+    void import('@/app/api/orchestrator/packet-transcript/route').then(async ({ GET }) => {
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) if (typeof value === 'string') headers.set(key, value);
+      const response = await GET(new NextRequest(`http://127.0.0.1${req.url}`, { headers }));
+      res.writeHead(response.status, { 'Content-Type': 'application/json' }).end(await response.text());
+    });
+    return;
+  }
   const chunks: Buffer[] = [];
   req.on('data', (chunk: Buffer) => chunks.push(chunk));
   req.on('end', () => {
@@ -196,7 +206,9 @@ const { hasCurrentCleanWorkerExit } = await import('@/lib/lane/worker-session-st
 const { createPiLaneApproval } = await import('@/lib/pi/sdk/lane-approval');
 const { getRuntime } = await import('@/lib/runtimes');
 const capabilities = await import('@/lib/orchestrator/runtime-capabilities');
-const { getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
+const { archiveOwnedPiBuiltinSession, getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
+const { handleTranscript } = await import('@/lib/mcp/operator-handlers/status');
+const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { getOrCreateWsToken, WS_TOKEN_PATH } = await import('@/lib/ws-auth');
 const { setLaneStatus } = await import('@/lib/lane/registry');
 const { withPiExclusive } = await import('@/lib/pi/sdk/command');
@@ -384,6 +396,43 @@ describe('bundled Pi worker (#3258)', () => {
     // Lane rules end with the lane: a merged lane's worktree gets no further writes or commands.
     const approve = createPiLaneApproval(realpathSync(workspacePath), laneId);
     expect(await approve({ name: 'run_command', args: { command: 'true' } }, new AbortController().signal)).toBe(false);
+  }, 240_000);
+
+  it('reads a dispatched packet\'s transcript through the operator command, before and after archive (#3666)', async () => {
+    const target = await makeRepo('transcript');
+    model.answers.push(
+      call('t1', 'write_file', { path: 'notes.md', content: 'pi transcript\n' }),
+      call('t2', 'run_command', { command: 'cat notes.md' }),
+      message([{ type: 'text', text: 'Wrote notes.md.' }]),
+    );
+    const worker = await delegate(target.repoPath, 'Add notes.md.');
+    await lastRunOutcome(worker.sessionKey, 'finished');
+    setApiBase(`http://127.0.0.1:${(host.address() as AddressInfo).port}`);
+    const read = async () => {
+      const result = await handleTranscript({ packetId: worker.packetId });
+      expect(result.isError).toBeFalsy();
+      return (JSON.parse((result.content[0] as { text: string }).text) as { data: { sessionKey: string;
+        events: Array<{ type: string; tool?: string; ok?: boolean; text?: string; summary?: string }> } }).data;
+    };
+    const live = await read();
+    expect(live.sessionKey).toBe(worker.sessionKey);
+    const shape = (events: typeof live.events) => events.map((event) => [event.type, event.tool ?? event.text ?? '']);
+    expect(shape(live.events)).toEqual([
+      ['tool_call', 'write_file'], ['tool_result', 'write_file'],
+      ['tool_call', 'run_command'], ['tool_result', 'run_command'],
+      ['assistant', 'Wrote notes.md.'], ['done', ''],
+    ]);
+    expect(live.events[3]).toMatchObject({ ok: true });
+    expect(live.events[3].summary).toContain('pi transcript');
+
+    // A merged packet's session is archived; its transcript stays readable.
+    expect((await dispatch({ verb: 'request_review', laneId: worker.laneId, actor: 'system' })).ok).toBe(true);
+    const reviewedHeadSha = git(worker.workspacePath, ['rev-parse', 'HEAD']);
+    await submitPacketReview({ packetId: worker.packetId, approved: true, findings: [], reviewedHeadSha });
+    expect((await approveAndMergePacket({ packetId: worker.packetId, expectedHeadSha: reviewedHeadSha, actor: 'user' })).merged).toBe(true);
+    await archiveOwnedPiBuiltinSession(worker.sessionKey);
+    expect(existsSync(join(process.env.O8_OWNED_PI_BUILTIN_ROOT!, worker.sessionKey.slice('pi-builtin-owned:'.length)))).toBe(false);
+    expect(shape((await read()).events)).toEqual(shape(live.events));
   }, 240_000);
 
   it('runs two packets pinned to an OpenRouter model in separate worktrees, records each call and lands both (#3584)', async () => {

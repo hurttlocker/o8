@@ -23,6 +23,7 @@ import { validateGeneratedOutputResource } from './generated-output-validation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import type { LinkedGitBuildCustody } from './linked-git-build-custody';
 import { withManagedRetirementOwnership } from './retirement-process-authority';
+import { readFailedPrebuildPark, retainedFailedPrebuild, verifyRetainedFailedPrebuild } from './failed-prebuild-parking';
 
 export type GeneratedOutputState = 'planned' | 'legacy-held' | 'ready' | 'active'
   | 'succeeded' | 'failed-held' | 'adopted' | 'retired';
@@ -69,9 +70,10 @@ export interface GeneratedOutputResource {
     verifiedRecoveryOperationId: string; claim: ExactWorkspaceClaimRecord };
   disposal?: { kind: 'postship'; retiredAt: number; claim: ExactWorkspaceClaimRecord };
   recovery?: GeneratedOutputRecovery;
+  continuedFrom?: { resourceId: string; operationId: string };
 }
 
-interface ResourceRow { payload_json: string; version: number; state: GeneratedOutputState;
+interface ResourceRow { payload_json: string; version: number; state: GeneratedOutputState; retained_operation_id: string | null;
   workspace_path: string; created_at: number; updated_at: number }
 
 /** Indexed discovery only selects the repo; current manager metadata proves ownership. */
@@ -129,6 +131,23 @@ export function readGeneratedOutputResource(resourceId: string): GeneratedOutput
   if (resource.disposal && readExactManagedFinalization(resource.disposal.claim)?.state !== 'complete') {
     throw new Error('Generated-output disposal lost its exact finalization.');
   }
+  if (row.retained_operation_id) {
+    const parked = readFailedPrebuildPark(row.retained_operation_id);
+    if (parked.state !== 'parked' || JSON.stringify(parked.resource) !== JSON.stringify(resource)) {
+      throw new Error('Failed prebuild namespace release lost its exact preservation journal.');
+    }
+  }
+  if (resource.continuedFrom) {
+    const parked = readFailedPrebuildPark(resource.continuedFrom.operationId);
+    const predecessor = getSqlite().prepare('SELECT payload_json, retained_operation_id FROM workspace_generated_outputs WHERE resource_id = ?')
+      .get(parked.resource.resourceId) as { payload_json: string; retained_operation_id: string | null } | undefined;
+    if (parked.state !== 'parked' || parked.resource.resourceId !== resource.continuedFrom.resourceId
+      || JSON.stringify(parked.resource.workspace) !== JSON.stringify(resource.workspace)
+      || !predecessor || predecessor.retained_operation_id !== parked.operationId
+      || JSON.stringify(parked.resource) !== predecessor.payload_json) {
+      throw new Error('Fresh prebuild lost its preserved predecessor.');
+    }
+  }
   return resource;
 }
 
@@ -143,7 +162,7 @@ export function lastDisposedPrebuildOutput(workspacePath: string): GeneratedOutp
 
 export function currentGeneratedOutputResource(workspacePath: string): GeneratedOutputResource | null {
   const row = getSqlite().prepare(`SELECT resource_id FROM workspace_generated_outputs
-    WHERE workspace_path = ? AND state != 'retired'`).get(path.resolve(workspacePath)) as { resource_id: string } | undefined;
+    WHERE workspace_path = ? AND state != 'retired' AND retained_operation_id IS NULL`).get(path.resolve(workspacePath)) as { resource_id: string } | undefined;
   return row ? readGeneratedOutputResource(row.resource_id) : null;
 }
 
@@ -155,6 +174,7 @@ export function saveGeneratedOutputResource(resource: GeneratedOutputResource,
     || (resource.output && JSON.stringify(next.output) !== JSON.stringify(resource.output))
     || JSON.stringify(next.owner) !== JSON.stringify(resource.owner)
     || JSON.stringify(next.creationAuthority) !== JSON.stringify(resource.creationAuthority)
+    || JSON.stringify(next.continuedFrom) !== JSON.stringify(resource.continuedFrom)
     || (resource.bank && JSON.stringify(next.bank) !== JSON.stringify(resource.bank))
     || (resource.disposal && (next.state !== 'retired'
       || JSON.stringify(next.disposal) !== JSON.stringify(resource.disposal)
@@ -167,7 +187,7 @@ export function saveGeneratedOutputResource(resource: GeneratedOutputResource,
   if (Buffer.byteLength(JSON.stringify(next)) > 16 * 1024 ** 2) throw new Error('Generated-output state exceeds its bound.');
   return getSqlite().transaction(() => {
     const result = getSqlite().prepare(`UPDATE workspace_generated_outputs
-      SET payload_json = ?, state = ?, version = ?, updated_at = ? WHERE resource_id = ? AND version = ?`)
+      SET payload_json = ?, state = ?, version = ?, updated_at = ? WHERE resource_id = ? AND version = ? AND retained_operation_id IS NULL`)
       .run(JSON.stringify(next), next.state, next.version, next.updatedAt, next.resourceId, resource.version);
     if (result.changes !== 1) throw new Error('Generated-output state lost its trusted CAS.');
     recordGeneratedOutputRecoveryHistory(resource.resourceId, resource.recovery, next.recovery);
@@ -259,7 +279,7 @@ export async function generatedOutputRevision(workspace: WorktreeMaterialization
 }
 
 /** Store binding prevents a different profile from bypassing reservations and holds. */
-export async function assertGeneratedOutputStoreBinding(workspace: WorktreeMaterializationIdentity): Promise<void> {
+export async function assertGeneratedOutputStoreBinding(workspace: WorktreeMaterializationIdentity, requireExisting = false): Promise<void> {
   getSqlite();
   const database = await realpath(process.env.CORTEX_IDE_DB_PATH || path.join(getDataDir(), 'cortex-ide.db'));
   const expected = createHash('sha256').update(database).digest('hex');
@@ -267,6 +287,7 @@ export async function assertGeneratedOutputStoreBinding(workspace: WorktreeMater
   try { await lstat(marker); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (requireExisting) throw new Error('Generated-output lifecycle store binding is missing.');
     try { await writeExactChildFile(workspace.canonicalPath, workspace, marker, expected, 0o600); }
     catch { /* Exclusive creation may have been won by another profile; verify its binding. */ }
   }
@@ -283,7 +304,9 @@ export async function withGeneratedOutputExclusion<T>(workspace: WorktreeMateria
   owner: GeneratedOutputResource['owner'], operation: () => Promise<T>): Promise<T> {
   const execute = () => withPacketLifecycleSpawnLock(
     `generated-output:${createHash('sha256').update(workspace.canonicalPath).digest('hex')}`, async () => {
-      await assertGeneratedOutputStoreBinding(workspace);
+      const registered = getSqlite().prepare('SELECT resource_id FROM workspace_generated_outputs WHERE workspace_path = ? LIMIT 1')
+        .get(workspace.canonicalPath);
+      await assertGeneratedOutputStoreBinding(workspace, Boolean(registered));
       return operation();
     });
   return owner ? withManagedRetirementOwnership(owner.repositoryPath, workspace.canonicalPath, execute) : execute();
@@ -297,6 +320,13 @@ export async function withGeneratedOutputBankExclusion<T>(resource: GeneratedOut
 }
 
 export function assertGeneratedOutputClaimsReleased(workspace: WorktreeMaterializationIdentity): void {
+  if (getSqlite().prepare(`SELECT operation_id FROM workspace_failed_prebuild_parks
+    WHERE workspace_path = ? AND state = 'prepared' LIMIT 1`).get(workspace.canonicalPath)) {
+    throw new Error('Generated output is blocked by pending failed prebuild preservation.');
+  }
+  const parking = getSqlite().prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+    WHERE workspace_path = ? AND state IN ('prepared', 'restoring') LIMIT 1`).get(workspace.canonicalPath);
+  if (parking) throw new Error('Generated output is blocked by pending legacy parking or restoration.');
   assertWorkspaceRetentionReleased(workspace.canonicalPath, workspace);
   const claims = getSqlite().prepare(`SELECT operation_id FROM workspace_exact_claims
     WHERE expected_path = ? OR source_path = ? OR claim_path = ? OR parent_canonical_path = ? LIMIT 1`)
@@ -320,6 +350,11 @@ export async function registerGeneratedOutputLocked(workspace: WorktreeMateriali
     return current;
   }
   const outputPath = path.join(workspace.canonicalPath, '.next');
+  const predecessor = retainedFailedPrebuild(workspace.canonicalPath);
+  if (predecessor) {
+    if (owner || !creationAuthority?.linkedGit) throw new Error('A preserved failed prebuild requires fresh prebuild authority.');
+    await verifyRetainedFailedPrebuild(predecessor, true);
+  }
   assertWorkspaceRetentionReleased(outputPath);
   const existing = await lstat(outputPath).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -330,7 +365,9 @@ export async function registerGeneratedOutputLocked(workspace: WorktreeMateriali
   if (output && output.canonicalPath !== outputPath) throw new Error('Generated output escapes its containing workspace.');
   const now = Date.now();
   let resource: GeneratedOutputResource = { schema: 'o8/generated-output-resource/v1', resourceId: randomUUID(),
-    workspace, output, owner, ...(creationAuthority ? { creationAuthority } : {}), state: existing ? 'legacy-held' : 'planned',
+    workspace, output, owner, ...(creationAuthority ? { creationAuthority } : {}),
+    ...(predecessor ? { continuedFrom: { resourceId: predecessor.resource.resourceId, operationId: predecessor.operationId } } : {}),
+    state: existing ? 'legacy-held' : 'planned',
     origin: existing ? 'legacy-observation' : 'managed-creation', version: 1,
     createdAt: now, updatedAt: now, revision: await generatedOutputRevision(workspace) };
   validateGeneratedOutputResource(resource);
