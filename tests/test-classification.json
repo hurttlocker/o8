@@ -2335,6 +2335,14 @@
       ]
     },
     {
+      "path": "tests/fixture-child-lifetime-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/fixture-lifecycle-real-path.test.ts",
       "reasons": [
         "apfs-tool",
