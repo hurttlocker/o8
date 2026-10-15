@@ -1,4 +1,5 @@
 import { parkLegacyOutput, continueLegacyOutputPark, readLegacyOutputPark, listLegacyOutputParks } from '../src/lib/workspace/legacy-output-parking';
+import { parkFailedPrebuild, readFailedPrebuildPark, resumeFailedPrebuild } from '../src/lib/workspace/failed-prebuild-parking';
 import { captureWorktreeMaterializationIdentity } from '../src/lib/worktree/materialization-identity';
 import { recoverGeneratedOutput } from '../src/lib/workspace/generated-output-recovery';
 import { retireGeneratedOutputVerification } from '../src/lib/workspace/generated-output-recovery-retirement';
@@ -14,7 +15,8 @@ function project(resource: GeneratedOutputResource) {
       entries: resource.bank.entries.length, expandedBytes: resource.bank.expandedBytes,
       compressedBytes: resource.bank.compressedBytes } : null,
     bankCapture: resource.bankCapture ?? null, recovery: resource.recovery ?? null,
-    retirement: resource.retirement ?? null, disposal: resource.disposal ?? null };
+    retirement: resource.retirement ?? null, disposal: resource.disposal ?? null,
+    continuedFrom: resource.continuedFrom ?? null };
 }
 
 async function main() {
@@ -28,6 +30,22 @@ async function main() {
     if (key === '--evidence') evidencePaths.push(value); else values.set(key, value);
   }
   const resourceId = values.get('--resource'); const workspacePath = values.get('--workspace');
+  if (['park-failed-prebuild', 'resume-failed-prebuild', 'failed-prebuild-status'].includes(command ?? '')) {
+    let record;
+    if (command === 'park-failed-prebuild') {
+      const intent = values.get('--intent');
+      if (!resourceId || !intent || values.size !== 2) throw new Error('Failed prebuild parking requires --resource, --intent and --evidence.');
+      record = await parkFailedPrebuild({ resourceId, intent, evidencePaths });
+    } else {
+      const operation = values.get('--operation');
+      if (!operation || values.size !== 1 || evidencePaths.length) throw new Error('Select exactly one --operation.');
+      record = command === 'failed-prebuild-status' ? readFailedPrebuildPark(operation) : await resumeFailedPrebuild(operation);
+    }
+    const { entries, ...retention } = record;
+    process.stdout.write(`${JSON.stringify({ schema: 'o8/failed-prebuild-cli/v1', ok: true, command,
+      retention: { ...retention, entryCount: entries.length, reclaimedBytes: 0 } })}\n`);
+    return;
+  }
   if (['park-legacy', 'restore-legacy', 'resume-legacy', 'legacy-status'].includes(command ?? '')) {
     const operation = values.get('--operation');
     const intent = values.get('--intent');
@@ -68,7 +86,7 @@ async function main() {
     }
     resource = await adoptGeneratedOutput({ workspacePath, owner: { repositoryPath, worktreeId }, intent, evidencePaths });
   } else {
-    throw new Error('Use generated-output register, status, adopt, recover, recover-verification, retire, retire-verification, park-legacy, legacy-status, resume-legacy or restore-legacy.');
+    throw new Error('Use generated-output register, status, adopt, recover, recover-verification, retire, retire-verification, park-legacy, legacy-status, resume-legacy, restore-legacy, park-failed-prebuild, failed-prebuild-status or resume-failed-prebuild.');
   }
   process.stdout.write(`${JSON.stringify({ schema: 'o8/generated-output-cli/v1', ok: true, command,
     resource: project(resource) })}\n`);

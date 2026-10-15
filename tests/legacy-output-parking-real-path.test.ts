@@ -17,7 +17,7 @@ async function fixture() {
   const primary = path.join(root, 'primary'); const workspace = path.join(root, 'linked');
   const data = path.join(root, 'data'); const bin = path.join(root, 'bin');
   for (const directory of [primary, data, bin]) mkdirSync(directory, { mode: 0o700 });
-  writeFileSync(path.join(primary, '.gitignore'), '.next\n.o8-generated-output-store\n.o8-retained-legacy-*\n');
+  writeFileSync(path.join(primary, '.gitignore'), '.next\n.o8-generated-output-store\n.o8-retained-legacy-*\n.o8-retained-prebuild-*\n');
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],
     ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
       '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'fixture'], ['worktree', 'add', '-b', 'fixture-linked', workspace]]) {
@@ -86,6 +86,7 @@ it('retains terminal failed prebuild bytes and history before admitting a linked
   const legacy = f.success(f.park());
   const build = (exit: number) => f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/generated-output-producer.ts')});
     const {runGeneratedOutputPrebuild}=ns.default??ns;
+    process.chdir(${JSON.stringify(f.workspace)});
     const code=await runGeneratedOutputPrebuild({workspacePath:${JSON.stringify(f.workspace)},preflight(){},
       operation:ctx=>ctx.runBuild(run=>run(process.execPath,['-e',
         "require('node:fs').writeFileSync('.next/proof','generation-${exit}');process.exit(${exit})"]))});
@@ -99,6 +100,12 @@ it('retains terminal failed prebuild bytes and history before admitting a linked
   const original = resources()[0]; const identity = lstatSync(f.output);
   expect(original.state).toBe('failed-held'); expect(original.attempt.children.at(-1).exitCode).toBe(17);
   expect(build(0).status).not.toBe(0);
+  // Exercise additive migration of an already populated pre-continuation store.
+  const previousDb = new Database(path.join(f.data, 'fixture.db'));
+  previousDb.exec(`DROP INDEX idx_generated_output_current;
+    ALTER TABLE workspace_generated_outputs DROP COLUMN retained_operation_id;
+    CREATE UNIQUE INDEX idx_generated_output_current ON workspace_generated_outputs(workspace_path) WHERE state != 'retired';`);
+  previousDb.close();
   const retained = f.cli('park-failed-prebuild', '--resource', original.resourceId,
     '--intent', 'Preserve terminal failed prebuild before retry', ...f.evidence.flatMap(value => ['--evidence', value]));
   expect(retained.status, retained.stderr).toBe(0);
@@ -107,15 +114,102 @@ it('retains terminal failed prebuild bytes and history before admitting a linked
   expect(lstatSync(record.retainedPath).ino).toBe(identity.ino); expect(existsSync(f.output)).toBe(false);
   expect(readFileSync(path.join(record.retainedPath, 'proof'), 'utf8')).toBe('generation-17');
   expect(resources()).toEqual([original]);
+  writeFileSync(path.join(record.retainedPath, 'proof'), 'changed retained generation');
+  expect(build(0).status).not.toBe(0); expect(resources()).toEqual([original]);
+  writeFileSync(path.join(record.retainedPath, 'proof'), 'generation-17');
   const fresh = build(0); expect(fresh.status, fresh.stderr).toBe(0);
   const [old, next] = resources(); expect(old).toEqual(original); expect(next.state).toBe('succeeded');
   expect(next.continuedFrom).toEqual({ resourceId: original.resourceId, operationId: record.operationId });
   expect(next.output.inode).not.toBe(identity.ino);
+  const preflight = spawnSync(process.execPath, [path.join(source, 'scripts/preship-cleanup.mjs')],
+    { cwd: f.workspace, env: f.env, encoding: 'utf8', timeout: 30_000 });
+  expect(preflight.status, preflight.stderr).toBe(0);
   const replay = f.cli('resume-failed-prebuild', '--operation', record.operationId);
   expect(replay.status, replay.stderr).toBe(0); expect(resources()).toEqual([old, next]);
   expect(readFileSync(path.join(record.retainedPath, 'proof'), 'utf8')).toBe('generation-17');
   f.assertLinks(legacy.retainedPath);
   writeFileSync(path.join(f.root, 'failed-prebuild-state.json'), JSON.stringify({ original, record, next }, null, 2));
+}, 300_000);
+
+it('refuses unsafe failed prebuild movement and cold-resumes an interrupted exact retention', async () => {
+  const f = await fixture(); f.success(f.park());
+  const failed = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/generated-output-producer.ts')});
+    process.exitCode=await (ns.default??ns).runGeneratedOutputPrebuild({workspacePath:${JSON.stringify(f.workspace)},preflight(){},
+      operation:ctx=>ctx.runBuild(run=>run(process.execPath,['-e',"require('node:fs').writeFileSync('.next/proof','failed bytes');process.exit(19)"]))});`);
+  expect(failed.status, failed.stderr).toBe(19);
+  const db = new Database(path.join(f.data, 'fixture.db'));
+  const original = JSON.parse((db.prepare('SELECT payload_json FROM workspace_generated_outputs').get() as { payload_json: string }).payload_json);
+  const rows = () => db.prepare('SELECT payload_json FROM workspace_failed_prebuild_parks').all()
+    .map(row => JSON.parse((row as { payload_json: string }).payload_json));
+  const park = () => f.cli('park-failed-prebuild', '--resource', original.resourceId, '--intent', 'Retain failed fixture',
+    ...f.evidence.flatMap(value => ['--evidence', value]));
+  const refused = (message: string) => { const result = park(); expect(result.status).not.toBe(0); expect(result.stderr).toContain(message); };
+  try {
+    const unknown = structuredClone(original); unknown.attempt.children[0].observedClosed = false;
+    unknown.attempt.children[0].exitCode = null;
+    db.prepare('UPDATE workspace_generated_outputs SET payload_json = ?').run(JSON.stringify(unknown));
+    refused('complete terminal');
+    db.prepare('UPDATE workspace_generated_outputs SET payload_json = ?').run(JSON.stringify(original));
+    const marker = path.join(f.workspace, '.o8-generated-output-store'); const savedMarker = path.join(f.root, 'saved-marker');
+    renameSync(marker, savedMarker); refused('store binding is missing'); renameSync(savedMarker, marker);
+    const gitFile = path.join(f.workspace, '.git'); const savedGit = readFileSync(gitFile);
+    writeFileSync(gitFile, 'gitdir: /nonexistent/fixture-admin\n');
+    expect(park().status).not.toBe(0); writeFileSync(gitFile, savedGit);
+    const live = spawn(process.execPath, ['-e', 'process.stdout.write("ready");setInterval(()=>{},1000)'], { cwd: f.workspace });
+    const closed = once(live, 'close'); let ready = ''; live.stdout.on('data', value => { ready += value; });
+    try { await vi.waitFor(() => expect(ready).toBe('ready')); refused('live or inconclusive'); }
+    finally { live.kill('SIGTERM'); await closed; }
+    writeFileSync(path.join(f.output, 'lock'), 'unknown lock'); refused('inconclusive');
+    renameSync(path.join(f.output, 'lock'), path.join(f.root, 'unknown-lock-retained'));
+    const held = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/retention-holds.ts')});
+      (ns.default??ns).acquireWorkspaceRetentionHold({repositoryPath:${JSON.stringify(f.workspace)},repositoryUuid:'fixture',worktreeId:'failed',
+        packetId:'failed',laneId:'failed',holdId:'failed-hold',reason:'Keep failed fixture',identity:${JSON.stringify(original.output)}});`);
+    expect(held.status, held.stderr).toBe(0); refused('retention hold');
+    const released = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/retention-holds.ts')});
+      (ns.default??ns).releaseWorkspaceRetentionHold({repositoryUuid:'fixture',packetId:'failed',holdId:'failed-hold'});`);
+    expect(released.status, released.stderr).toBe(0);
+    db.prepare(`INSERT INTO workspace_exact_claims (kind,repository_path,worktree_id,operation_id,expected_path,source_path,claim_path,state,
+      parent_device,parent_inode,parent_canonical_path,source_device,source_inode,created_at,updated_at)
+      VALUES ('generated-output-retirement',?,?,?,?,?,?,'prepared',?,?,?,?,?,?,?)`).run(f.workspace, original.resourceId,
+      'fixture-claim', f.output, f.output, path.join(f.workspace, '.fixture-claim'), original.workspace.device, original.workspace.inode,
+      f.workspace, original.output.device, original.output.inode, Date.now(), Date.now());
+    refused('exact workspace claim');
+    db.prepare("DELETE FROM workspace_exact_claims WHERE operation_id = 'fixture-claim'").run();
+    expect(rows()).toEqual([]);
+    f.scriptHook(`if(process.argv[2]==='directory-before-rename') {
+      const fs=require('node:fs');const D=require(${JSON.stringify(require.resolve('better-sqlite3'))});
+      const d=new D(${JSON.stringify(path.join(f.data, 'fixture.db'))},{readonly:true});
+      const r=JSON.parse(d.prepare('SELECT payload_json FROM workspace_failed_prebuild_parks').get().payload_json);d.close();fs.mkdirSync(r.retainedPath);
+    }`);
+    refused('Directory move refused'); let record = rows()[0]; expect(record.state).toBe('prepared');
+    expect(f.cli('resume-failed-prebuild', '--operation', record.operationId).status).not.toBe(0);
+    renameSync(record.retainedPath, path.join(f.root, 'failed-contender-retained'));
+    renameSync(f.hook, path.join(f.root, 'failed-race-hook-retained'));
+    renameSync(f.output, path.join(f.root, 'failed-original-held')); mkdirSync(f.output);
+    expect(f.cli('resume-failed-prebuild', '--operation', record.operationId).status).not.toBe(0);
+    renameSync(f.output, path.join(f.root, 'failed-replacement-held')); renameSync(path.join(f.root, 'failed-original-held'), f.output);
+    writeFileSync(path.join(f.output, 'proof'), 'tampered bytes');
+    expect(f.cli('resume-failed-prebuild', '--operation', record.operationId).status).not.toBe(0);
+    writeFileSync(path.join(f.output, 'proof'), 'failed bytes');
+    const evidence = readFileSync(f.evidence[1]); writeFileSync(f.evidence[1], 'tampered evidence');
+    expect(f.cli('resume-failed-prebuild', '--operation', record.operationId).status).not.toBe(0);
+    writeFileSync(f.evidence[1], evidence);
+    f.scriptHook("if(process.argv[2]==='directory-after-rename') process.kill(Number(process.argv[3]),'SIGKILL');");
+    expect(f.cli('resume-failed-prebuild', '--operation', record.operationId).status).not.toBe(0);
+    expect(rows()[0].state).toBe('prepared'); expect(existsSync(f.output)).toBe(false);
+    const pending = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/generated-output-producer.ts')});
+      await (ns.default??ns).runGeneratedOutputPrebuild({workspacePath:${JSON.stringify(f.workspace)},preflight(){},operation:async()=>0});`);
+    expect(pending.status).not.toBe(0); expect(pending.stderr).toContain('pending failed prebuild');
+    renameSync(f.hook, path.join(f.root, 'failed-interrupt-hook-retained'));
+    const resumed = f.cli('resume-failed-prebuild', '--operation', record.operationId);
+    expect(resumed.status, resumed.stderr).toBe(0); record = rows()[0]; expect(record.state).toBe('parked');
+    expect(lstatSync(record.retainedPath).ino).toBe(original.output.inode);
+    expect(JSON.parse((db.prepare('SELECT payload_json FROM workspace_generated_outputs').get() as { payload_json: string }).payload_json)).toEqual(original);
+    const disposable = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/retention-holds.ts')});
+      (ns.default??ns).assertWorkspaceRetentionReleased(${JSON.stringify(record.retainedPath)},${JSON.stringify(original.output)});`);
+    expect(disposable.status).not.toBe(0); expect(disposable.stderr).toContain('not disposable');
+    writeFileSync(path.join(f.root, 'failed-prebuild-guards.json'), JSON.stringify({ original, record }, null, 2));
+  } finally { db.close(); }
 }, 300_000);
 
 it('preserves native legacy parking, refuses raced/replaced destinations, and cold-replays restoration', async () => {

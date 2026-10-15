@@ -136,6 +136,10 @@ async function stopped(workspace: WorktreeMaterializationIdentity, candidate: st
     if (await evidenceHash(file) !== before) throw new Error('Legacy producer lock changed.');
   }
 }
+
+// Shared movement guards; callers still prove their own durable authority.
+export { outside as assertOutputMaintenanceOutside, holdsAndClaims as assertOutputMovementReleased,
+  stopped as assertOutputStopped };
 async function verify(record: LegacyOutputPark, candidate: string): Promise<void> {
   outside(record.workspace);
   await assertWorktreeMaterializationIdentity(record.workspace.canonicalPath, record.workspace);
