@@ -3343,6 +3343,12 @@
       ]
     },
     {
+      "path": "tests/orchestrator-late-ack-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-mcp-owned-root-real-path.test.ts",
       "reasons": [
         "child-process",
