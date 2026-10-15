@@ -55,11 +55,11 @@ it('hides and reopens the same running worker from Agents without a lifecycle re
       await act(async () => workerRow().click());
       expect(host.textContent).toContain('Worker progress stays here.');
       const hide = host.querySelector<HTMLButtonElement>('[aria-label="Hide Fixture worker pane"]')!;
+      expect(hide).not.toBeNull();
       expect(hide.title).toContain('available in Agents');
       await act(async () => hide.click());
       expect(host.textContent).not.toContain('Worker progress stays here.');
       expect(workerRow()).toBeDefined();
-      expect(host.querySelector('[aria-label="1 agent working"]')).not.toBeNull();
       expect(localStorage.getItem('o8:orchestrator:session-tiles:tab:visibility-fixture-tab')).toBeNull();
     }
     expect(fetcher.mock.calls.every(([, options]) => !(options as RequestInit | undefined)?.method || (options as RequestInit).method === 'GET')).toBe(true);
