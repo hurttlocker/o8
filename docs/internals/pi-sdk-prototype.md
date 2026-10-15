@@ -169,9 +169,26 @@ platform).
 
 In Full access, Pi's own `write_file` and `run_command` in the repo run without
 asking, as the Claude orchestrator's do with Full access (#3555). A command the
-policy blocks still never starts, writes stay inside the workspace, and commands
-keep their clean environment and time and output limits. Plan only gives Pi only
-`read_file`. Per-turn limits are 40 model calls, 80 tool calls and 30 minutes.
+policy blocks still never starts, and commands keep their clean environment and
+time and output limits. Plan only gives Pi only `read_file`. Per-turn limits are
+40 model calls, 80 tool calls and 30 minutes.
+
+Full access is not unrestricted (#3658). `write_file` refuses any path outside
+the workspace, and every `run_command` runs confined under the workspace rules
+(`WORKSPACE_CONFINEMENT` in `src/lib/sandbox/confine.ts`): it can write only in
+the workspace, its `.git` included, and a private temp directory that is its
+`TMPDIR` and is removed when the command ends. Network access stays as usual, and
+reading file contents in the o8 data directory stays denied, as for lane
+commands. A write anywhere else fails inside the command, and o8 appends a note
+to the result naming the boundary, so the lead can tell the operator. Tools that
+write a cache in the home directory, such as a package manager's download
+cache, fail the same way. Where confinement cannot be applied (no
+`sandbox-exec` on macOS, Landlock below ABI 4 on Linux), the command does not
+start until the operator approves it in the approval inbox, and then it runs
+unconfined. Lane rules differ in two ways: they also deny network and writes to
+`.git`. A setting that lets the lead write outside the workspace is tracked
+separately (#3677). The composer's Full access description says this for the o8
+and Pi leads; other leads keep their own runtime's Full access behavior.
 
 `tests/pi-orchestrator-real-path.test.ts` serves the real `/api/mcp` route over a
 local HTTP server behind the real middleware gate, which refuses a request

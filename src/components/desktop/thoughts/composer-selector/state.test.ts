@@ -8,16 +8,13 @@ import {
   clampEffortToLead,
   composerSupportsFastMode,
   cycleComposerSelectorMode,
-  composerEffortConsequence,
   isHotComposerEffort,
   providerMarkForLead,
   providerMarkForRuntime,
   resolveEffectiveComposerLeadModelId,
   resolveComposerSelectorState,
-  resolveSupportedEffortChange,
   readComposerEffortMaps,
   setModelEffort,
-  stepComposerEffort,
   supportedEffortsForLead,
   type ComposerSelectorMode,
 } from './state';
@@ -134,7 +131,7 @@ describe('composer selector state', () => {
     expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
-  it.each([true, false])('keeps o8 on Low without locked efforts (free plan: %s)', (isFreePlan) => {
+  it.each([true, false])('keeps o8 on Low with no effort options, ignoring a saved High (free plan: %s)', (isFreePlan) => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -149,10 +146,9 @@ describe('composer selector state', () => {
     });
 
     expect(resolved.effort).toBe('low');
-    expect(resolved.effortOptions).toEqual(['low']);
+    expect(resolved.effortOptions).toEqual([]);
     expect(resolved.lockedEffortOptions).toEqual([]);
-    expect(composerEffortConsequence('o8', 'low')).toBe('Low · managed model');
-    expect(resolved.effortClampedFrom).toBe('high');
+    expect(resolved.atRestText).toBe('o8 / workers Codex');
   });
 
   it.each([true, false])('defaults o8 to Low without a saved preference (free plan: %s)', (isFreePlan) => {
@@ -172,13 +168,8 @@ describe('composer selector state', () => {
     expect(resolved.lockedEffortOptions).toEqual([]);
   });
 
-  it('clamps a free o8 effort change before it reaches persistence callbacks', () => {
-    const supported = supportedEffortsForLead('o8', 'o8-free', true, true);
-
-    expect(clampEffortToLead('high', supported)).toEqual({ effort: 'low', clampedFrom: 'high' });
-    expect(resolveSupportedEffortChange('high', 'low', supported))
-      .toEqual({ effort: 'low', accepted: false });
-    expect(stepComposerEffort('low', supported, 1)).toBe('low');
+  it.each([true, false])('offers the o8 lead no effort options (free plan: %s)', (isFreePlan) => {
+    expect(supportedEffortsForLead('o8', 'o8-free', true, isFreePlan)).toEqual([]);
   });
 
   it('maps lead families and worker runtimes to provider marks', () => {

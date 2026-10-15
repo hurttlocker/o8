@@ -7,9 +7,12 @@ const mk = (event: string, data: Record<string, unknown>): OrchestratorReplayMes
   data,
 });
 
+// A zero clock keeps seq values small and readable; production seeds from Date.now.
+const zeroClock = () => 0;
+
 describe('OrchestratorReplayBuffers', () => {
   it('stamps a monotonic seq and replays only events after the since cursor', () => {
-    const b = new OrchestratorReplayBuffers();
+    const b = new OrchestratorReplayBuffers(1500, zeroClock);
     b.record('s', mk('status', { status: 'busy' })); // seq 1
     b.record('s', mk('output', { text: 'a' })); // seq 2
     b.record('s', mk('output', { text: 'b' })); // seq 3
@@ -23,13 +26,13 @@ describe('OrchestratorReplayBuffers', () => {
   });
 
   it('stamps seq onto the outgoing message (so the client can advance its cursor)', () => {
-    const b = new OrchestratorReplayBuffers();
+    const b = new OrchestratorReplayBuffers(1500, zeroClock);
     const raw = b.record('s', mk('output', { text: 'x' }));
     expect(JSON.parse(raw).seq).toBe(1);
   });
 
   it('a new turn (status:busy) starts the buffer fresh but keeps seq monotonic', () => {
-    const b = new OrchestratorReplayBuffers();
+    const b = new OrchestratorReplayBuffers(1500, zeroClock);
     b.record('s', mk('status', { status: 'busy' })); // 1
     b.record('s', mk('output', { text: 'old' })); // 2
     b.record('s', mk('status', { status: 'ready' })); // 3 → clears entries
@@ -76,5 +79,19 @@ describe('OrchestratorReplayBuffers', () => {
     expect(b.since('a', 0)).toHaveLength(2);
     expect(b.since('b', 0)).toHaveLength(1);
     expect(b.since('unknown', 0)).toEqual([]);
+  });
+
+  it('a buffer created after a restart stamps seq above the previous process cursor (#3665)', () => {
+    let clock = 1_000_000;
+    const before = new OrchestratorReplayBuffers(1500, () => clock);
+    before.record('s', mk('status', { status: 'busy' }));
+    let cursor = 0;
+    for (let i = 0; i < 50; i++) cursor = JSON.parse(before.record('s', mk('output', { text: String(i) }))).seq;
+
+    clock += 1_000; // the replacement process starts later
+    const after = new OrchestratorReplayBuffers(1500, () => clock);
+    const raw = after.record('s', mk('status', { status: 'busy' }));
+    expect(JSON.parse(raw).seq).toBeGreaterThan(cursor);
+    expect(after.since('s', cursor)).toHaveLength(1);
   });
 });
