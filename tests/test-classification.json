@@ -3081,6 +3081,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "fixture-lifecycle",
         "git-cli",
         "network-listener",
         "process-signal",
