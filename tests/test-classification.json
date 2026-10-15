@@ -4639,7 +4639,8 @@
       "path": "tests/tauri-prebuild-profile.test.ts",
       "reasons": [
         "child-process",
-        "git-cli"
+        "git-cli",
+        "worktree-api"
       ]
     },
     {

@@ -121,7 +121,7 @@ export async function runGeneratedOutputProducer(input: {
 
 async function runReservedProducer(workspace: WorktreeMaterializationIdentity, resource: GeneratedOutputResource,
   input: { mode: 'build' | 'dev' | 'start'; operation: (run: GeneratedOutputSpawn) => Promise<number> }): Promise<number> {
-  if (resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
+  if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
   assertGeneratedOutputClaimsReleased(workspace);
   if (!resource.output || resource.state === 'active' || resource.state === 'planned'
     || resource.state === 'failed-held' || resource.bankCapture?.state === 'failed-held'
@@ -145,7 +145,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     if (abortRequested) throw new Error('Generated-output producer admission is closed.');
     if (activeChild) throw new Error('Generated-output child spawns must be serial.');
     if (resource.attempt!.children.length >= 16) throw new Error('Generated-output child count exceeded its bound.');
-    if (resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
+    if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
     if (abortRequested) throw new Error('Generated-output producer admission is closed.');
     const child = spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output: resource.output, command, args })], {
@@ -172,7 +172,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
       resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children: [...resource.attempt!.children,
         { pid: child.pid, identity: probe.identity, exitCode: null, signal: null, observedClosed: false }] } });
       if (abortRequested) throw new Error('Generated-output producer admission is closed.');
-      if (resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
+      if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
       child.send({ continue: true });
     } catch (error) {
       if (child.connected) child.disconnect();
@@ -187,7 +187,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children } });
     activeChild = null;
     await assertWorktreeMaterializationIdentity(workspace.canonicalPath, workspace);
-    if (resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
+    if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
     return result.code ?? 1;
   };
@@ -260,7 +260,7 @@ export async function runGeneratedOutputPrebuild(input: {
     }
     if (!containingOwner) await assertLinkedGitBuildCustody(workspace, linkedGit);
     const previous = current ?? lastDisposedPrebuildOutput(workspace.canonicalPath);
-    if (previous?.creationAuthority) await assertLinkedGitBuildCustody(workspace, previous.creationAuthority.linkedGit);
+    if (previous?.creationAuthority && !previous.owner) await assertLinkedGitBuildCustody(workspace, previous.creationAuthority.linkedGit);
     assertGeneratedOutputClaimsReleased(workspace);
     input.preflight();
     const disposed = !currentGeneratedOutputResource(workspace.canonicalPath)

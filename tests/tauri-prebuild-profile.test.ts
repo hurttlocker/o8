@@ -12,6 +12,54 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
+it('preserves managed linked prebuild ownership through native producers', async () => {
+  const root = await createRetainedGeneratedOutputFixture('o8-managed-prebuild-');
+  const repo = path.join(root, 'repo');
+  const data = path.join(root, 'data');
+  mkdirSync(repo); mkdirSync(data, { mode: 0o700 });
+  writeFileSync(path.join(repo, '.gitignore'), '.next\n.o8-generated-output-store\n');
+  for (const args of [['init', '--initial-branch=main'], ['add', '.'],
+    ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
+      '-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'fixture']]) {
+    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+  }
+  const moduleUrl = (name: string) => JSON.stringify(pathToFileURL(path.join(source, name)).href);
+  const script = `
+    const manager = await import(${moduleUrl('src/lib/worktree/manager.ts')});
+    const producer = await import(${moduleUrl('src/lib/workspace/generated-output-producer.ts')});
+    const state = await import(${moduleUrl('src/lib/workspace/generated-output-state.ts')});
+    const { WorktreeManager } = manager.default ?? manager;
+    const { runGeneratedOutputPrebuild, runGeneratedOutputProducer } = producer.default ?? producer;
+    const { currentGeneratedOutputResource } = state.default ?? state;
+    const entry = await new WorktreeManager(${JSON.stringify(repo)}).create({ agentType: 'codex',
+      taskName: 'Managed prebuild fixture', branchName: 'codex/managed-prebuild-fixture',
+      baseBranch: 'main', managed: true, skipSetup: true });
+    const codes = [];
+    const child = run => run(process.execPath, ['-e', "require('node:fs').writeFileSync('.next/proof', 'managed producer')"]);
+    for (let attempt = 0; attempt < 2; attempt++) codes.push(await runGeneratedOutputPrebuild({
+      workspacePath: entry.path, preflight() {}, operation: context => context.runBuild(child) }));
+    codes.push(await runGeneratedOutputProducer({ workspacePath: entry.path, mode: 'build', operation: child }));
+    console.log('MANAGED_PREBUILD_RESULT ' + JSON.stringify({ codes, entry,
+      resource: currentGeneratedOutputResource(entry.path) }));
+  `;
+  const result = spawnSync(process.execPath, ['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
+    '--import', require.resolve('tsx'), '--input-type=module', '-e', script], { cwd: source,
+    env: { ...process.env, O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, CORTEX_IDE_DB_PATH: path.join(data, 'fixture.db'),
+      TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') }, encoding: 'utf8', timeout: 120_000, maxBuffer: 2 * 1024 ** 2 });
+  writeFileSync(path.join(root, 'command.json'), JSON.stringify({ script, pid: result.pid, exit: result.status,
+    signal: result.signal, stdout: result.stdout, stderr: result.stderr }, null, 2));
+  expect(result.status, result.stderr + result.stdout).toBe(0);
+  const receipt = JSON.parse(/^MANAGED_PREBUILD_RESULT (.+)$/m.exec(result.stdout)![1]);
+  expect(receipt.codes).toEqual([0, 0, 0]);
+  expect(receipt.resource.owner).toEqual({ repositoryPath: realpathSync(repo), worktreeId: receipt.entry.id });
+  expect(receipt.resource.creationAuthority).toMatchObject({ kind: 'prebuild' });
+  expect(receipt.resource.creationAuthority.linkedGit).toBeUndefined();
+  expect(receipt.resource.state).toBe('succeeded');
+  expect(receipt.resource.attempt.children[0]).toMatchObject({ observedClosed: true, exitCode: 0 });
+  writeFileSync(path.join(root, 'product-state.json'), JSON.stringify(receipt, null, 2));
+}, 150_000);
+
 it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority across default prebuild and release lifetimes', async kind => {
   const root = await createRetainedGeneratedOutputFixture('o8-prebuild-lifetime-');
   const repo = path.join(root, 'repo');

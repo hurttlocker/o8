@@ -84,7 +84,8 @@ export async function captureLinkedGitBuildCustody(workspace: WorktreeMaterializ
   if (path.dirname(admin.canonicalPath) !== registrations.canonicalPath) throw new Error('Linked Git admin is outside its common registration directory.');
   const backPointer = await pointer(admin, 'gitdir');
   if (!path.isAbsolute(backPointer.text) || backPointer.text !== gitPath) throw new Error('Linked Git registration does not point back to this checkout.');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
   Object.assign(env, { GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
   await withWorktreeMaterializationExecution(workspace.canonicalPath, workspace, async () => {
     const options = { cwd: workspace.canonicalPath, env, timeout: 10_000, maxBuffer: 1024 ** 2 };
