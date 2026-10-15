@@ -4449,6 +4449,14 @@
       ]
     },
     {
+      "path": "tests/ship-preflight-benchmark-cleanup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/shipped-dark-audit-real-path.test.ts",
       "reasons": [
         "child-process",

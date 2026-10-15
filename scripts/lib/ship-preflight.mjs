@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  lstatSync,
   openSync,
   readFileSync,
   rmSync,
@@ -21,12 +23,15 @@ function commandReceipt(command, args, options = {}) {
     encoding: 'utf8',
     env: options.env,
     timeout: options.timeoutMs ?? 15_000,
+    ...(options.maxBuffer ? { maxBuffer: options.maxBuffer } : {}),
+    ...(options.detached ? { detached: true } : {}),
     windowsHide: true,
   });
   return {
     status: result.status ?? (result.error ? 127 : 0),
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? result.error?.message ?? '',
+    ...(options.detached ? { pid: result.pid ?? null } : {}),
   };
 }
 
@@ -322,17 +327,176 @@ export function performShipPreflight(options) {
   };
 }
 
+// The quick benchmark boots servers in their own process groups inside the
+// release checkout. A timeout can orphan them, and an orphaned dev server
+// writes `.next`, which the prebuild then refuses as unknown generated output.
+// The benchmark therefore runs in its own process group with a per-run
+// environment marker. When the step ends, every process in that group, every
+// marked process and every group a marked process leads is stopped, and
+// `.next` is removed only when the step created it. A state file lets the next
+// preflight finish the cleanup of a run that was interrupted.
+const BENCHMARK_MARKER = 'O8_SHIP_BENCHMARK_RUN';
+const MARKER_SCAN_MAX_BUFFER = 64 * 1024 * 1024;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function benchmarkStatePath(root) {
+  const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
+  return join(tmpdir(), `o8-ship-benchmark-${key}.json`);
+}
+
+// Process-group membership is visible for every process of this user, even
+// where macOS hides a process's environment (system binaries, hardened apps).
+function processGroups() {
+  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
+  if (receipt.status !== 0) return null;
+  const table = new Map();
+  for (const line of receipt.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (match) table.set(Number(match[1]), Number(match[2]));
+  }
+  return table;
+}
+
+// `ps` prints process environments, which can hold release credentials. Only
+// matching PIDs leave this function; null means the scan could not complete.
+function markedProcessIds(marker) {
+  const receipt = commandReceipt('ps', ['axeww', '-o', 'pid=,command='], {
+    timeoutMs: 15_000,
+    maxBuffer: MARKER_SCAN_MAX_BUFFER,
+  });
+  if (receipt.status !== 0) return null;
+  const needle = `${BENCHMARK_MARKER}=${marker}`;
+  const pids = [];
+  for (const line of receipt.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s/.exec(line);
+    if (!match || !line.includes(needle)) continue;
+    const pid = Number(match[1]);
+    if (pid !== process.pid) pids.push(pid);
+  }
+  return pids;
+}
+
+// `groups` holds the benchmark's own process group while it is fresh. A group
+// is otherwise signaled only while a member still shows the marker, so a
+// recorded group whose ID was later reused is never signaled.
+function stopBenchmarkProcesses(marker, groups) {
+  if (process.platform === 'win32') return { confirmed: false, stoppedProcesses: 0, reason: 'unsupported platform' };
+  const stopped = new Set();
+  const signals = ['SIGTERM', 'SIGTERM', 'SIGTERM', 'SIGKILL', null];
+  for (const signal of signals) {
+    const marked = markedProcessIds(marker);
+    const table = processGroups();
+    if (marked === null || table === null) {
+      return { confirmed: false, stoppedProcesses: stopped.size, reason: 'process scan failed' };
+    }
+    const ownGroup = table.get(process.pid);
+    for (const pid of marked) {
+      const group = table.get(pid);
+      if (group !== undefined) groups.add(group);
+    }
+    groups.delete(ownGroup);
+    const members = [...table].filter(([pid, group]) => pid !== process.pid && groups.has(group)).map(([pid]) => pid);
+    const targets = new Set([...marked, ...members]);
+    if (targets.size === 0) return { confirmed: true, stoppedProcesses: stopped.size };
+    if (signal === null) break;
+    for (const group of groups) {
+      try { process.kill(-group, signal); } catch { /* group already empty */ }
+    }
+    for (const pid of targets) {
+      try {
+        process.kill(pid, signal);
+        stopped.add(pid);
+      } catch {
+        // Already exited.
+      }
+    }
+    sleepSync(1000);
+  }
+  return { confirmed: false, stoppedProcesses: stopped.size, reason: 'benchmark processes remain after SIGKILL' };
+}
+
+function removeCreatedOutput(root) {
+  const output = join(root, '.next');
+  if (!lstatSync(output, { throwIfNoEntry: false })) return { removedOutput: false };
+  try {
+    rmSync(output, { recursive: true, force: true });
+    return { removedOutput: true };
+  } catch (error) {
+    return { removedOutput: false, outputError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function settleBenchmarkRun(root, run, groups) {
+  const settlement = stopBenchmarkProcesses(run.marker, groups);
+  // A step that started without `.next` owns any `.next` present now, unless
+  // a prebuild has since bound it to the generated-output store.
+  const bound = lstatSync(join(root, '.o8-generated-output-store'), { throwIfNoEntry: false });
+  const output = !run.outputExisted && !bound ? removeCreatedOutput(root) : { removedOutput: false };
+  const result = { ...settlement, ...output };
+  if (output.outputError) {
+    result.confirmed = false;
+    result.reason = [settlement.reason, `output removal failed: ${output.outputError}`].filter(Boolean).join('; ');
+  }
+  return result;
+}
+
+function readBenchmarkRuns(path) {
+  try {
+    const state = JSON.parse(readFileSync(path, 'utf8'));
+    return Array.isArray(state?.runs) ? state.runs.filter((entry) => typeof entry?.marker === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBenchmarkRuns(path, runs) {
+  if (runs.length === 0) rmSync(path, { force: true });
+  else writeFileSync(path, JSON.stringify({ runs }), { mode: 0o600 });
+}
+
 export function runQuickBenchmarkPreflight(options) {
   const {
     root,
     env = process.env,
     run = commandReceipt,
+    timeoutMs = 120_000,
   } = options;
-  const receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
-    cwd: root,
-    env,
-    timeoutMs: 120_000,
-  });
+  const statePath = benchmarkStatePath(root);
+  const pending = [];
+  const recovered = [];
+  for (const previous of readBenchmarkRuns(statePath)) {
+    const settlement = settleBenchmarkRun(root, previous, new Set());
+    recovered.push(settlement);
+    if (!settlement.confirmed) pending.push(previous);
+  }
+
+  const current = {
+    marker: randomUUID(),
+    outputExisted: Boolean(lstatSync(join(root, '.next'), { throwIfNoEntry: false })),
+  };
+  writeBenchmarkRuns(statePath, [...pending, current]);
+  let receipt;
+  let cleanup;
+  try {
+    receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
+      cwd: root,
+      env: { ...env, [BENCHMARK_MARKER]: current.marker },
+      timeoutMs,
+      detached: true,
+    });
+  } finally {
+    const groups = new Set(typeof receipt?.pid === 'number' ? [receipt.pid] : []);
+    cleanup = settleBenchmarkRun(root, current, groups);
+    writeBenchmarkRuns(statePath, cleanup.confirmed ? pending : [...pending, current]);
+  }
+  if (recovered.length > 0) cleanup.recoveredPrevious = recovered;
+  return { ...parseQuickBenchmarkReceipt(receipt), cleanup };
+}
+
+function parseQuickBenchmarkReceipt(receipt) {
   if (receipt.status !== 0) {
     return {
       schema: 'o8/benchmark-quick-preflight/v1',
@@ -372,6 +536,7 @@ export function runQuickBenchmarkPreflight(options) {
 }
 
 export const shipPreflightInternals = {
+  benchmarkStatePath,
   commandReceipt,
   parseRemoteTagHead,
   repositoryFromRemote,
