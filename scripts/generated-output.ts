@@ -1,3 +1,4 @@
+import { parkLegacyOutput, continueLegacyOutputPark, readLegacyOutputPark, listLegacyOutputParks } from '../src/lib/workspace/legacy-output-parking';
 import { captureWorktreeMaterializationIdentity } from '../src/lib/worktree/materialization-identity';
 import { recoverGeneratedOutput } from '../src/lib/workspace/generated-output-recovery';
 import { retireGeneratedOutputVerification } from '../src/lib/workspace/generated-output-recovery-retirement';
@@ -22,11 +23,30 @@ async function main() {
   const command = argv.shift(); const values = new Map<string, string>(); const evidencePaths: string[] = [];
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index]; const value = argv[index + 1];
-    if (!['--workspace', '--resource', '--repository', '--worktree-id', '--intent', '--evidence'].includes(key)
+    if (!['--workspace', '--resource', '--repository', '--worktree-id', '--intent', '--evidence', '--operation'].includes(key)
       || !value?.trim() || (key !== '--evidence' && values.has(key))) throw new Error('Invalid generated-output arguments.');
     if (key === '--evidence') evidencePaths.push(value); else values.set(key, value);
   }
   const resourceId = values.get('--resource'); const workspacePath = values.get('--workspace');
+  if (['park-legacy', 'restore-legacy', 'resume-legacy', 'legacy-status'].includes(command ?? '')) {
+    const operation = values.get('--operation');
+    const intent = values.get('--intent');
+    let records;
+    if (command === 'park-legacy') {
+      if (!workspacePath || !intent || values.size !== 2) throw new Error('Parking requires --workspace, --intent and retained --evidence files.');
+      records = [await parkLegacyOutput({ workspacePath, intent, evidencePaths })];
+    } else if (command === 'legacy-status' && workspacePath && values.size === 1 && !evidencePaths.length) {
+      const workspace = await captureWorktreeMaterializationIdentity(workspacePath);
+      records = listLegacyOutputParks(workspace.canonicalPath);
+    } else {
+      if (!operation || values.size !== 1 || evidencePaths.length) throw new Error('Select exactly one --operation.');
+      records = [command === 'legacy-status' ? readLegacyOutputPark(operation)
+        : await continueLegacyOutputPark(operation, command === 'restore-legacy')];
+    }
+    process.stdout.write(`${JSON.stringify({ schema: 'o8/legacy-output-cli/v1', ok: true, command,
+      legacy: records.map(({ entries, ...record }) => ({ ...record, entryCount: entries.length, reclaimedBytes: 0 })) })}\n`);
+    return;
+  }
   let resource: GeneratedOutputResource;
   if (command === 'status' || command === 'recover' || command === 'recover-verification'
     || command === 'retire' || command === 'retire-verification') {
@@ -48,7 +68,7 @@ async function main() {
     }
     resource = await adoptGeneratedOutput({ workspacePath, owner: { repositoryPath, worktreeId }, intent, evidencePaths });
   } else {
-    throw new Error('Use generated-output register, status, adopt, recover, recover-verification, retire or retire-verification.');
+    throw new Error('Use generated-output register, status, adopt, recover, recover-verification, retire, retire-verification, park-legacy, legacy-status, resume-legacy or restore-legacy.');
   }
   process.stdout.write(`${JSON.stringify({ schema: 'o8/generated-output-cli/v1', ok: true, command,
     resource: project(resource) })}\n`);

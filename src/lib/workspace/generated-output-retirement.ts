@@ -32,7 +32,7 @@ export interface GeneratedOutputRetirementHooks {
   afterFinalRemoval?: () => Promise<void>;
 }
 
-async function evidenceHash(filePath: string): Promise<string> {
+export async function evidenceHash(filePath: string): Promise<string> {
   const file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const before = await file.stat();

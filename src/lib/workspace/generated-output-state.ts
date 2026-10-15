@@ -297,6 +297,9 @@ export async function withGeneratedOutputBankExclusion<T>(resource: GeneratedOut
 }
 
 export function assertGeneratedOutputClaimsReleased(workspace: WorktreeMaterializationIdentity): void {
+  const parking = getSqlite().prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+    WHERE workspace_path = ? AND state IN ('prepared', 'restoring') LIMIT 1`).get(workspace.canonicalPath);
+  if (parking) throw new Error('Generated output is blocked by pending legacy parking or restoration.');
   assertWorkspaceRetentionReleased(workspace.canonicalPath, workspace);
   const claims = getSqlite().prepare(`SELECT operation_id FROM workspace_exact_claims
     WHERE expected_path = ? OR source_path = ? OR claim_path = ? OR parent_canonical_path = ? LIMIT 1`)
