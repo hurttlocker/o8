@@ -283,7 +283,8 @@ export interface MobileTranscriptToolCall {
   id?: string | null;
   name: string;
   args?: Record<string, unknown>;
-  status?: 'calling' | 'running' | 'done' | 'error';
+  /** `stopped`: the operator's Stop ended the call before it reported a result (#3659). */
+  status?: 'calling' | 'running' | 'done' | 'error' | 'stopped';
   preview?: string;
   result?: string;
   sideEffectClass?: ToolSideEffectClass;

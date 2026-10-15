@@ -8,7 +8,8 @@
  * every o8 command is reachable without sending every schema on every call. In
  * Full access its own file writes and commands in the repo run without asking,
  * as the Claude orchestrator's do (#3555); policy-blocked commands, workspace
- * path checks and command limits still apply. A plan-mode turn gets the
+ * path checks and command limits still apply, and commands write only in the
+ * workspace and a private temp dir (#3658). A plan-mode turn gets the
  * proposer projection and only `read_file`.
  *
  * One turn at a time per repo and thread, and one resident Pi process for it.
@@ -66,7 +67,10 @@ export function piSurfaceForTurn(options: OrchestratorTurnOptions): PiSurface {
   return { profile, readOnly: plan || profile === 'propose' };
 }
 
-/** Full access: the operator chose "can edit files and run actions" for this turn. */
+/**
+ * Full access: the operator chose "can edit files and run actions" for this turn.
+ * Commands still run confined to the workspace and a private temp dir (#3658).
+ */
 const fullAccess: NonNullable<PiSdkSessionOptions['approve']> = async () => true;
 
 /** Start failures o8 itself explains; anything else stays in the host log. */
@@ -200,6 +204,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
         transport,
         approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
+        // Writes outside the workspace need a setting beyond Full access (#3677).
+        confineCommands: 'workspace',
         hostTools: commands.length ? createO8CommandTools(commands) : [],
         systemPrompt,
         readOnly: surface.readOnly,
