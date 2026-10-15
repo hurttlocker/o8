@@ -58,7 +58,8 @@ function runGitPlanSync<T>(plan: GitPlan<T>): T {
     let output: string;
     try {
       output = execFileSync('git', step.value.args, { cwd: step.value.cwd, env: step.value.env, encoding: 'utf8',
-        timeout: GIT_READ_TIMEOUT_MS, maxBuffer: step.value.maxBuffer, stdio: ['ignore', 'pipe', 'pipe'] });
+        timeout: GIT_READ_TIMEOUT_MS, ...(step.value.maxBuffer ? { maxBuffer: step.value.maxBuffer } : {}),
+        stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
       step = plan.throw(error);
       continue;
@@ -78,7 +79,7 @@ async function runGitPlan<T>(plan: GitPlan<T>): Promise<T> {
     const read = step.value;
     const result = await new Promise<{ output: string } | { error: unknown }>((resolve) => {
       execFile('git', read.args, { cwd: read.cwd, env: read.env, encoding: 'utf8', timeout: GIT_READ_TIMEOUT_MS,
-        maxBuffer: read.maxBuffer }, (error, stdout) => {
+        ...(read.maxBuffer ? { maxBuffer: read.maxBuffer } : {}) }, (error, stdout) => {
         if (!error) { resolve({ output: stdout }); return; }
         const code = (error as { code?: unknown }).code;
         resolve({ error: Object.assign(error, { status: typeof code === 'number' ? code : null }) });

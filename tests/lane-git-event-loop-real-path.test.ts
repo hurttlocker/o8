@@ -32,7 +32,9 @@ const bin = join(root, 'bin');
 mkdirSync(bin);
 writeFileSync(join(bin, 'git'), `#!/bin/sh
 case " $* " in
-  *" --git-common-dir "*|*" config "*) sleep 0.3 ;;
+  *" --git-common-dir "*|*" config "*)
+    [ -n "$O8_TEST_GIT_CONFIG_EXIT" ] && case " $* " in *" config "*) exit "$O8_TEST_GIT_CONFIG_EXIT" ;; esac
+    sleep 0.3 ;;
 esac
 exec '${realGit}' "$@"
 `);
@@ -72,6 +74,17 @@ describe('lane Git checks off the event loop (#3565)', () => {
     expect(laneGitSync(worktreePath, repoPath, ['status', '--porcelain']).trim()).toBe('M notes.txt');
     // Three slowed reads of 300 ms each; held synchronously they block for 900 ms or more.
     expect(stall).toBeLessThan(250);
+  }, 30_000);
+
+  it('fails the call when a check read fails, as laneGitSync does', async () => {
+    // Exit 1 means "no matching config"; any other failure must stop the command.
+    process.env.O8_TEST_GIT_CONFIG_EXIT = '3';
+    try {
+      await expect(laneGit(worktreePath, repoPath, ['status', '--porcelain'])).rejects.toMatchObject({ status: 3 });
+      expect(() => laneGitSync(worktreePath, repoPath, ['status', '--porcelain'])).toThrow(expect.objectContaining({ status: 3 }));
+    } finally {
+      delete process.env.O8_TEST_GIT_CONFIG_EXIT;
+    }
   }, 30_000);
 
   it('still refuses a lane whose .git pointer names another worktree', async () => {

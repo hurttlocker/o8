@@ -43,6 +43,7 @@ function runCommand(command: string, args: string[]): Promise<CommandReceipt> {
     let stderr = '';
     let overflow = false;
     const collect = (append: (chunk: string) => void) => (chunk: string) => {
+      if (overflow) return;
       if (stdout.length + stderr.length + chunk.length > COMMAND_OUTPUT_LIMIT) {
         overflow = true;
         child.kill('SIGKILL');
