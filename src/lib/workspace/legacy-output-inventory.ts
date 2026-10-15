@@ -5,7 +5,7 @@ import path from 'node:path';
 import { assertWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { GENERATED_BANK_LIMITS, type GeneratedOutputContentEntry } from './generated-output-bank';
 
-/** Link nodes belong only to intact legacy relocation, never a file bank or disposal. */
+/** Link nodes belong only to intact retained-output relocation, never a file bank or disposal. */
 export type LegacyOutputEntry = GeneratedOutputContentEntry | (Omit<GeneratedOutputContentEntry, 'kind'> & {
   kind: 'symlink';
   rawTarget: string;
@@ -14,7 +14,7 @@ interface Location {
   workspace: WorktreeMaterializationIdentity;
   candidate: WorktreeMaterializationIdentity;
 }
-const retainedName = /^\.o8-retained-legacy-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const retainedName = /^\.o8-retained-(?:legacy|prebuild)-[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const generatedLink = /^dev\/node_modules\/(?:(@[a-z0-9][a-z0-9._-]*)\/)?([a-z0-9][a-z0-9._-]*)-[a-f0-9]{16}$/;
 const linkBytesLimit = 4096;
 

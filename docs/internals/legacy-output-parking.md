@@ -69,3 +69,40 @@ forget, or automatic cleanup command in this operation. Restoration does not cre
 a successful build or authorize subsequent deletion. If an operation refuses,
 retain the journal and both namespaces for review; do not clear the store marker,
 move a competing entry, or use an ordinary filesystem move to bypass the refusal.
+
+## Terminal failed prebuild continuation
+
+A registered terminal failed prebuild is not legacy output. Use its original
+lifecycle profile and run maintenance outside the linked checkout:
+
+```sh
+node "$source/scripts/generated-output.mjs" park-failed-prebuild \
+  --resource "$failed_resource" \
+  --intent 'Retain failed build evidence before a new generation' \
+  --evidence "$producer_evidence" --evidence "$build_log"
+node "$source/scripts/generated-output.mjs" failed-prebuild-status --operation "$operation"
+node "$source/scripts/generated-output.mjs" resume-failed-prebuild --operation "$operation"
+```
+
+The command requires linked Git custody, the existing store binding, an unchanged
+`failed-held` resource with complete observed child exits, absent producer PIDs,
+clear filesystem-user observations, and no independent hold or exact claim. It
+uses the existing inventory and native no-replace move to retain the original
+inode at `.o8-retained-prebuild-<operation-uuid>`. Links keep the same narrow
+relative dependency rules as legacy parking. No bank or disposal rule changes.
+
+The journal begins as `prepared`. An interrupted move stays pending and blocks
+new generation admission. Resume verifies both namespaces, original producer
+history, external evidence, content and custody before completing the journal.
+An occupied or replaced destination is never overwritten. There is no automatic
+restore, deletion, expiry, or reclaimed-byte credit.
+
+Only a completed `parked` record releases the old generation's namespace index.
+Its original `failed-held` payload, revision, version, ownership and child exits
+remain unchanged. The old row is immutable after this release. The normal
+prebuild entry point verifies retained evidence before creating a separate
+resource with `continuedFrom` pointing to the old resource and operation.
+Preflight selects only the generation currently owning `.next`. Replaying a
+completed preservation checks the retained directory without moving a newer
+`.next`. The journal is bounded to sixteen retained failures per workspace;
+reaching the bound requires an explicit future retention policy, not deletion.

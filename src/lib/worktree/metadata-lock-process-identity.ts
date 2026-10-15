@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
@@ -20,18 +20,47 @@ interface CommandReceipt {
   stderr: string;
 }
 
+const COMMAND_OUTPUT_LIMIT = 64 * 1024;
+const COMMAND_TIMEOUT_MS = 2_000;
+
+/**
+ * The time limit only stops a command that is still running, and the receipt
+ * always waits for the command's own close. `execFile`'s limit discards the
+ * output instead, so on a loop held past the limit a command that had already
+ * succeeded came back empty and the probe reported `unknown` (#3565).
+ */
 function runCommand(command: string, args: string[]): Promise<CommandReceipt> {
   return new Promise((resolve) => {
-    execFile(command, args, {
-      encoding: 'utf8',
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
-      maxBuffer: 64 * 1024,
-      timeout: 2_000,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      const rawCode = (error as NodeJS.ErrnoException & { code?: unknown } | null)?.code;
-      const code = typeof rawCode === 'number' ? rawCode : error ? 127 : 0;
-      resolve({ code, stdout: stdout ?? '', stderr: stderr ?? '' });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(command, args, { env: { ...process.env, LANG: 'C', LC_ALL: 'C' }, windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch {
+      resolve({ code: 127, stdout: '', stderr: '' });
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let overflow = false;
+    const collect = (append: (chunk: string) => void) => (chunk: string) => {
+      if (overflow) return;
+      if (stdout.length + stderr.length + chunk.length > COMMAND_OUTPUT_LIMIT) {
+        overflow = true;
+        child.kill('SIGKILL');
+        return;
+      }
+      append(chunk);
+    };
+    child.stdout?.setEncoding('utf8').on('data', collect((chunk) => { stdout += chunk; }));
+    child.stderr?.setEncoding('utf8').on('data', collect((chunk) => { stderr += chunk; }));
+    const timer = setTimeout(() => child.kill('SIGKILL'), COMMAND_TIMEOUT_MS);
+    child.once('error', () => {
+      clearTimeout(timer);
+      resolve({ code: 127, stdout, stderr });
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: overflow || typeof code !== 'number' ? 127 : code, stdout, stderr });
     });
   });
 }

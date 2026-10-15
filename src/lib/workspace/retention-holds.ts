@@ -77,6 +77,12 @@ export function assertWorkspaceRetentionReleased(
     WHERE retained_path = ? OR (source_device = ? AND source_inode = ?) LIMIT 1`)
     .get(path.resolve(workspacePath), identity?.device ?? -1, identity?.inode ?? -1);
   if (legacy) throw new Error('Retained legacy output is not disposable.');
+  const failed = getSqlite().prepare(`SELECT p.operation_id FROM workspace_failed_prebuild_parks p
+    JOIN workspace_generated_outputs g ON g.resource_id = p.resource_id
+    WHERE json_extract(p.payload_json, '$.retainedPath') = ?
+      OR (json_extract(g.payload_json, '$.output.device') = ? AND json_extract(g.payload_json, '$.output.inode') = ?) LIMIT 1`)
+    .get(path.resolve(workspacePath), identity?.device ?? -1, identity?.inode ?? -1);
+  if (failed) throw new Error('Retained failed prebuild output is not disposable.');
 }
 
 export function assertSnapshotRetentionReleased(input: {
@@ -131,7 +137,12 @@ export function acquireWorkspaceRetentionHold(input: {
       WHERE state IN ('prepared', 'restoring') AND (workspace_path = ? OR retained_path = ?
         OR (source_device = ? AND source_inode = ?)) LIMIT 1`)
       .get(workspacePath, workspacePath, input.identity.device, input.identity.inode);
-    if (claim || retiring || parking) {
+    const failedParking = sqlite.prepare(`SELECT p.operation_id FROM workspace_failed_prebuild_parks p
+      JOIN workspace_generated_outputs g ON g.resource_id = p.resource_id WHERE p.state = 'prepared'
+        AND (p.workspace_path = ? OR json_extract(p.payload_json, '$.retainedPath') = ?
+          OR (json_extract(g.payload_json, '$.output.device') = ? AND json_extract(g.payload_json, '$.output.inode') = ?)) LIMIT 1`)
+      .get(workspacePath, workspacePath, input.identity.device, input.identity.inode);
+    if (claim || retiring || parking || failedParking) {
       throw new Error('Workspace retirement or materialization change already began; a new hold was not granted.');
     }
     const now = Date.now();

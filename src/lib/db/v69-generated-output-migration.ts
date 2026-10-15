@@ -109,5 +109,18 @@ export function ensureV69GeneratedOutputSchema(sqlite: Database.Database): void 
           OR (phase != 'complete' AND observed_closed = 0 AND exit_code IS NULL))
       );
     `);
+    const columns = sqlite.prepare('PRAGMA table_info(workspace_generated_outputs)').all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === 'retained_operation_id')) {
+      sqlite.exec(`ALTER TABLE workspace_generated_outputs ADD COLUMN retained_operation_id TEXT;
+        DROP INDEX idx_generated_output_current;
+        CREATE UNIQUE INDEX idx_generated_output_current ON workspace_generated_outputs(workspace_path)
+          WHERE state != 'retired' AND retained_operation_id IS NULL;`);
+    }
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS workspace_failed_prebuild_parks (
+      operation_id TEXT PRIMARY KEY, resource_id TEXT NOT NULL UNIQUE, workspace_path TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('prepared', 'parked')), payload_json TEXT NOT NULL, version INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_failed_prebuild_park_pending
+      ON workspace_failed_prebuild_parks(workspace_path) WHERE state = 'prepared';`);
   }).immediate();
 }
