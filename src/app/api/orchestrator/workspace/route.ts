@@ -393,7 +393,9 @@ export async function POST(request: NextRequest) {
       }
       const result = action === 'park'
         ? await parkWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId })
-        : await restoreWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId });
+        : await restoreWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId,
+          expectedSnapshot: target.snapshot ? { generation: target.snapshot.snapshotGeneration,
+            version: target.snapshot.version, fingerprint: target.snapshot.snapshotFingerprint } : undefined });
       const ok = result.status !== 'refused';
       return {
         ok,
