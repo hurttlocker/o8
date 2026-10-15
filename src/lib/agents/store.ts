@@ -203,6 +203,7 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
       repo_path TEXT NOT NULL,
       agent_name TEXT NOT NULL COLLATE NOCASE,
       acknowledged_sequence INTEGER NOT NULL DEFAULT 0 CHECK (acknowledged_sequence >= 0),
+      native_wake_id TEXT,
       native_wake_session_key TEXT,
       native_wake_through_sequence INTEGER NOT NULL DEFAULT 0 CHECK (native_wake_through_sequence >= 0),
       native_wake_at TEXT,
@@ -213,6 +214,11 @@ export function ensureAgentBusSchema(sqlite: Database.Database = getSqlite()): v
       name TEXT PRIMARY KEY
     );
   `);
+  // Legacy pending wakes retain their TTL/ACK behavior; only new claims get an ID.
+  sqlite.transaction(() => {
+    const columns = sqlite.pragma('table_info(agent_inbox_state)') as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'native_wake_id')) sqlite.exec('ALTER TABLE agent_inbox_state ADD COLUMN native_wake_id TEXT');
+  }).immediate();
   const messageColumns = new Set((sqlite.pragma('table_info(agent_messages)') as Array<{ name: string }>).map((column) => column.name));
   for (const [name, definition] of [
     ['conversation_id', 'TEXT'],
@@ -609,9 +615,9 @@ export function getAgentInboxCursor(
 export function claimAgentInboxWake(
   input: { agent: AgentPresence; throughSequence: number; now?: Date },
   sqlite: Database.Database = getSqlite(),
-): boolean {
+): string | null {
   ensureAgentBusSchema(sqlite);
-  if (!input.agent.sessionKey || input.throughSequence <= 0) return false;
+  if (!input.agent.sessionKey || input.throughSequence <= 0) return null;
   const repo = input.agent.repo;
   const now = input.now ?? new Date();
   return sqlite.transaction(() => {
@@ -627,35 +633,38 @@ export function claimAgentInboxWake(
         SET native_wake_through_sequence = MAX(native_wake_through_sequence, ?)
         WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
       `).run(input.throughSequence, repo, input.agent.name);
-      return false;
+      return null;
     }
+    // Ownership must survive coalescing and distinguish same-millisecond claims.
+    const reservationId = randomUUID();
     sqlite.prepare(`
       UPDATE agent_inbox_state
-      SET native_wake_session_key = ?, native_wake_through_sequence = ?, native_wake_at = ?
+      SET native_wake_id = ?, native_wake_session_key = ?, native_wake_through_sequence = ?, native_wake_at = ?
       WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
     `).run(
-      input.agent.sessionKey,
+      reservationId, input.agent.sessionKey,
       input.throughSequence,
       now.toISOString(),
       repo,
       input.agent.name,
     );
-    return true;
+    return reservationId;
   })();
 }
 
 export function releaseAgentInboxWake(
   agent: AgentPresence,
+  reservationId: string,
   sqlite: Database.Database = getSqlite(),
 ): void {
   ensureAgentBusSchema(sqlite);
-  if (!agent.sessionKey) return;
+  if (!agent.sessionKey || !reservationId) return;
   sqlite.prepare(`
     UPDATE agent_inbox_state
-    SET native_wake_session_key = NULL, native_wake_through_sequence = 0, native_wake_at = NULL
+    SET native_wake_id = NULL, native_wake_session_key = NULL, native_wake_through_sequence = 0, native_wake_at = NULL
     WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
-      AND native_wake_session_key = ?
-  `).run(agent.repo, agent.name, agent.sessionKey);
+      AND native_wake_session_key = ? AND native_wake_id = ?
+  `).run(agent.repo, agent.name, agent.sessionKey, reservationId);
 }
 
 export function listAgentInbox(
@@ -703,6 +712,7 @@ export function acknowledgeAgentInbox(
       UPDATE agent_inbox_state
       SET
         acknowledged_sequence = MAX(acknowledged_sequence, ?),
+        native_wake_id = CASE WHEN native_wake_through_sequence <= ? THEN NULL ELSE native_wake_id END,
         native_wake_session_key = CASE
           WHEN native_wake_through_sequence <= ? THEN NULL
           ELSE native_wake_session_key
@@ -717,6 +727,7 @@ export function acknowledgeAgentInbox(
         END
       WHERE repo_path = ? AND agent_name = ? COLLATE NOCASE
     `).run(
+      input.throughSequence,
       input.throughSequence,
       input.throughSequence,
       input.throughSequence,

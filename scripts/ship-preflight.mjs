@@ -16,6 +16,15 @@ if (intake.status === 'configured') {
   console.warn(`[release] intake warning: ${intakeReconciliationDiagnostic(intake)}; ship remains independent`);
 }
 const benchmark = runQuickBenchmarkPreflight({ root });
+const cleanup = benchmark.cleanup;
+for (const recovered of cleanup?.recoveredPrevious ?? []) {
+  console.warn(`[release] interrupted benchmark cleanup: stopped ${recovered.stoppedProcesses} process(es)${recovered.removedOutput ? ', removed the .next output it created' : ''}${recovered.confirmed ? '' : `; unconfirmed: ${recovered.reason}`}`);
+}
+if (cleanup && !cleanup.confirmed) {
+  console.warn(`[release] benchmark cleanup unconfirmed: ${cleanup.reason}; the prebuild refuses any output it leaves`);
+} else if (cleanup && (cleanup.stoppedProcesses > 0 || cleanup.removedOutput)) {
+  console.warn(`[release] benchmark cleanup stopped ${cleanup.stoppedProcesses} leftover process(es)${cleanup.removedOutput ? ' and removed the .next output it created' : ''}`);
+}
 if (benchmark.status === 'regressed') {
   console.warn(`[release] benchmark warning: ${benchmark.regressions.map((entry) => entry.name).join(', ')} regressed; ship remains unblocked`);
 } else if (benchmark.status === 'incomplete') {
