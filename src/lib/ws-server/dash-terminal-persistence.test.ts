@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDashTmuxSessionSync, dashSessionNameForOwnerKey } from './dash-terminal-persistence';
+import { DASH_PROFILE_OWNER_OPTION } from '@/lib/terminal/dash-session-owner';
 
 function input(enabled = true) {
   return {
@@ -22,6 +23,7 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary,
       execFileSync: vi.fn(),
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(false);
     expect(resolveTmuxBinary).not.toHaveBeenCalled();
     expect(recordHealth).toHaveBeenCalledWith('disabled', 'operator_disabled');
@@ -45,6 +47,7 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary: () => { throw new Error('sensitive lookup detail'); },
       execFileSync: vi.fn(),
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(false);
     expect(recordHealth).toHaveBeenCalledWith('degraded', 'tmux_unavailable');
   });
@@ -60,11 +63,12 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary: () => '/usr/bin/tmux',
       execFileSync: exec,
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(false);
     expect(recordHealth).toHaveBeenCalledWith('degraded', 'session_create_failed');
   });
 
-  it('reaps a partially configured backing session before falling back', () => {
+  it('reaps only the newly created session when its ownership stamp fails', () => {
     const recordHealth = vi.fn();
     const exec = vi.fn()
       .mockImplementationOnce(() => { throw new Error('no existing session'); })
@@ -77,17 +81,31 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary: () => '/usr/bin/tmux',
       execFileSync: exec,
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(false);
     expect(exec.mock.calls[3]?.[1]).toEqual([
-      '-L', 'o8-dashboard', 'kill-session', '-t', 'cortex-dash-test',
+      '-L', 'o8-dashboard', 'kill-session', '-t', '=cortex-dash-test',
     ]);
     expect(recordHealth).toHaveBeenCalledWith('degraded', 'session_create_failed');
+  });
+
+  it('starts no persistent session when its profile cannot be resolved', () => {
+    const exec = vi.fn().mockImplementation(() => { throw new Error('no existing session'); });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(createDashTmuxSessionSync(input(), {
+      resolveTmuxBinary: () => '/usr/bin/tmux', execFileSync: exec, recordHealth: vi.fn(),
+      resolveProfileOwnerId: () => { throw new Error('unresolvable profile'); },
+    })).toBe(false);
+    expect(exec.mock.calls.map((call) => call[1])).toEqual([
+      ['-L', 'o8-dashboard', 'has-session', '-t', '=cortex-dash-test'],
+    ]);
   });
 
   it('creates dashboard sessions on the isolated tmux server with only indn disabled', () => {
     const recordHealth = vi.fn();
     const exec = vi.fn()
       .mockImplementationOnce(() => { throw new Error('no existing session'); })
+      .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from(''))
       .mockReturnValueOnce(Buffer.from(''))
@@ -99,12 +117,14 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary: () => '/usr/bin/tmux',
       execFileSync: exec,
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(true);
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
-      ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'has-session', '-t', '=cortex-dash-test'],
       ['-L', 'o8-dashboard', 'new-session', '-d', '-s', 'cortex-dash-test', '-x', '120', '-y', '30', '/bin/zsh', '-l'],
-      ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'history-limit', '50000'],
-      ['-L', 'o8-dashboard', 'set-option', '-t', 'cortex-dash-test', 'status', 'off'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', DASH_PROFILE_OWNER_OPTION, 'profile-fixture'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', 'history-limit', '50000'],
+      ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', 'status', 'off'],
       ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
       ['-L', 'o8-dashboard', 'set-option', '-ga', 'terminal-overrides', ',xterm*:indn@'],
     ]);
@@ -121,9 +141,10 @@ describe('dashboard terminal persistence real fallback path', () => {
       resolveTmuxBinary: () => '/usr/bin/tmux',
       execFileSync: exec,
       recordHealth,
+      resolveProfileOwnerId: () => 'profile-fixture',
     })).toBe(true);
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
-      ['-L', 'o8-dashboard', 'has-session', '-t', 'cortex-dash-test'],
+      ['-L', 'o8-dashboard', 'has-session', '-t', '=cortex-dash-test'],
       ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
     ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_reused');
