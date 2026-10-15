@@ -78,3 +78,7 @@ export function runQuickBenchmarkPreflight(options: {
     detached?: boolean;
   }) => ShipCommandReceipt;
 }): QuickBenchmarkPreflightReceipt;
+
+export const shipPreflightInternals: {
+  benchmarkStatePath(root: string): string;
+} & Record<string, unknown>;
