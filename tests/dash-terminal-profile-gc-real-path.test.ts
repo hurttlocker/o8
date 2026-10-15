@@ -134,6 +134,44 @@ describe.runIf(tmuxAvailable)('profile-owned terminal cleanup through real tmux 
     expect(listDashTmuxSessionsWithAge().map(({ name }) => name)).toEqual(['cortex-dash-candidate-foreign']);
   });
 
+  it('preserves a foreign replacement which reuses the exact candidate name', () => {
+    create(profileA, 'cortex-dash-candidate');
+    // Keep the same tmux server alive, so session ids remain from one epoch.
+    create(profileB, 'cortex-dash-retained');
+    expect(reapOrphanDashTmuxSessions({
+      dataDir: profileA, liveSessionNames: [], collectAdditionalReferences: () => [],
+      nowMs: Date.now() + 600_000, minAgeMs: 300_000, maxSessions: 1,
+      beforeKill(name) {
+        execFileSync('tmux', dashTmuxArgs('kill-session', '-t', `=${name}`), { stdio: 'ignore' });
+        create(profileB, name);
+      },
+    })).toBe(0);
+    expect(listDashTmuxSessionsWithAge().find(({ name }) => name === 'cortex-dash-candidate')?.profileOwner)
+      .toBe(dashProfileOwnerId(profileB));
+  });
+
+  it.each(['same-profile', 'foreign-profile'])('preserves a %s replacement after the tmux server restarts', (kind) => {
+    create(profileA, 'cortex-dash-candidate');
+    const replacementProfile = kind === 'same-profile' ? profileA : profileB;
+    expect(reapOrphanDashTmuxSessions({
+      dataDir: profileA, liveSessionNames: [], collectAdditionalReferences: () => [],
+      nowMs: Date.now() + 600_000, minAgeMs: 300_000, maxSessions: 1,
+      beforeKill(name) {
+        stopServer();
+        create(replacementProfile, name);
+        save(replacementProfile, [name]);
+      },
+    })).toBe(0);
+    expect(listDashTmuxSessionsWithAge().find(({ name }) => name === 'cortex-dash-candidate')?.profileOwner)
+      .toBe(dashProfileOwnerId(replacementProfile));
+  });
+
+  it('reports retirement when its last owned orphan closes the tmux server', () => {
+    create(profileA, 'cortex-dash-last-orphan');
+    expect(sweep()).toBe(1);
+    expect(listDashTmuxSessionsWithAge()).toEqual([]);
+  });
+
   it('creates an exact identity instead of adopting a longer foreign prefix', () => {
     create(profileB, 'cortex-dash-new-foreign');
     create(profileA, 'cortex-dash-new');
