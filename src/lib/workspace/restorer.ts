@@ -352,15 +352,18 @@ export async function restoreWorkspace(
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
-        const processReceipt = await deps.processProbe(lane.sessionKey, snapshot.originalPath, { allowArchivedRecovery: true });
+        const processReceipt = await deps.processProbe(archivedRecovery.binding.surfaceId, snapshot.originalPath, { allowArchivedRecovery: true });
         if (processReceipt.state !== 'quiescent') throw new Error('Archived session process quiescence is unproved.');
         assertArchivedReviewRecoveryCurrent(archivedRecovery, false);
       }
       snapshot = transition(snapshot, input.operationId, 'restoring', 'restoring', {
         originalPath: snapshot.originalPath,
         isolationKind,
-        archiveRecovery: archivedRecovery ? { laneId: lane.id, approvalId: archivedRecovery.approvalId,
-          originalVersion: snapshot.version, sessionRecordFingerprint: archivedRecovery.binding.recordFingerprint! } : null,
+        archiveRecovery: archivedRecovery ? true : null,
+        archiveRecoveryLaneId: archivedRecovery ? lane.id : null,
+        archiveRecoveryApprovalId: archivedRecovery?.approvalId ?? null,
+        archiveRecoveryOriginalVersion: archivedRecovery ? snapshot.version : null,
+        archiveRecoverySessionFingerprint: archivedRecovery?.binding.recordFingerprint ?? null,
       });
       await deps.restoreExact({
         repoPath: repo.localPath,
