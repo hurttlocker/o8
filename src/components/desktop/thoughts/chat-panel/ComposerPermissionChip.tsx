@@ -6,10 +6,14 @@ import { useComposerChipCompact } from '../composer-compact-context';
 import { ComposerPopover } from './ComposerPopover';
 import type { ThoughtsChatPermissionMode } from './types';
 
+/** What Full access allows when the lead's commands run confined to the workspace (#3658). */
+export const WORKSPACE_FULL_ACCESS_DETAIL = 'Can edit files and run commands that write only in this workspace';
+
 /** Next-message permissions sit inside the composer and shrink with its row. */
-export function ComposerPermissionChip({ mode, onChange }: {
+export function ComposerPermissionChip({ mode, onChange, fullAccessDetail = 'Can edit files and run actions' }: {
   mode: ThoughtsChatPermissionMode;
   onChange: (mode: ThoughtsChatPermissionMode) => void;
+  fullAccessDetail?: string;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -31,7 +35,7 @@ export function ComposerPermissionChip({ mode, onChange }: {
     <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => { setOpen(false); triggerRef.current?.focus(); }} align="start">
       <FloatingSurface role="menu" aria-label="Permissions for next message" style={{ width: 232 }} contentStyle={{ padding: 6 }}>
         {([
-          { mode: 'full', label: 'Full access', detail: 'Can edit files and run actions' },
+          { mode: 'full', label: 'Full access', detail: fullAccessDetail },
           { mode: 'plan', label: 'Plan only', detail: 'Inspect and propose without edits' },
         ] as const).map(option => <button key={option.mode} type="button" role="menuitemradio" aria-checked={mode === option.mode}
           onClick={() => { onChange(option.mode); setOpen(false); triggerRef.current?.focus(); }}

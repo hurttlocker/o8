@@ -2,6 +2,7 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtimes/shared/stdio-json-rpc';
+import { WORKSPACE_CONFINEMENT } from '@/lib/sandbox/confine';
 import { createPiApproval } from './approval';
 import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
@@ -36,8 +37,9 @@ export interface PiSdkSessionOptions {
   /**
    * Lane rules (#3385): every command runs confined (no network, writes only in
    * the workspace and a private temp dir), or needs inbox approval where it cannot be.
+   * `'workspace'` keeps network and `.git` writes (the orchestrator in Full access, #3658).
    */
-  confineCommands?: boolean;
+  confineCommands?: boolean | 'workspace';
   onEvent?: (event: Record<string, unknown>) => void;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -101,7 +103,9 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   let surfaceId = '';
   const inbox: PiApproval = (call, signal) => createPiApproval(surfaceId, root)(call, signal);
   const approve: PiApproval = options.approve ?? inbox;
-  const confine = options.confineCommands ? { inbox } : undefined;
+  const confine = options.confineCommands
+    ? { inbox, ...(options.confineCommands === 'workspace' ? { rules: WORKSPACE_CONFINEMENT } : {}) }
+    : undefined;
   const transport = options.transport ?? createManagedPiTransport({ model: options.model });
   const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,

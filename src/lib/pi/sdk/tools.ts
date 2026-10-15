@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { openWorkspaceFile, type OpenWorkspaceFileResult } from '@/lib/fs/workspace-file';
 import { commitPiWrite } from './approved-write';
 import { PI_COMMAND_MAX_BYTES, piCommandCleanupUnconfirmed, runPiCommand, withPiExclusive, type PiCommandOptions } from './command';
-import { ConfinementUnavailable } from '@/lib/sandbox/confine';
+import { ConfinementUnavailable, type ConfinementRules } from '@/lib/sandbox/confine';
 
 import type { PiContinuityGuard } from './continuity';
 import { PiToolRefusal } from './refusal';
@@ -36,11 +36,13 @@ export interface PiToolOptions extends PiCommandOptions {
    * Lane rules (#3385): every command runs confined, with no network and writes
    * only in the workspace and a private temp dir. Where confinement is
    * unavailable the command needs `inbox` approval and then runs unconfined, as
-   * approved. Host-set only.
+   * approved. `rules` replaces lane rules, as the orchestrator's workspace rules
+   * do (#3658). Host-set only.
    */
-  confine?: { inbox: PiApproval };
+  confine?: { inbox: PiApproval; rules?: ConfinementRules };
 }
 const MAX_BYTES = 50_000;
+export const CONFINED_WRITE_NOTE = 'o8: this command runs confined and can write only in the workspace and a private temp directory.';
 
 function protectedPath(path: string) {
   return path.split(/[\\/]/).some(part => part === '..' || part.toLowerCase() === '.git'
@@ -114,11 +116,13 @@ async function executePiCommand(root: string, call: PiToolCall, approve: PiAppro
     await requireAuthority(call, authorize);
     await continuity?.assertCurrent(root, { name: 'run_command', command }, signal);
     if (continuity) await requireAuthority(call, authorize);
-    return runPiCommand(root, command, signal, { ...options, confined });
+    return runPiCommand(root, command, signal, { ...options, confined, rules: confine?.rules });
   }, signal);
   let text: string;
   try {
     text = await run(Boolean(confine));
+    // A refused write reads like any permission error, so say which boundary refused it.
+    if (confine && /Operation not permitted|Permission denied/.test(text)) text += `\n\n${CONFINED_WRITE_NOTE}`;
   } catch (error) {
     if (!confine || !(error instanceof ConfinementUnavailable)) throw error;
     // Nothing started. Lane rules cover only a confined command, so the operator approves this one.
