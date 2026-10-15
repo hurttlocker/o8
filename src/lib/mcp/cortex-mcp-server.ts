@@ -718,7 +718,7 @@ async function handleListPrs(args: Record<string, unknown>): Promise<McpToolResu
       reviewDecision: p.reviewDecision,
       created: p.createdAt,
     }));
-    return jsonResult({ count: prs.length, returned: summary.length, repo: data.repo, prs: summary });
+    return jsonResult({ count: prs.length, returned: summary.length, repo: data.repo, prs: summary, error: data.error ? safeErrorText({ error: data.error }) : null, stale: data.stale ?? false }, Boolean(data.error));
   } catch (err) {
     return textResult(`Failed to fetch PRs: ${safeErrorText(err)}`, true);
   }
