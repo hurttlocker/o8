@@ -733,8 +733,9 @@ export async function ensureGitHubPullRequest(repoFullName: string, prNumber: nu
     const pr = await syncPullRequest(repoFullName, prNumber);
     return { pr, error: null, stale: false };
   } catch (error) {
+    // A single-PR failure is returned to its caller; it must not mark the
+    // complete open-PR listing stale or errored.
     const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request';
-    markGitHubSyncError(repoFullName, 'pull_requests', message);
     return { pr: current, error: message, stale: true };
   }
 }
@@ -754,8 +755,9 @@ export async function ensureGitHubPullRequestByHead(repoFullName: string, headRe
     const pr = await syncPullRequestByHead(repoFullName, headRefName);
     return { pr: pr ?? current, error: null, stale: false };
   } catch (error) {
+    // A single-PR failure is returned to its caller; it must not mark the
+    // complete open-PR listing stale or errored.
     const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request by head branch';
-    markGitHubSyncError(repoFullName, 'pull_requests', message);
     return { pr: current, error: message, stale: true };
   }
 }

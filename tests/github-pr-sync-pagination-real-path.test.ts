@@ -29,7 +29,7 @@ process.env.CORTEX_READONLY = '1';
 
 const { buildOutsideHumanWaitingInbox } = await import('@/lib/supervisor/inbox');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { ensureGitHubPullRequests } = await import('@/lib/github-broker/sync');
+const { ensureGitHubPullRequest, ensureGitHubPullRequestByHead, ensureGitHubPullRequests } = await import('@/lib/github-broker/sync');
 const { listGitHubPullRequests, invalidateGitHubSync, readGitHubSyncState, markGitHubSyncError } = await import('@/lib/github-broker/store');
 const { GET } = await import('@/app/api/panel/prs/route');
 await import('@/lib/mcp/cortex-mcp-server');
@@ -194,6 +194,19 @@ describe('bounded open PR sync through persisted panel and MCP listings', () => 
     const result = await operator();
     expect(result.isError).toBe(true);
     expect(result.data).toMatchObject({ count: 125, stale: true, error: 'Fixture detail failure' });
+  });
+
+  it('keeps a failed single-PR refresh out of the complete listing state', async () => {
+    await panel();
+    fixture.fetch.mockImplementation((repoName: string, endpoint: string) => (
+      /\/pulls\/7$|head=/.test(endpoint) ? respond({ message: 'Fixture single failure' }, 503) : transport(repoName, endpoint)
+    ));
+    expect(await ensureGitHubPullRequest(repo, 7)).toMatchObject({ stale: true, error: expect.stringContaining('503') });
+    expect(await ensureGitHubPullRequestByHead(repo, 'branch-7')).toMatchObject({ stale: true, error: expect.stringContaining('503') });
+    expect(readGitHubSyncState(repo, 'pull_requests')?.lastError ?? null).toBeNull();
+    const result = await operator();
+    expect(result.isError).not.toBe(true);
+    expect(result.data).toMatchObject({ count: 125, stale: false, error: null });
   });
 
   it('bounds and normalizes persisted upstream errors in the operator response', async () => {
