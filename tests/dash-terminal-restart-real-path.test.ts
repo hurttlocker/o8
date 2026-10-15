@@ -82,6 +82,8 @@ async function startWsServer() {
       HOME: dataDir,
       USERPROFILE: dataDir,
       ZDOTDIR: dataDir,
+      // Keep system login-shell logout hooks from recreating the removed fixture.
+      SHELL_SESSIONS_DISABLE: '1',
       XDG_CONFIG_HOME: join(dataDir, '.config'),
       XDG_STATE_HOME: join(dataDir, '.local', 'state'),
       XDG_CACHE_HOME: join(dataDir, '.cache'),
