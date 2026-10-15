@@ -69,7 +69,10 @@ function renderInlineNodes(nodes: PhrasingContent[], prefix = ''): ReactNode[] {
 
 function inline(text: string): ReactNode[] {
   const node = fromMarkdown(text).children[0];
-  return node?.type === 'paragraph' ? renderInlineNodes(node.children) : [text];
+  if (node?.type !== 'paragraph') return [text];
+  const start = node.children[0]?.position?.start.offset ?? 0;
+  const end = node.children.at(-1)?.position?.end.offset ?? text.length;
+  return [text.slice(0, start), ...renderInlineNodes(node.children), text.slice(end)];
 }
 
 // Slice a content string into a stream of typed segments. We pre-extract
