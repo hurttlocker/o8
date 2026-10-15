@@ -73,6 +73,10 @@ export function assertWorkspaceRetentionReleased(
   if (getWorkspaceRetentionHold(workspacePath, identity)) {
     throw new Error('Workspace retirement is blocked by a persisted retention hold.');
   }
+  const legacy = getSqlite().prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+    WHERE retained_path = ? OR (source_device = ? AND source_inode = ?) LIMIT 1`)
+    .get(path.resolve(workspacePath), identity?.device ?? -1, identity?.inode ?? -1);
+  if (legacy) throw new Error('Retained legacy output is not disposable.');
 }
 
 export function assertSnapshotRetentionReleased(input: {
@@ -123,7 +127,11 @@ export function acquireWorkspaceRetentionHold(input: {
       WHERE (original_path = ? OR (repository_uuid = ? AND packet_id = ?))
         AND state IN ('parkable', 'hibernating', 'restoring', 'retiring', 'retired') LIMIT 1
     `).get(workspacePath, input.repositoryUuid, input.packetId);
-    if (claim || retiring) {
+    const parking = sqlite.prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+      WHERE state IN ('prepared', 'restoring') AND (workspace_path = ? OR retained_path = ?
+        OR (source_device = ? AND source_inode = ?)) LIMIT 1`)
+      .get(workspacePath, workspacePath, input.identity.device, input.identity.inode);
+    if (claim || retiring || parking) {
       throw new Error('Workspace retirement or materialization change already began; a new hold was not granted.');
     }
     const now = Date.now();
