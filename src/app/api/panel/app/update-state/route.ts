@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   getAppUpdateState,
+  recordAppUpdateInstall,
   setAppUpdateState,
   type AppUpdateCheckOutcome,
 } from '@/lib/app-update/relaunch-state';
@@ -26,6 +27,17 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
+  // An install outcome from the webview (#3588), separate from check results.
+  if (isRecord(body) && isRecord(body.install)) {
+    const { outcome, version, error } = body.install;
+    if (outcome !== 'started' && outcome !== 'failed') {
+      return invalidState('invalid_install_outcome', 'install.outcome must be started or failed.');
+    }
+    const state = recordAppUpdateInstall({ outcome,
+      version: typeof version === 'string' ? version : null,
+      error: typeof error === 'string' ? error : null });
+    return NextResponse.json({ ok: true, state }, { headers: NO_STORE_HEADERS });
+  }
   if (!isRecord(body) || typeof body.updatePending !== 'boolean') {
     return invalidState('invalid_update_pending', 'updatePending must be boolean.');
   }
