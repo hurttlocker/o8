@@ -76,13 +76,12 @@ A registered terminal failed prebuild is not legacy output. Use its original
 lifecycle profile and run maintenance outside the linked checkout:
 
 ```sh
-node scripts/generated-output.mjs park-failed-prebuild \
-  --resource <failed-resource-uuid> \
+node "$source/scripts/generated-output.mjs" park-failed-prebuild \
+  --resource "$failed_resource" \
   --intent 'Retain failed build evidence before a new generation' \
-  --evidence /absolute/external/producer-receipt.json \
-  --evidence /absolute/external/build-log.txt
-node scripts/generated-output.mjs failed-prebuild-status --operation <operation-uuid>
-node scripts/generated-output.mjs resume-failed-prebuild --operation <operation-uuid>
+  --evidence "$producer_evidence" --evidence "$build_log"
+node "$source/scripts/generated-output.mjs" failed-prebuild-status --operation "$operation"
+node "$source/scripts/generated-output.mjs" resume-failed-prebuild --operation "$operation"
 ```
 
 The command requires linked Git custody, the existing store binding, an unchanged
