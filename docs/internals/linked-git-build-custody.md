@@ -26,10 +26,9 @@ its lock. Git membership does not establish who wrote those bytes or whether a
 writer is stopped. Do not delete, move aside or relabel the directory to make a
 build pass. A stale lock does not prove quiescence.
 
-The current explicit legacy adoption, bank recovery and retirement contract
-requires an application-managed containing owner. Extending that contract to an
-externally managed checkout requires a separate output-only preservation design,
-including live-writer checks, retained evidence, recovery and exact finalization.
-This change intentionally does not grant that broader authority. A linked checkout
-with unknown existing output therefore remains blocked at that preservation
-boundary after its Git custody is proved.
+The bank-based legacy adoption, recovery and retirement contract still requires
+an application-managed containing owner. For an externally managed linked checkout,
+[explicit legacy parking](./legacy-output-parking.md) can retain the intact directory
+under a journaled sibling name without granting bank or purge authority. It requires
+fresh process, identity, content, evidence and custody proof and refuses ambiguity.
+Fresh prebuild never performs that maintenance automatically.
