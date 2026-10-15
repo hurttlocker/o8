@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchSWRJson: vi.fn(),
   ipcFetch: vi.fn(),
   requestConfirm: vi.fn(async () => true),
+  toast: vi.fn(),
 }));
 
 vi.mock('@/lib/panel/fetch-cache', () => ({
@@ -24,7 +25,7 @@ vi.mock('@/lib/tauri/ipc-fetch', () => ({
 vi.mock('@/components/shared/ConfirmToastHost', () => ({
   requestConfirm: mocks.requestConfirm,
   requestPrompt: vi.fn(async () => null),
-  toast: vi.fn(),
+  toast: mocks.toast,
 }));
 
 import { useGlobalRepoState } from './useGlobalRepoState';
@@ -86,6 +87,7 @@ describe('global repository worktree discovery', () => {
     window.sessionStorage.clear();
     mocks.fetchSWRJson.mockReset();
     mocks.ipcFetch.mockReset();
+    mocks.toast.mockReset();
     mocks.ipcFetch.mockImplementation(async () => Response.json({
       worktrees: [],
       conflicts: { safe: true, count: 0 },
@@ -129,6 +131,27 @@ describe('global repository worktree discovery', () => {
 
     expect(mocks.ipcFetch).toHaveBeenCalledTimes(2);
     expect(mocks.ipcFetch).toHaveBeenLastCalledWith('/api/worktrees?repo=%2Ftmp%2Frepo-0250');
+  });
+
+  it('handles a cancelled repository-change refresh and exposes real failures without losing inventory', async () => {
+    const registered = repo(1);
+    mocks.fetchSWRJson.mockResolvedValueOnce({ repos: [registered] });
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => { await Promise.resolve(); });
+    mocks.fetchSWRJson.mockRejectedValueOnce(new DOMException('Fetch is aborted', 'AbortError'));
+    await act(async () => { window.dispatchEvent(new Event('o8:repos-changed')); });
+    expect(current.globalRepoEntries).toEqual([registered]);
+    expect(mocks.toast).not.toHaveBeenCalled();
+
+    mocks.fetchSWRJson.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await act(async () => { window.dispatchEvent(new Event('o8:repos-changed')); });
+    expect(current.globalRepoEntries).toEqual([registered]);
+    expect(mocks.toast).toHaveBeenCalledWith('Could not refresh repositories. Try opening the project again.');
+
+    mocks.fetchSWRJson.mockResolvedValueOnce({ repos: [registered, repo(2)] });
+    await act(async () => { window.dispatchEvent(new Event('o8:repos-changed')); });
+    expect(current.globalRepoEntries).toEqual([registered, repo(2)]);
   });
 
   it('rebuilds an exact saved worktree scope from the authoritative repo producer', async () => {
