@@ -81,6 +81,43 @@ async function fixture() {
   return { root, workspace, output, data, hook, helper, env, evidence, lock, links, assertLinks, cli, cold, moduleUrl, park, rows, scriptHook, success };
 }
 
+it('retains terminal failed prebuild bytes and history before admitting a linked fresh generation', async () => {
+  const f = await fixture();
+  const legacy = f.success(f.park());
+  const build = (exit: number) => f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/generated-output-producer.ts')});
+    const {runGeneratedOutputPrebuild}=ns.default??ns;
+    const code=await runGeneratedOutputPrebuild({workspacePath:${JSON.stringify(f.workspace)},preflight(){},
+      operation:ctx=>ctx.runBuild(run=>run(process.execPath,['-e',
+        "require('node:fs').writeFileSync('.next/proof','generation-${exit}');process.exit(${exit})"]))});
+    process.exitCode=code;`);
+  const failed = build(17); expect(failed.status, failed.stderr).toBe(17);
+  const resources = () => {
+    const db = new Database(path.join(f.data, 'fixture.db'), { readonly: true });
+    try { return db.prepare('SELECT payload_json FROM workspace_generated_outputs ORDER BY rowid').all()
+      .map(row => JSON.parse((row as { payload_json: string }).payload_json)); } finally { db.close(); }
+  };
+  const original = resources()[0]; const identity = lstatSync(f.output);
+  expect(original.state).toBe('failed-held'); expect(original.attempt.children.at(-1).exitCode).toBe(17);
+  expect(build(0).status).not.toBe(0);
+  const retained = f.cli('park-failed-prebuild', '--resource', original.resourceId,
+    '--intent', 'Preserve terminal failed prebuild before retry', ...f.evidence.flatMap(value => ['--evidence', value]));
+  expect(retained.status, retained.stderr).toBe(0);
+  const record = JSON.parse(retained.stdout.trim().split('\n').at(-1)!).retention;
+  expect(record.state).toBe('parked'); expect(record.reclaimedBytes).toBe(0);
+  expect(lstatSync(record.retainedPath).ino).toBe(identity.ino); expect(existsSync(f.output)).toBe(false);
+  expect(readFileSync(path.join(record.retainedPath, 'proof'), 'utf8')).toBe('generation-17');
+  expect(resources()).toEqual([original]);
+  const fresh = build(0); expect(fresh.status, fresh.stderr).toBe(0);
+  const [old, next] = resources(); expect(old).toEqual(original); expect(next.state).toBe('succeeded');
+  expect(next.continuedFrom).toEqual({ resourceId: original.resourceId, operationId: record.operationId });
+  expect(next.output.inode).not.toBe(identity.ino);
+  const replay = f.cli('resume-failed-prebuild', '--operation', record.operationId);
+  expect(replay.status, replay.stderr).toBe(0); expect(resources()).toEqual([old, next]);
+  expect(readFileSync(path.join(record.retainedPath, 'proof'), 'utf8')).toBe('generation-17');
+  f.assertLinks(legacy.retainedPath);
+  writeFileSync(path.join(f.root, 'failed-prebuild-state.json'), JSON.stringify({ original, record, next }, null, 2));
+}, 300_000);
+
 it('preserves native legacy parking, refuses raced/replaced destinations, and cold-replays restoration', async () => {
   const f = await fixture(); const identity = lstatSync(f.output);
   const strictBank = f.cold(`const bank=await import(${f.moduleUrl('src/lib/workspace/generated-output-bank.ts')});
