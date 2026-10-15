@@ -79,10 +79,10 @@ describe('seeded states through the actual compact chat panel', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] button')!.click());
     expect(stateNames()).not.toContain('finished');
     expect(container.querySelector('[aria-label="Settled conversations"]')?.textContent).toContain('Settled');
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] button[aria-controls]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] button[aria-expanded="true"]')!.click());
     expect(stateNames()).toEqual([]);
     expect(container.querySelector('[aria-label="Priority chats"] [data-attention-dot]')).not.toBeNull();
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settled conversations"] button[aria-controls]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settled conversations"] button[aria-expanded="false"]')!.click());
     expect(stateNames()).toEqual(expect.arrayContaining(['finished', 'idle']));
     expect(stateNames()).not.toContain('running');
   });
