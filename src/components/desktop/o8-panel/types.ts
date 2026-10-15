@@ -29,3 +29,12 @@ export function canonicalPanelTab(tab: O8Tab): O8Tab {
 export function isRightUtilityTab(tab: O8Tab): tab is RightUtilityTab {
   return RIGHT_UTILITY_TAB_IDS.includes(tab as RightUtilityTab);
 }
+
+/** Restore current tools and the supported aliases from older saved layouts. */
+export function normalizePanelTab(raw: string | null | undefined): O8Tab | null {
+  if (!raw) return null;
+  if (raw === 'diff' || raw === 'changes' || raw === 'workspace') return 'review';
+  if (raw === 'prs') return 'activity';
+  return isRightUtilityTab(raw as O8Tab) || raw === 'launcher' || raw === 'compare' || raw === 'handoffs'
+    ? raw as O8Tab : null;
+}

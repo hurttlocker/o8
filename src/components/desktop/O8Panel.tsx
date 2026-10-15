@@ -31,6 +31,7 @@ import { LinkedPullRequests } from './pr-panel/LinkedPullRequests';
 import { WorkspaceFilesPane } from './o8-panel/workspace-rail/WorkspaceFilesPane';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
 import { canonicalPanelTab, isRightUtilityTab, type O8Tab } from './o8-panel/types';
+import { usePersistedUtilityTabs } from './o8-panel/use-persisted-utility-tabs';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
 import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
@@ -155,7 +156,7 @@ export function O8Panel({
   const orchestratorData = useOrchestratorData();
   const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
   const compareGroup = compareReadyGroups[0] ?? null;
-  const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
+  const [utilityTabs, setUtilityTabs] = usePersistedUtilityTabs(browserStateKey);
   const rightContextualPanelRef = useRef<ContextualPanelHandle | null>(null);
   const [localSelectedFile, setLocalSelectedFile] = useState<{ repoPath: string | null; path: string } | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
@@ -190,7 +191,7 @@ export function O8Panel({
     queueMicrotask(() => {
       setUtilityTabs((prev) => [...new Set([...prev, ...[activeUtilityTab, secondaryUtilityTab].filter((tab) => tab !== null)])]);
     });
-  }, [activeUtilityTab, secondaryUtilityTab]);
+  }, [activeUtilityTab, secondaryUtilityTab, setUtilityTabs]);
 
   const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
     // Browser is a first-class drawer state now (Q ruling 2026-07-12: "the
@@ -203,7 +204,7 @@ export function O8Panel({
     }
     setUtilityTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
     onActiveTabChange?.(tab);
-  }, [onActiveTabChange]);
+  }, [onActiveTabChange, setUtilityTabs]);
 
   const closeRightUtilityTab = useCallback(async (tab: RightUtilityTab) => {
     if (tab === 'terminal' && rightContextualPanelRef.current?.confirmClose && !await rightContextualPanelRef.current.confirmClose()) return false;
@@ -214,7 +215,7 @@ export function O8Panel({
       onActiveTabChange?.(remaining[Math.min(currentIndex, remaining.length - 1)] ?? 'launcher');
     }
     return true;
-  }, [activeTab, onActiveTabChange, utilityTabs]);
+  }, [activeTab, onActiveTabChange, setUtilityTabs, utilityTabs]);
 
   const handleSelectUtilityFile = useCallback((path: string) => {
     setLocalSelectedFile({ repoPath: repoPath ?? null, path });

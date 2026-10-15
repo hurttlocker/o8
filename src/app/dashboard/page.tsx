@@ -86,7 +86,7 @@ import {
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo } from './types';
-import { canonicalPanelTab, type O8Tab } from '@/components/desktop/o8-panel/types';
+import { canonicalPanelTab, normalizePanelTab as normalizeO8ActiveTab, type O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   logDashboardBootTiming,
   markDashboardScriptStart,
@@ -271,35 +271,6 @@ const O8_ACTIVE_TAB_PREF_VERSION = '2';
  *  (source, config, docs, svg) opens in the 'file' viewer, which itself routes
  *  .html/.htm to HtmlPreview. */
 const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-
-function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
-  if (!raw) return null;
-  // Legacy migrations — 'diff' and 'changes' were old labels for what's
-  // now the Workspace tab. 'files' used to be the same, but is now a
-  // distinct surface in the launcher (see O8Panel RIGHT_UTILITY_TABS),
-  // so we let it pass through to the new kind instead of remapping.
-  if (raw === 'diff' || raw === 'changes' || raw === 'workspace') return 'review';
-  if (raw === 'prs') return 'activity';
-  if (
-    raw === 'browser'
-    || raw === 'activity'
-    || raw === 'threads'
-    || raw === 'resources'
-    || raw === 'handoffs'
-    || raw === 'inbox'
-    || raw === 'spec'
-    || raw === 'launcher'
-    || raw === 'files'
-    || raw === 'side-chat'
-    || raw === 'review'
-    || raw === 'compare'
-    || raw === 'targets'
-    || raw === 'terminal'
-  ) {
-    return raw;
-  }
-  return null;
-}
 
 function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): SavedChatRepoContext | null {
   if (!thread.repoPath) return null;
