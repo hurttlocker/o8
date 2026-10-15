@@ -589,12 +589,17 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
 
   it('parks and restores an isolated copy-on-write clone through quarantine', async () => {
     const f = fixture('cow-roundtrip', 'apfs-cow-clone');
+    await writeManagedWorkspaceSafetyHooks(
+      f.repo.localPath,
+      f.lane.worktreePath!,
+      await captureWorktreeMaterializationIdentity(f.lane.worktreePath!),
+    );
     const parked = await parkWorkspace({
       repositoryUuid: f.repo.id,
       packetId: f.lane.packetId!,
       operationId: 'cow-roundtrip-park',
     }, dependencies(f));
-    expect(parked).toMatchObject({ status: 'parked' });
+    expect(parked, JSON.stringify(parked)).toMatchObject({ status: 'parked' });
     expect(existsSync(f.lane.worktreePath!)).toBe(false);
 
     const restored = await restoreWorkspace({
@@ -606,7 +611,56 @@ describe('workspace hibernate and restore services', { timeout: 60_000 }, () => 
     expect(git(f.lane.worktreePath!, 'rev-parse', 'HEAD')).toBe(
       getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)?.headCommit,
     );
-  });
+  }, 120_000);
+
+  it.each(['content', 'path', 'identity', 'exclude-content'] as const)(
+    'preserves the quarantined clone when %s changes after manifest verification',
+    async (change) => {
+      const f = fixture(`cow-quarantine-${change}`, 'apfs-cow-clone');
+      await writeManagedWorkspaceSafetyHooks(
+        f.repo.localPath,
+        f.lane.worktreePath!,
+        await captureWorktreeMaterializationIdentity(f.lane.worktreePath!),
+      );
+      let heldPath = '';
+      const result = await parkWorkspace({
+        repositoryUuid: f.repo.id,
+        packetId: f.lane.packetId!,
+        operationId: `cow-quarantine-${change}`,
+      }, {
+        ...dependencies(f),
+        parkExact: async (input) => parkExactWorktree({
+          ...input,
+          verifyQuarantinedClone: async (quarantinePath) => {
+            heldPath = quarantinePath;
+            const tracked = path.join(quarantinePath, 'tracked.txt');
+            if (change === 'content') writeFileSync(tracked, 'changed source\n');
+            if (change === 'path') renameSync(tracked, path.join(quarantinePath, 'moved.txt'));
+            if (change === 'identity') {
+              const contents = readFileSync(tracked);
+              renameSync(tracked, path.join(path.dirname(quarantinePath), 'original-tracked'));
+              writeFileSync(tracked, contents);
+            }
+            if (change === 'exclude-content') {
+              writeFileSync(path.join(quarantinePath, '.git/info/o8-managed-excludes-.git'),
+                '.claude/settings.local.json\n.o8/\nextra-ignore\n');
+            }
+            await input.verifyQuarantinedClone!(quarantinePath);
+          },
+        }),
+      });
+      expect(result.status).toBe('refused');
+      expect(heldPath).not.toBe('');
+      const preservedPath = existsSync(heldPath) ? heldPath : f.lane.worktreePath!;
+      expect(existsSync(path.join(preservedPath, '.git'))).toBe(true);
+      expect(existsSync(path.join(preservedPath, change === 'path' ? 'moved.txt' : 'tracked.txt')))
+        .toBe(true);
+      if (change === 'content') {
+        expect(readFileSync(path.join(preservedPath, 'tracked.txt'), 'utf8')).toBe('changed source\n');
+      }
+      expect(getWorkspaceSnapshot(f.repo.id, f.lane.packetId!)?.state).not.toBe('parked');
+    },
+  );
 
   it.each([
     ['dirty tracked', (workspace: string) => writeFileSync(path.join(workspace, 'tracked.txt'), 'late dirty\n')],

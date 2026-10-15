@@ -27,6 +27,8 @@
 //! applies Landlock before it starts the command, so the command and everything
 //! it starts can create, change, remove or rename files only beneath those
 //! paths, and can neither connect nor bind TCP sockets. Reads stay as they are.
+//! An `--allow-tcp` option among them leaves TCP alone (the orchestrator's
+//! workspace rules, #3658); writes stay confined.
 //! It needs Landlock ABI 4 (Linux 6.7) for the TCP rights; without it the
 //! supervisor refuses to start the command, and the host never runs it
 //! unconfined. Landlock does not cover file metadata (mode, owner, timestamps),
@@ -233,17 +235,17 @@ fn allow_writes(ruleset: libc::c_int, path: &OsString) -> bool {
 }
 
 /// Limits writes by this process and everything it starts to `paths`, and
-/// denies TCP. False when Landlock is below ABI 4 or any step fails; the
-/// command must not start then.
+/// denies TCP unless `allow_tcp`. False when Landlock is below ABI 4 or any
+/// step fails; the command must not start then.
 #[cfg(target_os = "linux")]
-fn confine_writes(paths: &[OsString]) -> bool {
+fn confine_writes(paths: &[OsString], allow_tcp: bool) -> bool {
     let abi = unsafe {
         libc::syscall(libc::SYS_landlock_create_ruleset, std::ptr::null::<RulesetAttr>(), 0usize, 1u32)
     };
     if abi < 4 {
         return false;
     }
-    let attr = RulesetAttr { handled_access_fs: FS_WRITES, handled_access_net: NET_TCP };
+    let attr = RulesetAttr { handled_access_fs: FS_WRITES, handled_access_net: if allow_tcp { 0 } else { NET_TCP } };
     let ruleset = unsafe {
         libc::syscall(libc::SYS_landlock_create_ruleset, &attr as *const RulesetAttr, std::mem::size_of::<RulesetAttr>(), 0u32)
     } as libc::c_int;
@@ -284,10 +286,18 @@ pub fn run(argv: &[OsString]) -> i32 {
         return 125;
     }
     let mut writes = Vec::new();
+    let mut allow_tcp = false;
     let mut argv = argv;
-    while argv.len() > 1 && argv[0] == "--write" {
-        writes.push(argv[1].clone());
-        argv = &argv[2..];
+    loop {
+        if !argv.is_empty() && argv[0] == "--allow-tcp" {
+            allow_tcp = true;
+            argv = &argv[1..];
+        } else if argv.len() > 1 && argv[0] == "--write" {
+            writes.push(argv[1].clone());
+            argv = &argv[2..];
+        } else {
+            break;
+        }
     }
     let Some(host) = argv.first().and_then(|arg| arg.to_str()).and_then(|arg| arg.parse::<libc::pid_t>().ok()) else {
         write_receipt(None, false);
@@ -331,7 +341,7 @@ pub fn run(argv: &[OsString]) -> i32 {
         }
     }
     // Applied to the supervisor itself, so the command inherits it from the start.
-    if !writes.is_empty() && !confine_writes(&writes) {
+    if !writes.is_empty() && !confine_writes(&writes, allow_tcp) {
         eprintln!("The command supervisor could not confine the command (Landlock ABI 4, Linux 6.7 or later).");
         write_receipt(None, true);
         return 125;

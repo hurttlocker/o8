@@ -22,7 +22,8 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
-import { appendEvent, archiveLane, updateLane } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, getLane, updateLane } from '@/lib/lane/registry';
+import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconciliation } from '@/lib/workspace/automatic-reconciliation-guard';
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import type { Lane } from '@/lib/lane/types';
 import { runBoundedWorktreeMaintenance } from './bounded-worktree-maintenance';
@@ -350,6 +351,16 @@ async function laneHasPendingApproval(laneId: string): Promise<boolean> {
 }
 
 async function reconcileWorktreeLane(lane: Lane): Promise<void> {
+  if (!workspaceAllowsAutomaticReconciliation(lane.packetId)) return;
+  await withAutomaticWorkspaceReconciliation(lane.packetId, async () => {
+    const current = getLane(lane.id);
+    if (!current || current.packetId !== lane.packetId) return false;
+    await reconcileEligibleWorktreeLane(current);
+    return true;
+  });
+}
+
+async function reconcileEligibleWorktreeLane(lane: Lane): Promise<void> {
   const lanes = [lane];
   const now = Date.now();
   let remainingTargetedPrRefreshes = MAX_TARGETED_PR_REFRESHES_PER_TICK;

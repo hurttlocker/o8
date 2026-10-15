@@ -31,7 +31,7 @@ import {
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 import { ComposerContextRow } from './ComposerContextRow';
-import { ComposerPermissionChip } from './ComposerPermissionChip';
+import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
@@ -734,7 +734,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
             permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
-              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange} /> : null}
+              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
+                // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
+                fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
             inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
             voiceModeEnabled={voiceModeEnabled}
             onVoiceModeChange={onVoiceModeChange}

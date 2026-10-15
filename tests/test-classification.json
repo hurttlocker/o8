@@ -2065,6 +2065,16 @@
       ]
     },
     {
+      "path": "tests/cortex-launch-agent-runtime-errors-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2647,6 +2657,15 @@
       ]
     },
     {
+      "path": "tests/lane-git-event-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-guard.test.ts",
       "reasons": [
         "child-process",
@@ -2712,6 +2731,16 @@
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/legacy-output-parking-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -3035,6 +3064,14 @@
       ]
     },
     {
+      "path": "tests/metadata-lock-probe-busy-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/metadata-store-root-boundary-real-path.test.ts",
       "reasons": [
         "real-path",
@@ -3235,12 +3272,35 @@
       ]
     },
     {
+      "path": "tests/o8-serve-owned-stop.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/o8-serve-real-path.test.ts",
       "reasons": [
         "child-process",
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/o8-serve-review-mode.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/o8-serve-token-renewal.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
       ]
     },
     {
@@ -3318,6 +3378,12 @@
       ]
     },
     {
+      "path": "tests/orchestrator-late-ack-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-mcp-owned-root-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3328,6 +3394,17 @@
     },
     {
       "path": "tests/orchestrator-model-attribution-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-replay-restart-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",
@@ -3350,6 +3427,17 @@
         "child-process",
         "network-listener",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-stop-turn-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
@@ -3521,6 +3609,7 @@
     {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
+        "git-cli",
         "network-listener",
         "real-path"
       ]
@@ -3934,6 +4023,16 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/repo-inventory-realtime-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "git-cli",
         "network-listener",
         "process-signal",
@@ -4603,7 +4702,8 @@
       "path": "tests/tauri-prebuild-profile.test.ts",
       "reasons": [
         "child-process",
-        "git-cli"
+        "git-cli",
+        "worktree-api"
       ]
     },
     {
@@ -4787,6 +4887,12 @@
     },
     {
       "path": "tests/unified-update-client-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-apply-failure-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -5020,6 +5126,15 @@
         "child-process",
         "git-cli",
         "terminal-tool",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-reaper-snapshot-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "worktree",
         "worktree-api"
       ]

@@ -130,8 +130,10 @@ function assertOwnedOutput(workspace, output) {
   const Database = require('better-sqlite3');
   const database = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
+    const hasRetentionIndex = database.prepare('PRAGMA table_info(workspace_generated_outputs)').all()
+      .some(column => column.name === 'retained_operation_id');
     const rows = database.prepare(`SELECT * FROM workspace_generated_outputs
-      WHERE workspace_path = ? AND state != 'retired'`).all(workspace);
+      WHERE workspace_path = ? AND state != 'retired'${hasRetentionIndex ? ' AND retained_operation_id IS NULL' : ''}`).all(workspace);
     if (rows.length !== 1 || Buffer.byteLength(rows[0].payload_json) > 16 * 1024 ** 2) {
       throw new Error('generated-output lifecycle resource is unknown');
     }

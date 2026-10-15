@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { lstat, mkdtemp, readdir, readlink, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, readlink, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -42,6 +42,73 @@ describe('workspace storage verifier', () => {
     expect(scan.state).toBe('verified_clean');
     expect(scan.findings).toEqual([]);
     expect(scan.canonicalWorkspacePath).toBe(await realpath(repo));
+  });
+
+  it('preserves managed excludes across a real sibling rename without editing Git config', async () => {
+    const repo = await realpath(await makeRepo('storage-quarantine'));
+    const quarantine = `${repo}-quarantine`;
+    tempPaths.push(quarantine);
+    const relativeExclude = '.git/info/o8-managed-excludes-.git';
+    const excludes = path.join(repo, relativeExclude);
+    writeFileSync(excludes, '.claude/settings.local.json\n');
+    mkdirSync(path.join(repo, '.claude'));
+    writeFileSync(path.join(repo, '.claude/settings.local.json'), '{}\n');
+    git(repo, 'config', 'core.excludesFile', excludes);
+    const options = { allowedIgnoredPaths: ['.claude/settings.local.json'] };
+    const before = await scanWorkspaceStorageState(repo, options);
+    await rename(repo, quarantine);
+
+    expect((await scanWorkspaceStorageState(quarantine, options)).state).toBe('dirty');
+    const after = await scanWorkspaceStorageState(quarantine, { ...options, quarantinedFrom: repo });
+    expect(after.state).toBe('verified_clean');
+    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(git(quarantine, 'config', '--get', 'core.excludesFile')).toBe(excludes);
+
+    writeFileSync(path.join(quarantine, relativeExclude), '.claude/settings.local.json\nextra-ignore\n');
+    const changedExcludes = await scanWorkspaceStorageState(quarantine, { ...options, quarantinedFrom: repo });
+    expect(changedExcludes.state).toBe('verified_clean');
+    expect(changedExcludes.fingerprint).not.toBe(after.fingerprint);
+
+    writeFileSync(path.join(quarantine, 'tracked.txt'), 'changed source\n');
+    expect((await scanWorkspaceStorageState(quarantine, { ...options, quarantinedFrom: repo })).state)
+      .toBe('dirty');
+  });
+
+  it.each(['external', 'relative', 'absent'] as const)(
+    'leaves %s exclude configuration alone after a sibling rename',
+    async (configuration) => {
+      const repo = await realpath(await makeRepo('storage-quarantine-config'));
+      const quarantine = `${repo}-quarantine`;
+      tempPaths.push(quarantine);
+      if (configuration !== 'absent') {
+        const external = await makeRepo('storage-external-exclude');
+        const exclude = configuration === 'relative'
+          ? '.git/info/custom-excludes'
+          : path.join(external, 'custom-excludes');
+        writeFileSync(path.resolve(repo, exclude), 'custom-ignored.txt\n');
+        writeFileSync(path.join(repo, 'custom-ignored.txt'), 'disposable\n');
+        git(repo, 'config', 'core.excludesFile', exclude);
+      }
+      const options = { allowedIgnoredPaths: ['custom-ignored.txt'] };
+      const before = await scanWorkspaceStorageState(repo, options);
+      await rename(repo, quarantine);
+      const after = await scanWorkspaceStorageState(quarantine, { ...options, quarantinedFrom: repo });
+      expect(after.state).toBe('verified_clean');
+      expect(after.fingerprint).toBe(before.fingerprint);
+    },
+  );
+
+  it('refuses a redirected managed exclude file in quarantine', async () => {
+    const repo = await realpath(await makeRepo('storage-quarantine-redirect'));
+    const quarantine = `${repo}-quarantine`;
+    tempPaths.push(quarantine);
+    const relativeExclude = '.git/info/o8-managed-excludes-.git';
+    git(repo, 'config', 'core.excludesFile', path.join(repo, relativeExclude));
+    symlinkSync('exclude', path.join(repo, relativeExclude));
+    await rename(repo, quarantine);
+    const scan = await scanWorkspaceStorageState(quarantine, { quarantinedFrom: repo });
+    expect(scan.state).toBe('unknown');
+    expect(scan.findings).toContainEqual(expect.objectContaining({ reason: 'git_error' }));
   });
 
   it('reports staged, unstaged, untracked, and undeclared ignored work', async () => {

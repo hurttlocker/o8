@@ -14,7 +14,10 @@
  *   buffered. The client tracks the max seq it has seen and sends it as `since`
  *   on (re)subscribe; the server replays entries with seq > since.
  * - `seq` is monotonic for the life of the session (never reset), so a client
- *   cursor stays valid across turns.
+ *   cursor stays valid across turns. A session's first seq starts from the
+ *   current time in milliseconds, not 0, so it also stays above a cursor a
+ *   client kept from before a ws-server restart (#3665). Restarting at 0 made
+ *   the client drop every new event as an already-applied replay.
  * - A new turn (`status: busy`) starts the buffer fresh. A finished turn
  *   (`status: ready | dead`, or an `error`) drops the entries so a POST-turn
  *   (re)subscribe replays nothing and relies on persisted chat history instead
@@ -35,10 +38,12 @@ interface SessionBuffer {
 
 export class OrchestratorReplayBuffers {
   private readonly maxEntries: number;
+  private readonly now: () => number;
   private readonly buffers = new Map<string, SessionBuffer>();
 
-  constructor(maxEntries = 1500) {
+  constructor(maxEntries = 1500, now: () => number = Date.now) {
     this.maxEntries = maxEntries;
+    this.now = now;
   }
 
   /**
@@ -48,7 +53,7 @@ export class OrchestratorReplayBuffers {
   record(sessionName: string, msg: OrchestratorReplayMessage): string {
     let buf = this.buffers.get(sessionName);
     if (!buf) {
-      buf = { seq: 0, entries: [] };
+      buf = { seq: Math.max(0, Math.floor(this.now())), entries: [] };
       this.buffers.set(sessionName, buf);
     }
 

@@ -7,6 +7,7 @@ import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
+import { readOwnedPiBuiltinTelemetryTail } from '@/lib/pi-builtin/telemetry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { normalizeCodexEvents, type TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import {
@@ -14,10 +15,11 @@ import {
   normalizeOpencodeEvents,
 } from '@/lib/orchestrator/transcript-normalizer-multi';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { normalizePiBuiltinEvents } from '@/lib/orchestrator/transcript-normalizer-pi';
 
 const MAX_TAIL_BYTES = 256_000;
 
-type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'gemini' | null;
+type TranscriptRuntime = 'codex' | 'opencode' | 'claude-code' | 'gemini' | 'pi-builtin' | null;
 
 interface ResolvedJsonl {
   raw: string;
@@ -131,6 +133,11 @@ async function findClaudeCodeJsonl(sessionId: string): Promise<string | null> {
 async function resolveRawJsonlForSession(sessionKey: string): Promise<ResolvedJsonl> {
   if (!sessionKey) return { raw: '', runtime: null };
 
+  if (sessionKey.startsWith('pi-builtin-owned:')) {
+    const tail = await readOwnedPiBuiltinTelemetryTail(sessionKey);
+    return { raw: tail.raw, runtime: 'pi-builtin' };
+  }
+
   if (sessionKey.startsWith('codex-owned:')) {
     try {
       const sources = await getOwnedCodexTelemetrySources(sessionKey);
@@ -215,6 +222,8 @@ function normalizeForRuntime(
 ): TranscriptEvent[] {
   if (!raw) return [];
   switch (runtime) {
+    case 'pi-builtin':
+      return normalizePiBuiltinEvents(raw);
     case 'codex':
       return normalizeCodexEvents(raw, fallbackTimestamp);
     case 'opencode':

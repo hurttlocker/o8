@@ -38,6 +38,22 @@ interface UpdateCheckReport {
 }
 
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
+
+/** The updater can reject with an Error, an empty Error or a plain string; keep whatever it said. */
+export function describeInstallError(error: unknown): string {
+  if (error instanceof Error) return error.message.trim() || error.name;
+  if (typeof error === 'string') return error.trim();
+  try { return JSON.stringify(error) ?? ''; } catch { return ''; }
+}
+
+/** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
+function reportInstall(install: { outcome: 'started' | 'failed'; version: string | null; error?: string }) {
+  fetch('/api/panel/app/update-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ install }),
+  }).catch(() => { /* best-effort, like the check state */ });
+}
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
 const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
@@ -431,6 +447,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         }
         return;
       }
+      reportInstall({ outcome: 'started', version: updateRef.current?.version ?? null });
       const outcome = await installUpdateAndRestart(
         action.kind === 'download' ? action.url : updateRef.current?.releaseUrl ?? RELEASE_URL,
         {
@@ -452,11 +469,10 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
       }
     } catch (err) {
-      console.error('[update-card] install failed:', err);
-      const detail = err instanceof Error && err.message.trim()
-        ? ` ${err.message.trim()}`
-        : '';
-      setInstallError(`Update failed before restart.${detail}`);
+      const message = describeInstallError(err);
+      console.error(`[update-card] install failed: ${message || '(no message)'}`, err);
+      setInstallError(`Update failed before restart.${message ? ` ${message}` : ''}`);
+      reportInstall({ outcome: 'failed', version: updateRef.current?.version ?? null, error: message });
     } finally {
       updateInstallInFlight = false;
       installingRef.current = false;
@@ -521,7 +537,17 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   if (bundleIntegrity?.status === 'invalid') {
     return <BundleIntegrityWarning status={bundleIntegrity} />;
   }
-  if (quiet || !update) return null;
+  // The navigation rail renders the quiet card; a failed install still shows there (#3588).
+  if (quiet) {
+    return installError ? (
+      <div role="alert" style={{ marginTop: 6, marginLeft: 8, marginRight: 8, padding: 8, borderRadius: 8,
+        border: '1px solid var(--t-danger-border)', fontSize: 10.5, fontWeight: 320, lineHeight: 1.5,
+        color: 'var(--t-danger)', wordBreak: 'break-word' }}>
+        {installError}
+      </div>
+    ) : null;
+  }
+  if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
 
   // A deb/rpm Linux install cannot replace itself, so the same slot carries a

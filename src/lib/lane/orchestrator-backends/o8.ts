@@ -19,7 +19,6 @@
  */
 
 import { resolveBackendTurnModel } from '@/lib/orchestrator/turn-model-selection';
-import { getEntitlementSync } from '@/lib/entitlement/store';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
 import { readFile } from 'node:fs/promises';
 import { readOrchestratorThreadMessages, safeOrchestratorHistoryPath } from '@/lib/mobile/orchestrator-thread-history';
@@ -114,14 +113,12 @@ Answer style:
 - A strict requested output format overrides every style preference. Return only that format, with no preface or afterword.`;
 
 /**
- * Rail tier for a text-only fallback turn. Mirrors the proxy's own gate
- * (`paidPlan && !wantsLow`, route.ts) so the prompt matches the rail it picks:
- * explicit effort wins, absent = plan auto (paid High, free Low).
+ * Rail tier for a text-only fallback turn: Low on every plan. High runs only
+ * with a member's own key (#2864), so the composer stopped offering it (#2999)
+ * and this turn requests Low explicitly rather than letting the proxy infer
+ * High from a paid plan (#3660).
  */
-export function o8FallbackTier(paidPlan: boolean, thinkingEffort: OrchestratorTurnOptions['thinkingEffort']): 'low' | 'high' {
-  if (thinkingEffort === 'high' || thinkingEffort === 'low') return thinkingEffort;
-  return paidPlan ? 'high' : 'low';
-}
+const O8_FALLBACK_TIER = 'low';
 
 // Brand identity guard (#1575, live-hit 2026-07-17): a founder asked the free
 // model who it was — first answer stayed "the o8 model", the summary two
@@ -194,7 +191,7 @@ async function sendTextOnlyTurn(
     prior.length > 0 && prior[prior.length - 1].role === 'user'
       ? prior
       : [...prior, { role: 'user', content: message }];
-  const tier = o8FallbackTier(getEntitlementSync().plan !== 'free', options.thinkingEffort);
+  const tier = O8_FALLBACK_TIER;
   onEvent({ type: 'turn_receipt', leadModel: o8ReceiptModel(options), effort: tier });
   // Say why before anything streams, so a text-only answer is never mistaken for the agent.
   onEvent({ type: 'text', text: `${blocker}, so this reply is text only, without o8 commands, file edits or tools.\n\n` });
@@ -251,12 +248,8 @@ async function sendTextOnlyTurn(
         messages,
         // Text only. The proxy never attaches tools to the operator rail either.
         disableTools: true,
-        // Tier gate (Q ruling 2026-07-12): High = paid rail, Low = free rail.
-        // Absent = server auto by plan. The proxy enforces the plan either
-        // way — this is a request, not an entitlement.
-        ...(options.thinkingEffort
-          ? { thinkingEffort: options.thinkingEffort === 'high' ? 'high' : 'low' }
-          : {}),
+        // Always explicit: an absent effort lets the proxy pick High for a paid plan.
+        thinkingEffort: tier,
       }),
       signal: controller.signal,
     });

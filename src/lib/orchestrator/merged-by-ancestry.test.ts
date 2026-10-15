@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorLaneBinding, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 const h = vi.hoisted(() => ({
-  beforeActivityAssessment: null as null | (() => void),
+  beforeActivityAssessment: null as null | (() => void | Promise<void>),
 }));
 
 vi.mock('@/lib/lane/reaper-liveness', async (importOriginal) => {
@@ -17,7 +17,7 @@ vi.mock('@/lib/lane/reaper-liveness', async (importOriginal) => {
     assessOwnedTranscriptActivity: async (...args: Parameters<typeof actual.assessOwnedTranscriptActivity>) => {
       const callback = h.beforeActivityAssessment;
       h.beforeActivityAssessment = null;
-      callback?.();
+      await callback?.();
       return actual.assessOwnedTranscriptActivity(...args);
     },
   };
@@ -29,7 +29,7 @@ process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT = mkdtempSync(
   join(tmpdir(), 'o8-merged-by-ancestry-owned-claude-'),
 );
 
-const { appendEvent, createLane, deleteLane, getLane, getLaneEvents, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, deleteLane, getLane, getLaneEvents, listActiveLanes, setLaneStatus, updateLane } = await import('@/lib/lane/registry');
 const { triggerAutoReview } = await import('@/lib/lane/auto-review');
 const { getSqlite } = await import('@/lib/db');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -37,6 +37,8 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
 const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
 const { prepareMissionBranches } = await import('@/lib/orchestrator/operator-mission-service/branch-cleanup');
+const { withPacketLifecycleMutationLock } = await import('@/lib/orchestrator/lifecycle-mutation-lock');
+const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 const tempDirs: string[] = [];
@@ -183,6 +185,77 @@ afterEach(() => {
 });
 
 describe('merged-by-ancestry reconciliation', () => {
+  it.each([
+    ['parkable', false, false], ['hibernating', false, false], ['parked', false, false],
+    ['restoring', false, false], ['retiring', false, false], ['retired', false, false],
+    ['parked', true, false], ['materialized', false, false], ['parked', false, true],
+  ] as const)('respects %s snapshot truth (late: %s, lane-only: %s)', async (state, late, laneOnly) => {
+    const { clone, seed } = makeRepo('o8-snapshot-archive');
+    const packetId = `pkt-snapshot-${state}-${late}-${laneOnly}`;
+    const lane = seedPacket(seed, packetId);
+    triggerAutoReview(getLane(lane.id)!);
+    const sessionKey = `codex-owned:${lane.id}`;
+    const sessionDir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, lane.id);
+    mkdirSync(join(sessionDir, 'runs'), { recursive: true });
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ surfaceId: sessionKey, sessionDir, recentRuns: [], activeRun: null }));
+    const transcript = join(sessionDir, 'runs', 'finished.jsonl');
+    writeFileSync(transcript, 'finished provider evidence\n');
+    const stale = new Date(Date.now() - 60 * 60_000);
+    utimesSync(transcript, stale, stale);
+    updateLane(lane.id, { worktreePath: clone, sessionKey });
+    if (state !== 'materialized') {
+      writeFileSync(join(clone, 'preserved.txt'), 'reviewed work\n');
+      commitAll(clone, 'reviewed work');
+    }
+    const recoveryRef = `refs/o8/recovery/${packetId}`;
+    git(seed, ['fetch', clone, `HEAD:${recoveryRef}`]);
+    const mission = readOrchestratorControlPlaneState();
+    mission.packets[0]!.lane!.worktreePath = clone;
+    writeOrchestratorControlPlaneState(laneOnly ? createEmptyOrchestratorMissionState() : mission);
+    const headCommit = git(clone, ['rev-parse', 'HEAD']);
+    const treeSha = git(clone, ['rev-parse', 'HEAD^{tree}']);
+    const createSnapshot = () => {
+      let snapshot = createWorkspaceSnapshot({
+        repositoryUuid: packetId, packetId, laneId: lane.id,
+        originalPath: clone, branch: 'packet',
+        baseCommit: git(seed, ['rev-parse', 'HEAD']),
+        headCommit, treeSha,
+        recoveryRef, diffFingerprint: 'test-diff',
+        sessionIdentities: [{ kind: 'owned-session', identity: sessionKey }], creationId: 'create',
+      }).record;
+      const steps = state === 'retiring' || state === 'retired'
+        ? ['retiring', 'retired'] as const
+        : ['parkable', 'hibernating', 'parked', 'restoring'] as const;
+      if (state !== 'materialized') {
+        for (const next of steps) {
+          snapshot = transitionWorkspaceSnapshot({
+            repositoryUuid: packetId, packetId, transitionId: next,
+            expectedState: snapshot.state, expectedVersion: snapshot.version, toState: next,
+          }).record!;
+          if (next === state) break;
+        }
+      }
+    };
+    if (late) h.beforeActivityAssessment = () => withPacketLifecycleMutationLock(packetId, async () => { createSnapshot(); });
+    else createSnapshot();
+    rmSync(clone, { recursive: true, force: true });
+    const reviewBefore = getSqlite().prepare('SELECT * FROM review_queue WHERE lane_id = ?').get(lane.id);
+    expect(reviewBefore).toMatchObject({ status: 'pending' });
+    await sweepPacketsMergedByAncestry();
+    if (state === 'materialized') {
+      expect(getLane(lane.id)?.status).toBe('archived');
+      expect(persistedPacket(packetId)?.status).toBe('archived');
+    } else {
+      expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: null, sessionKey });
+      expect(listActiveLanes().map((item) => item.sessionKey)).toContain(sessionKey);
+      expect(readFileSync(transcript, 'utf8')).toBe('finished provider evidence\n');
+      expect(git(seed, ['rev-parse', recoveryRef])).toBe(headCommit);
+      expect(persistedPacket(packetId)?.status).toBe(laneOnly ? undefined : 'awaiting_review');
+      expect(getSqlite().prepare('SELECT * FROM review_queue WHERE lane_id = ?').get(lane.id)).toEqual(reviewBefore);
+      expect(getLaneEvents(lane.id).some((event) => event.payload.reason === 'branch_missing_reconciled')).toBe(false);
+    }
+  });
+
   it.each([
     { label: 'failed', laneStatus: 'failed', packetStatus: 'failed', eventLabel: 'agent_failed' },
     { label: 'stopped', laneStatus: 'paused', packetStatus: 'blocked', eventLabel: 'operator_stopped' },
