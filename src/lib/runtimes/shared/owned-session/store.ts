@@ -22,6 +22,7 @@ import {
 
 import {
   archiveOwnedSessionDir,
+  ownedSessionRecordFingerprint,
   readOwnedSessionState,
   restoreArchivedOwnedSessionDir,
 } from './archive';
@@ -565,6 +566,9 @@ export function createOwnedSessionStore(
       surfaceId: session.surfaceId,
       runtimeId,
       sessionState,
+      ...(sessionState === 'archived' ? {
+        recordFingerprint: ownedSessionRecordFingerprint(session), detached: Boolean(session.detachedAt),
+      } : {}),
       binding: normalizedWorkspaceBinding(session),
       activeRun: session.activeRun ? {
         pid: session.activeRun.pid,
@@ -588,7 +592,32 @@ export function createOwnedSessionStore(
         return bindingReceipt(active, 'active');
       }
       const archived = await io.findArchivedSession(surfaceId);
-      return archived ? bindingReceipt(archived, 'archived') : null;
+      return archived ? bindingReceipt(await io.loadSession(archived.sessionDir), 'archived') : null;
+    });
+  }
+
+  function recoverArchivedWorkspace(
+    surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void,
+  ): Promise<OwnedWorkspaceBindingReceipt> {
+    return withSurfaceLock(surfaceId, async () => {
+      const located = await io.findArchivedSession(surfaceId);
+      const archived = located ? await io.loadSession(located.sessionDir) : null;
+      if (!archived || await io.findSession(surfaceId) || !expected.recordFingerprint
+        || JSON.stringify(bindingReceipt(archived, 'archived')) !== JSON.stringify(expected)
+        || archived.activeRun || archived.detachedAt || !expected.retainedRunsComplete
+        || archived.recentRuns.some((run) => run.outcome === 'running')) {
+        throw new Error('Archived workspace session changed before recovery.');
+      }
+      const restored = await restoreArchivedOwnedSessionDir(root, surfaceId, surfacePrefix, expected.recordFingerprint);
+      if (!restored.restored) throw new Error(restored.note);
+      const active = await io.findSession(surfaceId);
+      if (!active || active.surfaceId !== surfaceId || active.activeRun || active.detachedAt) {
+        throw new Error('Restored session identity could not be verified.');
+      }
+      // Publish the lane while the same surface lock still excludes orphan archival.
+      publish();
+      invalidateFleetCache();
+      return bindingReceipt(active, 'active');
     });
   }
 
@@ -694,6 +723,7 @@ export function createOwnedSessionStore(
     getTelemetrySources: reviewTailController.getTelemetrySources,
     getSessionIdentityId,
     getWorkspaceBinding,
+    recoverArchivedWorkspace,
     rebindWorkspace,
     setReviewDisposition,
     invalidateFleetCache,
