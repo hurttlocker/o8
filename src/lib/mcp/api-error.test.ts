@@ -7,8 +7,8 @@ describe('MCP API error summaries', () => {
   it.each([
     [404, { error: 'packet not found' }, 'packet not found'],
     [400, { error: 'packet\u0000 not found\u001b' }, 'packet not found'],
-    [400, { error: 'x'.repeat(200) }, 'x'.repeat(200)],
-    [400, { error: 'x'.repeat(201) }, 'o8 API error (400)'],
+    [400, { error: 'x'.repeat(500) }, 'x'.repeat(500)],
+    [400, { error: 'x'.repeat(501) }, 'o8 API error (400)'],
     [400, { error: 'private\nstack' }, 'o8 API error (400)'],
     [400, { error: 'private\rstack' }, 'o8 API error (400)'],
     [400, { error: 'private\u2028stack' }, 'o8 API error (400)'],

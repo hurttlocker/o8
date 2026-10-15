@@ -2057,6 +2057,16 @@
       ]
     },
     {
+      "path": "tests/cortex-launch-agent-runtime-errors-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
         "real-path"
