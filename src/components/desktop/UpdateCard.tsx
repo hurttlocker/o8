@@ -6,6 +6,7 @@ import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } fr
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { readCachedSummary, writeCachedSummary } from '@/lib/app-update/changelog-cache';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
@@ -56,7 +57,6 @@ function reportInstall(install: { outcome: 'started' | 'failed'; version: string
 }
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
-const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
@@ -90,28 +90,6 @@ function readExpanded() {
   } catch {
     return false;
   }
-}
-
-function readCachedSummary(version: string): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    if (!raw) return null;
-    const map = JSON.parse(raw) as Record<string, string>;
-    return typeof map[version] === 'string' ? map[version] : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSummary(version: string, summary: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    const map = raw ? JSON.parse(raw) as Record<string, string> : {};
-    map[version] = summary;
-    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
-  } catch { /* ignore */ }
 }
 
 function claimApplyMutation(mutationId: string): boolean {
