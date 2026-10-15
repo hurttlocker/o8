@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, createRef } from 'react';
+import { act, createElement, createRef, useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { XtermPanelHandle, XtermPanelProps } from './XtermPanel';
@@ -37,9 +37,14 @@ class MockTerminal {
   };
 
   loadAddon() {}
-  open() {}
+  private output: HTMLElement | null = null;
+  open(container: HTMLElement) {
+    this.output = document.createElement('pre');
+    this.output.dataset.terminalOutput = 'true';
+    container.appendChild(this.output);
+  }
   focus() {}
-  reset() { xtermMock.resets += 1; }
+  reset() { xtermMock.resets += 1; if (this.output) this.output.textContent = ''; }
   dispose() {}
   getSelection() { return ''; }
   onData(callback: (data: string) => void) {
@@ -54,6 +59,7 @@ class MockTerminal {
   write(data: Uint8Array | string, callback?: () => void) {
     if (data instanceof Uint8Array) xtermMock.writes.push(data);
     const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+    if (this.output) this.output.textContent += text;
     // xterm answers terminal queries while parsing output. Model fragmented
     // response events so the replay boundary cannot leak any fragment.
     if (text.includes('\x1b[c') && !this.options.disableStdin) {
@@ -79,6 +85,51 @@ vi.mock('@/components/desktop/workspace-terminal/xterm-selection-registry', () =
 }));
 
 import { XtermPanel } from './XtermPanel';
+import { WorkspaceTerminalPanels } from './WorkspaceTerminalPanels';
+import { DesktopWebSocketProvider, useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
+
+vi.mock('@/lib/react/retrying-lazy', () => ({ retryingLazy: () => () => null }));
+vi.mock('./WorkspaceChatPane', () => ({ WorkspaceChatPane: () => null }));
+vi.mock('./workspace-boot-loader-claim', () => ({ WorkspaceBootLoaderClaim: () => null }));
+
+class FixtureSocket {
+  static OPEN = 1;
+  static instances: FixtureSocket[] = [];
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror = null;
+  sent: Array<Record<string, unknown>> = [];
+  constructor() { FixtureSocket.instances.push(this); }
+  send(data: string) { this.sent.push(JSON.parse(data)); }
+  close() { this.readyState = 3; }
+  open() { this.readyState = 1; this.onopen?.(); }
+  receive(event: string, data: Record<string, unknown>) {
+    this.onmessage?.({ data: JSON.stringify({ channel: 'terminal', event, data }) } as MessageEvent);
+  }
+}
+
+function ReconnectingWorkspace() {
+  const panelRefs = useMemo(() => ({ current: new Map<string, XtermPanelHandle>() }), []);
+  const ws = useSharedDesktopWs(undefined, {
+    onTerminalResync: (session, data, epoch, truncated, source) => panelRefs.current.get(session)?.applyResync?.(data, epoch, truncated, source),
+  });
+  const noop = () => {};
+  return createElement(WorkspaceTerminalPanels, {
+    workspaceId: 'reconnect-fixture',
+    visibleTabs: [{ id: 'persisted-tab', label: 'Shell', kind: 'terminal', tmuxSession: 'cortex-dash-persisted', createdAt: 1, lastActivity: 1 }],
+    effectiveActiveTabId: 'persisted-tab', restoreSettled: true, panelRefs,
+    termWsConnected: ws.isConnected, projectContextRailVisible: false,
+    sendTerminalAttach: ws.sendTerminalAttach, sendTerminalInput: ws.sendTerminalInput,
+    sendTerminalResize: ws.sendTerminalResize, sendTerminalVisibility: ws.sendTerminalVisibility,
+    sendTerminalDetach: ws.sendTerminalDetach,
+    onCloseTab: noop, onRunInTerminal: noop, onOpenWorkspaceCommitTab: noop,
+    onUpdateLlmSummary: noop, onUpdateLinkedIssue: noop, onUpdateChatMessages: noop,
+    onUpdateChatSessionKey: noop, onUpdateChatModel: noop, onConsumeChatDraftInjection: noop,
+    onSaveCheckpoint: noop, onRestoreLatestCheckpoint: noop,
+  });
+}
 
 function panelProps(visible: boolean): XtermPanelProps {
   return {
@@ -145,6 +196,38 @@ describe('XtermPanel terminal workload instrumentation', () => {
 
     expect(xtermMock.writes).toHaveLength(0);
     expect(window.__o8TerminalWriteStats).toBeUndefined();
+  });
+
+  it('replays the same workspace terminal when its initial attach was dropped and after reconnect', async () => {
+    FixtureSocket.instances = [];
+    vi.stubGlobal('WebSocket', FixtureSocket);
+    await act(async () => {
+      root.render(createElement(DesktopWebSocketProvider, null, createElement(ReconnectingWorkspace)));
+      await Promise.resolve();
+    });
+    const first = FixtureSocket.instances[0];
+    expect(first.sent).toEqual([]); // xterm mounted before the socket opened.
+    vi.useFakeTimers();
+    await act(async () => first.open());
+    const replay = async (socket: FixtureSocket, marker: string) => {
+      expect(socket.sent.filter((entry) => entry.type === 'terminal-attach')).toEqual([
+        expect.objectContaining({ sessionName: 'cortex-dash-persisted' }),
+      ]);
+      const visibility = socket.sent.findLast((entry) => entry.type === 'terminal-visibility');
+      expect(visibility).toMatchObject({ sessionName: 'cortex-dash-persisted', visible: true, needsResync: true });
+      await act(async () => socket.receive('resync', {
+        sessionName: 'cortex-dash-persisted', data: btoa(marker), epoch: visibility?.epoch, source: 'tmux',
+      }));
+      expect(container.querySelector('[data-terminal-output]')?.textContent).toBe(marker);
+      expect(socket.sent.some((entry) => entry.type === 'terminal-create' || entry.type === 'agent-kill')).toBe(false);
+    };
+    await replay(first, 'RELOAD_MARKER');
+    await act(async () => { first.close(); first.onclose?.(); });
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    const second = FixtureSocket.instances[1];
+    await act(async () => second.open());
+    await replay(second, 'RELOAD_MARKER\r\nRECONNECTED');
+    expect(container.querySelectorAll('[data-terminal-output]')).toHaveLength(1);
   });
 
   it('enables accessible terminal output only for an opted-in surface', async () => {

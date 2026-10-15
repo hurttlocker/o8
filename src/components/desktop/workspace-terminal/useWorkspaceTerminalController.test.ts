@@ -9,13 +9,14 @@ import { subscribeTerminalCloseConfirm, type TerminalCloseRequest } from './term
 const restoreHarness = vi.hoisted(() => ({
   resolveValidated: null as null | ((value: unknown) => void),
   validatedPromise: null as Promise<unknown> | null,
+  savedSession: null as string | null,
 }));
 
 vi.mock('./terminal-restore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./terminal-restore')>();
   const restoredTabs = () => ([
     {
-      id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: null,
+      id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: restoreHarness.savedSession,
       cliAgent: 'shell', createdAt: 1, lastActivity: 1,
     },
     {
@@ -27,7 +28,7 @@ vi.mock('./terminal-restore', async (importOriginal) => {
     tabs: restoredTabs(),
     activeTabId: 'terminal-a',
     sessionsToAttach: [],
-    deadTerminalTabs: restoredTabs(),
+    deadTerminalTabs: restoredTabs().filter(tab => tab.tmuxSession === null),
     restoredAny: true,
   });
   return {
@@ -78,6 +79,7 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
 
   beforeEach(() => {
     experimental.chat = false;
+    restoreHarness.savedSession = null;
     restoreHarness.validatedPromise = new Promise((resolve) => {
       restoreHarness.resolveValidated = resolve;
     });
@@ -164,6 +166,30 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     expect(duplicateResult).toBe(true);
     expect(sendTerminalDetach).not.toHaveBeenCalled();
     expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces a saved session positively found dead instead of reviving its stale ID', async () => {
+    restoreHarness.savedSession = 'cortex-dash-expired';
+    const sendTerminalCreate = vi.fn<WorkspaceTerminalProps['sendTerminalCreate']>();
+    const sendTerminalDetach = vi.fn<WorkspaceTerminalProps['sendTerminalDetach']>();
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'dead-saved-terminal', defaultTab: 'terminal', autoCreateDefaultTab: false,
+      termWsConnected: true, sendTerminalCreate, sendTerminalDetach,
+      sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(), sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    const terminalARequests = () => sendTerminalCreate.mock.calls.filter(call => String(call[2]).includes('terminal-a'));
+    // The optimistic phase can attach the saved ID; it must not create over a live shell.
+    expect(terminalARequests()).toHaveLength(0);
+    await act(async () => {
+      const dead = { id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: null, cliAgent: 'shell', createdAt: 1, lastActivity: 1 };
+      restoreHarness.resolveValidated?.({ tabs: [dead], activeTabId: 'terminal-a', sessionsToAttach: [], deadTerminalTabs: [dead], restoredAny: true });
+      await restoreHarness.validatedPromise;
+    });
+    expect(JSON.parse(container.firstElementChild!.getAttribute('data-sessions')!)).toEqual([['terminal-a', null]]);
+    expect(terminalARequests()).toHaveLength(1);
+    expect(terminalARequests()[0][4]).toBe('workspace:terminal-a');
+    expect(sendTerminalDetach).not.toHaveBeenCalled();
   });
 
   it('keeps live repo-less shells when the selected repo hydrates after restore', async () => {

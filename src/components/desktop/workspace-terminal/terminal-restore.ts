@@ -586,12 +586,14 @@ export function mergeUserSpawnedTabs(
 export function reconcileValidatedTabs(
   validatedTabs: TerminalTab[],
   currentTabs: TerminalTab[],
+  acknowledgedDuringRestore: ReadonlySet<string>,
 ): TerminalTab[] {
   const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
   return validatedTabs.map((validatedTab) => {
-    if (validatedTab.kind !== 'terminal' || validatedTab.tmuxSession !== null) return validatedTab;
+    if (validatedTab.kind !== 'terminal') return validatedTab;
     const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
-    return currentSession ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
+    return currentSession && acknowledgedDuringRestore.has(validatedTab.id)
+      ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
   });
 }
 
@@ -614,7 +616,6 @@ export function applyCreatedTerminalSession(
 export function resetControllerRefs(refs: {
   restoredRef: React.MutableRefObject<boolean>;
   restoreSettledRef: React.MutableRefObject<boolean>;
-  previousWsConnectedRef: React.MutableRefObject<boolean>;
   initialTerminalBootstrapRef: React.MutableRefObject<boolean>;
   reportedRepoScopeRef: React.MutableRefObject<string | null | undefined>;
   reportedChatSessionsSignatureRef: React.MutableRefObject<string>;
@@ -627,7 +628,6 @@ export function resetControllerRefs(refs: {
 }): void {
   refs.restoredRef.current = false;
   refs.restoreSettledRef.current = false;
-  refs.previousWsConnectedRef.current = false;
   refs.initialTerminalBootstrapRef.current = false;
   refs.reportedRepoScopeRef.current = undefined;
   refs.reportedChatSessionsSignatureRef.current = '';
