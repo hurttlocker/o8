@@ -3389,6 +3389,17 @@
       ]
     },
     {
+      "path": "tests/orchestrator-stop-turn-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
       "reasons": [
         "child-process",

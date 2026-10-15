@@ -18,6 +18,21 @@ export function transcriptRunningTools(entries: MobileTranscriptEntry[], busy: b
   return (latest.toolCalls ?? []).filter(tool => tool.status === 'running' || tool.status === 'calling');
 }
 
+/**
+ * The operator pressed Stop: the latest reply's in-flight calls end as stopped
+ * at once, so no row or timer keeps running for a turn that is over (#3659).
+ */
+export function stopRunningTools(entries: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  const index = entries.findLastIndex(entry => entry.role === 'assistant');
+  const tools = index < 0 ? [] : entries[index].toolCalls ?? [];
+  if (!tools.some(tool => tool.status === 'running' || tool.status === 'calling')) return entries;
+  const next = [...entries];
+  next[index] = { ...entries[index], toolCalls: tools.map(tool => (
+    tool.status === 'running' || tool.status === 'calling' ? { ...tool, status: 'stopped' as const } : tool
+  )) };
+  return next;
+}
+
 export function transcriptPlan(entries: MobileTranscriptEntry[]) {
   for (const entry of [...entries].reverse()) for (const tool of [...entry.toolCalls ?? []].reverse()) {
     if (tool.status === 'error' || !/^(?:.*__)?(?:update_plan|todowrite)$/i.test(tool.name)) continue;
