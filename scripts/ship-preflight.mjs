@@ -17,6 +17,9 @@ if (intake.status === 'configured') {
 }
 const benchmark = runQuickBenchmarkPreflight({ root });
 const cleanup = benchmark.cleanup;
+for (const recovered of cleanup?.recoveredPrevious ?? []) {
+  console.warn(`[release] interrupted benchmark cleanup: stopped ${recovered.stoppedProcesses} process(es)${recovered.removedOutput ? ', removed the .next output it created' : ''}${recovered.confirmed ? '' : `; unconfirmed: ${recovered.reason}`}`);
+}
 if (cleanup && !cleanup.confirmed) {
   console.warn(`[release] benchmark cleanup unconfirmed: ${cleanup.reason}; the prebuild refuses any output it leaves`);
 } else if (cleanup && (cleanup.stoppedProcesses > 0 || cleanup.removedOutput)) {

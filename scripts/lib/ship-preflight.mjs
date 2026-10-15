@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -24,12 +24,14 @@ function commandReceipt(command, args, options = {}) {
     env: options.env,
     timeout: options.timeoutMs ?? 15_000,
     ...(options.maxBuffer ? { maxBuffer: options.maxBuffer } : {}),
+    ...(options.detached ? { detached: true } : {}),
     windowsHide: true,
   });
   return {
     status: result.status ?? (result.error ? 127 : 0),
     stdout: result.stdout ?? '',
     stderr: result.stderr ?? result.error?.message ?? '',
+    ...(options.detached ? { pid: result.pid ?? null } : {}),
   };
 }
 
@@ -328,13 +330,34 @@ export function performShipPreflight(options) {
 // The quick benchmark boots servers in their own process groups inside the
 // release checkout. A timeout can orphan them, and an orphaned dev server
 // writes `.next`, which the prebuild then refuses as unknown generated output.
-// Every benchmark descendant inherits this marker, so the step stops whatever
-// outlives it and removes output that it created.
+// The benchmark therefore runs in its own process group with a per-run
+// environment marker. When the step ends, every process in that group, every
+// marked process and every group a marked process leads is stopped, and
+// `.next` is removed only when the step created it. A state file lets the next
+// preflight finish the cleanup of a run that was interrupted.
 const BENCHMARK_MARKER = 'O8_SHIP_BENCHMARK_RUN';
 const MARKER_SCAN_MAX_BUFFER = 64 * 1024 * 1024;
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function benchmarkStatePath(root) {
+  const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
+  return join(tmpdir(), `o8-ship-benchmark-${key}.json`);
+}
+
+// Process-group membership is visible for every process of this user, even
+// where macOS hides a process's environment (system binaries, hardened apps).
+function processGroups() {
+  const receipt = commandReceipt('ps', ['-axo', 'pid=,pgid='], { timeoutMs: 15_000, maxBuffer: MARKER_SCAN_MAX_BUFFER });
+  if (receipt.status !== 0) return null;
+  const table = new Map();
+  for (const line of receipt.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (match) table.set(Number(match[1]), Number(match[2]));
+  }
+  return table;
 }
 
 // `ps` prints process environments, which can hold release credentials. Only
@@ -356,16 +379,33 @@ function markedProcessIds(marker) {
   return pids;
 }
 
-// Each signal goes only to a PID whose environment carried the marker in the
-// scan just before it, so a reused PID is not signaled.
-function stopMarkedProcesses(marker) {
+// `groups` holds the benchmark's own process group while it is fresh. A group
+// is otherwise signaled only while a member still shows the marker, so a
+// recorded group whose ID was later reused is never signaled.
+function stopBenchmarkProcesses(marker, groups) {
   if (process.platform === 'win32') return { confirmed: false, stoppedProcesses: 0, reason: 'unsupported platform' };
   const stopped = new Set();
-  for (const signal of ['SIGTERM', 'SIGTERM', 'SIGTERM', 'SIGKILL']) {
-    const pids = markedProcessIds(marker);
-    if (pids === null) return { confirmed: false, stoppedProcesses: stopped.size, reason: 'process scan failed' };
-    if (pids.length === 0) return { confirmed: true, stoppedProcesses: stopped.size };
-    for (const pid of pids) {
+  const signals = ['SIGTERM', 'SIGTERM', 'SIGTERM', 'SIGKILL', null];
+  for (const signal of signals) {
+    const marked = markedProcessIds(marker);
+    const table = processGroups();
+    if (marked === null || table === null) {
+      return { confirmed: false, stoppedProcesses: stopped.size, reason: 'process scan failed' };
+    }
+    const ownGroup = table.get(process.pid);
+    for (const pid of marked) {
+      const group = table.get(pid);
+      if (group !== undefined) groups.add(group);
+    }
+    groups.delete(ownGroup);
+    const members = [...table].filter(([pid, group]) => pid !== process.pid && groups.has(group)).map(([pid]) => pid);
+    const targets = new Set([...marked, ...members]);
+    if (targets.size === 0) return { confirmed: true, stoppedProcesses: stopped.size };
+    if (signal === null) break;
+    for (const group of groups) {
+      try { process.kill(-group, signal); } catch { /* group already empty */ }
+    }
+    for (const pid of targets) {
       try {
         process.kill(pid, signal);
         stopped.add(pid);
@@ -375,21 +415,46 @@ function stopMarkedProcesses(marker) {
     }
     sleepSync(1000);
   }
-  const remaining = markedProcessIds(marker);
-  return remaining !== null && remaining.length === 0
-    ? { confirmed: true, stoppedProcesses: stopped.size }
-    : { confirmed: false, stoppedProcesses: stopped.size, reason: `${remaining?.length ?? 'unknown'} benchmark processes remain` };
+  return { confirmed: false, stoppedProcesses: stopped.size, reason: 'benchmark processes remain after SIGKILL' };
 }
 
-function settleQuickBenchmark(root, marker, outputExisted) {
-  const settlement = stopMarkedProcesses(marker);
+function removeCreatedOutput(root) {
   const output = join(root, '.next');
-  let removedOutput = false;
-  if (!outputExisted && lstatSync(output, { throwIfNoEntry: false })) {
+  if (!lstatSync(output, { throwIfNoEntry: false })) return { removedOutput: false };
+  try {
     rmSync(output, { recursive: true, force: true });
-    removedOutput = true;
+    return { removedOutput: true };
+  } catch (error) {
+    return { removedOutput: false, outputError: error instanceof Error ? error.message : String(error) };
   }
-  return { ...settlement, removedOutput };
+}
+
+function settleBenchmarkRun(root, run, groups) {
+  const settlement = stopBenchmarkProcesses(run.marker, groups);
+  // A step that started without `.next` owns any `.next` present now, unless
+  // a prebuild has since bound it to the generated-output store.
+  const bound = lstatSync(join(root, '.o8-generated-output-store'), { throwIfNoEntry: false });
+  const output = !run.outputExisted && !bound ? removeCreatedOutput(root) : { removedOutput: false };
+  const result = { ...settlement, ...output };
+  if (output.outputError) {
+    result.confirmed = false;
+    result.reason = [settlement.reason, `output removal failed: ${output.outputError}`].filter(Boolean).join('; ');
+  }
+  return result;
+}
+
+function readBenchmarkRuns(path) {
+  try {
+    const state = JSON.parse(readFileSync(path, 'utf8'));
+    return Array.isArray(state?.runs) ? state.runs.filter((entry) => typeof entry?.marker === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBenchmarkRuns(path, runs) {
+  if (runs.length === 0) rmSync(path, { force: true });
+  else writeFileSync(path, JSON.stringify({ runs }), { mode: 0o600 });
 }
 
 export function runQuickBenchmarkPreflight(options) {
@@ -399,19 +464,35 @@ export function runQuickBenchmarkPreflight(options) {
     run = commandReceipt,
     timeoutMs = 120_000,
   } = options;
-  const marker = randomUUID();
-  const outputExisted = Boolean(lstatSync(join(root, '.next'), { throwIfNoEntry: false }));
+  const statePath = benchmarkStatePath(root);
+  const pending = [];
+  const recovered = [];
+  for (const previous of readBenchmarkRuns(statePath)) {
+    const settlement = settleBenchmarkRun(root, previous, new Set());
+    recovered.push(settlement);
+    if (!settlement.confirmed) pending.push(previous);
+  }
+
+  const current = {
+    marker: randomUUID(),
+    outputExisted: Boolean(lstatSync(join(root, '.next'), { throwIfNoEntry: false })),
+  };
+  writeBenchmarkRuns(statePath, [...pending, current]);
   let receipt;
   let cleanup;
   try {
     receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
       cwd: root,
-      env: { ...env, [BENCHMARK_MARKER]: marker },
+      env: { ...env, [BENCHMARK_MARKER]: current.marker },
       timeoutMs,
+      detached: true,
     });
   } finally {
-    cleanup = settleQuickBenchmark(root, marker, outputExisted);
+    const groups = new Set(typeof receipt?.pid === 'number' ? [receipt.pid] : []);
+    cleanup = settleBenchmarkRun(root, current, groups);
+    writeBenchmarkRuns(statePath, cleanup.confirmed ? pending : [...pending, current]);
   }
+  if (recovered.length > 0) cleanup.recoveredPrevious = recovered;
   return { ...parseQuickBenchmarkReceipt(receipt), cleanup };
 }
 
@@ -455,6 +536,7 @@ function parseQuickBenchmarkReceipt(receipt) {
 }
 
 export const shipPreflightInternals = {
+  benchmarkStatePath,
   commandReceipt,
   parseRemoteTagHead,
   repositoryFromRemote,

@@ -2,6 +2,7 @@ export interface ShipCommandReceipt {
   status: number;
   stdout: string;
   stderr: string;
+  pid?: number | null;
 }
 
 export interface ShipPreflightReceipt {
@@ -23,6 +24,14 @@ export interface ShipPreflightReceipt {
   toolchains: Record<string, string>;
 }
 
+export interface QuickBenchmarkCleanup {
+  confirmed: boolean;
+  stoppedProcesses: number;
+  removedOutput: boolean;
+  reason?: string;
+  outputError?: string;
+}
+
 export interface QuickBenchmarkPreflightReceipt {
   schema: 'o8/benchmark-quick-preflight/v1';
   status: 'ok' | 'regressed' | 'incomplete' | 'unavailable';
@@ -41,12 +50,7 @@ export interface QuickBenchmarkPreflightReceipt {
   } | null;
   comparedTo?: string | null;
   resultPath?: string | null;
-  cleanup?: {
-    confirmed: boolean;
-    stoppedProcesses: number;
-    removedOutput: boolean;
-    reason?: string;
-  };
+  cleanup?: QuickBenchmarkCleanup & { recoveredPrevious?: QuickBenchmarkCleanup[] };
 }
 
 export function acquireReleaseLock(options?: { lockPath?: string }): {
@@ -71,5 +75,6 @@ export function runQuickBenchmarkPreflight(options: {
     cwd?: string;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    detached?: boolean;
   }) => ShipCommandReceipt;
 }): QuickBenchmarkPreflightReceipt;
