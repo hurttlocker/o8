@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { initRepo, RepoInitError } from '@/lib/repos/bootstrap';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,7 @@ function bodyPath(body: InitRepoBody): string {
   return value.trim();
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as InitRepoBody | null;
   const repoPath = body ? bodyPath(body) : '';
   if (!repoPath) {
@@ -47,3 +48,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });
   }
 }
+
+export const POST = withRepoInventoryChange('repo-init', handlePOST);

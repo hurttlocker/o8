@@ -10,8 +10,8 @@ import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationId
   type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { captureLinkedGitBuildCustody, assertLinkedGitBuildCustody, validateLinkedGitBuildCustody,
   type LinkedGitBuildCustody } from './linked-git-build-custody';
-import { captureGeneratedOutputEntries, verifyGeneratedOutputEntries, GENERATED_BANK_LIMITS,
-  type GeneratedOutputContentEntry } from './generated-output-bank';
+import { GENERATED_BANK_LIMITS } from './generated-output-bank';
+import { captureLegacyOutputEntries, verifyLegacyOutputEntries, type LegacyOutputEntry } from './legacy-output-inventory';
 import { generatedOutputOwner, withGeneratedOutputExclusion } from './generated-output-state';
 import { evidenceHash } from './generated-output-retirement';
 import { getWorkspaceRetentionHold } from './retention-holds';
@@ -30,7 +30,7 @@ export interface LegacyOutputPark {
   custody: LinkedGitBuildCustody;
   intent: string;
   evidence: Array<{ path: string; sha256: string }>;
-  entries: GeneratedOutputContentEntry[];
+  entries: LegacyOutputEntry[];
   contentDigest: string;
   retainedBytes: number;
   createdAt: number;
@@ -149,7 +149,7 @@ async function verify(record: LegacyOutputPark, candidate: string): Promise<void
     }
   }
   await stopped(record.workspace, candidate);
-  await verifyGeneratedOutputEntries({ entries: record.entries, candidate: { ...record.output, canonicalPath: candidate } });
+  await verifyLegacyOutputEntries({ workspace: record.workspace, entries: record.entries, candidate: { ...record.output, canonicalPath: candidate } });
   await stopped(record.workspace, candidate);
   await assertLinkedGitBuildCustody(record.workspace, record.custody);
   holdsAndClaims(record.workspace, record.output, record.retainedPath);
@@ -196,7 +196,7 @@ export async function parkLegacyOutput(input: { workspacePath: string; intent: s
       evidence.push({ path: selected, sha256: await evidenceHash(selected) });
     }
     if (new Set(evidence.map(value => value.path)).size !== evidence.length) throw new Error('Legacy evidence files must be distinct.');
-    const entries = await captureGeneratedOutputEntries(output); const now = Date.now();
+    const entries = await captureLegacyOutputEntries({ workspace, candidate: output }); const now = Date.now();
     const record: LegacyOutputPark = { schema: 'o8/retained-legacy-output/v1', operationId, state: 'prepared', version: 1,
       workspace, output, originalPath: output.canonicalPath, retainedPath, custody, intent: input.intent, evidence,
       entries, contentDigest: digest(entries), retainedBytes: entries.reduce((sum, entry) => sum + entry.bytes, 0), createdAt: now, updatedAt: now };
@@ -230,7 +230,7 @@ export async function continueLegacyOutputPark(operationId: string, restore = fa
     if (restore && record.state !== 'restored') throw new Error('Legacy restoration requires parked output.');
     const candidate = record.state === 'parked' ? record.retainedPath : record.originalPath;
     await assertWorktreeMaterializationIdentity(candidate, { ...record.output, canonicalPath: candidate });
-    await verifyGeneratedOutputEntries({ entries: record.entries, candidate: { ...record.output, canonicalPath: candidate } });
+    await verifyLegacyOutputEntries({ workspace: record.workspace, entries: record.entries, candidate: { ...record.output, canonicalPath: candidate } });
     return record;
   });
 }

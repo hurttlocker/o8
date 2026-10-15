@@ -4022,6 +4022,16 @@
       ]
     },
     {
+      "path": "tests/repo-inventory-realtime-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/repo-package-manager-contract-real-path.test.ts",
       "reasons": [
         "child-process",

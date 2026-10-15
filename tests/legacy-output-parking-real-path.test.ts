@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +25,24 @@ async function fixture() {
   }
   const output = path.join(workspace, '.next'); mkdirSync(path.join(output, 'dev'), { recursive: true });
   writeFileSync(path.join(output, 'proof'), 'intact retained legacy bytes');
+  const links = [
+    ['dev/node_modules/better-sqlite3-90e2652d1716b047', '../../../node_modules/better-sqlite3'],
+    ['dev/node_modules/@earendil-works/pi-ai-5e96b54476ded9ea', '../../../../node_modules/@earendil-works/pi-ai'],
+  ].map(([relative, target]) => {
+    const leaf = path.join(output, relative); mkdirSync(path.dirname(leaf), { recursive: true });
+    const dependency = path.resolve(path.dirname(leaf), target); mkdirSync(dependency, { recursive: true });
+    const sentinel = path.join(dependency, 'sentinel'); writeFileSync(sentinel, 'untouched dependency bytes');
+    symlinkSync(target, leaf); const node = lstatSync(leaf);
+    return { relative, target, sentinel, device: node.dev, inode: node.ino };
+  });
+  function assertLinks(directory: string) {
+    for (const link of links) {
+      const leaf = path.join(directory, link.relative); const node = lstatSync(leaf);
+      expect(node.isSymbolicLink()).toBe(true); expect(node.dev).toBe(link.device); expect(node.ino).toBe(link.inode);
+      expect(readlinkSync(leaf)).toBe(link.target);
+      expect(readFileSync(link.sentinel, 'utf8')).toBe('untouched dependency bytes');
+    }
+  }
   const stopped = spawnSync(process.execPath, ['-e', 'process.exit(0)']); expect(stopped.status).toBe(0);
   const lock = JSON.stringify({ pid: stopped.pid, startedAt: Date.now() });
   writeFileSync(path.join(output, 'dev/lock'), lock);
@@ -60,11 +78,15 @@ async function fixture() {
   };
   function scriptHook(body: string) { writeFileSync(hook, `#!${process.execPath}\n${body}\n`, { mode: 0o700 }); }
   function success(result: ReturnType<typeof cli>) { expect(result.status, result.stderr + result.stdout).toBe(0); return JSON.parse(result.stdout.trim().split('\n').at(-1)!).legacy[0]; }
-  return { root, workspace, output, data, hook, helper, env, evidence, lock, cli, cold, moduleUrl, park, rows, scriptHook, success };
+  return { root, workspace, output, data, hook, helper, env, evidence, lock, links, assertLinks, cli, cold, moduleUrl, park, rows, scriptHook, success };
 }
 
 it('preserves native legacy parking, refuses raced/replaced destinations, and cold-replays restoration', async () => {
   const f = await fixture(); const identity = lstatSync(f.output);
+  const strictBank = f.cold(`const bank=await import(${f.moduleUrl('src/lib/workspace/generated-output-bank.ts')});
+    const ids=await import(${f.moduleUrl('src/lib/worktree/materialization-identity.ts')});
+    await (bank.default??bank).captureGeneratedOutputEntries(await (ids.default??ids).captureWorktreeMaterializationIdentity(${JSON.stringify(f.output)}));`);
+  expect(strictBank.status).not.toBe(0); expect(strictBank.stderr).toContain('bank refuses links'); f.assertLinks(f.output);
   // Real process with cwd inside the linked workspace must prevent parking.
   const live = spawn(process.execPath, ['-e', 'process.stdout.write("ready");setInterval(()=>{},1000)'], { cwd: f.workspace });
   const closed = once(live, 'close'); let ready = ''; live.stdout.on('data', value => { ready += value; });
@@ -97,7 +119,7 @@ it('preserves native legacy parking, refuses raced/replaced destinations, and co
   renameSync(f.output, path.join(f.root, 'replacement-retained'));
   renameSync(path.join(f.root, 'original-held-for-test'), f.output);
   record = f.success(f.cli('resume-legacy', '--operation', record.operationId));
-  expect(record.state).toBe('parked'); expect(record.reclaimedBytes).toBe(0);
+  expect(record.state).toBe('parked'); expect(record.reclaimedBytes).toBe(0); f.assertLinks(record.retainedPath);
   expect(existsSync(f.output)).toBe(false); expect(lstatSync(record.retainedPath).ino).toBe(identity.ino);
   expect(readFileSync(path.join(record.retainedPath, 'dev/lock'), 'utf8')).toBe(f.lock);
   const retainedGuard = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/retention-holds.ts')});
@@ -114,6 +136,18 @@ it('preserves native legacy parking, refuses raced/replaced destinations, and co
   const changed = f.cli('restore-legacy', '--operation', record.operationId);
   expect(changed.status).not.toBe(0); expect(f.rows()[0].state).toBe('parked');
   writeFileSync(path.join(record.retainedPath, 'proof'), 'intact retained legacy bytes');
+  // The same target text on a replacement inode cannot inherit the journal.
+  const originalLink = path.join(record.retainedPath, f.links[0].relative);
+  const savedLink = path.join(f.root, 'original-link-retained'); renameSync(originalLink, savedLink);
+  symlinkSync(f.links[0].target, originalLink);
+  const replacementLink = f.cli('restore-legacy', '--operation', record.operationId);
+  expect(replacementLink.status).not.toBe(0); expect(replacementLink.stderr).toContain('node identity changed');
+  renameSync(originalLink, path.join(f.root, 'replacement-link-retained'));
+  symlinkSync('../../../node_modules/other', originalLink);
+  const changedLink = f.cli('restore-legacy', '--operation', record.operationId);
+  expect(changedLink.status).not.toBe(0); expect(changedLink.stderr).toContain('link target is unsafe');
+  renameSync(originalLink, path.join(f.root, 'changed-link-retained')); renameSync(savedLink, originalLink);
+  f.assertLinks(record.retainedPath); expect(f.rows()[0].state).toBe('parked');
   // Mutation completes but native receipt is interrupted: journal remains restoring.
   f.scriptHook("if(process.argv[2]==='directory-after-rename') process.kill(Number(process.argv[3]),'SIGKILL');");
   const interrupted = f.cli('restore-legacy', '--operation', record.operationId);
@@ -121,12 +155,13 @@ it('preserves native legacy parking, refuses raced/replaced destinations, and co
   expect(lstatSync(f.output).ino).toBe(identity.ino); expect(existsSync(record.retainedPath)).toBe(false);
   renameSync(f.hook, path.join(f.root, 'interrupt-hook-disabled'));
   record = f.success(f.cli('resume-legacy', '--operation', record.operationId));
+  f.assertLinks(f.output);
   expect(record.state).toBe('restored'); expect(readFileSync(path.join(f.output, 'proof'), 'utf8')).toBe('intact retained legacy bytes');
   expect(readFileSync(path.join(f.output, 'dev/lock'), 'utf8')).toBe(f.lock);
   // A separate fresh generation may run after parking; legacy history stays retained.
   f.scriptHook("if(process.argv[2]==='directory-after-rename') process.kill(Number(process.argv[3]),'SIGKILL');");
   expect(f.park().status).not.toBe(0);
-  record = f.rows()[1]; expect(record.state).toBe('prepared'); expect(existsSync(f.output)).toBe(false);
+  record = f.rows()[1]; f.assertLinks(record.retainedPath); expect(record.state).toBe('prepared'); expect(existsSync(f.output)).toBe(false);
   renameSync(f.hook, path.join(f.root, 'park-interrupt-hook-disabled'));
   const pending = f.cold(`const ns=await import(${f.moduleUrl('src/lib/workspace/generated-output-producer.ts')});
     const {runGeneratedOutputPrebuild}=ns.default??ns;
@@ -147,13 +182,27 @@ it('preserves native legacy parking, refuses raced/replaced destinations, and co
   const missingGeneration = f.cli('restore-legacy', '--operation', record.operationId);
   expect(missingGeneration.status).not.toBe(0); expect(missingGeneration.stderr).toContain('registered output generations');
   renameSync(path.join(f.root, 'new-generation-held-for-test'), f.output);
+  f.assertLinks(record.retainedPath);
   expect(f.rows().map(row => row.state)).toEqual(['restored', 'parked']);
   expect(lstatSync(record.retainedPath).ino).toBe(identity.ino);
-  writeFileSync(path.join(f.root, 'product-state.json'), JSON.stringify({ legacy: f.rows(), generation, contender, newcomer: newcomer.ino }, null, 2));
+  writeFileSync(path.join(f.root, 'product-state.json'), JSON.stringify({ legacy: f.rows(), links: f.links, generation, contender, newcomer: newcomer.ino }, null, 2));
 }, 600_000);
 
 it('refuses unknown lock evidence, missing native capability and persisted holds without losing legacy bytes', async () => {
   const f = await fixture(); const identity = lstatSync(f.output);
+  const originalLink = path.join(f.output, f.links[0].relative);
+  const savedLink = path.join(f.root, 'safe-link-retained'); renameSync(originalLink, savedLink);
+  for (const [index, target] of ['/outside/dependency', '../../../../outside', '../../../node_modules/./better-sqlite3'].entries()) {
+    symlinkSync(target, originalLink); const refused = f.park();
+    expect(refused.status).not.toBe(0); expect(refused.stderr).toContain('link target is unsafe');
+    expect(f.rows()).toEqual([]); renameSync(originalLink, path.join(f.root, `unsafe-link-${index}-retained`));
+  }
+  renameSync(savedLink, originalLink); f.assertLinks(f.output);
+  // A redirected ancestor is a link node to refuse, never a directory to traverse.
+  const modules = path.join(f.output, 'dev/node_modules'); const savedModules = path.join(f.root, 'original-modules-retained');
+  renameSync(modules, savedModules); symlinkSync(savedModules, modules);
+  const redirected = f.park(); expect(redirected.status).not.toBe(0); expect(redirected.stderr).toContain('link shape is unsafe');
+  renameSync(modules, path.join(f.root, 'redirected-ancestor-retained')); renameSync(savedModules, modules); f.assertLinks(f.output);
   const unavailable = path.join(f.root, 'unavailable-probe'); mkdirSync(unavailable);
   writeFileSync(path.join(unavailable, 'lsof'), `#!${process.execPath}\nprocess.stderr.write('fixture unavailable');process.exit(2);\n`, { mode: 0o700 });
   const uncertain = f.park({ PATH: unavailable + path.delimiter + process.env.PATH });
@@ -177,5 +226,5 @@ it('refuses unknown lock evidence, missing native capability and persisted holds
   expect(refused.status).not.toBe(0); expect(refused.stderr).toContain('retention hold');
   expect(lstatSync(record.retainedPath).ino).toBe(identity.ino);
   expect(f.rows()[0].state).toBe('parked');
-  writeFileSync(path.join(f.root, 'product-state.json'), JSON.stringify({ legacy: f.rows(), held: true }, null, 2));
+  writeFileSync(path.join(f.root, 'product-state.json'), JSON.stringify({ legacy: f.rows(), links: f.links, held: true }, null, 2));
 }, 300_000);
