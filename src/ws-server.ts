@@ -149,7 +149,7 @@ import {
   validateComposerImageAttachments,
   type ComposerImageAttachment,
 } from './lib/mobile/composer-image-validation';
-import { createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
+import { appendOperatorStopNote, createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
@@ -5773,6 +5773,7 @@ async function handleOrchestratorSendMsgOnce(
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
         sawTerminal = true;
+        if (turnController?.signal.aborted) appendOperatorStopNote(assistantText);
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
@@ -6199,6 +6200,7 @@ async function handleOrchestratorSendMsgOnce(
     // client latch releases instead of counting up to the 4-hour reaper.
     // (2026-06-22 latch audit)
     if (!sawTerminal && sessionName) {
+      if (turnController?.signal.aborted) appendOperatorStopNote(assistantText);
       persistAssistantText(null);
       broadcastToOrchestratorSession(sessionName, JSON.stringify({
         channel: 'orchestrator',
