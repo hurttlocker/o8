@@ -1,10 +1,14 @@
 import { createRequire } from 'node:module';
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { PiWorkerSessionRecord } from '@/lib/pi-builtin/types';
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
   JSDOM: new (html?: string, options?: { url?: string }) => {
@@ -21,6 +25,7 @@ vi.stubGlobal('HTMLElement', dom.window.HTMLElement);
 vi.stubGlobal('Element', dom.window.Element);
 vi.stubGlobal('Node', dom.window.Node);
 vi.stubGlobal('Event', dom.window.Event);
+vi.stubGlobal('CustomEvent', dom.window.CustomEvent);
 vi.stubGlobal('MouseEvent', dom.window.MouseEvent);
 vi.stubGlobal('getComputedStyle', dom.window.getComputedStyle.bind(dom.window));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
@@ -40,6 +45,11 @@ const transcriptRenderMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/transcripts/useTranscript', () => ({
   useTranscript: () => transcriptMock.slice,
+}));
+
+vi.mock('@/lib/realtime/publisher', () => ({
+  publishRealtimeMutation: vi.fn(),
+  requestRealtimeRefresh: vi.fn(),
 }));
 
 vi.mock('framer-motion', () => ({
@@ -234,6 +244,106 @@ describe('AgentTilePane structured packet transcript delivery', () => {
     expect(fetchMock).toHaveBeenCalled();
     expect(toolCall).toMatchObject({ name: 'shell', args: { command } });
     expect(transcriptRenderMock.entries.some((entry) => entry.text.includes('{"command"'))).toBe(false);
+  });
+
+  it('maps persisted Pi logs through the real route and refreshes after a later persisted event', async () => {
+    // WorkspaceTranscript is intentionally mocked above: this proves the mounted
+    // pane's polling/mapping boundary, not the visual tool-chip implementation.
+    const dataRoot = process.env.CORTEX_IDE_DATA_DIR;
+    if (!dataRoot || process.env.O8_DATA_DIR) throw new Error('An isolated test data root is required.');
+    const fixtureRoot = mkdtempSync(join(dataRoot, 'pi-pane-transcript-'));
+    const priorPiRoot = process.env.O8_OWNED_PI_BUILTIN_ROOT;
+    process.env.O8_OWNED_PI_BUILTIN_ROOT = join(fixtureRoot, 'owned-pi-builtin');
+    const sessionKey = 'pi-builtin-owned:pane-transcript';
+    const sessionDir = join(process.env.O8_OWNED_PI_BUILTIN_ROOT, 'pane-transcript');
+    const stdoutPath = join(sessionDir, 'runs', 'run.jsonl');
+    mkdirSync(join(sessionDir, 'runs'), { recursive: true });
+    const at = '2026-10-14T12:00:00.000Z';
+    const logLine = (event: Record<string, unknown>) => `${JSON.stringify({ at, ...event })}\n`;
+    writeFileSync(stdoutPath,
+      logLine({ type: 'tool_call', name: 'read_file', args: { path: 'src/worker.ts' } })
+      + logLine({ type: 'tool_result', name: 'read_file', output: 'Worker source read.', isError: false })
+      + logLine({ type: 'assistant', text: 'The worker is ready.' })
+      + logLine({ type: 'settled', outcome: 'finished', summary: 'Finished.' }));
+    const session: PiWorkerSessionRecord = {
+      surfaceId: sessionKey, sessionDir, cwd: fixtureRoot, repoPath: fixtureRoot,
+      title: 'Pi pane transcript', createdAt: at, updatedAt: at,
+      latestPrompt: 'Read the worker', latestSummary: 'The worker is ready.',
+      model: 'fixture-model', readOnly: true,
+      recentRuns: [{ id: 'run', mode: 'launch', prompt: 'Read the worker', startedAt: at,
+        outcome: 'finished', stdoutPath }],
+    };
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(session));
+
+    const received: TranscriptEvent[][] = [];
+    let readCompleted!: () => void;
+    let readFinished = new Promise<void>((resolve) => { readCompleted = resolve; });
+    let getTranscript: typeof import('@/app/api/orchestrator/packet-transcript/route').GET;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(new URL(String(input), dom.window.location.origin), init);
+      const url = new URL(request.url);
+      if (url.origin !== dom.window.location.origin || request.method !== 'GET') {
+        throw new Error(`Unexpected pane fetch: ${request.method} ${url.pathname}`);
+      }
+      if (url.pathname === '/api/agents/presence') return Response.json({ agents: [] });
+      if (url.pathname !== '/api/orchestrator/packet-transcript') {
+        throw new Error(`Unexpected pane fetch: ${url.pathname}`);
+      }
+      const headers = new Headers(request.headers);
+      headers.set('host', url.host);
+      const response = await getTranscript(new NextRequest(url, { headers, signal: request.signal }));
+      expect(response.status).toBe(200);
+      received.push((await response.clone().json() as { events: TranscriptEvent[] }).events);
+      readCompleted();
+      return response;
+    });
+    const priorWindowFetch = dom.window.fetch;
+    globalThis.fetch = fetchMock;
+    dom.window.fetch = fetchMock;
+    const { closeDb } = await import('@/lib/db');
+    try {
+      ({ GET: getTranscript } = await import('@/app/api/orchestrator/packet-transcript/route'));
+      const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+      const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+      const packet = packetFixture('pi-builtin');
+      packet.lane = { ...packet.lane!, sessionKey, repoPath: fixtureRoot, worktreePath: fixtureRoot };
+      packet.workspaceTargetPath = fixtureRoot;
+      writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), packets: [packet] });
+
+      vi.useFakeTimers();
+      Object.defineProperty(dom.window, 'setInterval', { configurable: true, value: globalThis.setInterval });
+      Object.defineProperty(dom.window, 'clearInterval', { configurable: true, value: globalThis.clearInterval });
+      await act(async () => {
+        root.render(createElement(AgentTilePane, {
+          sessionKey, agent: { name: 'Pi worker', status: 'running', runtime: 'pi-builtin' }, packet,
+          focused: true, onClose: () => {}, onFocus: () => {},
+        }));
+      });
+      await act(async () => { await readFinished; });
+      expect(received[0].map((event) => event.type)).toEqual(['tool_call', 'tool_result', 'assistant', 'done']);
+      expect(transcriptRenderMock.entries).toEqual([expect.objectContaining({
+        role: 'assistant', text: 'The worker is ready.',
+        toolCalls: [expect.objectContaining({ name: 'read_file', status: 'done',
+          args: { path: 'src/worker.ts' }, preview: 'Worker source read.' })],
+      })]);
+      expect(host.textContent).not.toContain('unavailable');
+
+      appendFileSync(stdoutPath, logLine({ type: 'assistant', text: 'Later Pi event reached the pane.' }));
+      readFinished = new Promise<void>((resolve) => { readCompleted = resolve; });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+        await readFinished;
+      });
+      expect(received).toHaveLength(2);
+      expect(received[1].at(-1)).toMatchObject({ seq: 5, type: 'assistant', text: 'Later Pi event reached the pane.' });
+      expect(host.textContent).toContain('Later Pi event reached the pane.');
+      expect(transcriptRenderMock.entries.some((entry) => entry.text.includes('{"command"'))).toBe(false);
+    } finally {
+      closeDb();
+      dom.window.fetch = priorWindowFetch;
+      if (priorPiRoot === undefined) delete process.env.O8_OWNED_PI_BUILTIN_ROOT;
+      else process.env.O8_OWNED_PI_BUILTIN_ROOT = priorPiRoot;
+    }
   });
 
   it('does not render a step_finish reason from the generic history fallback', async () => {
