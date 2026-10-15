@@ -99,9 +99,6 @@ export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
 ): string {
-  if (backend === 'o8' && effort === 'low') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · managed model`;
-  }
   return THINKING_EFFORT_LABELS[effort].detail;
 }
 
@@ -319,7 +316,8 @@ export function supportedEffortsForLead(
   _isFreePlan = false,
   ultraEnabled = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return ['low'];
+  // The o8 lead has one setting on every plan (#2999), so it offers no effort control (#3660).
+  if (backend === 'o8') return [];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   // Adaptive is a provider thinking mode, not a manual effort level.
   const base = [...BASE_EFFORTS];
@@ -366,8 +364,9 @@ export function setModelEffort(
 export function resolveComposerSelectorState(input: ResolveComposerSelectorInput): ResolvedComposerSelectorState {
   const storedEffort = input.inSessionEffortByModel[input.leadModelId]
     ?? input.threadEffortByModel[input.leadModelId];
+  // The o8 lead always sends Low; a saved effort from the old two-tier picker never applies.
   const requestedEffort = input.leadBackend === 'o8'
-    ? storedEffort ?? 'low'
+    ? 'low'
     : storedEffort ?? input.operatorDefaultEffort;
   const effortOptions = supportedEffortsForLead(
     input.leadBackend,
@@ -407,7 +406,10 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
   const workerTail = workerModelLabel
     ? `${workerRuntimeLabel} · ${workerModelLabel}`
     : workerRuntimeLabel;
-  const atRestText = `${input.leadModelLabel} · ${THINKING_EFFORT_LABELS[effort].short} / workers ${workerTail}`;
+  const leadText = input.leadBackend === 'o8'
+    ? input.leadModelLabel
+    : `${input.leadModelLabel} · ${THINKING_EFFORT_LABELS[effort].short}`;
+  const atRestText = `${leadText} / workers ${workerTail}`;
   return {
     mode: mode.id,
     modeLabel: mode.long,
