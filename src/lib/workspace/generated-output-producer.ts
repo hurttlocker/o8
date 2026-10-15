@@ -6,6 +6,7 @@ import path from 'node:path';
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import { assertLinkedGitBuildCustody, captureLinkedGitBuildCustody } from './linked-git-build-custody';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
   currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
   lastDisposedPrebuildOutput, type GeneratedOutputResource } from './generated-output-state';
@@ -120,6 +121,7 @@ export async function runGeneratedOutputProducer(input: {
 
 async function runReservedProducer(workspace: WorktreeMaterializationIdentity, resource: GeneratedOutputResource,
   input: { mode: 'build' | 'dev' | 'start'; operation: (run: GeneratedOutputSpawn) => Promise<number> }): Promise<number> {
+  if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
   assertGeneratedOutputClaimsReleased(workspace);
   if (!resource.output || resource.state === 'active' || resource.state === 'planned'
     || resource.state === 'failed-held' || resource.bankCapture?.state === 'failed-held'
@@ -143,6 +145,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     if (abortRequested) throw new Error('Generated-output producer admission is closed.');
     if (activeChild) throw new Error('Generated-output child spawns must be serial.');
     if (resource.attempt!.children.length >= 16) throw new Error('Generated-output child count exceeded its bound.');
+    if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
     if (abortRequested) throw new Error('Generated-output producer admission is closed.');
     const child = spawn(process.execPath, ['-e', PRODUCER_START, JSON.stringify({ workspace, output: resource.output, command, args })], {
@@ -169,6 +172,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
       resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children: [...resource.attempt!.children,
         { pid: child.pid, identity: probe.identity, exitCode: null, signal: null, observedClosed: false }] } });
       if (abortRequested) throw new Error('Generated-output producer admission is closed.');
+      if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
       child.send({ continue: true });
     } catch (error) {
       if (child.connected) child.disconnect();
@@ -183,6 +187,7 @@ async function runReservedProducer(workspace: WorktreeMaterializationIdentity, r
     resource = saveGeneratedOutputResource(resource, { attempt: { ...resource.attempt!, children } });
     activeChild = null;
     await assertWorktreeMaterializationIdentity(workspace.canonicalPath, workspace);
+    if (!resource.owner && resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     await assertWorktreeMaterializationIdentity(resource.output!.canonicalPath, resource.output!);
     return result.code ?? 1;
   };
@@ -235,9 +240,7 @@ export async function runGeneratedOutputPrebuild(input: {
   if (typeof Reflect.get(process, 'execve') !== 'function') {
     throw new Error('Generated-output prebuild requires Node.js 22.15+ with process.execve.');
   }
-  if (!containingOwner && !(await lstat(path.join(workspace.canonicalPath, '.git'))).isDirectory()) {
-    throw new Error('Prebuild requires proved containing ownership for a linked or ambiguous checkout.');
-  }
+  const linkedGit = !containingOwner ? await captureLinkedGitBuildCustody(workspace) : undefined;
   // Refuse unknown output or lost authority before exclusion could create a marker.
   const current = currentGeneratedOutputResource(workspace.canonicalPath);
   if ((current || lastDisposedPrebuildOutput(workspace.canonicalPath)) && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
@@ -255,6 +258,9 @@ export async function runGeneratedOutputPrebuild(input: {
     if (JSON.stringify(await generatedOutputOwner(workspace)) !== JSON.stringify(containingOwner)) {
       throw new Error('Generated-output owner changed before prebuild admission.');
     }
+    if (!containingOwner) await assertLinkedGitBuildCustody(workspace, linkedGit);
+    const previous = current ?? lastDisposedPrebuildOutput(workspace.canonicalPath);
+    if (previous?.creationAuthority && !previous.owner) await assertLinkedGitBuildCustody(workspace, previous.creationAuthority.linkedGit);
     assertGeneratedOutputClaimsReleased(workspace);
     input.preflight();
     const disposed = !currentGeneratedOutputResource(workspace.canonicalPath)
@@ -266,8 +272,9 @@ export async function runGeneratedOutputPrebuild(input: {
     const creator = await probeMetadataLockProcessIdentity(process.pid);
     if (creator.state !== 'live') throw new Error('Prebuild creation process identity is unknown.');
     const register = async () => {
+      if (!containingOwner) await assertLinkedGitBuildCustody(workspace, linkedGit);
       const resource = await registerGeneratedOutputLocked(workspace, containingOwner,
-        { kind: 'prebuild', pid: process.pid, identity: creator.identity });
+        { kind: 'prebuild', pid: process.pid, identity: creator.identity, ...(linkedGit ? { linkedGit } : {}) });
       if (!resource.output || (!resource.owner && !resource.creationAuthority)
         || resource.origin !== 'managed-creation' || !['ready', 'succeeded'].includes(resource.state)
         || resource.bank || resource.bankCapture || resource.adoption || resource.recovery || resource.retirement) {

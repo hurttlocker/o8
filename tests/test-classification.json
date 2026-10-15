@@ -2057,6 +2057,16 @@
       ]
     },
     {
+      "path": "tests/cortex-launch-agent-runtime-errors-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3379,6 +3389,17 @@
       ]
     },
     {
+      "path": "tests/orchestrator-stop-turn-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/outsider-waiting-inbox-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3547,6 +3568,7 @@
     {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
+        "git-cli",
         "network-listener",
         "real-path"
       ]
@@ -4629,7 +4651,8 @@
       "path": "tests/tauri-prebuild-profile.test.ts",
       "reasons": [
         "child-process",
-        "git-cli"
+        "git-cli",
+        "worktree-api"
       ]
     },
     {

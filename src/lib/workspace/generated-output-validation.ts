@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { validateLinkedGitBuildCustody } from './linked-git-build-custody';
 import { validateGeneratedOutputBank } from './generated-output-bank';
 import type { GeneratedOutputResource } from './generated-output-state';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
@@ -64,6 +65,10 @@ export function validateGeneratedOutputResource(resource: GeneratedOutputResourc
     || resource.origin !== 'managed-creation' || !integer(resource.creationAuthority.pid, 1)
     || !processIdentity(resource.creationAuthority.identity))) {
     throw new Error('Generated-output prebuild creation authority is invalid.');
+  }
+  if (resource.creationAuthority?.linkedGit) {
+    if (resource.owner) throw new Error('Linked Git build custody is not containing manager authority.');
+    validateLinkedGitBuildCustody(resource.creationAuthority.linkedGit);
   }
   if (resource.attempt) {
     const attempt = resource.attempt;

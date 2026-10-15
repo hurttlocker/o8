@@ -31,6 +31,15 @@ export interface AssistantTextBuffer {
   readonly discarded: boolean;
 }
 
+/** Saved on a turn the operator stopped, so it never persists as an empty reply (#3659). */
+export const OPERATOR_STOPPED_NOTE = 'Stopped by the operator.';
+
+/** Record the operator's Stop at the end of whatever the turn streamed. */
+export function appendOperatorStopNote(buffer: AssistantTextBuffer): void {
+  if (buffer.value.endsWith(OPERATOR_STOPPED_NOTE)) return;
+  buffer.append(buffer.value.trim() ? `\n\n${OPERATOR_STOPPED_NOTE}` : OPERATOR_STOPPED_NOTE);
+}
+
 export function createAssistantTextBuffer(): AssistantTextBuffer {
   let text = '';
   let persisted = '';

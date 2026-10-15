@@ -12,6 +12,7 @@ import { codename } from '@/lib/agents/codename';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
+import { runtimeNotInstalledReason } from '@/lib/runtimes/shared/runtime-installed';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
@@ -141,6 +142,16 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       requestedModel: profileRouting.requestedModel,
       source: 'delegate-api',
     });
+    // Refuse a runtime that is not installed before a packet or lane exists, with
+    // a reason the orchestrator can act on (#3657, #3664). A failed check keeps
+    // the launch path, which reports readiness problems itself.
+    const notInstalled = await runtimeNotInstalledReason(workerRouting.selectedRuntime).catch((error: unknown) => {
+      console.warn('[orchestrator-delegate] runtime install check failed', error);
+      return null;
+    });
+    if (notInstalled) {
+      return NextResponse.json({ ok: false, error: notInstalled, code: 'runtime_not_installed' }, { status: 400 });
+    }
     const huddle = resolveWorkerHuddle({
       mode: defaults.workerStartMode,
       explicitHuddle: typeof body.huddle === 'boolean' ? body.huddle : undefined,

@@ -8,12 +8,14 @@
  * lives outside our tree, so the thread is fully resumable: resume restores
  * the archived dir and resumes the saved thread, marked cold in the note.
  */
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDataDir } from '@/lib/data-dir-migration';
 import type { OwnedRuntimeAdapter, ParsedRunLog } from './types';
@@ -68,6 +70,9 @@ describe('owned-session store cold resume (#1524)', () => {
   let sessionsRoot: string;
   let priorRoot: string | undefined;
   let priorBin: string | undefined;
+
+  // Load the shared runtime graph outside individual scenario timeouts.
+  beforeAll(async () => { await import('./store'); }, 60_000);
 
   beforeEach(() => {
     // validateWorkspace (helpers.ts) fail-closes owned-runtime launches to
@@ -150,5 +155,80 @@ describe('owned-session store cold resume (#1524)', () => {
     const { createOwnedSessionStore } = await import('./store');
     const store = createOwnedSessionStore(coldAdapter());
     await expect(store.resume('test-owned:ghost-session', 'hello')).rejects.toThrow(/was not found/);
+  });
+
+  it('holds new launch and resume at the artifact budget while preserving exact archived recovery', { timeout: 30_000 }, async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    const store = createOwnedSessionStore(coldAdapter());
+    const launched = await store.launch({ cwd: repoPath, prompt: 'retained work' });
+    expect(launched.ok).toBe(true);
+    await store.getReviewPacket(launched.surfaceId);
+    const archived = await store.archiveSession(launched.surfaceId);
+    expect(archived.archived).toBe(true);
+    const original = readFileSync(path.join(archived.archivePath!, 'session.json'));
+    const binding = await store.getWorkspaceBinding!(launched.surfaceId);
+    expect(binding?.retainedRunsComplete).toBe(true);
+    expect(binding?.activeRun).toBeNull();
+    expect(binding?.retainedRuns.map(run => run.outcome)).toEqual(['finished']);
+    const retained = path.join(archived.archivePath!, 'required-evidence.bin');
+    const fd = openSync(retained, 'wx', 0o600);
+    ftruncateSync(fd, 4 * 1024 ** 3);
+    closeSync(fd);
+    const identity = statSync(retained);
+    const calls = spawnMock.mock.calls.length;
+    const entries = readdirSync(archived.archivePath!).sort();
+
+    const refused = await store.launch({ cwd: repoPath, prompt: 'must not write' });
+    expect(refused).toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(refused.note).toContain('artifact');
+    const missingCliStore = createOwnedSessionStore({
+      ...coldAdapter(), binaryName: 'missing-owned-fixture', isolatedConfigHomeEnv: 'O8_TEST_ISOLATED_HOME',
+      defaultConfigHome: () => { throw new Error('Refused launches must not prepare identity configuration'); },
+    });
+    expect(await missingCliStore.launch({ cwd: repoPath, prompt: 'must not stage CLI output', packetId: 'budget-held-packet' }))
+      .toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(readdirSync(sessionsRoot)).toEqual([]);
+    expect(await store.resume(launched.surfaceId, 'must not resume')).toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(spawnMock).toHaveBeenCalledTimes(calls);
+    expect(readdirSync(archived.archivePath!).sort()).toEqual(entries);
+    // Cold-resume refusal must not change the original archived metadata.
+    expect(readFileSync(path.join(archived.archivePath!, 'session.json'))).toEqual(original);
+    expect(statSync(retained)).toMatchObject({ dev: identity.dev, ino: identity.ino, size: identity.size });
+
+    const publish = vi.fn();
+    await expect(store.recoverArchivedWorkspace!(launched.surfaceId, binding!, publish)).resolves.toMatchObject({ sessionState: 'active' });
+    expect(publish).toHaveBeenCalledOnce();
+    expect(spawnMock).toHaveBeenCalledTimes(calls);
+    expect(await store.sessionState(launched.surfaceId)).toBe('active');
+    expect((await store.archiveSession(launched.surfaceId)).archived).toBe(true);
+    expect(statSync(retained)).toMatchObject({ dev: identity.dev, ino: identity.ino, size: identity.size });
+  });
+
+  it('refuses a redirected artifact root without following or writing its target', async () => {
+    const { createOwnedSessionStore } = await import('./store');
+    const outside = path.join(tempRoot, 'outside');
+    mkdirSync(outside);
+    symlinkSync(outside, sessionsRoot, 'dir');
+    const store = createOwnedSessionStore(coldAdapter());
+    expect(await store.launch({ cwd: repoPath, prompt: 'unsafe root' })).toMatchObject({ ok: false, sideEffect: 'none' });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it('refuses a competing process before it can enter the runtime artifact namespace', { timeout: 30_000 }, async () => {
+    const { withOwnedArtifactRootLock } = await import('./artifact-admission');
+    const moduleUrl = pathToFileURL(path.join(process.cwd(), 'src/lib/runtimes/shared/owned-session/artifact-admission.ts')).href;
+    const script = `const imported = await import(${JSON.stringify(moduleUrl)});
+      const api = imported.default ?? imported;
+      try { await api.withOwnedArtifactRootLock(process.env.O8_TEST_OWNED_ROOT, async () => console.log('ENTERED')); }
+      catch (error) { if (error.code !== 'owned_artifact_admission_held') throw error; console.log('HELD'); }`;
+    await withOwnedArtifactRootLock(sessionsRoot, async () => {
+      const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+        cwd: process.cwd(), env: { ...process.env, NODE_OPTIONS: '--conditions=react-server' }, timeout: 20_000,
+      });
+      expect(stdout.trim()).toBe('HELD');
+    });
+    expect(existsSync(sessionsRoot)).toBe(false);
+    expect(existsSync(`${sessionsRoot}-archive`)).toBe(false);
   });
 });
