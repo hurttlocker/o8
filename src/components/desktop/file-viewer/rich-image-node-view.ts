@@ -1,29 +1,6 @@
 import { DOMSerializer, type Node as ProseMirrorNode } from 'prosemirror-model';
 import type { NodeViewConstructor } from 'prosemirror-view';
-
-/** Preserve URL image sources instead of resolving them as workspace assets. */
-function isUrlImage(src: string): boolean {
-  return /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(src);
-}
-
-function localImageUrl(src: string, filePath: string, repoPath: string | null): string | null {
-  // Markdown URLs are URL-encoded, while the asset reader accepts filesystem
-  // paths. Decode once, before encoding the route's query parameter. Leave
-  // containment, registration, and symlink checks to the existing asset reader.
-  const path = src.split(/[?#]/, 1)[0];
-  if (!path) return null;
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(path);
-  } catch {
-    return null;
-  }
-  const directory = filePath.slice(0, filePath.lastIndexOf('/') + 1);
-  const params = new URLSearchParams({ path: decoded.startsWith('/') ? decoded : directory + decoded });
-  if (repoPath) params.set('workspace', repoPath);
-  const fragment = src.includes('#') ? src.slice(src.indexOf('#')) : '';
-  return `/api/panel/file-asset?${params.toString()}${fragment}`;
-}
+import { markdownImageSource } from '@/lib/markdown/image-source';
 
 function imageDom(node: ProseMirrorNode, src: string | null): HTMLImageElement {
   // The temporary node is only a display spec. The editor document and its
@@ -35,7 +12,7 @@ function imageDom(node: ProseMirrorNode, src: string | null): HTMLImageElement {
 export function richImageNodeView(filePath: string, repoPath: string | null): NodeViewConstructor {
   return (node) => {
     const src = String(node.attrs.src);
-    const url = isUrlImage(src) ? src : localImageUrl(src, filePath, repoPath);
+    const url = markdownImageSource(src, filePath, repoPath);
     const dom = document.createElement('span');
     dom.contentEditable = 'false';
     dom.style.cssText = 'display:inline-block;max-width:100%;vertical-align:middle;';

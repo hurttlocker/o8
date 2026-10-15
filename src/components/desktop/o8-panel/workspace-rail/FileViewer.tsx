@@ -410,7 +410,7 @@ export function FileViewer({
           />
         ) : fileKind === 'markdown' && viewMode === 'preview' && fileContent !== null ? (
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingTop: 18, paddingRight: 22, paddingBottom: 22, paddingLeft: 22 }}>
-            <MarkdownRender content={editContent} />
+            <MarkdownRender content={editContent} filePath={selectedFile} repoPath={repoPath} />
           </div>
         ) : fileContent !== null && !editing ? (
           <SyntaxFileView path={selectedFile} content={editContent} wrap={wrapLines} />
