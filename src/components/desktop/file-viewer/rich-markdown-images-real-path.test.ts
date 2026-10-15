@@ -8,6 +8,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileViewer } from '../FileViewer';
+import { FileViewer as PanelFileViewer } from '../o8-panel/workspace-rail/FileViewer';
 import { getRichMarkdownEditorView } from './RichMarkdownEditor';
 
 vi.mock('next/dynamic', async () => {
@@ -51,9 +52,11 @@ writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({
 
 let readContent: typeof import('@/app/api/panel/file-content/route').GET;
 let readAsset: typeof import('@/app/api/panel/file-asset/route').GET;
+let readPanelContent: typeof import('@/app/api/v2/files/route').GET;
 beforeAll(async () => {
   ({ GET: readContent } = await import('@/app/api/panel/file-content/route'));
   ({ GET: readAsset } = await import('@/app/api/panel/file-asset/route'));
+  ({ GET: readPanelContent } = await import('@/app/api/v2/files/route'));
 });
 afterAll(() => {
   if (oldDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
@@ -79,6 +82,7 @@ describe('Rich Markdown images through FileViewer and the workspace asset route'
       const url = new URL(String(input), 'http://localhost');
       if (url.pathname === '/api/panel/file-content') return readContent(new Request(url));
       if (url.pathname === '/api/panel/file-diff') return Response.json({ diff: '', hasDiff: false });
+      if (url.pathname === '/api/v2/files' && !init?.method) return readPanelContent(new NextRequest(url));
       if (url.pathname === '/api/v2/files' && init?.method === 'POST') {
         saves.push(JSON.parse(String(init.body)) as { content: string });
         return Response.json({ contentHash: 'saved-hash' });
@@ -99,6 +103,30 @@ describe('Rich Markdown images through FileViewer and the workspace asset route'
     if (!found) throw new Error(`Missing ${label} button`);
     return found;
   }
+
+  it('reads a right-panel Markdown image through the persisted repository and contained asset routes', async () => {
+    const source = '![Diagram](./assets/diagram%20space.svg)\n\n![Blocked](../linked-directory/outside.gif)';
+    const filePath = 'docs/panel-preview.md';
+    writeFileSync(join(repos[0], filePath), source);
+    container.style.width = '260px';
+    await act(async () => root.render(createElement(PanelFileViewer, { repoPath: repos[0], selectedFile: filePath })));
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+      expect(container.querySelector('img[alt="Diagram"]'), container.textContent ?? '').not.toBeNull();
+    });
+    const image = container.querySelector<HTMLImageElement>('img[alt="Diagram"]')!;
+    expect(image).not.toBeNull();
+    expect(image.style.maxWidth).toBe('100%');
+    const asset = await readAsset(new NextRequest(new URL(image.getAttribute('src')!, 'http://localhost')));
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toBe(svg);
+    const blocked = container.querySelector<HTMLImageElement>('img[alt="Blocked"]')!;
+    const rejected = await readAsset(new NextRequest(new URL(blocked.getAttribute('src')!, 'http://localhost')));
+    expect(rejected.status).toBe(404);
+    await act(async () => blocked.dispatchEvent(new Event('error')));
+    expect(container.querySelector('[aria-label="Image unavailable: Blocked"]')).not.toBeNull();
+    expect(readFileSync(join(repos[0], filePath), 'utf8')).toBe(source);
+  });
 
   async function renderFile(repo: string, filePath: string, source: string) {
     mkdirSync(dirname(join(repo, filePath)), { recursive: true });

@@ -137,6 +137,7 @@ interface SearchResponse {
   results: CommandPaletteSearchResult[];
   groups: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>;
   error?: string;
+  providerErrors?: Partial<Record<CommandPaletteSearchKind, string>>;
 }
 
 const RECENTS_KEY = 'o8:command-palette:recents:v1';
@@ -300,6 +301,7 @@ export const CommandPalette = memo(function CommandPalette({
   const [recents, setRecents] = useState<CommandPaletteRecent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchAttempt, setSearchAttempt] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -386,6 +388,7 @@ export const CommandPalette = memo(function CommandPalette({
       return;
     }
 
+    setError(null);
     setLoading(true);
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController();
@@ -416,7 +419,7 @@ export const CommandPalette = memo(function CommandPalette({
         if (scope === 'all' && shouldRequestRecall(trimmed, keywordHits)) {
           setRecallCandidate({ query: trimmed, keywordHits });
         }
-        setError(null);
+        setError(data.providerErrors?.file && (scope === 'all' || scope === 'file') ? 'File search is unavailable.' : null);
       } catch (caught) {
         if (controller.signal.aborted || (caught as { name?: string })?.name === 'AbortError') return;
         setError('Search failed.');
@@ -430,7 +433,7 @@ export const CommandPalette = memo(function CommandPalette({
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [fileItems, open, query, repo, scope, seededFileResults, workspace]);
+  }, [fileItems, open, query, repo, scope, searchAttempt, seededFileResults, workspace]);
 
   useEffect(() => {
     if (!open || !recallCandidate || scope !== 'all') return;
@@ -720,9 +723,11 @@ export const CommandPalette = memo(function CommandPalette({
 
           <div ref={listRef} style={listStyle}>
             {error ? (
-              <div style={errorRowStyle}>
+              <div role="status" style={errorRowStyle}>
                 <AlertGlyph />
                 <span>{error}</span>
+                <button type="button" aria-label="Retry search" onClick={() => setSearchAttempt(attempt => attempt + 1)}
+                  style={{ marginLeft: 'auto', borderWidth: 0, borderRadius: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', minHeight: 28, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, cursor: 'pointer' }}>Retry</button>
               </div>
             ) : null}
 

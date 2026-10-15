@@ -172,10 +172,21 @@ describe('reconcileValidatedTabs', () => {
       tab({ id: 'terminal-b', tmuxSession: null, label: 'Optimistic B' }),
     ];
 
-    expect(reconcileValidatedTabs(validated, current)).toEqual([
+    expect(reconcileValidatedTabs(validated, current, new Set(['terminal-a']))).toEqual([
       { ...validated[0], tmuxSession: 'cortex-dash-a' },
       validated[1],
     ]);
+  });
+
+  it('does not revive an unchanged saved session that validation found absent', () => {
+    const validated = [tab({ id: 'terminal-a', tmuxSession: null })];
+    expect(reconcileValidatedTabs(validated, [tab({ id: 'terminal-a', tmuxSession: 'expired' })], new Set())).toEqual(validated);
+  });
+
+  it('keeps a freshly acknowledged replacement ahead of an older live inventory result', () => {
+    const validated = [tab({ id: 'terminal-a', tmuxSession: 'older-session' })];
+    const current = [tab({ id: 'terminal-a', tmuxSession: 'newly-acknowledged' })];
+    expect(reconcileValidatedTabs(validated, current, new Set(['terminal-a']))[0].tmuxSession).toBe('newly-acknowledged');
   });
 });
 
@@ -201,7 +212,6 @@ describe('resetControllerRefs', () => {
     resetControllerRefs({
       restoredRef: { current: true },
       restoreSettledRef: { current: true },
-      previousWsConnectedRef: { current: true },
       initialTerminalBootstrapRef: { current: true },
       reportedRepoScopeRef: { current: '/repo' },
       reportedChatSessionsSignatureRef: { current: 'signature' },

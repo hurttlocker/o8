@@ -143,6 +143,7 @@ const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
   // The chat-surface input is a composer, not a card: it must stay a breath here
   // too, or it paints an opaque slab on the one glass material.
   '--t-chat-surface-input-bg': 'rgba(255, 255, 255, 0.06)',
+  '--t-chat-user-bg': 'var(--t-glass-muted-strong)',
   '--t-search-bg': 'rgba(255, 255, 255, 0.06)',
   '--t-btn-secondary-bg': 'rgba(255, 255, 255, 0.07)',
   '--t-kbd-bg': 'rgba(255, 255, 255, 0.06)',

@@ -617,6 +617,7 @@ function AgentPanelExtraAgentsBase({
   }, [clearableRowKeys]);
 
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
+  const workingCount = rankedRows.filter(({ row }) => row.status === 'running' && !isTerminalRow(row)).length;
   usePublishSidebarAttention(needsYouCount);
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
   // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
@@ -676,6 +677,13 @@ function AgentPanelExtraAgentsBase({
           compact
           count={needsYouCount > 0 ? needsYouCount : undefined}
           countTone={countTone}
+          status={workingCount > 0 ? (
+            <span aria-label={`${workingCount} agent${workingCount === 1 ? '' : 's'} working`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 10.5, fontWeight: 300, color: 'var(--t-text-muted)', whiteSpace: 'nowrap' }}>
+              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: AGENT_STATUS_ACCENT.running }} />
+              {workingCount} working
+            </span>
+          ) : undefined}
           collapsed={collapsed}
           onToggle={toggleCollapsed}
           action={clearableRowKeys.length > 0 ? (

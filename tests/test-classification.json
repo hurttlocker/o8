@@ -2126,9 +2126,18 @@
       ]
     },
     {
+      "path": "tests/dash-terminal-profile-gc-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/dash-terminal-restart-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "network-listener",
         "process-signal",
         "real-path",
@@ -2302,6 +2311,14 @@
       "path": "tests/feedback-sync-reports.test.ts",
       "reasons": [
         "executable-fixture"
+      ]
+    },
+    {
+      "path": "tests/fetch-cache-cancellation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
       ]
     },
     {

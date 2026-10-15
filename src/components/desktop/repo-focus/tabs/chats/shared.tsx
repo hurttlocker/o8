@@ -30,6 +30,7 @@ export function SectionLabel({
   onToggle,
   action,
   controls,
+  status,
 }: {
   label: string;
   compact?: boolean;
@@ -41,6 +42,7 @@ export function SectionLabel({
    *  toggle button — a button inside a button is invalid markup. */
   action?: ReactNode;
   controls?: string;
+  status?: ReactNode;
 }) {
   const commonStyle = {
     paddingTop: compact ? 10 : 12,
@@ -55,30 +57,7 @@ export function SectionLabel({
     fontFamily: REPO_FOCUS_FONT,
   };
 
-  if (!onToggle) {
-    return (
-      <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
-        {typeof count === 'number' ? (
-          <span
-            aria-label={`${count} ${label.toLowerCase()}`}
-            style={{
-              fontSize: 10.5,
-              lineHeight: '12px',
-              letterSpacing: 0,
-              color: countTone ?? 'var(--t-text-muted)',
-              fontWeight: 300,
-            }}
-          >
-            {count}
-          </span>
-        ) : null}
-        {action}
-      </div>
-    );
-  }
-
-  const toggle = (
+  const toggle = onToggle ? (
     <button
       type="button"
       aria-expanded={!collapsed}
@@ -86,8 +65,12 @@ export function SectionLabel({
       onClick={onToggle}
       title={`${collapsed ? 'Show' : 'Hide'} ${label.toLowerCase()}`}
       style={{
-        ...commonStyle,
-        width: '100%',
+        flex: 1,
+        minWidth: 0,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
         borderWidth: 0,
         background: 'transparent',
         cursor: 'pointer',
@@ -95,10 +78,21 @@ export function SectionLabel({
         alignItems: 'center',
         gap: 8,
         textAlign: 'left',
+        color: 'inherit',
+        font: 'inherit',
+        letterSpacing: 'inherit',
       }}
     >
       {collapsed ? <ChevronRight size={12} strokeWidth={1.8} /> : <ChevronDown size={12} strokeWidth={1.8} />}
-      <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  ) : <span style={{ flex: 1, minWidth: 0 }}>{label}</span>;
+
+  return (
+    <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box' }}>
+      {toggle}
+      {status}
+      {action ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{action}</div> : null}
       {typeof count === 'number' ? (
         <span
           aria-label={`${count} ${label.toLowerCase()}`}
@@ -113,17 +107,6 @@ export function SectionLabel({
           {count}
         </span>
       ) : null}
-    </button>
-  );
-
-  if (!action) return toggle;
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
-      <div style={{ flex: 1, minWidth: 0 }}>{toggle}</div>
-      <div style={{ display: 'flex', alignItems: 'center', paddingRight: 6, flexShrink: 0 }}>
-        {action}
-      </div>
     </div>
   );
 }

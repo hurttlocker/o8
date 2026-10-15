@@ -151,6 +151,7 @@ export function useWorkspaceTerminalController(
   const queuedRemoteLaunchesRef = useRef<Map<string, string>>(new Map());
   const pendingRequestRef = useRef<Map<string, string>>(new Map());
   const pendingSessionsRef = useRef<Set<string>>(new Set());
+  const terminalAckRevisionsRef = useRef(new Map<string, number>());
   const restoredRef = useRef(false);
   const restoreSettledRef = useRef(false);
   const restoreInFlightRef = useRef(false);
@@ -158,7 +159,6 @@ export function useWorkspaceTerminalController(
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detectedPortsRef = useRef<Set<number>>(new Set());
   const urlDetectionEnabledRef = useRef(false);
-  const previousWsConnectedRef = useRef(false);
   const termWsConnectedRef = useRef(termWsConnected);
   const initialTerminalBootstrapRef = useRef(false);
   const restoreKeyRef = useRef<string | null>(null);
@@ -343,7 +343,7 @@ export function useWorkspaceTerminalController(
 
     const shouldPreserve = canPreserveScopedTabs(tabsRef.current, preferredRepo?.localPath ?? null, previousKey?.endsWith('::no-repo') === true);
     resetControllerRefs({
-      restoredRef, restoreSettledRef, previousWsConnectedRef, initialTerminalBootstrapRef,
+      restoredRef, restoreSettledRef, initialTerminalBootstrapRef,
       reportedRepoScopeRef, reportedChatSessionsSignatureRef, reportedActiveChatSessionKeyRef,
       detectedPortsRef, pendingCliCommands, pendingRequestRef, pendingSessionsRef, saveTimerRef,
     });
@@ -694,6 +694,7 @@ export function useWorkspaceTerminalController(
     // compute awaits (GQXEZD — "New session" during a slow Rosetta restore)
     // must survive the landing. Replace-not-merge silently ate it.
     const preRestoreTabIds = new Set(tabsRef.current.map((tab) => tab.id));
+    const preRestoreAckRevisions = new Map(terminalAckRevisionsRef.current);
     const restoreGeneration = ++restoreGenerationRef.current;
     const result = await computeRestoredTabs(saved, {
       preferredRepo: preferredRepoRef.current,
@@ -731,17 +732,20 @@ export function useWorkspaceTerminalController(
       createDefaultChatTab: defaultTab === 'orchestrator' ? () => createInitialChatTabs()[0] : createDefaultChatTab,
     }, () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current, 'validated').then((validated) => {
       if (!validated || cancelled?.() || restoreGeneration !== restoreGenerationRef.current) return;
+      const acknowledgedDuringRestore = new Set([...terminalAckRevisionsRef.current]
+        .filter(([tabId, revision]) => revision !== preRestoreAckRevisions.get(tabId))
+        .map(([tabId]) => tabId));
       const currentById = new Map(tabsRef.current.map((tab) => [tab.id, tab]));
       for (const validatedTab of validated.tabs) {
         const currentTab = currentById.get(validatedTab.id);
-        if (validatedTab.tmuxSession === null && currentTab?.tmuxSession) {
+        if (validatedTab.tmuxSession === null && currentTab?.tmuxSession && acknowledgedDuringRestore.has(validatedTab.id)) {
           logTerminalBench('validated-restore-preserved-session', {
             tabId: validatedTab.id,
             sessionName: currentTab.tmuxSession,
           });
         }
       }
-      const validatedTabs = reconcileValidatedTabs(validated.tabs, tabsRef.current);
+      const validatedTabs = reconcileValidatedTabs(validated.tabs, tabsRef.current, acknowledgedDuringRestore);
       const reconciledTabs = mergeUserSpawnedTabs(validatedTabs, tabsRef.current, new Set(result.tabs.map((tab) => tab.id)));
       landTerminalTabs('restore-validated', reconciledTabs);
       setTabs(reconciledTabs);
@@ -924,17 +928,6 @@ export function useWorkspaceTerminalController(
     return () => window.clearTimeout(timer);
   }, [createInitialChatTabs, defaultTab, tabs.length]);
 
-  useEffect(() => {
-    const wasConnected = previousWsConnectedRef.current;
-    previousWsConnectedRef.current = termWsConnected;
-    if (!termWsConnected || !wasConnected || !restoredRef.current) return;
-    for (const tab of tabsRef.current) {
-      if (tab.kind === 'terminal' && tab.tmuxSession) {
-        sendTerminalAttach(tab.tmuxSession, 120, 30, tab.readOnly);
-      }
-    }
-  }, [sendTerminalAttach, termWsConnected]);
-
   // Migration: if restored state is missing an Orchestrator tab, inject one
   // at the front. Ensures existing users get the new tab automatically and
   // don't have to manually add it.
@@ -964,6 +957,9 @@ export function useWorkspaceTerminalController(
   }, [createDefaultOrchestratorTab, defaultTab, splitCreated, tabs]);
 
   const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
+    const recordAcknowledgement = (tabId: string) => {
+      terminalAckRevisionsRef.current.set(tabId, (terminalAckRevisionsRef.current.get(tabId) ?? 0) + 1);
+    };
     const ownerTabId = ownerTabIdFromRequest(requestId);
     const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
     if (requestId && !directTabId) {
@@ -971,6 +967,7 @@ export function useWorkspaceTerminalController(
         ? tabsRef.current.find((tab) => tab.id === ownerTabId && tab.kind === 'terminal')
         : null;
       if (ownerTab?.tmuxSession === sessionName) {
+        recordAcknowledgement(ownerTab.id);
         logTerminalBench('terminal-created', {
           tabId: ownerTab.id,
           requestId,
@@ -1011,6 +1008,7 @@ export function useWorkspaceTerminalController(
         ? previous.find((tab) => tab.id === directTabId && tab.kind === 'terminal')
         : null;
       if (directTab?.tmuxSession === sessionName) {
+        recordAcknowledgement(directTab.id);
         logTerminalBench('terminal-created', {
           tabId: directTab.id,
           requestId: requestId ?? null,
@@ -1036,6 +1034,7 @@ export function useWorkspaceTerminalController(
     }
     const updated = [...previous];
     const tab = updated[pendingIndex];
+    recordAcknowledgement(tab.id);
     updated[pendingIndex] = { ...tab, tmuxSession: sessionName };
     logTerminalBench('terminal-created', {
       tabId: tab.id,

@@ -92,7 +92,7 @@ export function ChatGroupPicker({
 
       </button>
       {/* Portal keeps the glass blur and menu outside the scrolling chat panel. */}
-      {typeof document !== 'undefined' ? createPortal(<FloatingSurface
+      {open && typeof document !== 'undefined' ? createPortal(<FloatingSurface
         ref={menuRef}
         id={menuId}
         onKeyDown={(event) => {

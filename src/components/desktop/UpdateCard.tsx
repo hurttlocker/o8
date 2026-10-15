@@ -3,9 +3,10 @@
 /** App update controller, with a legacy card outside the compact rail. */
 
 import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { readCachedSummary, writeCachedSummary } from '@/lib/app-update/changelog-cache';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
@@ -56,7 +57,6 @@ function reportInstall(install: { outcome: 'started' | 'failed'; version: string
 }
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
-const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
@@ -90,28 +90,6 @@ function readExpanded() {
   } catch {
     return false;
   }
-}
-
-function readCachedSummary(version: string): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    if (!raw) return null;
-    const map = JSON.parse(raw) as Record<string, string>;
-    return typeof map[version] === 'string' ? map[version] : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSummary(version: string, summary: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    const map = raw ? JSON.parse(raw) as Record<string, string> : {};
-    map[version] = summary;
-    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
-  } catch { /* ignore */ }
 }
 
 function claimApplyMutation(mutationId: string): boolean {
@@ -176,6 +154,7 @@ export function UpdateCard({ quiet = false }: { quiet?: boolean }) {
 }
 
 function AppUpdateCard({ quiet }: { quiet: boolean }) {
+  const changelogId = useId();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
@@ -633,6 +612,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           }
         }}
         aria-expanded={expanded}
+        aria-controls={expanded ? changelogId : undefined}
         aria-label="Toggle update changelog"
       >
         <span
@@ -742,6 +722,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
       {expanded ? (
         <div
+          id={changelogId}
           style={{
             marginTop: 9,
             paddingTop: 9,

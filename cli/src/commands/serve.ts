@@ -17,6 +17,7 @@ import {
   readServeSupervisorPid,
   runServeAgentCommand,
   sourceServeApiLaunch,
+  serveStartupTimeoutMs,
   superviseServeDaemon,
   waitForSupervisorRestart,
 } from './serve-lifecycle.js';
@@ -28,7 +29,6 @@ import { outputServeNotRunning, outputServeState, outputServeStopped } from './s
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
-const START_TIMEOUT_MS = 60_000;
 const POLL_MS = 100;
 
 type ServeMode = 'development' | 'packaged';
@@ -379,8 +379,8 @@ function spawnService(
   });
 }
 
-async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<ServeState> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
+async function waitForDaemonReady(paths: ServePaths, pid: number, timeoutMs: number): Promise<ServeState> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = readState(paths);
     if (state?.pid === pid && state.status === 'failed') {
@@ -409,7 +409,7 @@ async function startServe(mode: OutputMode): Promise<number> {
   validateReviewMode();
   const paths = servePaths();
   mkdirSync(dirname(paths.logFile), { recursive: true });
-  const child = await withServeOperation(paths.dataDir, async () => {
+  const { child, timeoutMs } = await withServeOperation(paths.dataDir, async () => {
     cleanStaleOwner(paths);
     const existingPid = readOwnerPid(paths);
     const supervisorPid = readServeSupervisorPid(paths.stateFile);
@@ -463,9 +463,9 @@ async function startServe(mode: OutputMode): Promise<number> {
       throw error;
     }
     child.unref();
-    return child;
+    return { child, timeoutMs: serveStartupTimeoutMs(plan.mode) };
   });
-  const state = await waitForDaemonReady(paths, child.pid!);
+  const state = await waitForDaemonReady(paths, child.pid!, timeoutMs);
   outputServeState(mode, state, true, true);
   return EXIT.OK;
 }
@@ -561,7 +561,7 @@ async function restartServe(mode: OutputMode): Promise<number> {
     }));
     const restarted = await waitForSupervisorRestart({
       supervisorPid,
-      timeoutMs: START_TIMEOUT_MS,
+      timeoutMs: serveStartupTimeoutMs(state?.mode ?? 'packaged'),
       pollMs: POLL_MS,
       logPath: paths.logFile,
       processAlive,
@@ -742,7 +742,7 @@ async function runDaemon(): Promise<number> {
     return EXIT.CONNECTION_REFUSED;
   }
 
-  const readyDeadline = Date.now() + START_TIMEOUT_MS;
+  const readyDeadline = Date.now() + serveStartupTimeoutMs(plan.mode);
   while (Date.now() < readyDeadline) {
     if (await apiIsReady(apiPort) && await portAcceptsConnections(wsPort)) {
       state.status = 'ready';

@@ -5,6 +5,7 @@ import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { fetchSWRJson, getSWR } from '@/lib/panel/fetch-cache';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { isAbortError } from '@/lib/active-long-lived-request';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type {
@@ -325,7 +326,11 @@ export function useGlobalRepoState({
   // re-derives.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handler = () => { void loadRegisteredRepos(); };
+    const handler = () => {
+      void loadRegisteredRepos().catch((error: unknown) => {
+        if (!isAbortError(error)) toast('Could not refresh repositories. Try opening the project again.');
+      });
+    };
     window.addEventListener('o8:repos-changed', handler);
     return () => window.removeEventListener('o8:repos-changed', handler);
   }, [loadRegisteredRepos]);

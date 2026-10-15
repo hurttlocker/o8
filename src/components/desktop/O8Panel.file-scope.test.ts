@@ -3,6 +3,7 @@ import { act, createElement, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { O8Panel } from './O8Panel';
+import { normalizePanelTab } from './o8-panel/types';
 
 // Keep the real panel's selection and tab routing, with unrelated tools inert.
 vi.mock('./O8ActivityPane', () => ({ O8ActivityPane: () => null }));
@@ -29,9 +30,28 @@ vi.mock('./o8-panel/workspace-rail/AllFilesTree', () => ({ AllFilesTree: ({ repo
 vi.mock('./o8-panel/workspace-rail/FileViewer', () => ({ FileViewer: ({ repoPath, selectedFile }: { repoPath: string; selectedFile: string | null }) => createElement('output', { 'data-repo': repoPath }, selectedFile ?? 'No selection') }));
 
 let host: HTMLDivElement; let root: Root;
-beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear(); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 describe('panel file scope', () => {
+  it('restores the ordered tool tabs after remount and persists dismissal without crossing workspace scopes', async () => {
+    const render = (activeTab: 'review' | 'inbox' | 'device', scope = 'restore-fixture') =>
+      act(async () => root.render(createElement(O8Panel, { browserStateKey: scope, repoPath: '/workspace/one', activeTab })));
+    const tabs = () => [...host.querySelectorAll('[role="tab"]')].map(tab => tab.getAttribute('aria-label'));
+    await render('review'); await render('inbox'); await render('device');
+    expect(tabs()).toEqual(['Review', 'Inbox', 'Devices']);
+    await act(async () => root.render(null));
+    localStorage.setItem('o8ActiveTab', 'device');
+    const savedSelection = normalizePanelTab(localStorage.getItem('o8ActiveTab'));
+    expect(savedSelection).toBe('device');
+    await render(savedSelection as 'device');
+    expect(tabs()).toEqual(['Review', 'Inbox', 'Devices']);
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('Devices');
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close Inbox tab"]')!.click());
+    await act(async () => root.render(null)); await render('device');
+    expect(tabs()).toEqual(['Review', 'Devices']);
+    await render('inbox', 'another-fixture'); expect(tabs()).toEqual(['Inbox']);
+    await render('device'); expect(tabs()).toEqual(['Review', 'Devices']);
+  });
   it('leaves Activity unselected while a contextual pull request owns the header', async () => {
     await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'activity', prNumber: 5 })));
     expect(host.querySelector('[role="tab"]')?.getAttribute('aria-selected')).toBe('false');

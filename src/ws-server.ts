@@ -257,8 +257,7 @@ import { manualReviewRequested } from './lib/lane/review-mode';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
-import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
-import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
+import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions } from './lib/ws-server/dash-terminal-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
@@ -1578,27 +1577,6 @@ const DASH_GC_MIN_AGE_MS = 5 * 60 * 1000;
 const DASH_GC_MAX_SESSIONS = 64;
 let dashGcTimer: ReturnType<typeof setInterval> | null = null;
 
-/** One `tmux list-sessions` → live `cortex-dash-*` sessions with creation age. */
-function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
-  try {
-    const out = execFileSync(
-      resolveTmuxBinary(),
-      dashTmuxArgs('list-sessions', '-F', '#{session_name} #{session_created}'),
-      { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
-    );
-    const rows: DashSessionInfo[] = [];
-    for (const line of out.split('\n')) {
-      const [name, created] = line.trim().split(/\s+/);
-      if (!name || !name.startsWith('cortex-dash-')) continue;
-      const sec = Number(created);
-      rows.push({ name, createdMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : 0 });
-    }
-    return rows;
-  } catch {
-    return [];
-  }
-}
-
 /**
  * #6 persistent terminals — capture a dash session's scrollback history so a
  * re-attach after a restart/crash restores what scrolled off-screen (a bare
@@ -1654,48 +1632,27 @@ function captureTmuxPane(sessionName: string): string {
 
 function reapOrphanDashSessions() {
   if (!dashPersistentTerminalsEnabled()) return;
-  const sessions = listDashTmuxSessionsWithAge();
-  if (sessions.length === 0) return;
-
-  // Durable reference set FIRST — never reap on a failed read of persisted tabs
-  // (after a crash the in-memory map is empty; persisted tabs are the only
-  // owner record, so a read failure must abort the sweep, not reap survivors).
-  let referenced: Set<string>;
-  try {
-    referenced = collectPersistedTmuxSessions();
-    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
-  } catch {
-    return;
-  }
-  // A session with live clients is referenced too — covers the brief
-  // create→persist window before the tab file is flushed.
-  for (const [name, att] of terminalAttachments) {
-    if (att.clientIds.size > 0) referenced.add(name);
-  }
-
-  const toKill = selectOrphanDashSessions(sessions, referenced, {
+  const liveSessionNames = [...terminalAttachments]
+    .filter(([, attachment]) => attachment.clientIds.size > 0)
+    .map(([name]) => name);
+  const killed = reapOrphanDashTmuxSessions({
+    liveSessionNames,
+    collectAdditionalReferences: pluginTerminalSessionReferences,
     nowMs: Date.now(),
     minAgeMs: DASH_GC_MIN_AGE_MS,
     maxSessions: DASH_GC_MAX_SESSIONS,
-  });
-  if (toKill.length === 0) return;
-
-  const tmuxBin = resolveTmuxBinary();
-  for (const name of toKill) {
-    // Tear down any warm-but-detached local PTY view first (0-client survivors
-    // from the reaper's persistence path), then kill the tmux session.
-    const att = terminalAttachments.get(name);
-    if (att) {
-      if (att.orphanTimer) clearTimeout(att.orphanTimer);
-      if (att.batchTimer) clearTimeout(att.batchTimer);
-      try { att.ptyProcess.kill(); } catch { /* already gone */ }
+    beforeKill(name) {
+      const attachment = terminalAttachments.get(name);
+      if (!attachment) return;
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      if (attachment.batchTimer) clearTimeout(attachment.batchTimer);
+      try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
       terminalAttachments.delete(name);
-    }
-    try {
-      execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', name), { windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
-    } catch { /* already gone */ }
+    },
+  });
+  if (killed > 0) {
+    console.log(`[ws-server] [persistent-terminals] GC reaped ${killed} orphan dash tmux session(s)`);
   }
-  console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
 }
 
 function startDashSessionGc() {

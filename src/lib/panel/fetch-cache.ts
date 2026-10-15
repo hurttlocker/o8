@@ -113,11 +113,13 @@ export async function fetchOnce(url: string, init?: RequestInit): Promise<Respon
   // ipcFetch: uses Tauri IPC for mapped endpoints, falls back to HTTP
   const promise = ipcFetch(url, init);
   inflight.set(url, { promise, timestamp: Date.now() });
-  promise.finally(() => {
-    setTimeout(() => {
-      if (inflight.get(url)?.promise === promise) inflight.delete(url);
-    }, DEDUP_WINDOW_MS);
-  });
+  const evict = () => {
+    if (inflight.get(url)?.promise === promise) inflight.delete(url);
+  };
+  // A detached finally() creates a second rejected promise even when every
+  // caller handles the original failure. Handle both cleanup outcomes here;
+  // callers still receive the original error and can retry a failed read now.
+  void promise.then(() => { setTimeout(evict, DEDUP_WINDOW_MS); }, evict);
   // EVERY caller gets a clone — the cached original is never read. Handing
   // the first caller the original meant its res.json() disturbed the body,
   // and any dedup hit inside the 150ms window then died at clone() with
