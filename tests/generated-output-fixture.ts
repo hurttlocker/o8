@@ -38,7 +38,8 @@ export async function createRetainedGeneratedOutputFixture(prefix: string): Prom
       try {
         for (const table of ['workspace_generated_outputs', 'workspace_generated_output_recoveries',
           'workspace_generated_output_bank_entries', 'workspace_generated_output_recovery_entries',
-          'workspace_exact_claims', 'workspace_exact_finalizations', 'workspace_retention_holds']) {
+          'workspace_exact_claims', 'workspace_exact_finalizations', 'workspace_retention_holds',
+          'workspace_legacy_output_parks', 'workspace_failed_prebuild_parks']) {
           tables[table] = database.prepare(`SELECT * FROM ${table} LIMIT 4096`).all();
         }
       } finally { database.close(); }

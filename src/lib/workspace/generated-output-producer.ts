@@ -6,6 +6,7 @@ import path from 'node:path';
 import { assertWorktreeMaterializationIdentity, captureWorktreeMaterializationIdentity, type WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import { retainedFailedPrebuild } from './failed-prebuild-parking';
 import { assertLinkedGitBuildCustody, captureLinkedGitBuildCustody } from './linked-git-build-custody';
 import { assertGeneratedOutputClaimsReleased, generatedOutputOwner, generatedOutputRevision,
   currentGeneratedOutputResource, registerGeneratedOutputLocked, saveGeneratedOutputResource, withGeneratedOutputExclusion,
@@ -243,7 +244,7 @@ export async function runGeneratedOutputPrebuild(input: {
   const linkedGit = !containingOwner ? await captureLinkedGitBuildCustody(workspace) : undefined;
   // Refuse unknown output or lost authority before exclusion could create a marker.
   const current = currentGeneratedOutputResource(workspace.canonicalPath);
-  if ((current || lastDisposedPrebuildOutput(workspace.canonicalPath)) && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
+  if ((current || lastDisposedPrebuildOutput(workspace.canonicalPath) || retainedFailedPrebuild(workspace.canonicalPath)) && !await lstat(path.join(workspace.canonicalPath, '.o8-generated-output-store')).catch(error => {
     if (error.code !== 'ENOENT') throw error;
     return null;
   })) throw new Error('Prebuild lifecycle store binding is missing; preserve output for recovery.');
