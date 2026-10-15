@@ -9,9 +9,15 @@ import {
   SERVE_LAUNCH_AGENT_LABEL,
   SERVE_LOG_ROTATE_BYTES,
   SERVE_PREVIOUS_LOG_TRUNCATE_BYTES,
+  serveStartupTimeoutMs,
 } from './serve-lifecycle';
 
 describe('serve launch agent lifecycle', () => {
+  it('allows a cold source compile while keeping the packaged readiness budget bounded', () => {
+    expect(serveStartupTimeoutMs('development')).toBe(300_000);
+    expect(serveStartupTimeoutMs('packaged')).toBe(60_000);
+  });
+
   it('generates the per-user plist with the daemon entry, data paths, and crash restart policy', () => {
     const plist = buildServeLaunchAgentPlist({
       cliEntry: '/Applications/o8.app/Contents/Resources/server/bin/o8.mjs',
