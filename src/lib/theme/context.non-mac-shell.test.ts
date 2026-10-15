@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider, useTheme } from './context';
+import { getPalette, resolveTheme } from './registry';
 
 type ThemeSnapshot = ReturnType<typeof useTheme>;
 
@@ -104,6 +105,19 @@ describe('ThemeProvider on a non-macOS shell', () => {
     act(() => theme?.setWorkspaceGlass(false));
     expect(document.documentElement.dataset.workspaceGlass).toBeUndefined();
     expect(document.documentElement.style.getPropertyValue('--t-terminal-bg')).not.toBe('transparent');
+  });
+
+  it.each(['light', 'dark'] as const)('restores %s prompt material when leaving All Glass and reapplies it on reentry', (palette) => {
+    stampHostPlatform('macos');
+    localStorage.setItem('cortex-theme-palette', palette);
+    const theme = render();
+    const promptBackground = () => document.documentElement.style.getPropertyValue('--t-chat-user-bg');
+    expect(promptBackground()).toBe('rgba(255, 255, 255, 0.06)');
+
+    act(() => theme?.setWorkspaceGlass(false));
+    expect(promptBackground()).toBe(resolveTheme(getPalette(palette), 'glass').cssVars['--t-chat-user-bg']);
+    act(() => theme?.setWorkspaceGlass(true));
+    expect(promptBackground()).toBe('rgba(255, 255, 255, 0.06)');
   });
 
   it('treats an unstamped host (browser, pre-#1743 shell) as macOS', () => {
