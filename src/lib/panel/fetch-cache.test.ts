@@ -13,13 +13,39 @@ vi.mock('@/lib/tauri/ipc-fetch', () => ({
   ipcFetch: (...args: unknown[]) => mockIpcFetch(...args),
 }));
 
-import { fetchOnce, invalidateFetchOnce } from './fetch-cache';
+import { fetchOnce, fetchSWRJson, invalidateFetchOnce } from './fetch-cache';
 
 beforeEach(() => {
   mockIpcFetch.mockReset();
 });
 
 describe('fetchOnce dedup window', () => {
+  it.each([
+    new DOMException('Fetch is aborted', 'AbortError'),
+    new TypeError('Failed to fetch'),
+  ])('delivers a failed shared read to callers and permits an immediate retry: %s', async (error) => {
+    const controller = new AbortController();
+    mockIpcFetch.mockImplementationOnce((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(error), { once: true });
+    }));
+    const url = `/api/panel/repos?rejected-read=${Math.random()}`;
+    const key = `repos-rejection:${Math.random()}`;
+    const reads = Promise.allSettled([
+      fetchSWRJson(key, url, { signal: controller.signal }),
+      fetchOnce(url),
+    ]);
+    controller.abort();
+    expect(await reads).toEqual([
+      { status: 'rejected', reason: error },
+      { status: 'rejected', reason: error },
+    ]);
+    mockIpcFetch.mockResolvedValueOnce(Response.json({ repos: ['recovered'] }));
+    await expect(fetchSWRJson(key, url)).resolves.toEqual({ repos: ['recovered'] });
+    expect(mockIpcFetch).toHaveBeenCalledTimes(2);
+    // Let orphaned promise rejections reach the runner, as they do the webview.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   it('lets every deduped caller read the body independently', async () => {
     mockIpcFetch.mockResolvedValue(new Response(JSON.stringify({ ok: 1 }), {
       headers: { 'Content-Type': 'application/json' },

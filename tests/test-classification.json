@@ -2298,6 +2298,14 @@
       ]
     },
     {
+      "path": "tests/fetch-cache-cancellation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/file-save-conflict-real-path.test.ts",
       "reasons": [
         "real-path"
