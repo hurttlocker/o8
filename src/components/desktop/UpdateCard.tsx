@@ -3,7 +3,7 @@
 /** App update controller, with a legacy card outside the compact rail. */
 
 import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
@@ -160,6 +160,7 @@ export function UpdateCard({ quiet = false }: { quiet?: boolean }) {
 }
 
 function AppUpdateCard({ quiet }: { quiet: boolean }) {
+  const changelogId = useId();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
@@ -607,6 +608,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           }
         }}
         aria-expanded={expanded}
+        aria-controls={expanded ? changelogId : undefined}
         aria-label="Toggle update changelog"
       >
         <span
@@ -716,6 +718,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
       {expanded ? (
         <div
+          id={changelogId}
           style={{
             marginTop: 9,
             paddingTop: 9,
