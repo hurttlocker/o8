@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { withOwnedArtifactRootLock } from './artifact-admission';
 import { readOwnedSessionMetadata } from './metadata-read';
 import { lstat, mkdir, readdir, realpath, rename } from 'node:fs/promises';
 
@@ -108,6 +109,12 @@ export async function restoreArchivedOwnedSessionDir(
   surfacePrefix: string,
   strictRecordFingerprint?: string,
 ): Promise<RestoreOwnedSessionResult> {
+  return withOwnedArtifactRootLock(root, () => restoreArchivedOwnedSessionDirLocked(root, surfaceId, surfacePrefix, strictRecordFingerprint));
+}
+
+async function restoreArchivedOwnedSessionDirLocked(
+  root: string, surfaceId: string, surfacePrefix: string, strictRecordFingerprint?: string,
+): Promise<RestoreOwnedSessionResult> {
   const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
   if (!archivePath) {
     return { restored: false, note: 'No archived session directory was found.' };
@@ -144,6 +151,12 @@ export async function restoreArchivedOwnedSessionDir(
 export async function archiveOwnedSessionDir(
   root: string,
   session: OwnedSessionRecord,
+): Promise<ArchiveOwnedSessionResult> {
+  return withOwnedArtifactRootLock(root, () => archiveOwnedSessionDirLocked(root, session));
+}
+
+async function archiveOwnedSessionDirLocked(
+  root: string, session: OwnedSessionRecord,
 ): Promise<ArchiveOwnedSessionResult> {
   const archiveRoot = archiveRootForOwnedSessionRoot(root);
   const archivePath = path.join(archiveRoot, path.basename(session.sessionDir));
