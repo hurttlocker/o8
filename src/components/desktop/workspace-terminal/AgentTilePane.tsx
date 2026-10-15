@@ -523,8 +523,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
             type="button"
-            aria-label={`Close ${name} tile`}
-            title="Close tile"
+            aria-label={`Hide ${name} pane`}
+            title="Hide pane · worker stays available in Agents"
             onClick={(event) => { event.stopPropagation(); onClose(sessionKey); }}
             style={{
               width: 44, height: 44, marginTop: -4, marginRight: -4, marginBottom: -4, marginLeft: 0,
