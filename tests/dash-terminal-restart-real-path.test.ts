@@ -79,6 +79,12 @@ async function startWsServer() {
     cwd: process.cwd(),
     env: {
       ...process.env,
+      HOME: dataDir,
+      USERPROFILE: dataDir,
+      ZDOTDIR: dataDir,
+      XDG_CONFIG_HOME: join(dataDir, '.config'),
+      XDG_STATE_HOME: join(dataDir, '.local', 'state'),
+      XDG_CACHE_HOME: join(dataDir, '.cache'),
       CORTEX_IDE_DATA_DIR: dataDir,
       O8_DATA_DIR: dataDir,
       CORTEX_IDE_REVIEW_REPO_ROOT: repoDir,
@@ -142,8 +148,12 @@ beforeAll(async () => {
   if (!tmuxAvailable) return;
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(repoDir);
-  execFileSync('git', ['init', '-q', repoDir]);
-  execFileSync('git', ['-C', repoDir, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Fixture']);
+  const gitEnv = {
+    PATH: process.env.PATH, HOME: dataDir, TMPDIR: dataDir,
+    GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  execFileSync('git', ['init', '--template=', '-q', repoDir], { env: gitEnv });
+  execFileSync('git', ['-C', repoDir, '-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Fixture'], { env: gitEnv });
   writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, { mode: 0o600 });
   apiPort = await freePort();
   wsPort = await freePort();
@@ -175,7 +185,9 @@ afterAll(async () => {
   try {
     execFileSync('tmux', tmuxArgs('kill-server'), { stdio: 'ignore' });
   } catch { /* the assertion may fail before the backing session is created */ }
-  rmSync(dataDir, { recursive: true, force: true });
+  // A login shell can finish writing its fixture-home logout state after tmux
+  // acknowledges shutdown. Retry only this owned temporary directory.
+  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSocket path', () => {
@@ -187,6 +199,7 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
       rows: 30,
       requestId: 'first-create',
       ownerKey,
+      cwd: repoDir,
     }));
     await waitFor(
       () => first.frames.some((frame) => frame.channel === 'terminal'
@@ -259,6 +272,7 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
       rows: 30,
       requestId: 'second-create',
       ownerKey,
+      cwd: repoDir,
     }));
     await waitFor(
       () => second.frames.some((frame) => frame.channel === 'terminal'
