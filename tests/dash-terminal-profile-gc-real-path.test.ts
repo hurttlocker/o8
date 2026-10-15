@@ -21,7 +21,7 @@ function create(profile: string, name: string) {
   vi.stubEnv('O8_DATA_DIR', profile);
   expect(createDashTmuxSessionSync({
     enabled: true, sessionName: name, cols: 80, rows: 24, cwd: root, shell: '/bin/sh',
-    env: { PATH: process.env.PATH, HOME: root, TERM: 'xterm-256color' },
+    env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root, TERM: 'xterm-256color' },
   })).toBe(true);
 }
 
