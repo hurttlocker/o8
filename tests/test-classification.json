@@ -5040,6 +5040,15 @@
       ]
     },
     {
+      "path": "tests/worktree-reaper-snapshot-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/worktree-retention-usage-real-path.test.ts",
       "reasons": [
         "real-path",
