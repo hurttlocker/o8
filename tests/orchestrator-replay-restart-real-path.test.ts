@@ -93,7 +93,7 @@ async function runTurn(socket: WebSocket, events: WireEvent[], threadId: string,
   socket.send(buildOrchestratorSendPayload({
     repoPath, threadId, clientMessageId: id,
     wireMessage: message, displayMessage: message,
-    permissionMode: 'plan', orchestrationMode: 'single', pickedMode: 'solo',
+    permissionMode: 'plan', orchestrationMode: 'fleet', pickedMode: 'multitask',
     model: 'gpt-6.1-sol', backend: 'codex',
   }));
   await waitFor(() => events.slice(start).some((event) => (
@@ -187,6 +187,7 @@ describe('orchestrator replay cursor across a ws-server restart (#3665)', () => 
     const first = await connect(threadId, cursor.current);
     const firstTurn = applied(await runTurn(first.socket, first.events, threadId, 'turn-1', 'first turn'));
     expect(firstTurn.some((event) => event.event === 'status' && event.data?.status === 'ready')).toBe(true);
+    expect(JSON.stringify(firstTurn)).toContain('First reply.');
     const cursorBeforeRestart = cursor.current;
     expect(cursorBeforeRestart).toBeGreaterThan(0);
 
