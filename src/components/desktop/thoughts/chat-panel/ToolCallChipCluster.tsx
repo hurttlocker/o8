@@ -105,6 +105,7 @@ function toolStatusLabel(tool: MobileTranscriptToolCall) {
   if (tool.status === 'calling') return 'calling';
   if (tool.status === 'running') return 'running';
   if (tool.status === 'error') return 'error';
+  if (tool.status === 'stopped') return 'stopped';
   return 'done';
 }
 
@@ -364,7 +365,7 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
             WebkitTapHighlightColor: 'transparent',
           }}
         >
-          <span>{describeToolRollup(toolCalls)}</span>
+          <span>{describeToolRollup(toolCalls)}{toolCalls.some((tool) => tool.status === 'stopped') ? ' · stopped' : ''}</span>
           <TurnChevron open={showAll} />
         </button>
       )}
@@ -417,6 +418,8 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
             </span>
             {status === 'error' ? (
               <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 500, color: 'var(--t-brand-red, #ef4444)' }}>failed</span>
+            ) : tool.status === 'stopped' ? (
+              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 500, color: 'var(--t-text-muted)' }}>stopped</span>
             ) : null}
           </button>
         );

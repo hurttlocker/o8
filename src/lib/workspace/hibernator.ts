@@ -621,6 +621,7 @@ export async function parkWorkspace(
           },
           verifyQuarantinedClone: async (quarantinePath) => {
             const quarantinedScan = await deps.secondScan(quarantinePath, {
+              quarantinedFrom: lane.worktreePath!,
               allowedIgnoredPaths,
               allowedExternalSymlinks,
               requiredCopyBindings,

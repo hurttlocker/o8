@@ -117,6 +117,10 @@ export function prepareExactWorkspaceClaim(
   };
   const sqlite = getSqlite();
   return sqlite.transaction(() => {
+    const legacy = sqlite.prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+      WHERE workspace_path = ? OR retained_path = ? OR (source_device = ? AND source_inode = ?) LIMIT 1`)
+      .get(candidate.sourcePath, candidate.sourcePath, candidate.sourceIdentity?.device ?? -1, candidate.sourceIdentity?.inode ?? -1);
+    if (legacy) throw new Error('Exact claim cannot retire a workspace or directory with retained legacy output.');
     if (candidate.kind !== 'generated-output-retirement') {
       assertWorkspaceRetentionReleased(candidate.sourcePath, candidate.sourceIdentity ?? undefined);
       const output = sqlite.prepare(`

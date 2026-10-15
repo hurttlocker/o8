@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import {
   appendFileSync,
@@ -15,6 +16,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { acquireServeOperation, withServeStateMutation } from './serve-processes.js';
 import { CliError, EXIT } from '../api.js';
 import { printHumanKv, printJson, type OutputMode } from '../output.js';
 
@@ -205,20 +207,28 @@ function writeServeStateDocument(stateFile: string, state: ServeStateDocument): 
   renameSync(temporary, stateFile);
 }
 
-function persistSupervisorPid(stateFile: string, reset: boolean): void {
-  const current = reset ? null : readServeStateDocument(stateFile);
-  writeServeStateDocument(stateFile, {
-    ...(current ?? { schema: 'o8/serve-state/v1' }),
-    supervisorPid: process.pid,
+function persistSupervisorPid(stateFile: string, generation: string): void {
+  withServeStateMutation(stateFile, () => {
+    const current = readServeStateDocument(stateFile);
+    if (current?.shutdownOwner || (Array.isArray(current?.shutdownProcesses) && current.shutdownProcesses.length)) {
+      throw new CliError('serve_stop_unconfirmed', 'Prior shutdown retains ownership evidence.', EXIT.CONFLICT);
+    }
+    if (current?.supervisorPid && current.supervisorPid !== process.pid) {
+      try { process.kill(current.supervisorPid, 0); throw new CliError('serve_already_running', 'Another supervisor owns this profile.', EXIT.CONFLICT); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    }
+    writeServeStateDocument(stateFile, { schema: 'o8/serve-state/v1', supervisorPid: process.pid, generation });
   });
 }
 
 function clearSupervisorPid(stateFile: string): void {
-  const current = readServeStateDocument(stateFile);
-  if (!current || current.supervisorPid !== process.pid) return;
-  const { supervisorPid: _supervisorPid, ...remaining } = current;
-  if (Object.keys(remaining).length === 1) rmSync(stateFile, { force: true });
-  else writeServeStateDocument(stateFile, remaining as ServeStateDocument);
+  withServeStateMutation(stateFile, () => {
+    const current = readServeStateDocument(stateFile);
+    if (!current || current.supervisorPid !== process.pid || current.shutdownOwner) return;
+    const { supervisorPid: _supervisorPid, ...remaining } = current;
+    if (!remaining.pid || remaining.daemonStopped) rmSync(stateFile, { force: true });
+    else writeServeStateDocument(stateFile, remaining as ServeStateDocument);
+  });
 }
 
 export function readServeSupervisorPid(stateFile: string): number | null {
@@ -390,50 +400,62 @@ export async function superviseServeDaemon(options: SuperviseServeDaemonOptions)
   process.once('SIGTERM', stopSupervisor);
   process.once('SIGINT', stopSupervisor);
   process.on('SIGHUP', restartChild);
-  persistSupervisorPid(options.stateFile, true);
 
   try {
     while (!stopping) {
       restartRequested = false;
-      persistSupervisorPid(options.stateFile, true);
-      prepareServeLog(options.logPath);
-      const logFd = openSync(options.logPath, 'a', 0o600);
-      child = spawn(process.execPath, [options.cliEntry, 'serve', '__daemon'], {
-        cwd: options.workingDirectory,
-        detached: true,
-        env: {
-          ...process.env,
-          O8_SERVE_ROOT: options.workingDirectory,
-          O8_SERVE_LAUNCH_MODE: options.launchMode,
-          O8_SERVE_SUPERVISOR_PID: String(process.pid),
-        },
-        stdio: ['ignore', logFd, logFd],
-      });
-      closeSync(logFd);
-      if (!child.pid) {
-        throw new CliError('serve_spawn_failed', 'Failed to spawn the headless daemon.', EXIT.CONNECTION_REFUSED);
-      }
-      if (stopping) {
-        try { child.kill('SIGTERM'); } catch {}
-        await waitForChildExit(child);
-        child = null;
-        break;
-      }
-      if (restartRequested) restartRequested = false;
+      const lease = acquireServeOperation(dirname(options.pidFile));
+      const generation = randomUUID();
       try {
-        writeFileSync(options.pidFile, String(child.pid), { flag: 'wx', mode: 0o600 });
-      } catch (error) {
-        try { child.kill('SIGTERM'); } catch {}
-        throw error;
-      }
-
-      const leafPid = child.pid;
-      const reachedReady = await daemonReachedReadyBeforeExit(child, options.stateFile, leafPid);
-      try {
-        if (readFileSync(options.pidFile, 'utf8').trim() === String(leafPid)) {
-          rmSync(options.pidFile, { force: true });
+        if (existsSync(options.pidFile)) throw new CliError('serve_already_running', 'A daemon owner record already exists.', EXIT.CONFLICT);
+        persistSupervisorPid(options.stateFile, generation);
+        prepareServeLog(options.logPath);
+        const logFd = openSync(options.logPath, 'a', 0o600);
+        child = spawn(process.execPath, [options.cliEntry, 'serve', '__daemon'], {
+          cwd: options.workingDirectory,
+          detached: true,
+          env: {
+            ...process.env,
+            O8_SERVE_ROOT: options.workingDirectory,
+            O8_SERVE_LAUNCH_MODE: options.launchMode,
+            O8_SERVE_SUPERVISOR_PID: String(process.pid),
+            O8_SERVE_GENERATION: generation,
+          },
+          stdio: ['ignore', logFd, logFd],
+        });
+        closeSync(logFd);
+        if (!child.pid) {
+          throw new CliError('serve_spawn_failed', 'Failed to spawn the headless daemon.', EXIT.CONNECTION_REFUSED);
         }
-      } catch {}
+        if (stopping) {
+          try { child.kill('SIGTERM'); } catch {}
+          await waitForChildExit(child);
+          child = null;
+          break;
+        }
+        if (restartRequested) restartRequested = false;
+        try {
+          withServeStateMutation(options.stateFile, () => {
+            const current = readServeStateDocument(options.stateFile);
+            if (current?.generation !== generation || current.shutdownOwner) throw new Error('Supervisor generation changed.');
+            writeFileSync(options.pidFile, String(child!.pid), { flag: 'wx', mode: 0o600 });
+            writeServeStateDocument(options.stateFile, { ...current, pid: child!.pid, children: [] });
+          });
+        } catch (error) {
+          try { child.kill('SIGTERM'); } catch {}
+          throw error;
+        }
+
+      } finally { lease.release(); }
+      const leafPid = child.pid!;
+      const reachedReady = await daemonReachedReadyBeforeExit(child, options.stateFile, leafPid);
+      withServeStateMutation(options.stateFile, () => {
+        const current = readServeStateDocument(options.stateFile);
+        if (current?.generation !== generation || current.shutdownOwner) return;
+        try {
+          if (readFileSync(options.pidFile, 'utf8').trim() === String(leafPid)) rmSync(options.pidFile);
+        } catch {}
+      });
       child = null;
       if (reachedReady) consecutiveFastFailures = 0;
       if (stopping) break;

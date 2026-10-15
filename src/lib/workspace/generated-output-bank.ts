@@ -372,3 +372,34 @@ export async function verifyGeneratedOutputEntries(input: {
   }
   await assertWorktreeMaterializationIdentity(input.candidate.canonicalPath, input.candidate);
 }
+
+/** Bounded content inventory only: no bank, copy, deletion or producer-success receipt. */
+export async function captureGeneratedOutputEntries(candidate: WorktreeMaterializationIdentity): Promise<GeneratedOutputContentEntry[]> {
+  const observed = await inventory(candidate);
+  const entries: GeneratedOutputContentEntry[] = [];
+  for (const entry of observed) {
+    let sha256: string | null = null;
+    if (entry.kind === 'file') {
+      const filePath = path.join(candidate.canonicalPath, entry.relative);
+      const file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        if (!sameEntry(entry, await file.stat())) throw new Error('Legacy content changed before capture.');
+        const digest = createHash('sha256'); let count = 0;
+        for await (const chunk of file.createReadStream({ autoClose: false })) {
+          count += chunk.length;
+          if (count > entry.bytes) throw new Error('Legacy content grew beyond its captured bound.');
+          digest.update(chunk);
+        }
+        if (count !== entry.bytes || !sameEntry(entry, await file.stat()) || !sameEntry(entry, await lstat(filePath))) {
+          throw new Error('Legacy content changed during capture.');
+        }
+        sha256 = digest.digest('hex');
+      } finally { await file.close(); }
+    }
+    entries.push({ relative: entry.relative, kind: entry.kind, device: entry.device, inode: entry.inode,
+      mode: entry.mode, bytes: entry.bytes, sha256 });
+  }
+  if (Buffer.byteLength(JSON.stringify(entries)) > GENERATED_BANK_LIMITS.manifestBytes) throw new Error('Legacy manifest exceeds its bound.');
+  await verifyGeneratedOutputEntries({ candidate, entries });
+  return entries;
+}

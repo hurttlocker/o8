@@ -532,39 +532,30 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid^="worker-row-"]')).toBeNull();
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-house-o8"]')!.click());
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-thinking"]')!.click());
-    const o8Stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
-    expect(o8Stops).toHaveLength(1);
-    expect(o8Stops[0]?.textContent).toBe('Low');
-    act(() => o8Stops[0]!.click());
-    expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('Low');
-    expect(container.querySelector('[data-testid="composer-selector-effort-consequence"] > span > span:not([aria-hidden])')?.textContent).toBe('managed model');
-    expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')?.textContent).not.toContain('of 2');
+    // The o8 lead has one setting, so it offers no effort control (#3660).
+    expect(container.querySelector('[data-testid="composer-selector-thinking"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-effort-stop"]')).toBeNull();
   });
 
   it.each(
     (['free', 'pro', 'team', 'founder'] as const).flatMap((plan) => (
-      [false, true].map((savedHigh) => ({ plan, savedHigh }))
+      [null, 'high', 'low'].map((saved) => ({ plan, saved }))
     )),
-  )('offers only Low on the $plan o8 plan (saved High: $savedHigh)', async ({ plan, savedHigh }) => {
+  )('shows no effort control for the o8 lead on the $plan plan (saved: $saved)', async ({ plan, saved }) => {
     entitlementState.plan = plan;
-    if (savedHigh) {
-      localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'o8-free': 'high' }));
+    if (saved) {
+      localStorage.setItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY, JSON.stringify({ 'o8-free': saved }));
     }
     await act(async () => { root.render(createElement(O8PlanHarness)); });
-    await openLeadEffort('o8', 'o8-free');
-    const stops = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="composer-selector-effort-stop"]')];
+    await openLeadHouse('o8');
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="lead-row-o8-free"]')!.click());
 
-    expect(stops.map((stop) => stop.textContent)).toEqual(['Low']);
-    expect(stops.some((stop) => stop.getAttribute('aria-disabled') === 'true')).toBe(false);
+    expect(container.querySelector('[data-testid="composer-selector-thinking"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-effort-stop"]')).toBeNull();
     expect(container.textContent).not.toMatch(/upgrade|founders|reset to high/i);
-    const slider = container.querySelector<HTMLElement>('[role="slider"]')!;
-    expect(slider.getAttribute('aria-valuemax')).toBe('0');
-    act(() => slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
-    expect(slider.getAttribute('aria-valuetext')).toBe('Low');
+    // The one setting the o8 lead sends, whatever was saved before.
     expect(container.querySelector('[data-testid="o8-plan-effort"]')?.textContent).toBe('low');
-    expect(container.querySelector('[data-testid="composer-selector-thinking"]')?.textContent).toContain('low');
-    if (savedHigh) {
+    if (saved) {
       expect(JSON.parse(localStorage.getItem(COMPOSER_EFFORT_BY_MODEL_STORAGE_KEY) ?? '{}'))
         .toEqual({ 'o8-free': 'low' });
     }

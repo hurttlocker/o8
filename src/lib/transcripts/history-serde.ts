@@ -1,6 +1,7 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 export type StoredTranscriptMessage = {
+  deliveryConfirmed?: boolean;
   id?: string;
   role?: MobileTranscriptEntry['role'];
   content?: string;
@@ -73,6 +74,7 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
 
   return {
     id: message.id as string,
+    deliveryConfirmed: message.deliveryConfirmed === true ? true : undefined,
     role: message.role as MobileTranscriptEntry['role'],
     text,
     persistedVersion: typeof message.persistedVersion === 'number'
@@ -119,6 +121,7 @@ export function serializeTranscriptForStorage(
   const timestampFallback = options?.timestampFallback ?? 'now';
   return entries.map((entry) => ({
     id: entry.id,
+    deliveryConfirmed: entry.deliveryConfirmed === true ? true : undefined,
     role: entry.role,
     content: entry.text,
     persistedVersion: entry.persistedVersion,

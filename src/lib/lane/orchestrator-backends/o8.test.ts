@@ -26,7 +26,7 @@ vi.mock('@/lib/entitlement/store', () => ({
 }));
 
 // Imported after the mocks so the backend binds them.
-import { createO8Backend, o8BuiltInAgentBlocker, o8FallbackTier, o8SystemPrompt } from './o8';
+import { createO8Backend, o8BuiltInAgentBlocker, o8SystemPrompt } from './o8';
 import type { OrchestratorBackend } from './types';
 
 const BLOCKER = 'o8\'s built-in agent runs on macOS and Linux, and Windows support is not available yet';
@@ -261,6 +261,24 @@ describe('o8 text-only fallback where Pi cannot start', () => {
     expect(piSendTurn).not.toHaveBeenCalled();
   });
 
+  it.each(
+    (['free', 'pro', 'team', 'founder'] as const).flatMap((plan) => (
+      [undefined, 'low', 'high'].map((thinkingEffort) => ({ plan, thinkingEffort }))
+    )),
+  )('$plan plan, effort $thinkingEffort → requests and records Low (#3660)', async ({ plan, thinkingEffort }) => {
+    mockEntitlement.mockReturnValue({ plan });
+    mockFetch.mockResolvedValue(sseResponse([contentFrame('ok'), 'data: [DONE]\n\n']));
+    const { events, onEvent } = collect();
+
+    await o8Backend.sendTurn('/Users/me/proj', 'hi', onEvent, {
+      threadId: 'thoughts-1',
+      ...(thinkingEffort ? { thinkingEffort: thinkingEffort as 'low' | 'high' } : {}),
+    });
+
+    expect((bodyOf() as { thinkingEffort?: string }).thinkingEffort).toBe('low');
+    expect(events[0]).toMatchObject({ type: 'turn_receipt', effort: 'low' });
+  });
+
   it('ignores tool frames: the fallback renders text only', async () => {
     mockFetch.mockResolvedValue(sseResponse([
       `data: ${JSON.stringify({ type: 'tool_use', toolName: 'create_file', toolCallId: 't1', arguments: { file_path: 'x.html' } })}\n\n`,
@@ -350,14 +368,6 @@ describe('o8 backend inactivity watchdog (wedged-turn class)', () => {
   });
 });
 
-describe('o8FallbackTier', () => {
-  it('follows an explicit effort, else the plan', () => {
-    expect(o8FallbackTier(false, undefined)).toBe('low');
-    expect(o8FallbackTier(true, undefined)).toBe('high');
-    expect(o8FallbackTier(true, 'low')).toBe('low');
-    expect(o8FallbackTier(false, 'high')).toBe('high');
-  });
-});
 
 describe('o8SystemPrompt', () => {
   it('says the reply is text only on both tiers', () => {

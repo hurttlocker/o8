@@ -8,7 +8,6 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
@@ -440,10 +439,8 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
-  // o8 tiers (Q ruling 2026-07-12): Low = the free rail, High = the founders
-  // rail. Founders default High, free defaults Low, and High never renders for
-  // the free plan — the proxy enforces the same gate server-side, this is
-  // just the honest UI for it. Mode rows (Solo/Collide) stay hidden for o8.
+  // The o8 lead has one setting on every plan, so it shows no effort control
+  // (#2999, #3660). Mode rows (Solo/Collide) stay hidden for o8.
   const isO8Backend = activeBackend === 'o8';
   const { plan: entitlementPlan } = useEntitlement();
   const isFreePlan = entitlementPlan === 'free';
@@ -454,17 +451,14 @@ export function ModelThinkingChip({
     isFreePlan,
     ultraEnabled,
   );
-  // Backends without steerable thinking expose no effort stops. o8 keeps its
-  // own plan-gated Low/High options from the shared support resolver.
-  const hideEffortUi = options.length === 0 || (!thinkingKnown && !isO8Backend);
+  // Backends without steerable thinking expose no effort stops.
+  const hideEffortUi = options.length === 0 || !thinkingKnown;
   const useSplit = split && !compact;
 
   const effortStops: EffortStop[] = options.map((option) => ({
     effort: option,
     label: THINKING_EFFORT_LABELS[option].long,
-    sub: isO8Backend
-      ? option === 'high' ? PLAN_LABELS[entitlementPlan] : 'free'
-      : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
+    sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
   }));
   const currentEffortIndex = Math.max(0, options.indexOf(effort));
   const handleEffortPick = (idx: number) => {
@@ -685,12 +679,8 @@ export function ModelThinkingChip({
                               }
                               // Drop an effort only when the shared verified catalog excludes it.
                               if (!codexSupportsReasoningEffort(option.model, 'ultra') && effort === 'ultra') onEffortChange?.('max');
-                              // o8 auto tier (Q ruling 2026-07-12): founders land on
-                              // High, free lands on Low — the server enforces the
-                              // same gate regardless.
-                              if (option.backend === 'o8') {
-                                onEffortChange?.(isFreePlan ? 'low' : 'high');
-                              }
+                              // The o8 lead has one setting on every plan (#3660).
+                              if (option.backend === 'o8') onEffortChange?.('low');
                               setOpen(false);
                             }}
                             style={{

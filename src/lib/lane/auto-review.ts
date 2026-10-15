@@ -9,6 +9,7 @@
  * (#456) — Persistent queue survives process restarts. No more lost reviews.
  */
 
+import { manualReviewRequested } from './review-mode';
 import { randomUUID } from 'node:crypto';
 import { laneGitSync } from '@/lib/lane/lane-git';
 import { isSafeGitRef } from '@/lib/git/refs';
@@ -74,8 +75,6 @@ let stopExplainerDrain: (() => void) | null = null;
 
 export { isLaneAutoReviewActive, cancelAutoReviewForLane };
 
-// ── Public API ──
-
 /**
  * Called when a lane transitions to 'reviewing' during reconciliation.
  * Enqueues a durable review job — does not block the caller.
@@ -88,6 +87,7 @@ export function triggerAutoReview(lane: Lane): void {
  * Start the review queue drain loop. Call once per server process.
  */
 export function startReviewQueueDrain(): () => void {
+  if (manualReviewRequested()) return () => {};
   if (drainTimer) return () => { /* already running */ };
 
   // At boot no claim from the prior process is live; reclaim with a receipt.
@@ -120,7 +120,6 @@ export function startReviewQueueDrain(): () => void {
   };
 }
 
-// ── Drain Logic ──
 type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
 
 /** Structured settlement prevents an early return from looking completed. */
@@ -224,6 +223,7 @@ async function drainAvailableReviewSlot(): Promise<void> {
 }
 
 export async function drainReviewQueue(): Promise<void> {
+  if (manualReviewRequested()) return;
   // Recovery stays ahead of capacity checks so an abandoned turn cannot pin a
   // slot or disable the path that reclaims and replaces it.
   await runReviewRecoveryPass();

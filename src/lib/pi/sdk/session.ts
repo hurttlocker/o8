@@ -2,6 +2,7 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Context, Model } from '@earendil-works/pi-ai';
 import { StdioJsonRpcPeer, type StdioJsonRpcInboundRequest } from '@/lib/runtimes/shared/stdio-json-rpc';
+import { WORKSPACE_CONFINEMENT } from '@/lib/sandbox/confine';
 import { createPiApproval } from './approval';
 import { requirePiNode, requirePiPlatform } from './platform';
 import { piSdkScriptPath } from './scripts';
@@ -9,7 +10,7 @@ import { createPiContinuityGuard, type PiContinuityPolicy } from './continuity';
 import { executePiTool, PI_SDK_TOOLS, type PiApproval, type PiAuthority } from './tools';
 import { createManagedPiTransport, isPiAllowanceMessage, type PiModelTransport } from './transport';
 import { OPENROUTER_PI_FAILURE_TEXT } from './openrouter-transport';
-import { PI_TOOL_REFUSAL_CODE, PiToolRefusal } from './refusal';
+import { PI_OPERATOR_STOPPED_TEXT, PI_TOOL_REFUSAL_CODE, PiToolRefusal } from './refusal';
 
 export { requirePiNode, requirePiPlatform } from './platform';
 
@@ -36,8 +37,9 @@ export interface PiSdkSessionOptions {
   /**
    * Lane rules (#3385): every command runs confined (no network, writes only in
    * the workspace and a private temp dir), or needs inbox approval where it cannot be.
+   * `'workspace'` keeps network and `.git` writes (the orchestrator in Full access, #3658).
    */
-  confineCommands?: boolean;
+  confineCommands?: boolean | 'workspace';
   onEvent?: (event: Record<string, unknown>) => void;
   maxModelCalls?: number;
   maxToolCalls?: number;
@@ -101,13 +103,17 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
   let surfaceId = '';
   const inbox: PiApproval = (call, signal) => createPiApproval(surfaceId, root)(call, signal);
   const approve: PiApproval = options.approve ?? inbox;
-  const confine = options.confineCommands ? { inbox } : undefined;
+  const confine = options.confineCommands
+    ? { inbox, ...(options.confineCommands === 'workspace' ? { rules: WORKSPACE_CONFINEMENT } : {}) }
+    : undefined;
   const transport = options.transport ?? createManagedPiTransport({ model: options.model });
   const workerPath = piSdkScriptPath('worker.mjs');
   const peer = new StdioJsonRpcPeer({ command: process.execPath, args: [workerPath], cwd: stateDir,
     // No inherited provider keys, NODE_OPTIONS, user extension paths or proxy variables.
     env: { NODE_ENV: 'production', HOME: stateDir, USERPROFILE: stateDir, PI_OFFLINE: '1', NO_COLOR: '1' } });
   let run: AbortController | undefined;
+  // Set only by abort(), so a timeout or a worker exit is never reported as the operator's Stop.
+  let operatorStopped = false;
   let closed = false;
   let modelCalls = 0;
   let toolCalls = 0;
@@ -161,6 +167,8 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       // o8's own fixed refusal text is none of those, and the model needs it to correct a call.
       if (!peer.running) return;
       if (error instanceof PiToolRefusal) peer.respondError(request.id, PI_TOOL_REFUSAL_CODE, error.message);
+      // A tool the operator's Stop interrupted says so, rather than reading as a host failure (#3659).
+      else if (request.method === 'tool' && operatorStopped) peer.respondError(request.id, PI_TOOL_REFUSAL_CODE, PI_OPERATOR_STOPPED_TEXT);
       else peer.respondError(request.id, -32001, 'Host operation denied or unavailable');
     }).catch(() => { run?.abort(); });
   });
@@ -182,7 +190,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     async prompt(message: string): Promise<PiRunResult> {
       if (closed || run) throw new Error('Session is closed or busy');
       if (!message.trim() || Buffer.byteLength(message) > PI_PROMPT_MAX_BYTES) throw new Error('Invalid prompt');
-      run = new AbortController(); modelCalls = 0; toolCalls = 0; settled = false;
+      run = new AbortController(); modelCalls = 0; toolCalls = 0; settled = false; operatorStopped = false;
       const timeoutMs = options.runTimeoutMs ?? 120_000;
       const timeout = setTimeout(() => {
         run?.abort();
@@ -201,6 +209,7 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
       } finally { clearTimeout(timeout); run = undefined; }
     },
     async abort() {
+      if (run) operatorStopped = true;
       run?.abort();
       await peer.request('abort').catch(async () => { await peer.close(); closed = true; });
     },
