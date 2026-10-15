@@ -41,6 +41,12 @@ export interface QuickBenchmarkPreflightReceipt {
   } | null;
   comparedTo?: string | null;
   resultPath?: string | null;
+  cleanup?: {
+    confirmed: boolean;
+    stoppedProcesses: number;
+    removedOutput: boolean;
+    reason?: string;
+  };
 }
 
 export function acquireReleaseLock(options?: { lockPath?: string }): {
@@ -60,6 +66,7 @@ export function performShipPreflight(options: {
 export function runQuickBenchmarkPreflight(options: {
   root: string;
   env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
   run?: (command: string, args: string[], options?: {
     cwd?: string;
     env?: NodeJS.ProcessEnv;

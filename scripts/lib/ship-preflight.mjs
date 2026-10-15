@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  lstatSync,
   openSync,
   readFileSync,
   rmSync,
@@ -21,6 +23,7 @@ function commandReceipt(command, args, options = {}) {
     encoding: 'utf8',
     env: options.env,
     timeout: options.timeoutMs ?? 15_000,
+    ...(options.maxBuffer ? { maxBuffer: options.maxBuffer } : {}),
     windowsHide: true,
   });
   return {
@@ -322,17 +325,97 @@ export function performShipPreflight(options) {
   };
 }
 
+// The quick benchmark boots servers in their own process groups inside the
+// release checkout. A timeout can orphan them, and an orphaned dev server
+// writes `.next`, which the prebuild then refuses as unknown generated output.
+// Every benchmark descendant inherits this marker, so the step stops whatever
+// outlives it and removes output that it created.
+const BENCHMARK_MARKER = 'O8_SHIP_BENCHMARK_RUN';
+const MARKER_SCAN_MAX_BUFFER = 64 * 1024 * 1024;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// `ps` prints process environments, which can hold release credentials. Only
+// matching PIDs leave this function; null means the scan could not complete.
+function markedProcessIds(marker) {
+  const receipt = commandReceipt('ps', ['axeww', '-o', 'pid=,command='], {
+    timeoutMs: 15_000,
+    maxBuffer: MARKER_SCAN_MAX_BUFFER,
+  });
+  if (receipt.status !== 0) return null;
+  const needle = `${BENCHMARK_MARKER}=${marker}`;
+  const pids = [];
+  for (const line of receipt.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s/.exec(line);
+    if (!match || !line.includes(needle)) continue;
+    const pid = Number(match[1]);
+    if (pid !== process.pid) pids.push(pid);
+  }
+  return pids;
+}
+
+// Each signal goes only to a PID whose environment carried the marker in the
+// scan just before it, so a reused PID is not signaled.
+function stopMarkedProcesses(marker) {
+  if (process.platform === 'win32') return { confirmed: false, stoppedProcesses: 0, reason: 'unsupported platform' };
+  const stopped = new Set();
+  for (const signal of ['SIGTERM', 'SIGTERM', 'SIGTERM', 'SIGKILL']) {
+    const pids = markedProcessIds(marker);
+    if (pids === null) return { confirmed: false, stoppedProcesses: stopped.size, reason: 'process scan failed' };
+    if (pids.length === 0) return { confirmed: true, stoppedProcesses: stopped.size };
+    for (const pid of pids) {
+      try {
+        process.kill(pid, signal);
+        stopped.add(pid);
+      } catch {
+        // Already exited.
+      }
+    }
+    sleepSync(1000);
+  }
+  const remaining = markedProcessIds(marker);
+  return remaining !== null && remaining.length === 0
+    ? { confirmed: true, stoppedProcesses: stopped.size }
+    : { confirmed: false, stoppedProcesses: stopped.size, reason: `${remaining?.length ?? 'unknown'} benchmark processes remain` };
+}
+
+function settleQuickBenchmark(root, marker, outputExisted) {
+  const settlement = stopMarkedProcesses(marker);
+  const output = join(root, '.next');
+  let removedOutput = false;
+  if (!outputExisted && lstatSync(output, { throwIfNoEntry: false })) {
+    rmSync(output, { recursive: true, force: true });
+    removedOutput = true;
+  }
+  return { ...settlement, removedOutput };
+}
+
 export function runQuickBenchmarkPreflight(options) {
   const {
     root,
     env = process.env,
     run = commandReceipt,
+    timeoutMs = 120_000,
   } = options;
-  const receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
-    cwd: root,
-    env,
-    timeoutMs: 120_000,
-  });
+  const marker = randomUUID();
+  const outputExisted = Boolean(lstatSync(join(root, '.next'), { throwIfNoEntry: false }));
+  let receipt;
+  let cleanup;
+  try {
+    receipt = run(process.execPath, ['scripts/bench/quick.mjs', '--ephemeral'], {
+      cwd: root,
+      env: { ...env, [BENCHMARK_MARKER]: marker },
+      timeoutMs,
+    });
+  } finally {
+    cleanup = settleQuickBenchmark(root, marker, outputExisted);
+  }
+  return { ...parseQuickBenchmarkReceipt(receipt), cleanup };
+}
+
+function parseQuickBenchmarkReceipt(receipt) {
   if (receipt.status !== 0) {
     return {
       schema: 'o8/benchmark-quick-preflight/v1',
