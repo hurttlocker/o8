@@ -2108,6 +2108,14 @@
       ]
     },
     {
+      "path": "tests/dash-terminal-profile-gc-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/dash-terminal-restart-real-path.test.ts",
       "reasons": [
         "child-process",

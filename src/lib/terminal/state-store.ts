@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -134,29 +134,39 @@ export function pruneTerminalStateForRepoPath(repoPath: string) {
  * #6 persistent terminals — collect every tmux session name referenced by a
  * persisted tab across all scope files (+ the legacy file). This is the durable
  * "is this session still owned by a tab?" source the dash-session GC keys on —
- * NOT the in-memory attachment map, which is empty after a crash. On any read
- * failure the caller must treat the result as authoritative-empty-only when it
- * also succeeded reading tmux; callers should skip GC entirely if this throws.
+ * NOT the in-memory attachment map, which is empty after a crash. A missing
+ * store is empty; any unreadable or invalid present store aborts cleanup.
  */
-export function collectPersistedTmuxSessions(): Set<string> {
+export function collectPersistedTmuxSessions(dataDir = STATE_DIR): Set<string> {
   const sessions = new Set<string>();
+  const scopeDir = path.join(dataDir, 'terminal-states');
+  const legacyFile = path.join(dataDir, 'terminal-state.json');
+  const present = (filePath: string) => {
+    try { lstatSync(filePath); return true; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  };
 
-  const fileSet = new Set<string>(
-    existsSync(STATE_SCOPE_DIR)
-      ? readdirSync(STATE_SCOPE_DIR)
-        .filter((file) => file.endsWith('.json'))
-        .map((file) => path.join(STATE_SCOPE_DIR, file))
-      : [],
-  );
-  if (existsSync(LEGACY_STATE_FILE)) {
-    fileSet.add(LEGACY_STATE_FILE);
+  const fileSet = new Set<string>();
+  if (present(scopeDir)) {
+    for (const file of readdirSync(scopeDir)) {
+      if (file.endsWith('.json')) fileSet.add(path.join(scopeDir, file));
+    }
   }
+  if (present(legacyFile)) fileSet.add(legacyFile);
 
   for (const filePath of fileSet) {
-    const parsed = readTerminalState(filePath);
-    if (!parsed || !Array.isArray(parsed.tabs)) continue;
+    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || !('tabs' in parsed) || !Array.isArray(parsed.tabs)) {
+      throw new Error('Invalid persisted terminal state; cleanup skipped');
+    }
     for (const tab of parsed.tabs) {
-      const name = tab.tmuxSession?.trim();
+      if (!tab || typeof tab !== 'object' || Array.isArray(tab)
+        || (tab.tmuxSession != null && typeof tab.tmuxSession !== 'string')) {
+        throw new Error('Invalid persisted terminal tab; cleanup skipped');
+      }
+      const name = typeof tab.tmuxSession === 'string' ? tab.tmuxSession.trim() : '';
       if (name) sessions.add(name);
     }
   }
