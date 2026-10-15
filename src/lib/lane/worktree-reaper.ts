@@ -301,6 +301,7 @@ async function reconcileMergedPullRequest(
     if (allowTargetedRefresh) {
       const { ensureGitHubPullRequest } = await import('@/lib/github-broker/sync');
       const refreshed = await ensureGitHubPullRequest(repoFullName, prNumber);
+      if (refreshed.error) console.warn(`[worktree-reaper] ${lane.id} PR #${prNumber} refresh failed: ${refreshed.error}`);
       pull = refreshed.pr;
       if (pull?.mergedAt) {
         return { archived: await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber'), refreshed: true };
@@ -324,6 +325,7 @@ async function reconcileMergedPullRequest(
   if (allowTargetedRefresh) {
     const { ensureGitHubPullRequestByHead } = await import('@/lib/github-broker/sync');
     const refreshed = await ensureGitHubPullRequestByHead(repoFullName, lane.branch);
+    if (refreshed.error) console.warn(`[worktree-reaper] ${lane.id} PR refresh for ${lane.branch} failed: ${refreshed.error}`);
     const pull = refreshed.pr;
     if (pull) {
       stampLanePullRequestNumber(lane, pull);
