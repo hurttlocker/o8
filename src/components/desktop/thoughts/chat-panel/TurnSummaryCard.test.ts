@@ -83,6 +83,19 @@ describe('TurnSummaryCard', () => {
     expect(html).toContain('Codex · GPT-5.6 Terra');
   });
 
+  it('leaves the effort out of an o8 lead receipt, which has one setting (#3660)', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'assistant-o8',
+      role: 'assistant',
+      text: 'Done.',
+      receipt: { leadModel: 'o8-free', effort: 'low', mode: 'solo' },
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+
+    expect(html).toContain('o8 · Solo');
+    expect(html).not.toMatch(/\bLow\b|\blow\b/);
+  });
+
   it('renders no receipt line and does not crash for a legacy persisted entry', () => {
     const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
       id: 'assistant-legacy',
