@@ -2121,6 +2121,7 @@
       "path": "tests/dash-terminal-restart-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "network-listener",
         "process-signal",
         "real-path",
