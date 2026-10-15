@@ -86,9 +86,17 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const settleRecord = useCallback((record: PersistedOrchestratorPendingSend) => {
     settlePersistedOrchestratorPendingSend(record.threadId, record.clientMessageId);
-    removeFailureEntry(record.clientMessageId);
+    setMessages((prev) => {
+      const next = prev
+        .filter((entry) => entry.id !== `orch-delivery-error-${record.clientMessageId}`)
+        .map((entry) => entry.role === 'user' && entry.id === `orch-user-${record.clientMessageId}`
+          ? { ...entry, deliveryConfirmed: true }
+          : entry);
+      messagesRef.current = next;
+      return next;
+    });
     if (activeRecordRef.current?.clientMessageId === record.clientMessageId) activeRecordRef.current = null;
-  }, [removeFailureEntry]);
+  }, [messagesRef, setMessages]);
 
   const armRecord = useCallback((record: PersistedOrchestratorPendingSend, deliveredAt: number) => {
     activeRecordRef.current = record;
