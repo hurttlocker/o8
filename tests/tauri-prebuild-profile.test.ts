@@ -12,7 +12,7 @@ import { createRetainedGeneratedOutputFixture } from './generated-output-fixture
 const source = process.cwd();
 const require = createRequire(import.meta.url);
 
-it('retains ordinary prebuild creation authority across default prebuild and release lifetimes', async () => {
+it.each(['ordinary', 'linked'] as const)('retains %s prebuild creation authority across default prebuild and release lifetimes', async kind => {
   const root = await createRetainedGeneratedOutputFixture('o8-prebuild-lifetime-');
   const repo = path.join(root, 'repo');
   const home = path.join(root, 'home');
@@ -65,6 +65,14 @@ it('retains ordinary prebuild creation authority across default prebuild and rel
     const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
     expect(result.status, result.stderr).toBe(0);
   }
+  if (kind === 'linked') {
+    const primary = path.join(root, 'primary');
+    renameSync(repo, primary);
+    const linked = spawnSync('git', ['worktree', 'add', '-b', 'fixture-linked', repo], { cwd: primary, encoding: 'utf8' });
+    expect(linked.status, linked.stderr).toBe(0);
+    renameSync(path.join(primary, 'node_modules'), path.join(repo, 'node_modules'));
+    mkdirSync(path.join(repo, '.fixture'));
+  }
   const env = { ...process.env, HOME: home, O8_RELEASE_BUILD_CACHE_DIR: path.join(root, 'cache'),
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
@@ -81,6 +89,25 @@ it('retains ordinary prebuild creation authority across default prebuild and rel
     return result;
   }
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
+  if (kind === 'linked') {
+    const pointer = path.join(repo, '.git');
+    const originalPointer = readFileSync(pointer);
+    writeFileSync(pointer, `gitdir: ${path.join(root, 'primary/.git')}\n`);
+    expect(run(prebuild).status).not.toBe(0);
+    expect(existsSync(path.join(repo, '.next'))).toBe(false);
+    writeFileSync(pointer, originalPointer);
+    // Legacy output stays untouched. Moving this fixture aside is not a product
+    // adoption command and grants no operational preservation authority.
+    mkdirSync(path.join(repo, '.next/dev'), { recursive: true });
+    writeFileSync(path.join(repo, '.next/dev/lock'), 'retained unknown producer evidence');
+    const legacy = lstatSync(path.join(repo, '.next'));
+    const refused = run(prebuild);
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('unknown existing generated output');
+    expect(lstatSync(path.join(repo, '.next')).ino).toBe(legacy.ino);
+    expect(readFileSync(path.join(repo, '.next/dev/lock'), 'utf8')).toBe('retained unknown producer evidence');
+    renameSync(path.join(repo, '.next'), path.join(repo, '.fixture/retained-legacy-next'));
+  }
   const first = run(prebuild);
   expect(first.status, first.stderr + first.stdout).toBe(0);
   const profile = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8')).modern as string;
@@ -96,6 +123,33 @@ it('retains ordinary prebuild creation authority across default prebuild and rel
   expect(original).toMatchObject({ state: 'succeeded', origin: 'managed-creation',
     creationAuthority: { kind: 'prebuild' } });
   expect(original.owner).toBeUndefined();
+  if (kind === 'linked') {
+    expect(original.creationAuthority.linkedGit.schema).toBe('o8/linked-git-build-custody/v1');
+    const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+    try { expect(db.prepare('SELECT count(*) AS count FROM worktree_maintenance_roots').get()).toEqual({ count: 0 }); }
+    finally { db.close(); }
+    const back = path.join(original.creationAuthority.linkedGit.admin.canonicalPath, 'gitdir');
+    const bytes = readFileSync(back);
+    writeFileSync(back, path.join(root, 'other/.git') + '\n');
+    const mismatch = run(prebuild);
+    expect(mismatch.status).not.toBe(0);
+    expect(mismatch.stderr).toContain('does not point back');
+    expect(resource()).toEqual(original);
+    writeFileSync(back, bytes);
+    const gitFile = path.join(repo, '.git');
+    const saved = path.join(repo, '.fixture/original-git-pointer');
+    renameSync(gitFile, saved);
+    writeFileSync(gitFile, readFileSync(saved));
+    const replaced = run(prebuild);
+    expect(replaced.status).not.toBe(0);
+    expect(replaced.stderr).toContain('persisted receipt');
+    expect(resource()).toEqual(original);
+    renameSync(gitFile, path.join(repo, '.fixture/replaced-git-pointer'));
+    renameSync(saved, gitFile);
+    expect(existsSync(path.join(root, 'primary/.git'))).toBe(true);
+    expect(readFileSync(path.join(repo, '.fixture/retained-legacy-next/dev/lock'), 'utf8'))
+      .toBe('retained unknown producer evidence');
+  }
   expect(original.attempt.children.length).toBeGreaterThan(0);
   expect(original.attempt.children.every((child: { identity: unknown; observedClosed: boolean; exitCode: number }) =>
     child.identity && child.observedClosed && child.exitCode === 0)).toBe(true);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { assertLinkedGitBuildCustody } from './linked-git-build-custody';
 
 import { readProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 import { getSqlite } from '@/lib/db';
@@ -49,6 +50,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
   return withGeneratedOutputExclusion(workspace, owner, async () => {
     const resource = readGeneratedOutputResource(previous.resourceId)!;
     await assertWorktreeMaterializationIdentity(workspace.canonicalPath, resource.workspace);
+    if (resource.creationAuthority) await assertLinkedGitBuildCustody(workspace, resource.creationAuthority.linkedGit);
     if (resource.disposal) {
       assertGeneratedOutputClaimsReleased(workspace);
       assertWorkspaceRetentionReleased(outputPath, resource.output!);
@@ -68,6 +70,7 @@ export async function disposeSuccessfulPrebuildOutput(workspacePath: string, ver
     }
     let claim = readExactWorkspaceClaim('generated-output-retirement', workspace.canonicalPath, resource.resourceId);
     const verify = async (captured?: CapturedPurgeProcessWitness) => {
+      await assertLinkedGitBuildCustody(workspace, resource.creationAuthority!.linkedGit);
       await assertWorktreeMaterializationIdentity(workspace.canonicalPath, resource.workspace);
       if (await generatedOutputOwner(workspace) || JSON.stringify(readGeneratedOutputResource(resource.resourceId)) !== JSON.stringify(resource)) {
         throw new Error('Postship output owner or resource changed.');

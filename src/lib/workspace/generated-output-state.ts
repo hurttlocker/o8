@@ -21,6 +21,7 @@ import { readExactManagedFinalization } from './exact-managed-finalization-state
 import { readGeneratedOutputRecoveryHistory, recordGeneratedOutputRecoveryHistory } from './generated-output-recovery-history';
 import { validateGeneratedOutputResource } from './generated-output-validation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
+import type { LinkedGitBuildCustody } from './linked-git-build-custody';
 import { withManagedRetirementOwnership } from './retirement-process-authority';
 
 export type GeneratedOutputState = 'planned' | 'legacy-held' | 'ready' | 'active'
@@ -53,7 +54,7 @@ export interface GeneratedOutputResource {
   updatedAt: number;
   revision: { head: string; tree: string; dirty: boolean; workingDigest: string };
   owner?: { repositoryPath: string; worktreeId: string };
-  creationAuthority?: { kind: 'prebuild'; pid: number; identity: MetadataLockProcessIdentity };
+  creationAuthority?: { kind: 'prebuild'; pid: number; identity: MetadataLockProcessIdentity; linkedGit?: LinkedGitBuildCustody };
   attempt?: { id: string; mode: string; ownerPid: number; ownerIdentity: MetadataLockProcessIdentity;
     children: Array<{ pid: number; identity: MetadataLockProcessIdentity | null; exitCode: number | null;
       signal: string | null; observedClosed: boolean }> };
