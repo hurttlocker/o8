@@ -65,7 +65,19 @@ export function captureCurrentDispatchRegistry(state: OrchestratorMissionState):
   const retainedPackets: OrchestratorPacket[] = [];
   for (const stored of entry.mission.packets) {
     const current = currentById.get(stored.id);
-    if (!current) throw new DispatchRegistryConflictError(missionId, 'packet_owner_missing', stored.id);
+    if (!current) {
+      // A comparison seed the current mission already fanned out is consumed by its
+      // candidates, not missing; they must keep any operator stop or hold it had.
+      const candidates = !stored.comparisonGroupId
+        ? state.packets.filter(packet => packet.comparisonGroupId && packet.id.startsWith(`${stored.id}-cmp-`))
+        : [];
+      if (candidates.length === 0) refuse('packet_owner_missing', stored.id);
+      if (stored.operatorStopped && !candidates.every(packet => packet.operatorStopped)) refuse('operator_stop_changed', stored.id);
+      if (stored.holdIntent === 'operator' && !candidates.every(packet => packet.holdIntent === 'operator')) {
+        refuse('operator_hold_changed', stored.id);
+      }
+      continue;
+    }
     const generationOrder = (current.storageAdmissionEpoch ?? 0) - (stored.storageAdmissionEpoch ?? 0)
       || (current.attemptCount ?? 0) - (stored.attemptCount ?? 0);
     if (generationOrder < 0) refuse('newer_generation', stored.id);

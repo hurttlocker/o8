@@ -183,6 +183,31 @@ describe('staged mission creation', () => {
     });
   }, 20_000);
 
+  it('treats a fanned-out comparison seed as consumed by its candidates, never as a missing owner', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission');
+    const staged = parseResult<{ missionId: string }>(await handleCreateMission({
+      issues_inline: [{ title: 'seed consumption', body: 'Fan out before dispatch.' }],
+      repoPath, runtime: 'codex', comparisonModels: ['gpt-5.6-sol', 'gpt-5.6-sol'], dispatch: false,
+    }));
+    const { fanOutComparisonPackets } = await import('@/lib/orchestrator/comparison-fanout');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { captureCurrentDispatchRegistry } = await import('@/lib/orchestrator/operator-mission-service/dispatch-registry-publication');
+    const { withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    const fanned = fanOutComparisonPackets(readOrchestratorControlPlaneState());
+    expect(fanned.packets).toHaveLength(2);
+    expect(() => captureCurrentDispatchRegistry(fanned)).not.toThrow();
+    // Without its candidates the seed really is missing.
+    expect(() => captureCurrentDispatchRegistry({ ...fanned, packets: [] })).toThrow(/packet_owner_missing/);
+    // Candidates that dropped the seed's operator stop are refused.
+    await withMissionRegistryState(staged.missionId, (state) => {
+      state.packets[0]!.operatorStopped = true;
+      return { state, result: undefined };
+    });
+    expect(() => captureCurrentDispatchRegistry(fanned)).toThrow(/operator_stop_changed/);
+  });
+
   it('does not launch a stale dispatch snapshot after an operator Hold wins during preflight', async () => {
     const repoPath = createTempRepo();
     const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
