@@ -1,10 +1,18 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   configured: 'codex' as string,
   lane: { packetId: 'pkt-1', model: null as string | null } as { packetId: string | null; model: string | null } | null,
   assignedModel: null as string | null,
+  wellKnownMissing: false,
 }));
+vi.mock('@/lib/runtimes/shared/cli-locate', async (original) => {
+  const actual = await original<typeof import('@/lib/runtimes/shared/cli-locate')>();
+  return { ...actual, scanForBinary: (...args: Parameters<typeof actual.scanForBinary>) => (state.wellKnownMissing ? null : actual.scanForBinary(...args)) };
+});
 vi.mock('./orchestrator-backends/active-backend', () => ({ resolveReviewerBackendId: () => state.configured }));
 vi.mock('./registry', () => ({ getLane: () => state.lane }));
 vi.mock('@/lib/orchestrator/mission-registry', () => ({
@@ -18,6 +26,7 @@ afterEach(() => {
   state.configured = 'codex';
   state.lane = { packetId: 'pkt-1', model: null };
   state.assignedModel = null;
+  state.wellKnownMissing = false;
 });
 
 const missingCli = () => {
@@ -41,6 +50,19 @@ describe('resolveReviewRoute (#3742)', () => {
     state.assignedModel = null;
     state.lane = { packetId: 'pkt-1', model: 'openrouter/z/model' };
     expect(resolveReviewRoute('lane-1')).toMatchObject({ backend: 'pi', model: 'openrouter/z/model' });
+  });
+
+  it('counts a CLI found only on PATH as installed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'o8-review-route-path-'));
+    try {
+      writeFileSync(join(dir, 'codex'), '', { mode: 0o755 });
+      vi.stubEnv('O8_CODEX_BIN', '');
+      state.wellKnownMissing = true;
+      vi.stubEnv('PATH', join(dir, 'empty'));
+      expect(resolveReviewRoute('lane-1')).toMatchObject({ backend: 'pi' });
+      vi.stubEnv('PATH', dir);
+      expect(resolveReviewRoute('lane-1')).toEqual({ backend: 'codex' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('keeps an installed CLI reviewer and a configured Pi reviewer as they are', () => {

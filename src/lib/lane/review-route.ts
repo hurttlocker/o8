@@ -6,7 +6,8 @@
  */
 
 import { existsSync } from 'node:fs';
-import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
+import path from 'node:path';
+import { executableSuffixes, scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import { resolveReviewerBackendId } from './orchestrator-backends/active-backend';
@@ -19,10 +20,16 @@ const CLI_REVIEWERS: Partial<Record<OrchestratorBackendId, { binary: string; ove
   codex: { binary: 'codex', overrides: ['O8_CODEX_BIN'] },
 };
 
-/** Installed, found without spawning: an override path that exists, else the well-known CLI directories. */
+/**
+ * Installed, found without spawning: an override path that exists, else the
+ * well-known CLI directories, else any PATH entry (what `which` would find).
+ */
 function cliInstalled(cli: { binary: string; overrides: string[] }): boolean {
   const override = cli.overrides.map((name) => process.env[name]?.trim()).find(Boolean);
-  return override ? existsSync(override) : scanForBinary(cli.binary) !== null;
+  if (override) return existsSync(override);
+  if (scanForBinary(cli.binary) !== null) return true;
+  return (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).some((dir) =>
+    executableSuffixes().some((suffix) => existsSync(path.join(dir, `${cli.binary}${suffix}`))));
 }
 
 export interface ReviewRoute {
