@@ -1,6 +1,6 @@
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +14,9 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 const networkFetch = globalThis.fetch;
-const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-'));
+// Match addRepo's physical paths even when the temporary root is a symlink
+// (for example /var on macOS), so registration cannot create a second repo id.
+const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-')));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DB_PATH = join(dataDir, 'cortex-ide.db');
@@ -40,7 +42,12 @@ const connectedWorkerHelper = `
   const laneRegistry = (await import('./src/lib/lane/registry.ts')).default;
   const runtimeCapabilities = (await import('./src/lib/orchestrator/runtime-capabilities.ts')).default;
   const chatHistory = (await import('./src/lib/llm/chat-history-store.ts')).default;
-  await repos.addRepo(process.env.O8_TEST_TARGET_REPO);
+  const projects = (await import('./src/lib/projects/store.ts')).default;
+  const repo = await repos.addRepo(process.env.O8_TEST_TARGET_REPO);
+  // Mission creation needs the client's selected project and authoritative
+  // membership. Keep this separate from the virtual/name-collision fixture.
+  const project = projects.createProject({ name: 'Connected receipt ' + process.env.O8_TEST_TURN_ID });
+  projects.addRepoToProject(project.id, repo.id, null, 'manual');
   const rpc = async (name, args) => {
     const response = await fetch('http://127.0.0.1:' + process.env.O8_API_PORT + '/api/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + readFileSync(process.env.O8_DATA_DIR + '/ws-token', 'utf8').trim() },
@@ -54,6 +61,7 @@ const connectedWorkerHelper = `
     issues_inline: [{ title: 'Connected receipt fixture', body: 'Write FIRST_RUN.txt and commit it.' }],
     dispatch: false, model: 'gpt-6.1-sol', requestedEffort: 'medium',
     repoPath: process.env.O8_TEST_TARGET_REPO,
+    projectId: project.id,
     runtime: 'codex',
     constraints: '',
     orchestratorThreadId: process.env.O8_TEST_THREAD_ID,
@@ -88,6 +96,7 @@ const connectedWorkerHelper = `
       + 'packet=' + (packet?.status ?? 'missing') + ' lane=' + (lane?.status ?? 'missing'),
     );
   }
+  if (packet?.projectId !== project.id) throw new Error('Mission did not persist the selected project.');
   writeFileSync(process.env.O8_TEST_CONNECTED_WORKER_FILE, JSON.stringify({
     packetId,
     runtime: lane.runtime,
@@ -680,12 +689,17 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
   const { routeReviewContinuation } = await import('@/lib/orchestrator/review-continuation');
   const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+  const { addRepo } = await import('@/lib/repos/registry');
+  const { createProject, addRepoToProject } = await import('@/lib/projects/store');
+  const repo = await addRepo(repoPath);
+  const project = createProject({ name: 'Durable origin mission fixture' });
+  addRepoToProject(project.id, repo.id, null, 'manual');
   const threadId = `thoughts-negative-origin-${Date.now()}`;
   async function prepared(extra: Record<string, unknown>) {
     const response = await networkFetch(`http://127.0.0.1:${apiPort}/api/mcp`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_mission', arguments: {
-        repoPath, runtime: 'codex', model: 'gpt-6.1-sol', requestedEffort: 'medium', dispatch: false,
+        repoPath, projectId: project.id, runtime: 'codex', model: 'gpt-6.1-sol', requestedEffort: 'medium', dispatch: false,
         issues_inline: [{title: 'Origin refusal fixture', body: 'Prepared only.'}], ...extra,
       } } }),
     });
@@ -693,6 +707,7 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     const result = await response.json(); expect(result.result.isError).not.toBe(true);
     const created = JSON.parse(result.result.content[0].text);
     const packet = readMissionRegistryEntry(created.missionId)!.mission.packets[0];
+    expect(packet.projectId).toBe(project.id);
     return { id: `lane-${packet.id}`, label: 'Prepared fixture', repoPath, packetId: packet.id };
   }
   const bound = await prepared({orchestratorThreadId: threadId, orchestratorTurnId: 'origin-turn'});
