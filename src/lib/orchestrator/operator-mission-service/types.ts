@@ -67,6 +67,8 @@ export interface CreateMissionInput {
    * `useBrain`. Omit to inherit the operator `workersUseBrain` setting.
    */
   useBrain?: boolean;
+  /** #3740: stamp every packet's `mergeHold`, so approved reviews wait for the operator's merge. */
+  holdMerges?: boolean;
   /**
    * Originating orchestrator thread id (#1329). When set, every packet in the
    * mission inherits the thread's active session rules (via `buildPacketPrompt`)
