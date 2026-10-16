@@ -47,7 +47,10 @@ time = { version = "0.3", features = ["formatting"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.10.3", features = ["tray-icon", "macos-private-api", "image-png"] }
-tauri-plugin-updater = "2"
+# No "zip" feature: o8 publishes v2 updater artifacts (the macOS .app.tar.gz and
+# the Windows setup .exe), so the updater never extracts a .zip, and dropping
+# the feature removes the zip crate (RUSTSEC-2026-0367/0368/0369).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
