@@ -64,6 +64,9 @@ import {
 
 /** Per-turn limits for a packet turn, the same size as an orchestrator turn. */
 export const PI_WORKER_LIMITS = { maxModelCalls: 40, maxToolCalls: 80, runTimeoutMs: 30 * 60_000 } as const;
+/** Pi startup (SDK import, model route, worker process) settles as failed past this (#3741). */
+export const PI_WORKER_START_TIMEOUT_MS = 120_000;
+const startTimeoutMs = () => Number(process.env.O8_PI_WORKER_START_TIMEOUT_MS) || PI_WORKER_START_TIMEOUT_MS;
 
 const RUNS_DIR = 'runs';
 /** Matches the worker script in a source checkout and in the packaged app. */
@@ -274,6 +277,12 @@ async function runTurn(turn: LiveTurn, surfaceId: string, run: PiWorkerRunRecord
   await settle(surfaceId, run.id, outcome, summary);
 }
 
+class PiStartTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Pi did not start within ${Math.round(ms / 1000)} seconds, so the turn was not run.`);
+  }
+}
+
 async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' | 'resume') {
   const { session, run } = await createRun(surfaceId, prompt, mode);
   let finished!: () => void;
@@ -285,7 +294,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     turn.log = turn.log.then(() => appendFile(run.stdoutPath, `${JSON.stringify({ at: nowIso(), ...line })}\n`, 'utf8'))
       .catch(() => {});
   };
-  try {
+  const start = async () => {
     // Loaded on the first Pi turn, so runtime registration never evaluates the Pi SDK.
     const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
     const stateDir = path.join(session.sessionDir, 'pi');
@@ -305,7 +314,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
         }).transport;
       }
     }
-    turn.session = await createPiSdkSession({
+    return createPiSdkSession({
       workspace: session.cwd,
       stateDir,
       model,
@@ -319,16 +328,27 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
       onEvent: (event) => { for (const line of piWorkerLogLines(event)) write(line); },
       ...PI_WORKER_LIMITS,
     });
+  };
+  const starting = start();
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    turn.session = await Promise.race([starting, new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(new PiStartTimeoutError(startTimeoutMs())), startTimeoutMs());
+    })]);
   } catch (error) {
+    // A start that completes after the deadline is closed, never left running unowned.
+    if (error instanceof PiStartTimeoutError) void starting.then((late) => late.close()).catch(() => {});
     const detail = error instanceof Error ? error.message : String(error);
     const known = /^The Pi prototype (?:needs Node|does not support)/.test(detail)
-      || (error instanceof Error && error.name === 'PiModelChoiceError');
+      || (error instanceof Error && (error.name === 'PiModelChoiceError' || error instanceof PiStartTimeoutError));
     if (!known) console.warn('[pi-builtin] Pi could not start:', error);
     const note = known ? detail : 'Pi could not start. Details are in the o8 log.';
     if (live.get(surfaceId) === turn) live.delete(surfaceId);
     await settle(surfaceId, run.id, 'failed', note);
     finished();
     return { ok: false, note, sideEffect: 'none' as const };
+  } finally {
+    clearTimeout(deadline);
   }
   const started = turn.session;
   void (async () => {

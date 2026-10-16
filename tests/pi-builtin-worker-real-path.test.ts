@@ -84,6 +84,7 @@ const seams = vi.hoisted(() => ({
   laneAnswers: [] as Array<{ laneId: string; name: string; allowed: boolean }>,
   startGate: null as null | Promise<void>,
   startReached: null as null | (() => void),
+  started: null as null | { running: boolean },
 }));
 vi.mock('@/lib/pi/sdk/lane-approval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/pi/sdk/lane-approval')>();
@@ -105,7 +106,7 @@ vi.mock('@/lib/pi/sdk/session', async (importOriginal) => {
       seams.startReached?.();
       await gate;
     }
-    return actual.createPiSdkSession(options);
+    return (seams.started = await actual.createPiSdkSession(options));
   } };
 });
 // Makes command confinement unavailable, as on a kernel without Landlock.
@@ -709,6 +710,34 @@ describe('bundled Pi worker (#3258)', () => {
     await expect(launching).resolves.toMatchObject({ ok: true });
     const packet = await lastRunOutcome(sessionKey, 'finished');
     expect(packet.summary).toBe('Started fine.');
+  }, 120_000);
+
+  it('fails a packet whose Pi start never finishes, and closes a start that finishes late (#3741)', async () => {
+    const repo = await makeRepo('start-hang');
+    vi.stubEnv('O8_PI_WORKER_START_TIMEOUT_MS', '2000');
+    let open!: () => void;
+    seams.startGate = new Promise<void>((resolve) => { open = resolve; });
+    try {
+      const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clientMutationId: `pi-builtin-${randomUUID()}`, prompt: 'Start and hang.', taskName: 'start hang',
+          repoPath: repo.repoPath, runtime: 'pi-builtin' }),
+      }));
+      // The launch settles at the deadline and says why; the lane leaves `launching` with that reason.
+      const reason = 'Pi did not start within 2 seconds, so the turn was not run.';
+      const body = await response.json() as { ok: boolean; laneId: string; error?: string };
+      expect({ status: response.status, ok: body.ok, error: body.error }).toEqual({ status: 422, ok: false, error: reason });
+      expect(getLane(body.laneId)?.status).toBe('idle');
+      const events = getLaneEvents(body.laneId, 200);
+      expect(events.findLast((event) => event.verb === 'status_change')?.payload).toMatchObject({ eventLabel: 'launch_failed', reason });
+      const exit = events.find((event) => event.verb === 'runtime_process_exit')!.payload as { surfaceId: string };
+      expect((await getOwnedPiBuiltinReviewPacket(exit.surfaceId)).lastRun).toMatchObject({ outcome: 'failed' });
+      open();
+      await waitFor(() => (seams.started && !seams.started.running ? true : null), 'late Pi start closed');
+    } finally {
+      open?.();
+      vi.unstubAllEnvs();
+    }
   }, 120_000);
 
   it('runs a read-only packet with read_file only', async () => {
