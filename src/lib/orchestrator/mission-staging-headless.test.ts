@@ -200,12 +200,26 @@ describe('staged mission creation', () => {
     expect(() => captureCurrentDispatchRegistry(fanned)).not.toThrow();
     // Without its candidates the seed really is missing.
     expect(() => captureCurrentDispatchRegistry({ ...fanned, packets: [] })).toThrow(/packet_owner_missing/);
-    // Candidates that dropped the seed's operator stop are refused.
-    await withMissionRegistryState(staged.missionId, (state) => {
-      state.packets[0]!.operatorStopped = true;
-      return { state, result: undefined };
-    });
-    expect(() => captureCurrentDispatchRegistry(fanned)).toThrow(/operator_stop_changed/);
+    // Candidates keep every durable authority of the seed, or the dispatch is refused.
+    const refusedAfter = async (change: (seed: (typeof fanned.packets)[number]) => void, reason: RegExp) => {
+      const { result: before } = await withMissionRegistryState(staged.missionId, (state) => {
+        const previous = structuredClone(state.packets[0]!);
+        change(state.packets[0]!);
+        return { state, result: previous };
+      });
+      expect(() => captureCurrentDispatchRegistry(fanned)).toThrow(reason);
+      await withMissionRegistryState(staged.missionId, (state) => {
+        state.packets[0] = before;
+        return { state, result: undefined };
+      });
+      expect(() => captureCurrentDispatchRegistry(fanned)).not.toThrow();
+    };
+    await refusedAfter((seed) => { seed.operatorStopped = true; }, /operator_stop_changed/);
+    // A reset of the durable seed raised its generation past the cached candidates.
+    await refusedAfter((seed) => { seed.attemptCount = (seed.attemptCount ?? 0) + 1; }, /newer_generation/);
+    // A released or archived seed is terminal and never consumed by launchable candidates.
+    await refusedAfter((seed) => { seed.status = 'archived'; seed.archivedAt = new Date().toISOString(); }, /terminal_owner_changed/);
+    await refusedAfter((seed) => { seed.branchTarget = 'inline/elsewhere'; }, /workspace_owner_changed/);
   });
 
   it('does not launch a stale dispatch snapshot after an operator Hold wins during preflight', async () => {

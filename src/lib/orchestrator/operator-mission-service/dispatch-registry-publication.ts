@@ -63,32 +63,39 @@ export function captureCurrentDispatchRegistry(state: OrchestratorMissionState):
   if (entry.mission.lifecycleHold && !isDeepStrictEqual(entry.mission.lifecycleHold, state.lifecycleHold)) refuse('lifecycle_owner_changed');
   const currentById = new Map(state.packets.map(packet => [packet.id, packet]));
   const retainedPackets: OrchestratorPacket[] = [];
-  for (const stored of entry.mission.packets) {
-    const current = currentById.get(stored.id);
-    if (!current) {
-      // A comparison seed the current mission already fanned out is consumed by its
-      // candidates, not missing; they must keep any operator stop or hold it had.
-      const candidates = !stored.comparisonGroupId
-        ? state.packets.filter(packet => packet.comparisonGroupId && packet.id.startsWith(`${stored.id}-cmp-`))
-        : [];
-      if (candidates.length === 0) refuse('packet_owner_missing', stored.id);
-      if (stored.operatorStopped && !candidates.every(packet => packet.operatorStopped)) refuse('operator_stop_changed', stored.id);
-      if (stored.holdIntent === 'operator' && !candidates.every(packet => packet.holdIntent === 'operator')) {
-        refuse('operator_hold_changed', stored.id);
-      }
-      continue;
-    }
+  // The durable owner's authority must survive in the current packet. Returns the generation order.
+  const checkOwner = (stored: OrchestratorPacket, current: OrchestratorPacket, branchTarget: string | undefined): number => {
     const generationOrder = (current.storageAdmissionEpoch ?? 0) - (stored.storageAdmissionEpoch ?? 0)
       || (current.attemptCount ?? 0) - (stored.attemptCount ?? 0);
     if (generationOrder < 0) refuse('newer_generation', stored.id);
     if (stored.projectId !== current.projectId || stored.workspaceTargetPath !== current.workspaceTargetPath
-      || stored.branchTarget !== current.branchTarget) refuse('workspace_owner_changed', stored.id);
+      || branchTarget !== current.branchTarget) refuse('workspace_owner_changed', stored.id);
     if (laneConflicts(stored, current)) refuse('lane_binding_changed', stored.id);
     if (stored.operatorStopped && !current.operatorStopped) refuse('operator_stop_changed', stored.id);
     if (stored.holdIntent === 'operator' && current.holdIntent !== 'operator') refuse('operator_hold_changed', stored.id);
     if (stored.manualLaunchClaim && !isDeepStrictEqual(stored.manualLaunchClaim, current.manualLaunchClaim)) refuse('launch_owner_changed', stored.id);
     if (stored.releaseStatePayload && !isDeepStrictEqual(stored.releaseStatePayload, current.releaseStatePayload)) refuse('release_owner_changed', stored.id);
     if (stored.recovery && !isDeepStrictEqual(stored.recovery, current.recovery)) refuse('recovery_owner_changed', stored.id);
+    return generationOrder;
+  };
+  for (const stored of entry.mission.packets) {
+    const current = currentById.get(stored.id);
+    if (!current) {
+      // A comparison seed the current mission already fanned out is consumed by its
+      // candidates, not missing (#3766). Only an unlaunched, non-terminal seed fans
+      // out, and every candidate must keep the seed's durable authority.
+      const candidates = stored.comparisonGroupId
+        ? []
+        : state.packets.filter(packet => packet.comparisonGroupId && packet.id.startsWith(`${stored.id}-cmp-`));
+      if (candidates.length === 0) refuse('packet_owner_missing', stored.id);
+      if (terminalPacket(stored) || stored.lane) refuse('terminal_owner_changed', stored.id);
+      if (new Set(candidates.map(candidate => candidate.comparisonGroupId)).size !== 1) refuse('packet_owner_missing', stored.id);
+      for (const candidate of candidates) {
+        checkOwner(stored, candidate, `${stored.branchTarget}-cmp-${candidate.comparisonIndex}`);
+      }
+      continue;
+    }
+    const generationOrder = checkOwner(stored, current, stored.branchTarget);
     if (terminalPacket(stored)) {
       if (generationOrder !== 0 || !isDeepStrictEqual(terminalAuthority(stored), terminalAuthority(current))) refuse('terminal_owner_changed', stored.id);
       // Preserve the entire durable terminal sibling, including its evidence.
