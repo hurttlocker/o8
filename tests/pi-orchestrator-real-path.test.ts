@@ -84,6 +84,7 @@ afterAll(async () => {
 const roots: string[] = [];
 const backends: Array<ReturnType<typeof createPiOrchestratorBackend>> = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(backends.splice(0).map(backend => backend.closeAll()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -326,6 +327,89 @@ describe('Pi orchestrator (#3258)', () => {
     ]);
     expect(JSON.stringify(rows)).not.toContain('fixture-openrouter-key');
   }, 180_000);
+
+  // #3742: with no reviewer CLI on the machine, a review of an OpenRouter packet runs on
+  // that model through Pi, and its calls are recorded as reviewer usage.
+  async function reviewedLane(repo: string, assignedModel: string) {
+    const { createLane } = await import('@/lib/lane/registry');
+    const { recordMission } = await import('@/lib/db/missions-store');
+    const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+    const packetId = `pkt-review-route-${Math.random().toString(16).slice(2)}`;
+    const missionState = normalizeOrchestratorMissionState({ version: 2, missionId: `mission-${packetId}`, prompt: 'Review route',
+      summary: 'Review route', repoPath: repo, runtime: 'pi-builtin', constraints: '', updatedAt: new Date().toISOString(),
+      packets: [{ id: packetId, referenceLabel: 'review-route', title: 'Review route', summary: 'Review route',
+        workspaceTargetPath: repo, branchTarget: 'inline/review-route', runtime: 'pi-builtin', dependencyLabels: [],
+        dependencyPacketIds: [], queueState: 'released', releaseState: 'pending', status: 'running', blockedReason: null,
+        lastEventAt: null, lastEventLabel: null, archivedAt: null, review: null, lane: null, assignedModel }] });
+    recordMission({ id: missionState.missionId!, repoPath: repo, runtime: 'pi-builtin', prompt: 'Review route', summary: 'Review route',
+      constraints: '', packetMeta: [{ id: packetId, title: 'Review route', referenceLabel: 'review-route' }], missionState, totalWaves: 1 });
+    return createLane({ repoPath: repo, worktreePath: repo, branch: 'inline/review-route', baseBranch: 'main', runtime: 'pi-builtin',
+      packetId, sessionKey: `pi-builtin-owned:${packetId}`, label: 'Review route' });
+  }
+
+  it('reviews an OpenRouter packet on OpenRouter through Pi when no reviewer CLI is installed (#3742)', async () => {
+    const { repo, stateRoot } = await fixture();
+    vi.stubEnv('O8_CODEX_BIN', join(stateRoot, 'no-codex'));
+    vi.stubEnv('O8_CLAUDE_CODE_BIN', join(stateRoot, 'no-claude'));
+    const { openRouterPiModel } = await import('@/lib/pi/sdk/openrouter-transport');
+    const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
+    const pricing = { inputPerMillion: 0.3, outputPerMillion: 1.2 };
+    const pin = 'openrouter/deepseek/deepseek-v4.1-flash';
+    const lane = await reviewedLane(repo, pin);
+    const requests: Array<string | undefined> = [];
+    const openRouterFetch = (async (_url: string, init?: RequestInit) => {
+      requests.push((JSON.parse(String(init?.body)) as { model?: string }).model);
+      const chunk = (extra: Record<string, unknown>) => `data: ${JSON.stringify({ id: `gen-review-${requests.length}`, object: 'chat.completion.chunk',
+        created: 1, model: 'deepseek/deepseek-v4.1-flash', ...extra })}\n\n`;
+      return new Response(chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Approve.' }, finish_reason: null }] })
+        + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 700, completion_tokens: 9, total_tokens: 709, cost: 0.0000321 } })
+        + 'data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot, openRouterFetch, openRouterTurnCeilingUsd: () => 1,
+      resolveRoute: async (requested) => {
+        expect(requested).toBe(pin);
+        return { carrier: 'openrouter', choice: pin, pricing, model: openRouterPiModel('deepseek/deepseek-v4.1-flash', pricing), label: 'DeepSeek V4.1 Flash (OpenRouter)' };
+      } });
+    backends.push(backend);
+    const resolved: string[] = [];
+    const result = await runReviewerTurnWithQuotaFallback({ laneId: lane.id, repoPath: repo, threadId: `auto-review-${lane.id}`,
+      sessionThreadId: 'thoughts-auto-review-route-test', surface: 'auto-review', prompt: 'Review the packet.',
+      backendResolver: (id) => { resolved.push(id); return backend; } });
+
+    expect(resolved).toEqual(['pi']);
+    expect(result).toMatchObject({ ok: true, backend: 'pi' });
+    expect(result.text).toContain('Approve.');
+    expect(requests).toEqual(['deepseek/deepseek-v4.1-flash']);
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const rows = getDb()!.select().from(usageLogs).all().filter(row => row.agentName === 'pi-reviewer');
+    expect(rows.map(row => [row.role, row.provider, row.model, row.costUsd])).toEqual([['reviewer', 'openrouter', pin, 0.0000321]]);
+    const { getSqlite } = await import('@/lib/db');
+    const receipt = getSqlite().prepare("SELECT reason FROM role_routing_receipts WHERE context_id = ? ORDER BY rowid DESC LIMIT 1").get(lane.id) as { reason?: string } | undefined;
+    expect(receipt?.reason).toContain('CLI is not installed');
+  }, 180_000);
+
+  it('keeps an installed CLI reviewer for the same packet (#3742)', async () => {
+    const { repo } = await fixture();
+    vi.stubEnv('O8_CODEX_BIN', process.execPath);
+    vi.stubEnv('O8_CLAUDE_CODE_BIN', process.execPath);
+    const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
+    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash');
+    const resolved: string[] = [];
+    const cli = { ...getOrchestratorBackend('codex'), ensureSession: () => ({ sessionName: 'fixture', status: 'ready' as const }),
+      sendTurn: async (_repo: string, _message: string, onEvent: (event: OrchestratorEvent) => void) => {
+        onEvent({ type: 'text', text: 'Approve.' }); onEvent({ type: 'done', sessionId: null, cost: null });
+      } };
+    const result = await runReviewerTurnWithQuotaFallback({ laneId: lane.id, repoPath: repo, threadId: `auto-review-${lane.id}`,
+      sessionThreadId: 'thoughts-auto-review-route-cli', surface: 'auto-review', prompt: 'Review the packet.',
+      backendResolver: (id) => { resolved.push(id); return cli; } });
+    // Whatever reviewer is configured stays, exactly as before #3742.
+    const { resolveReviewerBackendId } = await import('@/lib/lane/orchestrator-backends/active-backend');
+    const configured = resolveReviewerBackendId();
+    expect(['claude', 'codex']).toContain(configured);
+    expect(resolved).toEqual([configured]);
+    expect(result).toMatchObject({ backend: 'codex' });
+  }, 60_000);
 
   it('ends the turn with the allowance message when the daily allowance is used up', async () => {
     const { repo, stateRoot } = await fixture();

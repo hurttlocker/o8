@@ -53,6 +53,8 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
+  /** Usage role for metered calls this turn makes; a review turn passes 'reviewer' (#3742). */
+  usageRole?: 'reviewer';
   /** Per-turn fan-out policy shared by every composer surface. */
   orchestrationMode?: OrchestratorExecutionMode;
   /**
