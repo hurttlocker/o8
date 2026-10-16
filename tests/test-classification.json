@@ -3371,6 +3371,12 @@
       ]
     },
     {
+      "path": "tests/openrouter-work-usage-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-concurrency-settings-real-path.test.ts",
       "reasons": [
         "real-path"

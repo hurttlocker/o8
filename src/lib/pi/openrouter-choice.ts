@@ -12,7 +12,7 @@ import 'server-only';
 
 import type { Model } from '@earendil-works/pi-ai/compat';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
-import { logUsage, type UsageRole } from '@/lib/db/usage';
+import { hasOpenRouterGenerationUsage, logUsage, type UsageRole } from '@/lib/db/usage';
 import { getOpenRouterModelMetadata } from '@/lib/orchestrator/openrouter-model-metadata';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import {
@@ -79,6 +79,8 @@ export function recordPiOpenRouterReceipt(receipt: OpenRouterPiReceipt, attribut
   // A refused call never reached OpenRouter, so it has no usage to record.
   if (receipt.status === 'refused') return;
   try {
+    // A receipt replayed for the same OpenRouter generation is one call, never a second charge.
+    if (receipt.generationId && hasOpenRouterGenerationUsage(receipt.generationId)) return;
     logUsage({
       userId: null,
       model: `${OPENROUTER_PI_MODEL_PREFIX}${receipt.model}`,
