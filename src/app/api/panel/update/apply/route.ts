@@ -21,6 +21,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function unavailableIdleWindow(error: unknown): UpdateIdleWindow {
   return {
     idle: false,
+    idleExceptParked: false,
+    parkedLanes: [],
     active: { lanes: [], terminalSessions: [], managedRuns: [], ownedSessions: [], cloudJobs: [] },
     unavailable: [error instanceof Error ? error.message : 'idle-window'],
     checkedAt: new Date().toISOString(),

@@ -24,6 +24,15 @@ export interface InstallUpdateOptions {
    * download instead of ever reaching restart-to-install.
    */
   selfUpdatable?: boolean;
+  /** Download and install progress, for the update panel. */
+  onProgress?: (progress: UpdateProgress) => void;
+}
+
+export interface UpdateProgress {
+  stage: 'downloading' | 'installing' | 'restarting';
+  receivedBytes: number;
+  /** Null when the server did not send a content length. */
+  totalBytes: number | null;
 }
 
 async function releaseCloudJobLeasesForRestart(): Promise<void> {
@@ -104,7 +113,15 @@ export async function installUpdateAndRestart(
     return { installed: false, blocked: { version: result.version, note: health.note } };
   }
 
-  await result.downloadAndInstall();
+  let receivedBytes = 0;
+  let totalBytes: number | null = null;
+  options.onProgress?.({ stage: 'downloading', receivedBytes, totalBytes });
+  await result.downloadAndInstall((event) => {
+    if (event.event === 'Started') totalBytes = event.data.contentLength ?? null;
+    else if (event.event === 'Progress') receivedBytes += event.data.chunkLength;
+    options.onProgress?.({ stage: event.event === 'Finished' ? 'installing' : 'downloading', receivedBytes, totalBytes });
+  });
+  options.onProgress?.({ stage: 'restarting', receivedBytes, totalBytes });
   const restarted = await relaunchInstalledUpdate(options);
   return { installed: true, restartDeferred: !restarted };
 }

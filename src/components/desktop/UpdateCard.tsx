@@ -17,7 +17,9 @@ import {
   installUpdateAndRestart,
   relaunchInstalledUpdate,
   RELEASE_URL,
+  type UpdateProgress,
 } from '@/lib/app-update/client-restart';
+import type { AppUpdateBlockers } from '@/lib/app-update/update-hub-client';
 import {
   normalizeInstallInfo,
   resolveUpdateAction,
@@ -70,8 +72,51 @@ interface InstallRequest {
   userInitiated?: boolean;
 }
 
+interface UpdateIdleLaneView { label?: string; status?: string }
 interface UpdateIdleResponse {
-  idle?: { idle?: boolean };
+  idle?: {
+    idle?: boolean;
+    idleExceptParked?: boolean;
+    parkedLanes?: UpdateIdleLaneView[];
+    unavailable?: string[];
+    active?: {
+      lanes?: UpdateIdleLaneView[];
+      terminalSessions?: Array<{ name?: string }>;
+      managedRuns?: Array<{ command?: string }>;
+      ownedSessions?: Array<{ surfaceId?: string }>;
+      cloudJobs?: Array<{ id?: string }>;
+    };
+  };
+}
+
+const PARKED_LABEL: Record<string, string> = {
+  reviewing: 'waiting for review',
+  awaiting_input: 'waiting for input',
+  awaiting_orchestrator: 'waiting for the lead',
+  awaiting_human: 'waiting for you',
+  paused: 'paused',
+  idle: 'idle',
+  recovering: 'stopped, can retry',
+};
+
+/** Names what a restart would wait for, from GET /api/panel/update/apply. */
+export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppUpdateBlockers {
+  const idle = payload?.idle;
+  const name = (value: string | undefined, fallback: string) => value?.trim() || fallback;
+  const parkedStatuses = new Set((idle?.parkedLanes ?? []).map(lane => lane.status));
+  const live = [
+    ...(idle?.active?.lanes ?? [])
+      .filter(lane => !parkedStatuses.has(lane.status))
+      .map(lane => `${name(lane.label, 'Task')} (${(lane.status ?? 'active').replace(/_/g, ' ')})`),
+    ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
+    ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),
+    ...(idle?.active?.ownedSessions ?? []).map(session => `Agent session ${name(session.surfaceId, '')}`.trim()),
+    ...(idle?.active?.cloudJobs ?? []).map(job => `Cloud job ${name(job.id, '')}`.trim()),
+    ...(idle?.unavailable ?? []).map(item => item === 'terminal-sessions' ? 'Terminal list unavailable' : `Check unavailable: ${item}`),
+  ];
+  const parked = (idle?.parkedLanes ?? [])
+    .map(lane => `${name(lane.label, 'Task')} (${PARKED_LABEL[lane.status ?? ''] ?? (lane.status ?? 'parked').replace(/_/g, ' ')})`);
+  return { live, parked };
 }
 
 function readDismissedVersion() {
@@ -168,6 +213,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const [installError, setInstallError] = useState<string | null>(null);
   const [bundleIntegrity, setBundleIntegrity] = useState<BundleIntegrityStatus | null>(null);
   const [installInfo, setInstallInfo] = useState<InstallInfo | null>(null);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [blockers, setBlockers] = useState<AppUpdateBlockers | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
   const installInfoRef = useRef<InstallInfo | null>(null);
   const installingRef = useRef(false);
@@ -175,9 +222,10 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const restartDeferredRef = useRef(false);
 
   useEffect(() => {
-    publishAppUpdateView({ version: update?.version ?? null, outcome: checkReport.outcome, installing,
-      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download' });
-  }, [update, checkReport, installing, blockedNote, installError, installInfo]);
+    publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
+      progress, blockers });
+  }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
   useEffect(() => { void refreshCliUpdateView(); }, []);
 
   useEffect(() => {
@@ -250,6 +298,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       if (result) {
         setUpdate({
           version: result.version,
+          currentVersion: result.currentVersion || undefined,
           notes: result.body ?? undefined,
           date: result.date ?? undefined,
         });
@@ -316,6 +365,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         setCheckReport(nextReport);
         if (nextReport.outcome === 'current') {
           setUpdate(null);
+          setBlockers(null);
           setInstalling(false);
           restartDeferredRef.current = false;
         }
@@ -391,12 +441,28 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     return () => controller.abort();
   }, [expanded, update?.version]);
 
-  const checkUpdateIdle = useCallback(async () => {
+  const readUpdateIdle = useCallback(async () => {
     const response = await fetch('/api/panel/update/apply', { cache: 'no-store' }).catch(() => null);
-    if (!response?.ok) return false;
-    const payload = await response.json().catch(() => null) as UpdateIdleResponse | null;
-    return payload?.idle?.idle === true;
+    if (!response?.ok) return null;
+    return await response.json().catch(() => null) as UpdateIdleResponse | null;
   }, []);
+
+  const checkUpdateIdle = useCallback(async (allowParked = false) => {
+    const payload = await readUpdateIdle();
+    if (payload?.idle?.idle === true) return true;
+    return allowParked && payload?.idle?.idleExceptParked === true;
+  }, [readUpdateIdle]);
+
+  /** Names the blockers and returns a note that matches them. */
+  const explainWaitingRestart = useCallback(async () => {
+    const named = describeUpdateBlockers(await readUpdateIdle());
+    setBlockers(named);
+    return named.live.length
+      ? 'Update installed. Restart is waiting for running work to finish.'
+      : named.parked.length
+        ? 'Update installed. Restart now to apply it. Waiting tasks keep their state.'
+        : 'Update installed. Restart is waiting for lanes and terminals to become idle.';
+  }, [readUpdateIdle]);
 
   const handleInstall = useCallback(async (request: InstallRequest = {}) => {
     if (installingRef.current || updateInstallInFlight) return;
@@ -413,25 +479,27 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       setInstalling(true);
       setBlockedNote(null);
       setInstallError(null);
-      if (action.kind === 'restart' && request.requireIdle && !(await checkUpdateIdle())) {
+      setBlockers(null);
+      // Background applies stay idle-first. An operator's click downloads and
+      // installs first, so the update is staged even if the restart must wait.
+      if (action.kind === 'restart' && request.requireIdle && !request.userInitiated && !(await checkUpdateIdle())) {
         setBlockedNote('Update ready. Restart is waiting for lanes and terminals to become idle.');
         return;
       }
       if (action.kind === 'restart' && restartDeferredRef.current) {
         const restarted = await relaunchInstalledUpdate({
-          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+          beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
         });
-        if (!restarted) {
-          setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
-        }
+        if (!restarted) setBlockedNote(await explainWaitingRestart());
         return;
       }
       reportInstall({ outcome: 'started', version: updateRef.current?.version ?? null });
       const outcome = await installUpdateAndRestart(
         action.kind === 'download' ? action.url : updateRef.current?.releaseUrl ?? RELEASE_URL,
         {
-          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+          beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
           selfUpdatable: action.kind === 'restart',
+          onProgress: setProgress,
         },
       );
       if (outcome.downloadOpened) return;
@@ -445,7 +513,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       }
       if (outcome.restartDeferred) {
         restartDeferredRef.current = true;
-        setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
+        setBlockedNote(await explainWaitingRestart());
       }
     } catch (err) {
       const message = describeInstallError(err);
@@ -456,13 +524,41 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       updateInstallInFlight = false;
       installingRef.current = false;
       setInstalling(false);
+      setProgress(null);
     }
-  }, [checkUpdateIdle]);
+  }, [checkUpdateIdle, explainWaitingRestart]);
   useEffect(() => {
     const install = () => { void handleInstall({ userInitiated: true, requireIdle: true }); };
     window.addEventListener('o8:install-app-update', install);
     return () => window.removeEventListener('o8:install-app-update', install);
   }, [handleInstall]);
+
+  // "Restart now" from the panel, after the operator has read the named waiting
+  // tasks. It restarts past parked tasks only; running work still blocks it.
+  useEffect(() => {
+    const restartNow = async () => {
+      if (!restartDeferredRef.current || installingRef.current || updateInstallInFlight) return;
+      updateInstallInFlight = true;
+      installingRef.current = true;
+      setInstalling(true);
+      setInstallError(null);
+      try {
+        setProgress({ stage: 'restarting', receivedBytes: 0, totalBytes: null });
+        const restarted = await relaunchInstalledUpdate({ beforeRestart: () => checkUpdateIdle(true) });
+        if (!restarted) setBlockedNote(await explainWaitingRestart());
+      } catch (err) {
+        setInstallError(`Restart failed.${describeInstallError(err) ? ` ${describeInstallError(err)}` : ''}`);
+      } finally {
+        updateInstallInFlight = false;
+        installingRef.current = false;
+        setInstalling(false);
+        setProgress(null);
+      }
+    };
+    const onRestart = () => { void restartNow(); };
+    window.addEventListener('o8:restart-app-update', onRestart);
+    return () => window.removeEventListener('o8:restart-app-update', onRestart);
+  }, [checkUpdateIdle, explainWaitingRestart]);
 
   useEffect(() => {
     const onRealtime = (event: Event) => {

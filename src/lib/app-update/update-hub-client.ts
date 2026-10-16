@@ -3,14 +3,27 @@
 import { useSyncExternalStore } from 'react';
 import type { CliUpdateRecord } from '@/lib/setup/cli-updates';
 import type { ReleaseNotes } from './release-notes';
+import type { UpdateProgress } from './client-restart';
+
+export interface AppUpdateBlockers {
+  /** Work a restart would interrupt. A restart waits for it. */
+  live: string[];
+  /** Tasks waiting for review or input. A confirmed restart keeps their state. */
+  parked: string[];
+}
 
 export interface AppUpdateView {
   version: string | null;
+  /** The running app's version, when the updater reported it. */
+  currentVersion?: string | null;
   outcome: 'never' | 'available' | 'current' | 'failed';
   installing: boolean;
   message: string | null;
   error: string | null;
   downloadOnly: boolean;
+  progress?: UpdateProgress | null;
+  /** Set when the update is installed and its restart is waiting. */
+  blockers?: AppUpdateBlockers | null;
 }
 interface UpdateHub {
   app: AppUpdateView;
@@ -61,7 +74,11 @@ export function checkAllUpdates(): Promise<UpdateCheckResult> {
     const incompleteReport = ['codex', 'claude-code', 'grok'].some(runtime => hub.snapshot.tools.filter(tool => tool.runtimeId === runtime).length !== 1);
     const result = { hasUpdates: Boolean(app.version) || installed.some(tool => tool.status === 'update-available'),
       incomplete: incompleteReport || Boolean(app.error || hub.snapshot.cliError) || installed.some(tool => tool.status === 'unknown') };
-    patch({ checkMessage: result.incomplete ? 'Some update checks could not finish. Check again.'
+    // A connected-CLI check failure is not an o8 update failure; say which check did not finish.
+    const appIncomplete = Boolean(app.error);
+    patch({ checkMessage: result.incomplete
+      ? appIncomplete ? 'The o8 update check could not finish. Check again.'
+        : app.version ? 'o8 update is ready. Some CLI checks could not finish.' : 'Some CLI checks could not finish. Check again.'
       : result.hasUpdates ? app.version ? 'Updates are ready.' : 'o8 is up to date. CLI updates are ready.'
         : 'You’re up to date. o8 and connected CLIs are current.' });
     return result;
