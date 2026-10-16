@@ -17,6 +17,7 @@ import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/re
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { useWsConnectionEpoch } from '@/components/desktop/hooks/DesktopWebSocketContext';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -211,7 +212,7 @@ function WorkspaceTerminalPanelsBase({
           />
         ) : tab.kind === 'chatgpt-plan' ? (
           <div key={tab.id} style={{ display: tab.id === effectiveActiveTabId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} /></Suspense>
+            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} active={tab.id === effectiveActiveTabId} /></Suspense>
           </div>
         ) : tab.kind === 'chat' ? (
           <ChatResidentPanel
@@ -571,6 +572,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   active: boolean;
 }) {
   const { workspaceGlass } = useTheme();
+  const connectionEpoch = useWsConnectionEpoch();
   const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
@@ -614,6 +616,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
           tmuxSession={tmuxSession}
           readOnly={readOnly}
           inputLocked={inputLocked}
+          connectionEpoch={connectionEpoch}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
           sendTerminalResize={sendTerminalResize}
@@ -647,6 +650,7 @@ const CanvasPanel = memo(function CanvasPanel({
   return (
     <div
       aria-hidden={!active}
+      inert={!active}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -662,6 +666,7 @@ const CanvasPanel = memo(function CanvasPanel({
     >
       <Suspense fallback={null}>
         <LazyCanvas
+          active={active}
           tabs={[tab.canvasTab]}
           activeTabId={tab.canvasTab.id}
           onSelectTab={() => undefined}

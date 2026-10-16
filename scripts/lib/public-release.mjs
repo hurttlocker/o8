@@ -1,3 +1,5 @@
+import { pullNumberFromSubject } from './contributor-credits.mjs';
+
 const MAX_VERSION_LENGTH = 32;
 const MAX_TAG_LENGTH = 40;
 const MAX_PUBLISHED_AT_LENGTH = 40;
@@ -127,16 +129,21 @@ export function scrubPublicText(value) {
   return text;
 }
 
-function publicCommit(subject) {
+function publicCommit(subject, credits) {
   const match = String(subject).match(/^(feat|perf|design|fix)(\([^)]*\))?:\s*(.+)$/i);
   if (!match) return null;
   const item = scrubPublicText(match[3]);
   if (!item) return null;
   const kind = match[1].toLowerCase();
+  // The credit is appended after the scrub and the length bound, so neither can cut it off.
+  const login = credits[pullNumberFromSubject(subject)];
+  const credit = login ? ` (thanks @${login})` : '';
   return {
     group: kind === 'perf' ? 'Performance' : kind === 'fix' ? 'Fixes' : 'Features',
     isFeature: kind === 'feat',
-    item: capitalize(item),
+    credited: Boolean(login),
+    text: capitalize(item),
+    item: `${bounded(capitalize(item), MAX_SECTION_ITEM_LENGTH - credit.length)}${credit}`,
   };
 }
 
@@ -164,6 +171,7 @@ export function buildLatestShip({
   releaseUrl,
   commits,
   notesMarkdown = '',
+  credits = {},
 }) {
   const sourceCommits = commits
     .map((commit) => String(commit.sha ?? '').trim())
@@ -171,7 +179,7 @@ export function buildLatestShip({
     .slice(0, 50);
   if (sourceCommits.length === 0) throw new Error('latest-ship requires at least one source commit');
 
-  const publicCommits = commits.map((commit) => publicCommit(commit.subject)).filter(Boolean);
+  const publicCommits = commits.map((commit) => publicCommit(commit.subject, credits ?? {})).filter(Boolean);
   const notes = parseReleaseNotes(notesMarkdown);
   const sections = [];
   if (notes.length > 0) {
@@ -182,8 +190,10 @@ export function buildLatestShip({
   }
 
   for (const group of ['Features', 'Performance', 'Fixes']) {
+    // Credited items lead their group so the eight-item cap never drops a thank-you.
     const items = [...new Set(publicCommits
       .filter((commit) => commit.group === group)
+      .sort((a, b) => Number(b.credited) - Number(a.credited))
       .map((commit) => bounded(commit.item, MAX_SECTION_ITEM_LENGTH)))]
       .slice(0, 8);
     if (items.length > 0) {
@@ -195,10 +205,10 @@ export function buildLatestShip({
   }
   if (sections.length === 0) throw new Error('latest-ship requires release notes or a public commit section');
 
-  const topFeature = publicCommits.find((commit) => commit.isFeature)?.item;
+  const topFeature = publicCommits.find((commit) => commit.isFeature)?.text;
   const fallbackTitle = scrubPublicText(`o8 ${version}`);
   const title = bounded((topFeature ?? fallbackTitle).replace(/[.!?]+$/, ''), MAX_TITLE_LENGTH);
-  const summarySource = notes[0] ?? publicCommits[0]?.item ?? title;
+  const summarySource = notes[0] ?? publicCommits[0]?.text ?? title;
   const summary = bounded(scrubPublicText(asSentence(summarySource)), MAX_SUMMARY_LENGTH);
 
   const ship = {

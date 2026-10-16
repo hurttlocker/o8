@@ -8,6 +8,8 @@ export interface SymonTextPlannerSelection {
   engine: string;
   model: string;
   effort: string;
+  /** Only a newly selected automatic default may retry a pre-execution rejection. */
+  allowDefaultFallback?: boolean;
 }
 
 export function buildSymonTextPlannerInfoEval(selection?: SymonTextPlannerSelection): string {
@@ -46,6 +48,7 @@ export function buildSymonTextTurnEval(
   turnId: string,
   prompt: string,
   planner: SymonTextPlannerSelection,
+  reconcileOnly: boolean = false,
 ): string {
   const session = JSON.stringify(sessionId);
   const turn = JSON.stringify(turnId);
@@ -60,6 +63,7 @@ export function buildSymonTextTurnEval(
     const key = JSON.stringify([sessionId, callId]);
     let slot = calls[key];
     if (!slot) {
+      if (${JSON.stringify(reconcileOnly)}) return JSON.stringify({ state: 'call_mismatch' });
       slot = calls[key] = { startedAt: Date.now(), lastTouched: Date.now(), done: false, textTurn: true };
       Promise.resolve().then(() => A.text.runTurn(${content}, sessionId, callId, ${selection})).then((result) => {
         Object.assign(slot, { done: true, completedAt: Date.now(), result });
@@ -69,9 +73,13 @@ export function buildSymonTextTurnEval(
     }
     slot.lastTouched = Date.now();
     if (!slot.textTurn) return JSON.stringify({ state: 'call_mismatch' });
-    if (slot.done) return slot.error
-      ? JSON.stringify({ state: 'error', detail: slot.error })
-      : JSON.stringify({ state: 'done', result: slot.result });
+    if (slot.done) {
+      if (slot.error) return JSON.stringify({ state: 'error', detail: slot.error });
+      if (slot.result && slot.result.status === 'error') {
+        return JSON.stringify({ state: 'error', detail: slot.result.detail, result: slot.result });
+      }
+      return JSON.stringify({ state: 'done', result: slot.result });
+    }
     if (Array.isArray(A.pendingConfirmations)) {
       const hit = A.pendingConfirmations.find((candidate) => candidate && candidate.sessionId === sessionId && candidate.callId === callId);
       if (hit && hit.confirmationId !== slot.confirmationId) {

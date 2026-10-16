@@ -26,7 +26,13 @@ interface AccessResponse {
   error?: string;
 }
 
-export function SymonIMessageAccessSection() {
+export function SymonIMessageAccessSection({ nativeReceiverEnabled = false, mutationLocked = false, acquireMutation, releaseMutation, onWriteSettled }: {
+  nativeReceiverEnabled?: boolean | null;
+  mutationLocked?: boolean;
+  acquireMutation?: () => boolean;
+  releaseMutation?: () => void;
+  onWriteSettled?: (error: string | null) => void;
+}) {
   const [groups, setGroups] = useState<GroupAccess[]>([]);
   const [configured, setConfigured] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -39,7 +45,8 @@ export function SymonIMessageAccessSection() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/panel/symon/imessage-access', { cache: 'no-store' })
+    const controller = new AbortController();
+    void fetch('/api/panel/symon/imessage-access', { cache: 'no-store', signal: controller.signal })
       .then(async (response) => {
         const data = await response.json() as AccessResponse;
         if (!response.ok || !data.ok) throw new Error('Could not read iMessage group access.');
@@ -52,10 +59,12 @@ export function SymonIMessageAccessSection() {
         setGroups(data.groups ?? []);
       })
       .catch(() => { if (!cancelled) setError('Could not read iMessage group access.'); });
-    return () => { cancelled = true; };
-  }, []);
+    return () => { cancelled = true; controller.abort(); };
+  }, [nativeReceiverEnabled]);
 
   const saveBackend = useCallback(async (next: 'cli' | 'openclaw') => {
+    if (nativeReceiverEnabled !== false || mutationLocked || acquireMutation?.() === false) return;
+    let mutationError: string | null = null;
     setBusyId('backend');
     setError(null);
     try {
@@ -70,13 +79,18 @@ export function SymonIMessageAccessSection() {
       }
       setExecutionBackend(next);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not change the iMessage agent engine.');
+      mutationError = failure instanceof Error ? failure.message : 'Could not change the iMessage agent engine.';
+      setError(mutationError);
     } finally {
       setBusyId(null);
+      onWriteSettled?.(mutationError);
+      releaseMutation?.();
     }
-  }, []);
+  }, [nativeReceiverEnabled, mutationLocked, acquireMutation, onWriteSettled, releaseMutation]);
 
   const saveEnabled = useCallback(async (next: boolean) => {
+    if (nativeReceiverEnabled !== false || mutationLocked || acquireMutation?.() === false) return;
+    let mutationError: string | null = null;
     setBusyId('master');
     setError(null);
     try {
@@ -90,13 +104,18 @@ export function SymonIMessageAccessSection() {
       setEnabled(next);
       if (!next) setPendingId(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not change iMessage routing.');
+      mutationError = failure instanceof Error ? failure.message : 'Could not change iMessage routing.';
+      setError(mutationError);
     } finally {
       setBusyId(null);
+      onWriteSettled?.(mutationError);
+      releaseMutation?.();
     }
-  }, []);
+  }, [nativeReceiverEnabled, mutationLocked, acquireMutation, onWriteSettled, releaseMutation]);
 
   const save = useCallback(async (group: GroupAccess, fullAccess: boolean) => {
+    if (nativeReceiverEnabled !== false || mutationLocked || acquireMutation?.() === false) return;
+    let mutationError: string | null = null;
     const groupId = group.id;
     setBusyId(groupId);
     setError(null);
@@ -125,29 +144,36 @@ export function SymonIMessageAccessSection() {
       setGroups((current) => current.map((group) => group.id === groupId ? data.group! : group));
       setPendingId(null);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not change group access.');
+      mutationError = failure instanceof Error ? failure.message : 'Could not change group access.';
+      setError(mutationError);
     } finally {
       setBusyId(null);
+      onWriteSettled?.(mutationError);
+      releaseMutation?.();
     }
-  }, []);
+  }, [nativeReceiverEnabled, mutationLocked, acquireMutation, onWriteSettled, releaseMutation]);
 
   if (!configured) return null;
 
   return (
     <section style={{ marginTop: 28 }}>
       <SettingsGroup
-        header="Symon via iMessage"
-        footnote={error ?? 'Only approved chats can reach Symon. Group access stays limited unless every approved member is explicitly granted full access.'}
+        header="iMessage bridge access"
+        footnote={error ?? 'These controls belong to the existing OpenClaw / CLI bridge. The native Messages receiver has its own authorized senders above. Only one receiver can answer at a time.'}
       >
         <SettingsRow
           icon={<Smartphone size={14} />}
           label="Allow Symon on iMessage"
-          subtitle={directSenderSuffix
+          subtitle={nativeReceiverEnabled === null
+            ? 'Check native Messages receiver status above before changing the bridge'
+            : nativeReceiverEnabled
+              ? 'Disabled while the native Messages receiver is enabled'
+              : directSenderSuffix
             ? `${enabled ? 'On' : 'Off'} · Your approved direct number ends ${directSenderSuffix}`
             : enabled ? 'Symon is available in approved chats' : 'Symon will not reply to iMessage chats'}
-          checked={enabled}
+          checked={nativeReceiverEnabled ? false : enabled}
           onToggle={(next) => { void saveEnabled(next); }}
-          disabled={busyId !== null}
+          disabled={busyId !== null || mutationLocked || nativeReceiverEnabled !== false}
         />
         <SettingsRow
           icon={<Smartphone size={14} />}
@@ -157,7 +183,7 @@ export function SymonIMessageAccessSection() {
             : 'Connect a Symon agent to iMessage in OpenClaw to enable this.'}
           checked={executionBackend === 'openclaw'}
           onToggle={(next) => { void saveBackend(next ? 'openclaw' : 'cli'); }}
-          disabled={busyId !== null || (!openclawConfigured && executionBackend !== 'openclaw')}
+          disabled={busyId !== null || mutationLocked || nativeReceiverEnabled !== false || (!openclawConfigured && executionBackend !== 'openclaw')}
         />
         {groups.map((group) => (
           <div key={group.id}>
@@ -172,9 +198,9 @@ export function SymonIMessageAccessSection() {
                 if (next) setPendingId(group.id);
                 else void save(group, false);
               }}
-              disabled={busyId !== null || !group.canGrant}
+              disabled={busyId !== null || mutationLocked || nativeReceiverEnabled !== false || !group.canGrant}
             />
-            {pendingId === group.id ? (
+            {pendingId === group.id && nativeReceiverEnabled === false ? (
               <div style={{
                 borderTopWidth: 1,
                 borderTopStyle: 'solid',
@@ -188,8 +214,8 @@ export function SymonIMessageAccessSection() {
                   Give these approved members the same Symon tool access you have on this Mac?
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <RamsButton onClick={() => void save(group, true)} busy={busyId === group.id}>Grant full access</RamsButton>
-                  <RamsButton variant="ghost" onClick={() => setPendingId(null)} disabled={busyId !== null}>Cancel</RamsButton>
+                  <RamsButton onClick={() => void save(group, true)} busy={busyId === group.id} disabled={mutationLocked}>Grant full access</RamsButton>
+                  <RamsButton variant="ghost" onClick={() => setPendingId(null)} disabled={busyId !== null || mutationLocked}>Cancel</RamsButton>
                 </div>
               </div>
             ) : null}

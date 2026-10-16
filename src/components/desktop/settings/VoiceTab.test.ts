@@ -23,6 +23,8 @@ vi.mock('@/lib/tauri/bridge', () => ({
   }),
 }));
 vi.mock('./SymonAttentionSettingsSection', () => ({ SymonAttentionSettingsSection: () => null }));
+vi.mock('./SymonTextBrainSection', () => ({ SymonTextBrainSection: () => null }));
+vi.mock('./SymonConversationsSection', () => ({ SymonConversationsSection: () => null }));
 import { VoiceTab } from './VoiceTab';
 
 it('saves model choices, opens Symon, and routes credential management to API Keys', async () => {

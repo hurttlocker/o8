@@ -283,15 +283,11 @@ async function callHarness(body: Record<string, unknown>): Promise<McpToolResult
       method: 'POST',
       body: JSON.stringify(body),
       timeoutMs: body.action === 'evaluate_diff' ? 300_000 : 90_000,
-      acceptedErrorStatuses: [400, 403, 404, 409, 413],
     }) as HarnessApiResponse;
     if (response?.ok) return jsonResult(response.result);
-    const message = typeof response?.error === 'string'
-      ? response.error
-      : response?.error?.message ?? 'Harness action failed.';
-    return jsonResult({ ok: false, error: message });
+    return jsonResult({ ok: false, error: errorText(response) }, true);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 

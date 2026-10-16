@@ -13,6 +13,7 @@ import {
   type ProcessQuiescenceReceipt,
   type ProcessProbeReceipt,
 } from './process-quiescence';
+import { summarizeProcessProbeDetails } from './retirement-refusal-diagnostics';
 
 interface CommandReceipt {
   code: number;
@@ -21,6 +22,10 @@ interface CommandReceipt {
 }
 
 export interface OwnedProcessProbeOptions {
+  /** Exact terminal retirement only; archival never grants execution authority. */
+  allowArchivedRetirement?: true;
+  /** Quiescent archive recovery; never authorizes a provider run. */
+  allowArchivedRecovery?: true;
   run?: (command: string, args: string[], timeoutMs: number) => Promise<CommandReceipt>;
   readCwdSnapshot?: () => Promise<ProcessCwdSnapshot>;
   now?: () => Date;
@@ -144,12 +149,9 @@ function aggregateRunProbe(
       : 'clear';
   const relevant = receipts.filter((entry) => entry.receipt?.state === state);
   const pids = relevant.flatMap((entry) => entry.receipt?.pids ?? []);
-  const runIds = relevant.map((entry) => entry.runId).join(', ');
   const detail = state === 'clear'
     ? `All ${runProbes.length} retained owned runs are clear for ${primitive}.`
-    : state === 'live'
-      ? `Retained owned run evidence is live for ${primitive}: ${runIds}.`
-      : `Retained owned run evidence is uncertain for ${primitive}: ${runIds}.`;
+    : summarizeProcessProbeDetails(receipts.flatMap((entry) => entry.receipt?.state !== 'clear' && entry.receipt ? [entry.receipt] : []));
   return processProbe(primitive, state, detail, pids.length > 0 ? pids : undefined);
 }
 
@@ -293,7 +295,10 @@ export async function probeOwnedSessionProcessQuiescence(
     );
   }
   const receipt = await lifecycle.getWorkspaceBinding(surfaceId).catch(() => null);
-  if (!receipt || receipt.sessionState !== 'active') {
+  if (!receipt || (receipt.sessionState !== 'active'
+    && !((options.allowArchivedRetirement || options.allowArchivedRecovery) && receipt.sessionState === 'archived'
+      && receipt.activeRun === null && Array.isArray(receipt.retainedRuns)
+      && receipt.retainedRuns.every(runIdentity => runIdentity.outcome !== 'running')))) {
     return synthesizeProcessQuiescence(
       { ownership: receipt ? 'owned' : 'unknown', pidIdentity: 'unknown', sessionKey: surfaceId },
       [],

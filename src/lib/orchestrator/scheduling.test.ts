@@ -811,7 +811,7 @@ describe('dispatch scheduling caps and waves', () => {
         lastEventLabel: 'silent_exit_work_present',
       },
     });
-    expect(await hasReviewableCompletionDiff(repoPath, 'main')).toBe(true);
+    expect(await hasReviewableCompletionDiff(repoPath, 'main', repoPath)).toBe(true);
 
     const next = await runDispatchTick(missionFixture(repoPath, [packet]), {
       launchBudget: { maxLaunches: 1 },

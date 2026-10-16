@@ -101,7 +101,7 @@ export interface TileRegistryDeps {
   handleSelectCommit: (hash: string, meta?: Record<string, string>) => void;
   handleSelectPreviewTile: (tileId: string, previewId: string) => void;
   handleSelectRegisteredRepo: (repoId: string) => Promise<void>;
-  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore?: boolean) => string | null;
+  handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'orchestrator' | 'chat' | 'terminal' | 'remote', placeBefore?: boolean) => string | null;
   handleThoughtsMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
@@ -369,7 +369,7 @@ export function createTileRegistry({
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
             activeWorkspaceSurface={activeTileId === tileId}
-            defaultTab={isPrimaryWorkspaceTile || (content.kind === 'terminal' && content.initialTab === 'chat') ? 'llm-chat' : 'terminal'}
+            defaultTab={content.kind === 'terminal' && content.initialTab === 'orchestrator' ? 'orchestrator' : isPrimaryWorkspaceTile || (content.kind === 'terminal' && content.initialTab === 'chat') ? 'llm-chat' : 'terminal'}
             autoCreateDefaultTab={content.kind === 'terminal' && content.initialTab === 'remote'
               ? false
               : isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0 || (content.kind === 'terminal' && Boolean(content.initialTab))}

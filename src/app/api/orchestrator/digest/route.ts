@@ -41,9 +41,10 @@ export async function POST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    console.error('[api] orchestrator/digest failed:', error);
     return NextResponse.json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Digest failed',
+      error: 'Digest failed',
     }, {
       status: 500,
       headers: { 'Cache-Control': 'no-store, max-age=0' },

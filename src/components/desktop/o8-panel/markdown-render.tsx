@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { fromMarkdown } from 'mdast-util-from-markdown';
+import type { PhrasingContent } from 'mdast';
+import { markdownImageSource } from '@/lib/markdown/image-source';
 import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
 import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
@@ -24,28 +26,53 @@ export function proseWithoutBrainCitationMarkers(content: string): string {
   return content.replace(BRAIN_CITATION_MARKER, '');
 }
 
+const MarkdownAssetContext = createContext<{ filePath: string; repoPath: string | null } | null>(null);
+
+function safeMarkdownLink(url: string) {
+  try { return ['https:', 'http:', 'mailto:'].includes(new URL(url, 'https://markdown.invalid').protocol); }
+  catch { return false; }
+}
+
+function safeImageUrl(src: string) {
+  try { return /^https?:$/.test(new URL(src, 'https://markdown.invalid').protocol) ? src : null; }
+  catch { return null; }
+}
+
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const context = useContext(MarkdownAssetContext);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const external = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src);
+  const url = external ? safeImageUrl(src)
+    : context ? markdownImageSource(src, context.filePath, context.repoPath) : null;
+  const label = `Image unavailable: ${alt || 'image'}`;
+  if (!url || failedSource === url) return <span role="img" aria-label={label} title={label}
+    style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'middle', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 12 }}>{label}</span>;
+  // eslint-disable-next-line @next/next/no-img-element -- repo assets use the existing contained asset route
+  return <img src={url} alt={alt} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailedSource(url)}
+    style={{ maxWidth: '100%', height: 'auto', verticalAlign: 'middle' }} />;
+}
+
+function renderInlineNodes(nodes: PhrasingContent[], prefix = ''): ReactNode[] {
+  return nodes.map((node, index) => {
+    const key = `${prefix}:${index}`;
+    if (node.type === 'strong') return <strong key={key} style={{ fontWeight: 500 }}>{renderInlineNodes(node.children, key)}</strong>;
+    if (node.type === 'emphasis') return <em key={key}>{renderInlineNodes(node.children, key)}</em>;
+    if (node.type === 'inlineCode') return <code key={key} style={{ fontFamily: MONO_FONT, fontSize: '0.92em', background: 'var(--t-input-bg)', borderRadius: 8, paddingTop: 1, paddingRight: 4, paddingBottom: 1, paddingLeft: 4 }}>{node.value}</code>;
+    if (node.type === 'image') return <MarkdownImage key={key} src={node.url} alt={node.alt ?? ''} />;
+    if (node.type === 'link') return safeMarkdownLink(node.url)
+      ? <a key={key} href={node.url} target="_blank" rel="noreferrer" style={{ color: 'var(--t-accent)', textDecoration: 'none' }}>{renderInlineNodes(node.children, key)}</a>
+      : <span key={key}>{renderInlineNodes(node.children, key)}</span>;
+    if (node.type === 'break') return <br key={key} />;
+    return 'value' in node ? node.value : null;
+  });
+}
+
 function inline(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
-  let last = 0;
-  for (const match of text.matchAll(pattern)) {
-    const value = match[0];
-    const index = match.index ?? 0;
-    if (index > last) nodes.push(text.slice(last, index));
-    if (value.startsWith('**')) {
-      nodes.push(<strong key={index} style={{ fontWeight: 500 }}>{value.slice(2, -2)}</strong>);
-    } else if (value.startsWith('*')) {
-      nodes.push(<em key={index}>{value.slice(1, -1)}</em>);
-    } else if (value.startsWith('`')) {
-      nodes.push(<code key={index} style={{ fontFamily: MONO_FONT, fontSize: '0.92em', background: 'var(--t-input-bg)', borderRadius: 8, paddingTop: 1, paddingRight: 4, paddingBottom: 1, paddingLeft: 4 }}>{value.slice(1, -1)}</code>);
-    } else {
-      const link = value.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      nodes.push(<a key={index} href={link?.[2] ?? '#'} target="_blank" rel="noreferrer" style={{ color: 'var(--t-accent)', textDecoration: 'none' }}>{link?.[1] ?? value}</a>);
-    }
-    last = index + value.length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
+  const node = fromMarkdown(text).children[0];
+  if (node?.type !== 'paragraph') return [text];
+  const start = node.children[0]?.position?.start.offset ?? 0;
+  const end = node.children.at(-1)?.position?.end.offset ?? text.length;
+  return [text.slice(0, start), ...renderInlineNodes(node.children), text.slice(end)];
 }
 
 // Slice a content string into a stream of typed segments. We pre-extract
@@ -143,7 +170,7 @@ function renderMarkdownList(list: MarkdownList, text: string, key: string): Reac
 
 function renderMarkdownLines(text: string, keyPrefix: string): ReactNode[] {
   const blocks: ReactNode[] = [];
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   // Reuse the editor's Markdown parser for list boundaries, starts and nesting.
   // Only list ranges use its tree; other prose and the isolated HTML/SVG/iframe
   // segments retain their existing rendering and security boundaries.
@@ -299,12 +326,13 @@ function PassthroughIframe({ html }: { html: string }) {
   );
 }
 
-export function MarkdownRender({ content }: { content: string }) {
+export function MarkdownRender({ content, filePath, repoPath = null }: { content: string; filePath?: string; repoPath?: string | null }) {
   const { paletteId } = useTheme();
   const theme: HtmlStylePalette = paletteId === 'light' ? 'light' : 'midnight';
   const segments = useMemo(() => segmentize(content), [content]);
 
   return (
+    <MarkdownAssetContext.Provider value={filePath ? { filePath, repoPath } : null}>
     <div style={{ fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text)' }}>
       {segments.map((seg, i) => {
         if (seg.kind === 'md') {
@@ -323,5 +351,6 @@ export function MarkdownRender({ content }: { content: string }) {
         return <PassthroughIframe key={`s:${i}`} html={seg.html} />;
       })}
     </div>
+    </MarkdownAssetContext.Provider>
   );
 }

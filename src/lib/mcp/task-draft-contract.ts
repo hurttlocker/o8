@@ -1,3 +1,4 @@
+import { CONTROLLED_OPENROUTER_MODEL, parseControlledProvider, type ControlledOpenRouterPolicy } from '@/lib/runtimes/shared/owned-session/controlled-provider';
 import { isSupportedModelId } from '@/lib/models';
 import { resolveEffortPin, type ConcreteThinkingEffort } from '@/lib/orchestrator/effort-pin';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
@@ -54,7 +55,8 @@ export interface TaskDraftContract {
   allowedFiles: string[];
   runtime: 'codex' | 'claude-code';
   model: string;
-  effort: ConcreteThinkingEffort;
+  effort: ConcreteThinkingEffort | 'provider-default';
+  provider?: ControlledOpenRouterPolicy;
   workMode: 'read-only';
   evidence: string[];
   sealedTaskContract: PacketTaskContract;
@@ -63,18 +65,29 @@ export interface TaskDraftContract {
 export function parseTaskDraftContract(input: unknown): TaskDraftContract {
   const value = object(input);
   exactKeys(value, ['machineId', 'repoId', 'projectId', 'snapshotId', 'idempotencyKey', 'objective',
-    'allowedFiles', 'runtime', 'model', 'effort', 'workMode', 'evidence', 'sealedTaskContract']);
+    'allowedFiles', 'runtime', 'model', 'effort', 'workMode', 'evidence', 'sealedTaskContract'], ['provider']);
   if (value.workMode !== 'read-only' || (value.runtime !== 'codex' && value.runtime !== 'claude-code')) {
     throw new TaskDraftError('unsupported_work_mode_or_runtime');
   }
   const runtime = value.runtime;
   const model = normalizedText(value.model);
-  if (!isSupportedModelId(model) || !getRuntimeCapability(runtime).modelIdPattern?.test(model)) {
-    throw new TaskDraftError('model_incompatible');
-  }
-  const effort = resolveEffortPin({ runtime, model, explicitModel: model, requestedEffort: value.effort });
-  if (!effort.ok || !effort.selectedEffort || effort.selectedEffort !== value.effort || effort.selectedEffort === 'adaptive') {
-    throw new TaskDraftError('effort_not_honored');
+  let provider: ControlledOpenRouterPolicy | undefined;
+  let selectedEffort: TaskDraftContract['effort'];
+  if (value.provider !== undefined && value.provider !== null) {
+    try { provider = parseControlledProvider(value.provider); }
+    catch { throw new TaskDraftError('invalid_arguments'); }
+    if (runtime !== 'claude-code' || model !== CONTROLLED_OPENROUTER_MODEL) throw new TaskDraftError('model_incompatible');
+    if (value.effort !== 'provider-default') throw new TaskDraftError('effort_not_honored');
+    selectedEffort = 'provider-default';
+  } else {
+    if (!isSupportedModelId(model) || !getRuntimeCapability(runtime).modelIdPattern?.test(model)) {
+      throw new TaskDraftError('model_incompatible');
+    }
+    const effort = resolveEffortPin({ runtime, model, explicitModel: model, requestedEffort: value.effort });
+    if (!effort.ok || !effort.selectedEffort || effort.selectedEffort !== value.effort || effort.selectedEffort === 'adaptive') {
+      throw new TaskDraftError('effort_not_honored');
+    }
+    selectedEffort = effort.selectedEffort;
   }
   let sealedTaskContract: PacketTaskContract;
   try { sealedTaskContract = parseSealedTaskContract(value.sealedTaskContract); }
@@ -90,7 +103,7 @@ export function parseTaskDraftContract(input: unknown): TaskDraftContract {
     machineId: normalizedText(value.machineId), repoId: normalizedText(value.repoId),
     projectId: normalizedText(value.projectId), snapshotId: normalizedText(value.snapshotId),
     idempotencyKey: normalizedText(value.idempotencyKey), objective: normalizedText(value.objective, 2000),
-    allowedFiles, runtime, model, effort: effort.selectedEffort,
+    allowedFiles, runtime, model, effort: selectedEffort, ...(provider ? { provider } : {}),
     workMode: 'read-only', evidence: list(value.evidence, 8, (entry) => normalizedText(entry, 480)),
     sealedTaskContract,
   };

@@ -1,7 +1,7 @@
 {
   "note": "Resource-owning test files red on the Linux runner in run 35178955102 (2026-09-17, #2391). The integration gate reports these as baseline red instead of failing the run when O8_INTEGRATION_BASELINE points here. This list may only shrink: remove a file once it passes, and never add one.",
   "sourceRun": 35178955102,
-  "count": 45,
+  "count": 44,
   "files": [
     {
       "path": "src/app/api/panel/universal-search/route.test.ts",
@@ -82,10 +82,6 @@
     {
       "path": "tests/declarative-dispatch-worktree-real-path.test.ts",
       "firstFailure": "declarative packet dispatch worktree reachability > verifies a materialized dev binary and blocks launch when the binary is incomplete"
-    },
-    {
-      "path": "tests/execution-carrier-real-path.test.ts",
-      "firstFailure": "execution carrier isolated worktree real path > routes launch and resume through Ori while Codex retains identity, evidence, and cleanup"
     },
     {
       "path": "tests/managed-cleanup-missing-directory-real-path.test.ts",

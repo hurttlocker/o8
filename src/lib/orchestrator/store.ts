@@ -653,7 +653,7 @@ export function queueOrchestratorSessionPrelude(
 ) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = text.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   const nextItem = {
     id: `prelude-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     text: trimmed,
@@ -706,13 +706,13 @@ export function readStoredOrchestratorModel(repoPath: string | null | undefined)
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return null;
   const stored = window.localStorage.getItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`)?.trim();
-  return stored ? stored : null;
+  return stored ?? null;
 }
 
 export function writeStoredOrchestratorModel(repoPath: string | null | undefined, model: string) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = model.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   window.localStorage.setItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`, trimmed);
 }
 

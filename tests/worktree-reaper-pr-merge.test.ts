@@ -588,7 +588,11 @@ describe('worktree reaper PR merge reconciliation', () => {
       mergedAt: '2026-07-04T12:00:00.000Z',
     });
 
-    await runWorktreeReaperTick();
+    // Fair bounded passes can leave this newest lane behind earlier held candidates.
+    // Keep the original archival and no-invented-release assertions after one finite cycle.
+    for (let pass = 0; pass < 8 && getLane(lane.id)?.status !== 'archived'; pass += 1) {
+      await runWorktreeReaperTick();
+    }
 
     expect(getLane(lane.id)?.status).toBe('archived');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');

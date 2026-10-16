@@ -37,7 +37,7 @@ export type TurnSummary = {
   toolNames: string[];
   /** Distinct tool name count for the +N tail. */
   toolNameTotal: number;
-  /** Files edited during the turn (from /api/review/workspace at turn end). */
+  /** Files attributed to successful edit-tool receipts during the turn. */
   filesEditedCount: number;
   /** File paths so the inner ChatActionCard can Undo + Review. */
   filePaths: string[];
@@ -121,7 +121,9 @@ function TurnReceiptLine({ receipt }: { receipt: MobileTurnReceipt }) {
       }}
     >
       <div>
-        {formatModelLabel(receipt.leadModel)} · {THINKING_EFFORT_LABELS[receipt.effort].short} · {pickedMode
+        {formatModelLabel(receipt.leadModel)}
+        {/* The o8 lead has one setting, so its receipt names no effort (#3660). */}
+        {receipt.leadModel === 'o8-free' ? null : ` · ${THINKING_EFFORT_LABELS[receipt.effort].short}`} · {pickedMode
           ? `ran as ${mode}, picked ${pickedMode}`
           : mode}
       </div>

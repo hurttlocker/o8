@@ -90,6 +90,43 @@ acceptance evidence. Age can select a candidate, but it cannot authorize
 deletion. An archived conversation does not prove transcript or workspace bytes
 were reclaimed.
 
+Accepted managed worker completion writes a compact private handoff under the
+resolved data directory's `completion-handoffs/`, independently of retirement
+eligibility. A read-only zero-diff completion publishes its `no_changes` handoff
+before the terminal transition starts cleanup. An active retention hold keeps
+the source materialized. Review-bound completion captures use the same private
+writer, including silent-exit salvage/review and already-merged completion. Their
+accepted transitions publish under fresh owner/run/generation checks before source
+cleanup can start. Repeating an accepted state preserves its receipt byte-for-byte. Final
+acceptance may advance a review receipt while retaining the exact source identity.
+The handoff binds packet, lane, session, provider run, attempt/storage generation,
+source directory identity, head and tree. Superseded owners, changed source,
+unverified runtime quiescence and unsafe private storage are refused.
+
+The handoff contains bounded remaining work and evidence references, with shell
+commands to verify and copy the committed source. It attaches no recovery bundle:
+until separately verified private Git/artifact preservation is available, recovery
+depends on the live retained workspace and provider archive. Copying committed
+source does not copy ignored artifacts or provider history. Use the existing
+preservation receipt after retirement; a completion handoff does not authorize
+removal, release a hold, or replace independent acceptance evidence. Eligible
+unheld completion still uses the existing automatic retirement and banking path.
+
+The production completion-context reader returns `recovery.source` and executable
+`recovery.instructions` based on current persisted state, including in a new
+process. After retirement it verifies the existing preservation payload and Git
+bank against the exact completion owner, revision and tree, then supplies bundle
+import/verification commands. The completion-time live-source instructions remain
+historical. A missing or unverified bank returns `unavailable`, without presenting
+historical source-copy commands as currently executable. Provider history is still
+a separate dependency; no transcript bytes are invented.
+
+Normal owned-session launches leave the repository UUID null. A completion accepts
+that binding only with the registered repository, unique lane/packet/session,
+logical workspace, binding cwd and exact ready manager materialization in agreement.
+Private publication and readback use an inherited directory descriptor and captured
+cwd; substituted parents and non-regular files (including FIFOs) fail closed.
+
 Before retirement, acquire ownership, validate the exact resource and process
 generation, verify preserved content, and recheck immediately before removal.
 A PID alone is insufficient identity. Journal partial results and reconcile the

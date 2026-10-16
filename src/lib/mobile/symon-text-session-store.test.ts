@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   SYMON_TEXT_SESSION_STALE_MS,
   appendSymonTextTranscript,
+  bindSymonTextEffectiveModel,
   createSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
@@ -55,4 +56,19 @@ describe('Symon text session store', () => {
     expect(loadSymonTextSession(session.sessionId, 1_000 + SYMON_TEXT_SESSION_STALE_MS)).not.toBeNull();
     expect(loadSymonTextSession(session.sessionId, 1_001 + SYMON_TEXT_SESSION_STALE_MS)).toBeNull();
   });
+});
+
+it.each([
+  [true, 'gpt-5.6-sol', 'medium', 'gpt-5.6-sol'],
+  [true, 'gpt-5.6-sol', 'xhigh', 'gpt-6.1-sol'],
+  [true, 'some-model', 'medium', 'gpt-6.1-sol'],
+  [false, 'gpt-5.6-sol', 'medium', 'gpt-6.1-sol'],
+] as const)('binds only an eligible same-effort compatibility result (%s, %s, %s)', (allowed, model, effort, expected) => {
+  const session = createSymonTextSession({ ...create(),
+    model: 'gpt-6.1-sol', allowDefaultFallback: allowed,
+  }, 1_000);
+  bindSymonTextEffectiveModel(session.sessionId, model, effort, 2_000);
+  expect(loadSymonTextSession(session.sessionId, 2_000)).toMatchObject({ model: expected, effort: 'medium', allowDefaultFallback: false });
+  bindSymonTextEffectiveModel(session.sessionId, 'gpt-5.6-sol', 'medium', 3_000);
+  expect(loadSymonTextSession(session.sessionId, 3_000)?.model).toBe(expected);
 });

@@ -85,6 +85,8 @@ interface O8ActivityPaneProps {
   onSelectRepoPath?: (repoPath: string) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
+  onSelectPR?: (number: number, repo?: string) => void;
+  onClosePR?: (number: number, repo?: string | null) => void;
   selectedPrNumber?: number | null;
   selectedPrRepo?: string | null;
 }
@@ -101,6 +103,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   onSelectIssue,
   selectedPrNumber,
   selectedPrRepo,
+  onSelectPR,
+  onClosePR,
 }: O8ActivityPaneProps) {
   const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
@@ -113,14 +117,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [seenProposalSnapshot, setSeenProposalSnapshot] = useState<Set<string>>(() => new Set());
   const proposalAutoOpenedRef = useRef(false);
   const persistedSeenSigRef = useRef('');
-  const [selectedPr, setSelectedPr] = useState<{ number: number; repo: string | null } | null>(() => (
-    selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null
-  ));
+  const prSelectionKey = `${selectedPrRepo ?? repoSlug ?? ''}:${selectedPrNumber ?? ''}`;
+  const suppliedPr = selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null;
+  const [prSelection, setPrSelection] = useState(() => ({ key: prSelectionKey, pr: suppliedPr }));
+  const selectedPr = prSelection.key === prSelectionKey ? prSelection.pr : suppliedPr;
+  if (prSelection.key !== prSelectionKey) setPrSelection({ key: prSelectionKey, pr: suppliedPr });
+  const setSelectedPr = useCallback((pr: { number: number; repo: string | null } | null) => setPrSelection({ key: prSelectionKey, pr }), [prSelectionKey]);
   const prLinkDestination = usePrLinkDestinationFlag();
-
-  useEffect(() => {
-    setSelectedPr(selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null);
-  }, [repoSlug, selectedPrNumber, selectedPrRepo]);
 
   // Hydrate the proposals open/closed pref after mount so SSR doesn't
   // hydrate-mismatch. Default = collapsed; the row is recommendations,
@@ -410,6 +413,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         openExternalUrl(`https://github.com/${item.repo}/pull/${item.number}`);
       } else {
         setSelectedPr({ number: item.number, repo: item.repo ?? null });
+        onSelectPR?.(item.number, item.repo);
       }
     } else if (item.kind === 'issue') {
       if (onSelectIssue) {
@@ -420,15 +424,17 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     } else if (item.kind === 'ci') {
       openExternalUrl(`https://github.com/${item.repo}/actions/runs/${item.id}`);
     }
-  }, [onSelectCommit, onSelectIssue, prLinkDestination]);
+  }, [onSelectCommit, onSelectIssue, onSelectPR, prLinkDestination, setSelectedPr]);
 
   if (selectedPr) {
     return (
       <PrPanel
+        id="right-pr-detail"
+        active={active}
         prNumber={selectedPr.number}
         repoSlug={selectedPr.repo ?? repoSlug ?? null}
         repoPath={repoPath ?? null}
-        onClose={() => setSelectedPr(null)}
+        onClose={() => { setSelectedPr(null); onClosePR?.(selectedPr.number, selectedPr.repo); }}
       />
     );
   }
@@ -452,6 +458,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         {/* Repo selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <O8RepoSelector
+            active={active}
             repos={registeredRepoEntries}
             allRepos={allRepos}
             selectedRepoPath={repoPath ?? null}

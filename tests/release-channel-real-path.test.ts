@@ -104,12 +104,16 @@ function fixture(version = '0.1.741-preview.1') {
   const prelude = `import { appendFileSync } from 'node:fs';
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
-import { cpSync, readFileSync } from 'node:fs';
+import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
   record(command, args);
+  if (command === 'codex') {
+    writeFileSync(args[args.indexOf('--output-last-message') + 1], JSON.stringify({ summary: 'Clearer workspace feedback.', entries: [{ text: 'Workspace feedback is easier to follow.', sourceIndices: [0] }] }));
+    return '';
+  }
   if (command.endsWith('hdiutil')) {
     if (args[0] === 'attach') {
       const mountpoint = args[args.indexOf('-mountpoint') + 1];
@@ -175,6 +179,7 @@ function run(f: ReturnType<typeof fixture>, channel: string, args: string[] = []
       O8_DATA_DIR: join(f.root, 'data'),
       CORTEX_IDE_DATA_DIR: join(f.root, 'data'),
       O8_RELEASE_CHANNEL: channel,
+      O8_RELEASE_SUMMARY_CACHE_DIR: join(f.root, 'summary-cache'),
       O8_CHANNEL_TEST_VERSION: f.version,
       O8_CHANNEL_TEST_LOG: f.log,
       O8_CHANNEL_TEST_DMG_APP: f.dmgApp,
@@ -209,6 +214,11 @@ describe('release channels through the publication entry point', () => {
     const calls = effects(f);
     const creates = calls.filter(c => c.name === 'gh' && c.args[1] === 'create');
     expect(creates).toHaveLength(2);
+    expect(calls.filter(call => call.name === 'codex')).toHaveLength(1);
+    expect(calls.findIndex(call => call.name === 'codex')).toBeLessThan(calls.findIndex(call => call.name === 'gh' && call.args[1] === 'create'));
+    const mirror = creates.find(call => call.args.includes('hurttlocker/o8-releases'))!;
+    expect(mirror.args[mirror.args.indexOf('--notes') + 1]).toContain('## What’s changed\n\nClearer workspace feedback.');
+    expect(JSON.parse(readFileSync(join(f.root, 'summary-cache', `${f.version}.json`), 'utf8')).status).toBe('generated');
     for (const call of creates) {
       expect(call.args).toContain('--prerelease');
       expect(call.args).toContain('--latest=false');

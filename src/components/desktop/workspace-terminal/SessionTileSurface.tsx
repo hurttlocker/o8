@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
+import { ResizeEdge } from '../shell/ResizeEdge';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 export { projectLiveSessionMeshParticipants };
 import { ThreadChatPane } from '@/components/desktop/workspace-terminal/ThreadChatPane';
@@ -313,6 +314,7 @@ export function SessionTileSurface({
         <SessionResizeHandle
           key={frame.id}
           frame={frame}
+          onResize={(ratio) => onResizeSplit(frame.id, ratio)}
           onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
         />
       ))}
@@ -323,11 +325,14 @@ export function SessionTileSurface({
 function SessionResizeHandle({
   frame,
   onMouseDown,
+  onResize,
 }: {
   frame: SessionTileSplitFrame;
+  onResize: (ratio: number) => void;
   onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }) {
   const isVertical = frame.direction === 'vertical';
+  const ratio = isVertical ? (frame.boundary.left - frame.container.left) / frame.container.width : (frame.boundary.top - frame.container.top) / frame.container.height;
   const style: CSSProperties = isVertical
     ? {
         position: 'absolute',
@@ -346,40 +351,23 @@ function SessionResizeHandle({
         cursor: 'row-resize',
       };
   return (
-    <div
-      role="separator"
-      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
+    <ResizeEdge
+      orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-label={`Resize ${isVertical ? 'columns' : 'rows'}`}
       data-session-resize-handle={frame.id}
       data-session-resize-direction={frame.direction}
       onMouseDown={onMouseDown}
-      onMouseEnter={(event) => {
-        const bar = event.currentTarget.firstElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '1';
+      aria-valuemin={20}
+      aria-valuemax={80}
+      aria-valuenow={Math.round(ratio * 100)}
+      onKeyDown={(event) => {
+        const step = isVertical ? (event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0)
+          : (event.key === 'ArrowUp' ? -0.05 : event.key === 'ArrowDown' ? 0.05 : 0);
+        if (!step) return;
+        event.preventDefault();
+        onResize(Math.max(0.2, Math.min(0.8, ratio + step)));
       }}
-      onMouseLeave={(event) => {
-        const bar = event.currentTarget.firstElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0';
-      }}
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        zIndex: 10,
-      }}
-    >
-      <div
-        style={{
-          width: isVertical ? 3 : 42,
-          height: isVertical ? 42 : 3,
-          borderRadius: 999,
-          backgroundColor: 'var(--t-drag-handle, var(--t-border))',
-          opacity: 0,
-          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-    </div>
+      style={style}
+    />
   );
 }

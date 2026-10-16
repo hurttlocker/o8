@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
@@ -839,6 +840,9 @@ export function useOrchestratorStream(
         ...(activeTurnBackendRef.current ? { backend: activeTurnBackendRef.current } : {}),
       }));
     }
+    // Later events for this turn no longer reach its reply, so its in-flight calls end now (#3659).
+    const stoppedTools = stopRunningTools(messagesRef.current);
+    if (stoppedTools !== messagesRef.current) syncMessages(stoppedTools);
     if (statusRef.current === 'busy') {
       const nextStatus = connected ? 'ready' : 'connecting';
       statusRef.current = nextStatus;
@@ -847,7 +851,7 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected, turnOptionResolution]);
+  }, [connected, syncMessages, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
     suppressTurnEventsRef.current = false;
     const clientMessageId = createOrchestratorClientMessageId();
@@ -886,7 +890,7 @@ export function useOrchestratorStream(
         return;
       }
       const {
-        permissionMode, thinkingEffort, model, displayMessage, wireMessage,
+        permissionMode, thinkingEffort, serviceTier, model, displayMessage, wireMessage,
         localEntriesAfterUser, collideBaseBackend, backend, orchestrationMode, pickedMode,
       } = prepareOrchestratorTurn(message, turnOptions);
       activeTurnBackendRef.current = backend ?? null;
@@ -997,7 +1001,7 @@ export function useOrchestratorStream(
         displayMessage,
         permissionMode,
         orchestrationMode, pickedMode,
-        thinkingEffort,
+        thinkingEffort, serviceTier,
         model,
         // Per-turn override stays truthful while the global default write settles.
         backend,

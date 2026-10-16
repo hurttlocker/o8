@@ -6,6 +6,7 @@ import { GET, POST } from './route';
 import { listReposFresh } from '@/lib/repos/registry';
 import { buildNewChatGPTPlanTab, buildPersistedState } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { computeRestoredTabs } from '@/components/desktop/workspace-terminal/terminal-restore';
+import { buildRepoStateScope } from '@/lib/terminal/tab-state';
 
 const dataDir = process.env.CORTEX_IDE_DATA_DIR!;
 const stateDir = path.join(dataDir, 'terminal-states');
@@ -19,6 +20,24 @@ beforeEach(async () => {
 });
 
 describe('terminal state restore without a registered repo', () => {
+  it.each([false, true])('keeps the newer selected conversation when canonical state is newer: %s', async (canonicalIsNewer) => {
+    const repoPath = path.join(dataDir, 'registered-repo');
+    writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1,
+      repos: [{ id: 'registered', name: 'repo', localPath: repoPath }],
+    }));
+    await listReposFresh();
+    const state = (id: string, savedAt: string) => ({ version: 1, activeTabId: id, savedAt,
+      tabs: [{ id, kind: 'orchestrator', label: id, repoPath, orchestratorThreadId: `thoughts-${id}` }],
+    });
+    const root = state('selected-root', '2026-10-11T12:00:00.000Z');
+    const canonical = state('canonical', canonicalIsNewer ? '2026-10-11T13:00:00.000Z' : '2026-10-10T12:00:00.000Z');
+    await POST(new Request(`${stateUrl.replace('tile-root', buildRepoStateScope(repoPath))}`, { method: 'POST', body: JSON.stringify(canonical) }));
+    await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify(root) }));
+    const response = await GET(new Request(stateUrl));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(canonicalIsNewer ? canonical : root);
+  });
+
   it('persists and restores a plan chat through the desktop state route without adopting a repository or terminal', async () => {
     const tab = buildNewChatGPTPlanTab();
     const persisted = buildPersistedState([tab], tab.id);

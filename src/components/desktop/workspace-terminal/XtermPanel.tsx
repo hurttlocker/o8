@@ -64,7 +64,7 @@ function sendBenchTerminalVisibility(
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, readOnly = false, inputLocked = false, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
+  { tmuxSession, readOnly = false, inputLocked = false, screenReaderMode = false, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -444,6 +444,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           cursorBlink: true,
           cursorStyle: 'block',
           disableStdin: readOnly || inputLockedRef.current,
+          screenReaderMode,
           allowTransparency: transparent === true,
           allowProposedApi: true,
           scrollback: TERMINAL_SCROLLBACK_LINES,
@@ -625,7 +626,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
-  }, [tmuxSession, readOnly, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalVisibility, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
+  }, [tmuxSession, readOnly, screenReaderMode, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalVisibility, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never

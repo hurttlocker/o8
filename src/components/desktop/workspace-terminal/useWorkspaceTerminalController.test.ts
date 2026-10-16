@@ -4,17 +4,19 @@ import { act, createElement, forwardRef, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from './types';
+import { subscribeTerminalCloseConfirm, type TerminalCloseRequest } from './terminal-close-confirm';
 
 const restoreHarness = vi.hoisted(() => ({
   resolveValidated: null as null | ((value: unknown) => void),
   validatedPromise: null as Promise<unknown> | null,
+  savedSession: null as string | null,
 }));
 
 vi.mock('./terminal-restore', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./terminal-restore')>();
   const restoredTabs = () => ([
     {
-      id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: null,
+      id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: restoreHarness.savedSession,
       cliAgent: 'shell', createdAt: 1, lastActivity: 1,
     },
     {
@@ -26,7 +28,7 @@ vi.mock('./terminal-restore', async (importOriginal) => {
     tabs: restoredTabs(),
     activeTabId: 'terminal-a',
     sessionsToAttach: [],
-    deadTerminalTabs: restoredTabs(),
+    deadTerminalTabs: restoredTabs().filter(tab => tab.tmuxSession === null),
     restoredAny: true,
   });
   return {
@@ -43,11 +45,13 @@ vi.mock('./terminal-restore', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => false }));
+const experimental = vi.hoisted(() => ({ chat: false }));
+vi.mock('@/lib/operator/use-experimental-chat', () => ({ useExperimentalChatFlag: () => experimental.chat }));
 vi.mock('@/lib/operator/use-experimental-canvas', () => ({ useExperimentalCanvasFlag: () => false }));
 vi.mock('./orchestrator-thread-restore', () => ({ readLastOrchestratorThreadTitle: vi.fn(async () => null) }));
 
 import { useWorkspaceTerminalController } from './useWorkspaceTerminalController';
+import { loadInitialTabState } from './terminal-restore';
 
 function ControllerHarness({
   controllerRef,
@@ -58,6 +62,7 @@ function ControllerHarness({
 }) {
   const controller = useWorkspaceTerminalController(props, controllerRef);
   return createElement('div', {
+    'data-tabs': JSON.stringify(controller.tabs),
     'data-sessions': JSON.stringify(controller.tabs.map((tab) => [tab.id, tab.tmuxSession])),
   });
 }
@@ -73,6 +78,8 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
   let root: Root;
 
   beforeEach(() => {
+    experimental.chat = false;
+    restoreHarness.savedSession = null;
     restoreHarness.validatedPromise = new Promise((resolve) => {
       restoreHarness.resolveValidated = resolve;
     });
@@ -90,6 +97,21 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([false, true])('opens only a fresh orchestrator for a rail drop when experimental chat is %s', async (experimentalChat) => {
+    experimental.chat = experimentalChat;
+    vi.mocked(loadInitialTabState).mockResolvedValueOnce(null);
+    const selectedRepo = { name: 'Selected repo', localPath: '/tmp/selected-repo', branch: 'main' };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'fixture-rail-orchestrator-pane', defaultTab: 'orchestrator', splitCreated: true, selectedRepo,
+      termWsConnected: false, sendTerminalCreate: vi.fn(), sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(),
+      sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(), sendTerminalDetach: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    const tabs = JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!);
+    expect(tabs).toEqual([expect.objectContaining({ kind: 'orchestrator', freshSpawn: true, mode: 'fleet', label: 'Orchestrator', repo: selectedRepo })]);
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
   });
 
   it('keeps an ack that lands during validation without detaching or requesting the tab twice', async () => {
@@ -144,6 +166,30 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     expect(duplicateResult).toBe(true);
     expect(sendTerminalDetach).not.toHaveBeenCalled();
     expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it('replaces a saved session positively found dead instead of reviving its stale ID', async () => {
+    restoreHarness.savedSession = 'cortex-dash-expired';
+    const sendTerminalCreate = vi.fn<WorkspaceTerminalProps['sendTerminalCreate']>();
+    const sendTerminalDetach = vi.fn<WorkspaceTerminalProps['sendTerminalDetach']>();
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'dead-saved-terminal', defaultTab: 'terminal', autoCreateDefaultTab: false,
+      termWsConnected: true, sendTerminalCreate, sendTerminalDetach,
+      sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(), sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    const terminalARequests = () => sendTerminalCreate.mock.calls.filter(call => String(call[2]).includes('terminal-a'));
+    // The optimistic phase can attach the saved ID; it must not create over a live shell.
+    expect(terminalARequests()).toHaveLength(0);
+    await act(async () => {
+      const dead = { id: 'terminal-a', label: 'Terminal A', kind: 'terminal', tmuxSession: null, cliAgent: 'shell', createdAt: 1, lastActivity: 1 };
+      restoreHarness.resolveValidated?.({ tabs: [dead], activeTabId: 'terminal-a', sessionsToAttach: [], deadTerminalTabs: [dead], restoredAny: true });
+      await restoreHarness.validatedPromise;
+    });
+    expect(JSON.parse(container.firstElementChild!.getAttribute('data-sessions')!)).toEqual([['terminal-a', null]]);
+    expect(terminalARequests()).toHaveLength(1);
+    expect(terminalARequests()[0][4]).toBe('workspace:terminal-a');
+    expect(sendTerminalDetach).not.toHaveBeenCalled();
   });
 
   it('keeps live repo-less shells when the selected repo hydrates after restore', async () => {
@@ -228,7 +274,14 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
       body: JSON.stringify({ sessionName: 'remote-live-session', command: 'o8 machine attach fixture' }),
     }));
     await act(async () => Promise.resolve());
+    let closeRequest: TerminalCloseRequest | undefined;
+    const stopConfirm = subscribeTerminalCloseConfirm((request) => { closeRequest = request; });
     await act(async () => expect(controllerRef.current?.closeActiveTab()).toBe(true));
+    expect(sendTerminalInput).not.toHaveBeenCalled();
+    expect(sendTerminalDetach).not.toHaveBeenCalled();
+    expect(closeRequest?.tab.id).toBe(tabId);
+    await act(async () => closeRequest?.resolve(true));
+    stopConfirm();
     expect(sendTerminalInput).toHaveBeenCalledWith('remote-live-session', '\x1d');
     expect(sendTerminalDetach).toHaveBeenCalledWith('remote-live-session');
     expect(sendTerminalInput.mock.invocationCallOrder[0]).toBeLessThan(sendTerminalDetach.mock.invocationCallOrder[0]);

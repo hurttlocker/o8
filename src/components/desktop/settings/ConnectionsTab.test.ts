@@ -62,7 +62,7 @@ describe('ConnectionsTab managed Symon Messages', () => {
       root.render(createElement(ConnectionsTab));
       await settle();
     });
-    expect(container.textContent).toContain('CLI-backed replies');
+    expect(container.textContent).toContain('Managed replies and saved history');
     const input = container.querySelector<HTMLInputElement>(
       'input[aria-label="Phone number allowed to text Symon"]',
     );

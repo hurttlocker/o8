@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
-import { invalidateCodexDiscoveredFleetCache } from '@/lib/codex/sessions';
-import { pruneCodexSessions, type CodexSessionPruneMode } from '@/lib/codex/sessions-prune';
-import { invalidateRuntimeInventoryCache } from '@/lib/runtime/inventory';
+import { NextRequest, NextResponse } from 'next/server';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { requirePanelAuth } from '@/lib/panel/auth';
+import { pruneCodexSessions, UnsupportedCodexTranscriptRetentionError, type CodexSessionPruneMode } from '@/lib/codex/sessions-prune';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,7 +48,12 @@ function normalizeMaxAgeDays(value: unknown) {
   return Math.floor(parsed);
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+  if (resolveRequestPrincipal(request) !== 'operator') {
+    return response({ ok: false, code: 'forbidden', error: 'Transcript retention is operator-only.' }, 403);
+  }
   const body = await request.json().catch(() => ({})) as PruneRequestBody;
 
   let mode: CodexSessionPruneMode;
@@ -63,13 +68,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await pruneCodexSessions({ mode, maxAgeDays });
-
-    invalidateCodexDiscoveredFleetCache();
-    invalidateRuntimeInventoryCache();
-
-    return response({ ok: true, result });
+    return await pruneCodexSessions({ mode, maxAgeDays });
   } catch (error) {
+    if (error instanceof UnsupportedCodexTranscriptRetentionError) {
+      return response({
+        ok: false,
+        code: error.code,
+        error: error.message,
+        held: true,
+        reason: 'external_provider_ownership',
+        capabilities: error.capabilities,
+        mode,
+        maxAgeDays,
+      }, 409);
+    }
     const message = error instanceof Error ? error.message : 'Failed to prune codex sessions.';
     console.error('[panel-codex-sessions-prune] Failed to prune codex sessions:', message);
     return response({ error: message }, 500);

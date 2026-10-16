@@ -11,7 +11,7 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 const spawnMock = vi.hoisted(() => vi.fn());
 const configState = vi.hoisted(() => ({ reversed: false }));
 const carrierState = vi.hoisted(() => ({
-  source: 'codex-subscription' as 'codex-subscription' | 'openrouter',
+  source: 'codex-subscription' as 'codex-subscription' | 'openrouter' | 'native',
   model: 'gpt-5.6-sol',
   baseUrl: 'http://127.0.0.1:8317',
   token: 'local-orchestrator-token',
@@ -87,6 +87,26 @@ class FakeClaudeProc extends EventEmitter {
 }
 
 describe('warm orchestrator MCP config reuse', () => {
+  it('recycles a native resident process when Fast changes back to Standard', async () => {
+    carrierState.source = 'native'; carrierState.model = 'claude-opus-5-5';
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-speed-recycle-')); execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const procs: FakeClaudeProc[] = []; spawnMock.mockImplementation(() => { const proc = new FakeClaudeProc(); procs.push(proc); return proc as unknown as ChildProcess; });
+    const session = ensureOrchestratorSession(repoPath, `speed-recycle-${Date.now()}`);
+    const first = sendToOrchestrator(session, 'first', () => {}, { serviceTier: 'fast' });
+    await vi.waitFor(() => expect(procs[0]?.stdin.write).toHaveBeenCalledOnce());
+    const firstArgs = spawnMock.mock.calls[0][1] as string[]; expect(JSON.parse(firstArgs[firstArgs.indexOf('--settings') + 1]).fastMode).toBe(true);
+    procs[0].stdout.emit('data', Buffer.from('{"type":"result","session_id":"speed-session"}\n')); await first;
+    const second = sendToOrchestrator(session, 'second', () => {}, { serviceTier: 'default' });
+    await vi.waitFor(() => expect(procs[1]?.stdin.write).toHaveBeenCalledOnce());
+    expect(procs[0].kill).toHaveBeenCalled(); const secondArgs = spawnMock.mock.calls[1][1] as string[]; expect(JSON.parse(secondArgs[secondArgs.indexOf('--settings') + 1]).fastMode).toBe(false);
+    procs[1].stdout.emit('data', Buffer.from('{"type":"result","session_id":"speed-session"}\n')); await second; procs[1].exitCode = 0; procs[1].emit('close', 0);
+  });
+  it('blocks Fast on a routed API carrier before spawning', async () => {
+    carrierState.source = 'openrouter'; carrierState.model = 'claude-opus-5-5';
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-speed-carrier-')); execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const session = ensureOrchestratorSession(repoPath, `speed-carrier-${Date.now()}`);
+    await expect(sendToOrchestrator(session, 'first', () => {}, { serviceTier: 'fast' })).rejects.toThrow('not available'); expect(spawnMock).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     spawnMock.mockReset();
     resolveCarrierMock.mockClear();

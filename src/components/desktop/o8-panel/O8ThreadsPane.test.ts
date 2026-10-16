@@ -95,7 +95,7 @@ describe('contextual thread panel navigation', () => {
   it('opens Threads through the panel header, without changing the workspace', async () => {
     const onTabChange = vi.fn();
     await act(async () => root.render(createElement(O8HeaderTabs, { activeTab: 'workspace', onTabChange })));
-    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Panel view: Workspace"]')!.click());
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Panel view: Review"]')!.click());
     const entry = [...document.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent?.includes('Threads') && node.getAttribute('role') === 'menuitem');
     expect(entry).toBeDefined();
     act(() => entry!.click());

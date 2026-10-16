@@ -47,7 +47,9 @@ function passingRun(head: string) {
     if (command === 'git' && args[0] === 'status') return { status: 0, stdout: '', stderr: '' };
     if (command === 'git' && args[0] === 'remote') return { status: 0, stdout: 'git@github.com:example/release-repo.git\n', stderr: '' };
     if (command === 'git' && args[0] === 'ls-remote') return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
-    if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+    if (command === 'gh' && args[0] === 'api') return args[1]?.includes('/releases/tags/')
+      ? { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+      : { status: 0, stdout: JSON.stringify(args[1]?.includes('/releases?') ? [] : { full_name: 'example/release-repo' }), stderr: '' };
     if (command === 'ps') return { status: 0, stdout: `${process.pid} 1 node scripts/ship-preflight.mjs\n`, stderr: '' };
     return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
   };
@@ -87,7 +89,9 @@ describe('ship preflight', () => {
       if (command === 'git' && args[0] === 'ls-remote') {
         return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
       }
-      if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+      if (command === 'gh' && args[0] === 'api') return args[1]?.includes('/releases/tags/')
+        ? { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+        : { status: 0, stdout: JSON.stringify(args[1]?.includes('/releases?') ? [] : { full_name: 'example/release-repo' }), stderr: '' };
       if (command === 'ps') {
         return {
           status: 0,
@@ -105,7 +109,9 @@ describe('ship preflight', () => {
     expect(receipt.releaseAbsent).toBe(true);
     expect(receipt.credentialNames).not.toContain('not-a-real-secret');
     expect(receipt.intakeReconciliation).toMatchObject({ status: 'missing' });
-    expect(calls).toContain('gh release view v0.1.999 --repo example/release-repo --json tagName');
+    expect(calls).toContain('gh api repos/example/release-repo');
+    expect(calls).toContain('gh api repos/example/release-repo/releases?per_page=1');
+    expect(calls).toContain('gh api repos/example/release-repo/releases/tags/v0.1.999');
     expect(calls.at(-1)).toBe('ps -axo pid=,ppid=,command=');
   });
 
@@ -153,9 +159,9 @@ describe('ship preflight', () => {
       if (command === 'git' && args[0] === 'ls-remote') {
         return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
       }
-      if (command === 'gh' && args[0] === 'release') {
-        return { status: 1, stdout: '', stderr: 'not found' };
-      }
+      if (command === 'gh' && args[0] === 'api') return args[1]?.includes('/releases/tags/')
+        ? { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+        : { status: 0, stdout: JSON.stringify(args[1]?.includes('/releases?') ? [] : { full_name: 'example/release-repo' }), stderr: '' };
       if (command === 'ps') {
         return {
           status: 0,
@@ -234,7 +240,9 @@ describe('ship preflight', () => {
       if (command === 'git' && args[0] === 'ls-remote') {
         return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
       }
-      if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+      if (command === 'gh' && args[0] === 'api') return args[1]?.includes('/releases/tags/')
+        ? { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+        : { status: 0, stdout: JSON.stringify(args[1]?.includes('/releases?') ? [] : { full_name: 'example/release-repo' }), stderr: '' };
       if (args[0] === 'scripts/classify-tests.mjs') {
         return { status: 0, stdout: '[test-classification] manifest matches resource-owning source markers\n', stderr: '' };
       }
@@ -261,7 +269,9 @@ describe('ship preflight', () => {
       if (command === 'git' && args[0] === 'ls-remote') {
         return { status: 0, stdout: `${head}\trefs/tags/v0.1.999^{}\n`, stderr: '' };
       }
-      if (command === 'gh' && args[0] === 'release') return { status: 1, stdout: '', stderr: 'not found' };
+      if (command === 'gh' && args[0] === 'api') return args[1]?.includes('/releases/tags/')
+        ? { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+        : { status: 0, stdout: JSON.stringify(args[1]?.includes('/releases?') ? [] : { full_name: 'example/release-repo' }), stderr: '' };
       if (command === 'ps') return { status: 0, stdout: '', stderr: '' };
       return { status: 0, stdout: `${command} test-version\n`, stderr: '' };
     };

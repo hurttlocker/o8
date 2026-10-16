@@ -2,6 +2,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ResizeEdge } from './shell/ResizeEdge';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
@@ -17,6 +18,7 @@ import type {
   TileSplitDirection,
 } from '@/lib/tiles/types';
 import { WORKSPACE_TAB_DRAG_TYPE, workspaceTabDropZone, type WorkspaceTabDragKind, type WorkspaceTabDropZone } from '@/lib/tiles/workspace-tab-drag';
+import { getActiveWorkspacePaneDrag, WORKSPACE_PANE_DRAG_EVENT, type WorkspacePaneDrag } from '@/lib/tiles/workspace-pane-drag';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -84,12 +86,22 @@ export function TileContainer({
 }: TileContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
+  const [paneDragging, setPaneDragging] = useState(false);
   const [paneFocus, setPaneFocus] = useState<{ tileId: string; leaves: string } | null>(null);
 
   useEffect(() => {
-    const clearDropPreview = () => setTabDrop(null);
+    const startPaneDrag = (event: DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes(WORKSPACE_TAB_DRAG_TYPE)) setPaneDragging(true);
+    };
+    const clearDropPreview = () => { setTabDrop(null); setPaneDragging(false); };
+    window.addEventListener('dragstart', startPaneDrag);
     window.addEventListener('dragend', clearDropPreview);
-    return () => window.removeEventListener('dragend', clearDropPreview);
+    window.addEventListener('drop', clearDropPreview, true);
+    return () => {
+      window.removeEventListener('dragstart', startPaneDrag);
+      window.removeEventListener('dragend', clearDropPreview);
+      window.removeEventListener('drop', clearDropPreview, true);
+    };
   }, []);
 
   const { leaves, leafRects, splitFrames } = useMemo(() => {
@@ -114,6 +126,35 @@ export function TileContainer({
   const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
   const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
 
+  useEffect(() => {
+    const update = (drag: WorkspacePaneDrag) => {
+      const container = containerRef.current;
+      const target = drag.phase === 'cancel' || interactionDisabled || !container ? null
+        : Array.from(container.querySelectorAll<HTMLElement>(':scope > [data-tile-kind="terminal"]')).find((element) => {
+          if (element.style.visibility === 'hidden') return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && drag.clientX >= rect.left && drag.clientX <= rect.right
+            && drag.clientY >= rect.top && drag.clientY <= rect.bottom;
+        });
+      const drop = target ? {
+        tileId: target.dataset.tileId!,
+        zone: workspaceTabDropZone(target.getBoundingClientRect(), drag.clientX, drag.clientY),
+      } : null;
+      setPaneDragging(drag.phase === 'move');
+      setTabDrop(current => drag.phase !== 'move' ? null
+        : current?.tileId === drop?.tileId && current?.zone === drop?.zone ? current : drop);
+      if (drag.phase !== 'drop' || !drop) return;
+      const { tileId, zone } = drop;
+      onSplitTile(tileId, zone === 'above' || zone === 'below' ? 'horizontal' : 'vertical', drag.kind,
+        zone === 'left' || zone === 'above', true);
+    };
+    const handler = (event: Event) => update((event as CustomEvent<WorkspacePaneDrag>).detail);
+    window.addEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+    const active = getActiveWorkspacePaneDrag();
+    if (active) update(active);
+    return () => window.removeEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+  }, [interactionDisabled, onSplitTile, layout.root, focusedPaneId]);
+
   const handlePaneDragOver = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
     event.preventDefault();
@@ -126,7 +167,7 @@ export function TileContainer({
 
   const handlePaneDrop = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     const kind = event.dataTransfer.getData(WORKSPACE_TAB_DRAG_TYPE);
-    if (kind !== 'chat' && kind !== 'terminal') return;
+    if (kind !== 'orchestrator' && kind !== 'chat' && kind !== 'terminal') return;
     event.preventDefault();
     event.stopPropagation();
     setTabDrop(null);
@@ -235,6 +276,7 @@ export function TileContainer({
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
             onMouseDown={() => onActivateTile(leaf.id)}
+            onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
@@ -316,6 +358,11 @@ export function TileContainer({
                   tileId: leaf.id,
                 }) : null}
               </div>
+              {/* Cover iframe content during internal drags so every pane receives the drop. */}
+              {paneDragging && leaf.content.kind === 'terminal' ? <div data-workspace-drop-target={leaf.id}
+                onDragOver={event => handlePaneDragOver(event, leaf.id)}
+                onDropCapture={event => handlePaneDrop(event, leaf.id)}
+                style={{ position: 'absolute', inset: 0, zIndex: 19 }} /> : null}
               {tabDrop?.tileId === leaf.id ? (
                 <div aria-hidden style={{
                   position: 'absolute',
@@ -346,6 +393,7 @@ export function TileContainer({
           aria-hidden={!primaryRect}
           inert={!primaryRect}
           onMouseDown={primaryRect ? () => onActivateTile('tile-root') : undefined}
+          onFocusCapture={primaryRect ? () => onActivateTile('tile-root') : undefined}
           onDragOver={primaryRect ? (event) => handlePaneDragOver(event, 'tile-root') : undefined}
           onDropCapture={primaryRect ? (event) => handlePaneDrop(event, 'tile-root') : undefined}
           style={primaryRect ? {
@@ -415,10 +463,9 @@ function ResizeHandle({
       };
 
   return (
-    <div
-      role="separator"
+    <ResizeEdge
+      orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-label="Resize terminal panes"
-      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
       aria-valuemin={20}
       aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
@@ -432,34 +479,7 @@ function ResizeHandle({
         event.preventDefault();
         onResize(ratio + step);
       }}
-      onMouseEnter={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '1';
-      }}
-      onMouseLeave={(e) => {
-        const bar = e.currentTarget.lastElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0.65';
-      }}
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        zIndex: 10,
-      }}
-    >
-      <div aria-hidden style={{ position: 'absolute', width: isVertical ? 1 : '100%', height: isVertical ? '100%' : 1, backgroundColor: 'var(--t-divider-subtle)', pointerEvents: 'none' }} />
-      <div
-        style={{
-          width: isVertical ? 3 : 42,
-          height: isVertical ? 42 : 3,
-          borderRadius: 999,
-          backgroundColor: 'var(--t-drag-handle)',
-          opacity: 0.65,
-          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-    </div>
+      style={style}
+    />
   );
 }

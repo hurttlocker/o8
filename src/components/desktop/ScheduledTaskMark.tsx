@@ -1,0 +1,10 @@
+export function ScheduledTaskMark() {
+  return (
+    <svg role="img" aria-label="Scheduled task" width="13" height="13" viewBox="0 0 24 24"
+      fill="none" stroke="var(--t-text-muted)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <title>Scheduled task</title>
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+    </svg>
+  );
+}

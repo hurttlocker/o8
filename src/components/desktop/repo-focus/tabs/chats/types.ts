@@ -54,7 +54,7 @@ export interface ChatsTabProps {
   showKindInMeta?: boolean;
   packets?: OrchestratorPacket[];
   /** Flat Agents section rendered between Chats and Archived. */
-  agentsSection?: ReactNode;
+  agentsSection?: ReactNode | ((workingOnly: boolean) => ReactNode);
   /** When set (mini variant, repo grouping), each repo group header gets a
    *  hover-revealed [+] that spawns a fresh orchestrator session scoped to
    *  that repo — Cursor's contextual New Agent pattern. */

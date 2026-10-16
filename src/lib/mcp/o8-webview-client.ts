@@ -6,7 +6,7 @@ import { createConnection, type Socket } from 'node:net';
 import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
 import { resolveO8WebviewSocketPath } from '@/lib/mcp/o8-webview-socket';
 import {
-  createCodedError, getErrorCode, isMutationAckTimeout, queueCommandWrite,
+  createCodedError, getErrorCode, isMutationAckTimeout, queueCommandWrite, WebviewMutationUncertainError,
   type PendingRequest,
 } from '@/lib/mcp/o8-webview-command-transport';
 // Retry-safety is classified once, next to the command's documentation, in the
@@ -609,9 +609,7 @@ export class O8WebviewClient {
         // The socket dropped after the write — on the Rust side the action
         // usually ALREADY fired. Re-running would type the text twice or
         // double-fire a click; surface the uncertainty instead.
-        throw new Error(
-          `Webview connection dropped (${code}) while running a mutating command — not retried automatically because the action may have already executed in the app. Take a screenshot to verify before re-issuing.`,
-        );
+        throw new WebviewMutationUncertainError();
       }
       return operation();
     }

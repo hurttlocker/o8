@@ -107,7 +107,7 @@ export async function queryCodexThreadsFromHome(codexHome: string, limit = 6): P
     'order by updated_at desc',
     `limit ${limit};`,
   ].join(' ');
-  const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDb(codexHome), query], {
+  const { stdout } = await execFileAsync('sqlite3', ['-readonly', '-json', codexStateDb(codexHome), query], {
     windowsHide: true,
     maxBuffer: 2 * 1024 * 1024,
   });
@@ -137,7 +137,7 @@ export async function queryCodexThreadByIdFromHome(
     `where archived = 0 and id = '${escapedThreadId}'`,
     'limit 1;',
   ].join(' ');
-  const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDb(codexHome), query], {
+  const { stdout } = await execFileAsync('sqlite3', ['-readonly', '-json', codexStateDb(codexHome), query], {
     windowsHide: true,
     maxBuffer: 512 * 1024,
   });
@@ -158,7 +158,7 @@ export async function queryCodexProcessBindings(codexHome: string): Promise<Code
     'order by last_ts desc;',
   ].join(' ');
   try {
-    const { stdout } = await execFileAsync('sqlite3', ['-json', codexStateDb(codexHome), query], {
+    const { stdout } = await execFileAsync('sqlite3', ['-readonly', '-json', codexStateDb(codexHome), query], {
       windowsHide: true,
       maxBuffer: 2 * 1024 * 1024,
     });

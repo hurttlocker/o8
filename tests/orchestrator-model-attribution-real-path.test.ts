@@ -1,6 +1,6 @@
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +14,9 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 const networkFetch = globalThis.fetch;
-const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-'));
+// Match addRepo's physical paths even when the temporary root is a symlink
+// (for example /var on macOS), so registration cannot create a second repo id.
+const dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'o8-orchestrator-model-attribution-')));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DB_PATH = join(dataDir, 'cortex-ide.db');
@@ -40,7 +42,12 @@ const connectedWorkerHelper = `
   const laneRegistry = (await import('./src/lib/lane/registry.ts')).default;
   const runtimeCapabilities = (await import('./src/lib/orchestrator/runtime-capabilities.ts')).default;
   const chatHistory = (await import('./src/lib/llm/chat-history-store.ts')).default;
-  await repos.addRepo(process.env.O8_TEST_TARGET_REPO);
+  const projects = (await import('./src/lib/projects/store.ts')).default;
+  const repo = await repos.addRepo(process.env.O8_TEST_TARGET_REPO);
+  // Mission creation needs the client's selected project and authoritative
+  // membership. Keep this separate from the virtual/name-collision fixture.
+  const project = projects.createProject({ name: 'Connected receipt ' + process.env.O8_TEST_TURN_ID });
+  projects.addRepoToProject(project.id, repo.id, null, 'manual');
   const rpc = async (name, args) => {
     const response = await fetch('http://127.0.0.1:' + process.env.O8_API_PORT + '/api/mcp', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + readFileSync(process.env.O8_DATA_DIR + '/ws-token', 'utf8').trim() },
@@ -54,6 +61,7 @@ const connectedWorkerHelper = `
     issues_inline: [{ title: 'Connected receipt fixture', body: 'Write FIRST_RUN.txt and commit it.' }],
     dispatch: false, model: 'gpt-6.1-sol', requestedEffort: 'medium',
     repoPath: process.env.O8_TEST_TARGET_REPO,
+    projectId: project.id,
     runtime: 'codex',
     constraints: '',
     orchestratorThreadId: process.env.O8_TEST_THREAD_ID,
@@ -88,6 +96,7 @@ const connectedWorkerHelper = `
       + 'packet=' + (packet?.status ?? 'missing') + ' lane=' + (lane?.status ?? 'missing'),
     );
   }
+  if (packet?.projectId !== project.id) throw new Error('Mission did not persist the selected project.');
   writeFileSync(process.env.O8_TEST_CONNECTED_WORKER_FILE, JSON.stringify({
     packetId,
     runtime: lane.runtime,
@@ -680,12 +689,17 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
   const { routeReviewContinuation } = await import('@/lib/orchestrator/review-continuation');
   const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+  const { addRepo } = await import('@/lib/repos/registry');
+  const { createProject, addRepoToProject } = await import('@/lib/projects/store');
+  const repo = await addRepo(repoPath);
+  const project = createProject({ name: 'Durable origin mission fixture' });
+  addRepoToProject(project.id, repo.id, null, 'manual');
   const threadId = `thoughts-negative-origin-${Date.now()}`;
   async function prepared(extra: Record<string, unknown>) {
     const response = await networkFetch(`http://127.0.0.1:${apiPort}/api/mcp`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'create_mission', arguments: {
-        repoPath, runtime: 'codex', model: 'gpt-6.1-sol', requestedEffort: 'medium', dispatch: false,
+        repoPath, projectId: project.id, runtime: 'codex', model: 'gpt-6.1-sol', requestedEffort: 'medium', dispatch: false,
         issues_inline: [{title: 'Origin refusal fixture', body: 'Prepared only.'}], ...extra,
       } } }),
     });
@@ -693,12 +707,13 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     const result = await response.json(); expect(result.result.isError).not.toBe(true);
     const created = JSON.parse(result.result.content[0].text);
     const packet = readMissionRegistryEntry(created.missionId)!.mission.packets[0];
+    expect(packet.projectId).toBe(project.id);
     return { id: `lane-${packet.id}`, label: 'Prepared fixture', repoPath, packetId: packet.id };
   }
   const bound = await prepared({orchestratorThreadId: threadId, orchestratorTurnId: 'origin-turn'});
-  const legacy = vi.fn(); const origin = vi.fn();
-  const route = () => routeReviewContinuation(bound, legacy, () => false, origin);
-  route(); expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+  const origin = vi.fn();
+  const route = () => routeReviewContinuation(bound, () => false, origin);
+  route(); expect(origin).not.toHaveBeenCalled();
   const history = { repoPath, messages: [{id: 'origin-turn', role: 'assistant' as const, content: '', timestamp: Date.now(), backend: 'codex' as const,
     model: 'gpt-6.1-sol', receipt: {leadModel: 'gpt-6.1-sol', effort: 'medium' as const, mode: 'multitask' as const}}] };
   writePersistedLlmChat(threadId, history, {replace: true});
@@ -711,9 +726,32 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     {...history, messages: [history.messages[0], {...history.messages[0], id: 'changed-backend', backend: 'claude' as const}]},
   ]) {
     writePersistedLlmChat(threadId, invalid, {replace: true}); route();
-    expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+    expect(origin).not.toHaveBeenCalled();
   }
+  // Threads led by the built-in agent bind under the same checks (#3410).
+  for (const [backend, model] of [['o8', 'o8-free'], ['pi', 'pi']] as const) {
+    const agentThreadId = `thoughts-${backend}-origin-${Date.now()}`;
+    const agentBound = await prepared({orchestratorThreadId: agentThreadId, orchestratorTurnId: 'origin-turn'});
+    const agentRoute = () => routeReviewContinuation(agentBound, () => false, origin);
+    const turn = {...history.messages[0], backend, model, receipt: {...history.messages[0].receipt, leadModel: model}};
+    const agentHistory = {repoPath, backend, messages: [turn]};
+    writePersistedLlmChat(agentThreadId, agentHistory, {replace: true});
+    agentRoute(); expect(origin).toHaveBeenCalledOnce();
+    expect(origin.mock.calls[0][1]).toEqual({threadId: agentThreadId, turnId: 'origin-turn', backend, model, effort: 'medium', mode: 'fleet'});
+    origin.mockClear();
+    for (const invalid of [
+      {...agentHistory, repoPath: seedPath},
+      {...agentHistory, messages: []},
+      {...agentHistory, messages: [{...turn, model: 'gpt-6.1-sol'}]},
+      {...agentHistory, messages: [turn, {...turn, id: 'changed-backend', backend: 'codex' as const}]},
+      {...agentHistory, backend: 'codex'},
+    ]) {
+      writePersistedLlmChat(agentThreadId, invalid, {replace: true}); agentRoute();
+      expect(origin).not.toHaveBeenCalled();
+    }
+  }
+  // #3727: a mission created over MCP with no chat origin stays at review; no session is woken to merge it.
   const unbound = await prepared({});
-  routeReviewContinuation(unbound, legacy, () => false, origin);
-  expect(legacy).toHaveBeenCalledOnce(); expect(origin).not.toHaveBeenCalled();
+  routeReviewContinuation(unbound, () => false, origin);
+  expect(origin).not.toHaveBeenCalled();
 }, 30_000);

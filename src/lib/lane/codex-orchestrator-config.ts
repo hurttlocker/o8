@@ -155,3 +155,38 @@ export function prepareCodexHome(
 export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full'): string {
   return prepareCodexHome(repoPath, profile).codexHome;
 }
+
+/** The operator's own Codex home, where the Codex app reads its threads. */
+export function userCodexHome(): string {
+  return USER_CODEX_HOME;
+}
+
+function configuredNames(table: unknown): string[] {
+  return table && typeof table === 'object' && !Array.isArray(table) ? Object.keys(table) : [];
+}
+
+/**
+ * Per-thread config for a Codex app-server turn in the operator's own Codex home
+ * (#3573). Codex merges these overrides into config.toml instead of replacing
+ * tables, so the operator's own MCP servers and plugins are switched off by name,
+ * matching the private home that prepareCodexHome() builds. One nested object:
+ * mixing dotted keys with a table override is applied in no fixed order.
+ */
+export function codexAppThreadConfig(
+  repoPath: string,
+  profile: ToolProfile = 'full',
+  threadId?: string | null,
+): Record<string, unknown> {
+  const userConfig = existsSync(USER_CODEX_CONFIG_PATH)
+    ? parse(readFileSync(USER_CODEX_CONFIG_PATH, 'utf8')) as Record<string, unknown>
+    : {};
+  const off = (table: unknown) => Object.fromEntries(configuredNames(table).map((name) => [name, { enabled: false }]));
+  return {
+    mcp_servers: {
+      ...off(userConfig.mcp_servers),
+      ...toCodexServersMap(buildToolRegistry(normalizeRepoPath(repoPath), { profile, threadId })),
+    },
+    plugins: off(userConfig.plugins),
+    tools: { image_generation: false },
+  };
+}

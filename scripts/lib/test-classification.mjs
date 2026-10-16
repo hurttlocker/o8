@@ -7,6 +7,8 @@ const TEST_FILE_RE = /\.test\.ts$/;
 const TEST_ROOTS = ['src', 'tests', 'cli'];
 const EXTRA_TEST_FILES = new Set([
   'src/components/desktop/file-viewer/RichMarkdownEditor.test.tsx',
+  'src/components/desktop/thoughts/chat-panel/useComposerAutosize.test.tsx',
+  'src/components/desktop/thoughts/chat-panel/useComposerDraftLifecycle.test.tsx',
 ]);
 
 const PATH_RULES = [

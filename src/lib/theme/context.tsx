@@ -143,6 +143,7 @@ const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
   // The chat-surface input is a composer, not a card: it must stay a breath here
   // too, or it paints an opaque slab on the one glass material.
   '--t-chat-surface-input-bg': 'rgba(255, 255, 255, 0.06)',
+  '--t-chat-user-bg': 'var(--t-glass-muted-strong)',
   '--t-search-bg': 'rgba(255, 255, 255, 0.06)',
   '--t-btn-secondary-bg': 'rgba(255, 255, 255, 0.07)',
   '--t-kbd-bg': 'rgba(255, 255, 255, 0.06)',
@@ -379,6 +380,7 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
         --t-chrome-btn-active-shadow: inset 0 0 0 1px rgba(143, 180, 255, 0.36), 0 0 12px rgba(143, 180, 255, 0.28);
         --t-chrome-btn-text: rgba(255, 255, 255, 0.96);
         --t-accent: #8fb4ff;
+        --t-accent-contrast: #0f1216;
         --t-accent-soft: rgba(143, 180, 255, 0.14);
         --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
         --t-accent-border: rgba(143, 180, 255, 0.28);

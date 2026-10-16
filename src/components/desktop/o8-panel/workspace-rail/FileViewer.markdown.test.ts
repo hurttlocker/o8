@@ -55,6 +55,46 @@ describe('right Files Markdown Preview', () => {
     return [...list.querySelectorAll(':scope > li')].map((_, index) => list.start + index);
   }
 
+  it('renders repo-relative images and linked badges with compact unavailable feedback while preserving source', async () => {
+    const source = '![Local](./assets/diagram%20space.png)\n\n[![Build](https://example.test/badge.svg)](https://example.test/build)';
+    files['docs/procedure.md'] = source;
+    await open('docs/procedure.md');
+    const local = container.querySelector<HTMLImageElement>('img[alt="Local"]');
+    expect(local).not.toBeNull();
+    const asset = new URL(local!.getAttribute('src')!, 'https://example.test');
+    expect(asset.pathname).toBe('/api/panel/file-asset');
+    expect(asset.searchParams.get('workspace')).toBe('/workspace/example');
+    expect(asset.searchParams.get('path')).toBe('docs/./assets/diagram space.png');
+    const badge = container.querySelector<HTMLImageElement>('img[alt="Build"]')!;
+    expect(badge.closest('a')?.getAttribute('href')).toBe('https://example.test/build');
+    await act(async () => badge.dispatchEvent(new Event('error')));
+    const fallback = container.querySelector('[role="img"][aria-label="Image unavailable: Build"]');
+    expect(fallback?.closest('a')?.getAttribute('href')).toBe('https://example.test/build');
+    expect(container.textContent).not.toContain('![');
+    await selectView('Source');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
+    expect(container.querySelector('textarea')?.textContent).toBe(source);
+    expect(files['docs/procedure.md']).toBe(source);
+    expect(reads.mock.calls.every(call => call.length === 1)).toBe(true);
+  });
+
+  it('opens the editor directly from Preview and returns to formatted reading without a save', async () => {
+    const source = '# Procedure\r\n\r\n1. First\r\n1. Second\r\n';
+    files['procedure.md'] = source;
+    await open();
+    expect(container.querySelector('h1')?.textContent).toBe('Procedure');
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
+    expect(container.querySelector('textarea')?.textContent).toBe(source);
+    expect(container.querySelector('textarea')?.getAttribute('wrap')).toBe('off');
+    expect(container.querySelector('[aria-label="Read file"]')?.getAttribute('aria-pressed')).toBe('true');
+    await selectView('Preview');
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(listNumbers(topLists()[0])).toEqual([1, 2]);
+    expect(container.querySelector('[aria-label="Edit file"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(reads.mock.calls.every((call) => call.length === 1)).toBe(true);
+    expect(files['procedure.md']).toBe(source);
+  });
+
   it.each([
     ['sequential markers', '1. First\n2. Second\n3. Third', [1, 2, 3]],
     ['repeated markers', '1. First\n1. Second\n1. Third', [1, 2, 3]],
@@ -123,6 +163,7 @@ describe('right Files Markdown Preview', () => {
 
     for (let repeat = 0; repeat < 2; repeat += 1) {
       await selectView('Source');
+      if (!container.querySelector('textarea')) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
       // HTML textarea value normalizes CRLF, while its text child retains the supplied source.
       expect(container.querySelector('textarea')?.textContent).toBe(source);
       await selectView('Preview');
@@ -138,6 +179,7 @@ describe('right Files Markdown Preview', () => {
     await open();
     expect(listNumbers(topLists()[0])).toEqual([7, 8, 9]);
     await selectView('Source');
+    if (!container.querySelector('textarea')) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
     expect(container.querySelector('textarea')?.textContent).toBe(source);
     expect(container.textContent).not.toContain('Modified');
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Save')).toBe(false);

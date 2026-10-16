@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement, Fragment, StrictMode, useLayoutEffect, useRef, useState } from 'react';
+import { act, createElement, Fragment, StrictMode, useLayoutEffect, useRef, useState, type HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ChatGPTPlanChat } from './ChatGPTPlanChat';
@@ -17,18 +17,22 @@ vi.mock('../shell/SavedMachinePicker', () => ({ SavedMachinePicker: () => null }
 vi.mock('./XtermPanel', () => ({ XtermPanel: () => null }));
 vi.mock('./WorkspaceChatPane', () => ({ WorkspaceChatPane: () => null }));
 vi.mock('./workspace-boot-loader-claim', () => ({ WorkspaceBootLoaderClaim: () => null }));
+vi.mock('@/lib/theme/context', () => ({ useTheme: () => ({ paletteId: 'dark', workspaceGlass: true, surface: 'glass' }) }));
+vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style }: HTMLAttributes<HTMLDivElement>) => createElement('div', { style }, children) }));
+vi.mock('@/lib/pretext', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/pretext')>(), usePretextHeight: () => 24 }));
 
 let planAccount: string;
-const status = () => ({ connected: true, planEnabled: true, activeId: planAccount, selection: { accountId: planAccount, generation: 1, desktopEpoch: 'fixture-epoch' }, welcomed: true, accounts: [], models: [{ id: 'fixture-model', label: 'Fixture model' }], usageUrl: '' });
+const status = () => ({ connected: true, planEnabled: true, activeId: planAccount, selection: { accountId: planAccount, generation: 1, desktopEpoch: 'fixture-epoch' }, welcomed: true, accounts: [], models: [{ id: 'fixture-model', label: 'Fixture model' }, { id: 'fixture-model-two', label: 'Second model' }], usageUrl: '' });
 let root: Root; let container: HTMLDivElement; let releaseToken: () => void;
 let connected: boolean; let requestBodies: Array<Record<string, unknown>>; let requestHeaders: Headers[];
 let stream: ReadableStreamDefaultController<Uint8Array> | null;
 let deferStream: boolean;
+let replyText: string;
 const event = (text: string) => new TextEncoder().encode(`data: ${text}\n\n`);
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  fixture.owner = 'fixture-owner-a'; fixture.signedIn = true; connected = true; planAccount = 'fixture-plan-account'; requestBodies = []; requestHeaders = []; stream = null; deferStream = false;
+  fixture.owner = 'fixture-owner-a'; fixture.signedIn = true; connected = true; planAccount = 'fixture-plan-account'; requestBodies = []; requestHeaders = []; stream = null; deferStream = false; replyText = 'O8_PLAN_OK_40';
   releaseToken = registerPlanAccountToken(async () => `fixture-session-${fixture.owner}`);
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -37,11 +41,12 @@ beforeEach(() => {
     requestBodies.push(JSON.parse(init!.body as string)); requestHeaders.push(new Headers(init?.headers));
     return new Response(new ReadableStream<Uint8Array>({ start(controller) {
       stream = controller;
-      controller.enqueue(event(JSON.stringify({ type: 'content', text: 'O8_PLAN_OK_40' })));
+      controller.enqueue(event(JSON.stringify({ type: 'content', text: replyText })));
       if (!deferStream) { controller.enqueue(event('[DONE]')); controller.close(); }
       init?.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
     } }));
   }));
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); releaseToken(); container.remove(); vi.unstubAllGlobals(); });
@@ -49,7 +54,8 @@ async function mount() { await act(async () => root.render(createElement(Fragmen
 async function send() {
   const input = container.querySelector('textarea')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Add 17 and 23'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await act(async () => new Promise(resolve => setTimeout(resolve, 60)));
 }
 
 async function openFromWorkspace() {
@@ -182,7 +188,7 @@ it('takes a disconnected user from the normal pane entry to connection settings 
 
 it('prefills a suggested prompt without sending or changing the selected model', async () => {
   await openFromWorkspace();
-  const model = container.querySelector<HTMLSelectElement>('[aria-label="ChatGPT plan model"]')!;
+  const model = container.querySelector<HTMLButtonElement>('[aria-label="ChatGPT plan model"]')!;
   const before = model.value;
   const prompt = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Make a plan');
   await act(async () => prompt!.click());
@@ -190,5 +196,70 @@ it('prefills a suggested prompt without sending or changing the selected model',
   expect(input.value).toContain('turn this idea into a clear plan');
   expect(document.activeElement).toBe(input);
   expect(model.value).toBe(before);
+  expect(requestBodies).toHaveLength(0);
+});
+
+it('uses the shared composer model menu and keeps the chosen plan model for the real send path', async () => {
+  await mount();
+  const chip = container.querySelector<HTMLButtonElement>('[aria-label="ChatGPT plan model"]')!;
+  expect(chip.closest('[data-o8-composer-root]')).not.toBeNull();
+  expect(container.querySelector('header')).toBeNull();
+  await act(async () => chip.click());
+  const options = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+  expect(document.activeElement).toBe(options[0]);
+  await act(async () => options[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(options[1]);
+  await act(async () => options[1].click());
+  expect(document.querySelector('[aria-label="ChatGPT models"]')).toBeNull();
+  expect(document.activeElement).toBe(chip);
+  expect(chip.value).toBe('fixture-model-two');
+  expect(requestBodies).toHaveLength(0);
+  await send();
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0].model).toBe('fixture-model-two');
+});
+
+it('keeps file mentions and slash commands literal and uses Enter with Shift+Enter for a newline', async () => {
+  await mount();
+  const input = container.querySelector('textarea')!;
+  const text = '/visualize @src/example.ts as a simple diagram';
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  expect(input.value).toBe(text);
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+  expect(requestBodies).toHaveLength(0);
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  expect(requestBodies).toHaveLength(1);
+  expect(requestBodies[0]).toMatchObject({ planTextOnly: true, disableTools: true, messages: [{ role: 'user', content: text }] });
+});
+
+it('renders Markdown through the regular transcript instead of the old plain-text messages', async () => {
+  replyText = '## Next step\n\nUse **one shared workspace**.\n\n```ts\nconst ready = true;\n```';
+  await mount(); await send();
+  await act(async () => new Promise(resolve => setTimeout(resolve, 200)));
+  const log = container.querySelector('[role="log"]')!;
+  expect(log.textContent).toContain('Next step');
+  expect(log.textContent).not.toContain('## Next step');
+  expect(log.querySelector('strong')?.textContent).toBe('one shared workspace');
+  expect(log.querySelector('pre')?.textContent).toContain('const ready = true');
+});
+
+it('stops through the shared send control without issuing a duplicate request while busy', async () => {
+  deferStream = true;
+  await mount(); await send();
+  await send();
+  expect(requestBodies).toHaveLength(1);
+  const stop = container.querySelector<HTMLButtonElement>('[aria-label="Stop ChatGPT"]')!;
+  expect(stop.style.borderRadius).toBe('50%');
+  await act(async () => stop.click());
+  expect(container.textContent).toContain('Request stopped');
+  expect(requestBodies).toHaveLength(1);
+});
+
+it('closes the composer model portal when its resident pane becomes inactive', async () => {
+  await mount();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="ChatGPT plan model"]')!.click());
+  expect(document.querySelector('[aria-label="ChatGPT models"]')).not.toBeNull();
+  await act(async () => root.render(createElement(ChatGPTPlanChat, { tabId: 'fixture-plan-tab', active: false })));
+  expect(document.querySelector('[aria-label="ChatGPT models"]')).toBeNull();
   expect(requestBodies).toHaveLength(0);
 });

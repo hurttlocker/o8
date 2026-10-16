@@ -72,6 +72,8 @@ export async function GET(request: NextRequest) {
   const laneId = request.nextUrl.searchParams.get('laneId')?.trim() || undefined;
   const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
   const status = statusParam === 'all' ? 'all' : 'pending';
+  // The shared Inbox explicitly spans projects; other callers retain active-project scoping.
+  const projectId = request.nextUrl.searchParams.get('scope') === 'all' ? null : undefined;
   const isContextQuery = Boolean(packetId || laneId);
   const includeDiff = request.nextUrl.searchParams.get('include')?.trim() === 'diff';
   const ownershipRefusal = workerPacketRefusal(
@@ -86,10 +88,10 @@ export async function GET(request: NextRequest) {
       .filter((approval) => status === 'all' || approval.status === status)
     : status === 'pending'
       ? [
-          ...listApprovals({ status, sessionKey }),
-          ...listUnsettledApprovalContinuations({ sessionKey }),
+          ...listApprovals({ status, sessionKey, projectId }),
+          ...listUnsettledApprovalContinuations({ sessionKey, projectId }),
         ]
-      : listApprovals({ status, sessionKey });
+      : listApprovals({ status, sessionKey, projectId });
 
   return NextResponse.json({
     approvals: (isContextQuery || includeDiff) ? approvals : stripDiffPreviews(approvals),
@@ -167,7 +169,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('[approvals] Failed to create approval:', error);
       return NextResponse.json(
-        { ok: false, error: error instanceof Error ? error.message : 'Failed to create approval' },
+        { ok: false, error: 'Failed to create approval' },
         { status: 500 },
       );
     }
@@ -487,7 +489,8 @@ export async function POST(request: NextRequest) {
         decisionNote = mergeDecisionNotes(appliedEdit?.message, result.note);
       } catch (error) {
         continuationOutcome = 'outcome_unknown';
-        decisionNote = `Plan dispatch failed: ${error instanceof Error ? error.message : 'unknown'}`;
+        console.error('[approvals] Plan dispatch failed:', error);
+        decisionNote = 'Plan dispatch failed.';
       }
     } else if (continuation?.kind === 'runtime' && action === 'approve') {
       // Runtime continuation — launch or resume the session
@@ -553,9 +556,10 @@ export async function POST(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
+    console.error('[api] panel/approvals failed:', error);
     return NextResponse.json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Unable to resolve approval',
+      error: 'Unable to resolve approval',
     }, {
       status: 500,
       headers: { 'Cache-Control': 'no-store, max-age=0' },

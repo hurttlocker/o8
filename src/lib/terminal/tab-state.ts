@@ -113,6 +113,12 @@ export type PersistedRuntimeSessionKey =
 
 const API_PATH = '/api/panel/terminal-state';
 
+export function persistedTabStateSavedAt(state: unknown): number {
+  const savedAt = (state as Partial<PersistedTabState> | null)?.savedAt;
+  const timestamp = typeof savedAt === 'string' ? Date.parse(savedAt) : NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 /**
  * Hard cap on persisted tabs per scope. Dogfood-week users accumulate dozens of
  * stale chat tabs (the user hit 84 in `repo-1j19dlc.json`); fresh installs are

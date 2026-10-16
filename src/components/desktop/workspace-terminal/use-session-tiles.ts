@@ -514,8 +514,8 @@ export function buildPillContextMenuItems(
     return [
       {
         id: 'close-tile',
-        label: 'Close split',
-        description: `Hide ${request.sessionName} from the workspace`,
+        label: 'Hide pane',
+        description: `${request.sessionName} stays available in Agents`,
         iconDirection: 'vertical',
         onSelect: () => onCloseLeaf(existingLeaf.id),
       },

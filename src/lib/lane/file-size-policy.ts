@@ -1,3 +1,4 @@
+import { laneGit } from '@/lib/lane/lane-git';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -41,18 +42,14 @@ function parseOriginalLineCount(currentLineCount: number, diffOutput: string) {
 }
 
 export async function getOversizedChangedFilesForLane(
-  lane: Pick<Lane, 'baseBranch' | 'worktreePath'>,
+  lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>,
 ) {
   if (!lane.worktreePath) {
     return [];
   }
 
   try {
-    const result = await execFileAsync('git', ['diff', '--name-only', `${lane.baseBranch}...HEAD`], {
-      windowsHide: true,
-      cwd: lane.worktreePath,
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    const result = await laneGit(lane.worktreePath, lane.repoPath, ['diff', '--name-only', `${lane.baseBranch}...HEAD`], { maxBuffer: 4 * 1024 * 1024 });
     const changedFiles = Array.from(new Set(
       String(result.stdout)
         .split('\n')
@@ -69,11 +66,7 @@ export async function getOversizedChangedFilesForLane(
         });
         let diffOutput = '';
         try {
-          const diffResult = await execFileAsync('git', ['diff', '--numstat', `${lane.baseBranch}...HEAD`, '--', filePath], {
-            windowsHide: true,
-            cwd: lane.worktreePath!,
-            maxBuffer: 256 * 1024,
-          });
+          const diffResult = await laneGit(lane.worktreePath!, lane.repoPath, ['diff', '--numstat', `${lane.baseBranch}...HEAD`, '--', filePath], { maxBuffer: 256 * 1024 });
           diffOutput = String(diffResult.stdout);
         } catch {
           diffOutput = '';

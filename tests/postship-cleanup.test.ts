@@ -16,6 +16,7 @@ import {
   writeReleaseArtifactManifest,
 } from '../scripts/lib/release-artifacts.mjs';
 
+const nativeDirs = POSTSHIP_GENERATED_DIRS.filter(candidate => candidate !== '.next');
 const cleanupRoots: string[] = [];
 const runFile = promisify(execFile);
 const cleanupScript = fileURLToPath(new URL('../scripts/postship-cleanup.mjs', import.meta.url));
@@ -33,9 +34,18 @@ afterEach(async () => {
 });
 
 describe('postship generated-output cleanup', () => {
+  it('preserves unknown web output instead of inventing successful lifecycle ownership', async () => {
+    const root = await makeRepoRoot();
+    await mkdir(path.join(root, '.next'));
+    await writeFile(path.join(root, '.next', 'unknown'), 'preserve');
+    expect((await cleanupPostshipOutputs(root)).refused).toEqual([
+      { path: '.next', reason: 'Postship output has unknown lifecycle ownership.' },
+    ]);
+    expect(await readFile(path.join(root, '.next', 'unknown'), 'utf8')).toBe('preserve');
+  });
   it('removes only the exact generated release directories', async () => {
     const root = await makeRepoRoot();
-    for (const relativePath of POSTSHIP_GENERATED_DIRS) {
+    for (const relativePath of nativeDirs) {
       await mkdir(path.join(root, relativePath), { recursive: true });
       await writeFile(path.join(root, relativePath, 'generated.bin'), 'generated', 'utf8');
     }
@@ -48,7 +58,7 @@ describe('postship generated-output cleanup', () => {
 
     const result = await cleanupPostshipOutputs(root);
 
-    expect(result).toEqual({ removed: POSTSHIP_GENERATED_DIRS, skipped: [], refused: [] });
+    expect(result).toEqual({ removed: nativeDirs, skipped: ['.next'], refused: [] });
     for (const relativePath of POSTSHIP_PRESERVED_DIRS) {
       await expect(readFile(path.join(root, relativePath, 'verified.bin'), 'utf8')).resolves.toBe('verified');
     }
@@ -57,7 +67,7 @@ describe('postship generated-output cleanup', () => {
 
   it('keeps the verified release artifact reusable after cleanup', async () => {
     const root = await makeRepoRoot();
-    for (const relativePath of POSTSHIP_GENERATED_DIRS) {
+    for (const relativePath of nativeDirs) {
       await mkdir(path.join(root, relativePath), { recursive: true });
       await writeFile(path.join(root, relativePath, 'generated.bin'), 'generated', 'utf8');
     }
@@ -73,15 +83,15 @@ describe('postship generated-output cleanup', () => {
     }
     const recipe = { recipeSha256: 'recipe-a', head: 'head-a', version: '0.1.999' };
     writeReleaseArtifactManifest(root, recipe);
-    await symlink('../out/frontend', path.join(root, '.next', 'release-assets'));
+    await symlink('../../out/frontend', path.join(root, 'src-tauri/target', 'release-assets'));
 
     const result = await cleanupPostshipOutputs(root);
 
-    expect(result).toEqual({ removed: POSTSHIP_GENERATED_DIRS, skipped: [], refused: [] });
+    expect(result).toEqual({ removed: nativeDirs, skipped: ['.next'], refused: [] });
     expect(verifyReleaseArtifactManifest(root, recipe)).toMatchObject({ reusable: true });
   });
 
-  it.each(POSTSHIP_GENERATED_DIRS)('cleans internal links in %s and preserves donors on repeated cleanup', async (relativePath) => {
+  it.each(nativeDirs)('cleans internal links in %s and preserves donors on repeated cleanup', async (relativePath) => {
     const root = await makeRepoRoot();
     const donor = path.join(root, 'node_modules', 'dependency');
     const generated = path.join(root, relativePath);
@@ -112,13 +122,13 @@ describe('postship generated-output cleanup', () => {
     const root = await makeRepoRoot();
     await mkdir(path.join(root, 'out'));
     await writeFile(path.join(root, 'out', 'valuable.txt'), 'release bytes', 'utf8');
-    await mkdir(path.join(root, '.next', 'dev'), { recursive: true });
-    await symlink('../../out', path.join(root, '.next', 'dev', 'release-assets'));
+    await mkdir(path.join(root, 'src-tauri/target', 'dev'), { recursive: true });
+    await symlink('../../../out', path.join(root, 'src-tauri/target', 'dev', 'release-assets'));
 
     const { stdout } = await runFile(process.execPath, [cleanupScript, '--best-effort'], { cwd: root });
 
     expect(stdout).toContain(`removed=1 skipped=${POSTSHIP_GENERATED_DIRS.length - 1} refused=0`);
-    await expect(lstat(path.join(root, '.next'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(lstat(path.join(root, 'src-tauri/target'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(path.join(root, 'out', 'valuable.txt'), 'utf8')).resolves.toBe('release bytes');
   });
 
@@ -129,7 +139,7 @@ describe('postship generated-output cleanup', () => {
     await symlink('donor', path.join(root, '.next'));
 
     expect((await cleanupPostshipOutputs(root)).refused).toEqual([
-      { path: '.next', reason: 'target is not a real directory' },
+      { path: '.next', reason: 'Postship output has unknown lifecycle ownership.' },
     ]);
     expect((await lstat(path.join(root, '.next'))).isSymbolicLink()).toBe(true);
     await expect(readFile(path.join(root, 'donor', 'valuable.txt'), 'utf8')).resolves.toBe('keep');
@@ -137,7 +147,7 @@ describe('postship generated-output cleanup', () => {
 
   it.each(['missing', 'cycle', 'not-directory'])('refuses an uncertain %s nested link before removing entries', async (kind) => {
     const root = await makeRepoRoot();
-    const dev = path.join(root, '.next', 'dev');
+    const dev = path.join(root, 'src-tauri/target', 'dev');
     await mkdir(dev, { recursive: true });
     await writeFile(path.join(dev, 'generated.txt'), 'keep on refusal', 'utf8');
     await writeFile(path.join(root, 'donor.txt'), 'keep donor', 'utf8');
@@ -147,7 +157,7 @@ describe('postship generated-output cleanup', () => {
     const result = await cleanupPostshipOutputs(root);
 
     expect(result.removed).toEqual([]);
-    expect(result.refused).toEqual([{ path: '.next', reason: expect.stringContaining('linked entry inside .next: dev/uncertain') }]);
+    expect(result.refused).toEqual([{ path: 'src-tauri/target', reason: expect.stringContaining('linked entry inside src-tauri/target: dev/uncertain') }]);
     await expect(readFile(path.join(dev, 'generated.txt'), 'utf8')).resolves.toBe('keep on refusal');
     await expect(readFile(path.join(root, 'donor.txt'), 'utf8')).resolves.toBe('keep donor');
     expect((await lstat(path.join(dev, 'uncertain'))).isSymbolicLink()).toBe(true);
@@ -156,7 +166,7 @@ describe('postship generated-output cleanup', () => {
   it.each(['absolute', 'relative', 'external-return', 'external-parent'])('refuses %s paths that escape the checkout', async (kind) => {
     const root = await makeRepoRoot();
     const external = await makeRepoRoot();
-    const dev = path.join(root, '.next', 'dev');
+    const dev = path.join(root, 'src-tauri/target', 'dev');
     const donor = path.join(root, 'donor');
     await mkdir(dev, { recursive: true });
     await mkdir(donor);
@@ -180,7 +190,7 @@ describe('postship generated-output cleanup', () => {
     const result = await cleanupPostshipOutputs(root);
 
     expect(result.removed).toEqual([]);
-    expect(result.refused).toEqual([{ path: '.next', reason: expect.stringContaining('linked entry inside .next: dev/unsafe') }]);
+    expect(result.refused).toEqual([{ path: 'src-tauri/target', reason: expect.stringContaining('linked entry inside src-tauri/target: dev/unsafe') }]);
     await expect(readFile(path.join(dev, 'generated.txt'), 'utf8')).resolves.toBe('keep generated');
     await expect(readFile(path.join(donor, 'valuable.txt'), 'utf8')).resolves.toBe('keep donor');
     await expect(readFile(path.join(external, 'valuable.txt'), 'utf8')).resolves.toBe('keep external');
@@ -221,7 +231,7 @@ describe('postship generated-output cleanup', () => {
 
     const result = await cleanupPostshipOutputs(root);
 
-    expect(result.refused).toEqual([{ path: '.next', reason: 'target is not a real directory' }]);
+    expect(result.refused).toEqual([{ path: '.next', reason: 'Postship output has unknown lifecycle ownership.' }]);
     await expect(readFile(path.join(destination, 'valuable.txt'), 'utf8')).resolves.toBe('keep');
   });
 
@@ -237,7 +247,7 @@ describe('postship generated-output cleanup', () => {
 
     expect(result.refused).toEqual([{
       path: '.next',
-      reason: 'linked entry inside .next: linked-cache',
+      reason: 'Postship output has unknown lifecycle ownership.',
     }]);
     await expect(readFile(path.join(destination, 'valuable.txt'), 'utf8')).resolves.toBe('keep');
   });

@@ -5,6 +5,7 @@
  * Hosts the macOS traffic-light inset and the sidebar toggle. Part of epic #1089.
  */
 
+import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
@@ -28,15 +29,17 @@ interface LeftHeaderStripProps {
    * hairline instead of the chrome band + seam.
    */
   inCard?: boolean;
+  windowControls?: boolean;
+  onSearch?: () => void;
 }
 
-export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge, inCard = false }: LeftHeaderStripProps) {
+export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge, inCard = false, windowControls = true, onSearch }: LeftHeaderStripProps) {
   return (
     <ColumnHeaderStrip
       drag
       bottomHairline={!inCard}
-      style={inCard ? { background: 'transparent' } : undefined}
-      // Strip height 32 — the toggle pill centers at ~y=20. The traffic
+      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 2.5 } : {}) }}
+      // Compact rail controls share the workspace header centerline. The traffic
       // lights center on the same line: tao's inset semantics are
       // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15
       // measured center 14.75, NOT y+6 — the y=15 attempt overshot UP by
@@ -44,7 +47,8 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
       // Calibrated at 100% zoom; zoom-tracking via runtime repositioning
       // was tried (0.1.605) and REVERTED — resizing the titlebar container
       // outside tao's draw_rect left the webview under-filling the window.
-      height={32}
+      height={windowControls ? 32 : 34}
+      right={!windowControls ? <SidebarHeaderActions onSearch={onSearch} /> : undefined}
       left={
         <>
           {/* Traffic lights: DOM-rendered when the shell hides the native
@@ -57,12 +61,10 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
               puts the first light back at 14 — matching the workspace strip
               so the cluster doesn't jump when the sidebar collapses.
               See TrafficLights.tsx. */}
-          <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} />
-          <SidebarTogglePill
-            sidebarVisible={sidebarVisible}
-            onClick={onToggleSidebar}
-            yNudge={togglePillYNudge}
-          />
+          {windowControls ? <TrafficLightsOrSpacer yNudge={togglePillYNudge ?? 3.3} leadInPx={6} /> : null}
+          {onToggleSidebar ? <SidebarTogglePill
+            sidebarVisible={sidebarVisible} onClick={onToggleSidebar} yNudge={0}
+          /> : null}
         </>
       }
     />

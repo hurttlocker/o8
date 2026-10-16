@@ -1,47 +1,30 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import {
   BookOpen,
   ChevronDown,
   ChevronRight,
   CircleUser,
-  Cpu,
-  Download,
   ExternalLink,
-  Gauge,
   Globe,
-  LogOut,
   MessageSquare,
   Settings2,
 } from './lucide-shims';
-import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
-import {
-  clearDesktopAuthError,
-  getDesktopAuthError,
-  subscribeDesktopAuthError,
-  type DesktopAuthError,
-} from '@/lib/auth/desktop-auth-error';
 import { useTheme } from '@/lib/theme/context';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { openExternalUrl } from '@/lib/desktop/open-external';
-import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
-import { ThemeContrastGlyph, AppearanceControl } from './settings-quick-drawer/theme-rows';
-import { CapacityRows, capacitySummary } from './settings-quick-drawer/capacity-rows';
+import { OPEN_KEYBOARD_SHORTCUTS_EVENT, OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
+import { ThemeContrastGlyph } from './settings-quick-drawer/theme-rows';
+import { FloatingSurface } from './FloatingSurface';
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
-const POLL_MS = 30_000;
 const DOCS_URL = 'https://o8.run';
 // The canonical community invite — MUST match the README footer + o8.run
 // (the drawer previously carried a different, stale invite).
 const DISCORD_URL = 'https://o8.run/discord';
-// Paint the floating surface directly. It can be a gradient in glass mode,
-// which color-mix() cannot accept as a color argument.
-const PANEL_BG = 'var(--t-popover-surface)';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
@@ -50,17 +33,13 @@ const MUTED = 'var(--t-text-muted, #64748b)';
 const FAINT = 'color-mix(in srgb, var(--t-text-muted, #64748b) 62%, transparent)';
 
 interface SettingsQuickDrawerProps {
+  id?: string;
   open: boolean;
   anchorRect: DOMRect | null;
   onClose: () => void;
   onOpenSettings: () => void;
+  onOpenShortcuts?: () => void;
 }
-
-type UsageState =
-  | { status: 'idle'; snapshot: null; error: null }
-  | { status: 'loading'; snapshot: RuntimeCapacityControlSnapshot | null; error: null }
-  | { status: 'ready'; snapshot: RuntimeCapacityControlSnapshot; error: null }
-  | { status: 'error'; snapshot: RuntimeCapacityControlSnapshot | null; error: string };
 
 function IconFrame({ children }: { children: ReactNode }) {
   return (
@@ -145,265 +124,54 @@ function separatorStyle(): CSSProperties {
   };
 }
 
-/** Lifetime mark on the drawer account row: a quiet dot and tabular serial.
- *  The plan name lives in the tooltip. Hides while View-as-free is active
- *  because the effective entitlement's `founder` goes null under the override. */
-const FOUNDER_ORANGE = '#ff5a1f';
-
-function FoundingSerialChip({ operatorNumber }: { operatorNumber: number }) {
-  const serial = String(operatorNumber).padStart(3, '0');
-  return (
-    <div
-      title={`${PLAN_LABELS.founder} · No. ${serial}`}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        marginRight: 5,
-        userSelect: 'none',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      <span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: 999, background: FOUNDER_ORANGE, opacity: 0.9, flexShrink: 0 }} />
-      <span
-        style={{
-          fontFamily: 'var(--font-sans-system)',
-          fontSize: 10.5,
-          fontWeight: 400,
-          letterSpacing: '0.08em',
-          color: 'var(--t-text-muted)',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {serial}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Identity header for the quick drawer. Signed-out is a complete local profile;
- * account sign-in stays available as an optional account action.
- */
-function AccountSection({ auth }: { auth: O8AuthState }) {
-  const { founder } = useEntitlement();
-  const [authError, setAuthError] = useState<DesktopAuthError | null>(() => getDesktopAuthError());
-  const [signingOut, setSigningOut] = useState(false);
-  const [waitingForSignOut, setWaitingForSignOut] = useState(false);
-  const [signOutError, setSignOutError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!signingOut) return;
-    const timer = window.setTimeout(() => setWaitingForSignOut(true), 3000);
-    return () => window.clearTimeout(timer);
-  }, [signingOut]);
-
-  const signOut = async () => {
-    if (signingOut) return;
-    setSigningOut(true);
-    setWaitingForSignOut(false);
-    setSignOutError(null);
-    try { await auth.signOut(); } catch {
-      setSignOutError('Sign-out could not be saved. Try again.');
-    } finally {
-      setSigningOut(false);
-    }
-  };
-
-  useEffect(() => {
-    return subscribeDesktopAuthError(() => {
-      setAuthError(getDesktopAuthError());
-    });
-  }, []);
-
-  useEffect(() => {
-    if (auth.signedIn && authError) clearDesktopAuthError();
-  }, [auth.signedIn, authError]);
-
-  if (!auth.signedIn) {
-    return (
-      <>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 7px 1px', minWidth: 0 }}>
-          <IconFrame><Cpu size={15} /></IconFrame>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Local desktop profile
-            </div>
-            <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Free
-            </div>
-          </div>
-          {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
-        </div>
-        {auth.clerkEnabled ? (
-          <RowButton onClick={auth.signIn}>
-            <IconFrame><CircleUser size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in to o8</span>
-          </RowButton>
-        ) : null}
-        {authError ? <SignInErrorCard key={authError.id} authError={authError} onRetry={auth.signIn} /> : null}
-        <div style={separatorStyle()} />
-      </>
-    );
-  }
-
-  const user = auth.user;
-  const displayName = user?.name || user?.email || 'Signed in';
-  return (
-    <>
-      {/* The identity header IS the manage-account affordance (Q ruling
-          2026-07-16): a separate "Manage account" row doubled the same verb
-          and made the drawer taller. Clicking your own name/avatar opens
-          account management — one row shorter. */}
-      <RowButton onClick={auth.openManageAccount}>
-        {user?.avatarUrl ? (
-          <div
-            aria-hidden="true"
-            style={{
-              width: 26,
-              height: 26,
-              borderRadius: 999,
-              flexShrink: 0,
-              backgroundImage: `url("${user.avatarUrl}")`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              border: `1px solid ${BORDER}`,
-            }}
-          />
-        ) : (
-          <IconFrame><CircleUser size={15} /></IconFrame>
-        )}
-        <div style={{ flex: 1, minWidth: 0, paddingTop: 2, paddingBottom: 1 }}>
-          <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {displayName}
-          </div>
-          {user?.email ? (
-            <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.email}
-            </div>
-          ) : null}
-        </div>
-        {founder ? <FoundingSerialChip operatorNumber={founder.operatorNumber} /> : null}
-      </RowButton>
-
-      <div style={separatorStyle()} />
-
-      <RowButton onClick={() => { void signOut(); }} disabled={signingOut}>
-        <IconFrame><LogOut size={13} /></IconFrame>
-        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>{signingOut ? waitingForSignOut ? 'Waiting for sign-out…' : 'Signing out…' : 'Sign out'}</span>
-      </RowButton>
-      {signOutError ? (
-        <div role="alert" style={{ color: MUTED, fontSize: 11, fontWeight: 300, lineHeight: 1.35, paddingTop: 4, paddingBottom: 4, paddingLeft: 7, paddingRight: 7 }}>
-          {signOutError}
-        </div>
-      ) : null}
-
-      <div style={separatorStyle()} />
-    </>
-  );
-}
-
-// The merged Appearance control (palette segments + glass latch) lives in
-// ./settings-quick-drawer/theme-rows.tsx (extracted for the 800-line ceiling).
-
 export function SettingsQuickDrawer({
+  id,
   open,
   anchorRect,
   onClose,
   onOpenSettings,
+  onOpenShortcuts,
 }: SettingsQuickDrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [usageOpen, setUsageOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const { paletteId, workspaceGlass, setPalette, setWorkspaceGlass, setReduceTransparency } = useTheme();
   const auth = useO8Auth();
-  const { paletteId, setPalette, surface, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
-  // CLI usage telemetry is ungated (Q ruling 2026-07-31, supersedes the #1450
-  // founders-mode visibility): it reads the operator's OWN local CLI files, so
-  // neither an account nor an entitlement has any business gating it. The
-  // /api/panel/cli-usage route stays operator-bearer gated as always.
-  const [version, setVersion] = useState<string | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'current' | 'available'>('idle');
+  const openSettingsTab = (tab: string) => {
+    onClose();
+    window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab } }));
+  };
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    import('@tauri-apps/api/app').then((m) => m.getVersion()).then(setVersion).catch(() => { /* not in Tauri */ });
-  }, []);
-
-  const checkForUpdates = useCallback(async () => {
-    setUpdateStatus('checking');
-    try {
-      const { check } = await import('@/lib/app-update/check');
-      const update = await check();
-      if (update) {
-        setUpdateStatus('available');
-        // Surface the IN-APP update card (version + release note + install
-        // button) instead of bouncing the operator to GitHub — the card is
-        // the product surface for updates (operator report 2026-07-10).
-        window.dispatchEvent(new CustomEvent('o8:update-found', {
-          detail: {
-            version: update.version,
-            notes: update.body ?? undefined,
-            date: update.date ?? undefined,
-          },
-        }));
-        // The card mounts BEHIND this drawer's overlay — leaving the drawer
-        // open made "Check for updates" feel like it did nothing (Q report
-        // 2026-07-31). Found an update → get out of its way.
-        window.setTimeout(onClose, 350);
-      } else {
-        setUpdateStatus('current');
-        window.setTimeout(() => setUpdateStatus('idle'), 2600);
-      }
-    } catch {
-      setUpdateStatus('idle');
-    }
-  }, [onClose]);
-
-  const loadUsage = useCallback(async (preserveSnapshot = true, fresh = false) => {
-    setUsageState((current) => ({
-      status: 'loading',
-      snapshot: preserveSnapshot ? current.snapshot : null,
-      error: null,
-    }));
-    try {
-      const res = await fetch(`/api/runtime/capacity${fresh ? '?fresh=1' : ''}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok || data?.schema !== 'o8/runtime-capacity-control/v1') {
-        throw new Error(data?.error || 'Capacity data unavailable');
-      }
-      setUsageState({ status: 'ready', snapshot: data as RuntimeCapacityControlSnapshot, error: null });
-    } catch (err) {
-      setUsageState((current) => ({
-        status: 'error',
-        snapshot: current.snapshot,
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open || !usageOpen) return;
-    void loadUsage();
-    const timer = window.setInterval(() => {
-      void loadUsage();
-    }, POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [loadUsage, open, usageOpen]);
-
-  useEffect(() => {
-    if (!open) return;
+    if (!open || !mounted) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? []);
+    const first = focusable()[0];
+    first?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      } else if (event.key === 'Tab') {
+        const controls = focusable();
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus();
+        }
+      }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus();
+    };
+  }, [onClose, open, mounted]);
 
   const panelStyle = useMemo<CSSProperties>(() => {
     const viewportWidth = typeof window === 'undefined' ? 640 : window.innerWidth;
@@ -422,26 +190,8 @@ export function SettingsQuickDrawer({
       maxHeight: 'min(340px, calc(100vh - 64px))',
       overflow: 'hidden',
       zIndex: 11000,
-      borderRadius: 16,
-      background: PANEL_BG,
-      border: `1px solid ${BORDER}`,
-      boxShadow: 'var(--t-panel-shadow, 0 24px 60px rgba(15, 23, 42, 0.1))',
-      backdropFilter: 'blur(24px) saturate(150%)',
-      WebkitBackdropFilter: 'blur(24px) saturate(150%)',
-      color: TEXT,
-      fontFamily: FONT,
     };
   }, [anchorRect]);
-
-  const snapshot = usageState.snapshot;
-  // No sign-in requirement here (Q ruling 2026-07-31): this is the operator's
-  // OWN local CLI telemetry (~/.codex + Claude session files) — an account
-  // adds nothing to reading your own disk.
-  const usageSummary = snapshot
-    ? capacitySummary(snapshot)
-    : usageState.status === 'loading'
-      ? 'Syncing'
-      : 'Local runtimes';
 
   if (!mounted || !open) return null;
 
@@ -453,17 +203,27 @@ export function SettingsQuickDrawer({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div ref={panelRef} role="dialog" aria-label="Quick settings" style={panelStyle}>
+      <FloatingSurface id={id} ref={panelRef} role="dialog" aria-modal="true" aria-label="Quick settings" style={panelStyle}
+        contentStyle={{ maxHeight: 'inherit', overflow: 'hidden' }}>
         <div
           style={{
             maxHeight: 'inherit',
-            overflowY: 'auto',
+            overflowY: 'auto', scrollbarWidth: 'none',
             padding: 7,
             display: 'grid',
             gap: 4,
           }}
         >
-          <AccountSection auth={auth} />
+          <RowButton disabled={!auth.isLoaded} onClick={() => {
+            if (!auth.signedIn && auth.clerkEnabled) { onClose(); auth.signIn(); }
+            else openSettingsTab('account');
+          }}>
+            <IconFrame><CircleUser size={13} /></IconFrame>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Account</span>
+            <ChevronRight size={12} color={MUTED} />
+          </RowButton>
+
+          <div style={separatorStyle()} />
 
           <RowButton onClick={onOpenSettings}>
             <IconFrame><Settings2 size={13} /></IconFrame>
@@ -471,74 +231,30 @@ export function SettingsQuickDrawer({
             <span style={{ color: FAINT, fontFamily: MONO, fontSize: 10, fontWeight: 300, letterSpacing: '0.5px' }}>⌘,</span>
           </RowButton>
 
-          {/* ONE merged Appearance row (Q ruling 2026-07-16): the Light/Dark
-              segments carry the palette, the icon latch after the divider
-              carries glass. Replaced the separate Theme + Glass rows — one
-              row shorter, same one-click reach for every state. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, paddingLeft: 7, paddingRight: 7 }}>
+          <RowButton ariaExpanded={appearanceOpen} onClick={() => setAppearanceOpen(value => !value)}>
             <IconFrame><ThemeContrastGlyph /></IconFrame>
             <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Appearance</span>
-            <AppearanceControl paletteId={paletteId} setPalette={setPalette} surface={surface} setReduceTransparency={setReduceTransparency} allGlass={workspaceGlass} onLeaveAllGlass={() => setWorkspaceGlass(false)} />
-          </div>
-
-          <div style={separatorStyle()} />
-
-          <RowButton
-            ariaExpanded={usageOpen}
-            onClick={() => {
-              setUsageOpen((value) => !value);
-            }}
-          >
-            <IconFrame><Gauge size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Runtime capacity</span>
-            <span
-              style={{
-                color: MUTED,
-                fontFamily: MONO,
-                fontSize: 9.5,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {usageSummary}
-            </span>
-            {usageOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
+            <span style={{ color: MUTED, fontSize: 10 }}>{workspaceGlass ? 'All Glass' : paletteId === 'light' ? 'Light Solid' : 'Dark Solid'}</span>
+            {appearanceOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
           </RowButton>
 
-          {usageOpen ? (
-            <CapacityRows
-              snapshot={snapshot}
-              loading={usageState.status === 'loading'}
-              error={usageState.error}
-              onRefresh={(fresh) => { void loadUsage(true, fresh); }}
-            />
-          ) : null}
+          {appearanceOpen ? <div role="group" aria-label="Quick appearance" style={{ display: 'grid', gap: 2, paddingLeft: 25, paddingRight: 4 }}>
+            {(['light', 'dark', 'glass'] as const).map(mode => {
+              const selected = mode === 'glass' ? workspaceGlass : !workspaceGlass && paletteId === mode;
+              return <button key={mode} type="button" aria-pressed={selected} onClick={() => {
+                if (mode === 'glass') setWorkspaceGlass(true);
+                else { setWorkspaceGlass(false); setPalette(mode); setReduceTransparency('on'); }
+                onClose();
+              }} style={{ minHeight: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                paddingLeft: 10, paddingRight: 8, border: 0, borderRadius: 8, background: selected ? ROW_HOVER_BG : 'transparent',
+                color: TEXT, cursor: 'pointer', textAlign: 'left', font: 'inherit', fontSize: 12 }}>
+                {mode === 'glass' ? 'All Glass' : mode === 'light' ? 'Light' : 'Dark'}
+                {selected ? <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--t-accent)" strokeWidth="2"><path d="m5 12 4 4L19 6" /></svg> : null}
+              </button>;
+            })}
+          </div> : null}
 
           <div style={separatorStyle()} />
-
-          <RowButton onClick={() => { void checkForUpdates(); }}>
-            <IconFrame><Download size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Check for updates</span>
-            <span
-              style={{
-                color: updateStatus === 'available' ? 'var(--t-brand-orange, #f97316)' : MUTED,
-                fontFamily: MONO,
-                fontSize: 9.5,
-                fontWeight: 260,
-                letterSpacing: '-0.2px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {updateStatus === 'checking'
-                ? 'Checking…'
-                : updateStatus === 'available'
-                  ? 'Update ready'
-                  : updateStatus === 'current'
-                    ? 'Up to date'
-                    : version
-                      ? `v${version}`
-                      : ''}
-            </span>
-          </RowButton>
 
           <RowButton
             ariaExpanded={helpOpen}
@@ -551,6 +267,15 @@ export function SettingsQuickDrawer({
 
           {helpOpen ? (
             <div style={{ display: 'grid', gap: 2, paddingTop: 0, paddingRight: 4, paddingBottom: 3, paddingLeft: 28 }}>
+              <RowButton onClick={() => {
+                onClose();
+                if (onOpenShortcuts) onOpenShortcuts();
+                else window.dispatchEvent(new CustomEvent(OPEN_KEYBOARD_SHORTCUTS_EVENT));
+              }}>
+                <IconFrame><span aria-hidden="true" style={{ fontSize: 12 }}>?</span></IconFrame>
+                <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Keyboard shortcuts</span>
+                <span style={{ color: FAINT, fontFamily: MONO, fontSize: 10 }}>⌘/</span>
+              </RowButton>
               <RowButton onClick={() => openExternalUrl(DISCORD_URL)}>
                 <IconFrame><MessageSquare size={13} /></IconFrame>
                 <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Community Discord</span>
@@ -564,7 +289,7 @@ export function SettingsQuickDrawer({
             </div>
           ) : null}
         </div>
-      </div>
+      </FloatingSurface>
     </div>,
     document.body,
   );

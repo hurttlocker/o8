@@ -73,6 +73,16 @@ export function assertWorkspaceRetentionReleased(
   if (getWorkspaceRetentionHold(workspacePath, identity)) {
     throw new Error('Workspace retirement is blocked by a persisted retention hold.');
   }
+  const legacy = getSqlite().prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+    WHERE retained_path = ? OR (source_device = ? AND source_inode = ?) LIMIT 1`)
+    .get(path.resolve(workspacePath), identity?.device ?? -1, identity?.inode ?? -1);
+  if (legacy) throw new Error('Retained legacy output is not disposable.');
+  const failed = getSqlite().prepare(`SELECT p.operation_id FROM workspace_failed_prebuild_parks p
+    JOIN workspace_generated_outputs g ON g.resource_id = p.resource_id
+    WHERE json_extract(p.payload_json, '$.retainedPath') = ?
+      OR (json_extract(g.payload_json, '$.output.device') = ? AND json_extract(g.payload_json, '$.output.inode') = ?) LIMIT 1`)
+    .get(path.resolve(workspacePath), identity?.device ?? -1, identity?.inode ?? -1);
+  if (failed) throw new Error('Retained failed prebuild output is not disposable.');
 }
 
 export function assertSnapshotRetentionReleased(input: {
@@ -109,15 +119,30 @@ export function acquireWorkspaceRetentionHold(input: {
       throw new Error('The workspace already has a different retention hold.');
     }
     const claim = sqlite.prepare(`
-      SELECT operation_id FROM workspace_exact_claims WHERE kind = 'managed-retirement'
-        AND (expected_path = ? OR (source_device = ? AND source_inode = ?)) LIMIT 1
-    `).get(workspacePath, input.identity.device, input.identity.inode);
+      SELECT operation_id FROM workspace_exact_claims
+      WHERE kind IN ('managed-retirement', 'generated-output-retirement', 'generated-output-recovery-retirement') AND (
+        expected_path = ? OR (source_device = ? AND source_inode = ?)
+        OR (kind = 'generated-output-retirement' AND (
+          parent_canonical_path = ? OR (parent_device = ? AND parent_inode = ?)
+        ))
+      ) LIMIT 1
+    `).get(workspacePath, input.identity.device, input.identity.inode,
+      workspacePath, input.identity.device, input.identity.inode);
     const retiring = sqlite.prepare(`
       SELECT packet_id FROM workspace_snapshots
       WHERE (original_path = ? OR (repository_uuid = ? AND packet_id = ?))
         AND state IN ('parkable', 'hibernating', 'restoring', 'retiring', 'retired') LIMIT 1
     `).get(workspacePath, input.repositoryUuid, input.packetId);
-    if (claim || retiring) {
+    const parking = sqlite.prepare(`SELECT operation_id FROM workspace_legacy_output_parks
+      WHERE state IN ('prepared', 'restoring') AND (workspace_path = ? OR retained_path = ?
+        OR (source_device = ? AND source_inode = ?)) LIMIT 1`)
+      .get(workspacePath, workspacePath, input.identity.device, input.identity.inode);
+    const failedParking = sqlite.prepare(`SELECT p.operation_id FROM workspace_failed_prebuild_parks p
+      JOIN workspace_generated_outputs g ON g.resource_id = p.resource_id WHERE p.state = 'prepared'
+        AND (p.workspace_path = ? OR json_extract(p.payload_json, '$.retainedPath') = ?
+          OR (json_extract(g.payload_json, '$.output.device') = ? AND json_extract(g.payload_json, '$.output.inode') = ?)) LIMIT 1`)
+      .get(workspacePath, workspacePath, input.identity.device, input.identity.inode);
+    if (claim || retiring || parking || failedParking) {
       throw new Error('Workspace retirement or materialization change already began; a new hold was not granted.');
     }
     const now = Date.now();

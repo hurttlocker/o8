@@ -3,7 +3,6 @@
 import { requestPrompt } from '@/components/shared/ConfirmToastHost';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { ProjectRole } from '@/lib/projects/types';
 import { AlertCircle, CheckCircle2, FolderOpen, GitBranch, Globe, Loader2 } from '../lucide-shims';
 import {
   GlassModal,
@@ -13,24 +12,13 @@ import {
   type ValidatedRepoCandidate,
 } from './shared';
 import { broadcastProjectsUpdated, type ProjectRecord } from './useProjects';
-
-const ROLE_OPTIONS: Array<{ value: ProjectRole; label: string }> = [
-  { value: 'fullstack', label: 'Fullstack' },
-  { value: 'frontend', label: 'Frontend' },
-  { value: 'backend', label: 'Backend' },
-  { value: 'mobile', label: 'Mobile' },
-  { value: 'site', label: 'Site' },
-  { value: 'service', label: 'Service' },
-  { value: 'library', label: 'Library' },
-  { value: 'infra', label: 'Infra' },
-  { value: 'docs', label: 'Docs' },
-  { value: 'shared', label: 'Shared' },
-];
+import { ProjectButton } from '../agent-panel/project-ui';
 
 interface StoredProject {
   id: string;
   name: string;
   slug?: string | null;
+  repos?: Array<{ repoId: string }>;
 }
 
 function prettyRemoteLabel(remoteUrl: string): string {
@@ -43,22 +31,6 @@ function prettyRemoteLabel(remoteUrl: string): string {
   } catch {
     return trimmed;
   }
-}
-
-function inferRepoRole(repo: ValidatedRepoCandidate): ProjectRole {
-  const haystack = [
-    repo.name,
-    repo.localPath,
-    repo.remoteUrl ?? '',
-  ].join(' ').toLowerCase();
-
-  if (/\b(mobile|ios|android|expo|react-native|rn)\b/.test(haystack)) return 'mobile';
-  if (/\b(site|web|landing|marketing|next)\b/.test(haystack)) return 'site';
-  if (/\b(api|server|service|worker|backend)\b/.test(haystack)) return 'service';
-  if (/\b(docs|documentation|handbook)\b/.test(haystack)) return 'docs';
-  if (/\b(infra|deploy|ops|terraform)\b/.test(haystack)) return 'infra';
-  if (/\b(lib|library|sdk|package)\b/.test(haystack)) return 'library';
-  return 'fullstack';
 }
 
 async function pickFolderPath() {
@@ -125,29 +97,6 @@ function smallButtonStyle(disabled = false): CSSProperties {
   };
 }
 
-function primaryButtonStyle(disabled = false): CSSProperties {
-  return {
-    minHeight: 36,
-    paddingTop: 8,
-    paddingRight: 15,
-    paddingBottom: 8,
-    paddingLeft: 15,
-    borderRadius: 10,
-    border: '1px solid color-mix(in srgb, var(--t-accent) 26%, transparent)',
-    background: disabled
-      ? 'color-mix(in srgb, var(--t-accent-soft) 52%, transparent)'
-      : 'var(--t-accent-soft)',
-    color: 'var(--t-accent)',
-    fontSize: 12,
-    lineHeight: '16px',
-    fontWeight: 400,
-    letterSpacing: '-0.1px',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.55 : 1,
-    fontFamily: 'var(--font-sans-system)',
-  };
-}
-
 export function AddRepoDialog({
   open,
   projects,
@@ -178,7 +127,6 @@ export function AddRepoDialog({
   const [linkedToProject, setLinkedToProject] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedRole, setSelectedRole] = useState<ProjectRole>('fullstack');
 
   const visibleProjects = useMemo(() => {
     const hasConcreteProject = projects.some((project) => project.id !== 'default');
@@ -206,7 +154,6 @@ export function AddRepoDialog({
     setLinkedToProject(false);
     setAddError(null);
     setSelectedProjectId(null);
-    setSelectedRole('fullstack');
   }, []);
 
   const close = useCallback(() => {
@@ -235,7 +182,6 @@ export function AddRepoDialog({
       });
       setValidationResult(data.repo);
       setRepoPathInput(data.repo.localPath);
-      setSelectedRole(inferRepoRole(data.repo));
       return data.repo;
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : 'Validation failed.');
@@ -289,17 +235,20 @@ export function AddRepoDialog({
       || project.slug === selectedProject.name.toLowerCase().replace(/\s+/g, '-')
     ));
     if (!storedProject) return;
+    // The panel membership API already linked this repo. Preserve an existing
+    // role instead of overwriting it when reconnecting the same repository.
+    if (storedProject.repos?.some((link) => link.repoId === repo.id)) return;
 
     await requestJson(`/api/projects/${encodeURIComponent(storedProject.id)}/repos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         repoId: repo.id,
-        role: selectedRole,
+        role: null,
         suggestionOrigin: 'manual',
       }),
     });
-  }, [selectedProject, selectedRole]);
+  }, [selectedProject]);
 
   const addRepo = useCallback(async () => {
     const localPath = repoPathInput.trim();
@@ -385,8 +334,9 @@ export function AddRepoDialog({
       open={open}
       onClose={close}
       title="Add repository"
-      subtitle="Pick a folder. We'll register it and offer to add it to a project."
-      width={620}
+      subtitle="Choose a local folder and the project it belongs to."
+      width={480}
+      popoverSurface
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         <label
@@ -576,7 +526,7 @@ export function AddRepoDialog({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 150px',
+            gridTemplateColumns: 'minmax(0, 1fr)',
             gap: 10,
           }}
         >
@@ -602,26 +552,7 @@ export function AddRepoDialog({
               ))}
             </select>
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 10, lineHeight: '14px', fontWeight: 300, color: 'var(--t-text-muted)', letterSpacing: 0.6, textTransform: 'uppercase' }}>
-              Role
-            </span>
-            <select
-              value={selectedRole}
-              onChange={(event) => setSelectedRole(event.currentTarget.value as ProjectRole)}
-              disabled={adding || !!registeredRepo || effectiveProjectId === 'none'}
-              style={{
-                ...fieldStyle(),
-                paddingRight: 10,
-                paddingLeft: 10,
-                opacity: effectiveProjectId === 'none' ? 0.58 : 1,
-              }}
-            >
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+
         </div>
       ) : null}
 
@@ -655,44 +586,15 @@ export function AddRepoDialog({
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
-        <button
-          type="button"
-          onClick={close}
-          disabled={adding}
-          style={{
-            minHeight: 36,
-            paddingTop: 8,
-            paddingRight: 14,
-            paddingBottom: 8,
-            paddingLeft: 14,
-            borderRadius: 10,
-            border: '1px solid var(--t-btn-secondary-border)',
-            background: 'transparent',
-            color: 'var(--t-text-secondary)',
-            fontSize: 12,
-            lineHeight: '16px',
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            cursor: adding ? 'default' : 'pointer',
-            opacity: adding ? 0.5 : 1,
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => { void addRepo(); }}
-          disabled={!repoPathInput.trim() || validating || adding || !!validationError}
-          style={primaryButtonStyle(!repoPathInput.trim() || validating || adding || !!validationError)}
-        >
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+        <ProjectButton onClick={close} disabled={adding}>Cancel</ProjectButton>
+        <ProjectButton primary onClick={() => { void addRepo(); }} busy={adding} disabled={!repoPathInput.trim() || validating || !!validationError}>
           {adding
             ? 'Adding…'
             : registeredRepo
               ? linkedToProject ? 'Refresh workspace' : 'Retry project link'
               : selectedProject ? `Add to ${selectedProject.name}` : 'Add'}
-        </button>
+        </ProjectButton>
       </div>
     </GlassModal>
   );

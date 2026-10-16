@@ -1,3 +1,4 @@
+import { controlledProviderPins } from './controlled-provider';
 import { isManualThinkingEffort, type ManualThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -9,7 +10,7 @@ export interface OwnedExecutionPolicy {
   mode: 'single-attempt';
   runtime: string;
   model: string;
-  effort: ManualThinkingEffort;
+  effort: ManualThinkingEffort | undefined;
   runtimeConfig: Record<string, string>;
 }
 
@@ -24,11 +25,15 @@ function nativeModel(runtime: string, model: string): boolean {
 
 export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime: string): OwnedExecutionPolicy | undefined {
   if (request.executionPolicy === undefined) return undefined;
+  const controlled = !!request.controlledTask && runtime === 'claude-code'
+    && controlledProviderPins(request.model, request.effort, request.runtimeConfig);
   if (request.executionPolicy !== 'single-attempt' || !['codex', 'claude-code'].includes(runtime)
     || !request.model?.trim() || request.model !== request.model.trim()
-    || !isManualThinkingEffort(request.effort) || request.runtimeConfig?.workMode !== 'read-only') {
+    || (!controlled && !isManualThinkingEffort(request.effort)) || request.runtimeConfig?.workMode !== 'read-only') {
     throw new Error('Single-attempt workers require an explicit runtime, model, concrete effort and enforced read-only mode.');
   }
+  if (controlled) return { version: 1, mode: 'single-attempt', runtime, model: request.model!,
+    effort: undefined, runtimeConfig: { ...request.runtimeConfig } };
   const effort = resolveEffortPin({ runtime: runtime as OrchestratorRuntime, model: request.model,
     explicitModel: request.model, requestedEffort: request.effort });
   if (!effort.ok || effort.selectedEffort !== request.effort
@@ -38,21 +43,19 @@ export function createOwnedExecutionPolicy(request: OwnedLaunchRequest, runtime:
     throw new Error('Single-attempt workers require exact native model and effort pins without another execution carrier.');
   }
   return { version: 1, mode: 'single-attempt', runtime, model: request.model,
-    effort: request.effort, runtimeConfig: { ...request.runtimeConfig } };
+    effort: request.effort as ManualThinkingEffort, runtimeConfig: { ...request.runtimeConfig } };
 }
 
 /** An execution limit, not an authorization, account grant or dispatch receipt. */
 export function assertOwnedSingleAttemptSpawn(session: OwnedSessionRecord, runtime: string, mode: OwnedRunMode): void {
   const policy = session.executionPolicy;
   if (policy === undefined) return;
-  createOwnedExecutionPolicy({ cwd: session.cwd, prompt: session.latestPrompt, executionPolicy: 'single-attempt',
+  const fresh = createOwnedExecutionPolicy({ cwd: session.cwd, prompt: session.latestPrompt,
+    controlledTask: session.controlledTask, executionPolicy: 'single-attempt',
     model: session.model, effort: session.effort, runtimeConfig: session.runtimeConfig }, runtime);
   if (policy?.version !== 1 || policy.mode !== 'single-attempt' || policy.runtime !== runtime
-    || typeof policy.model !== 'string' || !nativeModel(runtime, policy.model)
     || policy.model !== session.model || policy.effort !== session.effort
-    || !isManualThinkingEffort(policy.effort) || policy.runtimeConfig?.workMode !== 'read-only'
-    || policy.runtimeConfig.executionCarrier !== undefined
-    || (policy.runtimeConfig.modelSource !== undefined && policy.runtimeConfig.modelSource !== 'native')
+    || configKey(fresh?.runtimeConfig) !== configKey(policy.runtimeConfig)
     || configKey(policy.runtimeConfig) !== configKey(session.runtimeConfig)
     || mode !== 'launch' || session.activeRun || session.recentRuns.length !== 0
     || session.runIdentityLedger?.version !== 1 || session.runIdentityLedger.complete !== true

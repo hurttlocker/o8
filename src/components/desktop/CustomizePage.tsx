@@ -10,6 +10,7 @@ import { ProjectInstructions } from './customize/ProjectInstructions';
 import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
 import type { ProjectRecord } from './repo-registry/useProjects';
 import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
+import { useCustomizeTab } from './customize/navigation';
 import { ORCHESTRATOR_SLASH_COMMANDS } from '@/lib/slash-commands/definitions';
 import { OPEN_SETTINGS_TAB_EVENT } from '@/lib/desktop/events';
 import { insertPromptIntoActiveComposer, type PromptLibraryEntry } from '@/lib/prompt-library/client';
@@ -40,13 +41,15 @@ function openSettingsMcpTab() {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_TAB_EVENT, { detail: { tab: 'mcp' } }));
 }
 
-export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal }: {
+export function CustomizePage({ onClose, project = null, registeredRepos = [], onOpenPluginTerminal, fixedTab }: {
   onClose?: () => void;
   onOpenPluginTerminal?: (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => Promise<void>;
   project?: ProjectRecord | null;
   registeredRepos?: CustomizeRepo[];
+  fixedTab?: 'plugins';
 }) {
-  const [tab, setTab] = useState<CustomizeTab>('rules');
+  const [navigationTab, setTab] = useCustomizeTab();
+  const tab = fixedTab ?? navigationTab;
   const [query, setQuery] = useState('');
   const [pluginRepo, setPluginRepo] = useState('');
   const [addingSkill, setAddingSkill] = useState(false);
@@ -156,6 +159,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         gap: 28,
       }}>
         <CustomizeHeader
+          pluginsOnly={fixedTab === 'plugins'}
           tab={tab} onTab={(next) => { setTab(next); setExpandedRow(null); }}
           query={query} onQuery={setQuery} repos={repos} scope={scope}
           onScope={(value) => { setSelection({ projectId: project?.id, value }); setExpandedRow(null); }} project={project}
@@ -172,7 +176,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         ) : inventoryError ? (
           <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
-          <RulesTab directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <RulesTab query={query.trim()} inventoryCount={directives.length} directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (
@@ -206,7 +210,9 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
 
 // ── Tabs ──
 
-function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
+function RulesTab({ directives, query, inventoryCount, expandedRow, onToggleRow, onOpenFile }: {
+  query: string;
+  inventoryCount: number;
   directives: DirectiveSummary[];
   expandedRow: string | null;
   onToggleRow: (id: string | null) => void;
@@ -217,8 +223,10 @@ function RulesTab({ directives, expandedRow, onToggleRow, onOpenFile }: {
   if (directives.length === 0) {
     return (
       <EmptyState
-        title="No additional rules"
-        body="Rules appear here with their source and scope. Shared project instructions are managed separately in the project view."
+        title={query && inventoryCount > 0 ? 'No matching instructions' : 'No additional rules'}
+        body={query && inventoryCount > 0
+          ? `No instructions match “${query}”. Change or clear the search to see your rules.`
+          : 'Rules appear here with their source and scope. Shared project instructions are managed separately in the project view.'}
       />
     );
   }

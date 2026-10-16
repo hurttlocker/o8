@@ -39,6 +39,7 @@ import type {
   RepoRegistryDeleteBody,
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 const RUNTIME_CLEANUP_TIMEOUT_MS = 3_500;
 const execFileAsync = promisify(execFile);
@@ -345,14 +346,15 @@ export async function GET(request: Request) {
       },
     );
   } catch (error) {
+    console.error('[api] panel/repos failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to load repository registry.' },
+      { error: 'Unable to load repository registry.' },
       { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   let body: RepoRegistryPostBody;
   try {
     body = (await request.json()) as RepoRegistryPostBody;
@@ -466,8 +468,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
     }
   } catch (error) {
+    console.error('[api] panel/repos failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to update repository registry.' },
+      { error: 'Unable to update repository registry.' },
       { status: 500 },
     );
   }
@@ -549,9 +552,12 @@ export async function DELETE(request: Request) {
       },
     });
   } catch (error) {
+    console.error('[api] panel/repos failed:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to remove repository.' },
+      { error: 'Unable to remove repository.' },
       { status: 500 },
     );
   }
 }
+
+export const POST = withRepoInventoryChange('repo-register', handlePOST);

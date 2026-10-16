@@ -357,6 +357,11 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     if (!el) return;
     const ro = new ResizeObserver(() => syncRect());
     ro.observe(el);
+    // A floating preview moves without resizing. Follow its position/motion
+    // so the native page stays inside the dragged shell on every frame.
+    const pip = el.closest('[data-hover-pip]');
+    const pipPositionObserver = pip ? new MutationObserver(() => syncRect()) : null;
+    if (pip) pipPositionObserver?.observe(pip, { attributes: true, attributeFilter: ['style'] });
     // A window resize is also where page-zoom changes surface — remeasure the
     // zoom before repositioning. Scroll and panel-divider drags (ResizeObserver)
     // don't change zoom, so they skip it.
@@ -371,6 +376,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     return () => {
       ro.disconnect();
+      pipPositionObserver?.disconnect();
       htmlObserver.disconnect();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);

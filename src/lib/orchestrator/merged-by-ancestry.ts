@@ -19,6 +19,7 @@ import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentL
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
+import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconciliation } from '@/lib/workspace/automatic-reconciliation-guard';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BASE_BRANCH = 'main';
@@ -189,6 +190,15 @@ function gitWithInput(
       } else {
         reject(new Error(stderr.trim() || `git ${args.join(' ')} exited ${code ?? 'unknown'}`));
       }
+    });
+    // #3627: git can exit (or be killed on timeout) before reading all of a
+    // large diff. The pending write then fails with EPIPE on stdin; without a
+    // listener that error is uncaught and takes down the whole server. The
+    // close or timeout path above already settles the promise.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE') return;
+      clearTimeout(timer);
+      reject(error);
     });
     child.stdin.end(input);
   });
@@ -695,6 +705,11 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
 
   for (const candidate of candidates) {
     const key = candidateKey(candidate);
+    const packetId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
+    if (!workspaceAllowsAutomaticReconciliation(packetId)) {
+      skipped += 1;
+      continue;
+    }
     if (
       candidate.packet
       && candidate.lane
@@ -731,9 +746,13 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
           continue;
         }
       }
-      const settled = evidence.kind === 'no-changes'
-        ? await finishWithoutChanges(candidate, evidence, generation)
-        : await releasePacket(candidate, evidence, generation);
+      const settled = await withAutomaticWorkspaceReconciliation(packetId, async () => {
+        const currentLane = candidate.laneId ? getLane(candidate.laneId) : null;
+        if (candidate.lane && (!currentLane || currentLane.packetId !== candidate.lane.packetId)) return false;
+        return evidence.kind === 'no-changes'
+          ? finishWithoutChanges(candidate, evidence, generation)
+          : releasePacket(candidate, evidence, generation);
+      });
       if (settled) merged += 1;
       else skipped += 1;
     } catch (error) {

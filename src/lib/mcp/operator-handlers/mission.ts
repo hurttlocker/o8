@@ -25,7 +25,7 @@ import {
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
-  apiFetch,
+  apiFetch, McpInputError,
   type McpTool,
   type McpToolResult,
   errorText,
@@ -775,7 +775,7 @@ export async function handleDispatchMission(args: Record<string, unknown>): Prom
       missionId: optionalString(args, 'missionId') || undefined,
       runtime: args.runtime === undefined ? undefined : parseMissionRuntime(args.runtime),
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} dispatch_mission failed: ${errorText(error)}`);
     return textResult(`Failed to dispatch mission: ${errorText(error)}`, true);
@@ -787,7 +787,7 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
     const includeCost = typeof args.includeCost === 'boolean' ? args.includeCost : false;
     const includeTiming = typeof args.includeTiming === 'boolean' ? args.includeTiming : false;
     const result = await getMissionStatus({ missionId: optionalString(args, 'missionId') || undefined, includeCost, includeTiming });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
     return textResult(`Failed to read mission status: ${errorText(error)}`, true);
@@ -969,7 +969,7 @@ export async function handleTaskBlock(args: Record<string, unknown>): Promise<Mc
   try {
     const code = optionalString(args, 'code') || undefined;
     if (code !== undefined && !isAgentReportReason(code)) {
-      throw new Error('code must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('code must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
     const result = await blockTask(requiredString(args, 'taskId'), {
       actor: 'orchestrator',
@@ -989,13 +989,13 @@ export async function handleTaskReport(args: Record<string, unknown>): Promise<M
   try {
     const reason = optionalString(args, 'reason') || undefined;
     if (reason !== undefined && !isAgentReportReason(reason)) {
-      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
     const metadata = args.metadata === undefined || args.metadata === null
       ? undefined
       : normalizeAgentReportMetadata(args.metadata);
     if (args.metadata !== undefined && args.metadata !== null && !metadata) {
-      throw new Error('metadata must be an object');
+      throw new McpInputError('metadata must be an object');
     }
     const result = await reportTask(requiredString(args, 'taskId'), {
       actor: 'orchestrator',
@@ -1108,7 +1108,7 @@ export async function handleWaitForMissionReady(
 export async function handleSubmitReview(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     if (typeof args.approved !== 'boolean') {
-      throw new Error('approved is required');
+      throw new McpInputError('approved is required');
     }
     const result = await submitPacketReview({
       packetId: requiredString(args, 'packetId'),
@@ -1145,7 +1145,7 @@ async function doResetPacket(
       reason: optionalString(args, 'reason') || undefined,
       clearWorktree,
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} reset/retry failed: ${errorText(error)}`);
     return textResult(`Failed to reset packet: ${errorText(error)}`, true);
@@ -1166,7 +1166,7 @@ export async function handleRerunWithFeedback(args: Record<string, unknown>): Pr
       packetId: requiredString(args, 'packetId'),
       feedback: requiredString(args, 'feedback'),
     });
-    return jsonResult(result);
+    return jsonResult(result, 'error' in result);
   } catch (error) {
     console.error(`${'[mcp-operator]'} rerun_with_feedback failed: ${errorText(error)}`);
     return textResult(`Failed to rerun with feedback: ${errorText(error)}`, true);
@@ -1183,12 +1183,12 @@ export async function handleReportPacketEvent(args: Record<string, unknown>): Pr
     const packetId = requiredString(args, 'packetId');
     const event = normalizeAgentReportEvent(args.event);
     if (!event) {
-      throw new Error('event is required');
+      throw new McpInputError('event is required');
     }
 
     const reason = optionalString(args, 'reason') || undefined;
     if (reason !== undefined && !isAgentReportReason(reason)) {
-      throw new Error('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
+      throw new McpInputError('reason must be one of: needs_clarification, missing_context, out_of_scope, dependency_blocked, context_full, nondeterministic_test, external_api_down, unknown.');
     }
 
     const lanesResult = await apiFetch('/api/lanes?active=false') as { lanes?: ReportLane[] };
@@ -1201,7 +1201,7 @@ export async function handleReportPacketEvent(args: Record<string, unknown>): Pr
       ? undefined
       : normalizeAgentReportMetadata(args.metadata);
     if (args.metadata !== undefined && args.metadata !== null && !metadata) {
-      throw new Error('metadata must be an object');
+      throw new McpInputError('metadata must be an object');
     }
 
     const result = await apiFetch(`/api/lanes/${encodeURIComponent(lane.id)}/events`, {

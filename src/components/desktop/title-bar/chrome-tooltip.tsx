@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { FloatingSurface } from '../FloatingSurface';
 
 /**
  * The header chrome's tooltip — label + keybind, in o8's own vocabulary rather
@@ -14,17 +15,19 @@ import { createPortal } from 'react-dom';
  * window's top edge — the operator saw "Open O…". This portals to document.body
  * and opens DOWNWARD, right-anchored, so the label is always fully readable.
  */
-export function useChromeTooltip({ label, keybind }: { label: string; keybind?: string }) {
+export function useChromeTooltip({ label, keybind, side = 'bottom' }: { label: string; keybind?: string; side?: 'bottom' | 'right' }) {
   const ref = useRef<HTMLButtonElement>(null);
   const showTimer = useRef<number | undefined>(undefined);
-  const [tip, setTip] = useState<{ top: number; right: number } | null>(null);
+  const [tip, setTip] = useState<{ top: number; right?: number; left?: number } | null>(null);
 
   const open = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setTip({ top: r.bottom + 6, right: Math.max(6, window.innerWidth - r.right) });
-  }, []);
+    setTip(side === 'right'
+      ? { top: Math.max(6, Math.min(r.top + (r.height - 24) / 2, window.innerHeight - 30)), left: r.right + 10 }
+      : { top: r.bottom + 6, right: Math.max(6, window.innerWidth - r.right) });
+  }, [side]);
 
   const close = useCallback(() => {
     window.clearTimeout(showTimer.current);
@@ -47,24 +50,22 @@ export function useChromeTooltip({ label, keybind }: { label: string; keybind?: 
 
   const tooltip = tip && typeof document !== 'undefined'
     ? createPortal(
-        <div
+        <FloatingSurface
           role="tooltip"
           style={{
             position: 'fixed',
             top: tip.top,
             right: tip.right,
+            left: tip.left,
             zIndex: 2147483000,
             pointerEvents: 'none',
+            borderRadius: 9,
+          }}
+          contentStyle={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
             whiteSpace: 'nowrap',
-            background: 'var(--t-bg-card)',
-            color: 'var(--t-text)',
-            borderWidth: '0.5px',
-            borderStyle: 'solid',
-            borderColor: 'var(--t-border)',
-            borderRadius: 8,
             paddingTop: 4,
             paddingBottom: 4,
             paddingLeft: 8,
@@ -74,12 +75,11 @@ export function useChromeTooltip({ label, keybind }: { label: string; keybind?: 
             fontWeight: 400,
             lineHeight: 1.3,
             letterSpacing: '-0.1px',
-            boxShadow: 'var(--t-glass-shadow, 0 8px 20px rgba(15, 23, 42, 0.22))',
           }}
         >
           <span>{label}</span>
           {keybind ? <span style={{ color: 'var(--t-text-muted)' }}>{keybind}</span> : null}
-        </div>,
+        </FloatingSurface>,
         document.body,
       )
     : null;

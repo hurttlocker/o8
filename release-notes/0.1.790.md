@@ -1,0 +1,7 @@
+- Update o8 without also updating connected agent CLIs, and get clearer version-check feedback.
+- Retry a failed workspace Review check without losing the error or showing an empty result as success.
+- Distinguish an Instructions search with no matches from an empty instruction list.
+- Run routine Pi commands and file edits directly in Full access, with clearer explanations when a tool call is refused.
+- Find pending Pi approvals across projects, inspect the workspace and proposed file content, and keep time to make a decision.
+- Keep the o8 model consistent when starting a conversation after using another provider.
+- Improve isolated worker launch checks and update a native transport dependency.

@@ -1,9 +1,10 @@
 'use client';
 
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, ReactNode, Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { SmoothCorners } from '@lisse/react';
-import { CollapsedRailIcon, ChevronsRightIcon } from './branch-rail-collapse';
+import { useReducedMotion } from 'framer-motion';
+import { useFloatingSurfaceMaterial } from './FloatingSurface';
 import {
   COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
   WORKSPACE_RAIL_CORNER_RADIUS,
@@ -17,6 +18,7 @@ const CHECK_ROW_HEIGHT = 28;
 
 /** The O8 right-panel tabs the rail rows can jump to (mirrors onOpenO8Panel). */
 export type OverlayPanelTab =
+  | 'files'
   | 'workspace'
   | 'prs'
   | 'inbox'
@@ -30,6 +32,7 @@ export type ProgressRowData = { label: string; done: boolean; muted?: boolean };
 export type PrChecksSummary = { label: string; danger: boolean } | null;
 
 export interface BranchDetailsOverlayProps {
+  overlayRef?: Ref<HTMLDivElement>;
   /** Open state — drives the morph in/out. The overlay stays mounted and
    *  cross-fades so the capsule can morph into it (and back) both ways. */
   open: boolean;
@@ -40,19 +43,13 @@ export interface BranchDetailsOverlayProps {
   onMouseLeave: () => void;
   /** The » control unpins (collapsed → true). */
   onToggleCollapsed?: () => void;
+  workspaceContext: ReactNode;
+  utilities: ReactNode;
   // Progress card
   progressHint: string;
   progressRows: ProgressRowData[];
   progressOpen: boolean;
   onToggleProgress: () => void;
-  // Environment card
-  environmentOpen: boolean;
-  onToggleEnvironment: () => void;
-  hasDiff: boolean;
-  additions: number;
-  deletions: number;
-  changesFileCount: number;
-  branch: string;
   // Pull request card
   prDetail: PrDetail | null;
   prChecks: PrChecksSummary;
@@ -86,6 +83,7 @@ const OVERLAY_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
  */
 export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
   const {
+    overlayRef,
     open,
     anchorRect,
     onMouseEnter,
@@ -95,13 +93,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     progressRows,
     progressOpen,
     onToggleProgress,
-    environmentOpen,
-    onToggleEnvironment,
-    hasDiff,
-    additions,
-    deletions,
-    changesFileCount,
-    branch,
+    workspaceContext,
+    utilities,
     prDetail,
     prChecks,
     prCommentCount,
@@ -112,6 +105,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     runtimeLabelText,
     onOpenTab,
   } = props;
+  const reducedMotion = useReducedMotion();
+  const material = useFloatingSurfaceMaterial();
 
   if (typeof document === 'undefined') return null;
 
@@ -135,9 +130,19 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     // a full-width strip at the bottom of the viewport (measured). Hence: fixed
     // wrapper, in-flow card (Q 2026-07-16 — "the edge still has no shadow").
     <div
+      ref={overlayRef}
+      role="region"
+      aria-label="Workspace details"
+      data-workspace-details=""
+      aria-hidden={!open}
+      inert={!open}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); onToggleCollapsed?.(); }
+      }}
       style={{
+        ...material.textStyle,
         position: 'fixed',
         top,
         right,
@@ -148,9 +153,9 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         // overlay stays mounted so both directions animate. On the wrapper so the
         // shadow morphs with the card instead of hanging behind it.
         opacity: open ? 1 : 0,
-        transform: open ? 'scale(1)' : 'scale(0.9)',
+        transform: reducedMotion || open ? 'scale(1)' : 'scale(0.9)',
         transformOrigin: 'top right',
-        transition: `opacity 150ms ${OVERLAY_EASE}, transform 150ms ${OVERLAY_EASE}`,
+        transition: reducedMotion ? 'none' : `opacity 150ms ${OVERLAY_EASE}, transform 150ms ${OVERLAY_EASE}`,
         pointerEvents: open ? 'auto' : 'none',
       }}
     >
@@ -169,7 +174,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
           bottomRight: { radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
           bottomLeft: { radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING },
         }}
-        innerBorder={{ width: 1, color: 'var(--t-border-subtle, var(--t-border))', opacity: 1 }}
+        innerBorder={{ width: 1, color: material.borderColor, opacity: 1 }}
         shadowStrategy="box-shadow"
         className="hide-scrollbar"
         style={{
@@ -184,21 +189,13 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
           paddingLeft: 14,
           overflowY: 'auto',
           scrollbarWidth: 'none',
-          background: 'var(--t-popover-surface)',
-          backdropFilter: 'blur(24px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-          boxShadow: 'var(--t-panel-shadow), 0 8px 30px rgba(15, 23, 42, 0.18)',
-          color: 'var(--t-text)',
+          ...material.surfaceStyle,
+          boxShadow: material.shadow,
         }}
       >
-      {/* » folds the overlay away (unpins → collapsed=true). */}
-      {onToggleCollapsed ? (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}>
-          <CollapsedRailIcon title="Collapse" onClick={onToggleCollapsed} resting="card"><ChevronsRightIcon /></CollapsedRailIcon>
-        </div>
-      ) : null}
+      {workspaceContext}
 
-      <Card>
+      {progressRows.length > 0 ? <Card>
         <SectionHeader
           label="Progress"
           hint={progressHint}
@@ -212,26 +209,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
             ))}
           </div>
         ) : null}
-      </Card>
-
-      <Card>
-        <SectionHeader
-          label="Environment"
-          open={environmentOpen}
-          onClick={onToggleEnvironment}
-          metric={hasDiff ? <DiffStats additions={additions} deletions={deletions} /> : null}
-          action={<GearIcon />}
-        />
-        {environmentOpen ? (
-          <div style={{ paddingTop: 2, paddingBottom: 3 }}>
-            <Row icon={<DiffIcon />} label="Changes" detail={changesFileCount > 0 ? `${changesFileCount}` : undefined} onClick={() => onOpenTab('workspace')} />
-            <Row icon={<LaptopIcon />} label="Local" onClick={() => onOpenTab('workspace')} />
-            <Row icon={<BranchIcon />} label={branch} onClick={() => onOpenTab('workspace')} />
-            <Row icon={<CommitIcon />} label="Commit" onClick={() => onOpenTab('workspace')} />
-            <Row icon={<GhIcon />} label="Create pull request" onClick={() => onOpenTab('prs')} />
-          </div>
-        ) : null}
-      </Card>
+      </Card> : null}
 
       {prDetail ? (
         <Card>
@@ -247,7 +225,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
             detail={`${prDetail.changedFiles} file${prDetail.changedFiles === 1 ? '' : 's'}`}
             onClick={() => onOpenTab('prs')}
           />
-          {!prDetail.mergeable ? (
+          {prDetail.mergeable === false ? (
             <Row icon={<ConflictIcon />} label="Conflicts with base" tone="danger" onClick={() => onOpenTab('prs')} />
           ) : null}
           {prChecks ? (
@@ -288,21 +266,18 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         </Card>
       ) : null}
 
-      <Card>
+      {sources.length > 0 ? <Card>
         <StaticHeader label="Sources" />
-        {sources.length === 0 ? (
-          <StaticRow icon={<LinkIcon />} label="No sources yet" muted />
-        ) : (
-          sources.map((source) => (
+        {sources.map((source) => (
             <Row
               key={source.href}
               icon={<LinkIcon />}
               label={source.label}
               onClick={() => onOpenSource?.(source.href)}
             />
-          ))
-        )}
-      </Card>
+          ))}
+      </Card> : null}
+      {utilities}
 
         <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabelText} />
       </SmoothCorners>
@@ -368,6 +343,7 @@ function SectionHeader({
   return (
     <button
       type="button"
+      aria-expanded={open}
       onClick={onClick}
       style={{
         display: 'flex',
@@ -446,24 +422,6 @@ function SectionHeader({
   );
 }
 
-function DiffStats({ additions, deletions }: { additions: number; deletions: number }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        fontSize: 9.5,
-        fontWeight: 300,
-        letterSpacing: '-0.2px',
-        fontVariantNumeric: 'tabular-nums',
-      }}
-    >
-      <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{additions}</span>
-      <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{deletions}</span>
-    </span>
-  );
-}
 
 function ProgressRow({ label, done, muted }: { label: string; done: boolean; muted?: boolean }) {
   return (
@@ -588,37 +546,8 @@ export function DiffIcon() {
   );
 }
 
-function LaptopIcon() {
-  return (
-    <svg {...svgProps()}>
-      <rect x="4" y="5" width="16" height="11" rx="2" />
-      <path d="M3 19h18" />
-      <path d="M8 16h8" />
-    </svg>
-  );
-}
 
-function BranchIcon() {
-  return (
-    <svg {...svgProps()}>
-      <circle cx="6" cy="6" r="2" />
-      <circle cx="6" cy="18" r="2" />
-      <circle cx="18" cy="8" r="2" />
-      <path d="M6 8v8" />
-      <path d="M18 10v2a4 4 0 0 1-4 4H8" />
-    </svg>
-  );
-}
 
-function CommitIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M3 12h6" />
-      <circle cx="12" cy="12" r="3" />
-      <path d="M15 12h6" />
-    </svg>
-  );
-}
 
 export function WorkerIcon() {
   return (
@@ -686,14 +615,6 @@ function CommentIcon() {
   );
 }
 
-function GearIcon() {
-  return (
-    <svg {...svgProps()}>
-      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.24.35.44.68.6 1H20a2 2 0 1 1 0 4h-.08c-.16.32-.36.65-.52 1Z" />
-    </svg>
-  );
-}
 
 function ChevronIcon() {
   return (

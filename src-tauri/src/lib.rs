@@ -11,6 +11,8 @@ mod remote_preview;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
+mod desktop_attach_retry;
+mod desktop_attach_owner;
 mod dictation_history;
 mod dock_window;
 #[cfg(target_os = "macos")]
@@ -954,7 +956,7 @@ fn decide_desktop_attach(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ServeStateV1 {
     schema: String,
@@ -962,6 +964,7 @@ struct ServeStateV1 {
     pid: u32,
     api_port: u16,
     ws_port: u16,
+    generation: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -982,12 +985,19 @@ struct DesktopAttachAttempt {
 // normally single-digit milliseconds; 75ms leaves scheduler margin while
 // keeping an unhealthy daemon below the common 100ms perception threshold.
 const DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS: u64 = 75;
+// Reopening a live profile can race a cold route or a busy scheduler. Other
+// listener probes retain their short budget; attachment has a recovery prompt.
+const DESKTOP_RECONNECT_IDENTITY_TIMEOUT_MS: u64 = 2_000;
 
 fn fetch_setup_identity(port: u16) -> Option<SetupIdentityResponse> {
+    fetch_setup_identity_with_timeout(port, DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS)
+}
+
+fn fetch_setup_identity_with_timeout(port: u16, timeout_ms: u64) -> Option<SetupIdentityResponse> {
     let url = format!("http://127.0.0.1:{}/api/setup/identity", port);
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(
-            DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS,
+            timeout_ms,
         ))
         .build()
         .ok()?;
@@ -1030,22 +1040,26 @@ fn daemon_pid_is_alive(_pid: u32) -> bool {
     false
 }
 
+fn unowned_desktop_boot(data_dir: &str, reason: String) -> DesktopAttachAttempt {
+    if let Some(reason) = desktop_attach_owner::retained_owner_reason(data_dir, daemon_pid_is_alive) {
+        return DesktopAttachAttempt { decision: DesktopAttachDecision::Coexist, target: None, reason };
+    }
+    DesktopAttachAttempt { decision: DesktopAttachDecision::NormalBoot, target: None, reason }
+}
+
 fn inspect_desktop_attach() -> DesktopAttachAttempt {
     let data_dir = o8_data_dir();
     let pid_path = format!("{data_dir}/serve.pid");
     let state_path = format!("{data_dir}/serve-state.json");
     let pid_raw = match std::fs::read_to_string(&pid_path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
-                target: None,
-                reason: "serve.pid is absent".to_string(),
-            };
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            && matches!(std::fs::symlink_metadata(&pid_path), Err(ref error) if error.kind() == std::io::ErrorKind::NotFound) => {
+            return unowned_desktop_boot(&data_dir, "serve.pid is absent".to_string());
         }
         Err(error) => {
             return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
+                decision: DesktopAttachDecision::Coexist,
                 target: None,
                 reason: format!("serve.pid could not be read: {error}"),
             };
@@ -1055,18 +1069,14 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
         Ok(pid) if pid > 0 => pid,
         _ => {
             return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
+                decision: DesktopAttachDecision::Coexist,
                 target: None,
                 reason: "serve.pid is malformed".to_string(),
             };
         }
     };
     if !daemon_pid_is_alive(pid) {
-        return DesktopAttachAttempt {
-            decision: decide_desktop_attach(Some(false), None, None),
-            target: None,
-            reason: format!("serve.pid references dead pid {pid}"),
-        };
+        return unowned_desktop_boot(&data_dir, format!("serve.pid references dead pid {pid}"));
     }
 
     let state_raw = match std::fs::read_to_string(&state_path) {
@@ -1102,7 +1112,7 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
         };
     }
 
-    let identity = fetch_setup_identity(state.api_port).and_then(|response| {
+    let identity = fetch_setup_identity_with_timeout(state.api_port, DESKTOP_RECONNECT_IDENTITY_TIMEOUT_MS).and_then(|response| {
         let SetupIdentityResponse {
             product: Some(product),
             instance_id: Some(instance_id),
@@ -1156,6 +1166,23 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
             ),
         };
     };
+    // The probe awaited an external process. Re-read ownership before using its
+    // result so a reply from a superseded generation cannot select our backend.
+    let owner_unchanged = std::fs::read_to_string(&pid_path)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok()) == Some(pid)
+        && daemon_pid_is_alive(pid)
+        && std::fs::read_to_string(&state_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<ServeStateV1>(&raw).ok())
+            .as_ref() == Some(&state);
+    if !owner_unchanged {
+        return DesktopAttachAttempt {
+            decision: DesktopAttachDecision::Coexist,
+            target: None,
+            reason: "daemon ownership changed during the identity probe".to_string(),
+        };
+    }
     DesktopAttachAttempt {
         decision,
         target: Some(DesktopAttachTarget {
@@ -1169,10 +1196,25 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
     }
 }
 
+/// A live or unreadable owner is never permission to start another backend in
+/// its profile. Dismissal exits before boot identity, listeners or sidecars.
+fn resolve_desktop_attach(mut retry: impl FnMut(&str) -> bool) -> Option<DesktopAttachAttempt> {
+    loop {
+        let attempt = inspect_desktop_attach();
+        if attempt.decision != DesktopAttachDecision::Coexist {
+            return Some(attempt);
+        }
+        eprintln!("[desktop-attach] waiting for existing profile: {}", attempt.reason);
+        if !retry(&attempt.reason) {
+            return None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod desktop_attach_tests {
     use super::{
-        decide_desktop_attach, inspect_desktop_attach, DesktopAttachDecision,
+        decide_desktop_attach, inspect_desktop_attach, resolve_desktop_attach, DesktopAttachDecision,
         DATA_DIR_ENV_TEST_LOCK,
     };
     use std::ffi::OsString;
@@ -1245,6 +1287,13 @@ mod desktop_attach_tests {
     }
 
     fn spawn_identity_stub() -> (u16, JoinHandle<()>) {
+        spawn_delayed_identity_stub(Duration::ZERO, || {})
+    }
+
+    fn spawn_delayed_identity_stub(
+        delay: Duration,
+        before_response: impl FnOnce() + Send + 'static,
+    ) -> (u16, JoinHandle<()>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind identity stub");
         listener
             .set_nonblocking(true)
@@ -1268,6 +1317,8 @@ mod desktop_attach_tests {
                                 .starts_with("GET /api/setup/identity "),
                             "identity probe must use the setup identity route"
                         );
+                        std::thread::sleep(delay);
+                        before_response();
                         let body = r#"{"product":"o8","instanceId":"daemon-instance","bootId":"daemon-boot"}"#;
                         write!(
                             stream,
@@ -1342,6 +1393,158 @@ mod desktop_attach_tests {
         assert_eq!(target.ws_port, 47105);
         assert_eq!(target.identity.instance_id, "daemon-instance");
         assert_eq!(target.identity.boot_id, "daemon-boot");
+    }
+
+    #[test]
+    fn delayed_valid_daemon_attaches_without_replacing_profile_metadata() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_delayed_identity_stub(Duration::from_millis(200), || {});
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+        let before = std::fs::read(fixture.path.join("serve-state.json")).unwrap();
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().expect("join delayed identity stub");
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert_eq!(std::fs::read(fixture.path.join("serve-state.json")).unwrap(), before);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn dismissing_reconnect_preserves_the_live_owner_and_saved_profile() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id().to_string();
+        std::fs::write(fixture.path.join("serve.pid"), &pid).unwrap();
+        std::fs::write(fixture.path.join("serve-state.json"), "{unfinished").unwrap();
+        std::fs::write(fixture.path.join("boot-id"), "existing-boot").unwrap();
+        std::fs::write(fixture.path.join("terminal-state.json"), "saved terminal").unwrap();
+
+        for _ in 0..2 {
+            let mut prompted = 0;
+            assert!(resolve_desktop_attach(|reason| {
+                assert!(reason.contains("malformed"));
+                prompted += 1;
+                false
+            }).is_none());
+            assert_eq!(prompted, 1);
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve.pid")).unwrap(), pid);
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), "{unfinished");
+            assert_eq!(std::fs::read_to_string(fixture.path.join("boot-id")).unwrap(), "existing-boot");
+            assert_eq!(std::fs::read_to_string(fixture.path.join("terminal-state.json")).unwrap(), "saved terminal");
+        }
+    }
+
+    #[test]
+    fn retry_rechecks_the_profile_and_connects_when_it_becomes_ready() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        std::fs::write(fixture.path.join("serve-state.json"), "{unfinished").unwrap();
+        let mut prompted = 0;
+
+        let attempt = resolve_desktop_attach(|_| {
+            prompted += 1;
+            write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+            true
+        }).expect("ready owner attaches after retry");
+        identity_stub.join().unwrap();
+
+        assert_eq!(prompted, 1);
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn a_live_supervisor_without_a_live_daemon_pid_keeps_the_profile_owned() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for dead_pid in [false, true] {
+            let fixture = DataDirFixture::new();
+            if dead_pid {
+                std::fs::write(fixture.path.join("serve.pid"), u32::MAX.to_string()).unwrap();
+            }
+            let state = serde_json::json!({
+                "schema": "o8/serve-state/v1", "supervisorPid": std::process::id(), "generation": "restarting"
+            }).to_string();
+            std::fs::write(fixture.path.join("serve-state.json"), &state).unwrap();
+            assert!(resolve_desktop_attach(|_| false).is_none());
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), state);
+            assert!(!fixture.path.join("boot-id").exists());
+        }
+    }
+
+    #[test]
+    fn retry_after_supervisor_startup_uses_its_ready_daemon() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        std::fs::write(fixture.path.join("serve-state.json"), serde_json::json!({
+            "schema": "o8/serve-state/v1", "supervisorPid": pid, "generation": "starting"
+        }).to_string()).unwrap();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        let mut prompted = 0;
+        let attempt = resolve_desktop_attach(|_| {
+            prompted += 1;
+            assert!(!fixture.path.join("boot-id").exists());
+            std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+            write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+            true
+        }).expect("attach to supervisor's ready daemon");
+        identity_stub.join().unwrap();
+        assert_eq!(prompted, 1);
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn retained_children_and_uncertain_lifecycle_metadata_block_a_new_backend() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for state in [
+            serde_json::json!({ "schema": "o8/serve-state/v1", "children": [{ "pid": std::process::id() }] }).to_string(),
+            "{unfinished".to_string(),
+        ] {
+            let fixture = DataDirFixture::new();
+            std::fs::write(fixture.path.join("serve-state.json"), &state).unwrap();
+            assert!(resolve_desktop_attach(|_| false).is_none());
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), state);
+            assert!(!fixture.path.join("boot-id").exists());
+        }
+        let fixture = DataDirFixture::new();
+        std::fs::create_dir(fixture.path.join("serve-operation.lock")).unwrap();
+        assert!(resolve_desktop_attach(|_| false).is_none());
+        assert!(fixture.path.join("serve-operation.lock").is_dir());
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn a_successful_identity_from_a_superseded_generation_is_rejected() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let state_path = fixture.path.join("serve-state.json");
+        let state_for_reply = state_path.clone();
+        let (api_port, identity_stub) = spawn_delayed_identity_stub(Duration::from_millis(50), move || {
+            let mut state: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&state_for_reply).unwrap()).unwrap();
+            state["generation"] = serde_json::json!("replacement");
+            std::fs::write(state_for_reply, state.to_string()).unwrap();
+        });
+        let pid = std::process::id();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().unwrap();
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Coexist);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("ownership changed"));
+        assert!(!fixture.path.join("boot-id").exists());
     }
 
     #[test]
@@ -5874,8 +6077,9 @@ async fn symon_text_run_turn(
     engine: String,
     model: String,
     effort: String,
+    allow_default_fallback: Option<bool>,
 ) -> Result<agent::SymonTextTurnResult, String> {
-    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort).await
+    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort, allow_default_fallback.unwrap_or(false)).await
 }
 
 #[cfg(target_os = "macos")]
@@ -7616,7 +7820,10 @@ pub fn run() {
             reason: format!("{} owns backend selection", dev_frontend::ENV_VAR),
         }
     } else {
-        inspect_desktop_attach()
+        let Some(attempt) = resolve_desktop_attach(|_| desktop_attach_retry::prompt_retry()) else {
+            return;
+        };
+        attempt
     };
     let desktop_attached = desktop_attach.decision == DesktopAttachDecision::Attach;
     let boot_identity = desktop_attach
@@ -9005,6 +9212,10 @@ pub fn run() {
         .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
         .run(move |_app_handle, event| match event {
+            // Auxiliary windows can keep has_visible_windows true while main
+            // is hidden. Every Dock reopen restores the existing main window.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_desktop_window(_app_handle),
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch

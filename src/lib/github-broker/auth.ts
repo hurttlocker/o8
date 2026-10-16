@@ -4,6 +4,9 @@ import { createHmac, createPrivateKey, timingSafeEqual } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { getGitHubAppConfig, requireGitHubAppConfig } from './env';
 import { readManagedGithubToken } from './managed';
+import { assertGitHubRequestBudget, githubCredentialScope, observeGitHubRequestBudget, type GitHubReadPriority } from './request-budget';
+import { sharedConditionalGitHubRead } from './conditional-read';
+import { isSecondaryGitHubLimit } from './rate-limit-response';
 
 const INSTALLATION_TOKEN_TTL_SKEW_MS = 60_000;
 const installationTokenCache = new Map<number, { token: string; expiresAtMs: number }>();
@@ -75,7 +78,7 @@ function buildGitHubError(response: Response, bodyText: string) {
   return new Error(pieces.join(' · '));
 }
 
-export async function getInstallationForRepo(repoFullName: string) {
+export async function getInstallationForRepo(repoFullName: string, signal?: AbortSignal) {
   // Managed mode: no BYO app key on this machine — there is exactly ONE
   // installation (the signed-in user's, minted by the license server). We
   // can't call /repos/:repo/installation without an app JWT; a repo outside
@@ -95,7 +98,7 @@ export async function getInstallationForRepo(repoFullName: string) {
     // that requireGitHubAppConfig would throw below (audit #6).
     throw new GitHubManagedUnavailableError();
   }
-  const response = await githubAppFetch(`/repos/${repoFullName}/installation`);
+  const response = await githubAppFetch(`/repos/${repoFullName}/installation`, { signal });
   const text = await response.text();
   if (!response.ok) {
     throw buildGitHubError(response, text);
@@ -108,7 +111,7 @@ export async function getInstallationForRepo(repoFullName: string) {
   };
 }
 
-export async function getInstallationToken(installationId: number) {
+export async function getInstallationToken(installationId: number, signal?: AbortSignal) {
   // Managed mode: the license server minted this token; use it as-is. Never
   // fall through to githubAppFetch (no BYO key exists — it would throw the
   // misleading "not configured", audit #1/#6).
@@ -124,6 +127,7 @@ export async function getInstallationToken(installationId: number) {
 
   const response = await githubAppFetch(`/app/installations/${installationId}/access_tokens`, {
     method: 'POST',
+    signal,
   });
   const text = await response.text();
   if (!response.ok) {
@@ -138,20 +142,27 @@ export async function getInstallationToken(installationId: number) {
   return data.token;
 }
 
-export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit) {
-  const installation = await getInstallationForRepo(repoFullName);
-  const token = await getInstallationToken(installation.id);
+export async function githubInstallationFetch(repoFullName: string, path: string, init?: RequestInit, readOptions: { priority?: GitHubReadPriority; share?: boolean } = {}) {
+  const installation = await getInstallationForRepo(repoFullName, init?.signal ?? undefined);
+  const token = await getInstallationToken(installation.id, init?.signal ?? undefined);
   // Managed mode has NO BYO config — requireGitHubAppConfig() would throw here
   // even though we hold a valid token (audit #1, the bug that made every managed
   // GitHub call fail). The API base is always public GitHub in managed mode.
   const apiBaseUrl = getGitHubAppConfig()?.apiBaseUrl ?? 'https://api.github.com';
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    headers: githubHeaders(token, init?.headers),
-    cache: 'no-store',
-  });
-
-  return { response, installation };
+  const scope = githubCredentialScope(apiBaseUrl, installation.id, token);
+  const budgetScope = githubCredentialScope(apiBaseUrl, installation.id, 'installation-budget');
+  const resource = path === '/graphql' ? 'graphql' : path.startsWith('/search/') ? 'search' : 'core';
+  const read = async (etag?: string) => {
+    assertGitHubRequestBudget(budgetScope, resource, readOptions.priority ?? 'interactive');
+    const headers = new Headers(githubHeaders(token, init?.headers)); if (etag) headers.set('If-None-Match', etag);
+    const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: 'no-store' });
+    observeGitHubRequestBudget(budgetScope, resource, response, Date.now(), await isSecondaryGitHubLimit(response));
+    if (response.status === 403 || response.status === 429) assertGitHubRequestBudget(budgetScope, resource, 'interactive');
+    return response;
+  };
+  const response = readOptions.share && (!init?.method || init.method === 'GET')
+    ? await sharedConditionalGitHubRead(JSON.stringify([scope, repoFullName.toLowerCase(), path]), read) : await read();
+  return { response, installation, scope };
 }
 
 export function verifyGitHubWebhookSignature(rawBody: string, signatureHeader: string | null) {
@@ -168,4 +179,3 @@ export function verifyGitHubWebhookSignature(rawBody: string, signatureHeader: s
 
   return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }
-

@@ -20,6 +20,10 @@ function argsFor(toolProfile: ToolProfile = 'full'): string[] {
 }
 
 describe('buildOrchestratorArgs managed isolation', () => {
+  it.each([true, false])('uses an explicit process-local fastMode=%s without weakening hook isolation', (fastMode) => {
+    const args = buildOrchestratorArgs({ permissionMode: 'full', toolProfile: 'full', effort: 'high', fastMode, mcpConfigPath: '/tmp/o8-managed-mcp.json', model: 'claude-opus-5-5', claudeSessionId: null, systemPrompt: 'managed prompt' });
+    expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual({ disableAllHooks: true, fastMode });
+  });
   it('strictly limits a full orchestrator spawn to the o8-written MCP config', () => {
     const args = argsFor();
     expect(args).toContain('--strict-mcp-config');

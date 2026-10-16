@@ -1,15 +1,19 @@
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -23,6 +27,8 @@ import {
   writeReleaseBuildCachePhaseReceipt,
   type ReleaseBuildCacheIdentity,
 } from '../scripts/lib/release-build-cache.mjs';
+
+import { promoteExactChild } from '../src/lib/workspace/exact-parent-operation';
 
 const roots: string[] = [];
 
@@ -79,7 +85,140 @@ function nativeIdentity(source: string): ReleaseBuildCacheIdentity {
   };
 }
 
-describe('shared release build cache', () => {
+describe('shared release build cache', { timeout: 120_000 }, () => {
+  it('persists staging identity and completed cleanup through the real capture entry point', async () => {
+    const { root, cacheRoot } = fixture();
+    const captured = await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a'), runId: 'staging-success' });
+    expect(captured, JSON.stringify(captured)).toMatchObject({ status: 'captured' });
+    const directory = join(cacheRoot, 'runs/staging-success/staging');
+    const records = readdirSync(directory).map(name => JSON.parse(readFileSync(join(directory, name), 'utf8')));
+    expect(records.some(record => record.state === 'bound' && record.staging.inode > 0)).toBe(true);
+    expect(records.some(record => record.state === 'cleaned')).toBe(true);
+    const final = await finalizeReleaseBuildCacheReceipt(cacheRoot, 'staging-success', {
+      outcome: 'PASS', source: { head: 'a' }, buildDurationMs: 1,
+    }, { projectRoot: root });
+    expect(final.receipt.staging).toEqual(expect.arrayContaining([expect.objectContaining({ state: 'cleaned' })]));
+    expect(existsSync(directory)).toBe(false);
+  });
+
+  it('retains unknown run content when completed staging is finalized', async () => {
+    const { root, cacheRoot } = fixture();
+    await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a'), runId: 'unknown-content' });
+    const run = join(cacheRoot, 'runs/unknown-content');
+    mkdirSync(join(run, 'unclaimed'));
+    writeFileSync(join(run, 'unclaimed/keep'), 'unclaimed bytes');
+    const final = await finalizeReleaseBuildCacheReceipt(cacheRoot, 'unknown-content', {
+      outcome: 'PASS', source: { head: 'a' }, buildDurationMs: 1,
+    }, { projectRoot: root });
+    expect(final.receipt.retention).toMatchObject({ reason: 'unknown_run_content' });
+    expect(readFileSync(join(run, 'unclaimed/keep'), 'utf8')).toBe('unclaimed bytes');
+    expect(existsSync(join(run, 'staging'))).toBe(true);
+  });
+
+  it('preserves an occupied restore destination instead of forcing a hit', async () => {
+    const { root, cacheRoot } = fixture();
+    await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a') });
+    writeFileSync(join(root, '.next/cache/webpack/entry.bin'), 'current consumer');
+    const before = readdirSync(cacheRoot).sort();
+    const runs = readdirSync(join(cacheRoot, 'runs')).sort();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await restoreReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a') });
+      expect(result.status).toBe('miss');
+      expect(result.reason).toContain('occupied');
+    }
+    expect(readdirSync(cacheRoot).sort()).toEqual(before);
+    expect(readdirSync(join(cacheRoot, 'runs')).sort()).toEqual(runs);
+    expect(readFileSync(join(root, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('current consumer');
+  });
+
+  it.each(['source-parent', 'destination-parent', 'source-child', 'occupied', 'symlink'])(
+    'refuses %s identity changes at the exact promotion boundary', async (mode) => {
+      const { root } = fixture();
+      const base = realpathSync(root);
+      const from = join(base, 'from');
+      const to = join(base, 'to');
+      mkdirSync(from); mkdirSync(to);
+      const source = join(from, 'source');
+      const destination = join(to, 'destination');
+      mkdirSync(source);
+      writeFileSync(join(source, 'original'), 'original bytes');
+      const capture = (path: string) => ({ canonicalPath: path, device: lstatSync(path).dev, inode: lstatSync(path).ino });
+      const parents = [capture(from), capture(to)];
+      const child = capture(source);
+      if (mode === 'source-parent' || mode === 'destination-parent' || mode === 'source-child') {
+        const replaced = mode === 'source-parent' ? from : mode === 'destination-parent' ? to : source;
+        renameSync(replaced, replaced + '.original');
+        mkdirSync(replaced);
+        writeFileSync(join(replaced, 'keep'), 'replacement bytes');
+      } else if (mode === 'occupied') mkdirSync(destination);
+      else symlinkSync(source, destination);
+      await expect(promoteExactChild(parents[0], parents[1], source, destination, child, 'directory')).rejects.toThrow();
+      const original = mode === 'source-parent' ? join(from + '.original', 'source/original')
+        : mode === 'source-child' ? join(source + '.original', 'original') : join(source, 'original');
+      expect(readFileSync(original, 'utf8')).toBe('original bytes');
+      if (mode === 'occupied' || mode === 'symlink') expect(lstatSync(destination)).toBeTruthy();
+    });
+
+  it.each(['tar-failure', 'staging-replaced', 'parent-replaced', 'owner-interrupted'])(
+    'retains original staging evidence after %s through actual capture and tar', async (mode) => {
+      const { root, cacheRoot } = fixture();
+      const bin = join(root, 'bin');
+      mkdirSync(bin);
+      const runId = 'interrupted';
+      const journal = join(cacheRoot, 'runs', runId, 'staging');
+      const wrapper = join(bin, 'tar');
+      writeFileSync(wrapper, `#!${process.execPath}
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const args = process.argv.slice(2);
+if (!args.includes('-cf')) process.exit(cp.spawnSync('/usr/bin/tar', args, { stdio: 'inherit' }).status ?? 1);
+const journal = ${JSON.stringify(journal)};
+const records = fs.readdirSync(journal).map(name => JSON.parse(fs.readFileSync(journal + '/' + name, 'utf8')));
+const bound = records.find(row => row.state === 'populating');
+if (!bound || bound.staging.inode !== fs.lstatSync(process.cwd()).ino || !bound.owner.identity.startId) process.exit(79);
+const mode = ${JSON.stringify(mode)};
+if (mode === 'tar-failure') process.exit(77);
+if (mode === 'owner-interrupted') { process.kill(bound.owner.pid, 'SIGKILL'); process.exit(0); }
+const result = cp.spawnSync('/usr/bin/tar', args, { stdio: 'inherit' });
+if (result.status !== 0) process.exit(result.status ?? 1);
+const replaced = mode === 'staging-replaced' ? process.cwd() : bound.destinations[0].parent.canonicalPath;
+fs.renameSync(replaced, replaced + '.original');
+fs.mkdirSync(replaced);
+fs.writeFileSync(replaced + '/keep.txt', 'replacement must survive');
+`);
+      chmodSync(wrapper, 0o700);
+      const script = `import { captureReleaseBuildCache } from ${JSON.stringify(new URL('../scripts/lib/release-build-cache.mjs', import.meta.url).href)};
+const result = await captureReleaseBuildCache(${JSON.stringify(root)}, 'web', ${JSON.stringify({ cacheRoot, runId, identity: identity('a') })});
+console.log(JSON.stringify(result));`;
+      const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 90_000,
+        env: { ...process.env, PATH: bin + ':' + process.env.PATH },
+      });
+      if (mode === 'owner-interrupted') expect(child.signal).toBe('SIGKILL');
+      else {
+        expect(child.status, child.stderr).toBe(0);
+        expect(JSON.parse(child.stdout.trim())).toMatchObject({ status: 'miss' });
+      }
+      const records = readdirSync(journal).map(name => JSON.parse(readFileSync(join(journal, name), 'utf8')));
+      const bound = records.find(row => row.state === 'bound');
+      expect(bound.staging.inode).toBeGreaterThan(0);
+      expect(existsSync(bound.stagingPath)).toBe(true);
+      if (mode === 'staging-replaced' || mode === 'parent-replaced') {
+        const replaced = mode === 'staging-replaced' ? bound.stagingPath
+          : join(cacheRoot, 'entries/web/compatibility-a');
+        expect(readFileSync(join(replaced, 'keep.txt'), 'utf8')).toBe('replacement must survive');
+        expect(existsSync(replaced + '.original')).toBe(true);
+      }
+      const original = readdirSync(journal).map(name => [name, readFileSync(join(journal, name), 'utf8')]);
+      const final = await finalizeReleaseBuildCacheReceipt(cacheRoot, runId, {
+        outcome: 'FAIL', source: { head: 'a' }, buildDurationMs: 1,
+      }, { projectRoot: root });
+      expect(final.receipt.staging).toEqual(expect.arrayContaining([expect.objectContaining({
+        state: mode === 'owner-interrupted' ? 'populating' : 'held',
+      })]));
+      for (const [name, contents] of original) expect(readFileSync(join(journal, name), 'utf8')).toBe(contents);
+    });
+
   it('rejects native output from a deleted producer checkout before replacing destination files', async () => {
     const { root: producer, cacheRoot } = fixture();
     const { root: destination } = fixture();
@@ -114,6 +253,7 @@ describe('shared release build cache', () => {
     expect(await restoreReleaseBuildCache(root, 'native', { cacheRoot, identity: nativeIdentity('a') }))
       .toMatchObject({ status: 'miss', reason: 'native_checkout_unverified' });
     await captureReleaseBuildCache(root, 'web', { cacheRoot, identity: identity('a') });
+    rmSync(join(destination, '.next/cache'), { recursive: true, force: true });
     expect(await restoreReleaseBuildCache(destination, 'web', { cacheRoot, identity: identity('b') }))
       .toMatchObject({ status: 'hit_compatible', reason: 'verified' });
     expect(readFileSync(join(destination, '.next/cache/webpack/entry.bin'), 'utf8')).toBe('compiled-source-a');
@@ -269,6 +409,17 @@ describe('shared release build cache', () => {
     expect(webA.compatibilitySha256).not.toBe(webB.compatibilitySha256);
   });
 
+  it('invalidates recipes when extracted staging execution changes', () => {
+    const root = identityFixture();
+    const helper = join(root, 'scripts/lib/release-build-cache-staging.mjs');
+    mkdirSync(join(root, 'scripts/lib'), { recursive: true });
+    writeFileSync(helper, 'export const protocol = 1;');
+    const before = collectReleaseBuildCacheIdentity(root, 'web');
+    writeFileSync(helper, 'export const protocol = 2;');
+    const after = collectReleaseBuildCacheIdentity(root, 'web');
+    expect(after.compatibilitySha256).not.toBe(before.compatibilitySha256);
+  });
+
   it('keeps compatibility across synchronized o8 version changes while source identity changes', () => {
     const root = identityFixture();
     const webBefore = collectReleaseBuildCacheIdentity(root, 'web');
@@ -319,7 +470,7 @@ describe('shared release build cache', () => {
       .not.toBe(featureBefore.compatibilitySha256);
   });
 
-  it('restores a verified compatible entry across changed source state', async () => {
+  it('restores a compatible entry across changed source and finalizes generated runs', async () => {
     const { root, cacheRoot } = fixture();
     const captured = await captureReleaseBuildCache(root, 'web', {
       cacheRoot,
@@ -328,11 +479,13 @@ describe('shared release build cache', () => {
     });
     expect(captured).toMatchObject({ status: 'captured', reason: 'verified' });
 
-    writeFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'stale-local-output');
+    rmSync(join(root, '.next/cache'), { recursive: true, force: true });
     const restored = await restoreReleaseBuildCache(root, 'web', {
       cacheRoot,
       identity: identity('b'),
     });
+    expect(readdirSync(join(cacheRoot, 'runs'))).toEqual([]);
+    expect(readdirSync(join(cacheRoot, 'receipts'))).toHaveLength(2);
     expect(restored).toMatchObject({
       status: 'hit_compatible',
       reason: 'verified',
@@ -362,7 +515,7 @@ describe('shared release build cache', () => {
 
     const entryDirectory = join(cacheRoot, 'entries', 'web', 'compatibility-a');
     expect(readdirSync(entryDirectory).sort()).toEqual(['entry-b.json', 'entry-b.tar']);
-    writeFileSync(join(root, '.next', 'cache', 'webpack', 'entry.bin'), 'stale-local-output');
+    rmSync(join(root, '.next/cache'), { recursive: true, force: true });
     expect(await restoreReleaseBuildCache(root, 'web', {
       cacheRoot,
       identity: identity('c'),
@@ -506,7 +659,7 @@ describe('shared release build cache', () => {
     }
   });
 
-  it('ignores AppleDouble metadata when finalizing aggregate release cache receipts', () => {
+  it('ignores AppleDouble metadata when finalizing aggregate release cache receipts', async () => {
     const { root, cacheRoot } = fixture();
     const runId = 'run-appledouble';
 
@@ -564,7 +717,7 @@ describe('shared release build cache', () => {
     expect(releaseBuildCacheInternals.isReleaseBuildCacheJsonCandidate('entry-a.json')).toBe(true);
     expect(releaseBuildCacheInternals.isReleaseBuildCacheJsonCandidate('._entry-a.json')).toBe(false);
 
-    const finalized = finalizeReleaseBuildCacheReceipt(
+    const finalized = await finalizeReleaseBuildCacheReceipt(
       cacheRoot,
       runId,
       {
@@ -588,7 +741,8 @@ describe('shared release build cache', () => {
       misses: 1,
     });
     expect(JSON.stringify(finalized.receipt)).not.toContain('noise');
-    expect(existsSync(runDir)).toBe(false);
+    expect(existsSync(runDir)).toBe(true);
+    expect(finalized.receipt.retention).toMatchObject({ reason: 'unknown_run_content', entryCount: 3 });
   });
 
   it('bypasses dirty source and records phase totals without local paths', async () => {
@@ -612,7 +766,7 @@ describe('shared release build cache', () => {
       },
       buildDurationMs: 100,
     });
-    const finalized = finalizeReleaseBuildCacheReceipt(cacheRoot, 'run-a', {
+    const finalized = await finalizeReleaseBuildCacheReceipt(cacheRoot, 'run-a', {
       outcome: 'PASS',
       source: { head: 'head-b' },
       buildDurationMs: 200,

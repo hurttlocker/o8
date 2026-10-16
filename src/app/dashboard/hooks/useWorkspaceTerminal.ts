@@ -270,7 +270,7 @@ export function useWorkspaceTerminal({
       return {
         ...current,
         root: replaceTileContent(current.root, tileId, {
-          kind: 'terminal',
+          ...tile.content,
           repoPath: nextRepoPath,
         }),
       };

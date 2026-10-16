@@ -50,7 +50,8 @@ export async function POST(request: NextRequest) {
       projectId: result.projectId,
     }, { status: 201, headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to scaffold repository.';
+    console.error('[api] panel/repos/scaffold failed:', error);
+    const message = 'Failed to scaffold repository.';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });
   }
 }

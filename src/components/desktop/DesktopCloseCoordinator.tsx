@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { canUseTauriEvents, resolveDesktopClose } from '@/lib/tauri/bridge';
 import {
@@ -18,6 +18,66 @@ export function DesktopCloseCoordinator() {
   const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState<'background' | 'quit' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const resolvingRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const open = request !== null;
+
+  const cancel = useCallback(() => {
+    // Once an explicit native choice starts, dismissing cannot undo it.
+    if (resolvingRef.current) return;
+    setRequest(null);
+    setRemember(false);
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusCancel = () => {
+      const control = actionsRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+      (control ?? dialog).focus();
+    };
+    const containFocus = (event: FocusEvent) => {
+      if (!dialog.contains(event.target as Node)) focusCancel();
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancel();
+      } else if (event.key === 'Tab') {
+        const controls = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first || !dialog.contains(document.activeElement) || document.activeElement === dialog) {
+          event.preventDefault();
+          (event.shiftKey ? last ?? dialog : first ?? dialog).focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+        event.stopPropagation();
+      }
+    };
+    focusCancel();
+    document.addEventListener('focusin', containFocus);
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('focusin', containFocus);
+      document.removeEventListener('keydown', handleKey, true);
+      const fallback = document.querySelector<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])');
+      const target = previousFocus?.isConnected && previousFocus !== document.body && !previousFocus.matches(':disabled')
+        ? previousFocus
+        : fallback;
+      target?.focus();
+    };
+  }, [open, cancel]);
 
   useEffect(() => {
     if (!canUseTauriEvents()) return;
@@ -26,7 +86,7 @@ export function DesktopCloseCoordinator() {
 
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const stop = await listen<DesktopCloseRequest>('desktop-close-requested', (event) => {
-        if (disposed) return;
+        if (disposed || resolvingRef.current) return;
         setRequest(event.payload);
         setRemember(false);
         setBusy(null);
@@ -43,9 +103,12 @@ export function DesktopCloseCoordinator() {
   }, []);
 
   const resolve = useCallback(async (action: 'background' | 'quit') => {
+    if (resolvingRef.current) return;
+    resolvingRef.current = true;
     setBusy(action);
     setError(null);
     const accepted = await resolveDesktopClose(action, remember);
+    resolvingRef.current = false;
     if (accepted) {
       setRequest(null);
       return;
@@ -67,6 +130,7 @@ export function DesktopCloseCoordinator() {
   return (
     <div
       role="presentation"
+      onClick={(event) => { if (event.target === event.currentTarget) cancel(); }}
       style={{
         position: 'fixed',
         top: 0,
@@ -86,7 +150,9 @@ export function DesktopCloseCoordinator() {
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby="desktop-close-title"
         aria-describedby="desktop-close-detail"
@@ -163,8 +229,9 @@ export function DesktopCloseCoordinator() {
             </div>
           ) : null}
         </div>
-        <div style={{
+        <div ref={actionsRef} style={{
           display: 'flex',
+          flexWrap: 'wrap',
           justifyContent: 'flex-end',
           gap: 8,
           paddingTop: 14,
@@ -174,6 +241,9 @@ export function DesktopCloseCoordinator() {
           borderTop: '1px solid var(--t-divider)',
           background: 'var(--t-bg-subtle)',
         }}>
+          <RamsButton variant="ghost" disabled={busy !== null} onClick={cancel}>
+            Cancel
+          </RamsButton>
           <RamsButton
             variant="danger"
             disabled={busy !== null}

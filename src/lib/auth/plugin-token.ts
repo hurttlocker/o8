@@ -8,6 +8,8 @@ export const PLUGIN_READ_SCOPE = 'o8:read';
 export const PLUGIN_FOLLOW_UP_SCOPE = 'o8:follow-up';
 // Preparing a held draft conveys no worker execution authority.
 export const PLUGIN_PREPARE_TASK_SCOPE = 'o8:prepare-task';
+// Separate consent for the bounded hosted launch and Stop capability.
+export const PLUGIN_LAUNCH_TASK_SCOPE = 'o8:launch-task';
 const PREFIX = 'o8p_';
 const MAX_LIFETIME_MS = 60_000;
 
@@ -45,9 +47,9 @@ export function mintPluginToken(
   options: { dataDir?: string; now?: number; expiresAt?: number } = {},
 ): string {
   if (!input.machineId || !input.clientId || !input.scopes.every((scope) =>
-    scope === PLUGIN_READ_SCOPE || scope === PLUGIN_FOLLOW_UP_SCOPE || scope === PLUGIN_PREPARE_TASK_SCOPE)
+    scope === PLUGIN_READ_SCOPE || scope === PLUGIN_FOLLOW_UP_SCOPE || scope === PLUGIN_PREPARE_TASK_SCOPE || scope === PLUGIN_LAUNCH_TASK_SCOPE)
     || (input.accountId !== undefined && !validAccountId(input.accountId))
-    || (input.scopes.includes(PLUGIN_PREPARE_TASK_SCOPE) && !validAccountId(input.accountId))) {
+    || (input.scopes.some((scope) => scope === PLUGIN_PREPARE_TASK_SCOPE || scope === PLUGIN_LAUNCH_TASK_SCOPE) && !validAccountId(input.accountId))) {
     throw new Error('Invalid plugin grant.');
   }
   const key = signingKey(options.dataDir ?? getDataDir(), true);
@@ -83,9 +85,9 @@ export function resolvePluginToken(
       && typeof value.machineId === 'string' && Boolean(value.machineId)
       && typeof value.clientId === 'string' && Boolean(value.clientId)
       && Array.isArray(value.scopes) && value.scopes.every((scope) =>
-        scope === PLUGIN_READ_SCOPE || scope === PLUGIN_FOLLOW_UP_SCOPE || scope === PLUGIN_PREPARE_TASK_SCOPE)
+        scope === PLUGIN_READ_SCOPE || scope === PLUGIN_FOLLOW_UP_SCOPE || scope === PLUGIN_PREPARE_TASK_SCOPE || scope === PLUGIN_LAUNCH_TASK_SCOPE)
       && (value.accountId === undefined || validAccountId(value.accountId))
-      && (!value.scopes.includes(PLUGIN_PREPARE_TASK_SCOPE) || validAccountId(value.accountId))
+      && (!value.scopes.some((scope) => scope === PLUGIN_PREPARE_TASK_SCOPE || scope === PLUGIN_LAUNCH_TASK_SCOPE) || validAccountId(value.accountId))
       && Number.isFinite(value.expiresAt) && value.expiresAt > now
       && value.expiresAt <= now + MAX_LIFETIME_MS
       ? value : null;

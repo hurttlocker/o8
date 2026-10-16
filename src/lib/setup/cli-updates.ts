@@ -1,4 +1,5 @@
 import { compareCliVersions, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { inspectCliInstallation } from './cli-installation';
 
 export type CliUpdateStatus = 'current' | 'update-available' | 'unknown' | 'not-installed';
 
@@ -10,6 +11,7 @@ export interface CliUpdateRecord {
   status: CliUpdateStatus;
   updateUrl: string;
   selectedPath: string | null;
+  manager?: 'npm' | 'native' | 'homebrew' | 'manual';
 }
 
 type CliUpdateSpec = {
@@ -18,7 +20,11 @@ type CliUpdateSpec = {
   binaryName: string;
   envOverride: string;
   extraEnvOverrides?: string[];
-  release: { kind: 'npm'; packageName: string } | { kind: 'github'; repository: string };
+  versionArgs?: string[];
+  release: { kind: 'npm'; packageName: string } | { kind: 'github'; repository: string }
+    | { kind: 'claude-native'; channel: 'stable' | 'latest' }
+    | { kind: 'grok-native' }
+    | { kind: 'homebrew'; package: string; packageKind: 'cask' | 'formula' };
   updateUrl: string;
 };
 
@@ -35,6 +41,11 @@ const UPDATE_SPECS: CliUpdateSpec[] = [
     envOverride: 'O8_CLAUDE_CODE_BIN', extraEnvOverrides: ['CLAUDE_BIN'],
     release: { kind: 'npm', packageName: '@anthropic-ai/claude-code' },
     updateUrl: 'https://docs.anthropic.com/en/docs/claude-code/setup',
+  },
+  {
+    runtimeId: 'grok', label: 'Grok Build', binaryName: 'grok', envOverride: 'O8_GROK_BIN',
+    versionArgs: ['--no-auto-update', '--version'], release: { kind: 'npm', packageName: '@xai-official/grok' },
+    updateUrl: 'https://docs.x.ai/build/cli/reference',
   },
   {
     runtimeId: 'antigravity', label: 'Antigravity CLI', binaryName: 'agy',
@@ -57,21 +68,25 @@ function parseVersion(value: string | undefined): string | null {
 }
 
 async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean): Promise<string | null> {
-  const cacheKey = release.kind === 'npm' ? `npm:${release.packageName}` : `github:${release.repository}`;
+  const cacheKey = JSON.stringify(release);
   const cached = latestCache.get(cacheKey);
   if (!refresh && cached && Date.now() - cached.checkedAt < LATEST_TTL_MS) return cached.version;
   try {
     const url = release.kind === 'npm'
       ? `https://registry.npmjs.org/${encodeURIComponent(release.packageName)}/latest`
-      : `https://api.github.com/repos/${release.repository}/releases/latest`;
+      : release.kind === 'github' ? `https://api.github.com/repos/${release.repository}/releases/latest`
+        : release.kind === 'homebrew' ? `https://formulae.brew.sh/api/${release.packageKind}/${release.package}.json`
+          : release.kind === 'grok-native' ? 'https://x.ai/cli/stable' : `https://downloads.claude.ai/claude-code-releases/${release.channel}`;
     const response = await fetch(url, {
       signal: AbortSignal.timeout(3_000),
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     if (!response.ok) return null;
-    const body = await response.json() as { version?: unknown; tag_name?: unknown };
-    const rawVersion = release.kind === 'npm' ? body.version : body.tag_name;
+    const body = release.kind === 'claude-native' || release.kind === 'grok-native' ? { version: (await response.text()).trim() }
+      : await response.json() as { version?: unknown; tag_name?: unknown; versions?: { stable?: unknown } };
+    const rawVersion = release.kind === 'github' ? body.tag_name
+      : release.kind === 'homebrew' && release.packageKind === 'formula' ? body.versions?.stable : body.version;
     const version = typeof rawVersion === 'string'
       && (release.kind !== 'npm' || /^\d+\.\d+\.\d+$/.test(rawVersion))
       ? parseVersion(rawVersion) : null;
@@ -86,19 +101,29 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
   return Promise.all(UPDATE_SPECS.filter((spec) => !runtimeId || spec.runtimeId === runtimeId).map(async (spec): Promise<CliUpdateRecord> => {
     let installedVersion: string | null = null;
     let selectedPath: string | null = null;
+    let manager: CliUpdateRecord['manager'];
+    let release = spec.release;
     try {
       const selected = await resolveCli({
         runtimeId: spec.runtimeId,
         binaryName: spec.binaryName,
         envOverride: spec.envOverride,
         extraEnvOverrides: spec.extraEnvOverrides,
+        versionArgs: spec.versionArgs,
       });
       selectedPath = selected.path;
       installedVersion = parseVersion(selected.version);
+      if (spec.runtimeId === 'codex' || spec.runtimeId === 'claude-code' || spec.runtimeId === 'grok') {
+        const install = await inspectCliInstallation(spec.runtimeId, selected);
+        manager = install.manager;
+        if (install.manager === 'homebrew') release = { kind: 'homebrew', package: install.package!, packageKind: install.packageKind! };
+        if (install.manager === 'native' && spec.runtimeId === 'claude-code') release = { kind: 'claude-native', channel: install.channel! };
+        if (install.manager === 'native' && spec.runtimeId === 'grok') release = { kind: 'grok-native' };
+      }
     } catch {
       // Missing or unprobeable CLIs do not prevent the rest of the report.
     }
-    const latest = selectedPath ? await latestVersion(spec.release, refresh) : null;
+    const latest = selectedPath && !(spec.runtimeId === 'grok' && manager === 'manual') ? await latestVersion(release, refresh) : null;
     const status: CliUpdateStatus = !selectedPath
       ? 'not-installed'
       : !installedVersion || !latest
@@ -114,6 +139,7 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
       status,
       updateUrl: spec.updateUrl,
       selectedPath,
+      ...(manager ? { manager } : {}),
     };
   }));
 }

@@ -198,6 +198,8 @@ export interface WorkspaceAgentLaunchRequest {
 }
 
 export interface AgentPanelProps {
+  /** Global destinations and account controls live in the adjacent navigation rail. */
+  navigationRail?: boolean;
   activeSessionKey?: string | null;
   selectedRepo?: string | null;
   selectedRepoBranch?: string | null;

@@ -137,6 +137,7 @@ interface SearchResponse {
   results: CommandPaletteSearchResult[];
   groups: Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>;
   error?: string;
+  providerErrors?: Partial<Record<CommandPaletteSearchKind, string>>;
 }
 
 const RECENTS_KEY = 'o8:command-palette:recents:v1';
@@ -300,6 +301,7 @@ export const CommandPalette = memo(function CommandPalette({
   const [recents, setRecents] = useState<CommandPaletteRecent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchAttempt, setSearchAttempt] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -379,13 +381,14 @@ export const CommandPalette = memo(function CommandPalette({
       || scope === 'directive'
       ? scope
       : null;
-    if (trimmed.length < 2 && !browseScope) {
+    if (trimmed.length < 2 && (!browseScope || browseScope === 'file')) {
       setGroups(EMPTY_GROUPS);
       setError(null);
       setLoading(false);
       return;
     }
 
+    setError(null);
     setLoading(true);
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController();
@@ -396,12 +399,14 @@ export const CommandPalette = memo(function CommandPalette({
         if (repo) params.set('repo', repo);
         if (browseScope) params.set('scope', browseScope);
         const response = await fetch(`/api/panel/search?${params.toString()}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
         if (!response.ok) {
           setError('Search is unavailable.');
           setGroups(EMPTY_GROUPS);
           return;
         }
         const data = await response.json() as SearchResponse;
+        if (controller.signal.aborted) return;
         if (data.error) {
           setError(data.error);
           setGroups(EMPTY_GROUPS);
@@ -414,13 +419,13 @@ export const CommandPalette = memo(function CommandPalette({
         if (scope === 'all' && shouldRequestRecall(trimmed, keywordHits)) {
           setRecallCandidate({ query: trimmed, keywordHits });
         }
-        setError(null);
+        setError(data.providerErrors?.file && (scope === 'all' || scope === 'file') ? 'File search is unavailable.' : null);
       } catch (caught) {
-        if ((caught as { name?: string })?.name === 'AbortError') return;
+        if (controller.signal.aborted || (caught as { name?: string })?.name === 'AbortError') return;
         setError('Search failed.');
         setGroups(EMPTY_GROUPS);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, trimmed.length < 2 ? 0 : DEBOUNCE_MS);
 
@@ -428,7 +433,7 @@ export const CommandPalette = memo(function CommandPalette({
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [fileItems, open, query, repo, scope, seededFileResults, workspace]);
+  }, [fileItems, open, query, repo, scope, searchAttempt, seededFileResults, workspace]);
 
   useEffect(() => {
     if (!open || !recallCandidate || scope !== 'all') return;
@@ -641,6 +646,7 @@ export const CommandPalette = memo(function CommandPalette({
 
   const trimmed = query.trim();
   const showEmpty = !loading && !error && items.length === 0;
+  const needsMoreFileCharacters = scope === 'file' && fileItems === undefined && trimmed.length === 1;
 
   return (
     <AnimatePresence>
@@ -717,9 +723,11 @@ export const CommandPalette = memo(function CommandPalette({
 
           <div ref={listRef} style={listStyle}>
             {error ? (
-              <div style={errorRowStyle}>
+              <div role="status" style={errorRowStyle}>
                 <AlertGlyph />
                 <span>{error}</span>
+                <button type="button" aria-label="Retry search" onClick={() => setSearchAttempt(attempt => attempt + 1)}
+                  style={{ marginLeft: 'auto', borderWidth: 0, borderRadius: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', minHeight: 28, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, cursor: 'pointer' }}>Retry</button>
               </div>
             ) : null}
 
@@ -727,7 +735,9 @@ export const CommandPalette = memo(function CommandPalette({
 
             {showEmpty ? (
               <div style={statusRowStyle}>
-                {trimmed.length < 2
+                {needsMoreFileCharacters
+                  ? 'Enter at least 2 characters to search files.'
+                  : trimmed.length === 0 || (scope !== 'file' && trimmed.length < 2)
                   ? scope === 'file'
                     ? 'Type to search files.'
                     : scope === 'all'

@@ -2,6 +2,8 @@ import 'server-only';
 
 import { githubInstallationFetch } from './auth';
 import { upsertGitHubIssue } from './store';
+import { recordOwnPrRemark } from './pr-watch';
+import { beginPrRemarkWrite } from './pr-watch-writes';
 
 function buildGitHubError(response: Response, bodyText: string) {
   const reset = response.headers.get('x-ratelimit-reset');
@@ -184,30 +186,47 @@ export async function createGitHubPullRequest(
 export async function reviewGitHubPullRequest(
   repoFullName: string,
   prNumber: number,
-  input: { event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'; body?: string },
+  input: { event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'; body?: string; commitSha?: string },
 ) {
-  const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
+  const finish = beginPrRemarkWrite(repoFullName, prNumber);
+  try {
+  const { response, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       event: input.event,
+      ...(input.commitSha ? { commit_id: input.commitSha } : {}),
       body: input.body ?? '',
     }),
+    signal: AbortSignal.timeout(18_000),
   });
 
-  return parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  const review = await parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  try { recordOwnPrRemark(scope, repoFullName, prNumber, 'reviews', review.id); } catch { /* Posting succeeded even if local watch bookkeeping failed. */ }
+  return review;
+  } finally { finish(); }
 }
 
 export async function commentOnGitHubPullRequest(repoFullName: string, prNumber: number, body: string) {
-  return commentOnGitHubIssue(repoFullName, prNumber, body);
+  const finish = beginPrRemarkWrite(repoFullName, prNumber);
+  try {
+  const { response, scope } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/issues/${prNumber}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }), signal: AbortSignal.timeout(18_000) });
+  const comment = await parseGitHubJson<{ id?: number; html_url?: string | null }>(response);
+  try { recordOwnPrRemark(scope, repoFullName, prNumber, 'comments', comment.id); } catch { /* Keep the confirmed posting result authoritative. */ }
+  return comment;
+  } finally { finish(); }
 }
 
-async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: number) {
+export async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: number) {
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`);
   const pull = await parseGitHubJson<{
     title?: string | null;
+    node_id?: string;
+    state?: string;
+    draft?: boolean;
     head?: {
       ref?: string | null;
+      sha?: string;
       repo?: { full_name?: string | null } | null;
     } | null;
   }>(response);
@@ -215,13 +234,17 @@ async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: numbe
     ref: pull.head?.ref ?? null,
     headRepoFullName: pull.head?.repo?.full_name ?? repoFullName,
     title: pull.title ?? null,
+    sha: pull.head?.sha ?? '',
+    nodeId: pull.node_id ?? '',
+    state: pull.state ?? '',
+    draft: Boolean(pull.draft),
   };
 }
 
 export async function mergeGitHubPullRequest(
   repoFullName: string,
   prNumber: number,
-  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase' },
+  options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase'; expectedHeadSha?: string },
 ) {
   const head = await getGitHubPullRequestHeadRef(repoFullName, prNumber);
   const mergeMethod = options?.mergeMethod ?? 'squash';
@@ -235,9 +258,10 @@ export async function mergeGitHubPullRequest(
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/merge`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merge_method: mergeMethod, ...(commitTitle ? { commit_title: commitTitle } : {}) }),
+    body: JSON.stringify({ merge_method: mergeMethod, ...(options?.expectedHeadSha ? { sha: options.expectedHeadSha } : {}), ...(commitTitle ? { commit_title: commitTitle } : {}) }),
   });
   const merged = await parseGitHubJson<{ merged?: boolean; sha?: string | null }>(response);
+  if (merged.merged !== true) throw new Error('GitHub did not confirm a merge.');
 
   if (options?.deleteBranch && merged.merged && head.ref && head.headRepoFullName === repoFullName) {
     const deleteResponse = await githubInstallationFetch(

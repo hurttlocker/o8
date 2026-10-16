@@ -53,11 +53,16 @@ validates the actual metadata rather than searching plist text.
 
 ## Release host
 
+Use the [macOS package compression setting](./macos-release-package.md) for the
+release command below so both the fresh size preflight and final updater archive
+use the same supported gzip level.
+
 After the normal version, tag, clean-checkout, credential, and release approval
 steps, set the manifest path for the existing ship command:
 
 ```sh
-O8_RELEASE_APP_HANDOFF=/path/to/handoff/handoff.json npm run ship
+TAR_WRITER_OPTIONS=gzip:compression-level=9 \
+  O8_RELEASE_APP_HANDOFF=/path/to/handoff/handoff.json npm run ship
 ```
 
 The release lock and preflight still run first. Only the build stage changes:

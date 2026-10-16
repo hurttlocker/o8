@@ -131,6 +131,24 @@ describe('Pi free-plan route through the real worker', () => {
     expect(await readFile(pi.sessionFile, 'utf8')).not.toContain('spentMicroUsd');
   }, 15000);
 
+  it.each([
+    { plan: 'pro' as const, cap: { period: 'week', resetsAt: '2026-10-12T00:00:00.000Z' },
+      message: 'Your weekly o8 model allowance is used up. It resets Monday, October 12 at 00:00 UTC.' },
+    { plan: 'pro' as const, cap: { period: 'week' },
+      message: 'Your weekly o8 model allowance is used up. It resets Monday at 00:00 UTC.' },
+    { plan: 'free' as const, cap: { period: 'day', resetsAt: '2026-10-08T00:00:00.000Z' },
+      message: 'Your daily o8 model allowance is used up. It resets Thursday, October 8 at 00:00 UTC.' },
+  ])('names the $plan allowance period and reset from the relay ($cap.period)', async ({ plan, cap, message }) => {
+    const token = await license(plan, `account-${plan}-capped`);
+    if (plan === 'pro') await writeFile(join(dataDir, 'entitlement.json'), JSON.stringify({ plan, status: 'active', licenseKey: token }));
+    const hits = network({ issuedLicense: token, inference: () => Response.json(
+      { error: 'daily cap reached', plan, ...cap, spentMicroUsd: 100_000, capMicroUsd: 100_000 }, { status: 402 }) });
+    const pi = await session();
+    expect(await pi.prompt('Say hello')).toMatchObject({ stopReason: 'error', errorMessage: message });
+    expect(hits.inference).toEqual([`Bearer ${token}`]);
+    expect(await readFile(pi.sessionFile, 'utf8')).not.toContain('spentMicroUsd');
+  }, 15000);
+
   it('treats an oversized 402 body as a generic rejection', async () => {
     const hits = network({ issuedLicense: await license('free', 'install-oversized'), inference: () => new Response(
       JSON.stringify({ error: 'daily cap reached', padding: 'x'.repeat(8192) }), { status: 402 }) });

@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface } from '../FloatingSurface';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { DoubleCheck } from 'iconoir-react';
 import { useTheme } from '@/lib/theme/context';
@@ -101,6 +102,19 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
   // Per-user note styling for the o8.md rail. customColor=null → brand orange;
   // else any CSS color string (a rainbow hue OR a neutral swatch incl. black).
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSettingsOpen(false);
+      settingsRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    };
+    document.addEventListener('keydown', dismiss, true);
+    return () => document.removeEventListener('keydown', dismiss, true);
+  }, [settingsOpen]);
   const [customColor, setCustomColor] = useState<string | null>(() => {
     try {
       if (typeof window === 'undefined') return null;
@@ -412,8 +426,7 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
   // values. In GLASS mode we want the editor to read as glass like every
   // other o8 panel tab — let the chrome-surface scope win (white text on
   // translucent vibrancy), no re-binding.
-  const { surface, paletteId } = useTheme();
-  const isLight = paletteId === 'light';
+  const { surface } = useTheme();
   // Note accent: brand orange by default, else the chosen color (rainbow hue or
   // a neutral incl. black). The anchor highlight tracks it at low opacity via
   // color-mix so the pairing stays cohesive for any color.
@@ -547,7 +560,7 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
           // "AI-validated" better than the old sparkle mark.
           icon={<DoubleCheck width={15} height={15} color="currentColor" strokeWidth={2} />}
         />
-        <div style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
+        <div ref={settingsRef} style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
           <TitleBarButton
             label="Notes settings"
             onClick={() => setSettingsOpen((v) => !v)}
@@ -560,15 +573,9 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
           {settingsOpen ? (
             <>
               <div onClick={() => setSettingsOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50, width: 224,
-                paddingTop: 12, paddingBottom: 12, paddingLeft: 14, paddingRight: 14, borderRadius: 12,
-                background: isLight ? '#ffffff' : '#22262d',
-                border: isLight ? '1px solid rgba(0, 0, 0, 0.10)' : '1px solid rgba(255, 255, 255, 0.12)',
-                boxShadow: '0 10px 30px rgba(0, 0, 0, 0.22)',
-                color: isLight ? '#1a1e24' : '#e8ecf2',
-              }}>
-                <div style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: isLight ? '#8a93a3' : '#9aa3b2', marginBottom: 10 }}>Note color</div>
+              <FloatingSurface role="dialog" aria-label="Note color" style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50, width: 224 }}
+                contentStyle={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 14, paddingRight: 14 }}>
+                <div style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-muted)', marginBottom: 10 }}>Note color</div>
                 <div
                   // embedded (canvas) divides clientX by the zoom so the picked
                   // hue matches the pointer — getBoundingClientRect is layout px
@@ -601,11 +608,11 @@ export function O8SpecPane({ repoPath: defaultRepoPath, toolbarSlot, embedded, a
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                     <span style={{ width: 14, height: 14, borderRadius: 4, background: noteColor, flexShrink: 0, border: '1px solid rgba(128, 128, 128, 0.4)' }} />
-                    <span style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: isLight ? '#5b6475' : '#9aa3b2' }}>{customColor == null ? 'Default' : 'Custom'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-secondary)' }}>{customColor == null ? 'Default' : 'Custom'}</span>
                   </div>
-                  <button type="button" onClick={resetColor} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', color: isLight ? '#2563eb' : '#8ab4ff' }}>Reset</button>
+                  <button type="button" onClick={resetColor} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-accent)' }}>Reset</button>
                 </div>
-              </div>
+              </FloatingSurface>
             </>
           ) : null}
         </div>

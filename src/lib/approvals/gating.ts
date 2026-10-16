@@ -13,7 +13,8 @@ export const GATE_POLICY_RULE_IDS = new Set([
   'lane-open',
 ]);
 
-export function isGateApprovalRow(approval: Pick<ApprovalRecord, 'continuation' | 'policyRuleId'>) {
-  return approval.continuation != null
+export function isGateApprovalRow(approval: Pick<ApprovalRecord, 'continuation' | 'policyRuleId'> & Partial<Pick<ApprovalRecord, 'source' | 'runtime'>>) {
+  return (approval.source === 'runtime' && approval.runtime === 'pi')
+    || approval.continuation != null
     || (approval.policyRuleId ? GATE_POLICY_RULE_IDS.has(approval.policyRuleId) : false);
 }

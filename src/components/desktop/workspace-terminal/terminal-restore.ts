@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  persistedTabStateSavedAt,
   sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
@@ -24,7 +25,7 @@ import {
 
 export interface ApplyPersistedStateOptions {
   preferredRepo: RegisteredRepo | null;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   createDefaultChatTab: () => TerminalTab;
 }
 
@@ -502,7 +503,7 @@ export async function computeRestoredTabs(
   let finalTabs: TerminalTab[];
   let nextActiveId: string;
 
-  if (options.defaultTab === 'llm-chat') {
+  if (options.defaultTab !== 'terminal') {
     const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
     if (restoredChat) {
       nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
@@ -541,7 +542,7 @@ export async function computeRestoredTabs(
 
 export interface LoadInitialTabStateOptions {
   stateScope: string;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   splitCreated: boolean;
   preferredRepoPath: string | null;
 }
@@ -585,12 +586,14 @@ export function mergeUserSpawnedTabs(
 export function reconcileValidatedTabs(
   validatedTabs: TerminalTab[],
   currentTabs: TerminalTab[],
+  acknowledgedDuringRestore: ReadonlySet<string>,
 ): TerminalTab[] {
   const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
   return validatedTabs.map((validatedTab) => {
-    if (validatedTab.kind !== 'terminal' || validatedTab.tmuxSession !== null) return validatedTab;
+    if (validatedTab.kind !== 'terminal') return validatedTab;
     const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
-    return currentSession ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
+    return currentSession && acknowledgedDuringRestore.has(validatedTab.id)
+      ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
   });
 }
 
@@ -613,7 +616,6 @@ export function applyCreatedTerminalSession(
 export function resetControllerRefs(refs: {
   restoredRef: React.MutableRefObject<boolean>;
   restoreSettledRef: React.MutableRefObject<boolean>;
-  previousWsConnectedRef: React.MutableRefObject<boolean>;
   initialTerminalBootstrapRef: React.MutableRefObject<boolean>;
   reportedRepoScopeRef: React.MutableRefObject<string | null | undefined>;
   reportedChatSessionsSignatureRef: React.MutableRefObject<string>;
@@ -626,7 +628,6 @@ export function resetControllerRefs(refs: {
 }): void {
   refs.restoredRef.current = false;
   refs.restoreSettledRef.current = false;
-  refs.previousWsConnectedRef.current = false;
   refs.initialTerminalBootstrapRef.current = false;
   refs.reportedRepoScopeRef.current = undefined;
   refs.reportedChatSessionsSignatureRef.current = '';
@@ -734,9 +735,21 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
+  const selectedTabId = saved?.activeTabId;
+  const selectedTab = saved?.tabs.find((tab) => tab.id === selectedTabId);
+  const selectedConversation = selectedTab?.kind === 'orchestrator'
+    ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
+    : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);
+  // The primary conversation follows sidebar selection independently of the
+  // global repo preference. Keep a newer, explicitly bound selection; other
+  // workspace scopes retain their repo-specific restore behavior.
+  const newerPrimaryConversation = options.stateScope === 'tile-root'
+    && selectedConversation && persistedTabStateSavedAt(saved) > 0
+    && persistedTabStateSavedAt(saved) >= persistedTabStateSavedAt(repoSaved);
+
   if (
     !options.splitCreated
-    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs && !newerPrimaryConversation))
     && currentStableRepoScope
   ) {
     saved = repoSaved;

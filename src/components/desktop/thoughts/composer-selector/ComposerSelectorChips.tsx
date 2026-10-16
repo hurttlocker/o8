@@ -1,12 +1,10 @@
 'use client';
 
-import { useEffect, useRef, type RefObject } from 'react';
-import { THINKING_EFFORT_LABELS } from '@/lib/orchestrator/thinking-effort';
+import { useEffect, type RefObject } from 'react';
 import { type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { useComposerChipCompact } from '../composer-compact-context';
 import { ProviderMarkGlyph } from './provider-marks';
 import {
-  isHotComposerEffort,
   providerMarkForLead,
   composerRuntimeLabel,
   providerMarkForRuntime,
@@ -30,13 +28,7 @@ const sharedChipStyle = {
   minWidth: 0,
 } as const;
 
-export function LeadChip({
-  state,
-  open,
-  saving,
-  buttonRef,
-  onClick,
-}: {
+export function LeadChip({ state, open, saving, buttonRef, onClick }: {
   state: ResolvedComposerSelectorState;
   open: boolean;
   saving: boolean;
@@ -44,113 +36,11 @@ export function LeadChip({
   onClick: () => void;
 }) {
   const compact = useComposerChipCompact();
-  const selectedIndex = Math.max(0, state.effortOptions.indexOf(state.effort));
-  const topActive = isHotComposerEffort(state.effort);
-  const accent = topActive ? 'var(--t-brand-orange)' : 'var(--t-accent)';
-  const meterRefs = useRef<Array<HTMLSpanElement | null>>([]);
-  const previousIndexRef = useRef<number | null>(null);
-  useEffect(() => {
-    const previousIndex = previousIndexRef.current;
-    previousIndexRef.current = selectedIndex;
-    if (
-      previousIndex === null
-      || selectedIndex <= previousIndex
-      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    ) return;
-    for (let index = previousIndex + 1; index <= selectedIndex; index += 1) {
-      meterRefs.current[index]?.animate?.(
-        [
-          { transform: 'scaleY(1)' },
-          { transform: 'scaleY(1.35)', offset: 0.5 },
-          { transform: 'scaleY(1)' },
-        ],
-        { duration: 240, delay: (index - previousIndex - 1) * 30, easing: 'cubic-bezier(.34,1.56,.64,1)' },
-      );
-    }
-  }, [selectedIndex]);
-  return (
-    <button
-      ref={buttonRef}
-      data-testid="composer-selector-lead"
-      data-accent={topActive ? 'swarm' : 'lead'}
-      type="button"
-      title={state.chipTitle}
-      aria-label={`Lead: ${state.leadModelLabel}, ${THINKING_EFFORT_LABELS[state.effort].long}`}
-      aria-expanded={open}
-      disabled={saving}
-      onClick={onClick}
-      style={{
-        ...sharedChipStyle,
-        gap: compact ? 4 : 5,
-        maxWidth: 260,
-        // A floor reserves a readable model prefix before the row collapses
-        // anything else; the effort meter yields into it first.
-        minWidth: compact ? 68 : 0,
-        borderColor: open ? 'var(--t-border)' : 'transparent',
-        background: open ? 'var(--t-hover)' : 'transparent',
-        color: 'var(--t-text-secondary)',
-        cursor: saving ? 'default' : 'pointer',
-        fontSize: 11,
-        opacity: saving ? 0.6 : 1,
-        // The row clamps at narrow widths; keep the model label inside the
-        // chip instead of letting the mark/meter paint over the Workers chip.
-        overflow: 'hidden',
-      }}
-    >
-      {compact ? null : (
-        <span style={{ display: 'inline-flex', flexShrink: 0, color: 'currentColor' }}>
-          <ProviderMarkGlyph mark={providerMarkForLead(state.leadBackend, state.leadModelId)} />
-        </span>
-      )}
-      <span
-        data-testid="composer-selector-lead-label"
-        style={{
-          // Guarantee a readable model prefix (roughly the first several
-          // glyphs) when the row is tight; the effort meter yields first.
-          minWidth: compact ? 40 : 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontWeight: 550,
-        }}
-      >
-        {state.leadModelLabel}
-      </span>
-      <span
-        data-testid="composer-selector-effort-meter"
-        aria-hidden
-        style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 2, height: 9, flexShrink: 0 }}
-      >
-        {state.effortOptions.map((effort, index) => {
-          const lit = index <= selectedIndex;
-          return (
-            <span
-              key={effort}
-              ref={(node) => { meterRefs.current[index] = node; }}
-              data-testid="composer-selector-meter-bar"
-              data-lit={lit ? 'true' : 'false'}
-              data-accent={topActive ? 'swarm' : 'lead'}
-              style={{
-                width: 2,
-                height: 4 + index,
-                borderRadius: 2,
-                background: lit ? accent : 'var(--t-border)',
-                opacity: lit ? 1 : topActive ? 0.32 : 0.65,
-                transformOrigin: 'bottom',
-              }}
-            />
-          );
-        })}
-      </span>
-      {compact ? null : (
-        <span
-          data-testid="composer-selector-effort-word"
-          style={{ flexShrink: 0, color: accent, fontWeight: 450 }}
-        >
-          {THINKING_EFFORT_LABELS[state.effort].short}
-        </span>
-      )}
-    </button>
-  );
+  return <button ref={buttonRef} data-testid="composer-selector-lead" type="button" title={`Orchestrator: ${state.leadModelLabel}`} aria-label={`Lead: ${state.leadModelLabel}`} aria-expanded={open} disabled={saving} onClick={onClick}
+    style={{ ...sharedChipStyle, gap: 5, maxWidth: 190, minWidth: compact ? 56 : 0, borderColor: open ? 'var(--t-border)' : 'transparent', background: open ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-secondary)', cursor: saving ? 'default' : 'pointer', fontSize: 11, fontWeight: 300, opacity: saving ? 0.6 : 1, overflow: 'hidden' }}>
+    {compact ? null : <span style={{ display: 'inline-flex', flexShrink: 0 }}><ProviderMarkGlyph mark={providerMarkForLead(state.leadBackend, state.leadModelId)} /></span>}
+    <span data-testid="composer-selector-lead-label" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.leadModelLabel}</span>
+  </button>;
 }
 
 export function WorkersChip({
@@ -187,7 +77,7 @@ export function WorkersChip({
     ? [0, 1, 2].map((offset) => runtimes[(selectedIndex + offset) % runtimes.length])
     : [runtime];
   const label = mode === 'fusion'
-    ? availableRuntimes ? `${availableRuntimes.length} ready` : 'Connected tools'
+    ? availableRuntimes ? `${availableRuntimes.length} ready` : 'Workers'
     : mode === 'moa'
       ? `2 ${composerRuntimeLabel(runtime)}`
       : composerRuntimeLabel(runtime);

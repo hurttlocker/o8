@@ -1,5 +1,7 @@
 import {
   ResetCleanupFailedError,
+  ResetStateChangedError,
+  ResetRetrySalvagePublicationError,
   ResetKillUnconfirmedError,
   ResetSessionArchiveUnconfirmedError,
   type ResetCleanupFailureResult,
@@ -39,6 +41,8 @@ export type ResetReceipt =
 
 export function resetFailureReceipt(error: unknown): ResetFailureReceipt {
   const message = error instanceof Error ? error.message : 'Unable to reset packet.';
+  if (error instanceof ResetStateChangedError) return { ok: false, code: 'reset_state_changed', message, status: 409 };
+  if (error instanceof ResetRetrySalvagePublicationError) return { ok: false, code: 'retry_salvage_publication_failed', message, status: 503 };
   if (error instanceof ResetKillUnconfirmedError) return { ok: false, code: 'kill_unconfirmed', message, status: 409 };
   if (error instanceof ResetSessionArchiveUnconfirmedError) {
     return { ok: false, code: 'session_archive_unconfirmed', message, status: 409 };

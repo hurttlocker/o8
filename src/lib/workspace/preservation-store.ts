@@ -15,6 +15,7 @@ import { preserveWorkspaceGitBundle, readWorkspaceGitBundle, type WorkspaceGitBu
 import { readManagedWorkspaceMaterialization } from './managed-materialization-identity';
 import { repoSetupCopyBindingRequirements } from './repo-setup';
 import { acquireWorkspaceRetentionHold } from './retention-holds';
+import { beginPreservationBankWriter, PRESERVATION_BANK_POLICY, withPreservationBankAdmission } from './preservation-bank-budget';
 
 export interface WorkspacePreservationReceipt {
   preservationId: string;
@@ -223,20 +224,7 @@ export async function preserveWorkspaceArtifacts(
       treeSha: snapshot.treeSha,
       ...capturePolicy,
     });
-    const gitBundle = await preserveWorkspaceGitBundle(snapshot, repo.localPath);
-    // Source, artifacts, and managed ownership must still name the same capture after Git verification.
-    const repeated = await readManagedWorkspaceMaterialization(repo.localPath, snapshot.originalPath);
-    if (repeated.identity.device !== managed.identity.device || repeated.identity.inode !== managed.identity.inode) {
-      throw new Error('Workspace owner changed during portable preservation.');
-    }
-    const observed = await captureIgnoredArtifacts({
-      workspacePath: snapshot.originalPath, identity: managed.identity,
-      headCommit: snapshot.headCommit, treeSha: snapshot.treeSha, ...capturePolicy,
-    });
-    if (sha256(JSON.stringify(observed)) !== sha256(JSON.stringify(capture))) {
-      throw new Error('Source or unique ignored artifacts changed during portable preservation.');
-    }
-    const payload: WorkspacePreservationPayload = {
+    const payloadFor = (gitBundle: WorkspaceGitBundleReceipt): WorkspacePreservationPayload => ({
       schema: 'o8/workspace-preservation/v1',
       repositoryUuid: repo.id,
       repositoryPath: repo.localPath,
@@ -261,40 +249,79 @@ export async function preserveWorkspaceArtifacts(
         sessionIdentities: snapshot.sessionIdentities,
         recoveryInstructions: 'Download the verified portable Git bundle through private workspace preservation, import its recovery ref into an empty repository, and verify the head, tree and required parent objects. Restore selected ignored artifacts into an exactly owned, quiescent successor. Retain the original provider archive.',
       },
-    };
-    const content = Buffer.from(JSON.stringify(payload));
-    const preservationId = sha256(content);
-    const directory = await archiveDirectory();
-    const destination = path.join(directory, preservationId + '.json');
-    try {
-      const file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try {
-        await file.writeFile(content);
-        await file.sync();
-        const stat = await file.stat();
-        if (!stat.isFile() || stat.nlink !== 1) throw new Error('Preservation publication lost exclusive file ownership.');
-      } finally {
-        await file.close();
+    });
+    const verifyCapture = async () => {
+      const repeated = await readManagedWorkspaceMaterialization(repo.localPath, snapshot.originalPath);
+      if (repeated.identity.device !== managed.identity.device || repeated.identity.inode !== managed.identity.inode) {
+        throw new Error('Workspace owner changed during portable preservation.');
       }
-      const parent = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      try { await parent.sync(); } finally { await parent.close(); }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const observed = await captureIgnoredArtifacts({
+        workspacePath: snapshot.originalPath, identity: managed.identity,
+        headCommit: snapshot.headCommit, treeSha: snapshot.treeSha, ...capturePolicy,
+      });
+      if (sha256(JSON.stringify(observed)) !== sha256(JSON.stringify(capture))) {
+        throw new Error('Source or unique ignored artifacts changed during portable preservation.');
+      }
+    };
+    // A trusted identical retry reads existing bytes without reserving or writing
+    // capacity, even when the bank is full or contains an interrupted capture.
+    const previousId = preservationIdForSnapshot(snapshot);
+    if (previousId) {
+      const previous = await readWorkspacePreservation(previousId);
+      if (previous.receipt.gitBundle && JSON.stringify(previous.payload) === JSON.stringify(payloadFor(previous.receipt.gitBundle))) {
+        await verifyCapture();
+        return previous.receipt;
+      }
     }
-    await readPayloadBytes(preservationId);
-    getSqlite().prepare(`
-      INSERT OR IGNORE INTO workspace_preservations (
-        preservation_id, repository_uuid, repository_path, workspace_path, worktree_id,
-        packet_id, lane_id, source_device, source_inode, head_commit, tree_sha,
-        manifest_sha256, handoff_sha256, artifact_count, artifact_bytes, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      preservationId, repo.id, repo.localPath, managed.identity.canonicalPath, managed.metadata.id,
-      snapshot.packetId, snapshot.laneId, managed.identity.device, managed.identity.inode,
-      snapshot.headCommit, snapshot.treeSha, preservationId, sha256(JSON.stringify(payload.handoff)),
-      capture.entries.filter((entry) => entry.kind === 'file').length, capture.bytes, Date.now(),
-    );
-    return (await readWorkspacePreservation(preservationId)).receipt;
+    const directory = await archiveDirectory();
+    return await withPreservationBankAdmission(directory, async (admission) => {
+      const gitBundle = await preserveWorkspaceGitBundle(snapshot, repo.localPath, admission);
+      await verifyCapture();
+      const payload = payloadFor(gitBundle);
+      const content = Buffer.from(JSON.stringify(payload));
+      if (content.length > PRESERVATION_BANK_POLICY.manifestBytes) throw new Error('Preservation manifest exceeds its reserved budget.');
+      const preservationId = sha256(content);
+      const destination = path.join(directory, preservationId + '.json');
+      const finishManifest = beginPreservationBankWriter(admission);
+      try {
+        let file: Awaited<ReturnType<typeof open>> | undefined;
+        try {
+          file = await open(destination, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+          await file.writeFile(content);
+          await file.sync();
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.nlink !== 1) throw new Error('Preservation publication lost exclusive file ownership.');
+        } finally {
+          if (file) await file.close();
+          finishManifest(true);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+      const finishParent = beginPreservationBankWriter(admission);
+      let parent: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        parent = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        await parent.sync();
+      } finally {
+        if (parent) await parent.close();
+        finishParent(true);
+      }
+      await readPayloadBytes(preservationId);
+      getSqlite().prepare(`
+        INSERT OR IGNORE INTO workspace_preservations (
+          preservation_id, repository_uuid, repository_path, workspace_path, worktree_id,
+          packet_id, lane_id, source_device, source_inode, head_commit, tree_sha,
+          manifest_sha256, handoff_sha256, artifact_count, artifact_bytes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        preservationId, repo.id, repo.localPath, managed.identity.canonicalPath, managed.metadata.id,
+        snapshot.packetId, snapshot.laneId, managed.identity.device, managed.identity.inode,
+        snapshot.headCommit, snapshot.treeSha, preservationId, sha256(JSON.stringify(payload.handoff)),
+        capture.entries.filter((entry) => entry.kind === 'file').length, capture.bytes, Date.now(),
+      );
+      return (await readWorkspacePreservation(preservationId)).receipt;
+    });
   } catch (error) {
     if (snapshot.laneId) {
       acquireWorkspaceRetentionHold({

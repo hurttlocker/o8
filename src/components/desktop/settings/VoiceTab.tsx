@@ -53,6 +53,8 @@ import { useSyncExternalStore } from 'react';
 import { VoiceShortcutsSection } from './VoiceShortcutsSection';
 import { VoiceBrainModelPicker } from './VoiceBrainModelPicker';
 import { SymonAttentionSettingsSection } from './SymonAttentionSettingsSection';
+import { SymonTextBrainSection } from './SymonTextBrainSection';
+import { SymonConversationsSection } from './SymonConversationsSection';
 
 // macOS System Settings deep-links.
 const URL_ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
@@ -638,7 +640,8 @@ export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab,
           <SymonAttentionSettingsSection />
         </>
       )}
-
+      <SymonTextBrainSection />
+      <SymonConversationsSection />
     </div>
   );
 }

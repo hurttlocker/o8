@@ -91,6 +91,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return errorResponse(statusForError(message), 'harness_action_failed', message);
+    console.error('[harness] action failed:', error);
+    const status = statusForError(message);
+    return errorResponse(status, 'harness_action_failed', 'Harness action failed.');
   }
 }

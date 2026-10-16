@@ -39,7 +39,8 @@ describe('integration gate red baseline', () => {
 
   it('loads the recorded Linux baseline, which lists only resource-owning files', async () => {
     const recorded = loadRedBaseline(join(__dirname, 'integration-linux-baseline.json'));
-    expect(recorded?.size).toBe(45);
+    expect(recorded?.size).toBe(44);
+    expect(recorded?.has('tests/execution-carrier-real-path.test.ts')).toBe(false);
     const { default: classification } = await import('./test-classification.json');
     const owning = new Set(classification.resourceOwning.map((entry: { path: string }) => entry.path));
     expect([...(recorded ?? [])].filter((path) => !owning.has(path))).toEqual([]);

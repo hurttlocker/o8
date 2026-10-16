@@ -272,6 +272,7 @@ export interface LaunchOptions {
   cwd: string;
   controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
   executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   prompt: string;
   /** Coordinator-side registered repository root; never sent to an external worker. */
   sourceRepoPath?: string;
@@ -406,7 +407,7 @@ export interface AgentRuntime {
   getTelemetry?(sessionKey: string): Promise<RuntimeTelemetry | undefined>;
 
   /** Read one normalized, credential-free capacity snapshot. */
-  getCapacity?(identityId?: string | null): Promise<RuntimeCapacitySnapshot> | RuntimeCapacitySnapshot;
+  getCapacity?(identityId?: string | null, options?: { fresh?: boolean }): Promise<RuntimeCapacitySnapshot> | RuntimeCapacitySnapshot;
 
   /** Read only the opaque launch identity ID for a session. */
   getSessionIdentityId?(sessionKey: string): Promise<string | null> | string | null;

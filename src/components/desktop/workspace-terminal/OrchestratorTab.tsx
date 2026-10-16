@@ -1005,8 +1005,8 @@ function OrchestratorTabInner({
       }}
     >
       <BranchDetailsLauncher
-        visible={projectContextRailVisible}
-        repoPath={repoPath ?? null}
+        visible={projectContextRailVisible && active}
+        repoPath={effectiveRepoPath === ORCHESTRATOR_HOME_REPO_SENTINEL ? null : effectiveRepoPath}
         threadId={chatChromeState.threadId}
         collapsed={branchRailCollapsed}
         onToggleCollapsed={toggleBranchRailCollapsed}

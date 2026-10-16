@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
+
+vi.stubEnv('PI_CODING_AGENT_DIR', path.join(getDataDir(), 'absent-user-pi'));
+vi.stubEnv('PI_CODING_AGENT_SESSION_DIR', '');
+afterAll(() => vi.unstubAllEnvs());
 
 vi.mock('@/lib/runtimes/shared/cli-resolver', () => ({
   CliNotFoundError: class CliNotFoundError extends Error {},

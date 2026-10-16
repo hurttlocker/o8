@@ -136,6 +136,7 @@ const BACKEND_LABELS: Record<string, string> = {
   fable: 'Fable',
   o8: 'o8 managed',
   opencode: 'OpenCode 2',
+  muse: 'Muse Code',
   follow: 'Follow Orchestrate',
   'auto-cascade': 'Auto cascade',
   'managed-inference': 'Managed inference',
@@ -152,6 +153,7 @@ function backendRuntime(backend: string): OrchestratorRuntime | null {
   if (backend === 'codex') return 'codex';
   if (backend === 'claude') return 'claude-code';
   if (backend === 'opencode') return 'opencode';
+  if (backend === 'muse') return 'muse';
   return null;
 }
 

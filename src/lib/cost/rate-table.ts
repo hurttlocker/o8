@@ -200,6 +200,7 @@ export const modelRateTable = {
     'openai/gpt-5-nano': { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.20 },
     'openrouter/anthropic/claude-haiku': { inputUsdPerMillion: 0.8, outputUsdPerMillion: 4 },
     'openrouter/anthropic/claude-sonnet': { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
+    'brain/openai/gpt-6-luna': { inputUsdPerMillion: 0.10, outputUsdPerMillion: 0.50 },
     'brain/google/gemini-2.5-flash-lite': { inputUsdPerMillion: 0.10, outputUsdPerMillion: 0.40 },
     'brain/openai/gpt-5.4-nano': { inputUsdPerMillion: 0.20, outputUsdPerMillion: 1.25 },
     'brain/x-ai/grok-4.3': { inputUsdPerMillion: 1.25, outputUsdPerMillion: 2.50 },

@@ -6,7 +6,12 @@ import { useModelSettings } from './useModelSettings';
 import { ENV_LOCKED_REASON } from './dispatch-shared';
 
 export function LocalModelsTab() {
-  const { data, loading, notice, busyField, updateField } = useModelSettings();
+  const settings = useModelSettings();
+  return <LocalModelsContent settings={settings} />;
+}
+
+export function LocalModelsContent({ settings }: { settings: ReturnType<typeof useModelSettings> }) {
+  const { data, loading, notice, busyField, updateField } = settings;
   return (
     <div style={{ paddingTop: 8, paddingLeft: 8, paddingRight: 8, paddingBottom: 40, maxWidth: SETTINGS_CONTENT_MAX_WIDTH, fontFamily: APP_FONT_STACK }}>
       <TabHeading title="local models" subtitle="Connect models running on your computer or a server you control. Configure the endpoint and the models o8 uses here." />

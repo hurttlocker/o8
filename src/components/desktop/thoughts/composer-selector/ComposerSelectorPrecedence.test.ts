@@ -89,7 +89,7 @@ describe('composer selector real-path precedence', () => {
         return new Response(JSON.stringify({
           groups: [{
             provider: 'deepseek',
-            models: [{ id: 'deepseek.deepseek-v4-pro', label: 'DeepSeek V4 Pro', efforts: [] }],
+            models: [{ id: 'deepseek.deepseek-v4-pro', label: 'DeepSeek V4 Pro', provider: 'deepseek', efforts: [] }],
           }],
         }), { status: 200 });
       }
@@ -107,6 +107,7 @@ describe('composer selector real-path precedence', () => {
     }));
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
+      unobserve() {}
       disconnect() {}
     });
     container = document.createElement('div');
@@ -138,14 +139,17 @@ describe('composer selector real-path precedence', () => {
       workersChip.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(document.querySelector('[data-testid="worker-row-gemini"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect([...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Plan')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('[data-testid="worker-house-gemini"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('[data-testid="composer-selector-worker-options"]')).toBeNull();
+    expect(operatorValues.workerStartMode).toBe('huddle');
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-codex"]')!.click();
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-house-codex"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
-    expect(postBodies).toContainEqual({ defaultDispatchRuntime: 'codex' });
+    expect(postBodies).toEqual([]);
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-testid="worker-row-gpt-6-luna"]')!.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(postBodies).toContainEqual({ defaultDispatchRuntime: 'codex', defaultDispatchModel: 'gpt-6-luna', workerStartMode: 'autonomous' });
+    expect(operatorValues.defaultDispatchModel).toBe('gpt-6-luna');
     expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
     workersChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
     expect(workersChip.textContent).toContain('2 Codex');
@@ -181,9 +185,9 @@ describe('composer selector real-path precedence', () => {
       freshWorkersChip.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(document.querySelector('[data-testid="worker-row-codex"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect([...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Plan')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('[data-testid="worker-row-gpt-6-luna"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('[data-testid="composer-selector-worker-options"]')).toBeNull();
+    expect(operatorValues.workerStartMode).toBe('autonomous');
 
     await act(async () => {
       root.render(createElement(RealComposerHarness, { key: 'tab-a-remount', tabId: 'tab-a', threadId: 'thread-a' }));
@@ -214,12 +218,16 @@ describe('composer selector real-path precedence', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-3code"]')!.click();
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-house-3code"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
+    expect(postBodies).toEqual([]);
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label')).toContain('OpenCode');
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Provider Deepseek"]')!.click(); });
+    await act(async () => { document.querySelector<HTMLButtonElement>('[title="deepseek.deepseek-v4-pro"]')!.click(); });
     const workerChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workerChip.getAttribute('aria-label')).toBe('Workers: 2 3code, runtime default');
+    expect(workerChip.getAttribute('aria-label')).toBe('Workers: 2 3code, deepseek.deepseek-v4-pro');
     expect(workerChip.getAttribute('aria-label')).not.toContain('openrouter/openai/gpt-5.6');
     expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
 
@@ -239,7 +247,7 @@ describe('composer selector real-path precedence', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
-      document.querySelector<HTMLButtonElement>('[data-testid="worker-row-3code"]')!.click();
+      document.querySelector<HTMLButtonElement>('[data-testid="worker-house-3code"]')!.click();
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
     await act(async () => {
@@ -249,10 +257,27 @@ describe('composer selector real-path precedence', () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
     });
 
-    expect(postBodies).toContainEqual({ defaultDispatchRuntime: '3code' });
-    expect(postBodies).toContainEqual({ threecodeWorkerModel: 'deepseek.deepseek-v4-pro' });
+    expect(postBodies).toEqual([{ defaultDispatchRuntime: '3code', threecodeWorkerModel: 'deepseek.deepseek-v4-pro', workerStartMode: 'autonomous' }]);
+    expect(operatorValues.threecodeWorkerModel).toBe('deepseek.deepseek-v4-pro');
     expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label'))
       .toBe('Workers: 2 3code, deepseek.deepseek-v4-pro');
   });
+  it('persists CLI worker thinking independently and uses provider defaults for other workers', async () => {
+    operatorValues = { ...operatorValues, defaultDispatchRuntime: 'codex', codexWorkerEffort: 'adaptive' };
+    writeStoredComposerMode('tab-worker-effort', 'fast');
+    await act(async () => { root.render(createElement(RealComposerHarness, { tabId: 'tab-worker-effort', threadId: 'thread-worker-effort' })); await new Promise(resolve => setTimeout(resolve, 30)); });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
+    expect(document.querySelector('[aria-label="Worker thinking"]')?.textContent).toContain('Provider default');
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Worker thinking"]')!.click());
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Worker thinking choices"] button')].find(button => button.textContent === 'Medium')!.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
+    expect(postBodies).toEqual([{ codexWorkerEffort: 'medium' }]);
+    expect(operatorValues.codexWorkerEffort).toBe('medium');
+    expect(container.querySelector('[data-testid="composer-selector-thinking"]')?.textContent).toContain('high');
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="worker-house-gemini"]')!.click());
+    expect(document.querySelector('[aria-label="Worker thinking"]')).toBeNull();
+    expect(document.querySelector('[data-testid="worker-provider-default"]')?.textContent).toBe('Provider default');
+    expect(postBodies).toHaveLength(1);
+  });
+
 });

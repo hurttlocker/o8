@@ -1,31 +1,12 @@
 'use client';
 
-/**
- * UpdateCard — inline card for the AgentPanel bottom slot.
- *
- * Replaces the old center-top UpdateBanner. The banner covered the
- * workspace tab strip + reconnect row whenever an update was available;
- * relocating it to the left rail (just above the chrome icons) lets the
- * operator dismiss + read changelog without losing content area.
- *
- * Collapsed shape:
- *   [•] Update available                 [Restart] [×]
- *       v0.1.172
- *
- * The action reads [Download] instead on an install that cannot replace
- * itself (a deb/rpm Linux install — see `isSelfUpdatableInstall`).
- *
- * Click anywhere on the body to expand. The expanded section calls
- * /api/panel/o8-update-summary (free OpenRouter pool) to render a
- * 1-paragraph professional summary from the actual GitHub release body
- * + recent commits. Result cached per version in localStorage so the
- * second open is instant.
- */
+/** App update controller, with a legacy card outside the compact rail. */
 
-import { CodexCliUpdateNotice } from './CodexCliUpdateNotice';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } from '@/lib/app-update/update-hub-client';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { readCachedSummary, writeCachedSummary } from '@/lib/app-update/changelog-cache';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
 import {
@@ -36,7 +17,9 @@ import {
   installUpdateAndRestart,
   relaunchInstalledUpdate,
   RELEASE_URL,
+  type UpdateProgress,
 } from '@/lib/app-update/client-restart';
+import type { AppUpdateBlockers } from '@/lib/app-update/update-hub-client';
 import {
   normalizeInstallInfo,
   resolveUpdateAction,
@@ -58,9 +41,24 @@ interface UpdateCheckReport {
 }
 
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
+
+/** The updater can reject with an Error, an empty Error or a plain string; keep whatever it said. */
+export function describeInstallError(error: unknown): string {
+  if (error instanceof Error) return error.message.trim() || error.name;
+  if (typeof error === 'string') return error.trim();
+  try { return JSON.stringify(error) ?? ''; } catch { return ''; }
+}
+
+/** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
+function reportInstall(install: { outcome: 'started' | 'failed'; version: string | null; error?: string }) {
+  fetch('/api/panel/app/update-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ install }),
+  }).catch(() => { /* best-effort, like the check state */ });
+}
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
-const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const APPLY_MUTATIONS_KEY = 'o8:update-card:apply-mutations';
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
@@ -74,8 +72,51 @@ interface InstallRequest {
   userInitiated?: boolean;
 }
 
+interface UpdateIdleLaneView { label?: string; status?: string }
 interface UpdateIdleResponse {
-  idle?: { idle?: boolean };
+  idle?: {
+    idle?: boolean;
+    idleExceptParked?: boolean;
+    parkedLanes?: UpdateIdleLaneView[];
+    unavailable?: string[];
+    active?: {
+      lanes?: UpdateIdleLaneView[];
+      terminalSessions?: Array<{ name?: string }>;
+      managedRuns?: Array<{ command?: string }>;
+      ownedSessions?: Array<{ surfaceId?: string }>;
+      cloudJobs?: Array<{ id?: string }>;
+    };
+  };
+}
+
+const PARKED_LABEL: Record<string, string> = {
+  reviewing: 'waiting for review',
+  awaiting_input: 'waiting for input',
+  awaiting_orchestrator: 'waiting for the lead',
+  awaiting_human: 'waiting for you',
+  paused: 'paused',
+  idle: 'idle',
+  recovering: 'stopped, can retry',
+};
+
+/** Names what a restart would wait for, from GET /api/panel/update/apply. */
+export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppUpdateBlockers {
+  const idle = payload?.idle;
+  const name = (value: string | undefined, fallback: string) => value?.trim() || fallback;
+  const parkedStatuses = new Set((idle?.parkedLanes ?? []).map(lane => lane.status));
+  const live = [
+    ...(idle?.active?.lanes ?? [])
+      .filter(lane => !parkedStatuses.has(lane.status))
+      .map(lane => `${name(lane.label, 'Task')} (${(lane.status ?? 'active').replace(/_/g, ' ')})`),
+    ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
+    ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),
+    ...(idle?.active?.ownedSessions ?? []).map(session => `Agent session ${name(session.surfaceId, '')}`.trim()),
+    ...(idle?.active?.cloudJobs ?? []).map(job => `Cloud job ${name(job.id, '')}`.trim()),
+    ...(idle?.unavailable ?? []).map(item => item === 'terminal-sessions' ? 'Terminal list unavailable' : `Check unavailable: ${item}`),
+  ];
+  const parked = (idle?.parkedLanes ?? [])
+    .map(lane => `${name(lane.label, 'Task')} (${PARKED_LABEL[lane.status ?? ''] ?? (lane.status ?? 'parked').replace(/_/g, ' ')})`);
+  return { live, parked };
 }
 
 function readDismissedVersion() {
@@ -94,28 +135,6 @@ function readExpanded() {
   } catch {
     return false;
   }
-}
-
-function readCachedSummary(version: string): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    if (!raw) return null;
-    const map = JSON.parse(raw) as Record<string, string>;
-    return typeof map[version] === 'string' ? map[version] : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSummary(version: string, summary: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
-    const map = raw ? JSON.parse(raw) as Record<string, string> : {};
-    map[version] = summary;
-    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
-  } catch { /* ignore */ }
 }
 
 function claimApplyMutation(mutationId: string): boolean {
@@ -175,11 +194,12 @@ function normalizeUpdateCheckReport(payload: unknown): UpdateCheckReport | null 
   return updateCheckReport(outcome, record.error, checkedAt);
 }
 
-export function UpdateCard() {
-  return <><CodexCliUpdateNotice /><AppUpdateCard /></>;
+export function UpdateCard({ quiet = false }: { quiet?: boolean }) {
+  return <AppUpdateCard quiet={quiet} />;
 }
 
-function AppUpdateCard() {
+function AppUpdateCard({ quiet }: { quiet: boolean }) {
+  const changelogId = useId();
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [checkReport, setCheckReport] = useState<UpdateCheckReport>(() => updateCheckReport('never'));
   const [installing, setInstalling] = useState(false);
@@ -193,11 +213,20 @@ function AppUpdateCard() {
   const [installError, setInstallError] = useState<string | null>(null);
   const [bundleIntegrity, setBundleIntegrity] = useState<BundleIntegrityStatus | null>(null);
   const [installInfo, setInstallInfo] = useState<InstallInfo | null>(null);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [blockers, setBlockers] = useState<AppUpdateBlockers | null>(null);
   const updateRef = useRef<UpdateInfo | null>(null);
   const installInfoRef = useRef<InstallInfo | null>(null);
   const installingRef = useRef(false);
   const autoApplyingRef = useRef(false);
   const restartDeferredRef = useRef(false);
+
+  useEffect(() => {
+    publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
+      message: blockedNote, error: installError || checkReport.error, downloadOnly: resolveUpdateAction(installInfo, update?.version ?? null).kind === 'download',
+      progress, blockers });
+  }, [update, checkReport, installing, blockedNote, installError, installInfo, progress, blockers]);
+  useEffect(() => { void refreshCliUpdateView(); }, []);
 
   useEffect(() => {
     updateRef.current = update;
@@ -262,23 +291,27 @@ function AppUpdateCard() {
   }, []);
 
   const checkForUpdate = useCallback(async () => {
-    if (!canUseTauriEvents()) return;
+    if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
     try {
       const { check } = await import('@/lib/app-update/check');
       const result = await check();
       if (result) {
         setUpdate({
           version: result.version,
+          currentVersion: result.currentVersion || undefined,
           notes: result.body ?? undefined,
           date: result.date ?? undefined,
         });
         setCheckReport(updateCheckReport('available'));
+        return { version: result.version };
       } else {
         setUpdate(null);
         setCheckReport(updateCheckReport('current'));
+        return { version: null };
       }
     } catch (error) {
       setCheckReport(updateCheckReport('failed', error));
+      return { version: null, error: error instanceof Error ? error.message : 'o8 update check failed.' };
     }
   }, []);
 
@@ -332,6 +365,7 @@ function AppUpdateCard() {
         setCheckReport(nextReport);
         if (nextReport.outcome === 'current') {
           setUpdate(null);
+          setBlockers(null);
           setInstalling(false);
           restartDeferredRef.current = false;
         }
@@ -369,6 +403,8 @@ function AppUpdateCard() {
     }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
   }, [checkReport, update]);
 
+  useEffect(() => registerAppUpdateCheck(checkForUpdate), [checkForUpdate]);
+
   // Fetch summary when the card is expanded and we have a version. Cache
   // by version in localStorage so repeated opens are instant.
   useEffect(() => {
@@ -405,12 +441,28 @@ function AppUpdateCard() {
     return () => controller.abort();
   }, [expanded, update?.version]);
 
-  const checkUpdateIdle = useCallback(async () => {
+  const readUpdateIdle = useCallback(async () => {
     const response = await fetch('/api/panel/update/apply', { cache: 'no-store' }).catch(() => null);
-    if (!response?.ok) return false;
-    const payload = await response.json().catch(() => null) as UpdateIdleResponse | null;
-    return payload?.idle?.idle === true;
+    if (!response?.ok) return null;
+    return await response.json().catch(() => null) as UpdateIdleResponse | null;
   }, []);
+
+  const checkUpdateIdle = useCallback(async (allowParked = false) => {
+    const payload = await readUpdateIdle();
+    if (payload?.idle?.idle === true) return true;
+    return allowParked && payload?.idle?.idleExceptParked === true;
+  }, [readUpdateIdle]);
+
+  /** Names the blockers and returns a note that matches them. */
+  const explainWaitingRestart = useCallback(async () => {
+    const named = describeUpdateBlockers(await readUpdateIdle());
+    setBlockers(named);
+    return named.live.length
+      ? 'Update installed. Restart is waiting for running work to finish.'
+      : named.parked.length
+        ? 'Update installed. Restart now to apply it. Waiting tasks keep their state.'
+        : 'Update installed. Restart is waiting for lanes and terminals to become idle.';
+  }, [readUpdateIdle]);
 
   const handleInstall = useCallback(async (request: InstallRequest = {}) => {
     if (installingRef.current || updateInstallInFlight) return;
@@ -427,24 +479,27 @@ function AppUpdateCard() {
       setInstalling(true);
       setBlockedNote(null);
       setInstallError(null);
-      if (action.kind === 'restart' && request.requireIdle && !(await checkUpdateIdle())) {
+      setBlockers(null);
+      // Background applies stay idle-first. An operator's click downloads and
+      // installs first, so the update is staged even if the restart must wait.
+      if (action.kind === 'restart' && request.requireIdle && !request.userInitiated && !(await checkUpdateIdle())) {
         setBlockedNote('Update ready. Restart is waiting for lanes and terminals to become idle.');
         return;
       }
       if (action.kind === 'restart' && restartDeferredRef.current) {
         const restarted = await relaunchInstalledUpdate({
-          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+          beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
         });
-        if (!restarted) {
-          setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
-        }
+        if (!restarted) setBlockedNote(await explainWaitingRestart());
         return;
       }
+      reportInstall({ outcome: 'started', version: updateRef.current?.version ?? null });
       const outcome = await installUpdateAndRestart(
         action.kind === 'download' ? action.url : updateRef.current?.releaseUrl ?? RELEASE_URL,
         {
-          beforeRestart: request.requireIdle ? checkUpdateIdle : undefined,
+          beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
           selfUpdatable: action.kind === 'restart',
+          onProgress: setProgress,
         },
       );
       if (outcome.downloadOpened) return;
@@ -458,20 +513,52 @@ function AppUpdateCard() {
       }
       if (outcome.restartDeferred) {
         restartDeferredRef.current = true;
-        setBlockedNote('Update installed. Restart is waiting for lanes and terminals to become idle.');
+        setBlockedNote(await explainWaitingRestart());
       }
     } catch (err) {
-      console.error('[update-card] install failed:', err);
-      const detail = err instanceof Error && err.message.trim()
-        ? ` ${err.message.trim()}`
-        : '';
-      setInstallError(`Update failed before restart.${detail}`);
+      const message = describeInstallError(err);
+      console.error(`[update-card] install failed: ${message || '(no message)'}`, err);
+      setInstallError(`Update failed before restart.${message ? ` ${message}` : ''}`);
+      reportInstall({ outcome: 'failed', version: updateRef.current?.version ?? null, error: message });
     } finally {
       updateInstallInFlight = false;
       installingRef.current = false;
       setInstalling(false);
+      setProgress(null);
     }
-  }, [checkUpdateIdle]);
+  }, [checkUpdateIdle, explainWaitingRestart]);
+  useEffect(() => {
+    const install = () => { void handleInstall({ userInitiated: true, requireIdle: true }); };
+    window.addEventListener('o8:install-app-update', install);
+    return () => window.removeEventListener('o8:install-app-update', install);
+  }, [handleInstall]);
+
+  // "Restart now" from the panel, after the operator has read the named waiting
+  // tasks. It restarts past parked tasks only; running work still blocks it.
+  useEffect(() => {
+    const restartNow = async () => {
+      if (!restartDeferredRef.current || installingRef.current || updateInstallInFlight) return;
+      updateInstallInFlight = true;
+      installingRef.current = true;
+      setInstalling(true);
+      setInstallError(null);
+      try {
+        setProgress({ stage: 'restarting', receivedBytes: 0, totalBytes: null });
+        const restarted = await relaunchInstalledUpdate({ beforeRestart: () => checkUpdateIdle(true) });
+        if (!restarted) setBlockedNote(await explainWaitingRestart());
+      } catch (err) {
+        setInstallError(`Restart failed.${describeInstallError(err) ? ` ${describeInstallError(err)}` : ''}`);
+      } finally {
+        updateInstallInFlight = false;
+        installingRef.current = false;
+        setInstalling(false);
+        setProgress(null);
+      }
+    };
+    const onRestart = () => { void restartNow(); };
+    window.addEventListener('o8:restart-app-update', onRestart);
+    return () => window.removeEventListener('o8:restart-app-update', onRestart);
+  }, [checkUpdateIdle, explainWaitingRestart]);
 
   useEffect(() => {
     const onRealtime = (event: Event) => {
@@ -524,6 +611,16 @@ function AppUpdateCard() {
 
   if (bundleIntegrity?.status === 'invalid') {
     return <BundleIntegrityWarning status={bundleIntegrity} />;
+  }
+  // The navigation rail renders the quiet card; a failed install still shows there (#3588).
+  if (quiet) {
+    return installError ? (
+      <div role="alert" style={{ marginTop: 6, marginLeft: 8, marginRight: 8, padding: 8, borderRadius: 8,
+        border: '1px solid var(--t-danger-border)', fontSize: 10.5, fontWeight: 320, lineHeight: 1.5,
+        color: 'var(--t-danger)', wordBreak: 'break-word' }}>
+        {installError}
+      </div>
+    ) : null;
   }
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
@@ -611,6 +708,7 @@ function AppUpdateCard() {
           }
         }}
         aria-expanded={expanded}
+        aria-controls={expanded ? changelogId : undefined}
         aria-label="Toggle update changelog"
       >
         <span
@@ -720,6 +818,7 @@ function AppUpdateCard() {
 
       {expanded ? (
         <div
+          id={changelogId}
           style={{
             marginTop: 9,
             paddingTop: 9,

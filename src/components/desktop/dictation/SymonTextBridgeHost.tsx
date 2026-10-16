@@ -10,6 +10,8 @@ interface SymonTextPlannerInfo {
   engine?: string;
   model?: string;
   effort?: string;
+  /** Only a newly selected automatic default may retry a pre-execution rejection. */
+  allowDefaultFallback?: boolean;
   /** The seat named the way the Settings → Voice status line names it. */
   seat?: string;
   tools?: Array<Record<string, unknown>>;
@@ -17,8 +19,11 @@ interface SymonTextPlannerInfo {
 }
 
 interface SymonTextTurnResult {
-  status: 'done' | 'interrupted';
+  status: 'done' | 'interrupted' | 'error';
+  detail?: string;
   text: string;
+  model: string;
+  effort: string;
 }
 
 interface SymonTextBridge {
@@ -59,6 +64,7 @@ export function SymonTextBridgeHost() {
           engine: planner.engine,
           model: planner.model,
           effort: planner.effort,
+          allowDefaultFallback: planner.allowDefaultFallback === true,
         }),
         interruptTurn: (sessionId, turnId) => invoke<boolean>('symon_text_interrupt', {
           sessionId,

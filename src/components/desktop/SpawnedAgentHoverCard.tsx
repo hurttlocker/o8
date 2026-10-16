@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { FloatingSurface } from './FloatingSurface';
 import { deriveSpawnedAgentState, formatSpawnedAgentElapsed } from './spawned-agents-hover-card-utils';
 import type { ExtraAgentRow } from './AgentPanelExtraAgentRow';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
@@ -158,7 +159,8 @@ export function SpawnedAgentHoverCard({
   const state = deriveSpawnedAgentState(row.laneStatus, row.status, row.lastEventLabel, row.outcome);
 
   return createPortal(
-    <div
+    <FloatingSurface
+      role="tooltip"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
@@ -167,17 +169,13 @@ export function SpawnedAgentHoverCard({
         top: position.top,
         zIndex: 10000,
         width: CARD_WIDTH,
+        pointerEvents: 'auto',
+      }}
+      contentStyle={{
         paddingTop: 14,
         paddingRight: 16,
         paddingBottom: 13,
         paddingLeft: 16,
-        borderRadius: 12,
-        border: '1px solid var(--t-panel-border)',
-        background: 'var(--t-popover-surface)',
-        boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
-        color: 'var(--t-text)',
-        pointerEvents: 'auto',
-        fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 11 }}>
@@ -289,7 +287,7 @@ export function SpawnedAgentHoverCard({
                 : 'No transcript available for this agent.'
               : 'No messages yet.'}
       </div>
-    </div>,
+    </FloatingSurface>,
     document.body,
   );
 }

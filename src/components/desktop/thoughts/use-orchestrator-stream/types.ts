@@ -21,6 +21,7 @@ export interface OrchestratorSendOptions {
   permissionMode?: OrchestratorPermissionMode;
   backend?: OrchestratorBackendId;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: import('@/lib/orchestrator/service-tier').OrchestratorServiceTier;
   model?: string;
   /** Model-facing text. The positional message remains operator-authored text. */
   wireMessage?: string;

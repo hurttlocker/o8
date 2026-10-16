@@ -128,7 +128,7 @@ rl.on('line', (line) => {
     const { getSessionTransformState, performSessionTransform } = await import('@/lib/runtime/session-transforms');
     invalidateCodexDiscoveredFleetCache();
 
-    const beforeImport = await codexRuntime.discoverSessions();
+    const beforeImport = await codexRuntime.discoverSessions({ fresh: true });
     expect(beforeImport).toEqual(expect.arrayContaining([
       expect.objectContaining({ sessionKey: 'codex:primary-thread', identityId: primary.id }),
       expect.objectContaining({ sessionKey: 'codex:secondary-thread', identityId: secondary.id }),
@@ -145,7 +145,7 @@ rl.on('line', (line) => {
     expect(readFileSync(auditPath, 'utf8').trim().split('\n').at(-1)).toBe(secondaryHome);
 
     invalidateCodexDiscoveredFleetCache();
-    const afterImport = await codexRuntime.discoverSessions();
+    const afterImport = await codexRuntime.discoverSessions({ fresh: true });
     expect(afterImport).toContainEqual(expect.objectContaining({
       sessionKey: 'codex:secondary-thread',
       identityId: secondary.id,
@@ -173,7 +173,7 @@ rl.on('line', (line) => {
     insertCodexThread(primaryHome, 'duplicated-thread');
     insertCodexThread(secondaryHome, 'duplicated-thread');
     invalidateCodexDiscoveredFleetCache();
-    const duplicateDiscovery = await codexRuntime.discoverSessions();
+    const duplicateDiscovery = await codexRuntime.discoverSessions({ fresh: true });
     expect(duplicateDiscovery).not.toContainEqual(expect.objectContaining({
       sessionKey: 'codex:duplicated-thread',
     }));

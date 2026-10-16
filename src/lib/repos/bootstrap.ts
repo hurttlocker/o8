@@ -2,7 +2,7 @@ import 'server-only';
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -23,6 +23,10 @@ interface RegisteredBootstrapRepo {
 interface InitRepoResult extends RegisteredBootstrapRepo {
   initialized: boolean;
   initialCommit: boolean;
+}
+
+export class RepoInitError extends Error {
+  constructor(message: string, readonly statusCode = 409) { super(message); this.name = 'RepoInitError'; }
 }
 
 interface ScaffoldRepoResult extends RegisteredBootstrapRepo {
@@ -367,6 +371,15 @@ async function registerRepo(repoPath: string): Promise<RegisteredBootstrapRepo> 
 
 export async function initRepo(inputPath: string, name?: string): Promise<InitRepoResult> {
   const repoPath = resolveTargetPath(inputPath);
+  // Git treats a new subfolder of a checkout as the parent repository. Reject
+  // that target before creating a folder or registering the wrong root.
+  let ancestor = repoPath;
+  while (!(await stat(ancestor).catch(() => null)) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+  const existingRoot = await runGit(ancestor, ['rev-parse', '--show-toplevel']).catch(() => null);
+  if (existingRoot) {
+    const target = await realpath(repoPath).catch(() => repoPath);
+    if (path.resolve(existingRoot) !== path.resolve(target)) throw new RepoInitError('Choose a folder outside an existing repository. Use Local folder to connect that repository.');
+  }
   await ensureDirectory(repoPath);
   const initialized = await ensureGitRepo(repoPath);
   const initialCommit = await ensureInitialCommit(repoPath, name);

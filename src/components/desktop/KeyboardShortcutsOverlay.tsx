@@ -4,8 +4,8 @@
  * KeyboardShortcutsOverlay — a glass reference card listing every real
  * keyboard shortcut wired in the desktop shell.
  *
- * Opened via ⌘/ (or `?` when not typing) and from the status-bar `?`
- * button. The shortcut list here is hand-kept in sync with the actual
+ * Opened via ⌘/ (or `?` when not typing) and Quick settings → Get help.
+ * The shortcut list here is hand-kept in sync with the actual
  * handlers — do NOT add a row for a keybind that isn't wired, or the
  * card lies to the operator. Current sources of truth:
  *   - dashboard/page.tsx        → ⌘K, ⌘W, ⌘1-9, ⌘⌥←/→
@@ -14,7 +14,7 @@
  *   - src-tauri/src/lib.rs      → global voice shortcuts
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   overlayStyle,
   cardStyle,
@@ -97,16 +97,29 @@ export const KEYBOARD_SHORTCUT_SECTIONS: ShortcutSection[] = [
 ];
 
 export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOverlayProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const closeButton = panelRef.current?.querySelector<HTMLButtonElement>('button');
+    const shortcutList = panelRef.current?.querySelector<HTMLElement>('[aria-label="Shortcut list"]');
+    closeButton?.focus();
     const handler = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
+      } else if (event.key === 'Tab') {
+        event.preventDefault();
+        if (document.activeElement === closeButton) shortcutList?.focus();
+        else closeButton?.focus();
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    document.addEventListener('keydown', handler, true);
+    return () => {
+      document.removeEventListener('keydown', handler, true);
+      if (previousFocus?.isConnected && !previousFocus.closest('[inert]')) previousFocus.focus();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -120,6 +133,7 @@ export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOve
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         style={{ ...cardStyle, maxWidth: 460 }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -166,9 +180,12 @@ export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOve
         </div>
 
         <div
+          role="region"
+          aria-label="Shortcut list"
+          tabIndex={0}
           style={{
             maxHeight: '60vh',
-            overflowY: 'auto',
+            overflowY: 'auto', scrollbarWidth: 'none',
             WebkitOverflowScrolling: 'touch',
             paddingTop: 4,
             paddingBottom: 10,

@@ -7,14 +7,15 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useRightPanelWidths } from './useRightPanelWidths';
+import type { O8Tab } from '../o8-panel/types';
 
-function Harness(): ReactElement {
+function Harness({ tab, secondaryTab }: { tab?: O8Tab; secondaryTab?: O8Tab | null }): ReactElement {
   const {
     rightWidth,
     setRightWidth,
     o8Width,
     setO8Width,
-  } = useRightPanelWidths();
+  } = useRightPanelWidths(tab, secondaryTab);
 
   return createElement(
     'div',
@@ -101,5 +102,24 @@ describe('useRightPanelWidths', () => {
     });
 
     expect(window.localStorage.getItem('o8:right-panel:width-o8')).toBe('640');
+  });
+  it('restores per-tool widths without making ordinary tools inherit the wider reading pane', async () => {
+    host.innerHTML = renderToString(createElement(Harness, { tab: 'files' }));
+    window.localStorage.setItem('o8:right-panel:width-o8', '480');
+    await act(async () => { root = hydrateRoot(host, createElement(Harness, { tab: 'files' })); });
+    await act(async () => root!.render(createElement(Harness, { tab: 'spec' })));
+    expect(host.firstElementChild?.getAttribute('data-o8-width')).toBe('600');
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-resize-o8]')!.click());
+    expect(window.localStorage.getItem('o8:right-panel:width-o8')).toBe('480');
+    expect(JSON.parse(window.localStorage.getItem('o8:right-panel:tool-widths')!)).toEqual({ spec: 640 });
+    await act(async () => root!.render(createElement(Harness, { tab: 'files' })));
+    expect(host.firstElementChild?.getAttribute('data-o8-width')).toBe('480');
+    await act(async () => root!.unmount());
+    host.innerHTML = renderToString(createElement(Harness, { tab: 'spec' }));
+    await act(async () => { root = hydrateRoot(host, createElement(Harness, { tab: 'spec' })); });
+    expect(host.firstElementChild?.getAttribute('data-o8-width')).toBe('640');
+    await act(async () => root!.render(createElement(Harness, { tab: 'review', secondaryTab: 'compare' })));
+    expect(host.firstElementChild?.getAttribute('data-o8-width')).toBe('960');
+    expect(window.localStorage.getItem('o8:right-panel:width-o8')).toBe('480');
   });
 });

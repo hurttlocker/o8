@@ -1,19 +1,22 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { lstat, mkdir, open, realpath } from 'node:fs/promises';
-import { devNull } from 'node:os';
 import path from 'node:path';
 
+import { laneGitArguments, laneGitEnvironment, laneGitInvocation } from '@/lib/lane/lane-git';
 import { getDataDir } from '@/lib/data-dir-migration';
 import {
   assertWorktreeMaterializationIdentity,
   captureWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity,
 } from '@/lib/worktree/materialization-identity';
-import { guardedWorkspaceInvocation, materializationAwareExecFile, withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
+import { guardedWorkspaceInvocation, materializationAwareExecFile, materializationAwareNodeSettlement, type MaterializationExecutionSettlement, withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
 import type { WorkspaceSnapshotRecord } from '@/lib/worktree/snapshot-state';
 
-const MAX_BUNDLE_BYTES = 512 * 1024 * 1024;
+import { assertPreservationBankAdmission, beginPreservationBankWriter, PRESERVATION_BANK_POLICY, type PreservationBankAdmission } from './preservation-bank-budget';
+
+const MAX_BUNDLE_BYTES = PRESERVATION_BANK_POLICY.bundleBytes;
 
 export interface WorkspaceGitBundleReceipt {
   schema: 'o8/workspace-git-bundle/v1';
@@ -32,17 +35,7 @@ export interface WorkspaceGitBundleReceipt {
   objectCount: number;
 }
 
-function gitEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
-  delete env.NODE_OPTIONS;
-  return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: devNull,
-    GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1', GIT_OPTIONAL_LOCKS: '0' };
-}
-
-function gitArguments(args: string[]): string[] {
-  return ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=', ...args];
-}
+const gitEnvironment = () => laneGitEnvironment(true);
 
 async function privateDirectory(directory: string): Promise<WorktreeMaterializationIdentity> {
   await mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
@@ -123,11 +116,37 @@ export async function readWorkspaceGitBundle(receipt: WorkspaceGitBundleReceipt)
   return result.content;
 }
 
-async function gitValue(cwd: string, identity: WorktreeMaterializationIdentity, args: string[]): Promise<string> {
+const writerAttempts = new AsyncLocalStorage<{ admission: PreservationBankAdmission; settlements: MaterializationExecutionSettlement[] }>();
+
+async function executePreservationNode(
+  script: string, payload: unknown, identity: WorktreeMaterializationIdentity,
+  env: NodeJS.ProcessEnv, maxBuffer = 1024 * 1024,
+): Promise<MaterializationExecutionSettlement> {
+  const attempt = writerAttempts.getStore();
+  const finish = attempt ? beginPreservationBankWriter(attempt.admission) : null;
+  const settlement = await materializationAwareNodeSettlement({ script, payload, identity, env, maxBuffer });
+  finish?.(settlement.settled);
+  attempt?.settlements.push(settlement);
+  if (!settlement.ok) {
+    throw Object.assign(new Error(settlement.reason + (settlement.stderr ? ': ' + settlement.stderr : '')), { settlement });
+  }
+  return settlement;
+}
+
+export async function preservationGitValue(cwd: string, identity: WorktreeMaterializationIdentity, args: string[]): Promise<string> {
   return withWorktreeMaterializationExecution(cwd, identity, async () => {
-    const { stdout } = await materializationAwareExecFile('git', gitArguments(args), {
-      cwd, env: gitEnvironment(), timeout: 120_000, maxBuffer: 32 * 1024 * 1024,
-    });
+    // Private empty verifiers have no lane metadata or configured drivers.
+    const invocation = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
+      ? { args: laneGitArguments(args), env: gitEnvironment() }
+      : laneGitInvocation(cwd, cwd, args, true);
+    const { stdout } = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
+      ? await executePreservationNode(
+        `const input = JSON.parse(process.argv[1]); await runChild(input.command, input.args);`,
+        guardedWorkspaceInvocation('git', invocation.args, identity), identity, invocation.env, PRESERVATION_BANK_POLICY.gitOutputBytes,
+      )
+      : await materializationAwareExecFile('git', invocation.args, {
+        cwd, env: invocation.env, timeout: 120_000, maxBuffer: PRESERVATION_BANK_POLICY.gitOutputBytes,
+      });
     return stdout.trim();
   });
 }
@@ -145,28 +164,14 @@ process.stdout.write(JSON.stringify({ leaf, device: stat.dev, inode: stat.ino })
 
 const CAPTURE_BUNDLE = String.raw`
 const fs = require('node:fs');
-const { spawn } = require('node:child_process');
-const { Writable } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
 const input = JSON.parse(process.argv[1]);
 const fd = fs.openSync('source.bundle', fs.constants.O_WRONLY | fs.constants.O_CREAT
   | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-const child = spawn(input.invocation.command, input.invocation.args, {
-  cwd: input.repositoryPath, env: process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-});
 let bytes = 0;
-let stderrBytes = 0;
-const abort = () => child.kill();
-process.once('SIGTERM', abort);
-child.stderr.on('data', (chunk) => { stderrBytes += chunk.length; if (stderrBytes > 1024 * 1024) abort(); });
-const timer = setTimeout(abort, 120000);
-const completed = new Promise((resolve, reject) => {
-  child.once('error', reject);
-  child.once('close', (code) => code === 0 ? resolve() : reject(new Error('Portable Git bundle creation failed.')));
-});
-const written = pipeline(child.stdout, new Writable({
-  write(chunk, _encoding, callback) {
-    try {
+try {
+  await runChild(input.invocation.command, input.invocation.args, {
+    cwd: input.repositoryPath,
+    stdout(chunk) {
       bytes += chunk.length;
       if (bytes > input.maxBytes) throw new Error('Portable Git source exceeds the bounded preservation budget.');
       let offset = 0;
@@ -175,26 +180,19 @@ const written = pipeline(child.stdout, new Writable({
         if (!count) throw new Error('Portable Git bundle descriptor write was incomplete.');
         offset += count;
       }
-      callback();
-    } catch (error) { callback(error); }
-  },
-}));
-(async () => {
-  try { await Promise.all([completed, written]); fs.fsyncSync(fd); }
-  catch (error) { abort(); await Promise.allSettled([completed, written]); throw error; }
-  finally { clearTimeout(timer); process.removeListener('SIGTERM', abort); fs.closeSync(fd); }
-})().catch((error) => { process.stderr.write(error.message + '\n'); process.exitCode = 1; });
+    },
+  });
+  fs.fsyncSync(fd);
+} finally { fs.closeSync(fd); }
 `;
 
-async function createBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
+export async function capturePreservationGitBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
   repositoryIdentity: WorktreeMaterializationIdentity, preparation: string, identity: WorktreeMaterializationIdentity) {
-  const invocation = guardedWorkspaceInvocation('git', gitArguments([
+  const safe = laneGitInvocation(repositoryPath, repositoryPath, [
     'bundle', 'create', '--version=3', '-', snapshot.recoveryRef,
-  ]), repositoryIdentity);
-  await withWorktreeMaterializationExecution(preparation, identity, () => materializationAwareExecFile(
-    process.execPath, ['-e', CAPTURE_BUNDLE, JSON.stringify({ invocation, repositoryPath, maxBytes: MAX_BUNDLE_BYTES })],
-    { cwd: preparation, env: gitEnvironment(), timeout: 125_000, maxBuffer: 1024 * 1024 },
-  ));
+  ], true);
+  const invocation = guardedWorkspaceInvocation('git', safe.args, repositoryIdentity);
+  return executePreservationNode(CAPTURE_BUNDLE, { invocation, repositoryPath, maxBytes: MAX_BUNDLE_BYTES }, identity, safe.env);
 }
 
 const PUBLISH_FROM_DESCRIPTOR = String.raw`
@@ -262,7 +260,6 @@ try {
 
 const BANK_OPERATION = String.raw`
 const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
 const input = JSON.parse(process.argv[1]);
 const directory = fs.lstatSync('.');
 if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077)
@@ -273,11 +270,10 @@ if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 
 if (input.operation === 'publish') {
   const fd = fs.openSync('source.bundle', fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
-    const result = spawnSync(input.bankInvocation.command, input.bankInvocation.args, {
-      cwd: input.bankDirectory, env: process.env, stdio: ['ignore', 'pipe', 'pipe', fd],
-      timeout: 120000, maxBuffer: 1024 * 1024,
+    await runChild(input.bankInvocation.command, [], {
+      cwd: input.bankDirectory, fd,
+      nodeScript: input.bankInvocation.args[1], payload: JSON.parse(input.bankInvocation.args[2]),
     });
-    if (result.error || result.status !== 0) throw new Error('Captured-bank bundle publication failed.');
     const named = fs.lstatSync('source.bundle');
     if (!named.isFile() || named.isSymbolicLink() || named.dev !== input.file.device
       || named.ino !== input.file.inode) throw new Error('Bundle source name changed; retained for inspection.');
@@ -312,48 +308,62 @@ interface BankOperationInput {
   file?: { device: number; inode: number };
 }
 
-async function bankOperation(bank: Awaited<ReturnType<typeof bundleDirectory>>, input: BankOperationInput) {
+export async function executePreservationBankOperation(bank: Awaited<ReturnType<typeof bundleDirectory>>, input: BankOperationInput) {
   await assertBank(bank);
-  const preparation = path.join(bank.directory, input.leaf);
   // execve closes descriptors beyond stdio. This child validates its captured
   // bank cwd directly so the inherited regular-file descriptor remains open.
   const bankInvocation = { command: process.execPath, args: ['-e', PUBLISH_FROM_DESCRIPTOR,
     JSON.stringify({ bankIdentity: bank.identity, sha256: input.sha256, bytes: input.bytes,
       file: input.file, maxBytes: MAX_BUNDLE_BYTES })] };
-  await withWorktreeMaterializationExecution(preparation, input.identity, () => materializationAwareExecFile(
-    process.execPath, ['-e', BANK_OPERATION, JSON.stringify({ ...input, bankInvocation, bankDirectory: bank.directory })],
-    { cwd: preparation, env: gitEnvironment(), timeout: 125_000, maxBuffer: 1024 * 1024 },
-  ));
+  const settlement = await executePreservationNode(BANK_OPERATION, { ...input, bankInvocation, bankDirectory: bank.directory }, input.identity, gitEnvironment());
   if (input.operation === 'remove') {
-    await withWorktreeMaterializationExecution(bank.directory, bank.identity, () => materializationAwareExecFile(
-      process.execPath, ['-e', REMOVE_DIRECTORY, JSON.stringify(input)],
-      { cwd: bank.directory, env: gitEnvironment(), timeout: 120_000, maxBuffer: 1024 * 1024 },
-    ));
+    await executePreservationNode(REMOVE_DIRECTORY, input, bank.identity, gitEnvironment());
   }
   await assertBank(bank);
+  return settlement;
 }
 
 /** Prove all source objects in an empty repository before publishing its bank receipt. */
-export async function preserveWorkspaceGitBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string): Promise<WorkspaceGitBundleReceipt> {
+export async function preserveWorkspaceGitBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string, admission: PreservationBankAdmission): Promise<WorkspaceGitBundleReceipt> {
+  const settlements: MaterializationExecutionSettlement[] = [];
+  try {
+    return await writerAttempts.run({ admission, settlements }, () => preserveBundle(snapshot, repositoryPath, admission));
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+      writerSettlements: settlements,
+      writersSettled: settlements.length > 0 && settlements.every(value => value.settled),
+    });
+  }
+}
+
+async function preserveBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string, admission: PreservationBankAdmission): Promise<WorkspaceGitBundleReceipt> {
+  assertPreservationBankAdmission(admission);
   if (!snapshot.recoveryRef.startsWith('refs/o8/recovery/')) throw new Error('Portable source needs a protected recovery ref.');
   const repositoryIdentity = await captureWorktreeMaterializationIdentity(repositoryPath);
   const sourceValues = async () => {
-    const ref = await gitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{commit}']);
-    const tree = await gitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{tree}']);
+    const ref = await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{commit}']);
+    const tree = await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{tree}']);
     if (ref !== snapshot.headCommit || tree !== snapshot.treeSha) throw new Error('The protected Git source changed before portable preservation.');
     return {
-      objectFormat: await gitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--show-object-format']),
-      commitCount: Number(await gitValue(repositoryPath, repositoryIdentity, ['rev-list', '--count', snapshot.recoveryRef])),
-      objectCount: (await gitValue(repositoryPath, repositoryIdentity, ['rev-list', '--objects', '--no-object-names', snapshot.recoveryRef])).split('\n').length,
+      objectFormat: await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--show-object-format']),
+      commitCount: Number(await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-list', '--count', snapshot.recoveryRef])),
+      objectCount: (await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-list', '--objects', '--no-object-names', snapshot.recoveryRef])).split('\n').length,
     };
   };
   const expected = await sourceValues();
   if (expected.objectFormat !== 'sha1' && expected.objectFormat !== 'sha256') throw new Error('Git object format is unsupported.');
+  // rev-list already has a 32 MiB stdout limit (at least 41 bytes per SHA1
+  // object line). Reserve 128 bytes/object for packed index/reverse-index and
+  // temporary index overhead, plus fixed metadata. No new object-count ceiling.
+  const verifierOverhead = expected.objectCount * 128 + 4096;
+  const required = 3 * MAX_BUNDLE_BYTES + PRESERVATION_BANK_POLICY.manifestBytes
+    + verifierOverhead + PRESERVATION_BANK_POLICY.captureEntries * 65_536 + 16 * 1024 ** 2;
+  if (!Number.isSafeInteger(required) || required > PRESERVATION_BANK_POLICY.captureBytes) {
+    throw new Error('Portable verifier overhead exceeds its preservation capacity reservation.');
+  }
   const bank = await bundleDirectory();
-  const { stdout } = await withWorktreeMaterializationExecution(bank.directory, bank.identity,
-    () => materializationAwareExecFile(process.execPath, ['-e', PREPARE_DIRECTORY], {
-      cwd: bank.directory, env: gitEnvironment(), timeout: 120_000, maxBuffer: 1024 * 1024,
-    }));
+  if (path.dirname(bank.directory) !== admission.directory) throw new Error('Preservation bank reservation differs from publication.');
+  const { stdout } = await executePreservationNode(PREPARE_DIRECTORY, {}, bank.identity, gitEnvironment());
   const created = JSON.parse(stdout) as { leaf: string; device: number; inode: number };
   if (!/^\.prepare-[a-zA-Z0-9]+$/.test(created.leaf)) throw new Error('Private verifier name is invalid.');
   const preparation = path.join(bank.directory, created.leaf);
@@ -365,19 +375,20 @@ export async function preserveWorkspaceGitBundle(snapshot: WorkspaceSnapshotReco
   const leaf = path.basename(preparation);
   try {
     await assertBank(bank);
-    await createBundle(snapshot, repositoryPath, repositoryIdentity, preparation, identity);
+    await capturePreservationGitBundle(snapshot, repositoryPath, repositoryIdentity, preparation, identity);
     const before = await readBundleFile(path.join(preparation, 'source.bundle'));
-    await gitValue(preparation, identity, ['init', '--bare', '--template=', '--object-format=' + expected.objectFormat, 'verify.git']);
+    await preservationGitValue(preparation, identity, ['init', '--bare', '--template=', '--object-format=' + expected.objectFormat, 'verify.git']);
     // Empty-repository verification refuses every prerequisite, alternate, or missing parent object.
-    await gitValue(preparation, identity, ['--git-dir=verify.git', 'bundle', 'verify', 'source.bundle']);
-    await gitValue(preparation, identity, ['--git-dir=verify.git', 'fetch', '--no-tags', '--no-recurse-submodules',
+    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'bundle', 'verify', 'source.bundle']);
+    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', '-c', 'fetch.unpackLimit=0', '-c', 'gc.auto=0',
+      '-c', 'maintenance.auto=false', '-c', 'fetch.writeCommitGraph=false', 'fetch', '--no-tags', '--no-recurse-submodules',
       './source.bundle', snapshot.recoveryRef + ':refs/heads/recovered']);
-    await gitValue(preparation, identity, ['--git-dir=verify.git', 'fsck', '--full', '--strict']);
+    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'fsck', '--full', '--strict']);
     const recovered = {
-      headCommit: await gitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{commit}']),
-      treeSha: await gitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{tree}']),
-      commitCount: Number(await gitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--count', 'refs/heads/recovered'])),
-      objectCount: (await gitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--objects', '--no-object-names', 'refs/heads/recovered'])).split('\n').length,
+      headCommit: await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{commit}']),
+      treeSha: await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{tree}']),
+      commitCount: Number(await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--count', 'refs/heads/recovered'])),
+      objectCount: (await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--objects', '--no-object-names', 'refs/heads/recovered'])).split('\n').length,
     };
     const after = await readBundleFile(path.join(preparation, 'source.bundle'));
     const repeated = await sourceValues();
@@ -394,11 +405,14 @@ export async function preserveWorkspaceGitBundle(snapshot: WorkspaceSnapshotReco
       headCommit: snapshot.headCommit, treeSha: snapshot.treeSha, recoveryRef: snapshot.recoveryRef,
       prerequisiteCount: 0, commitCount: expected.commitCount, objectCount: expected.objectCount,
     };
-    await bankOperation(bank, { operation: 'publish', leaf, identity, sha256: receipt.sha256, bytes: receipt.bytes,
+    await executePreservationBankOperation(bank, { operation: 'publish', leaf, identity, sha256: receipt.sha256, bytes: receipt.bytes,
       file: { device: after.stat.dev, inode: after.stat.ino } });
     await readWorkspaceGitBundle(receipt);
     return receipt;
   } finally {
-    await bankOperation(bank, { operation: 'remove', leaf, identity });
+    // Unknown writer closure retains staging; removing a name cannot settle a writer.
+    if (writerAttempts.getStore()?.settlements.every(value => value.settled)) {
+      await executePreservationBankOperation(bank, { operation: 'remove', leaf, identity });
+    }
   }
 }

@@ -8,7 +8,7 @@ import { TaskDraftError } from './task-draft-contract';
 const exec = promisify(execFile);
 
 /** Local probes/checkouts cannot execute configured hooks, filters or monitors. */
-export async function taskDraftGit(repo: string, args: string[]): Promise<string> {
+export async function taskDraftGitOptions(repo: string): Promise<string[]> {
   const hooks = join(taskDraftRoot(), 'empty-hooks');
   mkdirSync(hooks, { recursive: true, mode: 0o700 });
   if (readdirSync(hooks).length) throw new TaskDraftError('workspace_unavailable', 409);
@@ -25,5 +25,9 @@ export async function taskDraftGit(repo: string, args: string[]): Promise<string
     if (!/^filter\..+\.(clean|smudge|process|required)$/.test(key)) throw new TaskDraftError('workspace_unavailable', 409);
     options.push('-c', `${key}=${key.endsWith('.required') ? 'false' : ''}`);
   }
-  return (await exec('git', [...options, '-C', repo, ...args], { timeout: 10_000, maxBuffer: 512_000 })).stdout;
+  return options;
+}
+
+export async function taskDraftGit(repo: string, args: string[]): Promise<string> {
+  return (await exec('git', [...await taskDraftGitOptions(repo), '-C', repo, ...args], { timeout: 10_000, maxBuffer: 512_000 })).stdout;
 }

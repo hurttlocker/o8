@@ -565,7 +565,7 @@ export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestS
     FROM github_pull_requests
     WHERE repo_full_name = ? AND state = 'open'
     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
-    LIMIT 20
+    LIMIT 500
   `).all(repoFullName) as GitHubPullRequestRow[];
 
   return rows.map(mapPullRequestRow);

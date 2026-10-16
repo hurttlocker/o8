@@ -10,7 +10,7 @@ import { ComposerPicker } from './ComposerPicker';
 import { ModeChip } from './ModeChip';
 import { useComposerChipCompact } from '../composer-compact-context';
 import type { ResolvedComposerSelectorState } from './state';
-import type { ComposerWorkerDefaults } from './worker-settings';
+import type { ComposerWorkerDefaults, WorkerModelChange } from './worker-settings';
 
 export function ComposerSelectorFooterView({
   state,
@@ -22,9 +22,12 @@ export function ComposerSelectorFooterView({
   onEffortChange,
   onRuntimeChange,
   onWorkerModelChange,
+  onWorkerEffortChange,
+  workerLocks,
   onWorkerStartModeChange,
   saving = false,
   leadingControls,
+  permissionControl,
   attachControl,
   meterControl,
   micControl,
@@ -42,10 +45,13 @@ export function ComposerSelectorFooterView({
   onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
   onEffortChange: (effort: ThinkingEffort) => void;
   onRuntimeChange: (runtime: OrchestratorRuntime) => void;
-  onWorkerModelChange: (model: string | null) => void;
+  onWorkerModelChange: WorkerModelChange;
+  onWorkerEffortChange?: (effort: ThinkingEffort, runtime: OrchestratorRuntime) => void;
+  workerLocks?: { runtime?: boolean; defaultModel: boolean; opencode: boolean; threecode: boolean; codexEffort: boolean; claudeEffort: boolean };
   onWorkerStartModeChange: (mode: WorkerStartMode) => void;
   saving?: boolean;
   leadingControls?: ReactNode;
+  permissionControl?: ReactNode;
   attachControl?: ReactNode;
   meterControl?: ReactNode;
   micControl?: ReactNode;
@@ -71,6 +77,7 @@ export function ComposerSelectorFooterView({
       }}
     >
       <ModeChip state={state} onModeChange={onModeChange} />
+      {permissionControl}
       <span data-testid="composer-selector-attach" style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>{attachControl}</span>
       {leadingControls ? (
         <span data-testid="composer-selector-leading-controls" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
@@ -92,6 +99,8 @@ export function ComposerSelectorFooterView({
         onEffortChange={onEffortChange}
         onRuntimeChange={onRuntimeChange}
         onWorkerModelChange={onWorkerModelChange}
+        onWorkerEffortChange={onWorkerEffortChange}
+        workerLocks={workerLocks}
         onWorkerStartModeChange={onWorkerStartModeChange}
         onRequestTextareaFocus={onRequestTextareaFocus}
         saving={saving}

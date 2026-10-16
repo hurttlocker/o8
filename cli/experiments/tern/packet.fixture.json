@@ -1,0 +1,18 @@
+{
+  "schema": "o8/cli/packet.info/v1",
+  "packet": {
+    "laneId": "lane-fixture",
+    "id": "packet-fixture",
+    "status": "running",
+    "runtime": "pi",
+    "actualRuntime": null,
+    "branch": "lab/read-only",
+    "baseBranch": "main",
+    "repoPath": "/example/o8",
+    "worktreePath": null,
+    "label": "SYNTHETIC FIXTURE — not live worker evidence",
+    "events": [
+      { "id": "event-fixture", "timestamp": "2026-10-07T00:00:00Z", "actor": "fixture", "verb": "observed", "payload": {} }
+    ]
+  }
+}

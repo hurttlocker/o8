@@ -9,6 +9,7 @@ import { fetchOnce } from '@/lib/panel/fetch-cache';
 import { DEGRADED_FALLBACK_REFRESH_MS, REALTIME_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
+import { FloatingSurface } from '../FloatingSurface';
 
 type PortKind = 'page' | 'service';
 
@@ -428,22 +429,16 @@ export function FooterPorts({
         </button>
       )}
       {open && typeof document !== 'undefined' ? createPortal(
-        <div
+        <FloatingSurface
           data-stationary-chrome="true"
           onMouseEnter={showPopover}
           onMouseLeave={scheduleHide}
+          contentStyle={{ padding: 6, maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' }}
           style={{
             position: 'fixed',
             ...popoverPos,
             minWidth: 220,
             maxWidth: 320,
-            padding: 6,
-            borderRadius: 12,
-            background: 'var(--t-popover-surface)',
-            backdropFilter: 'blur(24px) saturate(1.4)',
-            WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
-            border: '1px solid var(--t-panel-border)',
-            boxShadow: 'var(--t-panel-shadow)',
             zIndex: 9999,
             fontFamily: 'var(--font-sans-system)',
           }}
@@ -541,7 +536,7 @@ export function FooterPorts({
               ) : null}
             </>
           )}
-        </div>,
+        </FloatingSurface>,
         document.body,
       ) : null}
     </div>

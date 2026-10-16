@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { resolveEffortAliases } from '@/lib/orchestrator/effort-pin';
@@ -33,7 +34,7 @@ export const MISSION_WORKER_PIN_PROPERTIES = {
 export function parseWorkerProvider(value: unknown): WorkerProvider | null | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   if (value === 'minimax' || isRuntimeWorkerProvider(value)) return value;
-  throw new Error(`requestedProvider must be one of: ${WORKER_PROVIDER_OPTIONS.join(', ')}.`);
+  throw new McpInputError(`requestedProvider must be one of: ${WORKER_PROVIDER_OPTIONS.join(', ')}.`);
 }
 
 export function parseMissionWorkerPinInput(args: Record<string, unknown>): {
@@ -44,10 +45,10 @@ export function parseMissionWorkerPinInput(args: Record<string, unknown>): {
   const requestedModel = optionalString(args, 'model') || undefined;
   const carrier = optionalString(args, 'carrier') || undefined;
   if (carrier && !isClaudeCodeModelSource(carrier)) {
-    throw new Error('carrier must be one of: native, openrouter, codex-subscription.');
+    throw new McpInputError('carrier must be one of: native, openrouter, codex-subscription.');
   }
   const effortAliases = resolveEffortAliases(args.requestedEffort, args.thinkingEffort);
-  if (!effortAliases.ok) throw new Error(effortAliases.message);
+  if (!effortAliases.ok) throw new McpInputError(effortAliases.message);
   return {
     requestedModel,
     claudeCodeCarrier: isClaudeCodeModelSource(carrier) ? carrier : undefined,

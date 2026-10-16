@@ -1,8 +1,10 @@
 import { lstat } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import { spokenReviewSnapshotFingerprint } from '@/lib/lane/lane-diff-facts';
-import { appendEvent, archiveLane, getLane, listLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, getLane } from '@/lib/lane/registry';
+import { exactWorkspaceOwningLanes } from '@/lib/lane/workspace-ownership-query';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { assertWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
@@ -113,8 +115,16 @@ function certifiesMergeEvidence(
   return recordedCandidate === undefined || recordedCandidate === evidence.mergeCandidateSha;
 }
 
+function canonicalWorkspaceNamespace(workspacePath: string): string {
+  const resolved = path.resolve(workspacePath);
+  return path.join(realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+}
+
 function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
-  const matches = listWorkspaceSnapshotsByOriginalPath(path.resolve(workspacePath));
+  const resolved = path.resolve(workspacePath);
+  const canonical = canonicalWorkspaceNamespace(resolved);
+  const matches = [...new Map([resolved, canonical].flatMap(listWorkspaceSnapshotsByOriginalPath)
+    .map(snapshot => [`${snapshot.repositoryUuid}:${snapshot.packetId}`, snapshot])).values()];
   if (matches.length > 1) {
     throw new Error('Workspace retirement found ambiguous durable materialization truth.');
   }
@@ -122,13 +132,9 @@ function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
 }
 
 /** The one durable packet lane that owns this exact manager path, if any. */
-function retirementLanes(repoLocalPath: string, workspacePath: string) {
-  return listLanes().filter((lane) => (
-    lane.packetId?.trim()
-    && lane.worktreePath
-    && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repoLocalPath)
-    && path.resolve(lane.worktreePath) === path.resolve(workspacePath)
-  ));
+async function retirementLanes(repoLocalPath: string, workspacePath: string) {
+  const metadata = (await readWorktreeMetaSnapshot(repoLocalPath))[path.basename(workspacePath)];
+  return exactWorkspaceOwningLanes(repoLocalPath, workspacePath, metadata).filter((lane) => lane.packetId?.trim());
 }
 
 type ExactManagedChildObservation =
@@ -206,7 +212,7 @@ function archiveTerminalLane(snapshot: WorkspaceSnapshotRecord, action: Workspac
   if (!lane || lane.status === 'archived') return;
   if (lane.packetId !== snapshot.packetId) return;
   if (lane.worktreePath
-    && path.resolve(lane.worktreePath) !== path.resolve(snapshot.originalPath)) return;
+    && canonicalWorkspaceNamespace(lane.worktreePath) !== canonicalWorkspaceNamespace(snapshot.originalPath)) return;
   const endings = {
     pr: { outcome: 'pr_opened' as const, outcomeNote: 'Pull request opened; local workspace retired.' },
     merge: { outcome: 'merged' as const, outcomeNote: 'Merged; local workspace retired.' },
@@ -247,7 +253,7 @@ export async function prepareWorkspaceMaterializationRetirement(
       }
       if (observation.status === 'missing') {
         const repo = await findRepoByLocalPath(canonicalRepoRoot(repoPath));
-        const lanes = retirementLanes(repoPath, workspacePath);
+        const lanes = await retirementLanes(repoPath, workspacePath);
         if (!repo || repo.id !== snapshot.repositoryUuid || lanes.length !== 1
           || lanes[0]!.packetId !== snapshot.packetId || lanes[0]!.id !== snapshot.laneId
           || await gitValue(repo.localPath, ['rev-parse', '--verify', snapshot.recoveryRef + '^{commit}']) !== snapshot.headCommit
@@ -285,7 +291,7 @@ export async function captureWorkspaceMaterializationSnapshot(
   }
   const repo = await findRepoByLocalPath(canonicalRepoRoot(repoPath));
   if (!repo) return null;
-  const lanes = retirementLanes(repo.localPath, workspacePath);
+  const lanes = await retirementLanes(repo.localPath, workspacePath);
   if (lanes.length === 0) {
     // Name both halves of the identity that failed to meet: an operator reading
     // the persisted merge_error can tell "the workspace is unbound" apart from
@@ -368,7 +374,7 @@ export async function captureWorkspaceMaterializationSnapshot(
       repositoryUuid: repo.id,
       packetId,
       laneId: lane.id,
-      originalPath: path.resolve(workspacePath),
+      originalPath: canonicalWorkspaceNamespace(workspacePath),
       branch,
       baseCommit,
       headCommit,
@@ -565,7 +571,7 @@ export async function confirmWorkspaceMaterializationRetirement(
 ): Promise<void> {
   const repo = await findRepoByLocalPath(repoPath);
   if (!repo) return;
-  const lanes = retirementLanes(repo.localPath, workspacePath);
+  const lanes = await retirementLanes(repo.localPath, workspacePath);
   if (lanes.length !== 1) return;
   appendEvent(lanes[0]!.id, 'workspace_retirement_confirmed', 'system', {
     reason: 'confirmed-missing-directory',

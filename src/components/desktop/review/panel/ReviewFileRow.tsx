@@ -7,12 +7,14 @@ import { UI_FONT, MONO_FONT, REVIEW_CONTROL_BG_ACTIVE } from './constants';
 import { DiffStatBadge, IconCheck } from './icons';
 import { DiffPatch, RowMessage } from './DiffView';
 import { MarkdownRender } from '../../o8-panel/markdown-render';
+import { isBinaryPatch, isDirectoryPatch, reviewFileKind, type ReviewFilePresentation } from '@/lib/review/file-presentation';
+import { ReviewAssetSummary } from './ReviewAssetSummary';
 
 /** Extensions that the "Rich preview" toggle (#1088) renders inline as
  *  rendered content instead of as a raw unified diff. Anything not in this
  *  set falls back to the normal diff path even when the toggle is on. */
 const MARKDOWN_PREVIEW_EXTENSIONS = new Set(['.md', '.mdx']);
-const IMAGE_PREVIEW_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp']);
+const IMAGE_PREVIEW_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg', '.ico', '.bmp']);
 
 type PreviewKind = 'markdown' | 'image' | null;
 
@@ -78,11 +80,25 @@ const ReviewFileRow = memo(function ReviewFileRow({
   const [comments, setComments] = useState<LocalDiffComment[]>([]);
   const [activeComment, setActiveComment] = useState<LocalCommentTarget | null>(null);
   const [commentText, setCommentText] = useState('');
+  const [sourceDiff, setSourceDiff] = useState(false);
+  const [presentation, setPresentation] = useState<ReviewFilePresentation>({ kind: reviewFileKind(file.path) });
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [previewVisible, setPreviewVisible] = useState(typeof IntersectionObserver === 'undefined');
 
   // #1088: applicable preview kind for this file (null = not previewable; the
   // toggle has no effect on this row and the diff renders as usual).
   const previewKind = previewKindFor(file.path);
-  const previewActive = richPreview && previewKind !== null && file.status !== 'deleted';
+  const historical = Boolean(diffBase || preloadedDiff !== undefined);
+  const svg = file.path.toLowerCase().endsWith('.svg');
+  const previewActive = !historical && !sourceDiff && file.status !== 'deleted' && (previewKind === 'image' || richPreview && previewKind === 'markdown');
+  useEffect(() => {
+    if (!open || !previewActive || previewKind !== 'image' || typeof IntersectionObserver === 'undefined') return;
+    const node = rowRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setPreviewVisible(true); observer.disconnect(); } }, { rootMargin: '120px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [open, previewActive, previewKind]);
 
   // Apply the panel-level bulk collapse/expand signal only when it actually
   // changes — never on mount, so the #1084 `initialOpen` default holds.
@@ -106,6 +122,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
       setLoading(false);
       setError(null);
       setDiff(preloadedDiff);
+      setPresentation({ kind: isDirectoryPatch(preloadedDiff) ? 'directory' : isBinaryPatch(preloadedDiff) ? reviewFileKind(file.path) === 'text' ? 'binary' : reviewFileKind(file.path) : reviewFileKind(file.path) });
       return;
     }
     let cancelled = false;
@@ -118,14 +135,16 @@ const ReviewFileRow = memo(function ReviewFileRow({
     if (diffBase) params.set('base', diffBase);
     fetch(`/api/panel/file-diff?${params.toString()}`, { signal: controller.signal })
       .then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { diff?: string; stagedDiff?: string; error?: string };
+        const data = (await response.json().catch(() => ({}))) as ReviewFilePresentation & { diff?: string; stagedDiff?: string; error?: string };
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
         return data;
       })
       .then((data) => {
         if (cancelled) return;
         if (data.error) setError(data.error);
-        setDiff(data.diff ?? data.stagedDiff ?? '');
+        const patch = data.diff ?? data.stagedDiff ?? '';
+        setPresentation({ kind: data.kind ?? (isDirectoryPatch(patch) ? 'directory' : isBinaryPatch(patch) ? 'binary' : reviewFileKind(file.path)), size: data.size, diffStatus: data.diffStatus });
+        setDiff(patch);
       })
       .catch((err) => {
         if (!cancelled && (err as { name?: string })?.name !== 'AbortError') {
@@ -147,7 +166,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
   // rendered content (markdown / image) instead of the unified diff.
   // Triggered only when the toggle is on AND the file is applicable.
   useEffect(() => {
-    if (!open || !previewActive) return;
+    if (!open || !previewActive || previewKind === 'image' && !previewVisible) return;
     let cancelled = false;
     const controller = new AbortController();
     setPreviewLoading(true);
@@ -171,6 +190,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
           const content = typeof data.content === 'string' ? data.content : '';
           setPreview({ kind: 'markdown', content, truncated: Boolean(data.truncated) });
         } else if (previewKind === 'image') {
+          setPresentation({ kind: 'image', size: typeof data.size === 'number' ? data.size : undefined });
           if (data.type === 'svg' && typeof data.content === 'string') {
             setPreview({ kind: 'svg', markup: data.content });
           } else if (typeof data.dataUrl === 'string') {
@@ -192,7 +212,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
       cancelled = true;
       controller.abort();
     };
-  }, [open, previewActive, previewKind, file.path, repoPath, file.additions, file.deletions]);
+  }, [open, previewActive, previewKind, previewVisible, file.path, repoPath, file.additions, file.deletions]);
 
   const openComment = useCallback((target: LocalCommentTarget) => {
     setActiveComment(target);
@@ -223,7 +243,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
 
   return (
     <div
-      ref={(node) => setRowRef(file.path, node)}
+      ref={(node) => { rowRef.current = node; setRowRef(file.path, node); }}
       style={{
         borderBottom: '1px solid var(--t-divider-subtle)',
         background: selected ? 'var(--t-hover)' : 'transparent',
@@ -240,18 +260,21 @@ const ReviewFileRow = memo(function ReviewFileRow({
           {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
         </span>
         <span style={{ flex: 1, minWidth: 0, fontFamily: MONO_FONT, fontSize: 12, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'rtl', textAlign: 'left' }}>
-          {file.path}
+          <bdi dir="ltr">{file.path}</bdi>
         </span>
-        <DiffStatBadge additions={file.additions ?? 0} deletions={file.deletions ?? 0} />
+        {presentation.kind && presentation.kind !== 'text' && presentation.kind !== 'symlink' ? <span style={{ fontFamily: UI_FONT, color: 'var(--t-text-faint)', fontSize: 10, textTransform: 'capitalize', flexShrink: 0 }}>{file.status} · {presentation.kind === 'directory' ? 'Folder' : presentation.kind}</span> : <DiffStatBadge additions={file.additions ?? 0} deletions={file.deletions ?? 0} />}
       </button>
+      {open && svg && !historical && file.status !== 'deleted' ? <div aria-label="Image view" style={{ display: 'flex', gap: 4, paddingLeft: 16, paddingBottom: 8 }}>
+        {[false, true].map((source) => <button key={String(source)} type="button" aria-pressed={sourceDiff === source} onClick={() => setSourceDiff(source)} style={{ minHeight: 24, paddingLeft: 8, paddingRight: 8, border: 0, borderRadius: 6, background: sourceDiff === source ? 'var(--t-hover)' : 'transparent', color: sourceDiff === source ? 'var(--t-text)' : 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11, cursor: 'pointer' }}>{source ? 'Source diff' : 'Preview'}</button>)}
+      </div> : null}
       {open ? (
         previewActive ? (
-          previewLoading ? (
+          previewKind === 'image' && !previewVisible ? <div style={{ minHeight: 140, display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--t-text-faint)' }}>Image preview</div> : previewLoading ? (
             <RowMessage text="Loading preview…" />
           ) : previewError ? (
-            <RowMessage text={previewError} tone="error" />
+            <ReviewAssetSummary presentation={presentation} path={file.path} repoPath={repoPath} error={previewError} />
           ) : preview ? (
-            <RichPreviewBody payload={preview} />
+            <><RichPreviewBody payload={preview} fileName={file.path.split('/').pop() ?? file.path} />{previewKind === 'image' ? <div style={{ paddingLeft: 16, paddingBottom: 12 }}><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('o8:browse-review-file', { detail: { repoPath, path: file.path } }))} style={{ padding: 0, border: 0, background: 'transparent', fontFamily: UI_FONT, fontSize: 11, color: 'var(--t-accent)', cursor: 'pointer' }}>Open in Files</button></div> : null}</>
           ) : (
             <RowMessage text="No preview available." />
           )
@@ -259,8 +282,10 @@ const ReviewFileRow = memo(function ReviewFileRow({
           <RowMessage text="Loading diff…" />
         ) : error ? (
           <RowMessage text={error} tone="error" />
+        ) : presentation.kind === 'directory' || presentation.diffStatus === 'binary' || presentation.diffStatus === 'too_large' || (presentation.kind && !['text', 'symlink'].includes(presentation.kind) && !(diff && /^@@/m.test(diff) && !isBinaryPatch(diff))) || diff && (isBinaryPatch(diff) || isDirectoryPatch(diff)) ? (
+          <ReviewAssetSummary presentation={presentation} path={file.path} repoPath={repoPath} deleted={file.status === 'deleted'} historical={historical} />
         ) : diff && diff.trim() ? (
-          <DiffPatch
+          <><DiffPatch
             patch={diff}
             mode={mode}
             wrap={wrap}
@@ -272,9 +297,9 @@ const ReviewFileRow = memo(function ReviewFileRow({
             onCommentTextChange={setCommentText}
             onCancelComment={cancelComment}
             onSaveComment={saveComment}
-          />
+          />{presentation.diffStatus === 'truncated' ? <ReviewAssetSummary presentation={{ ...presentation, diffStatus: 'too_large' }} path={file.path} repoPath={repoPath} error="Showing the first 50 KB of this diff. Open the file for the remaining content." historical={historical} /> : null}</>
         ) : (
-          <RowMessage text="No diff available (binary file or too large)." />
+          <ReviewAssetSummary presentation={presentation} path={file.path} repoPath={repoPath} deleted={file.status === 'deleted'} historical={historical} />
         )
       ) : null}
     </div>
@@ -283,7 +308,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
 
 // ── rich preview body (#1088) ──
 
-function RichPreviewBody({ payload }: { payload: PreviewPayload }) {
+function RichPreviewBody({ payload, fileName }: { payload: PreviewPayload; fileName: string }) {
   if (payload.kind === 'markdown') {
     return (
       <div style={{ paddingTop: 8, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}>
@@ -300,7 +325,7 @@ function RichPreviewBody({ payload }: { payload: PreviewPayload }) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}>
         {/* eslint-disable-next-line @next/next/no-img-element -- data URL, not a remote asset */}
-        <img src={payload.dataUrl} alt="" style={{ maxWidth: '100%', height: 'auto', borderRadius: 6, border: '1px solid var(--t-divider-subtle)' }} />
+        <img src={payload.dataUrl} alt={fileName} loading="lazy" style={{ maxWidth: '100%', maxHeight: 240, objectFit: 'contain', height: 'auto', borderRadius: 6, border: '1px solid var(--t-divider-subtle)' }} />
       </div>
     );
   }
@@ -314,8 +339,9 @@ function RichPreviewBody({ payload }: { payload: PreviewPayload }) {
         {/* eslint-disable-next-line @next/next/no-img-element -- data URL, not a remote asset */}
         <img
           src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(payload.markup)}`}
-          alt=""
-          style={{ maxWidth: '100%', height: 'auto' }}
+          alt={fileName}
+          loading="lazy"
+          style={{ maxWidth: '100%', maxHeight: 240, objectFit: 'contain', height: 'auto' }}
         />
       </div>
     );

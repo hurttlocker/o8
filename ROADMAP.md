@@ -22,6 +22,12 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 First-run acceptance is the immediate engineering priority. Published stable is 0.1.781. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 
+Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/hurttlocker/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246). Managed development environment cleanup is tracked in [#3337](https://github.com/hurttlocker/o8/issues/3337). These are source and development checks; installed first-run acceptance remains open.
+
+Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/hurttlocker/o8/pull/3374). A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Source completion does not establish installed acceptance or a release; voice and mobile acceptance remain with their existing work.
+
+Workspace polish is tracked in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Acceptance covers quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation retain their existing issues: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance.
+
 Update-service source work has closed. Closure does not establish deployed endpoint behavior, delivery in the installed updater, or trustworthy active-install counts. New-install usage analytics, existing opt-out preservation and matching privacy documentation remain a separate delivery gate. [#2882](https://github.com/hurttlocker/o8/issues/2882)
 
 After first-run acceptance, verify paid-tier behavior through the installed app, then complete the existing Symon reliability review. Its scope includes sessions, models, tool results, interruptions, reconnect and approvals. Current Symon follow-ups retain their own prerequisite and acceptance evidence. [#2534](https://github.com/hurttlocker/o8/issues/2534)
@@ -77,6 +83,10 @@ Project rules and prior outcomes stay attached to the project, not to one model 
 
 Local worker adapters launch the coding-agent CLIs you already pay for and reuse the authentication those tools already hold. The runtime contract keeps callers independent of any one provider's protocol.
 
+Hermes worker dispatch is implemented through the shared owned ACP path in [#3391](https://github.com/hurttlocker/o8/pull/3391). Entry-point fixtures cover model selection, launch, interrupt, reconnect, and persisted transcripts. Installed provider acceptance remains open in [#3388](https://github.com/hurttlocker/o8/issues/3388).
+
+Native Muse Code worker and orchestrator support is implemented in [#3602](https://github.com/hurttlocker/o8/pull/3602), and explicit ACP registry preparation and local onboarding in [#3603](https://github.com/hurttlocker/o8/pull/3603). Model-switch refusal and uncertainty, session isolation, saved model identity, and capability reporting are tracked in [#3597](https://github.com/hurttlocker/o8/issues/3597). Local protocol and process fixtures establish source behavior; signed-in provider, paid-model and installed-app acceptance remain separate gates.
+
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
 | Carrier coverage and auth probes | A new carrier lands as a registry entry plus a readiness and auth probe, with no fork in the dispatch path. | open | Readiness and auth checks are written per CLI, and the operator cannot see what evidence o8 used to call a runtime connected. The one adapter waiting is blocked on an upstream build for Intel Macs. | [#2200](https://github.com/hurttlocker/o8/issues/2200) |
@@ -85,6 +95,8 @@ Local worker adapters launch the coding-agent CLIs you already pay for and reuse
 ## 4. One control plane, every surface
 
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.
+
+Mobile voice intent resolution is implemented in [#3146](https://github.com/hurttlocker/o8/pull/3146). Entry-point tests cover paired-device access, confirmed choices scoped to a submitted chat and repository, and offline replay. Paired-phone and provider acceptance remain open.
 
 | Arc | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- |
@@ -97,6 +109,8 @@ Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control p
 ## 5. Smooth for people and for agents
 
 Two lanes, one pillar. The people lane covers the surfaces a person works in. The agents lane covers whether another program can drive o8 through a real interface instead of imitating a mouse.
+
+Shared GitHub quota and durable PR watching are implemented in [#3606](https://github.com/hurttlocker/o8/pull/3606), and commit-pinned review guides in [#3607](https://github.com/hurttlocker/o8/pull/3607). Paused queue restoration, acknowledged delivery, draft recovery, repository-scoped attachments and narrow-layout corrections are tracked in [#3598](https://github.com/hurttlocker/o8/issues/3598). Browser and route fixtures cover reload, dismissal, repeat actions and uncertain receipts. Queued intent never replays automatically after reload; released-build acceptance remains open.
 
 | Arc | Lane | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- | --- |
@@ -114,6 +128,9 @@ o8 should be light on the machine it runs on, and it should run on the machine y
 | Linux | A fresh Ubuntu machine installs o8, launches it, dispatches a packet, and merges it through the governed path. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#1672](https://github.com/hurttlocker/o8/issues/1672) |
 | Windows | The same as Linux, on Windows. | parked | Maintainer VM validation is paused; install-to-merge proof remains outstanding. | [#2204](https://github.com/hurttlocker/o8/issues/2204) |
 | Speed and idle-work pass | Interaction budgets hold under real load, not only at idle. | open | Conversation switching and long histories slow down under streaming load. | [#2202](https://github.com/hurttlocker/o8/issues/2202) |
+| Packaged release size | Reduce exported dependencies toward the 250 MiB app and 75 MiB update targets. | open | Shared package ceilings are approved at 350/100 MiB while reduction continues. Signing, notarization and native footprint checks remain required. | [#3545](https://github.com/hurttlocker/o8/issues/3545) |
+| Signed bundle immutability | Ordinary cache reads and updates leave the installed app's signed files intact. | open | The correction is published in 0.1.794 and real cache regressions pass; installed signature checks after GUI use and relaunch remain pending. | [#3619](https://github.com/hurttlocker/o8/issues/3619) |
+| Provider and workflow release | Publish the reviewed provider, review and conversation changes. | shipped | 0.1.794 is signed and notarized; public downloads and updater signature are verified. Installed acceptance is tracked separately. | [#3613](https://github.com/hurttlocker/o8/issues/3613) |
 | Storage admission and reclaim | o8 never blocks a dispatch it could have serviced, and never fills the disk. | open | Admission uses one flat free-space reserve instead of the job's size; a stale dashboard write can replay a prior hold or queued packet after recovery. | [#2203](https://github.com/hurttlocker/o8/issues/2203) |
 | Release channels and build integrity | Preview and stable are separable, and a build is reproducible from a tag. | open | Preview enrollment with an isolated app identity and data does not exist. The production web build also fails to resolve the shared settlement module; its source fix and build proof are tracked in #3268. | [#2205](https://github.com/hurttlocker/o8/issues/2205) |
 

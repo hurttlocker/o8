@@ -43,13 +43,23 @@ function namedTools(prompt: string): string[] {
 
 function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
   if (surface.dispatch) return ALL_TOOLS;
-  return surface.cortexReads ? new Set(CORTEX_READONLY_TOOLS) : new Set();
+  return surface.cortexReads ? new Set([...CORTEX_READONLY_TOOLS, 'o8_html_preview', 'o8_html_render', 'o8_visualization_read']) : new Set();
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
-const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex'];
+const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi'];
 
 describe('orchestrator prompt tool scope (#2898)', () => {
+  it.each(BACKENDS)('teaches explicit and natural visualization requests to %s without dispatch authority', backend => {
+    const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend, firstRunClarify: false, toolProfile: 'solo' });
+    expect(prompt).toContain('`/visualization`');
+    expect(prompt).toContain('show me a visualization');
+    expect(prompt).toContain('o8_html_preview');
+    expect(prompt).toContain('o8_html_render');
+    expect(prompt).toContain('o8_visualization_read');
+    expect(prompt).toContain('a rendered mock does not');
+    expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+  });
   it('finds the registered tool catalogs it guards', () => {
     expect(CORTEX_TOOLS).toContain('cortex_launch_agent');
     expect(OPERATOR_TOOLS).toContain('create_mission');

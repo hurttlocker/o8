@@ -16,28 +16,16 @@ import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { refreshProjectsFromExternalMutation, useProjects, type ProjectRecord } from './repo-registry/useProjects';
 import { MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { SymonSidebarRow } from './agent-panel/SymonSidebarRow';
 import { MiniAgentPanelAction } from './MiniAgentPanelAction';
-import { AutoFlash, ControlSlider, Delivery, InputSearch } from 'iconoir-react';
+import { MiniAgentPanelNavigation } from './agent-panel/MiniAgentPanelNavigation';
+import { ProjectIcon as FolderIcon } from './agent-panel/SidebarActionIcons';
 import { repoSlugFromRemote } from './canvas-utils';
 import { canCreateOrchestratorForRepo, deriveActiveProjectRepos, deriveAgentPanelRailRepos, resolveGlobalNewSessionRepo } from './agent-panel-repo-selection';
-import { groupProjectNavigationItems, selectWorkingRepository, visibleProjectNavigationItems } from './agent-panel/project-navigation';
+import { selectWorkingRepository } from './agent-panel/project-navigation';
+import { ProjectsSwitcher } from './agent-panel/ProjectsSwitcher';
 import { dispatchFocusRepoWorkspaceTab } from '@/lib/desktop/events';
 
-// ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
-// MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
-// uses width/height. Tiny wrappers keep the AgentPanel callsite clean.
-const FolderIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <Delivery width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
-);
-const SearchIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <InputSearch width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
-);
-const AutomationsIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <AutoFlash width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
-);
-const CustomizeIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <ControlSlider width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
-);
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -54,6 +42,7 @@ const MINI_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--t-divider-subtle) 6
 export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) {
   const {
     activeSessionKey,
+    navigationRail = false,
     selectedRepo,
     selectedRepoLocalPath,
     workingRepoPath,
@@ -209,6 +198,21 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   }, [activeProjectId, onSelectRepo, projects, registeredRepoByPath]);
   // The project name is the primary route into its overview. Repo disclosure
   // stays a separate control so expanding the tree never changes work context.
+  const handleMiniProjectSelect = useCallback(async (project: ProjectRecord) => {
+    const saved = await projects.switchActive(project.id);
+    if (!saved) return false;
+    const repoPath = project.repoPaths.includes(selectedRepoLocalPath ?? '') ? selectedRepoLocalPath : project.repoPaths[0];
+    if (repoPath) {
+      const repo = registeredRepoByPath.get(repoPath);
+      if (!dispatchFocusRepoWorkspaceTab({ repoId: repo?.id, repoPath })) onSelectRepo?.(repo?.id ?? repoPath);
+    }
+    return true;
+  }, [projects, selectedRepoLocalPath, registeredRepoByPath, onSelectRepo]);
+  const onRepoAdded = props.onRepoAdded;
+  const handleRepositoryConnected = useCallback(async (repo: RepoRegistryEntry) => {
+    await onRepoAdded?.(repo);
+    if (!dispatchFocusRepoWorkspaceTab({ repoId: repo.id, repoPath: repo.localPath })) onSelectRepo?.(repo.id);
+  }, [onRepoAdded, onSelectRepo]);
   const handleMiniProjectOpen = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
     onOpenProjectManagement?.(project.id);
@@ -259,8 +263,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         />
         <ConnectionPill />
         <FixedReportCard />
-        <UpdateCard />
-        <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
+        <UpdateCard quiet={navigationRail} />
+        {!navigationRail ? <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} /> : null}
       </div>
     );
   }
@@ -289,6 +293,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
 
       {projects.activeProject ? (
         <MiniAgentPanelHeader
+          navigationRail={navigationRail}
           onCreateOrchestrator={handleCreateOrchestrator}
           onCreateChat={handleCreateChat}
           onCreateTerminal={handleCreateTerminal}
@@ -300,9 +305,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           projectsOpen={projectsMenuOpen}
           onProjectsOpenChange={setProjectsMenuOpen}
           onRepoSelect={handleMiniRepoSelect}
+          onProjectSelect={handleMiniProjectSelect}
           onOpenProject={handleMiniProjectOpen}
           onManageProjects={handleOpenProjectManagement}
           onAddRepo={handleOpenAddRepoDialog}
+          onRepositoryConnected={handleRepositoryConnected}
         />
       ) : null}
 
@@ -315,17 +322,17 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: effectiveTitlebarSpacerHeight > 10 ? 14 : 12,
+          paddingTop: 4,
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
           gap: 0,
           // Symmetric fade — top edge softens against the navigation
           // section above, bottom edge fades into the button dock below.
-          // Matches the o8.md panel pattern; 16px top + 32px bottom keeps
+          // Matches the o8.md panel pattern; 4px top + 32px bottom keeps
           // the bottom dock visually anchored while letting the top blend.
-          maskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
+          maskImage: 'linear-gradient(to bottom, transparent 0px, black 4px, black calc(100% - 32px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 4px, black calc(100% - 32px), transparent 100%)',
         } as CSSProperties}
         className="hide-scrollbar"
       >
@@ -423,7 +430,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onSelectSession={onSelectSession}
             onOpenHistoryChat={onOpenHistoryChat}
             variant="mini"
-            hideWhenEmpty
+            hideWhenEmpty={false}
             sectionLabel={null}
             sections={PROJECT_HISTORY_SECTIONS}
             showLiveSessions={false}
@@ -432,8 +439,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             // Agents stay flat between Chats and Archived, never nested under a chat.
-            agentsSection={(
-              <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
+            agentsSection={(workingOnly) => (
+              <AgentPanelExtraAgents workingOnly={workingOnly} activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
             )}
           />
         </section>
@@ -452,13 +459,14 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       </div>
       <ConnectionPill />
       <FixedReportCard />
-      <UpdateCard />
-      <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} />
+      <UpdateCard quiet={navigationRail} />
+      {!navigationRail ? <AccountBlock onOpenSettings={onOpenSettings} onOpenMobilePairing={onOpenMobilePairing} /> : null}
     </div>
   );
 });
 
 function MiniAgentPanelHeader({
+  navigationRail,
   onCreateOrchestrator,
   onCreateChat,
   onCreateTerminal,
@@ -470,13 +478,16 @@ function MiniAgentPanelHeader({
   projectsOpen,
   onProjectsOpenChange,
   onRepoSelect,
+  onProjectSelect,
   onOpenProject,
   onManageProjects,
   onAddRepo,
+  onRepositoryConnected,
 }: {
   onCreateOrchestrator?: () => void;
   onCreateChat?: () => void;
   onCreateTerminal?: () => void;
+  navigationRail: boolean;
   onSearch?: () => void;
   projects: ProjectRecord[];
   activeProjectId: string | null;
@@ -485,9 +496,11 @@ function MiniAgentPanelHeader({
   projectsOpen: boolean;
   onProjectsOpenChange: (open: boolean) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
+  onProjectSelect: (project: ProjectRecord) => Promise<boolean>;
   onOpenProject: (project: ProjectRecord) => void;
   onManageProjects: () => void;
   onAddRepo: () => void;
+  onRepositoryConnected: (repo: RepoRegistryEntry) => Promise<void>;
 }) {
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const runSessionAction = useCallback((action?: () => void) => {
@@ -501,14 +514,15 @@ function MiniAgentPanelHeader({
         flexShrink: 0,
         paddingTop: 3,
         paddingRight: 0,
-        paddingBottom: 5,
+        paddingBottom: 4,
         paddingLeft: 0,
         borderBottom: '1px solid var(--t-divider-subtle)',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-        <MiniAgentPanelAction
+        {navigationRail ? <SymonSidebarRow /> : null}
+        {!navigationRail ? <MiniAgentPanelAction
           icon={Play}
           label="New session"
           active={sessionMenuOpen}
@@ -517,119 +531,21 @@ function MiniAgentPanelHeader({
             onProjectsOpenChange(false);
             setSessionMenuOpen((open) => !open);
           }}
-        />
-        {sessionMenuOpen ? (
+        /> : null}
+        {!navigationRail && sessionMenuOpen ? (
           <MiniSessionMenu
             onCreateOrchestrator={() => runSessionAction(onCreateOrchestrator)}
             onCreateTerminal={() => runSessionAction(onCreateTerminal)}
           />
         ) : null}
-        <MiniAgentPanelAction icon={Terminal} label="Terminal" onClick={() => runSessionAction(onCreateTerminal)} disabled={!onCreateTerminal} />
-        <MiniAgentPanelAction
-          icon={SearchIcon}
-          label="Search"
-          onClick={() => {
-            setSessionMenuOpen(false);
-            onSearch?.();
-          }}
-          disabled={!onSearch}
-        />
-        <MiniAgentPanelAction
-          icon={MessageSquare}
-          label="Handoffs"
-          onClick={() => {
-            setSessionMenuOpen(false);
-            window.dispatchEvent(new CustomEvent('o8:open-handoffs'));
-          }}
-        />
-        <MiniAgentPanelAction
-          icon={AutomationsIcon}
-          label="Automations"
-          onClick={() => {
-            setSessionMenuOpen(false);
-            // Dashboard listens for this and flips activeNavSection to 'automations'.
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('o8:open-automations'));
-            }
-          }}
-        />
-        <MiniAgentPanelAction
-          icon={CustomizeIcon}
-          label="Customize"
-          onClick={() => {
-            setSessionMenuOpen(false);
-            // Same page-takeover pattern as Automations (vid3 Cursor study).
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('o8:open-customize'));
-            }
-          }}
-        />
-        <MiniAgentPanelAction
-          icon={FolderIcon}
-          label="Projects"
-          active={projectsOpen}
-          onClick={() => {
-            setSessionMenuOpen(false);
-            refreshProjectsFromExternalMutation();
-            onManageProjects();
-          }}
-          // Add-repo lives here now (moved out of the status-bar footer,
-          // Q ruling 2026-07-11) — contextual to Projects, left of the
-          // filter disclosure. Span-not-button: the row itself is a button.
-          trailing={
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label="Add repository"
-              title="Add repository"
-              onClick={(event) => {
-                event.stopPropagation();
-                event.currentTarget.focus();
-                onAddRepo();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.stopPropagation();
-                  event.preventDefault();
-                  onAddRepo();
-                }
-              }}
-              style={{
-                flexShrink: 0,
-                width: 17,
-                height: 17,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 5,
-                color: 'var(--t-text-faint)',
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
-                event.currentTarget.style.color = 'var(--t-text)';
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = 'transparent';
-                event.currentTarget.style.color = 'var(--t-text-faint)';
-              }}
-            >
-              <Plus size={13} strokeWidth={2} />
-            </span>
-          }
-        />
-        {projectsOpen ? (
-          <MiniProjectsMenu
-            projects={projects}
-            activeProjectId={activeProjectId}
-            selectedRepoPath={selectedRepoPath}
-            registeredRepoByPath={registeredRepoByPath}
-            onRepoSelect={onRepoSelect}
-            onOpenProject={onOpenProject}
-            onManageProjects={onManageProjects}
-            onAddRepo={onAddRepo}
-          />
-        ) : null}
+        {!navigationRail ? <MiniAgentPanelNavigation onCreateTerminal={onCreateTerminal} onSearch={onSearch} onBeforeNavigate={() => setSessionMenuOpen(false)} /> : null}
+        {navigationRail ? <ProjectsSwitcher projects={projects} activeProjectId={activeProjectId} selectedRepoPath={selectedRepoPath} registeredRepoByPath={registeredRepoByPath} onProjectSelect={onProjectSelect} onRepoSelect={onRepoSelect} onManageProjects={onManageProjects} onAddRepo={onAddRepo} onRepositoryConnected={onRepositoryConnected} /> : <div style={{ display: 'flex', alignItems: 'center' }}>
+          <MiniAgentPanelAction icon={FolderIcon} label="Projects" onClick={onManageProjects} />
+          <button type="button" aria-label="Add repository" onClick={(event) => { event.currentTarget.focus(); onAddRepo(); }} onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onAddRepo(); }
+          }} style={{ width: 28, height: 28, flexShrink: 0, border: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}><Plus size={14} /></button>
+        </div>}
+
       </div>
     </div>
   );
@@ -775,435 +691,6 @@ function MiniSessionMenuItem({
 }
 
 
-function MiniProjectsMenu({
-  projects,
-  activeProjectId,
-  selectedRepoPath,
-  registeredRepoByPath,
-  onRepoSelect,
-  onOpenProject,
-  onManageProjects,
-  onAddRepo,
-}: {
-  projects: ProjectRecord[];
-  activeProjectId: string | null;
-  selectedRepoPath: string | null;
-  registeredRepoByPath: Map<string, RepoRegistryEntry>;
-  onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
-  onOpenProject: (project: ProjectRecord) => void;
-  onManageProjects: () => void;
-  onAddRepo: () => void;
-}) {
-  const [hoveredRepo, setHoveredRepo] = useState<{ repo: RepoRegistryEntry; rect: DOMRect } | null>(null);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const projectOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [collapsedProjectIds, setCollapsedProjectIds] = useState<Set<string>>(() => new Set());
-  const [otherProjectsOpen, setOtherProjectsOpen] = useState(false);
-  const registeredRepos = useMemo(
-    () => Array.from(new Map(
-      Array.from(registeredRepoByPath.values()).map((repo) => [repo.id, repo]),
-    ).values()),
-    [registeredRepoByPath],
-  );
-  const visibleProjects = useMemo(
-    () => visibleProjectNavigationItems(projects, registeredRepos),
-    [projects, registeredRepos],
-  );
-  const groupedProjects = useMemo(
-    () => groupProjectNavigationItems(visibleProjects, activeProjectId),
-    [activeProjectId, visibleProjects],
-  );
-  const displayedProjects = useMemo(() => [
-    ...(groupedProjects.currentProject ? [groupedProjects.currentProject] : []),
-    ...(otherProjectsOpen ? groupedProjects.otherProjects : []),
-  ], [groupedProjects, otherProjectsOpen]);
-
-  const clearCloseTimer = useCallback(() => {
-    if (!closeTimerRef.current) return;
-    clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-  }, []);
-
-  const closeRepoHover = useCallback(() => {
-    clearCloseTimer();
-    closeTimerRef.current = setTimeout(() => {
-      setHoveredRepo(null);
-      closeTimerRef.current = null;
-    }, 120);
-  }, [clearCloseTimer]);
-
-  useEffect(() => () => {
-    clearCloseTimer();
-    if (projectOpenTimerRef.current) clearTimeout(projectOpenTimerRef.current);
-  }, [clearCloseTimer]);
-
-  // B2 — rename is surfaced here because this is the live project list the user
-  // actually sees; the old ProjectsBottomBar rename UI is orphaned/unmounted.
-  // useProjects is multi-instance by design (mutations broadcast), so renaming
-  // here refreshes the parent's `projects` prop and the new name renders.
-  // Double-click a row to rename (default "Workspace" included).
-  const { renameProject } = useProjects();
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const beginRename = useCallback((project: ProjectRecord) => {
-    if (projectOpenTimerRef.current) {
-      clearTimeout(projectOpenTimerRef.current);
-      projectOpenTimerRef.current = null;
-    }
-    setRenamingId(project.id);
-    setRenameDraft(project.name);
-  }, []);
-  const cancelRename = useCallback(() => {
-    setRenamingId(null);
-    setRenameDraft('');
-  }, []);
-  const submitRename = useCallback(async (project: ProjectRecord) => {
-    const next = renameDraft.trim();
-    setRenamingId(null);
-    setRenameDraft('');
-    if (!next || next === project.name) return;
-    await renameProject(project.id, next);
-  }, [renameDraft, renameProject]);
-  useEffect(() => {
-    if (renamingId && renameInputRef.current) {
-      renameInputRef.current.focus();
-      renameInputRef.current.select();
-    }
-  }, [renamingId]);
-
-  const openProject = useCallback((project: ProjectRecord, clickDetail: number) => {
-    if (clickDetail === 0) {
-      onOpenProject(project);
-      return;
-    }
-    if (clickDetail > 1) return;
-    if (projectOpenTimerRef.current) clearTimeout(projectOpenTimerRef.current);
-    projectOpenTimerRef.current = setTimeout(() => {
-      projectOpenTimerRef.current = null;
-      onOpenProject(project);
-    }, 250);
-  }, [onOpenProject]);
-
-  const toggleProjectRepos = useCallback((projectId: string) => {
-    setCollapsedProjectIds((current) => {
-      const next = new Set(current);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      return next;
-    });
-  }, []);
-
-  return (
-    <div
-      style={{
-        marginTop: 0,
-        marginBottom: 3,
-        paddingTop: 3,
-        paddingRight: 0,
-        paddingBottom: 3,
-        paddingLeft: 0,
-        maxHeight: 188,
-        overflowY: 'auto',
-        scrollbarWidth: 'none',
-        msOverflowStyle: 'none',
-        borderTop: '1px solid color-mix(in srgb, var(--t-divider-subtle) 74%, transparent)',
-      } as CSSProperties}
-      className="hide-scrollbar"
-    >
-      {visibleProjects.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {displayedProjects.map((project) => {
-          const active = project.id === activeProjectId;
-          const visibleRepoPaths = project.repoPaths.filter((repoPath) => registeredRepoByPath.has(repoPath));
-          const reposExpanded = !collapsedProjectIds.has(project.id);
-          return (
-            <div key={project.id} style={{ paddingTop: 1, paddingBottom: 1, order: active ? 0 : 2 }}>
-              {project.id === renamingId ? (
-                <input
-                  ref={renameInputRef}
-                  type="text"
-                  value={renameDraft}
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') { event.preventDefault(); void submitRename(project); }
-                    else if (event.key === 'Escape') { event.preventDefault(); cancelRename(); }
-                  }}
-                  onBlur={() => { void submitRename(project); }}
-                  placeholder={project.name}
-                  aria-label={`Rename ${project.name}`}
-                  maxLength={60}
-                  style={{
-                    width: '100%',
-                    minHeight: 25,
-                    boxSizing: 'border-box',
-                    fontSize: 13.5,
-                    fontWeight: 300,
-                    letterSpacing: '-0.1px',
-                    color: 'var(--t-text)',
-                    background: 'var(--t-input-bg)',
-                    border: '1px solid var(--t-input-border, var(--t-divider))',
-                    borderRadius: 6,
-                    marginTop: 1,
-                    marginBottom: 1,
-                    paddingTop: 3,
-                    paddingBottom: 3,
-                    paddingLeft: 16,
-                    paddingRight: 16,
-                    outline: 'none',
-                    fontFamily: 'var(--font-sans-system)',
-                  }}
-                />
-              ) : (
-              <div
-                style={{
-                  width: '100%', minHeight: 25, display: 'flex', alignItems: 'center',
-                  background: active ? 'var(--t-hover)' : 'transparent',
-                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
-                onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
-              >
-                <button
-                  type="button"
-                  onClick={(event) => openProject(project, event.detail)}
-                  onDoubleClick={(event) => { event.preventDefault(); beginRename(project); }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'F2') return;
-                    event.preventDefault();
-                    beginRename(project);
-                  }}
-                  title={`Open ${project.name} project overview`}
-                  aria-label={`Open ${project.name} project overview`}
-                  aria-keyshortcuts="F2"
-                  style={{
-                    minWidth: 0, minHeight: 25, flex: 1, borderWidth: 0, borderRadius: 0,
-                    background: 'transparent', color: 'var(--t-text)', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 7, paddingTop: 3,
-                    paddingRight: 4, paddingBottom: 3, paddingLeft: 15, textAlign: 'left',
-                    fontFamily: 'var(--font-sans-system)', outlineOffset: -2,
-                  }}
-                >
-                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: 'transparent', border: `1.5px solid ${project.color ?? 'var(--t-text-faint)'}`, boxSizing: 'border-box', flexShrink: 0, marginRight: 9 }} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
-                    {project.name}
-                  </span>
-                </button>
-                <span aria-label={`${visibleRepoPaths.length} repositories`} style={{ color: 'var(--t-text-faint)', fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', flexShrink: 0 }}>
-                  {visibleRepoPaths.length} repo{visibleRepoPaths.length === 1 ? '' : 's'}
-                </span>
-                <button
-                  type="button"
-                  title={`${reposExpanded ? 'Collapse' : 'Expand'} repositories`}
-                  aria-label={`${reposExpanded ? 'Collapse' : 'Expand'} repositories in ${project.name}`}
-                  aria-expanded={reposExpanded}
-                  onClick={() => toggleProjectRepos(project.id)}
-                  onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
-                  onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
-                  style={{ width: 28, height: 25, borderWidth: 0, borderRadius: 0, background: 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)', flexShrink: 0, cursor: 'pointer', marginLeft: 2, marginRight: 8, transition: 'color 120ms cubic-bezier(0.22, 1, 0.36, 1)' }}
-                >
-                  <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d={reposExpanded ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6'} />
-                  </svg>
-                </button>
-              </div>
-              )}
-              {visibleRepoPaths.length > 0 && reposExpanded ? (
-                <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
-                  {visibleRepoPaths.map((repoPath) => {
-                    const repo = registeredRepoByPath.get(repoPath);
-                    const label = repo?.name ?? repoPath.split('/').filter(Boolean).at(-1) ?? repoPath;
-                    const selected = selectedRepoPath?.replace(/\/+$/, '') === repoPath.replace(/\/+$/, '');
-                    return (
-                      <button
-                        key={`${project.id}:${repoPath}`}
-                        type="button"
-                        onClick={() => onRepoSelect(project, repoPath)}
-                        aria-label={`${label} repository`}
-                        aria-current={selected ? 'page' : undefined}
-                        style={{
-                          width: '100%',
-                          minHeight: 22,
-                          borderWidth: 0,
-                          borderRadius: 0,
-                          background: selected ? 'var(--t-hover)' : 'transparent',
-                          color: selected ? 'var(--t-text)' : 'var(--t-text-muted)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          paddingTop: 2,
-                          paddingRight: 18,
-                          paddingBottom: 2,
-                          paddingLeft: 35,
-                          textAlign: 'left',
-                          fontFamily: 'var(--font-sans-system)',
-                          outlineOffset: -2,
-                          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                        }}
-                        onMouseEnter={(event) => {
-                          if (repo) {
-                            clearCloseTimer();
-                            setHoveredRepo({ repo, rect: event.currentTarget.getBoundingClientRect() });
-                          }
-                          event.currentTarget.style.background = 'var(--t-hover)';
-                          event.currentTarget.style.color = 'var(--t-text)';
-                        }}
-                        onMouseLeave={(event) => {
-                          closeRepoHover();
-                          event.currentTarget.style.background = selected ? 'var(--t-hover)' : 'transparent';
-                          event.currentTarget.style.color = selected ? 'var(--t-text)' : 'var(--t-text-muted)';
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          style={{
-                            width: 3,
-                            height: 3,
-                            borderRadius: 999,
-                            background: selected ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                            flexShrink: 0,
-                          }}
-                        />
-                        <span
-                          style={{
-                            minWidth: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            fontSize: 12.5,
-                            lineHeight: 1.25,
-                            fontWeight: 300,
-                            letterSpacing: '-0.1px',
-                          }}
-                        >
-                          {label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-        {groupedProjects.otherProjects.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setOtherProjectsOpen((open) => !open)}
-            aria-expanded={otherProjectsOpen}
-            style={{
-              order: 1,
-              width: '100%', minHeight: 25, marginTop: 2, borderWidth: 0, borderRadius: 0,
-              background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 7, paddingTop: 3, paddingRight: 18,
-              paddingBottom: 3, paddingLeft: 15, textAlign: 'left', fontFamily: 'var(--font-sans-system)',
-              fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', outlineOffset: -2,
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; event.currentTarget.style.color = 'var(--t-text)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-muted)'; }}
-          >
-            <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d={otherProjectsOpen ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6'} />
-            </svg>
-            <span>Other projects ({groupedProjects.otherProjects.length})</span>
-          </button>
-        ) : null}
-        </div>
-      ) : (
-        <div style={{ padding: '8px 7px', color: 'var(--t-text-faint)', fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
-          No projects yet
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={onAddRepo}
-        style={{
-          width: '100%',
-          minHeight: 25,
-          marginTop: 3,
-          borderWidth: 0,
-          borderRadius: 0,
-          background: 'transparent',
-          color: 'var(--t-text-muted)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingTop: 3,
-          paddingRight: 18,
-          paddingBottom: 3,
-          paddingLeft: 30,
-          textAlign: 'left',
-          fontFamily: 'var(--font-sans-system)',
-          fontSize: 13,
-          lineHeight: 1.25,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.background = 'var(--t-hover)';
-          event.currentTarget.style.color = 'var(--t-text)';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.background = 'transparent';
-          event.currentTarget.style.color = 'var(--t-text-muted)';
-        }}
-      >
-        <Plus size={12} strokeWidth={2} />
-        Add repo...
-      </button>
-      <button
-        type="button"
-        onClick={onManageProjects}
-        style={{
-          width: '100%',
-          minHeight: 25,
-          marginTop: 3,
-          borderWidth: 0,
-          borderRadius: 0,
-          background: 'transparent',
-          color: 'var(--t-text-muted)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          paddingTop: 3,
-          paddingRight: 18,
-          paddingBottom: 3,
-          paddingLeft: 30,
-          textAlign: 'left',
-          fontFamily: 'var(--font-sans-system)',
-          fontSize: 13,
-          lineHeight: 1.25,
-          fontWeight: 300,
-          letterSpacing: '-0.1px',
-          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.background = 'var(--t-hover)';
-          event.currentTarget.style.color = 'var(--t-text)';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.background = 'transparent';
-          event.currentTarget.style.color = 'var(--t-text-muted)';
-        }}
-      >
-        Manage projects
-      </button>
-      {hoveredRepo ? (
-        <RepoStatusHover
-          repo={hoveredRepo.repo}
-          anchorRect={hoveredRepo.rect}
-          agents={[]}
-          githubSlug={repoSlugFromRemote(hoveredRepo.repo.remoteUrl)}
-          onMouseEnter={clearCloseTimer}
-          onMouseLeave={closeRepoHover}
-        />
-      ) : null}
-    </div>
-  );
-}
 
 function StaleStatusDot() {
   return (

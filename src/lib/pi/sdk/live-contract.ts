@@ -58,3 +58,17 @@ export const O8_MANAGED_FLASH_LITE_MODEL: Model<'openai-completions'> = {
     supportsLongCacheRetention: false,
   },
 };
+
+/**
+ * The managed model Pi runs on, as orchestrator and packet worker. The hosted
+ * endpoint forwards it to OpenAI on paid plans and replaces it with its free
+ * model on the free plan. Its Chat Completions accepts tools only with reasoning
+ * effort none, which the endpoint sets, so Pi sends no reasoning field. The
+ * request shape is the same as the Flash Lite model's.
+ */
+export const O8_MANAGED_PI_MODEL: Model<'openai-completions'> = {
+  ...O8_MANAGED_FLASH_LITE_MODEL,
+  id: 'openai/gpt-6-luna',
+  name: 'GPT-6 Luna (o8 managed)',
+  cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+};

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { captureExactDirectoryManifest, purgeExactDirectory } from './exact-directory-purge';
+import { captureExactDirectoryManifest, purgeExactDirectory, readCapturedPurgeCwdSnapshot } from './exact-directory-purge';
 
 const roots: string[] = [];
 
@@ -16,6 +16,94 @@ afterEach(() => {
 });
 
 describe('exact directory purge', () => {
+  function aliasedFixture() {
+    const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-alias-'));
+    roots.push(root);
+    const source = path.join(root, 'source');
+    const alias = path.join(root, 'alias');
+    mkdirSync(path.join(source, 'parent', 'retired'), { recursive: true });
+    symlinkSync(source, alias, 'dir');
+    const candidate = path.join(alias, 'parent', 'retired');
+    writeFileSync(path.join(candidate, 'owned.txt'), 'preserve owned bytes');
+    return { root, source, alias, candidate };
+  }
+
+  it.skipIf(process.platform === 'win32')('attests a native purge through an unchanged ancestor alias', async () => {
+    const { candidate, alias } = aliasedFixture();
+    const stat = await lstat(candidate);
+    let captured = false;
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined,
+      async (requested, witness) => {
+        expect(requested).toBe(candidate);
+        expect(realpathSync(candidate)).not.toBe(path.resolve(candidate));
+        const snapshot = await readCapturedPurgeCwdSnapshot(witness, alias);
+        expect(snapshot.status).toBe('ready');
+        captured = true;
+      })).resolves.toBeUndefined();
+    expect(captured).toBe(true);
+    expect(existsSync(candidate)).toBe(false);
+  }, 30_000);
+
+  it.skipIf(process.platform === 'win32')('refuses an alias retargeted before native capture', async () => {
+    const { root, alias, candidate, source } = aliasedFixture();
+    const other = path.join(root, 'other');
+    mkdirSync(path.join(other, 'parent', 'retired'), { recursive: true });
+    writeFileSync(path.join(other, 'parent', 'retired', 'owned.txt'), 'preserve replacement');
+    const stat = await lstat(candidate);
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, async () => {
+      unlinkSync(alias);
+      symlinkSync(other, alias, 'dir');
+    })).rejects.toThrow();
+    expect(readFileSync(path.join(source, 'parent', 'retired', 'owned.txt'), 'utf8')).toBe('preserve owned bytes');
+    expect(readFileSync(path.join(candidate, 'owned.txt'), 'utf8')).toBe('preserve replacement');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses an alias retargeted after capture without releasing either tree', async () => {
+    const { root, alias, candidate, source } = aliasedFixture();
+    const other = path.join(root, 'other');
+    mkdirSync(path.join(other, 'parent', 'retired'), { recursive: true });
+    writeFileSync(path.join(other, 'parent', 'retired', 'owned.txt'), 'preserve replacement');
+    const stat = await lstat(candidate);
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined, async () => {
+      renameSync(alias, alias + '-prior');
+      symlinkSync(other, alias, 'dir');
+    })).rejects.toThrow();
+    expect(readFileSync(path.join(source, 'parent', 'retired', 'owned.txt'), 'utf8')).toBe('preserve owned bytes');
+    expect(readFileSync(path.join(candidate, 'owned.txt'), 'utf8')).toBe('preserve replacement');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses an alias replaced with the same target after capture', async () => {
+    const { alias, candidate, source } = aliasedFixture();
+    const stat = await lstat(candidate);
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined, async () => {
+      renameSync(alias, alias + '-prior');
+      symlinkSync(source, alias, 'dir');
+    })).rejects.toThrow();
+    expect(readFileSync(path.join(candidate, 'owned.txt'), 'utf8')).toBe('preserve owned bytes');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a captured directory replaced by a symlink', async () => {
+    const { candidate } = aliasedFixture();
+    const stat = await lstat(candidate);
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined, async () => {
+      renameSync(candidate, candidate + '-prior');
+      symlinkSync(candidate + '-prior', candidate, 'dir');
+    })).rejects.toThrow();
+    expect(readFileSync(path.join(candidate + '-prior', 'owned.txt'), 'utf8')).toBe('preserve owned bytes');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a replaced parent even when the candidate inode is retained', async () => {
+    const { candidate } = aliasedFixture();
+    const stat = await lstat(candidate);
+    const parent = path.dirname(candidate);
+    await expect(purgeExactDirectory(candidate, { device: stat.dev, inode: stat.ino }, undefined, async () => {
+      renameSync(parent, parent + '-prior');
+      mkdirSync(parent);
+      renameSync(path.join(parent + '-prior', 'retired'), candidate);
+    })).rejects.toThrow();
+    expect(readFileSync(path.join(candidate, 'owned.txt'), 'utf8')).toBe('preserve owned bytes');
+  });
+
   it.skipIf(process.platform === 'win32')('refuses every unsupported node before truncating an earlier file', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'o8-exact-purge-unknown-node-'));
     roots.push(root);

@@ -96,6 +96,7 @@ async function isWorktreeDirty(worktreePath: string): Promise<'clean' | 'dirty' 
  */
 export async function removeMergedWorktree(
   lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>,
+  options: { preserveUncommittedSource?: true } = {},
 ): Promise<RemoveMergedWorktreeResult> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -139,11 +140,10 @@ export async function removeMergedWorktree(
       return { removed: false, reason: 'ownership-unavailable' };
     }
 
-    // Dirty guard: a post-merge worktree should be clean. If it isn't,
-    // preserve the work and let the reconcile sweep deal with it rather
-    // than force-removing and losing uncommitted changes.
+    // Post-merge callers require clean source. Explicit unmerged Close uses
+    // the manager's exact-owner preservation boundary to bank source first.
     const cleanliness = await isWorktreeDirty(worktreePath);
-    if (cleanliness === 'dirty') {
+    if (cleanliness === 'dirty' && options.preserveUncommittedSource !== true) {
       console.log(
         '[worktree-cleanup]',
         `Lane ${lane.id} worktree at ${worktreePath} has uncommitted changes — skipping force-remove.`,

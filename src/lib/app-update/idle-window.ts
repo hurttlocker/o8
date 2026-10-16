@@ -46,8 +46,28 @@ export interface UpdateIdleCloudJob {
   leaseExpiresAt: string | null;
 }
 
+/**
+ * Lane states with no worker process: the task is waiting for review, input or
+ * a retry. A restart keeps their persisted state, so an operator may restart
+ * past them after confirming. Every other non-terminal lane is live work.
+ */
+const PARKED_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
+  'idle', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing',
+]);
+
+export function isParkedLaneStatus(status: LaneStatus): boolean {
+  return PARKED_LANE_STATUSES.has(status);
+}
+
 export interface UpdateIdleWindow {
   idle: boolean;
+  /**
+   * True when the only blockers are parked lanes. An operator-confirmed restart
+   * may proceed; automatic and remote applies still wait for `idle`.
+   */
+  idleExceptParked: boolean;
+  /** Parked lanes among `active.lanes`, named so the operator can confirm past them. */
+  parkedLanes: UpdateIdleLane[];
   active: {
     lanes: UpdateIdleLane[];
     terminalSessions: UpdateIdleTerminalSession[];
@@ -75,13 +95,16 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     session.kind === 'managed-process' || session.clientCount > 0
   ));
   const unavailable = input.terminalInventoryAvailable ? [] : ['terminal-sessions'];
+  const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status));
+  const otherWorkIdle = terminalSessions.length === 0
+    && input.managedRuns.length === 0
+    && input.ownedSessions.length === 0
+    && (input.cloudJobs?.length ?? 0) === 0
+    && unavailable.length === 0;
   return {
-    idle: activeLanes.length === 0
-      && terminalSessions.length === 0
-      && input.managedRuns.length === 0
-      && input.ownedSessions.length === 0
-      && (input.cloudJobs?.length ?? 0) === 0
-      && unavailable.length === 0,
+    idle: activeLanes.length === 0 && otherWorkIdle,
+    idleExceptParked: activeLanes.length === parkedLanes.length && otherWorkIdle,
+    parkedLanes,
     active: {
       lanes: activeLanes,
       terminalSessions,

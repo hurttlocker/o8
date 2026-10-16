@@ -1,3 +1,4 @@
+import { apiError, safeErrorText } from '@/lib/mcp/api-error';
 import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
@@ -37,6 +38,7 @@ export function createCortexDelegationHandlers(config: {
       const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
         url: `${config.apiBase}/api/orchestrator/delegate`,
         authorization: `Bearer ${config.wsToken}`,
+        parseError: (response, payload) => apiError('/api/orchestrator/delegate', response.status, JSON.stringify(payload)),
         correlationField: 'clientMutationId',
         body: {
           prompt,
@@ -62,7 +64,7 @@ export function createCortexDelegationHandlers(config: {
         note: result.note ?? 'Approval required before this agent can be launched.',
         status: 'awaiting_approval',
       });
-      if (!result.ok) return textResult(`Delegation failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
+      if (!result.ok) return textResult(`Delegation failed: ${safeErrorText(result)}`, true);
 
       const surfaceId = result.surfaceId as string;
       try {
@@ -95,7 +97,7 @@ export function createCortexDelegationHandlers(config: {
         note: result.note,
       });
     } catch (error) {
-      return textResult(`Failed to launch agent: ${error instanceof Error ? error.message : String(error)}`, true);
+      return textResult(`Failed to launch agent: ${safeErrorText(error)}`, true);
     }
   };
 
@@ -119,7 +121,7 @@ export function createCortexDelegationHandlers(config: {
       }));
       return jsonResult({ ...status, memberOutcomes });
     } catch (error) {
-      return textResult(`Shared team review unavailable: ${error instanceof Error ? error.message : String(error)}`, true);
+      return textResult(`Shared team review unavailable: ${safeErrorText(error)}`, true);
     }
   };
 
@@ -139,7 +141,7 @@ export function createCortexDelegationHandlers(config: {
       return jsonResult({ ok: true, teamId: result.team.id, reviewedHead: result.reviewedHead,
         committedPaths: result.committedPaths, note: 'Fast team review was archived and checkout ownership was released.' });
     } catch (error) {
-      return textResult(`Fast team finish refused: ${error instanceof Error ? error.message : String(error)}`, true);
+      return textResult(`Fast team finish refused: ${safeErrorText(error)}`, true);
     }
   };
 

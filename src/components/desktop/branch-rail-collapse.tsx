@@ -13,6 +13,7 @@ export function CollapsedRailIcon({
   children,
   resting = 'bare',
   tone = 'default',
+  expanded,
 }: {
   title: string;
   onClick: () => void;
@@ -27,6 +28,7 @@ export function CollapsedRailIcon({
   /** `warning` tints the glyph like the status bar's inbox badge does when
    *  something needs a human — informational, never a filled alarm pill. */
   tone?: 'default' | 'warning';
+  expanded?: boolean;
 }) {
   const restBg = resting === 'card' ? 'var(--t-bg-card)' : 'transparent';
   const restBorder = resting === 'card' ? 'var(--t-divider-subtle, var(--t-divider))' : 'transparent';
@@ -39,6 +41,7 @@ export function CollapsedRailIcon({
       type="button"
       title={title}
       aria-label={title}
+      aria-expanded={expanded}
       onClick={onClick}
       style={{
         width: 28,
@@ -94,4 +97,3 @@ export function ChevronsLeftIcon() {
     </svg>
   );
 }
-

@@ -7,14 +7,15 @@ import { shouldPollPacketTranscript, usePacketTranscriptPoll } from '@/component
 import { useWorkspaceChatModelOptions } from '@/components/desktop/workspace-terminal/useWorkspaceChatModelOptions';
 import {
   fetchOwnedRuntimeSteerReceipt,
-  ownedRuntimeCanAcceptInput,
   shouldHoldOwnedRuntimeSteer,
+  OwnedRuntimeSteerUnconfirmedError,
 } from '@/components/desktop/workspace-terminal/owned-runtime-steer';
 import {
   buildClaudePermissionDecisionMessage,
   coerceClaudeCodeChatEvent,
   mergeClaudeCodeChatEvent,
   workspaceUsageTokens,
+  workspaceStreamDelivery,
   type ClaudePermissionDecision,
   type WorkspaceUsageTokens,
   type WorkspaceStreamEvent,
@@ -46,9 +47,10 @@ import { isAbortError } from '@/lib/active-long-lived-request';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
-import type { PendingSteer } from '@/components/desktop/thoughts/chat-panel/PendingSteerCard';
 import { interruptRuntimeSurface } from '@/components/desktop/thoughts/chat-panel/runtimeInterrupt';
-import { useSteerAutoFire } from '@/components/desktop/thoughts/chat-panel/useSteerAutoFire';
+import { useOwnedSessionReadiness } from './useOwnedSessionReadiness';
+import { useWorkspaceChatScroll } from './useWorkspaceChatScroll';
+import { useWorkspaceSteerQueue, type WorkspaceQueuedSteer, type WorkspaceSendOutcome } from './workspace-chat-queue';
 import { useWorkspaceChatDraftRetention } from '@/components/desktop/workspace-terminal/workspace-chat-drafts';
 
 interface UseWorkspaceChatPaneOptions {
@@ -68,8 +70,9 @@ export function useWorkspaceChatPane({
   onSelectModel,
   onConsumeDraftInjection,
 }: UseWorkspaceChatPaneOptions) {
-  const { draft, setDraft, queuedContextCards, setQueuedContextCards } = useWorkspaceChatDraftRetention(tab.id);
+  const { draft, setDraft, queuedContextCards, setQueuedContextCards, retentionWarning } = useWorkspaceChatDraftRetention(tab.id);
   const [sending, setSending] = useState(false);
+  const sendLock = useRef(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
@@ -83,21 +86,19 @@ export function useWorkspaceChatPane({
     recalledFacts?: number;
     thinkingDurationMs?: number;
   }>({});
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const { scrollRef, stickToBottomRef, showScrollToBottom, setShowScrollToBottom, scrollToBottom, handleScroll } = useWorkspaceChatScroll();
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const [claudePlanMode, setClaudePlanMode] = useState(false);
   const [claudeBypassPermissions, setClaudeBypassPermissions] = useState(false);
-  const [pendingSteers, setPendingSteers] = useState<PendingSteer[]>([]);
   const [editingSteerId, setEditingSteerId] = useState<string | null>(null);
   const [ownedSessionReady, setOwnedSessionReady] = useState(false);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
   const messagesRef = useRef<MobileTranscriptEntry[]>([]);
-  const stickToBottomRef = useRef(true);
   const handledDraftInjectionRef = useRef<string | null>(null);
-  const queuedSteerSendNowRef = useRef<(text?: string) => void>(() => {});
+  const queuedSteerSendNowRef = useRef<(item: WorkspaceQueuedSteer) => Promise<WorkspaceSendOutcome>>(async () => 'failed');
+  const deliverQueued = useCallback((item: WorkspaceQueuedSteer) => queuedSteerSendNowRef.current(item), []);
   const streamRequest = useActiveLongLivedRequest(active);
 
   const tabId = tab.id;
@@ -123,6 +124,10 @@ export function useWorkspaceChatPane({
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
   const isOwnedRuntimeBound = isOwnedCliRuntimeSession(normalizedSessionKey);
+  const queueScope = JSON.stringify([tabId, chatRuntime, normalizedSessionKey, tab.repo?.localPath]);
+  const queue = useWorkspaceSteerQueue(queueScope, active && !sending && !editingSteerId && (!isOwnedRuntimeBound || ownedSessionReady), deliverQueued);
+  const pendingSteers = queue.items;
+  const queuePendingSteer = queue.enqueue;
 
   const toggleClaudePlanMode = useCallback(() => {
     setClaudePlanMode((current) => {
@@ -138,7 +143,6 @@ export function useWorkspaceChatPane({
   }, []);
   const disableClaudeBypassPermissions = useCallback(() => setClaudeBypassPermissions(false), []);
 
-  // Reads go through the transcript store; writes mirror back via `commitMessages`.
   const transcriptSlice = useTranscript(normalizedSessionKey, { live: active });
   const fallbackMessages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const messages = useMemo(() => {
@@ -148,7 +152,6 @@ export function useWorkspaceChatPane({
     return fallbackMessages;
   }, [fallbackMessages, normalizedSessionKey, transcriptSlice]);
 
-  // PacketId-keyed transcript poll for dispatched Codex lanes with an empty sessionKey slice.
   const packetEvents = usePacketTranscriptPoll({
     enabled: isAgentTab && shouldPollPacketTranscript(messages),
     packetIdHint: tab.orchestrationPacket?.packetId ?? null,
@@ -173,82 +176,13 @@ export function useWorkspaceChatPane({
     messagesRef.current = messages;
   }, [messages]);
 
-  const scrollToBottom = useCallback((force = false) => {
-    if (!scrollRef.current) return;
-    if (!force && !stickToBottomRef.current) return;
-    setShowScrollToBottom(false);
-    requestAnimationFrame(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-    });
-  }, []);
-
-  const handleScroll = useCallback(() => {
-    if (!scrollRef.current) return;
-    const el = scrollRef.current;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distFromBottom < 80;
-    setShowScrollToBottom(distFromBottom >= 80);
-  }, []);
-
   const supervisorActive = (() => {
     const status = tab.supervisorStatus?.trim().toLowerCase();
     return status === 'running' || status === 'launched' || status === 'waiting';
   })();
 
-  const queuePendingSteer = useCallback((text: string) => {
-    const message = text.trim();
-    if (!message) return;
-    const id = `steer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    setPendingSteers((previous) => [...previous, { id, text: message }]);
-  }, []);
-
-  const refreshOwnedSessionReady = useCallback(async (): Promise<boolean> => {
-    if (!isOwnedRuntimeBound || !normalizedSessionKey) {
-      setOwnedSessionReady(true);
-      return true;
-    }
-    try {
-      const response = await fetch('/api/runtime/inventory?fresh=1', { cache: 'no-store' });
-      if (!response.ok) {
-        setOwnedSessionReady(false);
-        return false;
-      }
-      const payload = await response.json().catch(() => null) as { agents?: unknown[] } | null;
-      const agents = Array.isArray(payload?.agents) ? payload.agents : [];
-      const ready = ownedRuntimeCanAcceptInput(agents, normalizedSessionKey);
-      setOwnedSessionReady(ready);
-      return ready;
-    } catch {
-      setOwnedSessionReady(false);
-      return false;
-    }
-  }, [isOwnedRuntimeBound, normalizedSessionKey]);
-
-  useEffect(() => {
-    if (!isOwnedRuntimeBound || !normalizedSessionKey) {
-      setOwnedSessionReady(true);
-      return undefined;
-    }
-    let cancelled = false;
-    const refresh = async () => {
-      const ready = await refreshOwnedSessionReady();
-      if (cancelled) return;
-      setOwnedSessionReady(ready);
-    };
-    void refresh();
-    // Poll ONLY while a steer is actually queued. A fresh inventory probe
-    // every 2s on every active owned tab is the #1484 saturation class; the
-    // send path refreshes readiness inline, and auto-fire only needs the
-    // poll while it is holding messages.
-    if (pendingSteers.length === 0) return () => { cancelled = true; };
-    const interval = window.setInterval(() => { void refresh(); }, 2_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [active, isOwnedRuntimeBound, normalizedSessionKey, pendingSteers.length, refreshOwnedSessionReady]);
+  const refreshOwnedSessionReady = useOwnedSessionReadiness(normalizedSessionKey, isOwnedRuntimeBound, active,
+    queue.paused ? 0 : pendingSteers.length, setOwnedSessionReady);
 
   // Seed once on session bind. Visible panes stay current through the shared
   // realtime subscription; reconnect requests a fresh server bootstrap.
@@ -267,13 +201,15 @@ export function useWorkspaceChatPane({
   const sendText = useCallback(async (inputText: string, options?: {
     baseMessages?: MobileTranscriptEntry[];
     claudeMode?: { planMode: boolean; bypassPermissions: boolean };
-  }) => {
+    queuedIntent?: WorkspaceQueuedSteer;
+  }): Promise<WorkspaceSendOutcome> => {
     const text = inputText.trim();
-    if (!text || sending) return;
+    if (!text || sending || sendLock.current) return 'failed';
+    sendLock.current = true;
     const ownedRuntimeAction = isOwnedRuntimeBound && Boolean(normalizedSessionKey);
     if (ownedRuntimeAction && !(await refreshOwnedSessionReady())) {
-      queuePendingSteer(text);
-      return;
+      sendLock.current = false;
+      return options?.queuedIntent || queuePendingSteer(text) ? 'queued' : 'failed';
     }
 
     stickToBottomRef.current = true;
@@ -308,13 +244,38 @@ export function useWorkspaceChatPane({
     let pendingAssistantId: string | null = null;
     let ownedDeliveryAccepted = false;
     let ownedDeliveryUnsettled = false;
+    let streamAccepted = false;
+    let streamRejected = false;
+    let requestStarted = false;
 
     try {
       const composedMessage = [buildLinkedIssueContext(linkedIssue), text].filter(Boolean).join('\n\n');
       let endpoint = '';
       let body: Record<string, unknown> = {};
 
-      if (chatRuntime === 'claude-code') {
+      if (ownedRuntimeAction && normalizedSessionKey) {
+        const { response: res, payload } = await fetchOwnedRuntimeSteerReceipt(
+          normalizedSessionKey,
+          composedMessage,
+          options?.queuedIntent?.mutationId,
+        );
+        if (payload?.outcomeUnknown) throw new OwnedRuntimeSteerUnconfirmedError();
+        if (shouldHoldOwnedRuntimeSteer(res.ok, payload)) {
+          setOwnedSessionReady(false);
+          return options?.queuedIntent || queuePendingSteer(text) ? 'queued' : 'failed';
+        }
+        if (!res.ok || payload?.ok === false) {
+          throw new Error('owned_runtime_send_failed');
+        }
+        ownedDeliveryAccepted = true;
+        if (normalizedSessionKey) {
+          await bootstrapTranscripts([normalizedSessionKey], {
+            merge: mergeTranscriptEntries,
+            refetchFresh: true,
+          });
+        }
+        return 'accepted';
+      } else if (chatRuntime === 'claude-code') {
         const effectiveClaudePlanMode = options?.claudeMode?.planMode ?? claudePlanMode;
         const effectiveClaudeBypassPermissions = options?.claudeMode?.bypassPermissions ?? claudeBypassPermissions;
         endpoint = '/api/claude-code/send';
@@ -329,32 +290,6 @@ export function useWorkspaceChatPane({
           bypassPermissions: effectiveClaudeBypassPermissions,
         };
       } else if (chatRuntime === 'codex' || chatRuntime === 'gemini' || chatRuntime === 'opencode') {
-        // Owned CLI sessions (dispatched via the orchestrator) steer through
-        // the generic /api/runtime/action verb — the owned-session-store
-        // injects the message into the live CLI process. Same pattern for
-        // codex, gemini, and opencode since they share the primitive.
-        if (normalizedSessionKey && isOwnedCliRuntimeSession(normalizedSessionKey)) {
-          const { response: res, payload } = await fetchOwnedRuntimeSteerReceipt(
-            normalizedSessionKey,
-            composedMessage,
-          );
-          if (shouldHoldOwnedRuntimeSteer(res.ok, payload)) {
-            setOwnedSessionReady(false);
-            queuePendingSteer(text);
-            return;
-          }
-          if (!res.ok || payload?.ok === false) {
-            throw new Error('owned_runtime_send_failed');
-          }
-          ownedDeliveryAccepted = true;
-          if (normalizedSessionKey) {
-            await bootstrapTranscripts([normalizedSessionKey], {
-              merge: mergeTranscriptEntries,
-              refetchFresh: true,
-            });
-          }
-          return;
-        }
         // Non-owned discovered sessions fall back to the codex stream endpoint.
         if (chatRuntime !== 'codex') {
           throw new Error(`Discovered ${chatRuntime} sessions don't support send yet — dispatch a packet via the orchestrator instead.`);
@@ -387,6 +322,7 @@ export function useWorkspaceChatPane({
       commitMessages(nextTranscript);
 
       streamController = streamRequest.begin();
+      requestStarted = true;
       const res = await fetchWithLongLivedBudget(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -399,7 +335,7 @@ export function useWorkspaceChatPane({
         commitMessages(
           nextTranscript.map((entry) => entry.id === assistantId ? { ...entry, text: `Error: ${errText || res.statusText}` } : entry),
         );
-        return;
+        return res.ok ? 'unconfirmed' : 'failed';
       }
 
       const reader = res.body.getReader();
@@ -484,6 +420,9 @@ export function useWorkspaceChatPane({
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice(6)) as WorkspaceStreamEvent;
+            const delivery = workspaceStreamDelivery(event);
+            if (delivery === 'accepted') streamAccepted = true;
+            if (delivery === 'rejected' && !streamAccepted) streamRejected = true;
             const claudeCodeEvent = coerceClaudeCodeChatEvent(event);
             if (claudeCodeEvent) {
               claudeCodeEvents = mergeClaudeCodeChatEvent(claudeCodeEvents, claudeCodeEvent);
@@ -648,7 +587,7 @@ export function useWorkspaceChatPane({
               updateAssistantEntry();
             }
           } catch {
-            return;
+            return streamAccepted ? 'accepted' : 'unconfirmed';
           }
         }
       }
@@ -667,8 +606,9 @@ export function useWorkspaceChatPane({
               : entry
           )));
         }
-        return;
+        return streamAccepted ? 'accepted' : 'unconfirmed';
       }
+      if (ownedDeliveryAccepted) return 'accepted';
       if (ownedRuntimeAction && correlatedActionIsUnsettled(err)) {
         ownedDeliveryUnsettled = true;
         commitMessages([
@@ -681,21 +621,20 @@ export function useWorkspaceChatPane({
             timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
-        return;
+        return 'unconfirmed';
       }
       if (ownedRuntimeAction) {
-        setDraft((current) => current.trim() ? current : text);
         commitMessages([
           ...baseMessages,
           {
             id: `msg-${Date.now()}-error`,
             role: 'assistant',
-            text: `${runtimeLabel} couldn't accept that message. It has been restored to the composer.`,
+            text: `${runtimeLabel} couldn't accept that message. Your draft or queued message has been kept.`,
             timestamp: Date.now(),
             timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
-        return;
+        return 'failed';
       }
       commitMessages([
         ...updated,
@@ -707,9 +646,10 @@ export function useWorkspaceChatPane({
           timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+      return streamAccepted ? 'accepted' : requestStarted ? 'unconfirmed' : 'failed';
     } finally {
       if (streamController) streamRequest.finish(streamController);
-      if (!ownedDeliveryUnsettled) setSending(false);
+      if (!ownedDeliveryUnsettled) { sendLock.current = false; setSending(false); }
       setAgentRunning(false);
       setLiveAssistantId(null);
       setStreamingText('');
@@ -720,48 +660,19 @@ export function useWorkspaceChatPane({
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
     }
-  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, isOwnedRuntimeBound, linkedIssue, normalizedSessionKey, onUpdateSessionKey, queuePendingSteer, refreshOwnedSessionReady, runtimeLabel, scrollToBottom, selectedModel, sending, setDraft, streamRequest, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
+    return streamAccepted ? 'accepted' : streamRejected ? 'failed' : 'unconfirmed';
+  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, isOwnedRuntimeBound, linkedIssue, normalizedSessionKey, onUpdateSessionKey, queuePendingSteer, refreshOwnedSessionReady, runtimeLabel, scrollToBottom, selectedModel, sending, setShowScrollToBottom, stickToBottomRef, streamRequest, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
 
-  queuedSteerSendNowRef.current = (text?: string) => {
-    if (text?.trim()) void sendText(text);
-  };
-  useSteerAutoFire({
-    displayWaiting: sending || (isOwnedRuntimeBound && !ownedSessionReady),
-    isOrchestratorMode: false,
-    pendingSteers,
-    editingSteerId,
-    setPendingSteers,
-    sendNowRef: queuedSteerSendNowRef,
-  });
-
+  queuedSteerSendNowRef.current = (item) => sendText(item.text, { queuedIntent: item });
   const handleSteerNow = useCallback((id: string) => {
-    setPendingSteers((previous) => {
-      const index = previous.findIndex((steer) => steer.id === id);
-      if (index <= 0) return previous;
-      const target = previous[index];
-      return [target, ...previous.slice(0, index), ...previous.slice(index + 1)];
-    });
+    if (queue.paused) { queue.promote(id); return; }
+    queue.promote(id);
     if (!normalizedSessionKey) return;
     setOwnedSessionReady(false);
-    void interruptRuntimeSurface(normalizedSessionKey)
-      .finally(() => { void refreshOwnedSessionReady(); });
-  }, [normalizedSessionKey, refreshOwnedSessionReady]);
-
-  const handleDeleteSteer = useCallback((id: string) => {
-    setPendingSteers((previous) => previous.filter((steer) => steer.id !== id));
-    setEditingSteerId((current) => current === id ? null : current);
-  }, []);
-
-  const handleEditSteer = useCallback((id: string, text: string) => {
-    const next = text.trim();
-    if (!next) {
-      setPendingSteers((previous) => previous.filter((steer) => steer.id !== id));
-      return;
-    }
-    setPendingSteers((previous) => previous.map((steer) => (
-      steer.id === id ? { ...steer, text: next } : steer
-    )));
-  }, []);
+    void interruptRuntimeSurface(normalizedSessionKey).finally(() => { void refreshOwnedSessionReady(); });
+  }, [normalizedSessionKey, queue, refreshOwnedSessionReady]);
+  const handleDeleteSteer = queue.remove;
+  const handleEditSteer = queue.edit;
 
   const handleSend = useCallback(async () => {
     const baseDraft = draft.trim();
@@ -772,7 +683,11 @@ export function useWorkspaceChatPane({
     ].filter(Boolean).join('\n\n');
     setQueuedContextCards([]);
     setDraft('');
-    await sendText(text);
+    const outcome = await sendText(text);
+    if (outcome === 'failed' || outcome === 'unconfirmed') {
+      setDraft(current => current.trim() ? current : draft);
+      setQueuedContextCards(current => [...queuedContextCards.filter(card => !current.some(next => next.id === card.id)), ...current]);
+    }
   }, [draft, queuedContextCards, sendText, sending, setDraft, setQueuedContextCards]);
 
   useEffect(() => {
@@ -795,7 +710,7 @@ export function useWorkspaceChatPane({
     }
 
     onConsumeDraftInjection(tabId, injection.id);
-  }, [onConsumeDraftInjection, sendText, setDraft, setQueuedContextCards, tab.chatDraftInjection, tabId]);
+  }, [onConsumeDraftInjection, sendText, setDraft, setQueuedContextCards, tab.chatDraftInjection, tabId, stickToBottomRef]);
 
   const handleClaudePermissionDecision = useCallback(async (
     request: Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>,
@@ -823,7 +738,7 @@ export function useWorkspaceChatPane({
     if (!scrollRef.current) return;
     if (visibleTranscriptEntries.length === 0 && !streamingText && activeToolCalls.length === 0) return;
     scrollToBottom();
-  }, [activeToolCalls.length, scrollToBottom, streamingText, visibleTranscriptEntries.length]);
+  }, [activeToolCalls.length, scrollToBottom, streamingText, visibleTranscriptEntries.length, scrollRef]);
 
   const handleRemoveQueuedContext = useCallback((contextId: string) => {
     setQueuedContextCards((previous) => previous.filter((card) => card.id !== contextId));
@@ -861,7 +776,11 @@ export function useWorkspaceChatPane({
     normalizedSessionKey,
     onEditingSteerChange: setEditingSteerId,
     pendingSteers,
+    queuePaused: queue.paused,
+    queueNotice: queue.notice,
+    resumeQueue: queue.resume,
     queuedContextCards,
+    retentionWarning,
     runtimeLabel,
     scrollRef,
     scrollToBottom,

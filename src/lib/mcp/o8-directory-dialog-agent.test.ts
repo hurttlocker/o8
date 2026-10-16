@@ -30,6 +30,17 @@ describe('discoverable directory dialog control', () => {
     }
   });
 
+  it('keeps unexpected native messages and codes private', async () => {
+    const client = {
+      inspectDirectoryDialog: async () => { throw Object.assign(new Error('unexpected-private-detail'), { code: 'unexpected-private-code' }); },
+    } as unknown as O8WebviewClient;
+    const result = await createO8WebviewToolHandlers(() => client).o8_view_inspect_directory_dialog({});
+    const content = result.content[0];
+    expect(content.type).toBe('text');
+    if (content.type !== 'text') throw new Error('Expected a text diagnostic');
+    expect(JSON.parse(content.text)).toEqual({ code: 'directory_dialog_error', message: 'o8 operation failed' });
+  });
+
   const directories: string[] = [];
   afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 

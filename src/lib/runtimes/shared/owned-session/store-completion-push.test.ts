@@ -17,12 +17,13 @@ import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { OwnedRuntimeAdapter, ParsedRunLog } from './types';
+import type { OwnedRuntimeAdapter, OwnedSessionRecord, ParsedRunLog } from './types';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn());
@@ -175,6 +176,47 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
     expect(sources?.stdoutPaths.length).toBeGreaterThan(0);
   });
 
+  async function launchCompletionFixture() {
+    server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true,"ingested":true}');
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', () => resolve()));
+    process.env.O8_WS_PORT = String((server.address() as { port: number }).port);
+
+    const child = Object.assign(new EventEmitter(), { pid: DEAD_PID, unref: vi.fn() });
+    spawnMock.mockReturnValue(child);
+    const { createOwnedSessionStore } = await import('./store');
+    const { readOwnedRecoveryState } = await import('./automatic-recovery');
+    const launched = await createOwnedSessionStore(pushAdapter()).launch({ cwd: repoPath, prompt: 'complete the fixture work' });
+    expect(launched.ok).toBe(true);
+    expect(launched.surfaceId).toBeTruthy();
+    const surfaceId = launched.surfaceId!;
+    const running = await readOwnedRecoveryState(surfaceId);
+    expect(running).toMatchObject({ owned: true, outcome: 'running' });
+    expect(running).toHaveProperty('runId', expect.any(String));
+    const runId = running.owned ? running.runId! : '';
+
+    return {
+      surfaceId,
+      runId,
+      async finish() {
+        child.emit('close', 0, null);
+        await vi.waitFor(async () => {
+          expect(await readOwnedRecoveryState(surfaceId)).toMatchObject({ owned: true, runId, outcome: 'finished' });
+        }, { timeout: 8_000 });
+        const session = JSON.parse(await readFile(path.join(
+          process.env.O8_TEST_OWNED_ROOT!, surfaceId.slice('test-owned:'.length), 'session.json',
+        ), 'utf8')) as OwnedSessionRecord;
+        expect(session.activeRun).toBeUndefined();
+        expect(session.recentRuns.find((run) => run.id === runId)).toMatchObject({
+          outcome: 'finished',
+          childExit: { code: 0, signal: null, classification: 'clean-exit' },
+        });
+      },
+    };
+  }
+
   it('drives the supervisor completion chain once, idempotently', async () => {
     const {
       ingestAgentCompletionSignal,
@@ -184,6 +226,7 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
       unregisterWatchedAgent,
     } = await import('@/lib/supervisor/agent-supervisor');
 
+    const fixture = await launchCompletionFixture();
     const onAgentCompletion = vi.fn(async () => undefined);
     startSupervisorLoop({
       fetchFleetStatus: vi.fn(async () => []),
@@ -197,19 +240,24 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
     });
 
     try {
-      registerWatchedAgent('test-owned:push-1', repoPath, 'push test', 'prompt');
+      registerWatchedAgent(fixture.surfaceId, repoPath, 'push test', 'prompt');
 
-      expect(await ingestAgentCompletionSignal('test-owned:push-1')).toBe(true);
-      expect(onAgentCompletion).toHaveBeenCalledWith('test-owned:push-1', 'completed');
+      expect(await ingestAgentCompletionSignal(fixture.surfaceId, fixture.runId)).toBe(true);
+      expect(onAgentCompletion).not.toHaveBeenCalled();
+      await fixture.finish();
+      expect(await ingestAgentCompletionSignal(fixture.surfaceId, `${fixture.runId}-stale`)).toBe(true);
+      expect(onAgentCompletion).not.toHaveBeenCalled();
+      expect(await ingestAgentCompletionSignal(fixture.surfaceId, fixture.runId)).toBe(true);
+      expect(onAgentCompletion).toHaveBeenCalledWith(fixture.surfaceId, 'completed');
 
       // Second push (or the poller arriving later) must not re-fire.
-      await ingestAgentCompletionSignal('test-owned:push-1');
+      await ingestAgentCompletionSignal(fixture.surfaceId, fixture.runId);
       expect(onAgentCompletion).toHaveBeenCalledTimes(1);
 
       // Unknown surface → false so the caller can re-register from the lane.
       expect(await ingestAgentCompletionSignal('test-owned:ghost')).toBe(false);
     } finally {
-      unregisterWatchedAgent('test-owned:push-1');
+      unregisterWatchedAgent(fixture.surfaceId);
       stopSupervisorLoop();
     }
   });
@@ -222,6 +270,7 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
       stopSupervisorLoop,
       unregisterWatchedAgent,
     } = await import('@/lib/supervisor/agent-supervisor');
+    const fixture = await launchCompletionFixture();
     const broadcastAgentUpdate = vi.fn();
     startSupervisorLoop({
       fetchFleetStatus: vi.fn(async () => []),
@@ -237,16 +286,19 @@ describe('#1523 — clean child exit pushes completion to the supervisor', () =>
     });
 
     try {
-      registerWatchedAgent('test-owned:read-only', repoPath, 'read-only test', 'prompt');
+      registerWatchedAgent(fixture.surfaceId, repoPath, 'read-only test', 'prompt');
+      await fixture.finish();
       broadcastAgentUpdate.mockClear();
-      expect(await ingestAgentCompletionSignal('test-owned:read-only')).toBe(true);
+      expect(await ingestAgentCompletionSignal(fixture.surfaceId, `${fixture.runId}-stale`)).toBe(true);
+      expect(broadcastAgentUpdate).not.toHaveBeenCalled();
+      expect(await ingestAgentCompletionSignal(fixture.surfaceId, fixture.runId)).toBe(true);
       expect(broadcastAgentUpdate).toHaveBeenCalledWith(expect.objectContaining({
-        surfaceId: 'test-owned:read-only',
+        surfaceId: fixture.surfaceId,
         status: 'completed',
         detail: 'Read-only inspection completed with evidence.',
       }));
     } finally {
-      unregisterWatchedAgent('test-owned:read-only');
+      unregisterWatchedAgent(fixture.surfaceId);
       stopSupervisorLoop();
     }
   });

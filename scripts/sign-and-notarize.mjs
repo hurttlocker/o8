@@ -19,12 +19,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync, cpSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs';
 import { assertMacPackageSize } from './lib/mac-package-size.mjs';
 import {
   resolveMacosReleaseArtifacts,
+  stageMacosDmgApp,
   verifyUniversalMacApp,
   verifyUniversalMacUpdaterArchive,
 } from './lib/macos-release-artifacts.mjs';
@@ -239,7 +240,7 @@ console.log('[sign-and-notarize] rebuilding DMG with stapled app');
 if (existsSync(DMG)) rmSync(DMG);
 if (existsSync(DMG_STAGING)) rmSync(DMG_STAGING, { recursive: true, force: true });
 mkdirSync(DMG_STAGING, { recursive: true });
-cpSync(APP, join(DMG_STAGING, 'o8.app'), { recursive: true, preserveTimestamps: true });
+stageMacosDmgApp(APP, DMG_STAGING);
 symlinkSync('/Applications', join(DMG_STAGING, 'Applications'));
 mkdirSync(dirname(DMG), { recursive: true });
 execFileSync('hdiutil', [

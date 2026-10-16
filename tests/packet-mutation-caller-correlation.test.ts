@@ -312,7 +312,8 @@ describe('desktop and preview packet mutation callers construct correlated bodie
     expect(caller).toContain('fetchOwnedRuntimeSteerReceipt(');
     expect(helper).toContain("from '@/lib/orchestrator/action-receipt'");
     expect(helper).toContain("'/api/runtime/action'");
-    expect(helper).toContain('clientMutationId: crypto.randomUUID()');
+    expect(helper).toContain('clientMutationId = crypto.randomUUID()');
+    expect(helper).toContain('clientMutationId,');
     expect(helper).toContain('const requestBody = JSON.stringify');
     expect(helper).toContain('body: requestBody');
     expect(helper).toContain('fetchCorrelatedActionReceipt');
@@ -327,7 +328,7 @@ describe('desktop and preview packet mutation callers construct correlated bodie
 
     const workspaceChat = readFileSync(join(ROOT, 'src/components/desktop/workspace-terminal/useWorkspaceChatPane.ts'), 'utf8');
     expect(workspaceChat).toContain('ownedDeliveryUnsettled = true');
-    expect(workspaceChat).toContain('if (!ownedDeliveryUnsettled) setSending(false)');
+    expect(workspaceChat).toMatch(/if \(!ownedDeliveryUnsettled\) \{[^}]*setSending\(false\)/);
 
     const agentPanel = readFileSync(join(ROOT, 'src/components/desktop/agent-panel/useAgentPanelState.ts'), 'utf8');
     expect(agentPanel).toContain('pendingRuntimeLaunches.get(launchKey)');
@@ -342,12 +343,7 @@ describe('desktop and preview packet mutation callers construct correlated bodie
     {
       file: 'src/components/desktop/thoughts/ThoughtsChatPanel.tsx',
       start: 'const ensureSingleRuntimeSession = useCallback',
-      end: '// ── Pre-warm orchestrator session on mount ──',
-    },
-    {
-      file: 'src/components/desktop/thoughts/ThoughtsChatPanel.tsx',
-      start: '// ── Pre-warm orchestrator session on mount ──',
-      end: 'useEffect(() => {\n    openRef.current = open;',
+      end: '// ── Reuse an idle orchestrator session on mount ──',
     },
   ])('$file runtime launch section polls through the correlated receipt helper', ({ file, start, end }) => {
     const section = sourceSection(file, start, end);
@@ -369,7 +365,7 @@ describe('desktop and preview packet mutation callers construct correlated bodie
   it('the thoughts chat runtime steer paths stay latched on unresolved receipts', () => {
     const source = readFileSync(join(ROOT, 'src/components/desktop/thoughts/ThoughtsChatPanel.tsx'), 'utf8');
     expect(source.match(/fetchRuntimeSteerReceipt\(/g)?.length).toBe(2);
-    expect(source.match(/correlatedActionIsUnsettled\(/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(source.match(/correlatedActionIsUnsettled\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(source).toContain('if (!receiptUnsettled) setWaitingForReply(false)');
     expect(source).not.toContain("fetch('/api/runtime/action'");
   });

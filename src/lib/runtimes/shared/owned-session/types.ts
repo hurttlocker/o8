@@ -148,6 +148,9 @@ export interface OwnedWorkspaceBinding {
 }
 
 export interface OwnedWorkspaceBindingReceipt {
+  /** Exact persisted record proof for quiescent archive recovery. */
+  recordFingerprint?: string;
+  detached?: boolean;
   surfaceId: string;
   runtimeId: string;
   sessionState: OwnedSessionState;
@@ -325,8 +328,16 @@ export interface OwnedRuntimeAdapter {
    */
   extraSpawnEnv?: (session: OwnedSessionRecord) => Record<string, string> | Promise<Record<string, string>>;
 
+  /** Capture trusted adapter state before initial persistence, never during spawn preparation. */
+  captureRuntimeConfig?: (config?: Record<string, string>) => Record<string, string>;
+
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
+  /** A runtime state folder below a shared configuration root, so sandbox grants stay narrow. */
+  configStateSubdir?: string;
+  /** Separate mutable session-data root for CLIs using XDG configuration and data directories. */
+  sessionDataHomeEnv?: string;
+  sessionDataSubdir?: string;
 
   /** How this adapter attaches operator-registered MCP servers to packet workers. */
   workerMcpInjection?: 'config-file' | 'config-override';
@@ -471,6 +482,9 @@ export interface OwnedSessionStore {
   } | null>;
   getSessionIdentityId(surfaceId: string): Promise<string | null>;
   getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  recoverArchivedWorkspace?(
+    surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void,
+  ): Promise<OwnedWorkspaceBindingReceipt>;
   rebindWorkspace?(
     surfaceId: string,
     input: RebindOwnedWorkspaceInput,

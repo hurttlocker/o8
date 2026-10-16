@@ -203,6 +203,8 @@ export interface ReviewChangedFile {
 
 export interface ReviewWorktreeSummary {
   path: string;
+  /** Filesystem identity for navigation; `path` may be shortened for display. */
+  absolutePath?: string;
   branch?: string;
   head?: string;
   isCurrent: boolean;
