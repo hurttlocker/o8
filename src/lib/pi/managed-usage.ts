@@ -20,7 +20,7 @@ function tokens(value: unknown): number {
 }
 
 export function recordPiManagedUsage(model: Model<'openai-completions'>, attribution: PiUsageAttribution,
-  usage: RawUsage | null, status: 'completed' | 'failed'): void {
+  usage: RawUsage | null, status: 'completed' | 'failed' | 'stopped'): void {
   try {
     logUsage({
       userId: null,
@@ -55,25 +55,39 @@ export function recordPiManagedUsage(model: Model<'openai-completions'>, attribu
   }
 }
 
-/** The managed transport, recording one usage row per model call. */
+/**
+ * The managed transport, recording one usage row per model call that reached the
+ * relay. A call refused before any request (no entitlement, a stop) records nothing.
+ */
 export function createPiManagedUsageTransport(model: Model<'openai-completions'>, attribution: PiUsageAttribution,
   options: Omit<ManagedPiTransportOptions, 'model' | 'observeRawUsage'> = {}): PiModelTransport {
   return async function* (context, signal) {
     let usage: RawUsage | null = null;
-    let failed = false;
-    const transport = createManagedPiTransport({ ...options, model, observeRawUsage: (raw) => {
-      if (raw && typeof raw === 'object') usage = raw as RawUsage;
-    } });
+    let sent = false;
+    let status: 'completed' | 'failed' | 'stopped' = 'stopped';
+    const transport = createManagedPiTransport({ ...options, model,
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+        sent = true;
+        return (options.fetch ?? globalThis.fetch)(input, init);
+      }) as typeof fetch,
+      observeRawUsage: (raw) => {
+        if (raw && typeof raw === 'object') usage = raw as RawUsage;
+      } });
     try {
       for await (const event of transport(context, signal)) {
-        if (event.type === 'error') failed = true;
+        if (event.type === 'error') status = event.reason === 'aborted' ? 'stopped' : 'failed';
+        else {
+          // A streamed reply means the request reached the relay.
+          sent = true;
+          if (event.type === 'done') status = 'completed';
+        }
         yield event;
       }
     } catch (error) {
-      failed = true;
+      status = signal.aborted ? 'stopped' : 'failed';
       throw error;
     } finally {
-      recordPiManagedUsage(model, attribution, usage, failed ? 'failed' : 'completed');
+      if (sent) recordPiManagedUsage(model, attribution, usage, status);
     }
   };
 }

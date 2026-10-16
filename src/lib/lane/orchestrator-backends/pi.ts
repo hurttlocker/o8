@@ -56,11 +56,20 @@ interface ResidentPi extends PiSurface {
   routeId: string;
   /** This turn's OpenRouter call receipts (#3584). Empty on the managed route. */
   receipts: OpenRouterPiReceipt[];
+  /** Who this turn's calls are recorded for; refreshed every turn, since a review session can be reused (#3742). */
+  attribution: PiUsageAttribution;
   ceiling?: OpenRouterSpendCeiling;
   session: PiSession;
   servers: O8ServerSet;
   emit?: (event: OrchestratorEvent) => void;
   idle?: ReturnType<typeof setTimeout>;
+}
+
+function piUsageAttribution(name: string, repoPath: string, options: OrchestratorTurnOptions): PiUsageAttribution {
+  return options.reviewUsage
+    ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath, laneId: options.reviewUsage.laneId,
+      packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId, surface: options.reviewUsage.surface }
+    : { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath };
 }
 
 /** Plan mode is read-only, like Claude's plan mode: proposer servers and no repo writes or commands. */
@@ -187,12 +196,10 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         commands.length ? o8CommandPrompt(commands) : '',
       ].filter(Boolean).join('\n\n');
       const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
-      const pi = { name, servers, routeId, receipts: [], ...surface } as unknown as ResidentPi;
+      // The transports read this object on every call, so each turn's calls go to that turn.
+      const attribution = piUsageAttribution(name, repoPath, options);
+      const pi = { name, servers, routeId, receipts: [], attribution, ...surface } as unknown as ResidentPi;
       let transport = deps.transport;
-      const attribution: PiUsageAttribution = options.reviewUsage
-        ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath, laneId: options.reviewUsage.laneId,
-          packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId, surface: options.reviewUsage.surface }
-        : { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath };
       if (!transport && route.carrier === 'openrouter') {
         const { createPiOpenRouterRouteTransport } = await import('@/lib/pi/openrouter-choice');
         const routed = createPiOpenRouterRouteTransport(route, {
@@ -285,6 +292,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     current.emit = onEvent;
     current.receipts = [];
     turnReceipts = current.receipts;
+    for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
+    Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
     current.ceiling?.reset();
     onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium' });
     const stop = () => { void current.session.abort(); };

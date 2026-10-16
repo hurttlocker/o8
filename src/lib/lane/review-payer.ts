@@ -36,8 +36,8 @@ export function reviewPayer(backend: string, model: string | null | undefined): 
 }
 
 /**
- * One usage row per review turn. A Pi review on OpenRouter or o8's managed model
- * already writes a row per model call, keyed by the same turn, so it writes none here.
+ * One usage row per review turn. A review that already wrote a row per model
+ * call (Pi on OpenRouter or o8's managed model), keyed by the same turn, writes none here.
  */
 export function recordReviewTurnUsage(input: {
   laneId: string;
@@ -51,11 +51,12 @@ export function recordReviewTurnUsage(input: {
   reportedCostUsd: number | null;
 }): void {
   const { payer, costBasis: basis } = reviewPayer(input.backend, input.model);
-  // Pi and the o8 choice write their own rows per call; a second row would count them twice.
-  if (payer === 'openrouter' || payer === 'o8-managed') return;
+  // Per-call rows already record the turn; a second row would count it twice.
+  if (hasReviewCallRows(input.reviewTurnId)) return;
   // A metered backend's reported cost is real spend; a subscription or allowance turn has no per-call charge.
   const metered = payer === 'operator-metered' && input.reportedCostUsd !== null;
-  const costBasis: ReviewCostBasis = metered ? 'reported' : basis;
+  // An OpenRouter turn with no call rows (for example o8's text-only proxy) has no reported cost.
+  const costBasis: ReviewCostBasis = metered ? 'reported' : payer === 'openrouter' ? 'unknown' : basis;
   try {
     logUsage({
       userId: null,
@@ -79,6 +80,16 @@ export function recordReviewTurnUsage(input: {
     });
   } catch (error) {
     console.warn('[review-usage] usage row failed:', error instanceof Error ? error.message : error);
+  }
+}
+
+function hasReviewCallRows(reviewTurnId: string): boolean {
+  try {
+    return Boolean(getSqlite().prepare(
+      "SELECT 1 FROM usage_logs WHERE role = 'reviewer' AND run_id = ? LIMIT 1",
+    ).get(reviewTurnId));
+  } catch {
+    return false;
   }
 }
 
