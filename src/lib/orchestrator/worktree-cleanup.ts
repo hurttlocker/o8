@@ -32,9 +32,8 @@ import type { Lane } from '@/lib/lane/types';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
-import { listWorkspaceSnapshotsByOriginalPath } from '@/lib/worktree/snapshot-state';
 import { readManagedWorkspaceMaterialization } from '@/lib/workspace/managed-materialization-identity';
-import { getWorkspaceRetirementAction } from '@/lib/workspace/workspace-materialization-retirement';
+import { exactSnapshot, getWorkspaceRetirementAction } from '@/lib/workspace/workspace-materialization-retirement';
 
 const execFileAsync = promisify(execFile);
 
@@ -125,8 +124,8 @@ export async function removeMergedWorktree(
     // A captured pre-merge lane is only a locator. Replay success requires
     // durable terminal truth for this exact packet plus confirmed absence.
     if (!(await pathExists(worktreePath))) {
-      const snapshots = listWorkspaceSnapshotsByOriginalPath(normalizedWorktree);
-      const snapshot = snapshots.length === 1 ? snapshots[0] : null;
+      // Retirement records the real path; on macOS /tmp and the like resolve elsewhere.
+      const snapshot = exactSnapshot(normalizedWorktree);
       const retired = snapshot?.state === 'retired' && snapshot.repositoryUuid === repo.id
         && snapshot.packetId === currentLane.packetId && snapshot.laneId === currentLane.id;
       return retired ? { removed: true, reason: 'already-removed' }

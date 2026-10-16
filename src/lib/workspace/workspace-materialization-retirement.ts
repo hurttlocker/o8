@@ -120,7 +120,8 @@ function canonicalWorkspaceNamespace(workspacePath: string): string {
   return path.join(realpathSync.native(path.dirname(resolved)), path.basename(resolved));
 }
 
-function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
+/** The one durable snapshot for a workspace, matched by its resolved or its real path. */
+export function exactSnapshot(workspacePath: string): WorkspaceSnapshotRecord | null {
   const resolved = path.resolve(workspacePath);
   const canonical = canonicalWorkspaceNamespace(resolved);
   const matches = [...new Map([resolved, canonical].flatMap(listWorkspaceSnapshotsByOriginalPath)
