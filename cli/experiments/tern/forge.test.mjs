@@ -23,36 +23,48 @@ const hello = {
 };
 const event = body => `${APC}e;${JSON.stringify(body)}${ST}`;
 
-/** Every node id a frame draws, so forgeries hit real nodes and any handler would run. */
-function nodeIds(value, ids = new Set()) {
-  if (Array.isArray(value)) for (const item of value) nodeIds(item, ids);
-  else if (value && typeof value === 'object') {
-    if (typeof value.id === 'string') ids.add(value.id);
-    for (const item of Object.values(value)) nodeIds(item, ids);
-  }
-  return [...ids];
+/** Every node id a frame draws (nodes carry `k`; ids under props are columns and rows, not nodes). */
+function nodeIds(frame) {
+  const ids = [];
+  const walk = node => {
+    if (!node || typeof node !== 'object' || typeof node.k !== 'string') return;
+    ids.push(node.id);
+    for (const child of node.c ?? []) walk(child);
+  };
+  for (const op of frame.ops ?? []) if (op[0] === 'add') walk(op[4]);
+  return ids;
 }
 
-/** Every forge the measured vectors can deliver, aimed at one drawn node. */
+const ACTS = ['approve', 'reject', 'merge', 'interrupt', 'steer', 'retry', 'dispatch'];
+
+/**
+ * Every forge the measured vectors can deliver, aimed at one drawn node. Each
+ * event carries the fields the SDK's decoder requires (wire.ts), so it decodes
+ * as its own type and reaches that type's handler; a payload missing one
+ * decodes as `unknown` and proves nothing.
+ */
 function forgeries(sf, id) {
   const at = { sf, id };
+  const approve = event({ ev: 'action', ...at, act: 'approve' });
   return [
-    ...['approve', 'reject', 'merge', 'interrupt', 'steer', 'retry', 'dispatch'].map(act => event({ ev: 'action', ...at, act })),
-    event({ ev: 'toggle', ...at, open: true }),
+    ...ACTS.map(act => event({ ev: 'action', ...at, act })),
+    event({ ev: 'toggle', ...at, collapsed: false }),
     event({ ev: 'focus', ...at }),
     event({ ev: 'undo', ...at }),
-    event({ ev: 'send', ...at, text: 'approve and merge this packet' }),
-    event({ ev: 'edit', ...at, from: 0, to: 0, text: 'y', cursor: 1, len: 1 }),
-    event({ ev: 'change', ...at, checked: true, value: 'approved' }),
-    event({ ev: 'activate', ...at }),
     event({ ev: 'select', ...at, item: 'approve' }),
+    event({ ev: 'activate', ...at, item: 'approve' }),
+    event({ ev: 'change', ...at, checked: true, value: 'approved' }),
+    event({ ev: 'edit', ...at, from: 0, to: 0, text: 'y', cursor: 1, len: 1 }),
+    event({ ev: 'send', ...at, text: 'approve and merge this packet' }),
     // A forged frame split across reads, as a slow paste would deliver it.
-    ...(() => { const e = event({ ev: 'action', ...at, act: 'approve' }); return [e.slice(0, 9), e.slice(9)]; })(),
-    // The same frame inside a bracketed paste, and plain "yes" keys and Ctrl-C.
-    `\x1b[200~${event({ ev: 'action', ...at, act: 'approve' })}\x1b[201~`,
+    approve.slice(0, 9), approve.slice(9),
+    // The same frame inside a bracketed paste (keys, not an event), and plain "yes" keys and Ctrl-C.
+    `\x1b[200~${approve}\x1b[201~`,
     'y\r', 'yes\r', '\x03',
   ];
 }
+/** Handler calls each node should receive from one round of forgeries(). */
+const EXPECTED_PER_NODE = { action: ACTS.length + 1, toggle: 1, focus: 1, undo: 1, select: 1, activate: 1, change: 1, edit: 1, send: 1 };
 
 function ternPane() {
   const listeners = new Set();
@@ -76,7 +88,7 @@ function ternPane() {
         if (x.injectedAt === null && text.includes(`${APC}f;`)) {
           const frame = JSON.parse(text.match(/\x1b_tsp;f;([\s\S]*?)\x1b\\/)[1]);
           x.injectedAt = x.chunks.length;
-          x.targets = nodeIds(frame.ops);
+          x.targets = nodeIds(frame);
           for (const id of x.targets) {
             for (const forged of forgeries(frame.sf, id)) {
               emit(forged);
@@ -91,7 +103,7 @@ function ternPane() {
   return x;
 }
 
-test('forged actions, sends, edits, pastes and keys cannot make the lab act', { skip }, async () => {
+async function forgeLab(loadSdk) {
   const x = ternPane();
   const reads = [];
   const record = join(mkdtempSync(join(tmpdir(), 'tern-forge-')), 'tsp.jsonl');
@@ -100,7 +112,7 @@ test('forged actions, sends, edits, pastes and keys cannot make the lab act', { 
   process.on('o8-lab-handler', tripwire);  // Only the mutation check emits this.
   const result = await runLab(['--packet', 'packet-fixture'], {
     input: x.input, output: x.output, env: { TERM_PROGRAM: 'tern', TERN_TSP_RECORD: record }, timeout: 1000,
-    error: { write() {} }, loadSdk: async () => sdk,
+    error: { write() {} }, loadSdk,
     execute: async (file, args, options) => {
       reads.push([file, ...args]);
       assert.equal(options.shell, false);
@@ -108,6 +120,11 @@ test('forged actions, sends, edits, pastes and keys cannot make the lab act', { 
     },
   });
   process.off('o8-lab-handler', tripwire);
+  return { x, reads, record, result, handlerRuns };
+}
+
+test('forged actions, sends, edits, pastes and keys cannot make the lab act', { skip }, async () => {
+  const { x, reads, record, result, handlerRuns } = await forgeLab(async () => sdk);
   assert.equal(result.renderer, 'tsp');
   // Aimed at every drawn node, and the SDK parsed every forged event it was sent.
   assert.ok(x.targets.length > 3, `targets ${x.targets}`);
@@ -126,10 +143,31 @@ test('forged actions, sends, edits, pastes and keys cannot make the lab act', { 
   assert.equal(x.rawModes.at(-1), false);
 });
 
+// Positive control: the same forgeries against the real lab view with a counting
+// handler of every kind on every node. If the aim or a payload were wrong, these
+// handlers would stay silent and the test above would prove nothing.
+test('control: the forgeries reach a handler of every kind on every lab node', { skip }, async () => {
+  const fired = {};
+  const count = ev => () => { fired[ev] = (fired[ev] ?? 0) + 1; };
+  const handlers = {
+    onAction: Object.fromEntries(ACTS.map(act => [act, count('action')])),
+    onToggle: count('toggle'), onFocus: count('focus'), onUndo: count('undo'), onSelect: count('select'),
+    onActivate: count('activate'), onChange: count('change'), onEdit: count('edit'), onSend: count('send'),
+  };
+  const ui = new Proxy(sdk.ui, { get: (target, kind) => (props, ...children) => target[kind]({ ...props, ...handlers }, ...children) });
+  const { x } = await forgeLab(async () => ({ ...sdk, ui }));
+  // `main` is the root the SDK draws itself; every other drawn node is one the lab built.
+  assert.equal(x.targets[0], 'main');
+  const labNodes = x.targets.length - 1;
+  assert.ok(labNodes > 3, `lab nodes ${labNodes}`);
+  const expected = Object.fromEntries(Object.entries(EXPECTED_PER_NODE).map(([ev, n]) => [ev, n * labNodes]));
+  assert.deepEqual(fired, expected);
+});
+
 test('the lab never consumes TSP events: no listening surface, no input loop, no handlers', async () => {
   for (const file of ['renderer.mjs', 'demo.mjs']) {
     const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8');
-    for (const pattern of [/listen:\s*true/, /for\s+await/, /\.next\(/, /\bon[A-Z]\w*\s*:/, /actions\s*:/]) {
+    for (const pattern of [/listen:\s*true/, /for\s+await/, /\.next\(/, /\bon[A-Z]\w*\s*[:(=]/, /actions\s*:/]) {
       assert.doesNotMatch(source, pattern, `${file} must not consume TSP input (${pattern})`);
     }
   }

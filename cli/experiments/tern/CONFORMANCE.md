@@ -105,14 +105,18 @@ Rules that follow:
    most ask o8 to open its own governed flow, which then authenticates again.
 2. Any future listening surface enables bracketed paste.
 3. The lab consumes no events at all. `forge.test.mjs` waits for the lab's
-   first frame, then aims actions, sends, edits, changes, selections, toggles,
-   focus, undo, split frames, a bracketed paste and `y`/Ctrl-C keys at every
-   node id that frame drew, through the real SDK. The SDK's own recording
-   must show every forged event parsed, and the lab must run only its
-   packet-info read, draw no further frame, and return the tty unchanged.
-   Giving any lab node an `onActivate` handler makes the test fail. A source
-   check rejects listening surfaces, input loops and any `on...:` handler.
-   The S3a observer test aims the same way and counts parsed events too.
+   first frame, then aims actions, toggles, focus, undo, selections,
+   activations, changes, edits, sends, split frames, a bracketed paste and
+   `y`/Ctrl-C keys at every node that frame drew, through the real SDK. Each
+   event carries the fields the SDK's decoder requires, so it decodes as its
+   own type rather than `unknown`. The lab must run only its packet-info read,
+   draw no further frame, and return the tty unchanged.
+   A positive control renders the same lab view with a counting handler of
+   every kind on every lab-built node and checks each handler fires exactly
+   once per forgery of its kind, so the aim and payloads are known to reach
+   handlers. A source check rejects listening surfaces, input loops and any
+   `on...` handler, including method shorthand. The S3a observer test aims at
+   the same nodes and checks the SDK parsed every forgery.
 
 ## 5. Ownership contract
 
