@@ -1215,6 +1215,13 @@
       ]
     },
     {
+      "path": "src/lib/worktree/storage-volume-id.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/dash-terminal-persistence.test.ts",
       "reasons": [
         "terminal-tool"

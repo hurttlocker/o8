@@ -350,14 +350,19 @@ function opaqueVolumeId(prefix: string, value: string): string {
   return `${prefix}:${createHash('sha256').update(value).digest('hex')}`;
 }
 
-async function platformVolumeId(targetPath: string): Promise<string | null> {
+/** The device node macOS mounts a path from, as `df` reports it. */
+async function darwinMountDevice(targetPath: string): Promise<string | null> {
+  const { stdout } = await execFileAsync('/bin/df', ['-P', targetPath], {
+    env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+    windowsHide: true,
+    timeout: VOLUME_ID_TIMEOUT_MS,
+  });
+  return stdout.trim().split('\n')[1]?.trim().split(/\s+/)[0] || null;
+}
+
+async function platformVolumeId(targetPath: string, mountDevice: string | null): Promise<string | null> {
   if (process.platform === 'darwin') {
-    const { stdout: dfOutput } = await execFileAsync('/bin/df', ['-P', targetPath], {
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
-      windowsHide: true,
-      timeout: VOLUME_ID_TIMEOUT_MS,
-    });
-    const device = dfOutput.trim().split('\n')[1]?.trim().split(/\s+/)[0];
+    const device = mountDevice ?? await darwinMountDevice(targetPath);
     if (!device) return null;
     const { stdout } = await execFileAsync('/usr/sbin/diskutil', ['info', '-plist', device], {
       env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
@@ -406,11 +411,15 @@ async function platformVolumeId(targetPath: string): Promise<string | null> {
 export async function resolveStorageVolumeId(targetPath: string): Promise<string> {
   const resolvedPath = path.resolve(targetPath);
   const identity = await stat(resolvedPath, { bigint: true });
-  const cacheKey = `${process.platform}:${identity.dev.toString()}`;
+  // APFS volumes in one volume group (the sealed system volume and Data) share st_dev,
+  // so on macOS the mounted device is part of the key; otherwise the first path a
+  // process resolved would decide the identity of both volumes (#3748).
+  const mountDevice = process.platform === 'darwin' ? await darwinMountDevice(resolvedPath).catch(() => null) : null;
+  const cacheKey = `${process.platform}:${identity.dev.toString()}:${mountDevice ?? ''}`;
   let pending = stableVolumeIds.get(cacheKey);
   if (!pending) {
     pending = (async () => {
-      const volumeId = await platformVolumeId(resolvedPath).catch(() => null);
+      const volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(() => null);
       const repeated = await stat(resolvedPath, { bigint: true });
       if (repeated.dev !== identity.dev) {
         throw new Error('Filesystem volume changed during identity capture.');
