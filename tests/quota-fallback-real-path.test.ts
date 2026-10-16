@@ -94,6 +94,8 @@ describe('cross-house quota fallback real paths', () => {
     const claude = fakeBackend('claude', vi.fn(async (_repo, prompt, onEvent, options) => {
       expect(prompt).toBe('Review the complete packet.');
       expect(options?.model).toBeTruthy();
+      // A real backend reports the route it ran on; the receipt's effective route comes only from this.
+      onEvent({ type: 'turn_receipt', leadModel: options!.model!, effort: 'medium' });
       onEvent({ type: 'text', text: 'complete cross-house review' });
       onEvent({ type: 'done', cost: null });
     }));
