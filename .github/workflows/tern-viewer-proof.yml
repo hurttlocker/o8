@@ -26,6 +26,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # Node 22 ships npm 10, whose npm ci rejects the npm-11 root lockfile, as in ci.yml.
+      - run: npm install -g npm@11
       - run: npm ci --prefer-offline
       - name: Install the locked SDK and build the S2 model
         run: |
