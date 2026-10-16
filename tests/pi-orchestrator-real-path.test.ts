@@ -337,7 +337,7 @@ describe('Pi orchestrator (#3258)', () => {
 
   // #3742: with no reviewer CLI on the machine, a review of an OpenRouter packet runs on
   // that model through Pi, and its calls are recorded as reviewer usage.
-  async function reviewedLane(repo: string, assignedModel: string, worktreePath = repo) {
+  async function reviewedLane(repo: string, assignedModel: string, worktreePath = repo, status = 'running') {
     const { createLane } = await import('@/lib/lane/registry');
     const { recordMission } = await import('@/lib/db/missions-store');
     const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -346,7 +346,7 @@ describe('Pi orchestrator (#3258)', () => {
       summary: 'Review route', repoPath: repo, runtime: 'pi-builtin', constraints: '', updatedAt: new Date().toISOString(),
       packets: [{ id: packetId, referenceLabel: 'review-route', title: 'Review route', summary: 'Review route',
         workspaceTargetPath: repo, branchTarget: 'inline/review-route', runtime: 'pi-builtin', dependencyLabels: [],
-        dependencyPacketIds: [], queueState: 'released', releaseState: 'pending', status: 'running', blockedReason: null,
+        dependencyPacketIds: [], queueState: 'released', releaseState: 'pending', status, blockedReason: null,
         lastEventAt: null, lastEventLabel: null, archivedAt: null, review: null, lane: null, assignedModel }] });
     recordMission({ id: missionState.missionId!, repoPath: repo, runtime: 'pi-builtin', prompt: 'Review route', summary: 'Review route',
       constraints: '', packetMeta: [{ id: packetId, title: 'Review route', referenceLabel: 'review-route' }], missionState, totalWaves: 1 });
@@ -405,11 +405,25 @@ describe('Pi orchestrator (#3258)', () => {
     const { getDb } = await import('@/lib/db');
     const { usageLogs } = await import('@/lib/db/schema');
     const rows = getDb()!.select().from(usageLogs).all().filter(row => row.agentName === 'pi-reviewer');
-    expect(rows.map(row => [row.role, row.provider, row.model, row.costUsd])).toEqual([
-      ['reviewer', 'openrouter', pin, 0.0000321], ['reviewer', 'openrouter', pin, 0.0000321]]);
+    expect(rows.map(row => [row.role, row.provider, row.model, row.costUsd, row.laneId, row.packetId])).toEqual([
+      ['reviewer', 'openrouter', pin, 0.0000321, lane.id, lane.packetId], ['reviewer', 'openrouter', pin, 0.0000321, lane.id, lane.packetId]]);
+    // The mission's cost receipt lists each review turn with its model, payer and cost, and counts it once (#3742).
+    const { aggregateMissionCost } = await import('@/lib/orchestrator/cost-aggregator');
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const cost = await aggregateMissionCost(readMissionRegistryEntry(`mission-${lane.packetId}`, { includeArchived: true })!.mission);
+    expect(cost.reviews.map(turn => [turn.surface, turn.model, turn.payer, turn.costBasis, turn.calls, turn.costUsd])).toEqual([
+      ['auto-review', pin, 'openrouter', 'reported', 1, 0.000032], ['auto-review', pin, 'openrouter', 'reported', 1, 0.000032]]);
+    expect(new Set(rows.map(row => row.runId)).size).toBe(2);
+    // Mission costs are reported to six decimal places, as every other mission cost is.
+    expect(cost.costByRole.reviewer).toMatchObject({ totalCostUsd: 0.000064, requestCount: 2 });
+    expect(cost.totalCostUsd).toBe(0.000064);
     const { getSqlite } = await import('@/lib/db');
     const receipt = getSqlite().prepare("SELECT reason FROM role_routing_receipts WHERE context_id = ? ORDER BY rowid DESC LIMIT 1").get(lane.id) as { reason?: string } | undefined;
     expect(receipt?.reason).toContain('CLI is not installed');
+    // Each review starts a new conversation, so older review sessions are pruned to the latest few.
+    await review(); await review();
+    const { readdir } = await import('node:fs/promises');
+    expect((await readdir(stateRoot, { recursive: true })).filter(name => String(name).endsWith('.jsonl'))).toHaveLength(3);
   }, 180_000);
 
   it('keeps an installed CLI reviewer for the same packet (#3742)', async () => {
@@ -419,7 +433,8 @@ describe('Pi orchestrator (#3258)', () => {
     const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
     const worktree = join(repo, '..', 'worktree');
     await import('node:fs/promises').then(fs => fs.mkdir(worktree));
-    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash', worktree);
+    // Closed unmerged, so a signed receipt can be built from what the review stored.
+    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash', worktree, 'archived');
     const resolved: string[] = [];
     const repoPaths: string[] = [];
     const cli = (id: Parameters<typeof getOrchestratorBackend>[0]) => ({ ...getOrchestratorBackend(id),
@@ -437,6 +452,25 @@ describe('Pi orchestrator (#3258)', () => {
     expect(['claude', 'codex']).toContain(configured);
     expect(resolved).toEqual([configured]);
     expect(result).toMatchObject({ backend: configured });
+    // The CLI review is recorded too: no per-call charge on the operator's subscription, never left out (#3742).
+    const { listReviewCosts, recordReviewTurnUsage } = await import('@/lib/lane/review-payer');
+    expect(listReviewCosts([lane.packetId!])).toEqual([expect.objectContaining({
+      surface: 'auto-review', payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription',
+      costBasis: 'subscription', costUsd: 0 })]);
+    // A metered reviewer's reported cost is real spend on the operator's own account, so it counts.
+    recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-metered',
+      backend: 'opencode', model: 'some-model', surface: 'merge-gate-review', reportedCostUsd: 0.0125 });
+    expect(listReviewCosts([lane.packetId!]).at(-1)).toMatchObject({ reviewTurnId: 'turn-metered',
+      surface: 'merge-gate-review', payer: 'operator-metered', costBasis: 'reported', costUsd: 0.0125 });
+    // The signed receipt names the review's surface and the payer its usage row recorded.
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    writeOrchestratorControlPlaneState(readMissionRegistryEntry(`mission-${lane.packetId}`, { includeArchived: true })!.mission);
+    const { createPacketReceiptForClosedPacket } = await import('@/lib/receipts/packet-receipt');
+    const stored = await createPacketReceiptForClosedPacket({ packetId: lane.packetId!, laneId: lane.id, disposition: {
+      kind: 'discarded', disposition: 'superseded', reason: 'test', preservedBranches: [], closedAt: new Date().toISOString() } });
+    expect(stored.receipt.reviews).toEqual([expect.objectContaining({ backend: configured, surface: 'auto-review',
+      payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription', outcome: 'completed' })]);
     // A CLI reviewer keeps the repository path it always had.
     expect(repoPaths).toEqual([repo]);
   }, 60_000);

@@ -233,7 +233,7 @@ describe('mission cost persisted-state path', () => {
     if (!('cost' in status) || !status.cost) {
       throw new Error('Current mission status did not include the requested cost receipt.');
     }
-    expect(Object.keys(status.cost)).toEqual(['totalCostUsd', 'packetCosts', 'tokensByRuntime', 'unattributed']);
+    expect(Object.keys(status.cost)).toEqual(['totalCostUsd', 'packetCosts', 'tokensByRuntime', 'costByRole', 'reviews', 'unattributed']);
     expect(status.cost.totalCostUsd).toBe(0.0045);
     expect(status.cost.packetCosts).toEqual([{
       packetId,

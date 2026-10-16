@@ -22,6 +22,7 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 import { getOrchestratorBackend } from './orchestrator-backends/registry';
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
 import { getLane } from './registry';
+import { recordReviewTurnUsage } from './review-payer';
 import { resolveReviewRoute } from './review-route';
 import {
   isReviewerSessionBusyMessage,
@@ -66,7 +67,6 @@ async function runAttempt(input: {
   formatRetryRejecting?: boolean;
   model?: string;
   thinkingEffort?: ThinkingEffort;
-  usageRole?: 'reviewer';
   freshSession?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
@@ -108,7 +108,10 @@ async function runAttempt(input: {
   let quotaError: string | null = null;
   let unavailableReason: ReviewUnavailableReason | null = null;
   let approximateCost: number | null = null;
+  let observedModel: string | null = null;
   const errors: string[] = [];
+  const lane = getLane(input.laneId);
+  const reviewUsage = { reviewTurnId, laneId: input.laneId, packetId: lane?.packetId ?? null, surface: input.surface };
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'turn_receipt') {
@@ -117,6 +120,7 @@ async function runAttempt(input: {
           expectedHeadSha: input.expectedHeadSha ?? null, model: event.leadModel, effort: event.effort });
         observedRoute = status === 'observed' ? createBackendRoleRouteChoice(input.backend.id, event.leadModel, event.effort) : null;
         if (status !== 'observed') errors.push(`Review runtime receipt ${status}; execution route is not proven.`);
+        else observedModel = event.leadModel;
       }
       if (event.type === 'text') text += event.text;
       if (event.type === 'done' && typeof event.cost === 'number') approximateCost = event.cost;
@@ -129,7 +133,7 @@ async function runAttempt(input: {
       threadId: sessionThreadId,
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
-      ...(input.usageRole ? { usageRole: input.usageRole } : {}),
+      reviewUsage,
       ...(input.freshSession ? { freshSession: true } : {}),
       signal: turnController.signal,
     });
@@ -161,6 +165,10 @@ async function runAttempt(input: {
   } catch (error) {
     errors.push(`Review turn finalization failed: ${message(error)}`);
   }
+  // Every review turn is recorded in usage with its payer and cost basis (#3742). An OpenRouter turn is
+  // recorded by its per-call rows instead, so one that ended before any call has no rows and cost nothing.
+  recordReviewTurnUsage({ ...reviewUsage, repoPath: lane?.repoPath ?? input.repoPath, backend: input.backend.id,
+    model: observedModel ?? input.model ?? null, reportedCostUsd: approximateCost });
   return { text, errors, quotaError, reviewTurnId, unavailableReason, approximateCost, observedRoute };
 }
 
@@ -274,7 +282,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     ...(initialBackend.id === 'codex' ? {
       model: requestedRoute.model ?? undefined, thinkingEffort: defaults.values.thinkingEffort,
     } : {}),
-    ...(initialBackend.id === 'pi' ? { model: route?.model, usageRole: 'reviewer' as const, freshSession: true } : {}),
+    ...(initialBackend.id === 'pi' ? { model: route?.model, freshSession: true } : {}),
     onEvent: input.onEvent,
     signal: input.signal,
   });
