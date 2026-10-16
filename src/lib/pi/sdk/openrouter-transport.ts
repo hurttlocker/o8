@@ -107,8 +107,10 @@ export interface OpenRouterPiTransportOptions {
   timeoutMs?: number;
 }
 
+/** A 402 means the OpenRouter account or key has no credit left; o8 spent nothing on the refused call. */
+export const OPENROUTER_NO_CREDIT_TEXT = 'OpenRouter has no credit left for this key or account (402). Add credit on OpenRouter, then try again.';
 /** Failure text the Pi session may show. Anything else becomes a generic failure. */
-export const OPENROUTER_PI_FAILURE_TEXT = /^OpenRouter (?:is not connected|rejected the request \(\d{3}\)|request failed|spend ceiling reached for this run)$/;
+export const OPENROUTER_PI_FAILURE_TEXT = /^OpenRouter (?:is not connected|rejected the request \(\d{3}\)|request failed|spend ceiling reached for this run|has no credit left for this key or account \(402\)\. Add credit on OpenRouter, then try again\.)$/;
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
@@ -158,7 +160,9 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
-        failure = `OpenRouter rejected the request (${response.status})`;
+        failure = response.status === 402
+          ? OPENROUTER_NO_CREDIT_TEXT
+          : `OpenRouter rejected the request (${response.status})`;
         throw new Error(failure);
       }
       return response;
