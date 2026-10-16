@@ -149,10 +149,11 @@ async function observe(f, mode) {
     expect(await closed).toEqual({ code: 0, signal: null });
     expect(done.result.renderer).toBe(mode === 'frame-loss' ? 'text' : 'tsp');
     expect(done.reads).toEqual([{ command: 'o8', args: ['packet', 'info', record.packetId, '--json'] }]);
-    // Forgeries were aimed at real nodes (except frame loss, which draws none) and the SDK parsed every one.
-    expect(done.injections).toBeGreaterThanOrEqual(10);
+    // Forgeries were aimed at every node of the first frame and the SDK parsed every one.
+    // forge.test.mjs carries the positive control that this aim reaches node handlers.
+    expect(done.targets.length).toBeGreaterThan(1);
+    expect(done.injections).toBe(done.targets.length * 10);  // five acts, each as action and activate
     expect(done.parsedEvents).toBe(done.injections);
-    if (mode === 'native') expect(done.targets.length).toBeGreaterThan(1);
     expect(done.raw).toBe(false);
     expect(done.listeners).toBe(0);
   }

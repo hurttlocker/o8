@@ -22,14 +22,16 @@ const send = message => new Promise((resolve, reject) => {
   process.send(message, error => error ? reject(error) : resolve());
 });
 
-/** Every node id a frame draws, so forgeries hit real nodes. */
-function nodeIds(value, ids = new Set()) {
-  if (Array.isArray(value)) for (const item of value) nodeIds(item, ids);
-  else if (value && typeof value === 'object') {
-    if (typeof value.id === 'string') ids.add(value.id);
-    for (const item of Object.values(value)) nodeIds(item, ids);
-  }
-  return [...ids];
+/** Every node id a frame draws (nodes carry `k`; ids under props are columns and rows, not nodes). */
+function nodeIds(frame) {
+  const ids = [];
+  const walk = node => {
+    if (!node || typeof node !== 'object' || typeof node.k !== 'string') return;
+    ids.push(node.id);
+    for (const child of node.c ?? []) walk(child);
+  };
+  for (const op of frame.ops ?? []) if (op[0] === 'add') walk(op[4]);
+  return ids;
 }
 
 class Terminal extends EventEmitter {
@@ -55,10 +57,8 @@ class Terminal extends EventEmitter {
         assert.equal(opened.listen, false);
         assert.equal(typeof opened.id, 'string');
         this.surfaceId = opened.id;
-        // Frame loss never draws a node, so its forgeries can only reach the surface id.
-        if (mode === 'frame-loss') this.forge([opened.id]);
       }
-      if (mode !== 'frame-loss' && this.injections === 0 && text.includes(`${APC}f;`)) {
+      if (this.injections === 0 && text.includes(`${APC}f;`)) {
         // Inject once the surface is registered and drawn, at every node it drew,
         // so a handler on any node would run. Even then nothing may answer worker RPC.
         const frame = JSON.parse(text.match(/\x1b_tsp;f;([\s\S]*?)\x1b\\/)[1]);
@@ -73,7 +73,8 @@ class Terminal extends EventEmitter {
     this.targets = ids;
     for (const id of ids) for (const act of ['approve', 'reject', 'interrupt', 'steer', 'prompt']) {
       this.emit('data', `${APC}e;${JSON.stringify({ ev: 'action', sf: this.surfaceId, id, act })}${ST}`);
-      this.emit('data', `${APC}e;${JSON.stringify({ ev: 'activate', sf: this.surfaceId, id })}${ST}`);
+      // activate needs an item, or the SDK decodes it as unknown and dispatches nothing.
+      this.emit('data', `${APC}e;${JSON.stringify({ ev: 'activate', sf: this.surfaceId, id, item: 'approve' })}${ST}`);
       this.injections += 2;
     }
     this.emit('data', '\x03');
