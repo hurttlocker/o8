@@ -5,10 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // report one st_dev. df names the device each path lives on, diskutil its UUID.
 const SYSTEM_UUID = '6a21fd45-7a7b-43ee-b69c-1ebe49db0df9';
 const DATA_UUID = '70aa7edb-d15c-4653-ac9b-a55d5c916e77';
+const df = vi.hoisted(() => ({ failures: 0 }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
   const run = async (file: string, args: string[]) => {
     if (file === '/bin/df') {
+      if (df.failures > 0) { df.failures -= 1; throw new Error('df timed out'); }
       const device = args[1] === '/' ? '/dev/disk1s1s1' : '/dev/disk1s2';
       return { stdout: `Filesystem 512-blocks Used Available Capacity Mounted on\n${device} 1 1 1 1% /\n`, stderr: '' };
     }
@@ -28,6 +30,7 @@ vi.mock('node:fs/promises', async (original) => ({
 
 const platform = process.platform;
 afterEach(() => {
+  df.failures = 0;
   Object.defineProperty(process, 'platform', { value: platform });
   vi.resetModules();
 });
@@ -46,5 +49,15 @@ describe('resolveStorageVolumeId on macOS (#3748)', () => {
     expect(await volumeIdsInOrder(['/', '/Users/o8/worktrees'])).toEqual(expected);
     vi.resetModules();
     expect(await volumeIdsInOrder(['/Users/o8/worktrees', '/'])).toEqual(expected);
+  });
+
+  it('refuses rather than caching a fallback identity when df fails, so one worktree never gets two', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const { resolveStorageVolumeId } = await import('./storage-telemetry');
+    df.failures = 1;
+    await expect(resolveStorageVolumeId('/Users/o8/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
+    df.failures = 2;
+    await expect(resolveStorageVolumeId('/Users/o8/other')).rejects.toThrow('volume identity is unavailable');
+    await expect(resolveStorageVolumeId('/Users/o8/other')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
   });
 });

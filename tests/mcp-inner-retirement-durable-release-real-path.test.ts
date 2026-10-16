@@ -12,7 +12,8 @@ import { resolveTsxProcess } from '@/lib/testing/tsx-process';
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
-  measureHostVolume: vi.fn(async () => ({ accountingStatus: 'observed', probePath: '/',
+  // Probe the data directory, an existing path on the worktrees' volume, as the real walk-up would.
+  measureHostVolume: vi.fn(async () => ({ accountingStatus: 'observed', probePath: process.env.O8_DATA_DIR!,
     availableBytes: 90_000_000_000, freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null })),
 }));
 

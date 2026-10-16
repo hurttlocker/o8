@@ -414,7 +414,14 @@ export async function resolveStorageVolumeId(targetPath: string): Promise<string
   // APFS volumes in one volume group (the sealed system volume and Data) share st_dev,
   // so on macOS the mounted device is part of the key; otherwise the first path a
   // process resolved would decide the identity of both volumes (#3748).
-  const mountDevice = process.platform === 'darwin' ? await darwinMountDevice(resolvedPath).catch(() => null) : null;
+  // Without the device the key would be ambiguous again, so a failed lookup is retried once and then
+  // refused, never cached; a degraded identity recorded now would refuse the same worktree later.
+  const mountDevice = process.platform === 'darwin'
+    ? await darwinMountDevice(resolvedPath).catch(() => darwinMountDevice(resolvedPath)).catch(() => null)
+    : null;
+  if (process.platform === 'darwin' && !mountDevice) {
+    throw new Error('Filesystem volume identity is unavailable: df did not report the mounted device.');
+  }
   const cacheKey = `${process.platform}:${identity.dev.toString()}:${mountDevice ?? ''}`;
   let pending = stableVolumeIds.get(cacheKey);
   if (!pending) {
