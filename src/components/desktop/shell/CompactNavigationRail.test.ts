@@ -181,7 +181,7 @@ it('opens cached release notes from the updater and restores focus on Escape wit
   }
 });
 
-it('checks updates on click, reports through notifications, and waits for hover before showing details', async () => {
+it('checks updates on click and opens the panel with the result', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   const unregister = registerAppUpdateCheck(updateCheck);
@@ -197,11 +197,9 @@ it('checks updates on click, reports through notifications, and waits for hover 
     expect(updateCheck).toHaveBeenCalledOnce();
     expect(notify).toHaveBeenCalledWith('Checking o8 and connected CLIs…', 'info');
     expect(notify).toHaveBeenCalledWith('o8 and connected CLIs are up to date.', 'success');
-    expect(document.querySelector('[aria-label="Updates and release notes"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Updates and release notes"]')?.textContent).toContain('You’re up to date.');
     expect(install).not.toHaveBeenCalled();
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
-    await act(async () => trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-    expect(document.querySelector('[aria-label="Updates and release notes"]')?.textContent).toContain('You’re up to date.');
   } finally { unregister(); window.removeEventListener('o8:install-app-update', install); await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -340,7 +338,9 @@ it('shows only installed supported CLIs and keeps legacy Gemini out of the ready
     expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).not.toContain('Gemini CLI');
     tools[2]!.status = 'update-available';
     await act(async () => refreshCliUpdateView(true));
-    expect(host.querySelector('[data-update-ready]')).not.toBeNull();
+    // A CLI update alone shows the small dot; the filled icon is reserved for an o8 update.
+    expect(host.querySelector('[data-update-ready]')).toBeNull();
+    expect(host.querySelector('[data-cli-update-ready]')).not.toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
