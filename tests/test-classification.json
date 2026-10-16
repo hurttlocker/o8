@@ -3,6 +3,12 @@
   "generatedBy": "node scripts/classify-tests.mjs --write",
   "resourceOwning": [
     {
+      "path": "cli/src/commands/packet/info-surface.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "cli/src/commands/team.test.ts",
       "reasons": [
         "child-process",
