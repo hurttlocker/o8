@@ -78,6 +78,14 @@ describe('resolveReviewRoute (#3742)', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it('checks Claude with the Claude backend resolver, so a missing override moves the review to Pi', () => {
+    state.configured = 'claude';
+    vi.stubEnv('O8_CLAUDE_CODE_BIN', '/nonexistent/o8-test/claude');
+    expect(resolveReviewRoute('lane-1')).toMatchObject({ backend: 'pi', reason: "The claude CLI is not installed, so the review runs on o8's Pi." });
+    vi.stubEnv('O8_CLAUDE_CODE_BIN', process.execPath);
+    expect(resolveReviewRoute('lane-1')).toEqual({ backend: 'claude' });
+  });
+
   it('keeps an installed CLI reviewer and a configured Pi reviewer as they are', () => {
     vi.stubEnv('O8_CODEX_BIN', process.execPath);
     state.assignedModel = 'openrouter/deepseek/deepseek-v4.1-flash';

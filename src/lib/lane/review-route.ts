@@ -7,30 +7,41 @@
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { executableSuffixes, scanForBinary } from '@/lib/runtimes/shared/cli-locate';
+import { executableSuffixes, resolveClaudeBinary, scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import { resolveReviewerBackendId } from './orchestrator-backends/active-backend';
 import type { OrchestratorBackendId } from './orchestrator-backends/types';
 import { getLane } from './registry';
 
-/** Reviewer backends that need a local CLI: the binary and its path overrides. */
-const CLI_REVIEWERS: Partial<Record<OrchestratorBackendId, { binary: string; overrides: string[] }>> = {
-  claude: { binary: 'claude', overrides: ['O8_CLAUDE_CODE_BIN', 'CLAUDE_BIN'] },
-  codex: { binary: 'codex', overrides: ['O8_CODEX_BIN'] },
-};
-
 /**
- * Installed, found without spawning: an override path that exists, else the
- * well-known CLI directories, else any PATH entry (what `which` would find).
- * A missing override path is skipped, as the CLI resolver skips it.
+ * Codex is installed when found without spawning: an override path that exists,
+ * else the well-known CLI directories, else any PATH entry (what `which` would
+ * find). A missing override path is skipped, as the shared CLI resolver skips it.
  */
-function cliInstalled(cli: { binary: string; overrides: string[] }): boolean {
-  if (cli.overrides.some((name) => { const value = process.env[name]?.trim(); return value && existsSync(value); })) return true;
-  if (scanForBinary(cli.binary) !== null) return true;
+function codexInstalled(): boolean {
+  const override = process.env.O8_CODEX_BIN?.trim();
+  if (override && existsSync(override)) return true;
+  if (scanForBinary('codex') !== null) return true;
   return (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).some((dir) =>
-    executableSuffixes().some((suffix) => existsSync(path.join(dir, `${cli.binary}${suffix}`))));
+    executableSuffixes().some((suffix) => existsSync(path.join(dir, `codex${suffix}`))));
 }
+
+/** Claude is installed exactly when the Claude backend's own resolver finds it. */
+function claudeInstalled(): boolean {
+  try {
+    resolveClaudeBinary();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Reviewer backends that need a local CLI. */
+const CLI_REVIEWERS: Partial<Record<OrchestratorBackendId, () => boolean>> = {
+  claude: claudeInstalled,
+  codex: codexInstalled,
+};
 
 export interface ReviewRoute {
   backend: OrchestratorBackendId;
@@ -51,8 +62,8 @@ function packetOpenRouterModel(laneId: string): string | undefined {
 
 export function resolveReviewRoute(laneId: string): ReviewRoute {
   const configured = resolveReviewerBackendId();
-  const cli = CLI_REVIEWERS[configured];
-  if (cli && !cliInstalled(cli)) {
+  const installed = CLI_REVIEWERS[configured];
+  if (installed && !installed()) {
     return {
       backend: 'pi',
       model: packetOpenRouterModel(laneId),

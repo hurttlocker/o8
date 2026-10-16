@@ -417,7 +417,9 @@ describe('Pi orchestrator (#3258)', () => {
     vi.stubEnv('O8_CODEX_BIN', process.execPath);
     vi.stubEnv('O8_CLAUDE_CODE_BIN', process.execPath);
     const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
-    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash');
+    const worktree = join(repo, '..', 'worktree');
+    await import('node:fs/promises').then(fs => fs.mkdir(worktree));
+    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash', worktree);
     const resolved: string[] = [];
     const repoPaths: string[] = [];
     const cli = (id: Parameters<typeof getOrchestratorBackend>[0]) => ({ ...getOrchestratorBackend(id),
