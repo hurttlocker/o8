@@ -19,11 +19,10 @@ import {
   recordReviewTurnRuntimeReceipt,
 } from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
-import {
-  getActiveReviewerBackend,
-  getOrchestratorBackend,
-} from './orchestrator-backends/registry';
+import { getOrchestratorBackend } from './orchestrator-backends/registry';
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
+import { getLane } from './registry';
+import { resolveReviewRoute } from './review-route';
 import {
   isReviewerSessionBusyMessage,
   type ReviewUnavailableReason,
@@ -67,6 +66,8 @@ async function runAttempt(input: {
   formatRetryRejecting?: boolean;
   model?: string;
   thinkingEffort?: ThinkingEffort;
+  usageRole?: 'reviewer';
+  freshSession?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
@@ -128,6 +129,8 @@ async function runAttempt(input: {
       threadId: sessionThreadId,
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
+      ...(input.usageRole ? { usageRole: input.usageRole } : {}),
+      ...(input.freshSession ? { freshSession: true } : {}),
       signal: turnController.signal,
     });
   } catch (error) {
@@ -178,14 +181,17 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
   signal?: AbortSignal;
 }): Promise<ReviewFallbackTurnResult> {
-  const initialBackend = input.initialBackend ?? getActiveReviewerBackend();
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
+  // #3742: a CLI reviewer that is not installed hands the review to o8's own Pi.
+  const route = input.initialBackend ? null : resolveReviewRoute(input.laneId);
+  const initialBackend = input.initialBackend ?? backendResolver(route!.backend);
   const defaults = getOperatorDefaultsSync();
   const override = process.env.O8_REVIEW_MODEL?.trim();
   const modelForBackend = (backend: OrchestratorBackendId) => {
     if (backend === 'claude') return defaults.values.orchestratorModel;
     if (backend === 'codex') return resolveOrchestratorModelSync();
     if (backend === 'opencode') return defaults.values.opencodeOrchestratorModel;
+    if (backend === 'pi') return route?.model ?? null;
     return null;
   };
   const requestedRoute = createBackendRoleRouteChoice(
@@ -238,9 +244,9 @@ export async function runReviewerTurnWithQuotaFallback(input: {
           ? 'env' : effectiveRoute?.model ? 'derived' : 'runtime-default',
         effort: effectiveRoute?.effort === defaults.values.thinkingEffort ? defaults.sources.thinkingEffort : 'derived',
       },
-      reason: result.ok
+      reason: `${route?.reason ? `${route.reason} ` : ''}${result.ok
         ? `${input.surface} completed on ${result.backend}. ${effectiveRoute ? 'Backend turn receipt observed.' : 'No unambiguous backend turn receipt observed.'}`
-        : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`,
+        : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`}`,
       fallbackReason,
       status: result.ok
         ? result.fallback ? 'fallback' : 'selected'
@@ -251,11 +257,15 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const promptFor = (backend: OrchestratorBackendId) => (
     typeof input.prompt === 'function' ? input.prompt(backend) : input.prompt
   );
+  // Pi works only inside its workspace, so a Pi review runs in the lane worktree it reviews.
+  // The buy-in doc runs after the merge and writes into the repository itself.
+  const piWorkspace = input.surface === 'buyin-doc' ? input.repoPath
+    : getLane(input.laneId)?.worktreePath || input.repoPath;
   const first = await runAttempt({
     backend: initialBackend,
     laneId: input.laneId,
     surface: input.surface,
-    repoPath: input.repoPath,
+    repoPath: initialBackend.id === 'pi' ? piWorkspace : input.repoPath,
     threadId: input.threadId,
     sessionThreadId: input.sessionThreadId,
     prompt: promptFor(initialBackend.id),
@@ -264,6 +274,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     ...(initialBackend.id === 'codex' ? {
       model: requestedRoute.model ?? undefined, thinkingEffort: defaults.values.thinkingEffort,
     } : {}),
+    ...(initialBackend.id === 'pi' ? { model: route?.model, usageRole: 'reviewer' as const, freshSession: true } : {}),
     onEvent: input.onEvent,
     signal: input.signal,
   });
