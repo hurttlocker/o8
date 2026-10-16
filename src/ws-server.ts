@@ -1387,7 +1387,7 @@ function queueOrchestratorEscalation(repoPath: string, message: string): void {
 }
 
 function queueReviewContinuation(lane: ReviewContinuationLane): void {
-  routeReviewContinuation(lane, enqueueOrchestratorAutoMessage, (reviewLane) => queueLeadReviewContinuation({
+  routeReviewContinuation(lane, (reviewLane) => queueLeadReviewContinuation({
     repoPath: reviewLane.repoPath,
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,

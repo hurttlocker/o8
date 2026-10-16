@@ -711,9 +711,9 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     return { id: `lane-${packet.id}`, label: 'Prepared fixture', repoPath, packetId: packet.id };
   }
   const bound = await prepared({orchestratorThreadId: threadId, orchestratorTurnId: 'origin-turn'});
-  const legacy = vi.fn(); const origin = vi.fn();
-  const route = () => routeReviewContinuation(bound, legacy, () => false, origin);
-  route(); expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+  const origin = vi.fn();
+  const route = () => routeReviewContinuation(bound, () => false, origin);
+  route(); expect(origin).not.toHaveBeenCalled();
   const history = { repoPath, messages: [{id: 'origin-turn', role: 'assistant' as const, content: '', timestamp: Date.now(), backend: 'codex' as const,
     model: 'gpt-6.1-sol', receipt: {leadModel: 'gpt-6.1-sol', effort: 'medium' as const, mode: 'multitask' as const}}] };
   writePersistedLlmChat(threadId, history, {replace: true});
@@ -726,13 +726,13 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
     {...history, messages: [history.messages[0], {...history.messages[0], id: 'changed-backend', backend: 'claude' as const}]},
   ]) {
     writePersistedLlmChat(threadId, invalid, {replace: true}); route();
-    expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+    expect(origin).not.toHaveBeenCalled();
   }
   // Threads led by the built-in agent bind under the same checks (#3410).
   for (const [backend, model] of [['o8', 'o8-free'], ['pi', 'pi']] as const) {
     const agentThreadId = `thoughts-${backend}-origin-${Date.now()}`;
     const agentBound = await prepared({orchestratorThreadId: agentThreadId, orchestratorTurnId: 'origin-turn'});
-    const agentRoute = () => routeReviewContinuation(agentBound, legacy, () => false, origin);
+    const agentRoute = () => routeReviewContinuation(agentBound, () => false, origin);
     const turn = {...history.messages[0], backend, model, receipt: {...history.messages[0].receipt, leadModel: model}};
     const agentHistory = {repoPath, backend, messages: [turn]};
     writePersistedLlmChat(agentThreadId, agentHistory, {replace: true});
@@ -747,10 +747,11 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
       {...agentHistory, backend: 'codex'},
     ]) {
       writePersistedLlmChat(agentThreadId, invalid, {replace: true}); agentRoute();
-      expect(origin).not.toHaveBeenCalled(); expect(legacy).not.toHaveBeenCalled();
+      expect(origin).not.toHaveBeenCalled();
     }
   }
+  // #3727: a mission created over MCP with no chat origin stays at review; no session is woken to merge it.
   const unbound = await prepared({});
-  routeReviewContinuation(unbound, legacy, () => false, origin);
-  expect(legacy).toHaveBeenCalledOnce(); expect(origin).not.toHaveBeenCalled();
+  routeReviewContinuation(unbound, () => false, origin);
+  expect(origin).not.toHaveBeenCalled();
 }, 30_000);
