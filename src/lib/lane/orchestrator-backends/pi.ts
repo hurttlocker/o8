@@ -31,13 +31,15 @@ import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
-import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
+import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
 export const PI_ORCHESTRATOR_LIMITS = { maxModelCalls: 40, maxToolCalls: 80, runTimeoutMs: 30 * 60_000 } as const;
 /** An idle thread's Pi and cortex processes close after this; the next message resumes from the session file. */
 export const PI_ORCHESTRATOR_IDLE_MS = 15 * 60_000;
+/** Earlier session files a fresh-conversation thread (a review slot) keeps for inspection. */
+const PI_FRESH_SESSION_KEEP = 2;
 
 type PiSession = Awaited<ReturnType<typeof createPiSdkSession>>;
 
@@ -198,6 +200,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         transport = routed.transport;
         pi.ceiling = routed.ceiling;
       }
+      // A fresh conversation never resumes the old ones, so only the latest few are kept (#3742).
+      if (options.freshSession) await prunePiSessionFiles(join(stateDir, 'sessions'), PI_FRESH_SESSION_KEEP);
       // Loaded on the first Pi turn, so ws-server startup never evaluates the Pi SDK.
       const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
       pi.session = await createPiSdkSession({

@@ -419,6 +419,10 @@ describe('Pi orchestrator (#3258)', () => {
     const { getSqlite } = await import('@/lib/db');
     const receipt = getSqlite().prepare("SELECT reason FROM role_routing_receipts WHERE context_id = ? ORDER BY rowid DESC LIMIT 1").get(lane.id) as { reason?: string } | undefined;
     expect(receipt?.reason).toContain('CLI is not installed');
+    // Each review starts a new conversation, so older review sessions are pruned to the latest few.
+    await review(); await review();
+    const { readdir } = await import('node:fs/promises');
+    expect((await readdir(stateRoot, { recursive: true })).filter(name => String(name).endsWith('.jsonl'))).toHaveLength(3);
   }, 180_000);
 
   it('keeps an installed CLI reviewer for the same packet (#3742)', async () => {
