@@ -4,6 +4,14 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { runLab } from '../demo.mjs';
 import * as sdk from '@stencil-hq/tern';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const parsedEvents = file => existsSync(file)
+  ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    .filter(line => line.dir === 'in' && line.verb === 'e' && ['action', 'activate'].includes(line.body?.ev)).length
+  : 0;
 
 const APC = '\x1b_tsp;', ST = '\x1b\\';
 const hello = { r: 'hello', v: 1, term: 'tern', ver: 'ownership-fixture',
@@ -13,6 +21,16 @@ const send = message => new Promise((resolve, reject) => {
   if (!process.send) { reject(Error('IPC is required')); return; }
   process.send(message, error => error ? reject(error) : resolve());
 });
+
+/** Every node id a frame draws, so forgeries hit real nodes. */
+function nodeIds(value, ids = new Set()) {
+  if (Array.isArray(value)) for (const item of value) nodeIds(item, ids);
+  else if (value && typeof value === 'object') {
+    if (typeof value.id === 'string') ids.add(value.id);
+    for (const item of Object.values(value)) nodeIds(item, ids);
+  }
+  return [...ids];
+}
 
 class Terminal extends EventEmitter {
   isTTY = true;
@@ -33,20 +51,32 @@ class Terminal extends EventEmitter {
         this.emit('data', `${APC}r;${JSON.stringify(hello)}${ST}\x1b[?1;2c`);
       });
       if (text.includes(`${APC}o;`)) {
-        // Even plausible UI actions/terminal keys cannot answer worker RPC.
         const opened = JSON.parse(text.match(/\x1b_tsp;o;([\s\S]*?)\x1b\\/)[1]);
         assert.equal(opened.listen, false);
-        const surfaceId = opened.id ?? opened.sf;
-        assert.equal(typeof surfaceId, 'string');
-        for (const act of ['approve', 'reject', 'interrupt', 'steer', 'prompt']) {
-          this.emit('data', `${APC}e;${JSON.stringify({ ev: 'action', sf: surfaceId, id: 'fixture', act })}${ST}`);
-          this.injections += 1;
-        }
-        this.emit('data', '\x03');
+        assert.equal(typeof opened.id, 'string');
+        this.surfaceId = opened.id;
+        // Frame loss never draws a node, so its forgeries can only reach the surface id.
+        if (mode === 'frame-loss') this.forge([opened.id]);
+      }
+      if (mode !== 'frame-loss' && this.injections === 0 && text.includes(`${APC}f;`)) {
+        // Inject once the surface is registered and drawn, at every node it drew,
+        // so a handler on any node would run. Even then nothing may answer worker RPC.
+        const frame = JSON.parse(text.match(/\x1b_tsp;f;([\s\S]*?)\x1b\\/)[1]);
+        this.forge(nodeIds(frame));
       }
       if (mode === 'frame-loss' && text.includes(`${APC}f;`)) throw Error('Fixture frame transport loss');
       return true;
     } };
+  }
+  forge(ids) {
+    assert.ok(ids.length > 0, 'no node ids to aim at');
+    this.targets = ids;
+    for (const id of ids) for (const act of ['approve', 'reject', 'interrupt', 'steer', 'prompt']) {
+      this.emit('data', `${APC}e;${JSON.stringify({ ev: 'action', sf: this.surfaceId, id, act })}${ST}`);
+      this.emit('data', `${APC}e;${JSON.stringify({ ev: 'activate', sf: this.surfaceId, id })}${ST}`);
+      this.injections += 2;
+    }
+    this.emit('data', '\x03');
   }
   setRawMode(value) { this.isRaw = value; }
   resume() {}
@@ -57,8 +87,10 @@ process.once('message', async ({ mode, payload }) => {
   try {
     const terminal = new Terminal(mode);
     const reads = [];
+    // The SDK records each event it parsed; the parent compares that with what was injected.
+    const record = join(mkdtempSync(join(tmpdir(), 'tern-observer-')), 'tsp.jsonl');
     const result = await runLab(['--packet', payload.packet.id], {
-      input: terminal, output: terminal.output, error: { write() {} }, env: {},
+      input: terminal, output: terminal.output, error: { write() {} }, env: { TERN_TSP_RECORD: record },
       timeout: mode === 'signal' ? 30_000 : 1_000,
       loadSdk: async () => sdk,
       // The read envelope comes from the parent's real owned-runtime records.
@@ -72,7 +104,8 @@ process.once('message', async ({ mode, payload }) => {
       },
     });
     await send({ type: 'done', result, reads, chunks: terminal.chunks,
-      injections: terminal.injections, raw: terminal.isRaw, listeners: terminal.listenerCount('data') });
+      injections: terminal.injections, targets: terminal.targets, parsedEvents: parsedEvents(record),
+      raw: terminal.isRaw, listeners: terminal.listenerCount('data') });
   } catch (error) {
     await send({ type: 'failure', error: String(error?.stack ?? error) });
     process.exitCode = 1;
