@@ -331,7 +331,8 @@ async function resetRegistryPacket(
   const { result } = await withMissionRegistryState(missionId, (state) => {
     const packet = state.packets.find((candidate) => candidate.id === input.packetId);
     if (!packet) {
-      throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
+      // Lane cleanup already ran by this point, so this is not a plain "nothing to reset".
+      throw new Error(`Packet ${input.packetId} not found.`);
     }
     if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
       return {

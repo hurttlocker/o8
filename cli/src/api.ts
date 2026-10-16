@@ -340,7 +340,13 @@ export async function apiFetch<T = unknown>(
   }
   if (res.status === 404) {
     if (opts.allowNotFound) return { status: 404, data: null };
-    throw new CliError('not_found', `404 from ${path}`, EXIT.NOT_FOUND);
+    // A route's typed not-found reason (for example an unknown packet) beats a bare status.
+    const json = parseResponseJson(responseText);
+    const error = asErrorRecord(json?.error);
+    const serverDetail = typeof json?.error === 'string' ? json.error
+      : typeof error?.message === 'string' ? error.message : '';
+    const detail = boundedErrorText(serverDetail).replace(/\p{Cc}/gu, ' ');
+    throw new CliError('not_found', `404 from ${path}${detail ? `: ${detail}` : ''}`, EXIT.NOT_FOUND);
   }
   if (res.status === 409 || res.status === 422) {
     const json = parseResponseJson(responseText);

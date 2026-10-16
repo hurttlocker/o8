@@ -169,6 +169,18 @@ describe('CLI apiFetch network error taxonomy', () => {
     });
   });
 
+  it('names the route\'s not-found reason on a 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: false, error: { code: 'packet_not_found', message: 'Packet pkt-1 not found.' },
+    }), { status: 404, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(apiFetch(config, '/api/orchestrator/reset-packet')).rejects.toMatchObject({
+      code: 'not_found',
+      exit: EXIT.NOT_FOUND,
+      message: '404 from /api/orchestrator/reset-packet: Packet pkt-1 not found.',
+    });
+  });
+
   it('returns structured conflict details when a command opts into handling them', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       ok: false,
