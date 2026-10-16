@@ -10,7 +10,7 @@
 import { existsSync } from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
 
-/** A clean env for spawned PTYs — inherits process.env, pins TERM/locale/PATH. */
+/** A clean env for spawned PTYs: inherits process.env, pins TERM/locale/PATH, drops the parent terminal identity. */
 export function sanitizePtyEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -19,6 +19,9 @@ export function sanitizePtyEnv(): Record<string, string> {
     }
   }
   env.TERM = 'xterm-256color';
+  // The panel is o8's xterm.js, not the terminal that started the server.
+  delete env.TERM_PROGRAM;
+  delete env.TERM_PROGRAM_VERSION;
   env.LANG = env.LANG || 'en_US.UTF-8';
   env.LC_ALL = env.LC_ALL || 'en_US.UTF-8';
   env.PATH = env.PATH || '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
