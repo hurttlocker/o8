@@ -39,6 +39,8 @@ vi.mock('@/lib/pi/sdk/approval', () => ({
 // /api/mcp, so the operator stdio proxy (Claude's path) and Pi's HTTP client
 // both reach the in-app host, and /api/panel/repos, which o8_list_repos calls.
 let api: Server;
+// #3739: how long /api/mcp holds its reply, standing in for a blocking command such as wait_for_mission_ready.
+let mcpHoldMs = 0;
 const saved = { NEXT_ORIGIN: process.env.NEXT_ORIGIN, O8_API_PORT: process.env.O8_API_PORT };
 beforeAll(async () => {
   buildPiWriteHelper();
@@ -61,6 +63,7 @@ beforeAll(async () => {
     const response = gate.headers.get('x-middleware-next') === '1'
       ? await handler(new Request(url, { method: req.method, headers, body }))
       : gate;
+    if (url.pathname === '/api/mcp' && mcpHoldMs > 0) await new Promise(resolve => setTimeout(resolve, mcpHoldMs));
     res.writeHead(response.status, { 'Content-Type': 'application/json' }).end(await response.text());
   });
   await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
@@ -183,6 +186,48 @@ describe('Pi orchestrator (#3258)', () => {
       }
     } finally { await servers.close(); }
   }, 180_000);
+
+  // #3739: fetch gave up after five minutes without headers, so a default ten-minute
+  // wait_for_mission_ready reached the lead as "could not reach the o8 operator server".
+  // CI holds the reply briefly; O8_TEST_OPERATOR_HOLD_MS=301000 reproduces the original limit.
+  const operatorHoldMs = Number(process.env.O8_TEST_OPERATOR_HOLD_MS) || 1_500;
+  it('waits for a held operator reply instead of failing at the fetch headers limit', async () => {
+    const { repo } = await fixture();
+    const servers = await openO8Servers(repo, { profile: 'full', threadId: 'thoughts-pi-test' });
+    mcpHoldMs = operatorHoldMs;
+    try {
+      const operator = servers.servers.find(server => server.name === 'operator')!;
+      const started = Date.now();
+      const result = await operator.request('tools/call', { name: 'o8_list_repos', arguments: {} },
+        new AbortController().signal) as { content?: Array<{ text?: string }>; isError?: boolean };
+      expect(Date.now() - started).toBeGreaterThanOrEqual(operatorHoldMs);
+      expect(result.isError).not.toBe(true);
+      expect(JSON.parse(result.content?.[0]?.text ?? 'null')).toEqual(expect.objectContaining({ repos: expect.any(Array) }));
+    } finally { mcpHoldMs = 0; await servers.close(); }
+  }, operatorHoldMs + 120_000);
+
+  it('still ends a held operator request at its bound and on Stop', async () => {
+    const { repo } = await fixture();
+    const servers = await openO8Servers(repo, { profile: 'full', threadId: 'thoughts-pi-test', operatorTimeoutMs: 300 });
+    mcpHoldMs = 5_000;
+    try {
+      const operator = servers.servers.find(server => server.name === 'operator')!;
+      let started = Date.now();
+      await expect(operator.request('tools/call', { name: 'o8_list_repos', arguments: {} }, new AbortController().signal))
+        .rejects.toThrow('The o8 operator server did not answer within 300ms');
+      expect(Date.now() - started).toBeLessThan(4_000);
+      const stop = new AbortController();
+      setTimeout(() => stop.abort(new Error('Stopped')), 200);
+      started = Date.now();
+      const unbounded = await openO8Servers(repo, { profile: 'full', threadId: 'thoughts-pi-test' });
+      try {
+        await expect(unbounded.servers.find(server => server.name === 'operator')!
+          .request('tools/call', { name: 'o8_list_repos', arguments: {} }, stop.signal)).rejects.toThrow();
+        expect(stop.signal.aborted).toBe(true);
+        expect(Date.now() - started).toBeLessThan(4_000);
+      } finally { await unbounded.close(); }
+    } finally { mcpHoldMs = 0; await servers.close(); }
+  }, 120_000);
 
   it('runs o8 commands through the operator server, keeps approval on repo writes, and resumes after a restart', async () => {
     const { repo, stateRoot } = await fixture();
