@@ -284,6 +284,30 @@ describe('Pi orchestrator (#3258)', () => {
     expect(doneIds[1]).toBe(doneIds[0]);
   }, 180_000);
 
+  it('records each managed lead call with its tokens and no per-call charge (#3742)', async () => {
+    const { repo, stateRoot } = await fixture();
+    const { O8_MANAGED_PI_MODEL } = await import('@/lib/pi/sdk/live-contract');
+    const chunk = (extra: Record<string, unknown>) => `data: ${JSON.stringify({ id: 'managed-1', object: 'chat.completion.chunk',
+      created: 1, model: O8_MANAGED_PI_MODEL.id, ...extra })}\n\n`;
+    const relay = (async () => new Response(chunk({ choices: [{ index: 0, delta: { role: 'assistant', content: 'Planned.' }, finish_reason: null }] })
+      + chunk({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 700, completion_tokens: 9, total_tokens: 709, prompt_tokens_details: { cached_tokens: 100 } } })
+      + 'data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } })) as unknown as typeof fetch;
+    const backend = createPiOrchestratorBackend({ stateRoot: () => stateRoot, managedInference: {
+      resolveRoute: async () => ({ via: 'proxy', url: 'https://relay.test/v1/inference', headers: {} }), fetch: relay } });
+    backends.push(backend);
+    const out: OrchestratorEvent[] = [];
+    await backend.sendTurn(repo, 'Plan the next mission', event => out.push(event), { threadId: 'thoughts-pi-managed-usage' });
+    expect(out.filter(event => event.type === 'error')).toEqual([]);
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const rows = getDb()!.select().from(usageLogs).all().filter(row => row.agentName === 'pi-orchestrator' && row.provider === 'runtime');
+    expect(rows.map(row => [row.role, row.model, row.inputTokens, row.outputTokens, row.cacheReadTokens, row.costUsd])).toEqual([
+      ['orchestrator', O8_MANAGED_PI_MODEL.id, 700, 9, 100, 0]]);
+    expect(JSON.parse(rows[0].metadataJson!)).toMatchObject({ carrier: 'o8-managed', payer: 'o8-managed', costSource: 'allowance',
+      usageReported: true, status: 'completed' });
+  });
+
   it('runs the lead on an explicit OpenRouter model and reports its exact model and provider cost (#3584)', async () => {
     const { repo, stateRoot } = await fixture();
     const { openRouterPiModel, OPENROUTER_CHAT_COMPLETIONS_URL } = await import('@/lib/pi/sdk/openrouter-transport');
@@ -457,6 +481,19 @@ describe('Pi orchestrator (#3258)', () => {
     expect(listReviewCosts([lane.packetId!])).toEqual([expect.objectContaining({
       surface: 'auto-review', payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription',
       costBasis: 'subscription', costUsd: 0 })]);
+    // A managed Pi review is recorded by its per-call rows: each call counts once, at no charge, with no turn row.
+    const { recordPiManagedUsage } = await import('@/lib/pi/managed-usage');
+    const { O8_MANAGED_PI_MODEL } = await import('@/lib/pi/sdk/live-contract');
+    const managedCall = { role: 'reviewer' as const, agentName: 'pi-reviewer', laneId: lane.id, packetId: lane.packetId,
+      runId: 'turn-managed', surface: 'auto-review' };
+    recordPiManagedUsage(O8_MANAGED_PI_MODEL, managedCall, { prompt_tokens: 50, completion_tokens: 5 }, 'completed');
+    recordPiManagedUsage(O8_MANAGED_PI_MODEL, managedCall, null, 'failed');
+    recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-managed',
+      backend: 'pi', model: O8_MANAGED_PI_MODEL.id, surface: 'auto-review', reportedCostUsd: null });
+    expect(listReviewCosts([lane.packetId!]).at(-1)).toEqual({ packetId: lane.packetId, reviewTurnId: 'turn-managed',
+      surface: 'auto-review', model: O8_MANAGED_PI_MODEL.id, payer: 'o8-managed', costBasis: 'allowance', calls: 2, costUsd: 0 });
+    const { getSqlite } = await import('@/lib/db');
+    expect(getSqlite().prepare("SELECT COUNT(*) AS n FROM usage_logs WHERE run_id = 'turn-managed'").get()).toEqual({ n: 2 });
     // A metered reviewer's reported cost is real spend on the operator's own account, so it counts.
     recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-metered',
       backend: 'opencode', model: 'some-model', surface: 'merge-gate-review', reportedCostUsd: 0.0125 });

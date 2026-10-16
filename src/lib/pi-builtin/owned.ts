@@ -299,6 +299,8 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
     const stateDir = path.join(session.sessionDir, 'pi');
     let model = O8_MANAGED_PI_MODEL;
+    const attribution = { role: 'worker' as const, agentName: 'pi-builtin', sessionKey: surfaceId, repoPath: session.repoPath,
+      laneId: session.laneId ?? null, packetId: session.packetId ?? null, runId: run.id };
     let transport: Parameters<typeof createPiSdkSession>[0]['transport'];
     if (isOpenRouterPiModelChoice(session.model)) {
       // An explicit OpenRouter pin runs only on that model, bounded by the operator's packet cap.
@@ -309,10 +311,13 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
         model = route.model;
         transport = choice.createPiOpenRouterRouteTransport(route, {
           ceilingUsd: getOperatorDefaultsSync().values.meteredPacketCostCapUsd,
-          attribution: { role: 'worker', agentName: 'pi-builtin', sessionKey: surfaceId, repoPath: session.repoPath,
-            laneId: session.laneId ?? null, packetId: session.packetId ?? null, runId: run.id },
+          attribution,
         }).transport;
       }
+    } else {
+      // Managed calls are metered by the relay; each is also recorded locally with its tokens (#3742).
+      const { createPiManagedUsageTransport } = await import('@/lib/pi/managed-usage');
+      transport = createPiManagedUsageTransport(model, attribution);
     }
     return createPiSdkSession({
       workspace: session.cwd,

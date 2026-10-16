@@ -33,7 +33,7 @@ const model = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/pi/sdk/transport')>(),
-  createManagedPiTransport: (options: { model: { id: string } }) => {
+  createManagedPiTransport: (options: { model: { id: string }; observeRawUsage?: (usage: unknown) => void }) => {
     model.managedModels.push(options.model.id);
     return async function* (context: { messages: unknown[] }, signal: AbortSignal) {
       const system = (context.messages as Array<{ role?: string; toolsAdded?: Array<{ name: string }> }>)
@@ -49,6 +49,7 @@ vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
       const answer = model.answers.shift() as AssistantMessage | undefined;
       if (!answer) throw new Error('No scripted answer left');
       yield* events(answer);
+      options.observeRawUsage?.({ prompt_tokens: 120, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 20 } });
     };
   },
 }));
@@ -350,6 +351,14 @@ describe('bundled Pi worker (#3258)', () => {
     // Only the managed transport, for the managed model, ever served this worker.
     expect(new Set(model.managedModels)).toEqual(new Set(['openai/gpt-6-luna']));
     expect(model.seen[0].tools).toEqual(['read_file', 'write_file', 'run_command']);
+    // Each managed call is recorded with its tokens, at no per-call charge to the operator (#3742).
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const usage = getDb()!.select().from(usageLogs).all().filter((row) => row.agentName === 'pi-builtin' && row.laneId === laneId);
+    expect(usage.length).toBeGreaterThan(0);
+    expect(usage[0]).toMatchObject({ role: 'worker', provider: 'runtime', model: 'openai/gpt-6-luna', inputTokens: 120,
+      outputTokens: 30, cacheReadTokens: 20, costUsd: 0, packetId });
+    expect(JSON.parse(usage[0].metadataJson!)).toMatchObject({ payer: 'o8-managed', status: 'completed', usageReported: true });
 
     // The work happened in the lane worktree and nowhere else, with no inbox approval, and is not committed yet.
     expect(git(workspacePath, ['rev-parse', 'HEAD'])).toBe(target.baseSha);

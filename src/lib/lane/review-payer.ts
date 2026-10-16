@@ -36,8 +36,8 @@ export function reviewPayer(backend: string, model: string | null | undefined): 
 }
 
 /**
- * One usage row per review turn. An OpenRouter review already writes a row per
- * model call, keyed by the same turn, so it writes none here.
+ * One usage row per review turn. A Pi review on OpenRouter or o8's managed model
+ * already writes a row per model call, keyed by the same turn, so it writes none here.
  */
 export function recordReviewTurnUsage(input: {
   laneId: string;
@@ -51,8 +51,8 @@ export function recordReviewTurnUsage(input: {
   reportedCostUsd: number | null;
 }): void {
   const { payer, costBasis: basis } = reviewPayer(input.backend, input.model);
-  // Pi and the o8 choice write their own OpenRouter rows per call; a second row would count them twice.
-  if (payer === 'openrouter') return;
+  // Pi and the o8 choice write their own rows per call; a second row would count them twice.
+  if (payer === 'openrouter' || payer === 'o8-managed') return;
   // A metered backend's reported cost is real spend; a subscription or allowance turn has no per-call charge.
   const metered = payer === 'operator-metered' && input.reportedCostUsd !== null;
   const costBasis: ReviewCostBasis = metered ? 'reported' : basis;
@@ -105,14 +105,16 @@ export function listReviewCosts(packetIds: string[]): MissionReviewCost[] {
     cost_usd: number | null; metadata_json: string | null }>;
   const turns = new Map<string, MissionReviewCost>();
   for (const row of rows) {
-    const metadata = JSON.parse(row.metadata_json ?? '{}') as { payer?: ReviewPayer; costSource?: string; surface?: string };
+    const metadata = JSON.parse(row.metadata_json ?? '{}') as { payer?: ReviewPayer; costSource?: string; surface?: string;
+      carrier?: string };
     const payer = metadata.payer ?? (row.provider === 'openrouter' ? 'openrouter' : 'unknown');
     const turn = turns.get(row.run_id) ?? {
       packetId: row.packet_id, reviewTurnId: row.run_id, surface: metadata.surface ?? null, model: row.model, payer,
       costBasis: payer === 'openrouter' ? 'reported' : (metadata.costSource as ReviewCostBasis | undefined) ?? 'unknown',
       calls: 0, costUsd: 0,
     };
-    if (payer === 'openrouter') {
+    // Pi's per-call rows name their carrier; each is one model call.
+    if (payer === 'openrouter' || metadata.carrier) {
       turn.calls += 1;
       if (metadata.costSource === 'unknown') turn.costBasis = 'unknown';
     }
