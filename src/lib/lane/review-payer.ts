@@ -121,11 +121,11 @@ export function listReviewCosts(packetIds: string[]): MissionReviewCost[] {
     const payer = metadata.payer ?? (row.provider === 'openrouter' ? 'openrouter' : 'unknown');
     const turn = turns.get(row.run_id) ?? {
       packetId: row.packet_id, reviewTurnId: row.run_id, surface: metadata.surface ?? null, model: row.model, payer,
-      costBasis: payer === 'openrouter' ? 'reported' : (metadata.costSource as ReviewCostBasis | undefined) ?? 'unknown',
+      costBasis: row.provider === 'openrouter' ? 'reported' : (metadata.costSource as ReviewCostBasis | undefined) ?? 'unknown',
       calls: 0, costUsd: 0,
     };
-    // Pi's per-call rows name their carrier; each is one model call.
-    if (payer === 'openrouter' || metadata.carrier) {
+    // Per-call rows (OpenRouter's, or any naming its carrier) are one model call each; a turn row is none.
+    if (row.provider === 'openrouter' || metadata.carrier) {
       turn.calls += 1;
       if (metadata.costSource === 'unknown') turn.costBasis = 'unknown';
     }

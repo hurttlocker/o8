@@ -165,8 +165,8 @@ async function runAttempt(input: {
   } catch (error) {
     errors.push(`Review turn finalization failed: ${message(error)}`);
   }
-  // Every review turn is recorded in usage with its payer and cost basis (#3742). An OpenRouter turn is
-  // recorded by its per-call rows instead, so one that ended before any call has no rows and cost nothing.
+  // Every review turn is recorded in usage with its payer and cost basis (#3742). A turn whose calls
+  // wrote their own rows is recorded by those; one that ended before any call gets a turn row.
   recordReviewTurnUsage({ ...reviewUsage, repoPath: lane?.repoPath ?? input.repoPath, backend: input.backend.id,
     model: observedModel ?? input.model ?? null, reportedCostUsd: approximateCost });
   return { text, errors, quotaError, reviewTurnId, unavailableReason, approximateCost, observedRoute };

@@ -517,6 +517,11 @@ describe('Pi orchestrator (#3258)', () => {
       backend: 'o8', model: 'o8-free', surface: 'auto-review', reportedCostUsd: null });
     expect(listReviewCosts([lane.packetId!]).at(-1)).toMatchObject({ reviewTurnId: 'turn-o8-text', payer: 'o8-managed',
       costBasis: 'allowance', calls: 0, costUsd: 0 });
+    // A Pi review on OpenRouter that ended before any call made no model call.
+    recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-or-refused',
+      backend: 'pi', model: 'openrouter/deepseek/deepseek-v4.1-flash', surface: 'auto-review', reportedCostUsd: null });
+    expect(listReviewCosts([lane.packetId!]).at(-1)).toMatchObject({ reviewTurnId: 'turn-or-refused', payer: 'openrouter',
+      costBasis: 'unknown', calls: 0, costUsd: 0 });
     // A metered reviewer's reported cost is real spend on the operator's own account, so it counts.
     recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-metered',
       backend: 'opencode', model: 'some-model', surface: 'merge-gate-review', reportedCostUsd: 0.0125 });
