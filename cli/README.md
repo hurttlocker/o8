@@ -4,12 +4,47 @@ Agent-first wrapper over the local o8 HTTP API. Worker agents in dispatched
 worktrees, CI runners, and scripts call `o8 <cmd>` instead of curling
 `http://127.0.0.1:<port>/api/...` with a bearer token.
 
-JSON to stdout is the default; pass `--human` for ANSI-formatted output.
+Commands default to JSON; pass `--human` for ANSI-formatted output.
+Bare `o8` in an interactive terminal opens a conversation. Piped invocations
+and `--json` stay in command mode.
+
+## Interactive conversation
+
+With o8 running, open a terminal in your repository:
+
+```sh
+o8 chat
+o8 chat --backend codex --model <model-id> --effort low
+o8 chat --resume thoughts-<conversation-id>
+```
+
+This uses the same local orchestrator, authentication, workspace, and saved
+conversation history as the app. It does not start a separate inference service
+or change saved settings. New and resumed chats start in **plan mode**; use
+`--execute` explicitly to request the backend's full execution mode. Model and
+effort overrides apply only to a new conversation. A resumed conversation keeps
+its saved backend, agent, and model routing.
+
+Enter sends, Ctrl+J inserts a newline, and pasted newlines remain in the draft.
+Use Esc to request interruption, Ctrl+O to expand tool details, and Page Up/Down
+to read earlier output. `/help` lists controls and `/session` gives the resume
+command. `/quit` detaches; active work continues in o8. Disconnections never
+resend prompts automatically: `/reconnect` reloads saved history.
+
+New turns stream live. When attaching to an already-running turn, chat refreshes
+the saved response until completion so a bounded event buffer cannot omit the
+beginning of a long answer. Tool details received in this terminal are expandable;
+historical tool details are not reconstructed from text-only history.
+
+Use `--no-motion` or `O8_REDUCED_MOTION=1` for a static activity indicator. Standard
+terminal color settings apply. The minimum terminal size is 36 columns by 12 rows.
+From a source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs chat`.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
+| `o8 chat [--repo <path>] [--resume <thread>]` | Interactive local orchestrator conversation |
 | `o8 version` | CLI version + connected server version |
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
 | `o8 status` | Snapshot: running packets, active lanes, recent merges, pending approvals |
