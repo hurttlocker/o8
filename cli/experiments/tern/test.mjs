@@ -15,11 +15,15 @@ const expectedText = '\npacket\n' + [
   ['label', 'SYNTHETIC FIXTURE — not live worker evidence'],
 ].map(([k, v]) => `${k.padEnd(14)}  ${v}\n`).join('') +
   '\nrecent events (1)\n  2026-10-07T00:00:00Z  fixture       observed\n';
+// A TTY gets bold headings, exactly as the CLI's color(title, 'bold') writes them.
+const expectedTty = expectedText.replace('\npacket\n', '\n\x1b[1mpacket\x1b[0m\n')
+  .replace('\nrecent events (1)\n', '\n\x1b[1mrecent events (1)\x1b[0m\n');
+const expectedFor = x => x.output.isTTY ? expectedTty : expectedText;
 
 function io() {
   const chunks = [], order = [];
   return {
-    input: { isTTY: true, isRaw: false, setRawMode() {} }, env: {},
+    input: { isTTY: true, isRaw: false, setRawMode() {} }, env: { TERM_PROGRAM: 'tern' },
     output: { isTTY: true, write(text) { chunks.push(String(text)); order.push('text'); } },
     chunks, order,
   };
@@ -61,22 +65,35 @@ for (const [name, mutate] of [
   ['already-owned raw input', x => { x.input.isRaw = true; }],
   ['opt-out', x => { x.env.TERN_TSP = '0'; }],
   ...['TMUX', 'STY', 'ZELLIJ'].map(key => [key, x => { x.env[key] = 'active'; }]),
+  // Measured: Terminal.app prints an unknown APC as text, so non-Tern terminals are never probed.
+  ...['Apple_Terminal', 'iTerm.app', 'ghostty', 'vscode', 'WezTerm'].map(program =>
+    [`TERM_PROGRAM=${program}`, x => { x.env.TERM_PROGRAM = program; }]),
+  ['SSH without TERM_PROGRAM', x => { x.env = { SSH_TTY: '/dev/pts/0', TERM: 'xterm-kitty' }; }],
 ]) test(`${name}: text without loading SDK or probing`, async () => {
   const x = io(); mutate(x);
-  const result = await presentSurface(model(), { ...x, loadSdk() { assert.fail('must not load SDK'); } });
+  // A throwing loadSdk is swallowed as sdk-unavailable, so count calls instead.
+  let loads = 0;
+  const result = await presentSurface(model(), { ...x, loadSdk: async () => { loads += 1; return fakeSdk().sdk; } });
+  assert.equal(loads, 0);
   assert.equal(result.renderer, 'text');
-  assert.equal(x.chunks.join(''), expectedText);
+  assert.equal(x.chunks.join(''), expectedFor(x));
+});
+test('TERN_TSP=1 opts in where TERM_PROGRAM is not forwarded', async () => {
+  const x = io(), { sdk, calls } = fakeSdk();
+  x.env = { SSH_TTY: '/dev/pts/0', TERN_TSP: '1' };
+  assert.equal((await presentSurface(model(), { ...x, loadSdk: async () => sdk })).renderer, 'tsp');
+  assert.equal(calls[0][0], 'connect');
 });
 test('missing SDK is a working text path', async () => {
   const x = io();
   const result = await presentSurface(model(), { ...x, loadSdk: async () => { throw Error('not installed'); } });
   assert.equal(result.reason, 'sdk-unavailable');
-  assert.equal(x.chunks.join(''), expectedText);
+  assert.equal(x.chunks.join(''), expectedFor(x));
 });
 test('no TSP after negotiation falls back exactly once', async () => {
   const x = io(), { sdk } = fakeSdk({ noTsp: true });
   assert.equal((await presentSurface(model(), { ...x, loadSdk: async () => sdk })).renderer, 'text');
-  assert.deepEqual(x.chunks, [expectedText]);
+  assert.deepEqual(x.chunks, [expectedFor(x)]);
 });
 for (const caps of [{ features: [] }, { kinds: ['col', 'text', 'kv'] }]) {
   test(`unsupported capabilities ${JSON.stringify(caps)} restore input before text`, async () => {
@@ -119,12 +136,12 @@ test('renderer failure discards partial native output and closes before fallback
   assert.equal((await presentSurface(model(), { ...x, loadSdk: async () => sdk })).renderer, 'text');
   assert.deepEqual(calls.find(([name]) => name === 'surface.close')[1], { keep: false });
   assert.deepEqual(x.order, ['close', 'text']);
-  assert.deepEqual(x.chunks, [expectedText]);
+  assert.deepEqual(x.chunks, [expectedFor(x)]);
 });
 test('cleanup failure cannot produce a native-success receipt', async () => {
   const x = io(), { sdk } = fakeSdk({ closeError: true });
   assert.equal((await presentSurface(model(), { ...x, loadSdk: async () => sdk })).reason, 'cleanup-failed');
-  assert.deepEqual(x.chunks, [expectedText]);
+  assert.deepEqual(x.chunks, [expectedFor(x)]);
 });
 test('a broken plain stdout is a real error, not reported as successful fallback', async () => {
   const x = io(); x.output.isTTY = false; x.output.write = () => { throw Error('broken stdout'); };
