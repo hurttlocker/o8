@@ -54,11 +54,12 @@ writeFileSync(join(dataDir, 'ws-token'), token);
 const setupRoute = await import('@/app/api/setup/agent/route');
 const missionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const mcpRoute = await import('@/app/api/mcp/route');
+const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
 const { panelGateMiddleware } = await import('@/middleware');
 const { closeDb } = await import('@/lib/db');
 const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
-const { recordOrchestratorReview, getApproval } = await import('@/lib/approvals/store');
+const { recordOrchestratorReview, getApproval, listApprovalsForContext } = await import('@/lib/approvals/store');
 const { dispatch } = await import('@/lib/lane/commands');
 const { createLane, getLane } = await import('@/lib/lane/registry');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
@@ -75,17 +76,23 @@ const server = createServer(async (req, res) => {
       : req.url === '/api/mcp' ? await mcpRoute.POST(request)
       : req.url === '/api/setup/agent' ? await setupRoute.POST(request)
       : req.url === '/api/orchestrator/create-mission' ? await missionRoute.POST(request)
+      : req.url === '/api/orchestrator/merge' ? await mergeRoute.POST(request)
+      : req.url === '/api/panel/approvals' ? await approvalsRoute.POST(request)
       : new Response('Unknown fixture route', { status: 404 });
     res.writeHead(response.status, { 'Content-Type': 'application/json' }); res.end(await response.text());
   } catch (error) { res.writeHead(500); res.end(JSON.stringify({ error: String(error) })); }
 });
 
-async function call(name: string, args: Record<string, unknown>) {
+/** One operator MCP tool call, the way a lead makes it: the operator token over /api/mcp. */
+async function callTool(name: string, args: Record<string, unknown>) {
   const response = await fetch(`http://127.0.0.1:${port}/api/mcp`, { method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
   });
-  const result = (await response.json()).result as McpToolResult;
+  return (await response.json()).result as McpToolResult;
+}
+async function call(name: string, args: Record<string, unknown>) {
+  const result = await callTool(name, args);
   expect(result.isError, JSON.stringify(result)).not.toBe(true);
   const content = result.content[0]; if (content.type !== 'text') throw new Error('Expected text receipt.');
   return JSON.parse(content.text);
@@ -130,7 +137,7 @@ afterAll(async () => {
 });
 
 it('holds an approved packet from a held mission until the operator approves the merge', async () => {
-  const { packet, lane, reviewedHeadSha } = await reviewedPacket('held', true);
+  const { packet, lane } = await reviewedPacket('held', true);
   expect(packet.mergeHold).toBe(true);
   const baseHeadSha = git(repoPath, 'rev-parse', 'main');
 
@@ -147,13 +154,36 @@ it('holds an approved packet from a held mission until the operator approves the
   expect(again.ok).toBe(false);
   expect(git(repoPath, 'rev-parse', 'main')).toBe(baseHeadSha);
 
+  // The lead's own tools share the operator token. In this order the old merge
+  // route resolved the card itself, failed on the moved HEAD and left the card
+  // approved, so the next approve_and_merge inherited it and merged.
+  writeFileSync(join(lane.worktreePath!, 'held-follow-up.txt'), 'follow-up\n');
+  git(lane.worktreePath!, 'add', '-A');
+  git(lane.worktreePath!, 'commit', '-qm', 'follow-up');
+  const followUpHeadSha = git(lane.worktreePath!, 'rev-parse', 'HEAD');
+  const leadMerge = await callTool('approve_and_merge', { packetId: packet.id });
+  expect(JSON.stringify(leadMerge)).not.toMatch(/"merged\\?":\s*true/);
+  expect(getApproval(held.approvalId!)?.status).toBe('pending');
+  recordOrchestratorReview(packet.id, { approved: true, findings: [], reviewer: 'codex', reviewedHeadSha: followUpHeadSha, requiresSecondPass: false });
+  const followUpMerge = await callTool('approve_and_merge', { packetId: packet.id });
+  expect(JSON.stringify(followUpMerge)).not.toMatch(/"merged\\?":\s*true/);
+  expect(git(repoPath, 'rev-parse', 'main')).toBe(baseHeadSha);
+  const leadApprove = await callTool('o8_approve', { id: held.approvalId });
+  expect(leadApprove.isError).toBe(true);
+  expect(JSON.stringify(leadApprove)).toContain('holds merges');
+  expect(git(repoPath, 'rev-parse', 'main')).toBe(baseHeadSha);
+  const pendingCard = listApprovalsForContext({ laneId: lane.id })
+    .filter((approval) => approval.status === 'pending' && approval.policyRuleId === 'mission-merge-hold')
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  expect(pendingCard).toBeTruthy();
+
   const approved = await approvalsRoute.POST(new NextRequest(`http://127.0.0.1:${port}/api/panel/approvals`, {
     method: 'POST',
     headers: { host: `127.0.0.1:${port}`, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ action: 'approve', id: held.approvalId }),
+    body: JSON.stringify({ action: 'approve', id: pendingCard!.id }),
   }));
   expect(approved.status, await approved.clone().text()).toBe(200);
-  expect(git(repoPath, 'rev-parse', 'main')).toBe(reviewedHeadSha);
+  expect(git(repoPath, 'rev-parse', 'main')).toBe(followUpHeadSha);
 }, 120_000);
 
 it('keeps the usual merge after an approved review when the mission does not hold merges', async () => {

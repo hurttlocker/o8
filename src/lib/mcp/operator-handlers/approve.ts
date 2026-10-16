@@ -94,6 +94,10 @@ export async function handleApprove(args: Record<string, unknown>): Promise<McpT
   try {
     const id = args.id as string;
     if (!id) return textResult('id is required', true);
+    const { isMergeApprovalHeld } = await import('@/lib/lane/merge-hold');
+    if (isMergeApprovalHeld(id)) {
+      return textResult('This packet\'s mission holds merges. Only the operator releases it, from the o8 inbox.', true);
+    }
 
     const result = await apiFetch('/api/panel/approvals', {
       method: 'POST',
