@@ -27,9 +27,25 @@ its saved backend, agent, and model routing.
 
 Enter sends, Ctrl+J inserts a newline, and pasted newlines remain in the draft.
 Use Esc to request interruption, Ctrl+O to expand tool details, and Page Up/Down
-to read earlier output. `/help` lists controls and `/session` gives the resume
+or the mouse wheel to read earlier output; Ctrl+G returns to latest. Hold Shift
+to use your terminal's native mouse text selection. Reading earlier rows holds your
+position while new output arrives. When an answer's prompt is above the viewport,
+a single prompt row stays at the top; it yields when the full prompt is visible.
+`/help` lists controls and `/session` gives the resume
 command. `/quit` detaches; active work continues in o8. Disconnections never
 resend prompts automatically: `/reconnect` reloads saved history.
+
+Drop file paths into the terminal or use `/attach "path with spaces.png"`.
+Files are staged locally, with no shell execution or automatic send. `/attachments`
+lists them; `/remove 2` removes the second file and `/remove all` clears the list.
+Add a message and press Enter to send. PNG, JPEG, GIF, and WebP bytes use the existing
+image attachment transport, with backend support checked before sending. UTF-8
+files send their actual contents as data, not a path the remote backend might lack.
+Limits are eight attachments, 3.7 MB per image, 256 KiB per text file, and 1 MiB of
+text in total. Directories, devices, and other binary documents (including PDF)
+are rejected with a visible explanation. Raw clipboard image paste is not supported
+in this slice; save the image and drop its file path. Attachments remain local
+until send, and unsent drafts are not persisted across terminal exit.
 
 New turns stream live. When attaching to an already-running turn, chat refreshes
 the saved response until completion so a bounded event buffer cannot omit the

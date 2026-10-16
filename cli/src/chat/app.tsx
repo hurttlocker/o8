@@ -8,15 +8,20 @@ import { editInput, graphemes, type InputValue } from './input.js';
 import { initialChatState, receiveEvent, safeText, type ChatRoute } from './state.js';
 import { Composer, Transcript, Welcome, composerLines, palette, transcriptLines, type ViewLine } from './view.js';
 import { terminalInput } from './terminal-input.js';
+import { attachmentPaths, attachmentTurn, pastedAttachmentPaths, stageAttachments, type Attachment } from './attachments.js';
 
 const HELP = [
   '/help        This guide',
   '/session     Conversation identity and resume command',
   '/reconnect   Reopen the connection and read saved history',
+  '/attach path Attach images or UTF-8 files (quote spaces)',
+  '/attachments List all staged files before sending',
+  '/remove n    Remove attachment n, or /remove all',
   '/quit        Leave chat; active work continues in o8',
   '',
   'Enter sends   Ctrl+J adds a line   Esc requests stop',
   'Ctrl+O expands tools   Page Up/Down reads the transcript',
+  'Ctrl+G returns to latest   Drop file paths to attach',
   '↑/↓ recalls prompts   Ctrl+U clears the draft',
   '',
   'This is the existing o8 orchestrator. Its normal approval',
@@ -54,8 +59,12 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   const [connection, setConnection] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [input, setInput] = useState<InputValue>({ text: '', cursor: 0 });
   const [expanded, setExpanded] = useState(false);
-  const [page, setPage] = useState<'chat' | 'help' | 'session'>('chat');
-  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState<'chat' | 'help' | 'session' | 'attachments'>('chat');
+  const [top, setTop] = useState<number | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  const [staging, setStaging] = useState(false);
+  const stagingRef = useRef(false);
   const [hint, setHint] = useState('');
   const clientRef = useRef<ChatClient | null>(null);
   const generation = useRef(0);
@@ -71,6 +80,18 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   const refreshTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const refreshPending = useRef(false);
   const stopRefresh = () => { clearInterval(refreshTimer.current); refreshTimer.current = undefined; };
+  const stagePaths = async (paths: string[]) => {
+    if (stagingRef.current) { setHint('Finishing the previous attachment. Your draft is preserved.'); return; }
+    stagingRef.current = true; setStaging(true); setHint('Reading attachments…');
+    try {
+      const next = await stageAttachments(paths, attachmentsRef.current, route.repoPath, route.backend);
+      if (!alive.current) return;
+      attachmentsRef.current = next; setAttachments(next);
+      setHint('Attachments ready. Add a message, then Enter to send. /remove n removes one.');
+    } catch (error) {
+      if (alive.current) setHint(safeText(error instanceof Error ? error.message : String(error)));
+    } finally { stagingRef.current = false; if (alive.current) setStaging(false); }
+  };
 
   const reconcile = async () => {
     const epoch = generation.current;
@@ -147,7 +168,11 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     void connect(false);
     const resize = () => setSize({ columns: stdout.columns || 80, rows: stdout.rows || 24 });
     stdout.on('resize', resize);
-    const paste = (text: string) => setInput((value) => editInput(value, text, {}));
+    const paste = (text: string) => {
+      const paths = pastedAttachmentPaths(text);
+      if (paths) void stagePaths(paths);
+      else setInput((value) => editInput(value, text, {}));
+    };
     const overflow = () => setHint('Paste exceeds 1 MiB. Use a smaller excerpt or reference the file.');
     terminal.paste.on('paste', paste);
     terminal.paste.on('overflow', overflow);
@@ -170,31 +195,48 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
   };
   const submit = () => {
     const text = input.text.trim();
-    if (!text) return;
+    if (stagingRef.current) { setHint('Wait for the attachment to finish reading.'); return; }
+    if (!text && !attachments.length) return;
     if (text.startsWith('/')) {
       if (text === '/quit' || text === '/exit') { clientRef.current?.close(); exit(); return; }
       if (text === '/help') setPage('help');
       else if (text === '/session') setPage('session');
+      else if (text === '/attachments') setPage('attachments');
       else if (text === '/reconnect') { if (connection !== 'connecting') void connect(true); }
+      else if (text === '/attach' || text.startsWith('/attach ')) {
+        try { void stagePaths(attachmentPaths(text.slice(7).trim())); }
+        catch (error) { setHint(safeText(error instanceof Error ? error.message : String(error))); return; }
+      }
+      else if (text.startsWith('/remove ')) {
+        const target = text.slice(8).trim();
+        if (target !== 'all' && (!/^\d+$/.test(target) || Number(target) < 1 || Number(target) > attachments.length)) {
+          setHint('Use /remove <attachment number> or /remove all.'); return;
+        }
+        const next = target === 'all' ? [] : attachments.filter((_, index) => index !== Number(target) - 1);
+        attachmentsRef.current = next; setAttachments(next); setHint('Attachment removed.');
+      }
+      else if (pastedAttachmentPaths(text)) void stagePaths(pastedAttachmentPaths(text)!);
       else { setHint('Unknown command. Type /help for the short guide.'); return; }
       setInput({ text: '', cursor: 0 });
-      setOffset(0);
+      setTop(null);
       return;
     }
     if (connection !== 'connected') { setHint('Waiting for a connection. /reconnect retries without resending your draft.'); return; }
     if (state.busy) { setHint('This turn is still running. Your draft is saved here; Esc requests stop.'); return; }
     try {
       const id = randomUUID();
+      const turn = attachmentTurn(text, attachments);
       turnEpoch.current += 1; recovering.current = false; stopRefresh();
-      clientRef.current!.send(text, id);
+      clientRef.current!.send(turn.message, id, turn);
       setState((previous) => ({ ...previous, busy: true, error: null, notice: null, activity: 'Sending', activeMessageId: null,
-        messages: [...previous.messages, { id, role: 'user', text, tools: [] }],
+        messages: [...previous.messages, { id, role: 'user', text: turn.displayMessage, tools: [] }],
       }));
+      attachmentsRef.current = []; setAttachments([]);
       promptHistory.current.push(text);
       historyIndex.current = promptHistory.current.length;
       savedDraft.current = '';
       setInput({ text: '', cursor: 0 });
-      setPage('chat'); setOffset(0); setHint('');
+      setPage('chat'); setTop(null); setHint('');
     } catch (error) { setHint(safeText(error instanceof Error ? error.message : String(error))); }
   };
 
@@ -214,8 +256,13 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     }
     if (size.columns < 36 || size.rows < 12) return;
     if (key.ctrl && text === 'o') { setExpanded((value) => !value); return; }
-    if (key.pageUp) { setOffset((value) => value + Math.max(4, size.rows - 12)); return; }
-    if (key.pageDown) { setOffset((value) => Math.max(0, value - Math.max(4, size.rows - 12))); return; }
+    if (key.ctrl && text === 'g') { setTop(null); return; }
+    if (key.pageUp) { setTop((value) => Math.max(0, (value ?? Math.max(0, displayed.length - bodyHeight)) - Math.max(4, bodyHeight - 2))); return; }
+    if (key.pageDown) { setTop((value) => {
+      if (value === null) return null;
+      const next = value + Math.max(4, bodyHeight - 2);
+      return next >= displayed.length - bodyHeight ? null : next;
+    }); return; }
     if ((key.upArrow || key.downArrow) && !input.text.includes('\n')) {
       if (historyIndex.current === promptHistory.current.length) savedDraft.current = input.text;
       historyIndex.current = Math.max(0, Math.min(promptHistory.current.length, historyIndex.current + (key.upArrow ? -1 : 1)));
@@ -229,14 +276,27 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
 
   const width = Math.max(20, Math.min(108, size.columns - 4));
   const inputHeight = Math.min(4, composerLines(input, width - 6).lines.length) + 2;
-  const bodyHeight = Math.max(2, size.rows - inputHeight - 9);
+  const attachmentHeight = attachments.length ? Math.min(2, attachments.length) : 0;
+  const bodyHeight = Math.max(2, size.rows - inputHeight - 9 - attachmentHeight);
   const lines = useMemo(() => transcriptLines(state.messages, width, expanded), [state.messages, width, expanded]);
   const sessionLines: ViewLine[] = [
     { text: 'This conversation', tone: 'accent', bold: true },
     ...transcriptLines([{ id: 'session', role: 'notice', tools: [], text:
       `${route.threadId}\n${route.repoPath}\n${route.backend} · ${route.model ?? 'backend default'}\n\nResume:\no8 chat --resume ${route.threadId}\n\nLeaving the terminal does not stop active work.\nUse Esc during a turn to request interruption.` }], width, true),
   ];
-  const displayed = page === 'help' ? HELP : page === 'session' ? sessionLines : lines;
+  const fileLines = transcriptLines([{ id: 'files', role: 'notice', tools: [], text: attachments.length
+    ? attachments.map((file, index) => `${index + 1}. ${file.name} (${file.image ? 'image' : 'text'}, ${file.bytes} bytes)\n${file.path}`).join('\n\n')
+    : 'No attachments. Use /attach <path> or drop a file path into the terminal.' }], width, false);
+  const displayed = page === 'help' ? HELP : page === 'session' ? sessionLines : page === 'attachments' ? fileLines : lines;
+  useEffect(() => {
+    const scroll = (delta: number) => setTop((value) => {
+      const last = Math.max(0, displayed.length - bodyHeight);
+      const next = Math.max(0, (value ?? last) + delta);
+      return next >= last ? null : next;
+    });
+    terminal.paste.on('scroll', scroll);
+    return () => { terminal.paste.off('scroll', scroll); };
+  }, [bodyHeight, displayed.length, terminal]);
   const status = state.error || hint || state.notice;
   if (size.columns < 36 || size.rows < 12) return <Text wrap="truncate-end">Resize to at least 36 × 12 to use chat.</Text>;
   return <Box flexDirection="column" paddingLeft={2} paddingRight={2} height={Math.max(10, size.rows - 1)}>
@@ -249,23 +309,26 @@ function ChatApp({ cfg, route, history, noMotion, terminal }: {
     <Box height={bodyHeight} flexDirection="column" overflow="hidden">
       {!state.messages.length && page === 'chat'
         ? <Welcome repo={route.repoPath} width={width} />
-        : <Transcript lines={displayed} height={bodyHeight} offset={Math.min(offset, Math.max(0, displayed.length - bodyHeight))} />}
+        : <Transcript lines={displayed} height={bodyHeight} top={top} />}
     </Box>
     <Activity busy={state.busy || connection === 'connecting'} noMotion={noMotion} text={connection === 'connecting' ? 'Connecting to o8' : state.activity} />
-    <Text color={state.error ? palette.error : palette.muted} wrap="truncate-end">{status ? safeText(status) : offset > 0 ? 'Reading earlier messages · Page Down to return' : ' '}</Text>
+    <Text color={state.error ? palette.error : palette.muted} wrap="truncate-end">{top !== null ? 'Reading earlier messages · Ctrl+G returns to latest' : status ? safeText(status) : ' '}</Text>
+    {attachments.slice(0, 2).map((file, index) => <Text key={file.path} color={palette.soft} wrap="truncate-end">
+      {index + 1}. {file.image ? 'Image' : 'File'} · {file.name} · {Math.ceil(file.bytes / 1024)} KiB{index === 1 && attachments.length > 2 ? ` · +${attachments.length - 2} more` : ''}
+    </Text>)}
     <Composer value={input} width={width} connected={connection === 'connected'} />
-    <Text color={palette.dim} wrap="truncate-end">↵ send  ·  Ctrl+J newline  ·  {state.busy ? 'Esc stop' : '/help'}  ·  Ctrl+O tools  ·  Ctrl+D leave</Text>
+    <Text color={palette.dim} wrap="truncate-end">{staging ? 'Reading files' : '↵ send'}  ·  Ctrl+J newline  ·  {state.busy ? 'Esc stop' : '/attach'}  ·  /help  ·  Ctrl+D leave</Text>
   </Box>;
 }
 
 export async function startChat(cfg: ResolvedConfig, route: ChatRoute, history: ThreadHistory, noMotion: boolean): Promise<void> {
-  process.stdout.write('\x1b[?1049h\x1b[?2004h');
+  process.stdout.write('\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h');
   const terminal = terminalInput(process.stdin);
   let restored = false;
   const restore = () => {
     if (restored) return;
     restored = true;
-    process.stdout.write('\x1b[?2004l\x1b[?25h\x1b[?1049l');
+    process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?2004l\x1b[?25h\x1b[?1049l');
   };
   // Standard synchronized frames avoid the incremental renderer's trailing-
   // newline cursor drift inside an alternate buffer.

@@ -9,17 +9,21 @@ const colors = { accent: '#8ab4ff', soft: '#b9cdf2', muted: '#a3aab6', dim: '#7c
 export const palette = Object.fromEntries(Object.entries(colors).map(([name, color]) => [name,
   process.env.NO_COLOR !== undefined ? undefined : color,
 ])) as Record<keyof typeof colors, string | undefined>;
-export interface ViewLine { text: string; tone?: keyof typeof palette; bold?: boolean }
+export interface ViewLine { text: string; tone?: keyof typeof palette; bold?: boolean; role?: ChatMessage['role']; prompt?: string }
 
 export function transcriptLines(messages: ChatMessage[], width: number, expanded: boolean): ViewLine[] {
   const lines: ViewLine[] = [];
+  let role: ChatMessage['role'] = 'notice';
   const append = (text: string, tone?: ViewLine['tone'], bold = false) => {
     for (const line of wrapAnsi(safeText(text), Math.max(8, width), { hard: true, trim: false }).split('\n')) {
-      lines.push({ text: line, tone, bold });
+      lines.push({ text: line, tone, bold, role });
     }
   };
   for (const message of messages) {
+    role = message.role;
+    const first = lines.length;
     append(message.role === 'user' ? '›  You' : message.role === 'notice' ? '·  Session' : '◉  o8', message.role === 'user' ? 'soft' : 'accent', true);
+    if (role === 'user') lines[first]!.prompt = safeText(message.text.slice(0, 512)).replace(/\s+/g, ' ').trim() || '[attachments]';
     let code = false;
     for (const line of message.text.split('\n')) {
       if (line.startsWith('```')) { code = !code; append(code ? `┌ ${line.slice(3) || 'code'}` : '└', 'dim'); continue; }
@@ -72,11 +76,21 @@ export function Composer({ value, width, connected }: { value: InputValue; width
   </Box>;
 }
 
-export function Transcript({ lines, height, offset }: { lines: ViewLine[]; height: number; offset: number }) {
-  const end = Math.max(height, lines.length - offset);
-  const visible = lines.slice(Math.max(0, end - height), end);
+/** A pinned prompt is presentation only; saved transcript text stays exact. */
+export function transcriptWindow(lines: ViewLine[], height: number, top: number | null) {
+  let start = Math.min(top ?? Infinity, Math.max(0, lines.length - height));
+  const precedingPrompt = (index: number) => lines[index]?.role === 'user'
+    ? undefined : lines.slice(0, index).findLast((line) => line.prompt !== undefined)?.prompt;
+  let prompt = precedingPrompt(start);
+  if (prompt && top === null) { start = Math.max(0, lines.length - height + 1); prompt = precedingPrompt(start); }
+  return { prompt, start, lines: lines.slice(start, start + Math.max(1, height - (prompt ? 1 : 0))) };
+}
+
+export function Transcript({ lines, height, top }: { lines: ViewLine[]; height: number; top: number | null }) {
+  const visible = transcriptWindow(lines, height, top);
   return <Box height={height} flexDirection="column" overflow="hidden">
-    {visible.map((line, index) => <Text key={index} color={line.tone ? palette[line.tone] : undefined} bold={line.bold}>{line.text || ' '}</Text>)}
+    {visible.prompt && <Text bold color={palette.soft} wrap="truncate-end">› {visible.prompt}</Text>}
+    {visible.lines.map((line, index) => <Text key={index} color={line.tone ? palette[line.tone] : undefined} bold={line.bold}>{line.text || ' '}</Text>)}
   </Box>;
 }
 

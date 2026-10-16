@@ -21,9 +21,24 @@ export function terminalInput(source: NodeJS.ReadStream) {
   let pasted: string | null = null;
   let tooLarge = false;
   let escapeTimer: ReturnType<typeof setTimeout> | undefined;
+  let keyBuffer = '';
+  let mouseTimer: ReturnType<typeof setTimeout> | undefined;
   // Ink labels both DEL and the forward-delete escape as delete. Normalize
   // only key bytes so Backspace and forward Delete remain different actions.
-  const keys = (text: string) => stream.write(text.replace(/\x7f/g, '\x08'));
+  const keys = (text: string) => {
+    clearTimeout(mouseTimer);
+    keyBuffer += text;
+    keyBuffer = keyBuffer.replace(/\x1b\[<(\d+);\d+;\d+([Mm])/g, (_, button: string, action: string) => {
+      const code = Number(button);
+      if ((code & 64) && action === 'M') paste.emit('scroll', (code & 1) ? 3 : -3);
+      return '';
+    });
+    const partial = /\x1b(?:\[(?:<[\d;]*)?)?$/.exec(keyBuffer);
+    const end = partial?.index ?? keyBuffer.length;
+    if (end) stream.write(keyBuffer.slice(0, end).replace(/\x7f/g, '\x08'));
+    keyBuffer = keyBuffer.slice(end);
+    if (keyBuffer) mouseTimer = setTimeout(() => { stream.write(keyBuffer); keyBuffer = ''; }, 25);
+  };
   const consume = (chunk: Buffer | string) => {
     clearTimeout(escapeTimer);
     buffer += typeof chunk === 'string' ? chunk : decoder.write(chunk);
@@ -70,6 +85,6 @@ export function terminalInput(source: NodeJS.ReadStream) {
   return {
     stream: stream as unknown as NodeJS.ReadStream,
     paste,
-    close() { clearTimeout(escapeTimer); source.off('data', consume); stream.destroy(); paste.removeAllListeners(); },
+    close() { clearTimeout(escapeTimer); clearTimeout(mouseTimer); source.off('data', consume); stream.destroy(); paste.removeAllListeners(); },
   };
 }

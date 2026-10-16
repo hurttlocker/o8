@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
+import type { ComposerImageAttachment } from '../../../src/lib/mobile/composer-image-validation.js';
 import { apiFetch, CliError, EXIT, resolveWsBase } from '../api.js';
 import type { ResolvedConfig } from '../config.js';
 import { safeText, type ChatMessage, type ChatRoute } from './state.js';
@@ -104,9 +105,10 @@ export class ChatClient {
     this.socket.send(JSON.stringify(value));
   }
 
-  send(message: string, id = randomUUID()): string {
+  send(message: string, id = randomUUID(), options: { displayMessage?: string; attachments?: ComposerImageAttachment[] } = {}): string {
     this.write({ type: 'orchestrator-send', ...this.routing(),
-      clientMessageId: id, message, displayMessage: message,
+      clientMessageId: id, message, displayMessage: options.displayMessage ?? message,
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
       permissionMode: this.route.permissionMode ?? 'full',
       ...(this.route.model ? { model: this.route.model } : {}),
       ...(this.route.effort ? { thinkingEffort: this.route.effort } : {}),

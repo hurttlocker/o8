@@ -23,7 +23,9 @@ Requires a terminal and a running o8 app or o8 serve.
   --no-motion        disable the working animation
 
 Enter sends · Ctrl+J newline · Esc interrupt · Ctrl+O tool details
-Page Up/Down transcript · /help commands · /quit detach
+Page Up/Down transcript · Ctrl+G latest · /attach <path> · /quit detach
+Drop image/text file paths to stage attachments. /attachments lists them.
+/remove <number|all> removes staged files. Enter sends the message and files.
 Chat starts in plan mode unless --execute is supplied, including on resume.
 Saved settings are never changed. Exiting does not stop an active turn.
 `;

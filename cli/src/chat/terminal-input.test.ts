@@ -27,8 +27,22 @@ describe('bracketed terminal paste', () => {
     let keys = '';
     input.stream.on('data', (value) => { keys += value.toString(); });
     source.write('\x1b');
-    await vi.advanceTimersByTimeAsync(30);
+    await vi.advanceTimersByTimeAsync(60);
     expect(keys).toBe('\x1b');
+    input.close();
+  });
+
+  it('routes split wheel events to scrolling without typing their escape bytes or interpreting pasted ones', async () => {
+    const source = new PassThrough();
+    const input = terminalInput(source as unknown as NodeJS.ReadStream);
+    const scroll: number[] = [];
+    let keys = '';
+    input.paste.on('scroll', (value) => scroll.push(value));
+    input.stream.on('data', (value) => { keys += value.toString(); });
+    source.write('\x1b[<64;'); source.write('10;5M'); source.write('\x1b[<65;10;5M');
+    source.write('\x1b[200~\x1b[<64;10;5M\x1b[201~');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(scroll).toEqual([-3, 3]); expect(keys).toBe('');
     input.close();
   });
 });

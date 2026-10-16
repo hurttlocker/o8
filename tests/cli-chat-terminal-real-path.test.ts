@@ -57,7 +57,7 @@ ws.on('connection', (client, request) => {
       send('status', { status: 'ready', snapshot: true });
     } else if (message.type === 'orchestrator-send') {
       const persisted = { repoPath: root, backend: 'codex', model: 'fixture-model', messages: [
-        { id: message.clientMessageId, role: 'user', content: message.message },
+        { id: message.clientMessageId, role: 'user', content: message.displayMessage ?? message.message, attachments: message.attachments },
         { id: 'assistant-fixture', role: 'assistant', content: 'Saved answer: café 🌲' },
       ] };
       writeFileSync(historyFile, JSON.stringify(persisted));
@@ -84,8 +84,9 @@ async function until(predicate: () => boolean, label: string, timeout = 8000) {
 
 function open(args: string[] = []) {
   const terminal = new Terminal({ cols: 90, rows: 28, allowProposedApi: true });
+  // This child is an interactive terminal, not Ink's buffer-until-exit CI mode.
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: 'xterm-256color', NO_COLOR: '1', O8_API_PORT: String(port),
-    O8_WS_PORT: String(port), O8_API_TOKEN: token, CORTEX_IDE_DATA_DIR: fixture };
+    O8_WS_PORT: String(port), O8_API_TOKEN: token, CORTEX_IDE_DATA_DIR: fixture, CI: 'false', CONTINUOUS_INTEGRATION: 'false' };
   delete env.O8_WORKER_PACKET_ID;
   delete env.FORCE_COLOR;
   const child = spawn(process.execPath, [join(root, 'cli/dist/o8.mjs'), 'chat', '--no-motion', '--repo', root, ...args], {
@@ -162,6 +163,73 @@ describe('bundled terminal conversation', () => {
     resumed.child.write('/quit'); await new Promise((resolve) => setTimeout(resolve, 60)); resumed.child.write('\r');
     await until(resumed.exited, 'resumed clean exit');
     resumed.terminal.dispose();
+  });
+
+  it('stages dropped images and text, removes files, and sends bytes through the real socket only on Enter', async () => {
+    const image = join(fixture, 'tiny image.png');
+    const note = join(fixture, 'note.txt');
+    const binary = join(fixture, 'binary.dat');
+    const oversized = join(fixture, 'oversized.txt');
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=', 'base64');
+    writeFileSync(image, png); writeFileSync(note, 'Exact café file contents');
+    writeFileSync(binary, Buffer.from([0, 255])); writeFileSync(oversized, 'a'.repeat(262145));
+    const app = open();
+    await until(() => app.screen().includes('● connected'), 'attachment connection');
+    const before = received.filter((event) => event.type === 'orchestrator-send').length;
+    const command = async (value: string) => {
+      app.child.write(value); await new Promise((resolve) => setTimeout(resolve, 80)); app.child.write('\r');
+    };
+    app.child.write(`\x1b[200~'${image}' '${note}'\x1b[201~`);
+    await until(() => app.screen().includes('Attachments ready') && app.screen().includes('2. File'), 'staged files');
+    expect(received.filter((event) => event.type === 'orchestrator-send')).toHaveLength(before);
+    await command(`/attach '${binary}'`);
+    await until(() => app.screen().includes('file is binary'), 'binary refusal');
+    expect(app.screen()).toContain('tiny image.png');
+    await command(`/attach '${oversized}'`);
+    await until(() => app.screen().includes('at most 256 KiB'), 'oversize refusal');
+    await command('/remove 2');
+    await until(() => app.screen().includes('Attachment removed'), 'remove text file');
+    expect(app.screen()).not.toContain('2. File');
+    await command(`/attach '${note}'`);
+    await until(() => app.screen().includes('2. File'), 'reattach text file');
+    await command('Review these files');
+    await until(() => received.filter((event) => event.type === 'orchestrator-send').length === before + 1 && app.screen().includes('Ready'), 'attachment send');
+    const sent = received.filter((event) => event.type === 'orchestrator-send').at(-1)!;
+    expect(sent.displayMessage).toBe('Review these files\n[Image: tiny image.png]\n[File: note.txt]');
+    expect(sent.message).toContain('Exact café file contents');
+    expect(sent.attachments).toEqual([{ name: 'tiny image.png', dataUri: `data:image/png;base64,${png.toString('base64')}` }]);
+    const saved = JSON.parse(readFileSync(historyFile, 'utf8'));
+    expect(saved.messages[0].content).toBe(sent.displayMessage);
+    expect(saved.messages[0].attachments).toEqual(sent.attachments);
+    await command('/quit'); await until(app.exited, 'attachment exit'); app.terminal.dispose();
+  });
+
+  it('pins the prompt, holds wheel scroll during streaming, and returns to latest', async () => {
+    writeFileSync(historyFile, JSON.stringify({ repoPath: root, backend: 'codex', model: 'fixture-model', messages: [
+      { id: 'prompt', role: 'user', content: 'Keep this task in view' },
+      { id: 'long-answer', role: 'assistant', content: Array.from({ length: 60 }, (_, i) => `Answer row ${i}`).join('\n') },
+    ] }));
+    const app = open(['--resume', 'thoughts-scroll']);
+    await until(() => app.screen().includes('Answer row 59') && app.screen().includes('● connected'), 'long saved response');
+    expect(app.screen()).toContain('› Keep this task in view');
+    app.child.write('\x1b[<64;10;5M\x1b[<64;10;5M');
+    await until(() => app.screen().includes('Reading earlier'), 'wheel scroll');
+    const visibleAnswer = () => app.screen().split('\n').filter((line) => /Answer row|Keep this task/.test(line));
+    const held = visibleAnswer();
+    send('output', { assistantMessageId: 'long-answer', text: '\nNEW END\n' });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(visibleAnswer()).toEqual(held);
+    app.child.write('\x07');
+    await until(() => app.screen().includes('NEW END'), 'return to latest');
+    for (let index = 0; index < 6; index += 1) {
+      app.child.write('\x1b[5~'); await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    await until(() => app.screen().includes('›  You'), 'full prompt revealed');
+    expect(app.screen()).not.toContain('› Keep this task in view');
+    app.child.write('/quit'); await new Promise((resolve) => setTimeout(resolve, 80)); app.child.write('\r');
+    await until(app.exited, 'scroll exit');
+    expect(app.raw()).toContain('\x1b[?1006l\x1b[?1000l');
+    app.terminal.dispose();
   });
 
   it('refreshes a ready snapshot after resume and preserves stored agent routing', async () => {
