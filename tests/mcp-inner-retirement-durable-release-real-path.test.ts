@@ -1,5 +1,5 @@
 import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -12,7 +12,8 @@ import { resolveTsxProcess } from '@/lib/testing/tsx-process';
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
-  measureHostVolume: vi.fn(async () => ({ accountingStatus: 'observed', probePath: '/',
+  // Probe the data directory, an existing path on the worktrees' volume, as the real walk-up would.
+  measureHostVolume: vi.fn(async () => ({ accountingStatus: 'observed', probePath: process.env.O8_DATA_DIR!,
     availableBytes: 90_000_000_000, freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null })),
 }));
 
@@ -20,6 +21,7 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-inner-release-'));
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_WORKTREE_ROOT = join(dataDir, 'worktrees');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 writeFileSync(join(dataDir, 'ws-token'), 'fixture-inner-release-token-0123456789\n');
 
@@ -117,15 +119,26 @@ describe('MCP durable release before inner retirement across API and control-pla
     execFileSync('git', ['init', '-q', '-b', 'main', repo]);
     git(repo, ['config', 'user.name', 'fixture']);git(repo, ['config', 'user.email', 'fixture@example.invalid']);
     writeFileSync(join(repo, 'README.md'), 'fixture\n');git(repo, ['add', 'README.md']);git(repo, ['commit', '-q', '-m', 'base']);
-    await addRepo(repo);
+    const registered = await addRepo(repo);
     const packetId = 'pkt-inner-release';const missionId = 'mission-inner-release';const branch = 'inline/inner-release';
     const worktree = await getWorktreeManager(repo).create({ agentType: 'codex', taskName: packetId,
       branchName: branch, baseBranch: 'main', packetId, skipSetup: true, isolationPreference: 'git-worktree' });
+    // Retirement needs the packet's owned session: an idle owned Codex session linked to this worktree.
+    const sessionKey = `codex-owned:codex-owned-${packetId}`;
+    const sessionDir = join(dataDir, 'owned-codex', `codex-owned-${packetId}`);
+    mkdirSync(sessionDir, { recursive: true });
+    const now = new Date().toISOString();
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ surfaceId: sessionKey, packetId, sessionDir,
+      cwd: worktree.path, repoPath: worktree.path, branch, head: git(worktree.path, ['rev-parse', 'HEAD']), title: 'inner release',
+      createdAt: now, updatedAt: now, recentRuns: [], latestPrompt: 'Inner release.', latestSummary: 'Idle.',
+      runIdentityLedger: { version: 1, totalRuns: 0, complete: true }, workspaceBinding: { logicalWorkspaceId: `packet:${packetId}`,
+        repositoryUuid: registered.id, packetId, cwd: worktree.path, version: 1, verifiedAt: now } }));
+    await getWorktreeManager(repo).linkSession(worktree.id, sessionKey);
     writeFileSync(join(worktree.path, 'QUICKSTART.md'), '# Quick start\nRun the app to begin.\n');
     git(worktree.path, ['add', 'QUICKSTART.md']);git(worktree.path, ['commit', '-q', '-m', 'docs: quick start [via-o8]']);
     const head = git(worktree.path, ['rev-parse', 'HEAD']);
     const lane = createLane({ repoPath: repo, worktreePath: worktree.path, branch, baseBranch: 'main',
-      runtime: 'codex', packetId, sessionKey: 'codex:fixture-inner-release' });
+      runtime: 'codex', packetId, sessionKey, ownership: 'managed' });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
     const packet = { id: packetId, referenceLabel: 'P1', title: 'quick start', summary: 'quick start',
       workspaceTargetPath: repo, branchTarget: branch, runtime: 'codex', dependencyLabels: [], dependencyPacketIds: [],
