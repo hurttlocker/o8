@@ -619,7 +619,7 @@ async function apiFetch(path: string, options?: RequestInit): Promise<unknown> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json', 'x-o8-agent-tool': '1', // #3740: agent tool calls, see /api/panel/approvals
       Authorization: `Bearer ${WS_TOKEN}`,
       ...(options?.headers ?? {}),
     },

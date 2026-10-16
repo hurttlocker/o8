@@ -63,6 +63,7 @@ const { recordOrchestratorReview, getApproval, listApprovalsForContext } = await
 const { dispatch } = await import('@/lib/lane/commands');
 const { createLane, getLane } = await import('@/lib/lane/registry');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
+const { openO8Servers } = await import('@/lib/pi/orchestrator/o8-servers');
 
 let port = 0;
 const server = createServer(async (req, res) => {
@@ -129,6 +130,8 @@ beforeAll(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
   writeFileSync(join(dataDir, 'api-port'), String(port));
+  // The cortex stdio server is a child process; it finds the API from these.
+  vi.stubEnv('O8_API_PORT', String(port)); vi.stubEnv('NEXT_ORIGIN', `http://127.0.0.1:${port}`);
   await call('o8_setup', { action: 'open', path: repoPath });
 });
 afterAll(async () => {
@@ -171,6 +174,16 @@ it('holds an approved packet from a held mission until the operator approves the
   const leadApprove = await callTool('o8_approve', { id: held.approvalId });
   expect(leadApprove.isError).toBe(true);
   expect(JSON.stringify(leadApprove)).toContain('holds merges');
+  // The cortex server the lead also gets resolves approvals the same way.
+  const servers = await openO8Servers(repoPath, { profile: 'full', threadId: 'thoughts-merge-hold' });
+  try {
+    const cortex = servers.servers.find((server) => server.name === 'cortex')!;
+    const cortexApprove = await cortex.request('tools/call', { name: 'cortex_resolve_approval',
+      arguments: { id: held.approvalId, action: 'approve' } }, new AbortController().signal) as McpToolResult;
+    expect(cortexApprove.isError).toBe(true);
+    expect(JSON.stringify(cortexApprove)).toContain('holds merges');
+  } finally { await servers.close(); }
+  expect(getApproval(held.approvalId!)?.status).toBe('pending');
   expect(git(repoPath, 'rev-parse', 'main')).toBe(baseHeadSha);
   const pendingCard = listApprovalsForContext({ laneId: lane.id })
     .filter((approval) => approval.status === 'pending' && approval.policyRuleId === 'mission-merge-hold')
