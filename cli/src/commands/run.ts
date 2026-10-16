@@ -46,6 +46,9 @@ const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE'
 const CALLER_ROUTING_ENV = [
   'O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
   'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
+  // Packaged processes may create the shared terminal server. Their frontend
+  // configuration must not survive when absent from the current caller.
+  '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE',
 ] as const;
 const LEGACY_SERVER_ONLY_STUB_NODE_OPTION = '--import=./scripts/register-server-only-stub.mjs';
 
