@@ -3,7 +3,8 @@
 Measured on macOS with Tern 0.6.2, the public SDK `@stencil-hq/tern` 0.1.0
 (source read at upstream commit `13d3cca`), and the published coding agent
 used as the reference TSP client, version 18.11.1 (source read at `a536558`).
-Every row below was recorded from raw bytes, not from documentation.
+Every row below was recorded from raw bytes, not from documentation; the
+scrubbed receipts are in `receipts/`.
 
 ## 1. Ground truth: the handshake on the wire
 
@@ -56,13 +57,19 @@ Consequences, enforced by `renderer.mjs` and `golden.test.mjs`:
 - SSH does not forward `TERM_PROGRAM`. Over SSH from Tern, TSP works but is
   opt-in with `TERN_TSP=1`.
 - A pty that never answers DA1 costs the full SDK timeout (1 s in the lab).
-  The gate avoids that cost everywhere except a Tern pane.
+- The gate reads an inherited environment variable. A terminal nested inside
+  a Tern pane that does not reset `TERM_PROGRAM` (an editor's terminal, or o8's
+  own PTY panel when the o8 server was started from Tern) still gets the probe.
+  tmux, screen and zellij are excluded explicitly; other nested terminals are
+  residual.
 
 ## 3. Byte-identical fallback
 
 `golden/packet-info.plain.txt` and `golden/packet-info.tty.txt` are today's
-`o8 packet info` human output for the fixture, written by the real CLI renderer
-(`cli/src/presentation/text.golden.test.ts` pins them). The TTY variant carries
+`o8 packet info` human output for the fixture, written by running the real
+command with only its config, target lookup and API calls stubbed
+(`cli/src/presentation/text.golden.test.ts` pins them; changing a field
+mapping in `info.ts` fails it). The TTY variant carries
 the CLI's bold headings; before this change the lab's fallback dropped them.
 
 `golden.test.mjs` runs the lab in seven terminal profiles without Tern and
@@ -71,6 +78,10 @@ the input never enters raw mode, and an `@xterm/headless` rendering of the
 output matches the rendering of the golden, cell for cell, including bold. A
 control case forces the probe in the measured Terminal.app behaviour and
 confirms the screen check fails, so the check can detect the leak it guards.
+
+The claim covers standard output. A runtime drift warning goes to standard
+error in both modes, worded `WARNING:` by the human command and `warning:` by
+the JSON command the lab runs, so that line differs; the fixture has no drift.
 
 ## 4. Threat model: input from the terminal
 
@@ -93,12 +104,15 @@ Rules that follow:
    retry and dispatch stay on o8's authenticated paths; a TSP event may at
    most ask o8 to open its own governed flow, which then authenticates again.
 2. Any future listening surface enables bracketed paste.
-3. The lab consumes no events at all: `forge.test.mjs` injects actions, sends,
-   edits, changes, selections, split frames, a bracketed paste and `y`/Ctrl-C
-   keys into a live lab surface through the real SDK, and checks that the lab
-   runs only its packet-info read, draws no further frame, and returns the tty
-   unchanged. A source check rejects listening surfaces, input loops and
-   handlers in the lab.
+3. The lab consumes no events at all. `forge.test.mjs` waits for the lab's
+   first frame, then aims actions, sends, edits, changes, selections, toggles,
+   focus, undo, split frames, a bracketed paste and `y`/Ctrl-C keys at every
+   node id that frame drew, through the real SDK. The SDK's own recording
+   must show every forged event parsed, and the lab must run only its
+   packet-info read, draw no further frame, and return the tty unchanged.
+   Giving any lab node an `onActivate` handler makes the test fail. A source
+   check rejects listening surfaces, input loops and any `on...:` handler.
+   The S3a observer test aims the same way and counts parsed events too.
 
 ## 5. Ownership contract
 
@@ -119,7 +133,17 @@ a node-pty plus xterm.js harness: it emits a few TSP frames, xterm.js answers
 DA1 first, and the client falls back to its text UI (11 visible rows against 10
 without the variable). Harmless today, and listed as residual.
 
-## 6. Not proven here
+## 6. Receipts
+
+- `receipts/tern-handshake.json`: every TSP message and DA1 exchange of the
+  reference client under Tern, with timings; frame bodies reduced to counts.
+- `receipts/conformance-probes.json`: the probe result per environment.
+- `receipts/terminal-app-visible-residue.json`: the line Terminal.app printed.
+- `receipts/forge-attempts.json`: what a listening program received for each
+  forge vector, with its bracketed-paste setting. In `forge-paste-on` the
+  `send text` forge was delivered twice because the run re-sent it.
+
+## 7. Not proven here
 
 - Ghostty and iTerm2 behaviour with the hello: not measured.
 - The windowed Tern app in a fresh profile stops at the closed-beta sign-in;

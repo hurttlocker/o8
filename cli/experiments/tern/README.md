@@ -29,8 +29,8 @@ is machine-readable with no probe. `--text`, `TERN_TSP=0`, piped stdin/stdout,
 raw input already owned by another UI, or a tmux/screen/zellij environment keep
 plain output. The hello probe is sent only when `TERM_PROGRAM=tern` or
 `TERN_TSP=1`: Terminal.app prints an unknown APC as text, and SSH does not
-forward `TERM_PROGRAM`. Plain output is byte-identical to `o8 packet info`,
-pinned by the files in `golden/`. Missing SDK installation also keeps plain
+forward `TERM_PROGRAM`. Standard output in the text path is byte-identical to
+`o8 packet info`, pinned by the files in `golden/`. Missing SDK installation also keeps plain
 output after the shared TypeScript model has been built. No Tern beta binary
 is required. Measurements, the threat model and the ownership contract are in
 `CONFORMANCE.md`.

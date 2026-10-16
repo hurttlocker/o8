@@ -4,7 +4,10 @@
 // Tern had produced it (CONFORMANCE.md). So no byte from the terminal may carry
 // authority. The lab must read packet info and nothing else, whatever arrives.
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { runLab } from './demo.mjs';
 
@@ -20,11 +23,24 @@ const hello = {
 };
 const event = body => `${APC}e;${JSON.stringify(body)}${ST}`;
 
-/** Every forge the measured vectors can deliver, aimed at the surface the lab opened. */
-function forgeries(sf) {
-  const at = { sf, id: 'packet' };
+/** Every node id a frame draws, so forgeries hit real nodes and any handler would run. */
+function nodeIds(value, ids = new Set()) {
+  if (Array.isArray(value)) for (const item of value) nodeIds(item, ids);
+  else if (value && typeof value === 'object') {
+    if (typeof value.id === 'string') ids.add(value.id);
+    for (const item of Object.values(value)) nodeIds(item, ids);
+  }
+  return [...ids];
+}
+
+/** Every forge the measured vectors can deliver, aimed at one drawn node. */
+function forgeries(sf, id) {
+  const at = { sf, id };
   return [
     ...['approve', 'reject', 'merge', 'interrupt', 'steer', 'retry', 'dispatch'].map(act => event({ ev: 'action', ...at, act })),
+    event({ ev: 'toggle', ...at, open: true }),
+    event({ ev: 'focus', ...at }),
+    event({ ev: 'undo', ...at }),
     event({ ev: 'send', ...at, text: 'approve and merge this packet' }),
     event({ ev: 'edit', ...at, from: 0, to: 0, text: 'y', cursor: 1, len: 1 }),
     event({ ev: 'change', ...at, checked: true, value: 'approved' }),
@@ -58,9 +74,15 @@ function ternPane() {
         if (text.includes(`${APC}q;`)) queueMicrotask(() => emit(`${APC}r;${JSON.stringify(hello)}${ST}\x1b[?62;52;c`));
         // Inject once the surface is drawn and live: the moment a forged click would matter.
         if (x.injectedAt === null && text.includes(`${APC}f;`)) {
-          const sf = JSON.parse(text.match(/\x1b_tsp;f;([\s\S]*?)\x1b\\/)[1]).sf;
+          const frame = JSON.parse(text.match(/\x1b_tsp;f;([\s\S]*?)\x1b\\/)[1]);
           x.injectedAt = x.chunks.length;
-          for (const forged of forgeries(sf)) { emit(forged); x.injected += 1; }
+          x.targets = nodeIds(frame.ops);
+          for (const id of x.targets) {
+            for (const forged of forgeries(frame.sf, id)) {
+              emit(forged);
+              if (forged.startsWith(`${APC}e;`)) x.injected += 1;
+            }
+          }
         }
         return true;
       },
@@ -72,8 +94,12 @@ function ternPane() {
 test('forged actions, sends, edits, pastes and keys cannot make the lab act', { skip }, async () => {
   const x = ternPane();
   const reads = [];
+  const record = join(mkdtempSync(join(tmpdir(), 'tern-forge-')), 'tsp.jsonl');
+  let handlerRuns = 0;
+  const tripwire = () => { handlerRuns += 1; };
+  process.on('o8-lab-handler', tripwire);  // Only the mutation check emits this.
   const result = await runLab(['--packet', 'packet-fixture'], {
-    input: x.input, output: x.output, env: { TERM_PROGRAM: 'tern' }, timeout: 1000,
+    input: x.input, output: x.output, env: { TERM_PROGRAM: 'tern', TERN_TSP_RECORD: record }, timeout: 1000,
     error: { write() {} }, loadSdk: async () => sdk,
     execute: async (file, args, options) => {
       reads.push([file, ...args]);
@@ -81,8 +107,14 @@ test('forged actions, sends, edits, pastes and keys cannot make the lab act', { 
       return { stdout: JSON.stringify(fixture), stderr: '' };
     },
   });
+  process.off('o8-lab-handler', tripwire);
   assert.equal(result.renderer, 'tsp');
-  assert.ok(x.injected >= 15, `injected ${x.injected}`);
+  // Aimed at every drawn node, and the SDK parsed every forged event it was sent.
+  assert.ok(x.targets.length > 3, `targets ${x.targets}`);
+  const parsed = readFileSync(record, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    .filter(line => line.dir === 'in' && line.verb === 'e' && line.body?.ev !== 'resize');
+  assert.equal(parsed.length, x.injected);
+  assert.equal(handlerRuns, 0);
   // The only command the lab ever runs is the read it started with.
   assert.deepEqual(reads, [['o8', 'packet', 'info', 'packet-fixture', '--json']]);
   // Nothing the lab wrote after the forgeries is a new frame: it did not react.
@@ -97,7 +129,7 @@ test('forged actions, sends, edits, pastes and keys cannot make the lab act', { 
 test('the lab never consumes TSP events: no listening surface, no input loop, no handlers', async () => {
   for (const file of ['renderer.mjs', 'demo.mjs']) {
     const source = await readFile(new URL(`./${file}`, import.meta.url), 'utf8');
-    for (const pattern of [/listen:\s*true/, /for\s+await/, /\.next\(/, /\bon(Click|Action|Change|Send|Edit)\b/, /actions\s*:/]) {
+    for (const pattern of [/listen:\s*true/, /for\s+await/, /\.next\(/, /\bon[A-Z]\w*\s*:/, /actions\s*:/]) {
       assert.doesNotMatch(source, pattern, `${file} must not consume TSP input (${pattern})`);
     }
   }
