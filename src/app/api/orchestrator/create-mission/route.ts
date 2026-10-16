@@ -406,6 +406,7 @@ export async function POST(request: NextRequest) {
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
+      ...(record.holdMerges === true ? { holdMerges: true } : {}),
       ...(!qualitySearch && !sealedTaskContract ? { huddle } : {}),
       ...(taskContract ? { taskContract } : {}),
       ...(sealedTaskContract ? { sealedTaskContract } : {}),

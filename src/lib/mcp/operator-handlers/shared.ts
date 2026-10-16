@@ -169,7 +169,8 @@ async function apiFetchResponse(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       const panelToken = readPanelToken();
-      const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      // #3740: marks agent tool calls, which /api/panel/approvals keeps off held merge cards.
+      const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json', 'x-o8-agent-tool': '1' };
       if (panelToken) {
         baseHeaders.Authorization = `Bearer ${panelToken}`;
       }

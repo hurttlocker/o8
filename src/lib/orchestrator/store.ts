@@ -393,7 +393,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
       : undefined,
     workerIntent,
-    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined,
+    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined, mergeHold: packet.mergeHold === true ? true : undefined,
     workerRouting,
     // Nullable on purpose: an absent pin must stay null — normalizeRuntime()'s
     // 'codex' default would re-manufacture the #1460 always-truthy boot pin.

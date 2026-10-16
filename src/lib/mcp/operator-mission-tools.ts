@@ -119,6 +119,7 @@ interface CreateMissionInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  holdMerges?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
   sealedTaskContract?: PacketTaskContract;
@@ -157,6 +158,7 @@ interface CreateMissionInlineInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  holdMerges?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
   sealedTaskContract?: PacketTaskContract;
@@ -394,6 +396,7 @@ export async function createMission(input: CreateMissionInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          holdMerges: input.holdMerges,
           huddle: input.huddle,
           taskContract: input.taskContract,
           sealedTaskContract: input.sealedTaskContract,
@@ -447,6 +450,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          holdMerges: input.holdMerges,
           huddle: input.huddle,
           taskContract: input.taskContract,
           sealedTaskContract: input.sealedTaskContract,

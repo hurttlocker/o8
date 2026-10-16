@@ -256,6 +256,7 @@ export async function createMission(input: CreateMissionInput) {
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
+      ...(input.holdMerges === true ? { mergeHold: true } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
       taskContractRequired: resolveTaskContractRequired({
         runtime: packetRouting.selectedRuntime,

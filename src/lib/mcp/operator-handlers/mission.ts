@@ -107,10 +107,8 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
         },
-        useBrain: {
-          type: 'boolean',
-          description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).',
-        },
+        useBrain: { type: 'boolean', description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).' },
+        holdMerges: { type: 'boolean', description: 'Hold merges. When true, every packet stops at an approved review and waits for the operator: a merge from the reviewer or from you routes to an operator approval card instead of merging. Set it whenever the operator says not to merge, or wants to merge themselves. Omit (default off) to keep the usual merge after an approved review.' },
         huddle: {
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',

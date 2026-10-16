@@ -221,6 +221,12 @@ export async function POST(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ ok: false, error: 'Approval id is required' }, { status: 400 });
   }
+  // #3740: a lead's tools share the operator token; a held packet's merge is released only from the inbox.
+  if (action === 'approve' && request.headers.get('x-o8-agent-tool') === '1'
+    && (await import('@/lib/lane/merge-hold')).isMergeApprovalHeld(id)) {
+    return NextResponse.json({ ok: false, error: 'This packet\'s mission holds merges. Only the operator releases it, from the o8 inbox.' },
+      { status: 403, headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  }
 
   const editedCommand = typeof body.editedCommand === 'string' ? body.editedCommand : undefined;
   // #2219 — the operator's rejection reason is the correction the next worker on
