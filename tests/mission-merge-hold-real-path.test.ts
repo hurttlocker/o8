@@ -18,6 +18,11 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import type { McpToolResult } from '@/lib/mcp/operator-handlers/shared';
 
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
+vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
+  ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
+  assertRuntimeDispatchable: vi.fn(async () => undefined),
+}));
+vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({ accountingStatus: 'observed', probePath: '/', availableBytes: 90_000_000_000, freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null })),
