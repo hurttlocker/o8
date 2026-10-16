@@ -111,7 +111,7 @@ async function runAttempt(input: {
   let observedModel: string | null = null;
   const errors: string[] = [];
   const lane = getLane(input.laneId);
-  const reviewUsage = { reviewTurnId, laneId: input.laneId, packetId: lane?.packetId ?? null };
+  const reviewUsage = { reviewTurnId, laneId: input.laneId, packetId: lane?.packetId ?? null, surface: input.surface };
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'turn_receipt') {
@@ -167,7 +167,7 @@ async function runAttempt(input: {
   }
   // Every review turn is recorded in usage with its payer and cost basis (#3742).
   recordReviewTurnUsage({ ...reviewUsage, repoPath: lane?.repoPath ?? input.repoPath, backend: input.backend.id,
-    model: observedModel ?? input.model ?? null, surface: input.surface, reportedCostUsd: approximateCost });
+    model: observedModel ?? input.model ?? null, reportedCostUsd: approximateCost });
   return { text, errors, quotaError, reviewTurnId, unavailableReason, approximateCost, observedRoute };
 }
 

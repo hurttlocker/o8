@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { LaneEvent } from '@/lib/lane/types';
+import { reviewPayer } from '@/lib/lane/review-payer';
 import { collectReviews } from './packet-receipt';
 
 let sequence = 0;
@@ -32,5 +33,24 @@ describe('packet receipt reviews (#3742)', () => {
       // An unproven route is not guessed: the model stays null, and the payer follows the backend.
       { turnId: 'turn-claude', backend: 'claude', model: null, payer: 'anthropic-subscription', outcome: 'failed' },
     ]);
+  });
+
+  it('does not guess a Pi payer without a reported model, and prefers the payer the usage rows recorded', () => {
+    const reviews = collectReviews([
+      event('review_turn_started', { reviewTurnId: 'turn-unproven', backend: 'pi' }),
+      event('review_turn_finished', { reviewTurnId: 'turn-unproven', outcome: 'failed' }),
+      event('review_turn_started', { reviewTurnId: 'turn-recorded', backend: 'o8' }),
+      event('review_turn_finished', { reviewTurnId: 'turn-recorded', outcome: 'completed' }),
+    ], new Map([['turn-recorded', 'openrouter' as const]]));
+    expect(reviews.map(({ turnId, payer }) => [turnId, payer])).toEqual([['turn-unproven', 'unknown'], ['turn-recorded', 'openrouter']]);
+  });
+
+  it('maps every backend to a payer by how it bills', () => {
+    expect(reviewPayer('o8', 'openrouter/deepseek/deepseek-v4.1-flash')).toEqual({ payer: 'openrouter', costBasis: 'reported' });
+    expect(reviewPayer('o8', 'pi')).toEqual({ payer: 'o8-managed', costBasis: 'allowance' });
+    expect(reviewPayer('o8', null)).toEqual({ payer: 'unknown', costBasis: 'unknown' });
+    expect(reviewPayer('opencode', 'some-model')).toEqual({ payer: 'operator-metered', costBasis: 'unknown' });
+    expect(reviewPayer('hermes', null)).toEqual({ payer: 'operator-subscription', costBasis: 'subscription' });
+    expect(reviewPayer('not-a-backend', null)).toEqual({ payer: 'unknown', costBasis: 'unknown' });
   });
 });

@@ -192,7 +192,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
           ceilingUsd: await leadTurnCeilingUsd(deps),
           attribution: options.reviewUsage
             ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath, laneId: options.reviewUsage.laneId,
-              packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId }
+              packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId, surface: options.reviewUsage.surface }
             : { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath },
           onReceipt: (receipt) => { pi.receipts.push(receipt); },
           fetch: deps.openRouterFetch,

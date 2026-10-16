@@ -411,11 +411,12 @@ describe('Pi orchestrator (#3258)', () => {
     const { aggregateMissionCost } = await import('@/lib/orchestrator/cost-aggregator');
     const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
     const cost = await aggregateMissionCost(readMissionRegistryEntry(`mission-${lane.packetId}`, { includeArchived: true })!.mission);
-    expect(cost.reviews.map(turn => [turn.model, turn.payer, turn.costBasis, turn.calls, turn.costUsd])).toEqual([
-      [pin, 'openrouter', 'reported', 1, 0.000032], [pin, 'openrouter', 'reported', 1, 0.000032]]);
+    expect(cost.reviews.map(turn => [turn.surface, turn.model, turn.payer, turn.costBasis, turn.calls, turn.costUsd])).toEqual([
+      ['auto-review', pin, 'openrouter', 'reported', 1, 0.000032], ['auto-review', pin, 'openrouter', 'reported', 1, 0.000032]]);
     expect(new Set(rows.map(row => row.runId)).size).toBe(2);
     // Mission costs are reported to six decimal places, as every other mission cost is.
     expect(cost.costByRole.reviewer).toMatchObject({ totalCostUsd: 0.000064, requestCount: 2 });
+    expect(cost.totalCostUsd).toBe(0.000064);
     const { getSqlite } = await import('@/lib/db');
     const receipt = getSqlite().prepare("SELECT reason FROM role_routing_receipts WHERE context_id = ? ORDER BY rowid DESC LIMIT 1").get(lane.id) as { reason?: string } | undefined;
     expect(receipt?.reason).toContain('CLI is not installed');
@@ -451,9 +452,15 @@ describe('Pi orchestrator (#3258)', () => {
     expect(resolved).toEqual([configured]);
     expect(result).toMatchObject({ backend: configured });
     // The CLI review is recorded too: no per-call charge on the operator's subscription, never left out (#3742).
-    const { listReviewCosts } = await import('@/lib/lane/review-payer');
+    const { listReviewCosts, recordReviewTurnUsage } = await import('@/lib/lane/review-payer');
     expect(listReviewCosts([lane.packetId!])).toEqual([expect.objectContaining({
-      payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription', costBasis: 'subscription', costUsd: 0 })]);
+      surface: 'auto-review', payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription',
+      costBasis: 'subscription', costUsd: 0 })]);
+    // A metered reviewer's reported cost is real spend on the operator's own account, so it counts.
+    recordReviewTurnUsage({ laneId: lane.id, packetId: lane.packetId, repoPath: repo, reviewTurnId: 'turn-metered',
+      backend: 'opencode', model: 'some-model', surface: 'merge-gate-review', reportedCostUsd: 0.0125 });
+    expect(listReviewCosts([lane.packetId!]).at(-1)).toMatchObject({ reviewTurnId: 'turn-metered',
+      surface: 'merge-gate-review', payer: 'operator-metered', costBasis: 'reported', costUsd: 0.0125 });
     // A CLI reviewer keeps the repository path it always had.
     expect(repoPaths).toEqual([repo]);
   }, 60_000);

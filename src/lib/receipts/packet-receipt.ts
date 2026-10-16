@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
-import { reviewPayer } from '@/lib/lane/review-payer';
+import { listReviewCosts, reviewPayer, type ReviewPayer } from '@/lib/lane/review-payer';
 import {
   artifactAbsPath,
   artifactRelPath,
@@ -48,7 +48,11 @@ export interface StoredPacketReceipt {
   rawReceiptJson: string;
 }
 
-export function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
+/**
+ * `turnPayers` are the payers the turns' own usage rows recorded; they win over a
+ * payer inferred from the backend and reported model.
+ */
+export function collectReviews(events: LaneEvent[], turnPayers: ReadonlyMap<string, ReviewPayer> = new Map()): PacketReceiptReview[] {
   const starts = new Map<string, {
     backend: string;
     startedAt: string;
@@ -90,7 +94,7 @@ export function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
     outcome: turn.outcome,
     at: turn.finishedAt ?? turn.startedAt,
     model: turn.model,
-    payer: reviewPayer(turn.backend, turn.model).payer,
+    payer: turnPayers.get(turnId) ?? reviewPayer(turn.backend, turn.model).payer,
   }));
 }
 
@@ -196,7 +200,8 @@ async function buildPacketReceipt(input: {
       baseBranch: input.lane.baseBranch,
     },
     disposition: input.disposition,
-    reviews: collectReviews(getLaneEvents(input.lane.id, 10_000)),
+    reviews: collectReviews(getLaneEvents(input.lane.id, 10_000),
+      new Map(listReviewCosts([input.packet.id]).map((turn) => [turn.reviewTurnId, turn.payer]))),
     approvals: collectApprovals(input.packet.id, input.lane),
     runtime: input.packet.runtime,
     model: input.packet.model ?? input.lane.model ?? null,

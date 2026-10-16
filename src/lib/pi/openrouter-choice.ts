@@ -39,6 +39,8 @@ export interface PiUsageAttribution {
   packetId?: string | null;
   missionId?: string | null;
   runId?: string | null;
+  /** The reviewer surface for a review turn's calls (#3742). */
+  surface?: string;
 }
 
 export type PiModelRoute =
@@ -101,6 +103,7 @@ export function recordPiOpenRouterReceipt(receipt: OpenRouterPiReceipt, attribut
       metadata: {
         runtime: 'pi',
         carrier: 'openrouter',
+        ...(attribution.surface ? { surface: attribution.surface } : {}),
         costSource: receipt.costUsd === null ? 'unknown' : 'provider_response',
         generationId: receipt.generationId,
         status: receipt.status,
