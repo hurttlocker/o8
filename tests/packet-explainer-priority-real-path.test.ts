@@ -143,4 +143,27 @@ describe('packet explainer correctness priority', () => {
     });
     expect(getLane(lane.id)?.status).toBe(laneStatusBefore);
   });
+
+  it('claims a review on a lane whose Git metadata is not trusted, so the queue keeps moving', () => {
+    // dataDir is not a Git repository, so a HEAD read for this lane refuses rather than guessing.
+    const lane = createLane({
+      label: 'Untrusted Git fixture',
+      repoPath: dataDir,
+      branch: 'inline/untrusted-git',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'packet-untrusted-git',
+    });
+    const keyed = enqueueLaneReview(lane, { headSha: 'b'.repeat(40) });
+    expect(claimNextReview()).toMatchObject({ id: keyed.reviewId, head_sha: 'b'.repeat(40) });
+    markReviewCompleted({ reviewId: keyed.reviewId!, claimOwner: claimNextReviewOwner(keyed.reviewId!) });
+    // A row from before reviews were keyed is claimed unkeyed instead of throwing on every drain.
+    const legacy = enqueueLaneReview(lane, { headSha: 'c'.repeat(40) });
+    getSqlite().prepare('UPDATE review_queue SET head_sha = NULL WHERE id = ?').run(legacy.reviewId);
+    expect(claimNextReview()).toMatchObject({ id: legacy.reviewId, head_sha: null });
+  });
 });
+
+function claimNextReviewOwner(reviewId: string): string {
+  return (getSqlite().prepare('SELECT claim_owner FROM review_queue WHERE id = ?').get(reviewId) as { claim_owner: string }).claim_owner;
+}
