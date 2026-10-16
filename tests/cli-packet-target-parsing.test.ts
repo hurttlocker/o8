@@ -187,7 +187,8 @@ describe('packet CLI help', () => {
   it('names valid packet subcommands in the unknown-subcommand hint', () => {
     const hint = packetSubcommandHint();
     expect(hint).toContain('Valid worker packet subcommands:');
-    expect(hint).toContain('Operator-only packet subcommands: receipt, receipts');
+    expect(hint).toContain(`Operator-only packet subcommands: ${OPERATOR_PACKET_SUBCOMMANDS.join(', ')}.`);
+    expect(OPERATOR_PACKET_SUBCOMMANDS).toEqual(expect.arrayContaining(['receipt', 'receipts']));
     expect(hint).toContain('rerun');
     expect(hint).toContain('steer');
     expect(hint).toContain('merge-preview');
