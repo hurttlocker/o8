@@ -14,7 +14,7 @@ function event(verb: LaneEvent['verb'], payload: Record<string, unknown>): LaneE
 describe('packet receipt reviews (#3742)', () => {
   it('names the model the backend reported and the payer for each review turn', () => {
     const reviews = collectReviews([
-      event('review_turn_started', { reviewTurnId: 'turn-or', backend: 'pi' }),
+      event('review_turn_started', { reviewTurnId: 'turn-or', backend: 'pi', surface: 'auto-review' }),
       event('update', { event: 'review_turn_runtime_receipt', reviewTurnId: 'turn-or', status: 'observed',
         runtimeRoute: { model: 'openrouter/deepseek/deepseek-v4.1-flash', effort: 'medium' } }),
       event('review_turn_finished', { reviewTurnId: 'turn-or', outcome: 'completed' }),
@@ -22,7 +22,7 @@ describe('packet receipt reviews (#3742)', () => {
       event('update', { event: 'review_turn_runtime_receipt', reviewTurnId: 'turn-managed', status: 'observed',
         runtimeRoute: { model: 'pi', effort: 'medium' } }),
       event('review_turn_finished', { reviewTurnId: 'turn-managed', outcome: 'completed' }),
-      event('review_turn_started', { reviewTurnId: 'turn-claude', backend: 'claude' }),
+      event('review_turn_started', { reviewTurnId: 'turn-claude', backend: 'claude', surface: 'packet-explainer' }),
       event('update', { event: 'review_turn_runtime_receipt', reviewTurnId: 'turn-claude', status: 'conflicting',
         runtimeRoute: null }),
       event('review_turn_finished', { reviewTurnId: 'turn-claude', outcome: 'failed' }),
@@ -33,6 +33,8 @@ describe('packet receipt reviews (#3742)', () => {
       // An unproven route is not guessed: the model stays null, and the payer follows the backend.
       { turnId: 'turn-claude', backend: 'claude', model: null, payer: 'anthropic-subscription', outcome: 'failed' },
     ]);
+    // Each turn names its surface, so an explainer turn is not signed as a packet review.
+    expect(reviews.map(review => review.surface)).toEqual(['auto-review', null, 'packet-explainer']);
   });
 
   it('does not guess a Pi payer without a reported model, and prefers the payer the usage rows recorded', () => {

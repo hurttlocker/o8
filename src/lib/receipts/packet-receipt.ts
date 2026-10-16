@@ -59,6 +59,7 @@ export function collectReviews(events: LaneEvent[], turnPayers: ReadonlyMap<stri
     outcome: PacketReceiptReview['outcome'];
     finishedAt: string | null;
     model: string | null;
+    surface: string | null;
   }>();
   for (const event of events) {
     const turnId = typeof event.payload.reviewTurnId === 'string'
@@ -74,6 +75,9 @@ export function collectReviews(events: LaneEvent[], turnPayers: ReadonlyMap<stri
         outcome: 'active',
         finishedAt: null,
         model: null,
+        surface: typeof event.payload.surface === 'string' && event.payload.surface.trim()
+          ? event.payload.surface.trim()
+          : null,
       });
     } else if (event.payload.event === 'review_turn_runtime_receipt') {
       const turn = starts.get(turnId);
@@ -94,6 +98,7 @@ export function collectReviews(events: LaneEvent[], turnPayers: ReadonlyMap<stri
     outcome: turn.outcome,
     at: turn.finishedAt ?? turn.startedAt,
     model: turn.model,
+    surface: turn.surface,
     payer: turnPayers.get(turnId) ?? reviewPayer(turn.backend, turn.model).payer,
   }));
 }

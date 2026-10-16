@@ -337,7 +337,7 @@ describe('Pi orchestrator (#3258)', () => {
 
   // #3742: with no reviewer CLI on the machine, a review of an OpenRouter packet runs on
   // that model through Pi, and its calls are recorded as reviewer usage.
-  async function reviewedLane(repo: string, assignedModel: string, worktreePath = repo) {
+  async function reviewedLane(repo: string, assignedModel: string, worktreePath = repo, status = 'running') {
     const { createLane } = await import('@/lib/lane/registry');
     const { recordMission } = await import('@/lib/db/missions-store');
     const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
@@ -346,7 +346,7 @@ describe('Pi orchestrator (#3258)', () => {
       summary: 'Review route', repoPath: repo, runtime: 'pi-builtin', constraints: '', updatedAt: new Date().toISOString(),
       packets: [{ id: packetId, referenceLabel: 'review-route', title: 'Review route', summary: 'Review route',
         workspaceTargetPath: repo, branchTarget: 'inline/review-route', runtime: 'pi-builtin', dependencyLabels: [],
-        dependencyPacketIds: [], queueState: 'released', releaseState: 'pending', status: 'running', blockedReason: null,
+        dependencyPacketIds: [], queueState: 'released', releaseState: 'pending', status, blockedReason: null,
         lastEventAt: null, lastEventLabel: null, archivedAt: null, review: null, lane: null, assignedModel }] });
     recordMission({ id: missionState.missionId!, repoPath: repo, runtime: 'pi-builtin', prompt: 'Review route', summary: 'Review route',
       constraints: '', packetMeta: [{ id: packetId, title: 'Review route', referenceLabel: 'review-route' }], missionState, totalWaves: 1 });
@@ -433,7 +433,8 @@ describe('Pi orchestrator (#3258)', () => {
     const { runReviewerTurnWithQuotaFallback } = await import('@/lib/lane/review-quota-fallback');
     const worktree = join(repo, '..', 'worktree');
     await import('node:fs/promises').then(fs => fs.mkdir(worktree));
-    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash', worktree);
+    // Closed unmerged, so a signed receipt can be built from what the review stored.
+    const lane = await reviewedLane(repo, 'openrouter/deepseek/deepseek-v4.1-flash', worktree, 'archived');
     const resolved: string[] = [];
     const repoPaths: string[] = [];
     const cli = (id: Parameters<typeof getOrchestratorBackend>[0]) => ({ ...getOrchestratorBackend(id),
@@ -461,6 +462,15 @@ describe('Pi orchestrator (#3258)', () => {
       backend: 'opencode', model: 'some-model', surface: 'merge-gate-review', reportedCostUsd: 0.0125 });
     expect(listReviewCosts([lane.packetId!]).at(-1)).toMatchObject({ reviewTurnId: 'turn-metered',
       surface: 'merge-gate-review', payer: 'operator-metered', costBasis: 'reported', costUsd: 0.0125 });
+    // The signed receipt names the review's surface and the payer its usage row recorded.
+    const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    writeOrchestratorControlPlaneState(readMissionRegistryEntry(`mission-${lane.packetId}`, { includeArchived: true })!.mission);
+    const { createPacketReceiptForClosedPacket } = await import('@/lib/receipts/packet-receipt');
+    const stored = await createPacketReceiptForClosedPacket({ packetId: lane.packetId!, laneId: lane.id, disposition: {
+      kind: 'discarded', disposition: 'superseded', reason: 'test', preservedBranches: [], closedAt: new Date().toISOString() } });
+    expect(stored.receipt.reviews).toEqual([expect.objectContaining({ backend: configured, surface: 'auto-review',
+      payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription', outcome: 'completed' })]);
     // A CLI reviewer keeps the repository path it always had.
     expect(repoPaths).toEqual([repo]);
   }, 60_000);

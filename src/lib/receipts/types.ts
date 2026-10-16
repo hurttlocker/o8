@@ -27,6 +27,8 @@ export interface PacketReceiptReview {
   at: string;
   /** The model the backend reported running the review on; null when it reported none (#3742). */
   model?: string | null;
+  /** The reviewer surface: auto-review, merge-gate-review, packet-explainer or buyin-doc; null when unrecorded (#3742). */
+  surface?: string | null;
   /** Who paid for the review turn (#3742). */
   payer?: ReviewPayer;
 }
