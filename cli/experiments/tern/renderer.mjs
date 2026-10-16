@@ -24,12 +24,25 @@ function supportsView(caps, surface) {
     Array.isArray(caps.kinds) && [...kinds].every(kind => caps.kinds.includes(kind));
 }
 
+// Same bytes as color(title, 'bold') in cli/src/output.ts; the golden files pin both.
+const bold = title => `\x1b[1m${title}\x1b[0m`;
+
+/**
+ * Only a terminal that names itself Tern, or an explicit TERN_TSP=1, gets the
+ * hello probe. Terminal.app prints an unknown APC as visible text, so probing
+ * everywhere would break the plain output there. SSH does not forward
+ * TERM_PROGRAM: over SSH from Tern, TSP is opt-in with TERN_TSP=1.
+ */
+export function mayProbeTern(env) {
+  return env.TERN_TSP === '1' || String(env.TERM_PROGRAM ?? '').toLowerCase() === 'tern';
+}
+
 /** Static, inert output. Never attach to a worker's stdin or infer an outcome. */
 export async function presentSurface(surface, options = {}) {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const env = options.env ?? process.env;
-  const text = formatHumanSemanticSurface(surface);
+  const text = formatHumanSemanticSurface(surface, output.isTTY ? bold : undefined);
   const fallback = reason => {
     // An actual stdout failure remains an error; it is not a successful fallback.
     output.write(text);
@@ -38,6 +51,7 @@ export async function presentSurface(surface, options = {}) {
   if (!input.isTTY || !output.isTTY) return fallback('not-a-tty');
   if (input.isRaw) return fallback('input-already-owned');
   if (env.TERN_TSP === '0' || env.TMUX || env.STY || env.ZELLIJ) return fallback('disabled');
+  if (!mayProbeTern(env)) return fallback('not-tern');
 
   let session, native;
   let sent = false;

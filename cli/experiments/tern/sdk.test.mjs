@@ -18,6 +18,8 @@ const protocolTest = (name, fn) => test(name, { skip: sdk ? false : 'official SD
 const fixture = JSON.parse(await readFile(new URL('./packet.fixture.json', import.meta.url), 'utf8'));
 const model = () => buildPacketInfoSurface(parsePacketPayload(fixture));
 const APC = '\x1b_tsp;', ST = '\x1b\\', DA1 = '\x1b[?1;2c';
+// The peer is a TTY, so the fallback carries the CLI's bold headings.
+const boldTty = title => `\x1b[1m${title}\x1b[0m`;
 const hello = {
   r: 'hello', v: 1, term: 'tern', ver: 'fixture',
   kinds: ['col', 'text', 'kv', 'table'], features: ['flow'],
@@ -62,7 +64,7 @@ class Peer extends EventEmitter {
       .filter(match => !verb || match[1] === verb)
       .map(match => ({ verb: match[1], body: JSON.parse(match[2]) }));
   }
-  options() { return { input: this, output: this.output, env: {}, timeout: 10, loadSdk: async () => sdk }; }
+  options() { return { input: this, output: this.output, env: { TERM_PROGRAM: 'tern' }, timeout: 10, loadSdk: async () => sdk }; }
   restored() { assert.equal(this.isRaw, false); assert.equal(this.listenerCount('data'), 0); }
 }
 
@@ -80,7 +82,7 @@ for (const mode of ['ordinary', 'native-disabled', 'silent', 'malformed']) proto
   const peer = new Peer(mode);
   assert.equal((await presentSurface(model(), peer.options())).renderer, 'text');
   assert.equal(peer.messages('o').length, 0);
-  assert.equal(peer.chunks.at(-1), formatHumanSemanticSurface(model()));
+  assert.equal(peer.chunks.at(-1), formatHumanSemanticSurface(model(), boldTty));
   peer.restored();
 });
 protocolTest('real SDK capability mismatch opens no surface', async () => {
@@ -96,7 +98,7 @@ protocolTest('actual SDK nodes and plain renderer preserve semantic information'
 protocolTest('TSP frame write loss attempts removal and recovers ordinary text', async () => {
   const peer = new Peer('frame-loss');
   assert.equal((await presentSurface(model(), peer.options())).renderer, 'text');
-  assert.equal(peer.chunks.at(-1), formatHumanSemanticSurface(model()));
+  assert.equal(peer.chunks.at(-1), formatHumanSemanticSurface(model(), boldTty));
   assert.equal(peer.messages('x').at(-1).body.keep, false);
   peer.restored();
 });

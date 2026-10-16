@@ -91,7 +91,8 @@ process.once('message', async ({ mode, payload }) => {
     // The SDK records each event it parsed; the parent compares that with what was injected.
     const record = join(mkdtempSync(join(tmpdir(), 'tern-observer-')), 'tsp.jsonl');
     const result = await runLab(['--packet', payload.packet.id], {
-      input: terminal, output: terminal.output, error: { write() {} }, env: { TERN_TSP_RECORD: record },
+      input: terminal, output: terminal.output, error: { write() {} },
+      env: { TERM_PROGRAM: 'tern', TERN_TSP_RECORD: record },
       timeout: mode === 'signal' ? 30_000 : 1_000,
       loadSdk: async () => sdk,
       // The read envelope comes from the parent's real owned-runtime records.
