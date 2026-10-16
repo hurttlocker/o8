@@ -8,15 +8,17 @@ import { runSetup } from './commands/setup.js';
  *     3 unauthorized, 4 not found, 5 conflict. Agents branch on these without
  *     parsing strings.
  *   - Stable, schema-versioned output. Every payload carries `schema: o8/cli/<cmd>/v1`.
- *   - No telemetry, no auto-update, no prompts. Failures loud (stderr),
+ *   - Command mode has no telemetry, auto-update, or prompts. Failures loud (stderr),
  *     successes silent unless --verbose.
- *   - DRY with MCP: every command is fetch + JSON shape, no business logic.
+ *   - Interactive `chat` presents the existing orchestrator transport.
+ *   - DRY with MCP: command actions use shared APIs, not duplicate business logic.
  *   - Auto-discovery: env first (O8_API_PORT / O8_API_TOKEN), then ~/.o8/,
  *     then legacy ~/.cortex-ide/, then fallback 3001.
  *
  * Handrolled dispatcher; deliberately no commander/yargs/oclif dependency.
  */
 
+import { CHAT_HELP, runChat } from './commands/chat.js';
 import { runAsk } from './commands/ask.js';
 import { runMsg, runPresence } from './commands/agents.js';
 import { runApp } from './commands/app.js';
@@ -216,6 +218,7 @@ const USAGE = `o8 — agent-first CLI for the local o8 control plane.
 usage: o8 <command> [subcommand] [flags]
 
 commands:
+  chat                 interactive conversation (o8 chat --help)
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
@@ -366,6 +369,7 @@ error JSON:
  * (caller falls back to the full USAGE).
  */
 function groupUsage(group: string): string | null {
+  if (group === 'chat') return CHAT_HELP;
   if (group === 'packet') return packetGroupUsage();
   const lines = USAGE.split('\n').filter((line) => new RegExp(`^  ${group}( |$)`).test(line));
   if (lines.length === 0) return null;
@@ -390,10 +394,14 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     return 0;
   }
   if (!primary) {
+    if (!args.jsonExplicit && process.stdin.isTTY && process.stdout.isTTY && process.env.TERM !== 'dumb') return runChat(args.rest);
     process.stdout.write(USAGE);
     return 1;
   }
   switch (primary) {
+    case 'chat':
+      if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
+      return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));
     case 'version':
       return runVersion(args.mode);
     case 'doctor':
