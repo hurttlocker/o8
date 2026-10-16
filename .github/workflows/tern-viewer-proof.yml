@@ -1,7 +1,13 @@
 name: Tern viewer ownership proof
 on:
-  push:
-    branches: ['test/3365-tern-viewer-isolation']
+  pull_request:
+    paths:
+      - 'cli/experiments/tern/**'
+      - 'cli/src/presentation/**'
+      - 'src/lib/runtimes/pi/**'
+      - 'src/lib/pi/**'
+      - 'src/lib/approvals/**'
+      - '.github/workflows/tern-viewer-proof.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,29 +22,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-      - run: npm install -g npm@11
       - run: npm ci --prefer-offline
-      - name: Install isolated SDK and build existing S2 model
+      - name: Install the locked SDK and build the S2 model
         run: |
-          npm --prefix cli/experiments/tern install --ignore-scripts --no-audit --no-fund
+          npm --prefix cli/experiments/tern ci --ignore-scripts --no-audit --no-fund
           npm --prefix cli/experiments/tern run build
       - name: Real owning-runtime and observer-process regressions
         run: npx vitest run --config cli/experiments/tern/vitest.ownership.config.ts
-      - name: Existing real-SDK proof (missing SDK fails)
+      - name: Real-SDK proof (missing SDK fails)
         env:
           TERN_REQUIRE_SDK: '1'
         run: npm --prefix cli/experiments/tern test
-      - run: npm run typecheck
-      - run: npm run protocol:check
       - run: npm run test:classification:check
-      - name: Touched-file lint and rules
-        run: |
-          npx eslint cli/experiments/tern/ownership.test.mjs cli/experiments/tern/fixtures/pi-permission-worker.mjs cli/experiments/tern/fixtures/observer-process.mjs cli/experiments/tern/vitest.ownership.config.ts
-          npm run rule-check -- --base=eff2e25f43029d582b21d36b6f9cf18bd51cafff
-      - name: Hermetic completion gate
-        run: npm test

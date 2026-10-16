@@ -7,16 +7,17 @@ permission bridge, renderer, dispatch or worker-input attachment is changed.
 
 ```sh
 npm ci
-npm --prefix cli/experiments/tern install --ignore-scripts
+npm --prefix cli/experiments/tern ci --ignore-scripts
 npm --prefix cli/experiments/tern run build
 npx vitest run --config cli/experiments/tern/vitest.ownership.config.ts
 ```
 
 The explicit config reuses o8's normal isolated data setup and aliases. The
 resource-owning `.mjs` experiment is not part of the hermetic default. Its named
-workflow runs the ownership cases, existing real-SDK tests, typecheck, protocol,
-classification, touched lint/rules and the hermetic completion gate. Missing
-root dependencies or the real SDK is a failure, not a skip.
+workflow runs the ownership cases, the real-SDK tests and the classification
+check on pull requests that touch the lab, the Pi runtime or approvals; the
+main CI owns typecheck, lint and the hermetic suite. Missing root dependencies
+or the real SDK is a failure, not a skip.
 
 ## What the test actually drives
 
