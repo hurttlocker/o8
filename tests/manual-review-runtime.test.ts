@@ -39,7 +39,7 @@ it('manual startup and explicit drain preserve a stale persisted claim and never
   await drainReviewQueue();
   expect(db.prepare('SELECT * FROM review_queue WHERE id=?').get('manual-claim')).toEqual(before);
   const enqueue = vi.fn(); const persistent = vi.fn(() => true); const origin = vi.fn();
-  routeReviewContinuation(lane, enqueue, persistent, origin);
+  routeReviewContinuation(lane, persistent, origin);
   queueReviewContinuation(lane, enqueue);
   expect(enqueue).not.toHaveBeenCalled(); expect(persistent).not.toHaveBeenCalled(); expect(origin).not.toHaveBeenCalled();
   expect(calls.provider).not.toHaveBeenCalled();
