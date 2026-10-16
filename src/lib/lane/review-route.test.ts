@@ -32,6 +32,8 @@ afterEach(() => {
 const missingCli = () => {
   vi.stubEnv('O8_CODEX_BIN', '/nonexistent/o8-test/codex');
   vi.stubEnv('O8_CLAUDE_CODE_BIN', '/nonexistent/o8-test/claude');
+  vi.stubEnv('PATH', '/nonexistent/o8-test/bin');
+  state.wellKnownMissing = true;
 };
 
 describe('resolveReviewRoute (#3742)', () => {
@@ -59,6 +61,17 @@ describe('resolveReviewRoute (#3742)', () => {
       vi.stubEnv('O8_CODEX_BIN', '');
       state.wellKnownMissing = true;
       vi.stubEnv('PATH', join(dir, 'empty'));
+      expect(resolveReviewRoute('lane-1')).toMatchObject({ backend: 'pi' });
+      vi.stubEnv('PATH', dir);
+      expect(resolveReviewRoute('lane-1')).toEqual({ backend: 'codex' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('skips an override that points at a missing file, as the CLI resolver does', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'o8-review-route-override-'));
+    try {
+      writeFileSync(join(dir, 'codex'), '', { mode: 0o755 });
+      missingCli();
       expect(resolveReviewRoute('lane-1')).toMatchObject({ backend: 'pi' });
       vi.stubEnv('PATH', dir);
       expect(resolveReviewRoute('lane-1')).toEqual({ backend: 'codex' });

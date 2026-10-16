@@ -21,6 +21,7 @@ import {
 import type { OrchestratorEvent } from './orchestrator-stream-events';
 import { getOrchestratorBackend } from './orchestrator-backends/registry';
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
+import { getLane } from './registry';
 import { resolveReviewRoute } from './review-route';
 import {
   isReviewerSessionBusyMessage,
@@ -66,6 +67,7 @@ async function runAttempt(input: {
   model?: string;
   thinkingEffort?: ThinkingEffort;
   usageRole?: 'reviewer';
+  freshSession?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
@@ -128,6 +130,7 @@ async function runAttempt(input: {
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
       ...(input.usageRole ? { usageRole: input.usageRole } : {}),
+      ...(input.freshSession ? { freshSession: true } : {}),
       signal: turnController.signal,
     });
   } catch (error) {
@@ -254,11 +257,15 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const promptFor = (backend: OrchestratorBackendId) => (
     typeof input.prompt === 'function' ? input.prompt(backend) : input.prompt
   );
+  // Pi works only inside its workspace, so a Pi review runs in the lane worktree it reviews.
+  // The buy-in doc runs after the merge and writes into the repository itself.
+  const piWorkspace = input.surface === 'buyin-doc' ? input.repoPath
+    : getLane(input.laneId)?.worktreePath || input.repoPath;
   const first = await runAttempt({
     backend: initialBackend,
     laneId: input.laneId,
     surface: input.surface,
-    repoPath: input.repoPath,
+    repoPath: initialBackend.id === 'pi' ? piWorkspace : input.repoPath,
     threadId: input.threadId,
     sessionThreadId: input.sessionThreadId,
     prompt: promptFor(initialBackend.id),
@@ -267,7 +274,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     ...(initialBackend.id === 'codex' ? {
       model: requestedRoute.model ?? undefined, thinkingEffort: defaults.values.thinkingEffort,
     } : {}),
-    ...(initialBackend.id === 'pi' ? { model: route?.model, usageRole: 'reviewer' as const } : {}),
+    ...(initialBackend.id === 'pi' ? { model: route?.model, usageRole: 'reviewer' as const, freshSession: true } : {}),
     onEvent: input.onEvent,
     signal: input.signal,
   });

@@ -203,7 +203,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         workspace: repoPath,
         stateDir,
         model: route.model,
-        sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
+        sessionFile: options.freshSession ? undefined : await newestPiSessionFile(join(stateDir, 'sessions')),
         transport,
         approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
         // Writes outside the workspace need a setting beyond Full access (#3677).
@@ -242,7 +242,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
     let pi = resident.get(name);
     // A different tool surface or model route needs a different process; the session file keeps the conversation.
-    if (pi && (pi.profile !== surface.profile || pi.readOnly !== surface.readOnly || pi.routeId !== routeId || !pi.session.running)) {
+    if (pi && (options.freshSession || pi.profile !== surface.profile || pi.readOnly !== surface.readOnly
+      || pi.routeId !== routeId || !pi.session.running)) {
       await close(pi);
       pi = undefined;
     }

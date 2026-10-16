@@ -23,10 +23,10 @@ const CLI_REVIEWERS: Partial<Record<OrchestratorBackendId, { binary: string; ove
 /**
  * Installed, found without spawning: an override path that exists, else the
  * well-known CLI directories, else any PATH entry (what `which` would find).
+ * A missing override path is skipped, as the CLI resolver skips it.
  */
 function cliInstalled(cli: { binary: string; overrides: string[] }): boolean {
-  const override = cli.overrides.map((name) => process.env[name]?.trim()).find(Boolean);
-  if (override) return existsSync(override);
+  if (cli.overrides.some((name) => { const value = process.env[name]?.trim(); return value && existsSync(value); })) return true;
   if (scanForBinary(cli.binary) !== null) return true;
   return (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).some((dir) =>
     executableSuffixes().some((suffix) => existsSync(path.join(dir, `${cli.binary}${suffix}`))));
