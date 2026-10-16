@@ -405,8 +405,17 @@ describe('Pi orchestrator (#3258)', () => {
     const { getDb } = await import('@/lib/db');
     const { usageLogs } = await import('@/lib/db/schema');
     const rows = getDb()!.select().from(usageLogs).all().filter(row => row.agentName === 'pi-reviewer');
-    expect(rows.map(row => [row.role, row.provider, row.model, row.costUsd])).toEqual([
-      ['reviewer', 'openrouter', pin, 0.0000321], ['reviewer', 'openrouter', pin, 0.0000321]]);
+    expect(rows.map(row => [row.role, row.provider, row.model, row.costUsd, row.laneId, row.packetId])).toEqual([
+      ['reviewer', 'openrouter', pin, 0.0000321, lane.id, lane.packetId], ['reviewer', 'openrouter', pin, 0.0000321, lane.id, lane.packetId]]);
+    // The mission's cost receipt lists each review turn with its model, payer and cost, and counts it once (#3742).
+    const { aggregateMissionCost } = await import('@/lib/orchestrator/cost-aggregator');
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const cost = await aggregateMissionCost(readMissionRegistryEntry(`mission-${lane.packetId}`, { includeArchived: true })!.mission);
+    expect(cost.reviews.map(turn => [turn.model, turn.payer, turn.costBasis, turn.calls, turn.costUsd])).toEqual([
+      [pin, 'openrouter', 'reported', 1, 0.000032], [pin, 'openrouter', 'reported', 1, 0.000032]]);
+    expect(new Set(rows.map(row => row.runId)).size).toBe(2);
+    // Mission costs are reported to six decimal places, as every other mission cost is.
+    expect(cost.costByRole.reviewer).toMatchObject({ totalCostUsd: 0.000064, requestCount: 2 });
     const { getSqlite } = await import('@/lib/db');
     const receipt = getSqlite().prepare("SELECT reason FROM role_routing_receipts WHERE context_id = ? ORDER BY rowid DESC LIMIT 1").get(lane.id) as { reason?: string } | undefined;
     expect(receipt?.reason).toContain('CLI is not installed');
@@ -437,6 +446,10 @@ describe('Pi orchestrator (#3258)', () => {
     expect(['claude', 'codex']).toContain(configured);
     expect(resolved).toEqual([configured]);
     expect(result).toMatchObject({ backend: configured });
+    // The CLI review is recorded too: no per-call charge on the operator's subscription, never left out (#3742).
+    const { listReviewCosts } = await import('@/lib/lane/review-payer');
+    expect(listReviewCosts([lane.packetId!])).toEqual([expect.objectContaining({
+      payer: configured === 'claude' ? 'anthropic-subscription' : 'openai-subscription', costBasis: 'subscription', costUsd: 0 })]);
     // A CLI reviewer keeps the repository path it always had.
     expect(repoPaths).toEqual([repo]);
   }, 60_000);

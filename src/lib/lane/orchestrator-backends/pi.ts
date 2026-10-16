@@ -188,8 +188,9 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         const { createPiOpenRouterRouteTransport } = await import('@/lib/pi/openrouter-choice');
         const routed = createPiOpenRouterRouteTransport(route, {
           ceilingUsd: await leadTurnCeilingUsd(deps),
-          attribution: options.usageRole === 'reviewer'
-            ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath }
+          attribution: options.reviewUsage
+            ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath, laneId: options.reviewUsage.laneId,
+              packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId }
             : { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath },
           onReceipt: (receipt) => { pi.receipts.push(receipt); },
           fetch: deps.openRouterFetch,

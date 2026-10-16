@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
+import { reviewPayer } from '@/lib/lane/review-payer';
 import {
   artifactAbsPath,
   artifactRelPath,
@@ -47,12 +48,13 @@ export interface StoredPacketReceipt {
   rawReceiptJson: string;
 }
 
-function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
+export function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
   const starts = new Map<string, {
     backend: string;
     startedAt: string;
     outcome: PacketReceiptReview['outcome'];
     finishedAt: string | null;
+    model: string | null;
   }>();
   for (const event of events) {
     const turnId = typeof event.payload.reviewTurnId === 'string'
@@ -67,7 +69,12 @@ function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
         startedAt: event.timestamp,
         outcome: 'active',
         finishedAt: null,
+        model: null,
       });
+    } else if (event.payload.event === 'review_turn_runtime_receipt') {
+      const turn = starts.get(turnId);
+      const route = event.payload.runtimeRoute as { model?: unknown } | null | undefined;
+      if (turn && typeof route?.model === 'string') turn.model = route.model;
     } else if (event.verb === 'review_turn_finished') {
       const turn = starts.get(turnId);
       const outcome = event.payload.outcome;
@@ -82,6 +89,8 @@ function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
     backend: turn.backend,
     outcome: turn.outcome,
     at: turn.finishedAt ?? turn.startedAt,
+    model: turn.model,
+    payer: reviewPayer(turn.backend, turn.model).payer,
   }));
 }
 

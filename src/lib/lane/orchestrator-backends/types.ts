@@ -53,8 +53,8 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
-  /** Usage role for metered calls this turn makes; a review turn passes 'reviewer' (#3742). */
-  usageRole?: 'reviewer';
+  /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */
+  reviewUsage?: { reviewTurnId: string; laneId: string; packetId: string | null };
   /** Start a new conversation instead of resuming the thread's; each review turn reads its diff fresh (#3742). */
   freshSession?: boolean;
   /** Per-turn fan-out policy shared by every composer surface. */
