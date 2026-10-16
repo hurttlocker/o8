@@ -120,7 +120,9 @@ async function observe(f, mode) {
   const { record } = await snapshot(f);
   const child = fork(join(here, 'fixtures/observer-process.mjs'), [], {
     execArgv: [], cwd: here, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env: { PATH: process.env.PATH, NODE_ENV: 'test' },
+    // Give the observer the same data root the owner uses, so a regression that wrote o8 state
+    // directly would land where unchanged() looks, not in a developer's real data directory.
+    env: { PATH: process.env.PATH, NODE_ENV: 'test', O8_DATA_DIR: getDataDir(), O8_OWNED_PI_ROOT: join(root, 'sessions') },
   });
   viewers.add(child);
   const messages = [];
@@ -147,7 +149,10 @@ async function observe(f, mode) {
     expect(await closed).toEqual({ code: 0, signal: null });
     expect(done.result.renderer).toBe(mode === 'frame-loss' ? 'text' : 'tsp');
     expect(done.reads).toEqual([{ command: 'o8', args: ['packet', 'info', record.packetId, '--json'] }]);
-    expect(done.injections).toBe(5);
+    // Forgeries were aimed at real nodes (except frame loss, which draws none) and the SDK parsed every one.
+    expect(done.injections).toBeGreaterThanOrEqual(10);
+    expect(done.parsedEvents).toBe(done.injections);
+    if (mode === 'native') expect(done.targets.length).toBeGreaterThan(1);
     expect(done.raw).toBe(false);
     expect(done.listeners).toBe(0);
   }
