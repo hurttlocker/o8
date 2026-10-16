@@ -38,6 +38,7 @@ import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle
 import {
   ResetCleanupFailedError,
   ResetKillUnconfirmedError,
+  ResetPacketNotFoundError,
   ResetSessionArchiveUnconfirmedError,
 } from './reset-errors';
 import {
@@ -178,7 +179,7 @@ async function selectPacketResetLocation(input: ResetPacketInput) {
     if (!input.scope?.skipHoldIfStateMoved) {
       const { result } = await withMissionRegistryState(registryEntry.id, (state) => {
         const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-        if (!packet) throw new Error(`Packet ${input.packetId} not found.`);
+        if (!packet) throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
         markPacketResetPending(packet);
         return {
           state,
@@ -278,7 +279,7 @@ async function resetRegistryPacket(
   if (!pendingAlready && !input.scope?.skipHoldIfStateMoved) {
     await withMissionRegistryState(missionId, (state) => {
       const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packet) throw new Error(`Packet ${input.packetId} not found.`);
+      if (!packet) throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
       markPacketResetPending(packet);
       return { state, result: undefined };
     });
@@ -330,7 +331,7 @@ async function resetRegistryPacket(
   const { result } = await withMissionRegistryState(missionId, (state) => {
     const packet = state.packets.find((candidate) => candidate.id === input.packetId);
     if (!packet) {
-      throw new Error(`Packet ${input.packetId} not found.`);
+      throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
     }
     if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
       return {
