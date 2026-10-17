@@ -10,7 +10,7 @@ const postedLabels = { comment: 'Comment posted.', 'close-with-comment': 'Commen
 export function PrCommentComposer({ detail, repoSlug, mode = 'comment', onModeChange, draft, onDraftChange, reviewAction = 'review-comment', onReviewActionChange, reviewHeadSha, onReviewHeadChange, onBrain, onCollapse, onPosted }: {
   detail: PrDetail; repoSlug?: string | null; mode?: 'comment' | 'review'; onModeChange?: (mode: PrComposerMode) => void;
   draft: string; onDraftChange: (draft: string) => void; reviewAction?: PrReviewAction; onReviewActionChange?: (action: PrReviewAction) => void;
-  reviewHeadSha?: string; onReviewHeadChange?: () => void; onBrain: () => void; onCollapse: () => void; onPosted?: () => void;
+  reviewHeadSha?: string; onReviewHeadChange?: () => void; onBrain?: () => void; onCollapse: () => void; onPosted?: () => void;
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const currentDraft = useRef(draft);
@@ -32,7 +32,7 @@ export function PrCommentComposer({ detail, repoSlug, mode = 'comment', onModeCh
   };
   return <>
     <header style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 7, paddingRight: 10, paddingBottom: 7, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-      <button type="button" onClick={onBrain} aria-label="Switch to Brain" style={modeStyle}><Brain size={13} aria-hidden="true" />Brain</button>
+      {onBrain ? <button type="button" onClick={onBrain} aria-label="Switch to Brain" style={modeStyle}><Brain size={13} aria-hidden="true" />Brain</button> : null}
       {(['comment', 'review'] as const).map((choice) => <button key={choice} type="button" aria-label={'Switch to ' + choice} aria-pressed={mode === choice} onClick={() => onModeChange?.(choice)} style={{ ...modeStyle, color: mode === choice ? 'var(--t-text)' : 'var(--t-text-muted)', background: mode === choice ? 'var(--t-hover)' : 'transparent' }}>{choice === 'comment' ? <MessageSquare size={13} aria-hidden="true" /> : <CheckCircle2 size={13} aria-hidden="true" />}{choice === 'comment' ? 'Comment' : 'Review'}</button>)}
       <span style={{ flex: 1 }} /><button type="button" aria-label={`Collapse ${mode} composer`} onClick={onCollapse} style={{ ...modeStyle, padding: 0, width: 28, height: 28 }}><ChevronDown size={15} aria-hidden="true" /></button>
     </header>
