@@ -297,10 +297,15 @@ describe('askJudgment against a local systemone fixture', () => {
 });
 
 /** A compact-JWT-shaped plan token; the proxy, not the client, verifies it. */
-const PLAN_TOKEN = `header.${Buffer.from(JSON.stringify({ sub: 'user_judgment', plan: 'founder' })).toString('base64url')}.signature`;
+const licenseToken = (plan: 'founder' | 'free') =>
+  `header.${Buffer.from(JSON.stringify({ sub: 'user_judgment', plan })).toString('base64url')}.signature`;
+const PLAN_TOKEN = licenseToken('founder');
+// A free allowance is forwarded only when the license itself claims the free plan.
+const FREE_TOKEN = licenseToken('free');
 
 function writeEntitlement(plan: 'founder' | 'free'): void {
-  writeFileSync(getEntitlementPath(), `${JSON.stringify({ plan, status: 'active', licenseKey: PLAN_TOKEN })}\n`);
+  writeFileSync(getEntitlementPath(),
+    `${JSON.stringify({ plan, status: 'active', licenseKey: plan === 'free' ? FREE_TOKEN : PLAN_TOKEN })}\n`);
 }
 
 describe('askJudgment route resolution (#2484)', () => {
@@ -348,7 +353,7 @@ describe('askJudgment route resolution (#2484)', () => {
     await askJudgment({ state: { diff: 'x' }, questions: QUESTIONS, context: { packetId: 'pkt-managed-free' } }, fast());
 
     expect(seen[0].url).toBe('/v1/judgment');
-    expect(seen[0].authorization).toBe(`Bearer ${PLAN_TOKEN}`);
+    expect(seen[0].authorization).toBe(`Bearer ${FREE_TOKEN}`);
     expect(listJudgmentReceipts({ packetId: 'pkt-managed-free' })[0]).toMatchObject({ route: 'managed' });
   });
 
@@ -456,7 +461,7 @@ describe('managed allowance cap and beta end date (#2486)', () => {
 
     expect(result).not.toBeNull();
     expect(seen.map((request) => request.url)).toEqual(['/v1/judgment', '/v1/systemone']);
-    expect(seen[0].authorization).toBe(`Bearer ${PLAN_TOKEN}`);
+    expect(seen[0].authorization).toBe(`Bearer ${FREE_TOKEN}`);
     expect(seen[1].authorization).toBe(`Bearer ${KEY}`);
     expect(seen[1].body).toEqual(seen[0].body);
     const receipts = listJudgmentReceipts({ packetId: 'pkt-cap-key' });

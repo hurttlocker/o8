@@ -183,6 +183,45 @@ describe('staged mission creation', () => {
     });
   }, 20_000);
 
+  it('treats a fanned-out comparison seed as consumed by its candidates, never as a missing owner', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission');
+    const staged = parseResult<{ missionId: string }>(await handleCreateMission({
+      issues_inline: [{ title: 'seed consumption', body: 'Fan out before dispatch.' }],
+      repoPath, runtime: 'codex', comparisonModels: ['gpt-5.6-sol', 'gpt-5.6-sol'], dispatch: false,
+    }));
+    const { fanOutComparisonPackets } = await import('@/lib/orchestrator/comparison-fanout');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { captureCurrentDispatchRegistry } = await import('@/lib/orchestrator/operator-mission-service/dispatch-registry-publication');
+    const { withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    const fanned = fanOutComparisonPackets(readOrchestratorControlPlaneState());
+    expect(fanned.packets).toHaveLength(2);
+    expect(() => captureCurrentDispatchRegistry(fanned)).not.toThrow();
+    // Without its candidates the seed really is missing.
+    expect(() => captureCurrentDispatchRegistry({ ...fanned, packets: [] })).toThrow(/packet_owner_missing/);
+    // Candidates keep every durable authority of the seed, or the dispatch is refused.
+    const refusedAfter = async (change: (seed: (typeof fanned.packets)[number]) => void, reason: RegExp) => {
+      const { result: before } = await withMissionRegistryState(staged.missionId, (state) => {
+        const previous = structuredClone(state.packets[0]!);
+        change(state.packets[0]!);
+        return { state, result: previous };
+      });
+      expect(() => captureCurrentDispatchRegistry(fanned)).toThrow(reason);
+      await withMissionRegistryState(staged.missionId, (state) => {
+        state.packets[0] = before;
+        return { state, result: undefined };
+      });
+      expect(() => captureCurrentDispatchRegistry(fanned)).not.toThrow();
+    };
+    await refusedAfter((seed) => { seed.operatorStopped = true; }, /operator_stop_changed/);
+    // A reset of the durable seed raised its generation past the cached candidates.
+    await refusedAfter((seed) => { seed.attemptCount = (seed.attemptCount ?? 0) + 1; }, /newer_generation/);
+    // A released or archived seed is terminal and never consumed by launchable candidates.
+    await refusedAfter((seed) => { seed.status = 'archived'; seed.archivedAt = new Date().toISOString(); }, /terminal_owner_changed/);
+    await refusedAfter((seed) => { seed.branchTarget = 'inline/elsewhere'; }, /workspace_owner_changed/);
+  });
+
   it('does not launch a stale dispatch snapshot after an operator Hold wins during preflight', async () => {
     const repoPath = createTempRepo();
     const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');

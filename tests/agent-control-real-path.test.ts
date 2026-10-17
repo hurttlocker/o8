@@ -133,7 +133,8 @@ describe('agent control through the real route', () => {
       expect(response.status).toBe(500);
       await expect(response.json()).resolves.toMatchObject({
         ok: false,
-        error: { code: 'agent_control_failed', message: 'agent control idempotency write failed' },
+        // A 5xx keeps its code but never the raw exception text (#3434).
+        error: { code: 'agent_control_failed', message: 'o8 API error (500)' },
       });
       expect(h.perform).not.toHaveBeenCalled();
     } finally {
