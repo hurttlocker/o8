@@ -557,7 +557,7 @@ export function ChatsTab({
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
-        repoLabel={compact && chatGroupBy === 'repo' ? null : repoSuffix(item)}
+        repoLabel={compact && chatGroupBy === 'repo' ? null : repoSuffix(item, targetRepos)}
         ownedCount={owned.length}
         roomy={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned))}
         preview={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned)) ? item.preview : undefined}
