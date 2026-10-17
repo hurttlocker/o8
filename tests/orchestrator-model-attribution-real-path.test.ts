@@ -1,6 +1,6 @@
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -298,6 +298,7 @@ beforeAll(async () => {
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 if (process.argv.includes('--version')) { console.log('codex-cli 0.130.0'); process.exit(0); }
+if (process.argv[2] === 'login' && process.argv[3] === 'status') { console.log('Logged in using fixture'); process.exit(0); }
 if (process.argv.includes('--input-format')) {
   const { createInterface } = await import('node:readline');
   createInterface({input: process.stdin}).on('line', () => {
@@ -353,6 +354,10 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 `);
   chmodSync(fakeCodex, 0o755);
+  mkdirSync(join(dataDir, 'bin'), { recursive: true });
+  symlinkSync(fakeCodex, join(dataDir, 'bin', 'codex'));
+  const { invalidateRuntimeAuthCache } = await import('@/lib/runtimes/shared/auth-detect');
+  invalidateRuntimeAuthCache();
   apiPort = await freePort();
   wsPort = await freePort();
   vi.stubEnv('O8_WS_PORT', String(wsPort));
@@ -704,7 +709,7 @@ it('routes only complete durable origins and keeps truly unbound legacy packets 
       } } }),
     });
     expect(response.ok).toBe(true);
-    const result = await response.json(); expect(result.result.isError).not.toBe(true);
+    const result = await response.json(); expect(result.result.isError, result.result.content?.[0]?.text).not.toBe(true);
     const created = JSON.parse(result.result.content[0].text);
     const packet = readMissionRegistryEntry(created.missionId)!.mission.packets[0];
     expect(packet.projectId).toBe(project.id);
