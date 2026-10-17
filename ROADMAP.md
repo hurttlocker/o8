@@ -123,6 +123,8 @@ Shared GitHub quota and durable PR watching are implemented in [#3606](https://g
 | Bounded peer conversations | people, agents | The operator sees named participants in split transcripts and a repo-scoped Handoffs pane. Every reply has a verifiable conversation and prior message, and the server stops the exchange at its turn budget or an earlier close. | open | The UI and protocol are merged in source; an isolated preview exercised grouped turns and operator stop/extend. A native installed two-agent exchange and release check remain. | [#2690](https://github.com/hurttlocker/o8/issues/2690) |
 | Agent-facing API manifest | agents | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | open | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
 
+Settings page history [#3853](https://github.com/hurttlocker/o8/issues/3853), a keyboard-accessible Brain conversation beside the composer [#3854](https://github.com/hurttlocker/o8/issues/3854), and chat-local sidebar review actions [#3855](https://github.com/hurttlocker/o8/issues/3855) are implemented in development. Native Settings and Brain checks and focused review-target checks passed. Required PR checks and released-build acceptance remain pending.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
