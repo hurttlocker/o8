@@ -370,6 +370,8 @@ export function ExtraAgentActionMenu({
   onClose,
   onFocus,
   onArchive,
+  pinned = false,
+  onTogglePin,
 }: {
   state: ExtraAgentActionMenuState;
   busy: boolean;
@@ -377,6 +379,8 @@ export function ExtraAgentActionMenu({
   onClose: () => void;
   onFocus: () => void;
   onArchive: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -387,7 +391,7 @@ export function ExtraAgentActionMenu({
   }, [onClose]);
 
   const menuWidth = 190;
-  const menuHeight = 130;
+  const menuHeight = onTogglePin ? 159 : 130;
   const panelRect = typeof document === 'undefined'
     ? null
     : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
@@ -454,6 +458,7 @@ export function ExtraAgentActionMenu({
         </div>
         <div style={{ display: 'grid', gap: 2 }}>
           <ExtraAgentMenuRow label="Open" disabled={!canFocus || busy} onClick={onFocus} />
+          {onTogglePin ? <ExtraAgentMenuRow label={pinned ? 'Unpin' : 'Pin'} disabled={busy} onClick={onTogglePin} /> : null}
           <ExtraAgentMenuRow label="Archive" disabled={busy || !canArchiveExtraAgent(state.row)} onClick={onArchive} />
         </div>
       </div>

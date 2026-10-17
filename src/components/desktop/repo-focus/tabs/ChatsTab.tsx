@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
@@ -51,6 +51,7 @@ import {
 } from './chats/sections';
 import { useRowReadState } from './chats/use-row-read-state';
 import { getLastVisited, markVisited } from './chats/read-state';
+import { EMPTY_CHAT_VIEW_ACTIONS, EMPTY_SIDEBAR_AGENTS, mergeSidebarAgentHistory, sidebarAgentItemId } from './chats/sidebar-agent-navigation';
 import type {
   ArchivedLaneRow,
   ChatHistoryItem,
@@ -74,7 +75,8 @@ export function ChatsTab({
   showLiveSessions = true,
   groupMode = 'sections',
   packets = [],
-  agentsSection,
+  agentEntries = EMPTY_SIDEBAR_AGENTS,
+  agentViewActions = EMPTY_CHAT_VIEW_ACTIONS,
   onCreateOrchestratorForRepo,
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
@@ -82,6 +84,7 @@ export function ChatsTab({
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [showAllChats, setShowAllChats] = useState(false);
   const demoFixtures = useSidebarFixtures(variant === 'mini');
+  const agentByTabId = useMemo(() => new Map(agentEntries.map(entry => [sidebarAgentItemId(entry), entry])), [agentEntries]);
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
   // Keep the existing persisted grouping ids compatible with the view menu.
@@ -399,16 +402,18 @@ export function ChatsTab({
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
   const sortedChatItems = useMemo(() => {
     return (
-    sweptThreads.chats.filter((item) => {
+    mergeSidebarAgentHistory(sweptThreads.chats, chatGroupBy === 'scheduled' ? [] : agentEntries).filter((item) => {
       if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
         isOwnedAutomationSession(session) && sessionIdentity(session).includes(item.tabId));
       return true;
     }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
     );
-  }, [chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
+  }, [agentEntries, chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
   const workingHistoryIds = useMemo(() => {
     void readStateVersion;
     return new Set(sortedChatItems.filter(item => {
+      const agent = agentByTabId.get(item.tabId);
+      if (agent) return staysInWorkingView(agent.attention, agent.active);
       const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
       const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
       return selected || related.some((packet) => packet && staysInWorkingView({
@@ -418,10 +423,11 @@ export function ChatsTab({
       })) || ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId)
         && staysInWorkingView({ status: session.status }));
     }).map(item => item.tabId));
-  }, [activeSessionKey, historyPacketsByTabId, ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sortedChatItems]);
+  }, [activeSessionKey, agentByTabId, historyPacketsByTabId, ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sortedChatItems]);
   const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
-  const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
+  const flatHistoryItems = [...sortedChatItems.filter(item => item.pinned), ...sortedChatItems.filter(item => !item.pinned)]
+    .slice(0, Math.max(0, Math.min(chatCap, historyCap)));
   const cappedChatCount = Math.min(sortedChatItems.length, historyCap);
   const flatHistoryRepoGroups = useMemo(
     () => deriveHistoryRepoGroups(flatHistoryItems, targetRepos),
@@ -435,6 +441,8 @@ export function ChatsTab({
     void readStateVersion;
     const eligibleItems = sortedChatItems.slice(0, historyCap);
     const split = derivePrioritySplit(eligibleItems.map((item) => {
+      const agent = agentByTabId.get(item.tabId);
+      if (agent) return { item, modifiedAt: item.modifiedAt, ...agent.attention };
       const packet = historyAttentionPackets.get(item.tabId);
       return {
         item,
@@ -452,8 +460,9 @@ export function ChatsTab({
       priority: [...split.priority, ...split.remainder.filter((entry) => staysInWorkingView(entry))].map((entry) => entry.item),
       remainder: split.remainder.filter((entry) => !staysInWorkingView(entry)).map((entry) => entry.item),
     };
-  }, [historyAttentionPackets, historyCap, readStateVersion, sortedChatItems]);
-  usePublishSidebarAttention([...historyAttentionPackets.values()].filter((packet) => packet && attentionRank(packetAttention(packet)) > 0).length, compact);
+  }, [agentByTabId, historyAttentionPackets, historyCap, readStateVersion, sortedChatItems]);
+  usePublishSidebarAttention([...historyAttentionPackets.values()].filter((packet) => packet && attentionRank(packetAttention(packet)) > 0).length
+    + sortedChatItems.filter(item => { const agent = agentByTabId.get(item.tabId); return agent && attentionRank(agent.attention) > 0; }).length, compact);
   const flatRemainderItems = [...flatPrioritySplit.remainder].sort((a, b) => Number(b.pinned) - Number(a.pinned)).slice(
     0,
     compact && !showAllChats ? Math.max(0, 12 - flatPrioritySplit.priority.length) : Number.POSITIVE_INFINITY,
@@ -507,7 +516,7 @@ export function ChatsTab({
     groupMode === 'flat'
       ? flatHistoryItems.length > 0
       : historyGroups.some((group) => group.items.length > 0)
-  ) || Boolean(agentsSection) || showMergedPackets || showArchivedHistory;
+  ) || agentEntries.length > 0 || showMergedPackets || showArchivedHistory;
   const toggleGroup = (key: HistoryGroupKey) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -547,6 +556,12 @@ export function ChatsTab({
   }, [broadcastThreadLink, chatGroupBy, clearThreadHoverTimers]);
 
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
+    const agent = agentByTabId.get(item.tabId);
+    if (agent) return <Fragment key={item.tabId}>{agent.render({
+      roomy: compact && (chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId)),
+      showPreview: chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId),
+      repoLabel: chatGroupBy === 'repo' ? null : repoSuffix(item, targetRepos),
+    })}</Fragment>;
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
     const packet = historyAttentionPackets.get(item.tabId);
     return (
@@ -604,6 +619,7 @@ export function ChatsTab({
                 items={sortedChatItems.slice(0, historyCap)} workingIds={workingHistoryIds} fixtures={demoFixtures}
                 activeSessionKey={activeSessionKey} renderHistoryRow={renderHistoryRow} onOpenHistoryChat={onOpenHistoryChat}
                 onChangeView={updateChatGroupBy} showAll={showAllChats} onShowMore={() => setShowAllChats(true)}
+                viewActions={agentViewActions}
               /> : <CompactChatHistory
                 chatGroupBy={chatGroupBy} updateChatGroupBy={updateChatGroupBy}
                 priority={flatPrioritySplit.priority} remainder={flatRemainderItems}
@@ -613,6 +629,7 @@ export function ChatsTab({
                 onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
                 hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
                 fixtures={demoFixtures} activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat}
+                viewActions={agentViewActions}
                 scheduledSessions={chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
                   <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />
                 )) : null}
@@ -661,10 +678,6 @@ export function ChatsTab({
           )}
         </div>
       )) : null}
-
-      <div data-sidebar-workers style={{ display: chatGroupBy === 'scheduled' ? 'none' : undefined }}>
-        {typeof agentsSection === 'function' ? agentsSection(compact && chatGroupBy === 'working') : agentsSection}
-      </div>
 
       {showArchivedHistory ? (
         <div>
