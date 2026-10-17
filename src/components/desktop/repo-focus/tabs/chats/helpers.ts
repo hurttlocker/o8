@@ -201,7 +201,7 @@ export function packetSortTime(packet: OrchestratorPacket): number {
 
 export function formatElapsedAgo(timestamp: string): string {
   const elapsed = formatElapsed(timestamp);
-  return elapsed === 'now' ? 'just now' : `${elapsed} ago`;
+  return elapsed === 'now' ? '0m' : elapsed;
 }
 
 export function packetMatchScore(item: ChatHistoryItem, packet: OrchestratorPacket): number {
