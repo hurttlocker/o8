@@ -50,6 +50,8 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run protocol:check
       - run: npm run typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
       # These bounded publication fixtures never contact release services or
       # build an app. Keep the stable/preview boundary on every PR.
       - name: Release channel policy
