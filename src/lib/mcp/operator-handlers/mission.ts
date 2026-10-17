@@ -77,17 +77,17 @@ export const MISSION_TOOLS: McpTool[] = [
         runtime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
-          description: 'Worker runtime for all mission packets. Codex remains the default; configured local CLI adapters are selected explicitly.',
+          description: 'Worker runtime for this mission. Omit to use the saved default worker; explicitly select another available dispatchable runtime for this task. Check current runtime availability before choosing.',
         },
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with runtime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with runtime.',
         },
         ...MISSION_WORKER_PIN_PROPERTIES,
         constraints: {
@@ -278,12 +278,12 @@ export const MISSION_TOOLS: McpTool[] = [
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with requestedRuntime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with requestedRuntime.',
         },
         requestedRuntime: {
           type: 'string',
@@ -375,12 +375,12 @@ export const MISSION_TOOLS: McpTool[] = [
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with requestedRuntime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with requestedRuntime.',
         },
         requestedRuntime: {
           type: 'string',
