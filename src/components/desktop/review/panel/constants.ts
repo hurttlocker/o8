@@ -3,9 +3,6 @@ import type { ReviewScope } from './types';
 
 const SCOPE_LABELS: Record<ReviewScope, string> = { all: 'All changes', 'last-turn': 'Last turn', staged: 'Staged', unstaged: 'Unstaged' };
 const SCOPE_ORDER: ReviewScope[] = ['all', 'last-turn', 'staged', 'unstaged'];
-// Above this many visible rows, files default to collapsed so the panel
-// doesn't fire N concurrent /api/panel/file-diff requests on mount (#1084).
-const BIG_CHANGESET = 25;
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -28,7 +25,6 @@ const NUM_CELL: CSSProperties = {
 export {
   SCOPE_LABELS,
   SCOPE_ORDER,
-  BIG_CHANGESET,
   UI_FONT,
   MONO_FONT,
   REVIEW_CONTROL_BG,
