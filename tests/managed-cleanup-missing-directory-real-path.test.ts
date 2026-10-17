@@ -395,6 +395,7 @@ it('preserves durable metadata when the parent directory is missing', async () =
 
     expect(outcome).not.toBe('retired');
     expect(await readDurableEntry(fixture.repoPath, fixture.id)).toBeDefined();
+    expect(existsSync(fixture.layout.primaryBase)).toBe(false);
     expect(getWorkspaceSnapshot(fixture.repo.id, fixture.id)).toBeNull();
   } finally {
     errorSpy.mockRestore();
