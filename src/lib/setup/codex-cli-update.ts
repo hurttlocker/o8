@@ -1,4 +1,5 @@
 import 'server-only';
+import type { CliUpdateReporter } from './cli-update-progress';
 
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
@@ -82,7 +83,8 @@ async function requireIdle(selectedPath: string, binary: string) {
 }
 
 /** One bounded, user-triggered operation, with a persisted receipt and crash-safe refusal lock. */
-export async function updateSelectedCodex() {
+export async function updateSelectedCodex(report: CliUpdateReporter = () => {}) {
+  report('checking');
   await mkdir(DATA_DIR, { recursive: true });
   const lockPath = path.join(DATA_DIR, 'codex-cli-update.lock');
   let lock;
@@ -103,6 +105,7 @@ export async function updateSelectedCodex() {
     await requireIdle(selected.path, install.binary);
     receipt = { status: 'installing', selectedPath: selected.path, targetVersion: tool.latestVersion, startedAt: new Date().toISOString() };
     await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600 });
+    report('installing');
     const configDir = await mkdtemp(path.join(tmpdir(), 'o8-codex-npm-'));
     const userConfig = path.join(configDir, 'user.npmrc');
     const globalConfig = path.join(configDir, 'global.npmrc');
@@ -118,6 +121,7 @@ export async function updateSelectedCodex() {
     } finally {
       await rm(configDir, { recursive: true, force: true });
     }
+    report('verifying');
     invalidateCliCache('codex');
     let verified = await resolveCli(spec);
     // A cold executable may miss the first bounded version probe after install.
@@ -132,6 +136,7 @@ export async function updateSelectedCodex() {
     }
     receipt.status = 'succeeded'; receipt.finishedAt = new Date().toISOString();
     await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600 });
+    report('succeeded');
     return { status: 'succeeded', installedVersion: verified.version, latestVersion: tool.latestVersion };
   } catch (error) {
     invalidateCliCache('codex');
