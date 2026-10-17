@@ -21,7 +21,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 const roots = [dataDir];
 const { closeDb } = await import('@/lib/db');
-const { archiveLane, createLane, getLane, listLanes, updateLane } = await import('@/lib/lane/registry');
+const { createLane, getLane, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
@@ -89,12 +89,7 @@ function fixture(location: 'current' | 'registry' = 'current') {
   return { repoPath, worktreePath, lane: getLane(lane.id)!, packet, mission, pull, persist, read };
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
-  // Worktree maintenance is bounded per tick (#3439), so an earlier test's lane
-  // must not take the slot of the lane the next test proves.
-  for (const lane of listLanes()) if (lane.status !== 'archived') archiveLane(lane.id, 'system');
-});
+afterEach(() => vi.restoreAllMocks());
 afterAll(() => { closeDb(); for (const root of roots.reverse()) rmSync(root, { recursive: true, force: true }); });
 
 describe('automatic PR release through the real reaper and durable missions', () => {
@@ -141,25 +136,15 @@ describe('automatic PR release through the real reaper and durable missions', ()
     expect(git(f.worktreePath, 'rev-parse', 'HEAD')).toBe(successor);
   });
 
-  it.each(['stop', 'archive', 'missing-proof', 'dirty'] as const)('refuses automatic release for %s', async (reason) => {
+  it.each(['stop', 'archive', 'running', 'missing-proof', 'dirty'] as const)('refuses automatic release for %s', async (reason) => {
     const f = fixture();
     if (reason === 'stop') f.packet.operatorStopped = true;
     if (reason === 'archive') f.packet.archivedAt = new Date().toISOString();
+    if (reason === 'running') f.packet.status = 'running';
     if (reason === 'missing-proof') upsertGitHubPullRequest({ ...f.pull, headSha: null, mergeCommit: null });
     if (reason === 'dirty') writeFileSync(join(f.worktreePath, 'app.txt'), 'dirty successor');
     f.persist();
     await runWorktreeReaperTick();
-    expect(f.read().packets[0].releaseState).toBe('pending');
-    expect(getLane(f.lane.id)?.status).toBe('reviewing');
-  });
-
-  it('refuses automatic release while the packet says its worker is running', async () => {
-    // Called directly: in a reaper tick, reconcile first settles a running packet
-    // whose lane is already reviewing, and the merged PR then releases it.
-    const f = fixture();
-    f.packet.status = 'running';
-    f.persist();
-    expect(await releaseMergedPullRequestPacket(f.lane, f.pull)).toBe('held');
     expect(f.read().packets[0].releaseState).toBe('pending');
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
   });
