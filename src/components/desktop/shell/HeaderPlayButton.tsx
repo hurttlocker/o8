@@ -110,7 +110,7 @@ export function HeaderPlayButton({
   }, []);
 
   return (
-    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
+    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
       <button
         type="button"
         onClick={() => {
@@ -125,11 +125,13 @@ export function HeaderPlayButton({
         aria-controls={open ? menuId : undefined}
         title={paneMode ? 'Add a pane' : 'Add a workspace tab'}
         style={{
+          position: 'relative',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           height: 26,
-          minWidth: 26,
+          width: 30,
+          minWidth: 30,
           paddingLeft: 7,
           paddingRight: 7,
           borderRadius: 7,
@@ -137,11 +139,12 @@ export function HeaderPlayButton({
           background: open || hovered ? 'var(--t-hover)' : 'transparent',
           color: 'var(--t-text-secondary)',
           cursor: 'pointer',
-          marginTop: -3,
+          marginTop: 1.3,
           transition: 'background 120ms ease',
           ['WebkitAppRegion' as string]: 'no-drag',
         }}
       >
+        <span aria-hidden style={{ position: 'absolute', top: -14, bottom: -4, left: 0, right: 0 }} />
         <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d={paneMode ? 'M7 4.5 20 12 7 19.5Z' : 'M12 5v14M5 12h14'} />
         </svg>
