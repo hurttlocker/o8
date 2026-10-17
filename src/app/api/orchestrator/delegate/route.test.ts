@@ -16,6 +16,8 @@ vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/panel/api-port', () => ({ resolvePortInfo: () => ({ wsPort: 12345 }) }));
 vi.mock('@/lib/ws-auth', () => ({ getOrCreateWsToken: () => 'test-token' }));
+// The install gate (#3657) reads the host's CLIs; these tests launch through a stub.
+vi.mock('@/lib/runtimes/shared/runtime-installed', () => ({ runtimeNotInstalledReason: async () => null }));
 
 const roots: string[] = [];
 
