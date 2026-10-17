@@ -157,13 +157,11 @@ describe('SessionTileSurface manual split geometry', () => {
     });
 
     await act(async () => {
-      horizontalHandle.dispatchEvent(new MouseEvent('mousedown', {
-        bubbles: true,
-        clientX: 700,
-        clientY: 520,
-      }));
-      document.dispatchEvent(new MouseEvent('mousemove', { clientX: 700, clientY: 600 }));
-      document.dispatchEvent(new MouseEvent('mouseup'));
+      const down = new MouseEvent('pointerdown', { bubbles: true, clientX: 700, clientY: 520 });
+      Object.defineProperty(down, 'isPrimary', { value: true });
+      horizontalHandle.dispatchEvent(down);
+      document.dispatchEvent(new MouseEvent('pointermove', { clientX: 700, clientY: 600 }));
+      document.dispatchEvent(new MouseEvent('pointerup', { clientX: 700, clientY: 600 }));
     });
     expect(onResizeSplit).toHaveBeenLastCalledWith(authored.id, 0.75);
   });

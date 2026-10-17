@@ -20,14 +20,14 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
     const glow = edge;
     expect(edge.style.top).toBe('53px'); expect(edge.style.bottom).toBe('0px');
     expect(glow.style.opacity).toBe('0'); expect(glow.style.borderRadius).toBe('');
-    expect(handle.style.width).toBe('6px');
+    expect(handle.style.width).toBe('4px');
     await act(async () => edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
     expect(glow.style.opacity).toBe('0.85');
-    await act(async () => edge.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    await act(async () => edge.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
     expect(drag).toHaveBeenCalledOnce();
     await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
     expect(glow.style.opacity).toBe('0.85');
-    await act(async () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+    await act(async () => document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true })));
     expect(glow.style.opacity).toBe('0');
     await act(async () => handle.focus()); expect(glow.style.opacity).toBe('0.85');
     await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })));
@@ -40,4 +40,16 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
   } finally {
     await act(async () => root.unmount()); host.remove();
   }
+});
+
+it('resizes by keyboard from a constrained sidebar width instead of its stored preference', async () => {
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const setWidth = vi.fn();
+  try {
+    await act(async () => root.render(createElement('div', null, createElement('aside'),
+      createElement(ChatListResizeEdge, { width: 496, glass: true, setWidth, onStartDrag: vi.fn() }))));
+    host.querySelector('aside')!.getBoundingClientRect = () => ({ width: 350 } as DOMRect);
+    await act(async () => host.querySelector('[role="separator"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+    expect(setWidth).toHaveBeenCalledExactlyOnceWith(334);
+  } finally { await act(async () => root.unmount()); host.remove(); }
 });
