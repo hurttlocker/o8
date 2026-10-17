@@ -14,7 +14,6 @@ import type { DiffMode, CollapseSignal, ReviewScope } from './panel/types';
 import {
   SCOPE_LABELS,
   SCOPE_ORDER,
-  BIG_CHANGESET,
   UI_FONT,
   REVIEW_CONTROL_BG,
   REVIEW_CONTROL_BG_ACTIVE,
@@ -66,7 +65,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [wordDiff, setWordDiff] = useState(false);
   const [hideWhitespace, setHideWhitespace] = useState(false);
   const [richPreview, setRichPreview] = useState(false);
-  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
+  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: false, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [scope, setScope] = useState<ReviewScope>('all');
@@ -218,7 +217,6 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     [visible],
   );
   const hasFiles = changes.files.length > 0;
-  const denseChangeset = visible.length > BIG_CHANGESET;
 
   useEffect(() => {
     if (!selectedFile || changes.loading) return;
@@ -471,7 +469,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               wordDiff={wordDiff}
               hideWhitespace={hideWhitespace}
               richPreview={richPreview}
-              initialOpen={!denseChangeset}
+              initialOpen={collapseSignal.open}
               collapseSignal={collapseSignal}
               focusSignal={focusSignal}
               selected={focusSignal.path === file.path}
