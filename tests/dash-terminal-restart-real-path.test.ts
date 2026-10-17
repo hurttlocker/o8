@@ -1,12 +1,17 @@
-import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dashSessionNameForOwnerKey } from '@/lib/ws-server/dash-terminal-persistence';
+import {
+  probeMetadataLockProcessIdentitySync,
+  sameMetadataLockProcessIdentity,
+  type MetadataLockProcessIdentity,
+} from '@/lib/worktree/metadata-lock-process-identity';
 import { renderTerminalBytes } from './helpers/headless-terminal';
 
 type WireFrame = {
@@ -25,6 +30,7 @@ const beforeMarker = `O8_BEFORE_RESTART_${process.pid}`;
 const afterMarker = `O8_AFTER_RESTART_${process.pid}`;
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-dash-terminal-restart-'));
 const repoDir = join(dataDir, 'repository');
+const identityPath = join(dataDir, 'interactive-program.json');
 const token = 'dash-terminal-restart-token';
 const dashboardServerName = `o8-dashboard-restart-test-${process.pid}`;
 const tmuxArgs = (...args: string[]) => ['-L', dashboardServerName, ...args];
@@ -33,6 +39,7 @@ let apiServer: Server;
 let apiPort = 0;
 let wsPort = 0;
 let wsProcess: ChildProcess | null = null;
+let wsClosed: Promise<void> = Promise.resolve();
 let serverOutput = '';
 
 const tmuxAvailable = process.platform !== 'win32' && (() => {
@@ -97,6 +104,8 @@ async function startWsServer() {
       NEXT_ORIGIN: `http://127.0.0.1:${apiPort}`,
     },
   });
+  const child = wsProcess;
+  wsClosed = new Promise<void>((resolve) => child.once('close', () => resolve()));
   wsProcess.stdout?.on('data', (chunk) => { serverOutput += String(chunk); });
   wsProcess.stderr?.on('data', (chunk) => { serverOutput += String(chunk); });
   await waitFor(async () => {
@@ -111,12 +120,35 @@ async function startWsServer() {
 async function stopWsServer() {
   const processToStop = wsProcess;
   wsProcess = null;
-  if (!processToStop || processToStop.exitCode !== null) return;
-  processToStop.kill('SIGTERM');
-  await Promise.race([
-    once(processToStop, 'exit'),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('ws server did not stop')), 10_000)),
-  ]);
+  if (!processToStop) return;
+  if (processToStop.exitCode === null && processToStop.signalCode === null) processToStop.kill('SIGTERM');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      wsClosed,
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('ws server did not close')), 10_000); }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function captureFixtureProcesses(): Map<number, MetadataLockProcessIdentity> {
+  const identities = new Map<number, MetadataLockProcessIdentity>();
+  if (!tmuxAvailable) return identities;
+  const panes = spawnSync('tmux', tmuxArgs('list-panes', '-a', '-F', '#{pid} #{pane_pid}'), { encoding: 'utf8' });
+  if (panes.error) throw panes.error;
+  if (panes.status !== 0 && !/no server running|error connecting.*No such file/i.test(panes.stderr)) {
+    throw new Error(`Cannot inspect fixture tmux processes: ${panes.stderr}`);
+  }
+  const pids = new Set((panes.stdout ?? '').trim().split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0));
+  if (existsSync(identityPath)) pids.add((JSON.parse(readFileSync(identityPath, 'utf8')) as { pid: number }).pid);
+  for (const pid of pids) {
+    const probe = probeMetadataLockProcessIdentitySync(pid);
+    if (probe.state === 'unknown') throw new Error(`Cannot identify fixture process ${pid}: ${probe.detail}`);
+    if (probe.state === 'live') identities.set(pid, probe.identity);
+  }
+  return identities;
 }
 
 async function connectClient() {
@@ -181,16 +213,24 @@ beforeAll(async () => {
 }, 70_000);
 
 afterAll(async () => {
+  const fixtureProcesses = captureFixtureProcesses();
   for (const socket of sockets) socket.close();
-  await stopWsServer().catch(() => undefined);
+  await stopWsServer();
   if (apiServer?.listening) await new Promise<void>((resolve) => apiServer.close(() => resolve()));
   try {
     execFileSync('tmux', tmuxArgs('kill-server'), { stdio: 'ignore' });
   } catch { /* the assertion may fail before the backing session is created */ }
-  // A login shell can finish writing its fixture-home logout state after tmux
-  // acknowledges shutdown. Retry only this owned temporary directory.
+  try {
+    await waitFor(() => [...fixtureProcesses].every(([pid, identity]) => {
+      const probe = probeMetadataLockProcessIdentitySync(pid);
+      return probe.state === 'absent'
+        || (probe.state === 'live' && !sameMetadataLockProcessIdentity(identity, probe.identity));
+    }), 'fixture tmux server, login shell, and interactive program exit');
+  } catch (error) {
+    throw new Error(`Preserved fixture ${dataDir}; processes=${[...fixtureProcesses.keys()]}; entries=${readdirSync(dataDir).join(', ')}. ${String(error)}`);
+  }
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
+}, 45_000);
 
 describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSocket path', () => {
   it('reclaims one owned tmux session with scrollback and the same running interactive program after server loss', async () => {
@@ -231,7 +271,6 @@ describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSo
     }));
     await waitFor(() => capturePane().includes(beforeMarker), 'pre-restart terminal output');
 
-    const identityPath = join(dataDir, 'interactive-program.json');
     const heartbeatPath = join(dataDir, 'interactive-program-heartbeat');
     const programPath = join(dataDir, 'interactive-program.cjs');
     const nonce = `restart-${process.pid}-${Date.now()}`;
