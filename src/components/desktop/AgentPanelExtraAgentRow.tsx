@@ -226,7 +226,7 @@ export function ExtraAgentRowView({
         // HISTORY_ROW_TONES.active in chats/constants.ts — revert both together.
         background: 'transparent',
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: showPreview && preview ? 'flex-start' : 'center',
         gap: 9,
         textAlign: 'left',
         cursor: canInteract ? 'pointer' : 'default',
