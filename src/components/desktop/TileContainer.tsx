@@ -1,14 +1,14 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSplitResize } from './hooks/useSplitResize';
 import { ResizeEdge } from './shell/ResizeEdge';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
   collectLeafNodes,
   computeTileLayout,
-  type TileRect,
   type TileSplitFrame,
 } from '@/lib/tiles/operations';
 import type {
@@ -52,13 +52,13 @@ interface TileContainerProps {
   onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean, exactPlacement?: boolean) => void;
 }
 
-const HANDLE_SIZE = 12;
+const HANDLE_SIZE = 8;
 // Per-leaf gap + squircle. Each leaf gets HALF the gap as inner padding on
 // every edge that faces a sibling, so the sum of two adjacent paddings
 // equals LEAF_GAP. Corners that face a gap get rounded; corners flush
 // against the workspace edge stay square so the leaves align with the
 // surrounding chrome.
-const LEAF_GAP = 10;
+const LEAF_GAP = 8;
 const LEAF_RADIUS = 14;
 
 /**
@@ -179,43 +179,7 @@ export function TileContainer({
     onSplitTile(tileId, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above', true);
   };
 
-  const makeResizeStart = useCallback(
-    (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
-      (event: React.MouseEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        const tileContainer = containerRef.current;
-        if (!tileContainer) return;
-        const outerRect = tileContainer.getBoundingClientRect();
-        // Convert the split's percent-space container rect to pixels.
-        // Drag positions are then interpreted as ratios within this pixel rect.
-        const splitPixelRect = {
-          left: outerRect.left + outerRect.width * containerRect.left,
-          top: outerRect.top + outerRect.height * containerRect.top,
-          width: outerRect.width * containerRect.width,
-          height: outerRect.height * containerRect.height,
-        };
-
-        const handleMove = (moveEvent: MouseEvent) => {
-          const ratio = direction === 'vertical'
-            ? (moveEvent.clientX - splitPixelRect.left) / splitPixelRect.width
-            : (moveEvent.clientY - splitPixelRect.top) / splitPixelRect.height;
-          onResizeSplit(splitId, ratio);
-        };
-
-        const handleUp = () => {
-          document.removeEventListener('mousemove', handleMove);
-          document.removeEventListener('mouseup', handleUp);
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-        };
-
-        document.body.style.cursor = direction === 'vertical' ? 'col-resize' : 'row-resize';
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMove);
-        document.addEventListener('mouseup', handleUp);
-      },
-    [onResizeSplit],
-  );
+  const makeResizeStart = useSplitResize(containerRef, onResizeSplit);
 
   return (
     <div
@@ -423,7 +387,9 @@ export function TileContainer({
         <ResizeHandle
           key={frame.id}
           frame={frame}
-          onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
+          onPointerDown={makeResizeStart(frame.id, frame.direction, frame.container, frame.direction === 'vertical'
+            ? (frame.boundary.left - frame.container.left) / frame.container.width
+            : (frame.boundary.top - frame.container.top) / frame.container.height)}
           onResize={(ratio) => onResizeSplit(frame.id, ratio)}
         />
       ))}
@@ -433,11 +399,11 @@ export function TileContainer({
 
 function ResizeHandle({
   frame,
-  onMouseDown,
+  onPointerDown,
   onResize,
 }: {
   frame: TileSplitFrame;
-  onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   onResize: (ratio: number) => void;
 }) {
   const isVertical = frame.direction === 'vertical';
@@ -465,12 +431,13 @@ function ResizeHandle({
   return (
     <ResizeEdge
       orientation={isVertical ? 'vertical' : 'horizontal'}
+      hitSlop={8}
       aria-label="Resize terminal panes"
       aria-valuemin={20}
       aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
       tabIndex={0}
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       onKeyDown={(event) => {
         const step = isVertical
           ? (event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0)
