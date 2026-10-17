@@ -125,6 +125,8 @@ Shared GitHub quota and durable PR watching are implemented in [#3606](https://g
 
 Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the default action specific to o8, place explicit CLI actions under Tools, and report per-tool progress and verified results. OpenCode checks preserve complete channel versions and the selected package family. Unrecognized installations keep their original updater. Source verification, required PR checks, and released-build acceptance remain separate gates.
 
+Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3108) uses one Threads control beside the task identity and Refresh. Ordinary project list and detail navigation remain available. Native development acceptance uses simulated task data; it does not establish remote execution acceptance.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
