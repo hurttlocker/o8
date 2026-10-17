@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { SmoothCorners } from '@lisse/react';
+import { WORKSPACE_TOOLS_STATE, WORKSPACE_TOOLS_TOGGLE } from './shell/WorkspaceToolsButton';
+import { FloatingSurface } from './FloatingSurface';
 import { CollapsedRailIcon, ChevronsLeftIcon, ChevronsRightIcon } from './branch-rail-collapse';
 import { WorkspaceContextSection } from './WorkspaceContextSection';
 import {
@@ -9,7 +10,6 @@ import {
   COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
   COLLAPSED_BRANCH_RAIL_INSET,
   COLLAPSED_BRANCH_RAIL_WIDTH,
-  WORKSPACE_RAIL_CORNER_SMOOTHING,
 } from './branch-rail-geometry';
 import {
   BranchDetailsOverlay,
@@ -108,8 +108,10 @@ function pickTarget(
 
 const NOOP = () => {};
 
-export function BranchDetailsLauncher({ visible = true, repoPath = null, threadId = null, collapsed = false, onToggleCollapsed }: {
+export function BranchDetailsLauncher({ visible = true, repoPath = null, threadId = null, collapsed = false, onToggleCollapsed, header = false, workspaceId }: {
   visible?: boolean;
+  header?: boolean;
+  workspaceId?: string;
   repoPath?: string | null;
   /** Active orchestrator thread — scopes the Sources card to this conversation. */
   threadId?: string | null;
@@ -120,6 +122,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   const data = useOrchestratorData();
   const hasData = Boolean(data);
   const [progressOpen, setProgressOpen] = useState(false);
+  const [headerOpen, setHeaderOpen] = useState(false);
 
   // Click-to-open overlay (Q ruling 2026-07-14). The capsule stays in layout
   // (never pushes the chat); CLICKING it toggles the full card stack open as a
@@ -131,35 +134,72 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
   const measure = useCallback(() => {
+    if (header) capsuleRef.current = [...document.querySelectorAll<HTMLElement>('[data-workspace-tools-owner]')]
+      .find(node => node.dataset.workspaceToolsOwner === (workspaceId ?? ''))?.querySelector('button') ?? null;
     const el = capsuleRef.current;
-    if (el) setAnchorRect(el.getBoundingClientRect());
-  }, []);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setAnchorRect(header ? new DOMRect(rect.x, rect.bottom + 8, rect.width, 0) : rect);
+    }
+  }, [header, workspaceId]);
 
-  const isOpen = visible && !collapsed;
+  const isOpen = visible && (header ? headerOpen : !collapsed);
   const toggle = () => {
-    onToggleCollapsed?.();
+    measure();
+    if (header) setHeaderOpen(value => !value); else onToggleCollapsed?.();
     window.requestAnimationFrame(() => {
-      if (isOpen) capsuleRef.current?.querySelector<HTMLButtonElement>('[aria-expanded]')?.focus();
+      if (isOpen) {
+        if (header) capsuleRef.current?.focus();
+        else capsuleRef.current?.querySelector<HTMLButtonElement>('[aria-expanded]')?.focus();
+      }
       else overlayRef.current?.querySelector<HTMLButtonElement>('[aria-label="Hide workspace details"]')?.focus();
     });
   };
+
+  useEffect(() => {
+    if (!header || !visible || !hasData) return;
+    const request = (event: Event) => {
+      if ((event as CustomEvent<{ workspaceId: string }>).detail?.workspaceId !== (workspaceId ?? '')) return;
+      measure(); setHeaderOpen(value => !value);
+      requestAnimationFrame(() => overlayRef.current?.querySelector<HTMLButtonElement>('[aria-label="Hide workspace details"]')?.focus());
+    };
+    window.addEventListener(WORKSPACE_TOOLS_TOGGLE, request);
+    return () => window.removeEventListener(WORKSPACE_TOOLS_TOGGLE, request);
+  }, [header, visible, hasData, workspaceId, measure]);
+  useEffect(() => {
+    if (!header) return;
+    window.dispatchEvent(new CustomEvent(WORKSPACE_TOOLS_STATE, { detail: { workspaceId: workspaceId ?? '', open: isOpen } }));
+    if (!isOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!capsuleRef.current?.contains(event.target as Node) && !overlayRef.current?.contains(event.target as Node)) setHeaderOpen(false);
+    };
+    const select = () => setHeaderOpen(false);
+    document.addEventListener('pointerdown', outside);
+    window.addEventListener('o8:request-select-tab', select);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      window.removeEventListener('o8:request-select-tab', select);
+      window.dispatchEvent(new CustomEvent(WORKSPACE_TOOLS_STATE, { detail: { workspaceId: workspaceId ?? '', open: false } }));
+    };
+  }, [header, isOpen, workspaceId]);
 
   // Measure the capsule on mount + keep the overlay glued to it. The overlay is
   // always mounted (it cross-fades / morphs on open+close), so we measure
   // regardless of open state.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    measure();
-    // The right panel animates the workspace width without a window resize.
-    // Keep the closed drawer's anchor current too, so its first open frame
-    // starts at the rail instead of jumping from the previous panel position.
-    const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    if (workspace) observer?.observe(workspace);
+    const frame = window.requestAnimationFrame(() => {
+      measure();
+      // Observe after resolving the header trigger and its workspace.
+      const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
+      if (workspace) observer?.observe(workspace);
+    });
     const onScrollResize = () => measure();
     window.addEventListener('scroll', onScrollResize, true);
     window.addEventListener('resize', onScrollResize);
     return () => {
+      window.cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener('scroll', onScrollResize, true);
       window.removeEventListener('resize', onScrollResize);
@@ -175,7 +215,6 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // idle frames are a string compare. Closed card costs nothing.
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
-    measure();
     let raf = 0;
     let lastKey = '';
     const glue = () => {
@@ -185,14 +224,14 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
         const key = `${rect.top}|${rect.right}`;
         if (key !== lastKey) {
           lastKey = key;
-          setAnchorRect(rect);
+          setAnchorRect(header ? new DOMRect(rect.x, rect.bottom + 8, rect.width, 0) : rect);
         }
       }
       raf = window.requestAnimationFrame(glue);
     };
     raf = window.requestAnimationFrame(glue);
     return () => window.cancelAnimationFrame(raf);
-  }, [isOpen, measure]);
+  }, [header, isOpen]);
 
   const activePacket = useMemo(
     () => repoPath ? pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath) : null,
@@ -273,7 +312,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
       {/* Always-in-layout trigger: the collapsed icon capsule (Codex parity, Q
           2026-07-13). Clicking an icon floats the full card stack as an overlay
           — the capsule width never changes, so the chat is never pushed. */}
-      <aside
+      {!header ? <aside
         ref={capsuleRef}
         className="hide-scrollbar"
         style={{
@@ -292,33 +331,18 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
           scrollbarWidth: 'none',
         }}
       >
-        <SmoothCorners
+        <FloatingSurface
+          overlay
+          data-workspace-shortcut-capsule
           inert={isOpen}
           aria-hidden={isOpen}
-          corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-          innerBorder={{ width: 1, color: 'var(--t-divider-subtle)', opacity: 1 }}
-          autoEffects={false}
-          style={{
-            width: COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 0,
-            paddingTop: 5,
-            paddingBottom: 5,
-            paddingLeft: 4,
-            paddingRight: 4,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'transparent',
-            background: 'var(--t-bg-card)',
-            flexShrink: 0,
-            // Morph: the capsule fades out as the card scales up out of its
-            // corner, so the two never coexist (Q ruling 2026-07-14).
-            opacity: isOpen ? 0 : 1,
-            pointerEvents: isOpen ? 'none' : 'auto',
-            transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}>
+          style={{ width: COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH, flexShrink: 0,
+            borderRadius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
+            boxShadow: '0 4px 14px rgba(15, 23, 42, 0.16)',
+            opacity: isOpen ? 0 : 1, pointerEvents: isOpen ? 'none' : 'auto',
+            transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+          contentStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
+            paddingTop: 5, paddingBottom: 5, paddingLeft: 4, paddingRight: 4 }}>
           {/* The arrow opens the drawer. Every other glyph here used to ALSO
               just open the drawer — five buttons for one action. They carry
               their own destinations now (Q 2026-07-16). */}
@@ -356,11 +380,12 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
             )}
           /> : null}
           {sources.length > 0 ? <CollapsedRailIcon title="Sources" onClick={toggle}><SquaresIcon /></CollapsedRailIcon> : null}
-        </SmoothCorners>
-      </aside>
+        </FloatingSurface>
+      </aside> : null}
 
       {anchorRect ? (
         <BranchDetailsOverlay
+          headerAnchor={header}
           overlayRef={overlayRef}
           open={isOpen}
           anchorRect={anchorRect}
