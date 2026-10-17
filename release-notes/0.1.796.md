@@ -1,0 +1,16 @@
+- Chat with o8 from the terminal using `o8 chat` or interactive `o8`, with streaming replies, conversation resume, multiline input, prompt history, expandable tool output and image or text attachments. New and resumed chats start in plan mode; use `--execute` to allow execution.
+- Keep terminal output across page reloads and backend restarts, restore hidden worker panes and Files or Devices tabs, and reconnect the desktop to an existing server before starting another backend.
+- Improve workspace pane dragging, working-agent status, repository Markdown images, file-search error recovery and message readability in All Glass.
+- Download and stage an update with visible progress before restarting. See installed and available versions, the live work that blocks a restart, and separate app and CLI update status.
+- Hold a mission's automatic merges for operator approval through the Inbox. A review without its originating chat stays at review instead of waking a default conversation.
+- Run reviews through the built-in Pi when the configured reviewer CLI is unavailable, keeping OpenRouter-pinned reviews on their model and payer and using managed Pi otherwise. An untrusted lane no longer stops the remaining review queue.
+- Bound Pi worker startup with a deadline, close late sessions, and let long operator requests continue within the existing request timeout.
+- Separate OpenRouter key totals from work run by o8, distinguish reported, estimated and unknown costs, and give clearer no-credit errors.
+- Record each review turn's backend, model, payer and cost in mission receipts, and record managed Pi model calls for lead, reviewer and worker roles without counting reviews twice.
+- Dispatch comparison missions after their seed creates candidates, return a clear not-found response for unknown packet resets, and preserve packet closure when its lane record is missing.
+- Protect active writers during automatic pull request workspace cleanup, match retired workspaces through path aliases, and retain ownership evidence when a managed directory or its parent is missing.
+- Identify macOS storage by its mounted device and prevent competing admission processes from interrupting the account lease owner.
+- Keep terminal identity and packaged-app environment settings from leaking into managed development sessions, and repair cache staging imports and compiler option forwarding.
+- Remove the updater's unused ZIP dependency feature while retaining its TLS support.
+- Restore strict coverage across all 695 integration test files, remove the Linux exemption baseline, and split weekly integration checks into six shards with explicit content-search prerequisites and reliable fixture cleanup.
+- Reconcile completed roadmap work and retain the isolated Tern packet-info experiment as read-only repository tooling, separate from ordinary CLI installs.
