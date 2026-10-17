@@ -31,10 +31,16 @@ function root(): string {
 }
 function database<T>(directory: string, action: (db: Database.Database) => T): T {
   const file = join(directory, 'account-state.sqlite');
-  const db = new Database(file, { timeout: 0 });
+  const held = authority.getStore();
+  // The active owner may wait briefly for transient SQLite readers. Claiming
+  // and releasing a lease still return immediately on database contention.
+  const timeout = held?.active && held.root === directory ? 100 : 0;
+  const db = new Database(file, { timeout });
   try {
     db.pragma('synchronous = FULL');
-    db.exec(`CREATE TABLE IF NOT EXISTS account_lease (
+    const schema = db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name IN ('account_lease', 'account_state')`).get() as { count: number };
+    if (schema.count !== 2) db.exec(`CREATE TABLE IF NOT EXISTS account_lease (
       id INTEGER PRIMARY KEY CHECK (id = 1), reservation TEXT NOT NULL, pid INTEGER NOT NULL, identity TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS account_state (
       id INTEGER PRIMARY KEY CHECK (id = 1), generation TEXT NOT NULL, status TEXT NOT NULL,
@@ -66,14 +72,18 @@ function requireAuthority(): Authority {
   return held;
 }
 function claim(directory: string, reservation: string, identity: MetadataLockProcessIdentity): LeaseOwner | null {
-  return database(directory, (db) => db.transaction(() => {
-    const inserted = db.prepare('INSERT OR IGNORE INTO account_lease VALUES (1, ?, ?, ?)')
-      .run(reservation, process.pid, JSON.stringify(identity));
-    if (inserted.changes === 1) return null;
-    const owner = db.prepare('SELECT reservation, pid, identity FROM account_lease WHERE id = 1').get() as LeaseOwner | undefined;
-    if (!owner) throw new AccountStateUnavailableError();
-    return owner;
-  }).immediate());
+  return database(directory, (db) => {
+    const current = db.prepare('SELECT reservation, pid, identity FROM account_lease WHERE id = 1').get() as LeaseOwner | undefined;
+    if (current) return current;
+    return db.transaction(() => {
+      const inserted = db.prepare('INSERT OR IGNORE INTO account_lease VALUES (1, ?, ?, ?)')
+        .run(reservation, process.pid, JSON.stringify(identity));
+      if (inserted.changes === 1) return null;
+      const owner = db.prepare('SELECT reservation, pid, identity FROM account_lease WHERE id = 1').get() as LeaseOwner | undefined;
+      if (!owner) throw new AccountStateUnavailableError();
+      return owner;
+    }).immediate();
+  });
 }
 function ownerIdentity(owner: LeaseOwner): MetadataLockProcessIdentity {
   const parsed: unknown = JSON.parse(owner.identity);
