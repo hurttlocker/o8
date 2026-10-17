@@ -14,7 +14,8 @@
  * Activity is the single mission-control surface.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useTheme } from '@/lib/theme/context';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -106,6 +107,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   onSelectPR,
   onClosePR,
 }: O8ActivityPaneProps) {
+  const { workspaceGlass } = useTheme();
   const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<O8FeedFilter>('all');
@@ -441,11 +443,17 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   return (
     <div style={{
+      ...(workspaceGlass ? {
+        '--o8-activity-label-fg': 'var(--t-text-secondary)',
+        '--o8-activity-label-bg': 'var(--t-input-bg)',
+        '--o8-activity-issue-fg': 'var(--t-text-muted)',
+        '--o8-activity-issue-bg': 'var(--t-hover)',
+      } : {}),
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
       overflow: 'hidden',
-    }}>
+    } as CSSProperties}>
       {/* Header: repo selector + filter pills */}
       <div style={{
         paddingTop: 10,
