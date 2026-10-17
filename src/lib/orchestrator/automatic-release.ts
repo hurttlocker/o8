@@ -1,11 +1,12 @@
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import { getLane } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import { readOrchestratorControlPlaneState, withLockedState } from './control-plane';
+import { readOrchestratorControlPlaneState, runtimeTruthFromInventoryAgent, withLockedState } from './control-plane';
 import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from './mission-registry';
 import { markPacketReleased } from './packet-release-truth';
 import type { OrchestratorPacket } from './types';
 import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentLaneHead } from './release-ownership';
+import { runtimeTruthHasActiveWriter } from './runtime-truth';
 
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 
@@ -14,6 +15,23 @@ export function canApplyAutomaticRelease(packet: OrchestratorPacket, lane: Lane,
   if (!['reviewing', 'completed', 'archived'].includes(lane.status)) return false;
   if (lane.packetId !== packet.id) return false;
   return packetReleaseIdentityIsCurrent(packet, lane.id, generation, allowReleased);
+}
+
+/**
+ * A live writer on the lane's session can still add commits, whatever the
+ * packet status says: an operator-held packet reconciles to `blocked` before
+ * its writer is checked. An unreadable inventory refuses too.
+ */
+async function laneHasActiveWriter(lane: Lane): Promise<boolean> {
+  if (!lane.sessionKey) return false;
+  try {
+    const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+    const agent = (await getRuntimeInventorySnapshot({ fresh: true })).agents
+      .find((candidate) => candidate.sessionKey === lane.sessionKey);
+    return Boolean(agent && runtimeTruthHasActiveWriter(runtimeTruthFromInventoryAgent(agent)));
+  } catch {
+    return true;
+  }
 }
 
 async function matchesMergedPull(lane: Lane, pull: GitHubPullRequestSnapshot): Promise<boolean> {
@@ -50,6 +68,7 @@ export async function releaseMergedPullRequestPacket(
     if (packet.releaseState === 'released' && (packet.releaseStatePayload?.headSha !== pull.headSha
       || packet.releaseStatePayload?.mergeCommit !== pull.mergeCommit)) return false;
     if (!(await matchesMergedPull(freshLane, pull))) return false;
+    if (await laneHasActiveWriter(freshLane)) return false;
     const finalLane = getLane(lane.id);
     if (!finalLane || !sameLane(finalLane) || !canApplyAutomaticRelease(packet, finalLane, generation, true)) return false;
     markPacketReleased(packet, { source: 'headless_released', evidenceKind: 'pull_request_merged',

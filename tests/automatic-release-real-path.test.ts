@@ -153,15 +153,24 @@ describe('automatic PR release through the real reaper and durable missions', ()
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
   });
 
-  it('refuses automatic release while the packet says its worker is running', async () => {
-    // Called directly: in a reaper tick, reconcile first settles a running packet
-    // whose lane is already reviewing, and the merged PR then releases it.
+  it.each(['held', 'running'] as const)('refuses automatic release while a live writer owns a %s packet', async (state) => {
+    // The fixture packet is operator-held; a held packet reconciles to blocked before its writer is read.
     const f = fixture();
-    f.packet.status = 'running';
+    const sessionKey = 'codex-owned:auto-release-live-writer';
+    updateLane(f.lane.id, { sessionKey }, 'system');
+    if (state === 'running') f.packet.status = 'running';
     f.persist();
-    expect(await releaseMergedPullRequestPacket(f.lane, f.pull)).toBe('held');
-    expect(f.read().packets[0].releaseState).toBe('pending');
-    expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+    const inventory = vi.mocked(getRuntimeInventorySnapshot);
+    inventory.mockImplementation(async () => ({ agents: [{ sessionKey, runtime: 'codex', status: 'running',
+      runtimeSurface: { ownership: 'owned', capabilities: { interrupt: true, sendInput: true }, lifecycle: { availability: 'running' } } }] }) as never);
+    try {
+      await runWorktreeReaperTick();
+      expect(f.read().packets[0].releaseState).toBe('pending');
+      expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    } finally {
+      inventory.mockImplementation(async () => ({ agents: [] }) as never);
+    }
   });
 
   it('refuses a delayed release after a new steer enters the same lane', async () => {
