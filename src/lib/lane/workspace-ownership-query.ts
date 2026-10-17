@@ -3,7 +3,7 @@ import { getSqlite } from '@/lib/db';
 import { getLane } from './registry';
 import type { Lane } from './types';
 import type { WorktreeMetaEntry } from '@/lib/worktree/types';
-import { canonicalRepoRoot, isManagedPacketWorktreeId } from '@/lib/worktree/root-layout';
+import { canonicalRepoRoot, canonicalWorktreeNamespace, isManagedPacketWorktreeId } from '@/lib/worktree/root-layout';
 import { ensureMaintenanceDiscoverySchema, WORKTREE_LANE_BASENAME_SQL } from '@/lib/worktree/maintenance-discovery';
 
 const MAX_EXACT_OWNERS = 32;
@@ -28,12 +28,10 @@ export function exactWorkspaceOwningLanes(
   repositoryPath: string, sourcePath: string, metadata?: WorktreeMetaEntry,
 ): Lane[] {
   const source = path.resolve(sourcePath);
-  const canonicalSource = metadata?.materializationIdentity?.canonicalPath ?? canonicalRepoRoot(source);
+  const canonicalSource = metadata?.materializationIdentity?.canonicalPath ?? canonicalWorktreeNamespace(source);
   const lanes = indexedWorkspaceLaneCandidates(source, canonicalSource, path.basename(source))
     .filter((lane) => lane.worktreePath !== null
-      && [source, canonicalSource].includes(path.join(
-        canonicalRepoRoot(path.dirname(lane.worktreePath)), path.basename(lane.worktreePath),
-      ))
+      && [source, canonicalSource].includes(canonicalWorktreeNamespace(lane.worktreePath))
       && canonicalRepoRoot(lane.repoPath) === canonicalRepoRoot(repositoryPath));
   if (metadata?.laneId && metadata.packetId && metadata.sessionKey
     && metadata.materializationIdentity?.canonicalPath === source
