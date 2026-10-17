@@ -125,6 +125,8 @@ Shared GitHub quota and durable PR watching are implemented in [#3606](https://g
 
 Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the default action specific to o8, place explicit CLI actions under Tools, and report per-tool progress and verified results. OpenCode checks preserve complete channel versions and the selected package family. Unrecognized installations keep their original updater. Source verification, required PR checks, and released-build acceptance remain separate gates.
 
+Composer Brain routing [#3863](https://github.com/hurttlocker/o8/issues/3863) prefers an authenticated native Codex or Claude connection and uses the Terra or Sonnet answer tier. Explicit Codex Brain model choices remain effective. Managed Brain is the fallback when neither supported native connection is ready; other runtime inference adapters remain separate work. Connected conversation retrieval is lexical and does not start paid semantic embedding calls. Native Codex acceptance, fixture coverage and released-build acceptance remain separate gates.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
