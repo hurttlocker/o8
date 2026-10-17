@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as Reac
 import { CheckCircle2 } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
-import { HISTORY_ROW_TONES } from './constants';
+import { HISTORY_ROW_TONES, SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './constants';
 import {
   formatElapsedAgo,
   historySection,
@@ -346,12 +346,12 @@ export function HistoryChatRow({
       ) : null}
       <span style={{ flex: 1, minWidth: 0, position: 'relative' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, height: 17 }}>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap',
+          <span style={{ minWidth: 0, maxWidth: SIDEBAR_TITLE_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px',
             color: recede && !active && !hovered ? 'var(--t-text-muted)' : 'var(--t-text)' }}>
             {item.title}
           </span>
-          {inlineRepo ? <span style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap',
+          {inlineRepo ? <span style={{ flexShrink: 1, minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             fontSize: 11.5, fontWeight: 260, color: 'var(--t-text-faint)' }}>{inlineRepo}</span> : null}
         </span>
         {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: roomy ? 6 : 4, fontSize: 11.5, lineHeight: roomy ? 1.45 : 1.4, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
