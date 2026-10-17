@@ -39,7 +39,7 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   flatHistoryItems, flatHistoryDateGroups, flatHistoryRepoGroups, collapsedRepoGroups,
   repoByGroupKey, toggleRepoGroup, onCreateOrchestratorForRepo, renderHistoryRow,
   hiddenChatCount, showMore, fixtures, activeSessionKey, onOpenHistoryChat, scheduledSessions, viewActions }: Props) {
-  const source = chatGroupBy === 'chronological' ? flatHistoryItems : remainder;
+  const source = chatGroupBy === 'chronological' || chatGroupBy === 'manual' ? flatHistoryItems : remainder;
   const pinned = source.filter(item => item.pinned);
   const conversations = source.filter(item => !item.pinned);
   const attentionCount = fixtures.filter(sample => attentionRank(sidebarFixtureAttention(sample)) > 0).length;
@@ -58,14 +58,14 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   </button> : null;
   if (chatGroupBy === 'scheduled') return <ChatHistoryShelf label="Scheduled" action={picker}
    >
-    {demos}{flatHistoryItems.map(renderHistoryRow)}{scheduledSessions}{more}
+    {demos}{flatHistoryItems.map(item => renderHistoryRow(item))}{scheduledSessions}{more}
   </ChatHistoryShelf>;
   if (chatGroupBy === 'date' || chatGroupBy === 'repo') return <ChatHistoryShelf label="Recents" action={picker}
     storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`}>
     {demos}
     {chatGroupBy === 'date' ? flatHistoryDateGroups.map(group => <ChatHistoryShelf key={group.key}
       label={group.label} storageKey={`o8:chat-date-${group.key}-collapsed`}>
-      {group.items.map(renderHistoryRow)}
+      {group.items.map(item => renderHistoryRow(item))}
     </ChatHistoryShelf>) : flatHistoryRepoGroups.map(group => {
       const groupCollapsed = collapsedRepoGroups.has(group.key);
       const groupRepo = group.key === CONVERSATIONS_GROUP_KEY ? undefined : repoByGroupKey.get(group.key);
@@ -77,14 +77,14 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
           createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined} />
         {!groupCollapsed ? <>
           {groupRepo?.readiness?.state === 'missing' ? <MissingRepoRailNotice summary={groupRepo.readiness.summary ?? ''} /> : null}
-          {group.items.map(renderHistoryRow)}
+          {group.items.map(item => renderHistoryRow(item))}
         </> : null}
       </div>;
     })}{more}
   </ChatHistoryShelf>;
   if (chatGroupBy === 'chronological') return <>
     {pinned.length ? <ChatHistoryShelf label="Pinned" action={picker}>
-      {pinned.map(renderHistoryRow)}
+      {pinned.map(item => renderHistoryRow(item))}
     </ChatHistoryShelf> : null}
     <ChatHistoryShelf label="Recents" storageKey="o8:chat-chronological-recents-collapsed" action={pinned.length ? undefined : picker}>
       {deriveHistoryDateGroups<{ modifiedAt: string; item?: ChatHistoryItem; sample?: SidebarFixture }>([
@@ -101,10 +101,10 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   return <>
     {hasPriority ? <ChatHistoryShelf label="Priority" action={picker}>
       <SidebarDemoStates mode={chatGroupBy} fixtures={priorityFixtures} publishAttention={false}
-        activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />{priority.map(renderHistoryRow)}
+        activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />{priority.map(item => renderHistoryRow(item))}
     </ChatHistoryShelf> : null}
     {pinned.length ? <ChatHistoryShelf label="Pinned" action={hasPriority ? undefined : picker}>
-      {pinned.map(renderHistoryRow)}
+      {pinned.map(item => renderHistoryRow(item))}
     </ChatHistoryShelf> : null}
     {chatGroupBy === 'flat' ? <>
       {deriveHistoryDateGroups<{ modifiedAt: string; item?: ChatHistoryItem; sample?: SidebarFixture }>([
@@ -121,7 +121,7 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
       {more}
     </> : <ChatHistoryShelf label="Recents"
       storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`} action={hasPriority || pinned.length ? undefined : picker}>
-      {demos}{conversations.map(renderHistoryRow)}{more}
+      {demos}{conversations.map(item => renderHistoryRow(item))}{more}
     </ChatHistoryShelf>}
   </>;
 }
