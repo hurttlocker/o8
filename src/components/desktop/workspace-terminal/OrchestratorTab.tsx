@@ -45,7 +45,6 @@ import { OrchestratorPromptControls } from '@/components/desktop/orchestrator/Or
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
-import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
 import { ThoughtsChatPanel, type ThoughtsChatPanelChromeState, type ThoughtsChatPanelHandle } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } from '@/components/desktop/thoughts/orchestrator-home-mode';
@@ -977,47 +976,16 @@ function OrchestratorTabInner({
     );
   }
 
-  // Branch-details rail rendered to the RIGHT of the transcript (inside the
-  // panel) so the composer spans full width even when the rail is up (Q ruling
-  // 2026-07-11). The rail is now a fixed COLLAPSED_BRANCH_RAIL_WIDTH capsule
-  // whose expanded card floats as a hover/click overlay (portal), so it never
-  // crowds the chat. The old railFits width-fold gate is gone (Q ruling
-  // 2026-07-14) — the capsule shows whenever projectContextRailVisible, at any
-  // window size.
-  const branchRail = (
-    <div
-      style={{
-        // The rail is ALWAYS the collapsed capsule width in layout now — the
-        // expanded card stack floats as a hover overlay (portal) instead of
-        // widening this flex item, so revealing it never pushes the chat over
-        // (git/environment popover, Q ruling 2026-07-14).
-        width: projectContextRailVisible ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
-        flexShrink: 0,
-        // minHeight:0 keeps this flex item bounded by the row height so the
-        // rail's own overflowY:auto can engage — without it the rail sized to
-        // its content and the ancestor CLIPPED it with no way to scroll
-        // (Q live-hit, short windows, 2026-07-13).
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-    >
-      <BranchDetailsLauncher
-        visible={projectContextRailVisible && active}
-        repoPath={effectiveRepoPath === ORCHESTRATOR_HOME_REPO_SENTINEL ? null : effectiveRepoPath}
-        threadId={chatChromeState.threadId}
-        collapsed={branchRailCollapsed}
-        onToggleCollapsed={toggleBranchRailCollapsed}
-      />
-    </div>
-  );
+  const branchRail = projectContextRailVisible ? <BranchDetailsLauncher
+    header workspaceId={workspaceId} visible={active}
+    repoPath={effectiveRepoPath === ORCHESTRATOR_HOME_REPO_SENTINEL ? null : effectiveRepoPath}
+    threadId={chatChromeState.threadId}
+    collapsed={branchRailCollapsed} onToggleCollapsed={toggleBranchRailCollapsed}
+  /> : null;
 
   const thoughtsChatPanel = (
     <ThoughtsChatPanel
       ref={chatPanelRef}
-      transcriptSideRail={projectContextRailVisible ? branchRail : null}
       open={active}
       // The panel's #1459 crash-recovery auto-restore (adopt the latest thread
       // when it was modified <60s ago) belongs ONLY to the boot-restore tab.
@@ -1142,6 +1110,7 @@ function OrchestratorTabInner({
           minHeight: 0,
           display: 'flex',
           flexDirection: 'row',
+          position: 'relative',
         }}
       >
         {/* Chat body */}
@@ -1163,8 +1132,7 @@ function OrchestratorTabInner({
           onCloseLeaf={sessionTiles.closeSessionLeafById}
           onFocusSession={sessionTiles.setFocusedSessionKey}
         />
-        {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
-            it sits beside the transcript, not the composer — see branchRail. */}
+        {branchRail}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <OrchestratorPromptControls active={active} repoPath={repoPath ?? null} repoName={repoLabel?.trim() || repoPath?.split('/').filter(Boolean).pop() || 'This repo'} onDraft={handlePaletteDraft} />

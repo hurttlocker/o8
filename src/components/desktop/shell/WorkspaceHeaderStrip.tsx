@@ -18,6 +18,7 @@ import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { useSidebarAttention } from '../repo-focus/tabs/chats/sidebar-view-store';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
+import { WorkspaceToolsButton } from './WorkspaceToolsButton';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
@@ -27,12 +28,6 @@ import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
 import { revealHeaderTab, scrollTabStripFromWheel } from './tab-scroll';
-
-/** Right-edge inset that lands the header's rightmost control on the branch rail
- *  capsule's centre, one row below. Measured, not guessed.
- *
- *  The panel toggle is 30px wide; the margin positions its centre. */
-const RAIL_COLUMN_ALIGN_NUDGE = 4;
 
 export function WorkspaceHeaderStrip({
   leadingInset = false,
@@ -46,6 +41,7 @@ export function WorkspaceHeaderStrip({
   rightPanelDisabled = false,
   onToggleRightPanel,
   approvalCount = 0,
+  projectContextRailAvailable = false,
   onOpenInbox,
   headerLabel,
   headerTabs,
@@ -107,6 +103,7 @@ export function WorkspaceHeaderStrip({
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
             {workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
+            {projectContextRailAvailable ? <WorkspaceToolsButton workspaceId={tabWorkspaceId ?? workspaceId} /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -116,8 +113,9 @@ export function WorkspaceHeaderStrip({
               />
             ) : null}
             {showRightPanelFallbackToggle ? (
-              <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
+              <div style={{ display: 'inline-flex' }}>
                 <RightPanelMorphButton
+                  yNudge={1.3}
                   workspacePanelVisible={false}
                   o8PanelVisible={false}
                   onToggleO8Panel={onToggleRightPanel}

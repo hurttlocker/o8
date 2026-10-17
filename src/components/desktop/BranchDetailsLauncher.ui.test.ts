@@ -3,13 +3,14 @@
 import { act, createElement, useState, type ComponentProps, type HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WorkspaceToolsButton } from './shell/WorkspaceToolsButton';
 import { BranchDetailsLauncher } from './BranchDetailsLauncher';
 import { OrchestratorDataProvider, type OrchestratorDataValue } from './orchestrator-data-context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style, inert, 'aria-hidden': hidden }: HTMLAttributes<HTMLDivElement>) =>
   createElement('div', { style, inert, 'aria-hidden': hidden }, children) }));
-vi.mock('framer-motion', () => ({ useReducedMotion: () => true }));
+vi.mock('framer-motion', async original => ({ ...await original<typeof import('framer-motion')>(), useReducedMotion: () => true }));
 vi.mock('./useBranchPr', () => ({ useBranchPr: () => null }));
 vi.mock('./pr-panel/usePrDetail', () => ({ usePrDetail: () => ({ detail: null }) }));
 vi.mock('./use-thread-sources', () => ({ useThreadSources: () => [] }));
@@ -30,13 +31,14 @@ describe('workspace details through the orchestrator rail', () => {
   const details = () => document.querySelector<HTMLElement>('[data-workspace-details]')!;
   const button = (name: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;
 
-  function Harness({ path, visible = true }: { path: string | null; visible?: boolean }) {
+  function Harness({ path, visible = true, header = false }: { path: string | null; visible?: boolean; header?: boolean }) {
     const [collapsed, setCollapsed] = useState(true);
     const data = { agents: [], missionState: { packets: [packet(repo)] }, selectedPacketId: 'worker',
       workspaceTargets: [{ id: 'target', label: 'Sample repo', repoName: 'sample', localPath: repo, branch: 'stale-target' }],
       onMissionStateChange: vi.fn(), onOpenO8Panel: openPanel } as unknown as OrchestratorDataValue;
-    return createElement(OrchestratorDataProvider, data as ComponentProps<typeof OrchestratorDataProvider>, createElement(BranchDetailsLauncher, {
-      repoPath: path, visible, collapsed, onToggleCollapsed: () => setCollapsed(!collapsed),
+    return createElement(OrchestratorDataProvider, data as ComponentProps<typeof OrchestratorDataProvider>,
+      header ? createElement(WorkspaceToolsButton, { workspaceId: 'pane-one' }) : null, createElement(BranchDetailsLauncher, {
+      header, workspaceId: 'pane-one', repoPath: path, visible, collapsed, onToggleCollapsed: () => setCollapsed(!collapsed),
     }));
   }
   const render = async (path: string | null = repo, visible = true) => {
@@ -67,6 +69,26 @@ describe('workspace details through the orchestrator rail', () => {
     act(() => root.unmount()); container.remove(); vi.unstubAllGlobals();
   });
 
+  it('opens workspace tools from the scoped header, frosts immediately, and closes on Escape or outside press', async () => {
+    await act(async () => root.render(createElement(Harness, { path: repo, header: true })));
+    expect(container.querySelector('aside')).toBeNull();
+    expect(button('Workspace details')).toBeFalsy();
+    const trigger = button('Workspace tools');
+    trigger.getBoundingClientRect = () => ({ x: 500, left: 500, top: 8, right: 526, bottom: 34, width: 26, height: 26 } as DOMRect);
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(details().getAttribute('role')).toBe('dialog');
+    expect(details().style.top).toBe('42px');
+    expect(details().style.backdropFilter).toContain('blur(24px)');
+    expect(details().style.transition).not.toContain('opacity');
+    expect(button('o8.md preview')).toBeTruthy(); expect(button('Supervisor inbox')).toBeTruthy();
+    await act(async () => details().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false'); expect(details().hasAttribute('inert')).toBe(true);
+    await act(async () => trigger.click());
+    await act(async () => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('shows the chat checkout and real Git branch, and opens each worktree only in Files', async () => {
     await render(); await open();
     expect(details().textContent).toContain('sampleWorktreechat/actual');
@@ -95,6 +117,9 @@ describe('workspace details through the orchestrator rail', () => {
     await open();
     expect(details().hasAttribute('inert')).toBe(false);
     expect(button('Workspace details').closest('[inert]')).not.toBeNull();
+    const capsule = container.querySelector<HTMLElement>('[data-workspace-shortcut-capsule]')!;
+    expect(capsule.style.backdropFilter).toContain('blur(24px)');
+    expect(capsule.style.pointerEvents).toBe('none');
     await act(async () => button('Hide workspace details').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(details().hasAttribute('inert')).toBe(true);
     expect(button('Workspace details').getAttribute('aria-expanded')).toBe('false');
