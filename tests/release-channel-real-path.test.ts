@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveReleaseChannel } from '../scripts/lib/release-channel.mjs';
+import { bundleContentSha256, resolveMacosCpuArtifacts } from '../scripts/lib/macos-release-artifacts.mjs';
 
 const roots: string[] = [];
 const releaseScript = join(process.cwd(), 'scripts/release.mjs');
@@ -59,6 +60,10 @@ function infoPlist(version: string) {
 }
 
 function configureUpdaterSignature(root: string, archive: string, signaturePath: string) {
+  configureUpdaterSignatures(root, [[archive, signaturePath]]);
+}
+
+function configureUpdaterSignatures(root: string, archives: string[][]) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const keyId = Buffer.from('o8fixtur');
   const publicDer = publicKey.export({ format: 'der', type: 'spki' });
@@ -70,10 +75,12 @@ function configureUpdaterSignature(root: string, archive: string, signaturePath:
     plugins: { updater: { pubkey: publicKeyConfig } },
   }));
 
-  const message = createHash('blake2b512').update(readFileSync(archive)).digest();
-  const signaturePacket = Buffer.concat([Buffer.from('ED'), keyId, sign(null, message, privateKey)]);
-  const standardSignature = `untrusted comment: fixture updater signature\n${signaturePacket.toString('base64')}\n`;
-  writeFileSync(signaturePath, Buffer.from(standardSignature).toString('base64'));
+  for (const [archive, signaturePath] of archives) {
+    const message = createHash('blake2b512').update(readFileSync(archive)).digest();
+    const signaturePacket = Buffer.concat([Buffer.from('ED'), keyId, sign(null, message, privateKey)]);
+    const standardSignature = `untrusted comment: fixture updater signature\n${signaturePacket.toString('base64')}\n`;
+    writeFileSync(signaturePath, Buffer.from(standardSignature).toString('base64'));
+  }
 }
 
 function fixture(version = '0.1.741-preview.1') {
@@ -105,7 +112,7 @@ function fixture(version = '0.1.741-preview.1') {
 const record = (name, args = []) => appendFileSync(process.env.O8_CHANNEL_TEST_LOG, JSON.stringify({name, args}) + '\\n');`;
   const childProcess = `${prelude}
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 const realChildProcess = process.getBuiltinModule('node:child_process');
 export function execFileSync(command, args = [], options = {}) {
   if (command === 'tar') return realChildProcess.execFileSync(command, args, options);
@@ -117,12 +124,17 @@ export function execFileSync(command, args = [], options = {}) {
   if (command.endsWith('hdiutil')) {
     if (args[0] === 'attach') {
       const mountpoint = args[args.indexOf('-mountpoint') + 1];
-      cpSync(process.env.O8_CHANNEL_TEST_DMG_APP, join(mountpoint, 'o8.app'), { recursive: true, preserveTimestamps: true });
+      const cpuApps = JSON.parse(process.env.O8_CHANNEL_TEST_CPU_DMG_APPS || '{}');
+      const source = cpuApps[basename(args.at(-1))] || process.env.O8_CHANNEL_TEST_DMG_APP;
+      cpSync(source, join(mountpoint, 'o8.app'), { recursive: true, preserveTimestamps: true });
       return '/dev/disk99';
     }
     return '';
   }
   if (command.endsWith('codesign')) return '';
+  if (command === 'xcrun' && args[0] === 'stapler' && process.env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY === '1') {
+    throw new Error('CPU notarization ticket unavailable');
+  }
   if (command.endsWith('plutil')) {
     const plist = readFileSync(args[args.length - 1], 'utf8');
     const value = plist.match(/<key>CFBundleShortVersionString<\\/key>\\s*<string>([^<]+)<\\/string>/)?.[1];
@@ -141,7 +153,11 @@ export function execFileSync(command, args = [], options = {}) {
   return '';
 }
 export const spawn = () => { throw new Error('unexpected spawn'); };
-export const spawnSync = spawn;`;
+export function spawnSync(command, args) {
+  if (command !== '/usr/bin/codesign') throw new Error('unexpected spawnSync');
+  if (args.includes('--verbose=4')) return { status: 0, stdout: '', stderr: 'Identifier=fixture\\nTeamIdentifier=not set\\nCodeDirectory flags=0x10000(runtime)\\nRuntime Version=15.0.0' };
+  return { status: 0, stdout: args.includes('-r') ? 'designated => identifier fixture' : '', stderr: '' };
+}`;
   const modules: Record<string, string> = {
     'node:child_process': childProcess,
     '/scripts/native-bundle.mjs': 'export function verifyNativeBundle() {}',
@@ -202,11 +218,129 @@ function expectNoPublicationMutation(f: ReturnType<typeof fixture>) {
   expect(existsSync(join(f.bundle, 'macos', 'latest.json'))).toBe(false);
 }
 
+function addCpuFixtures(f: ReturnType<typeof fixture>, architectures: Array<'x86_64' | 'arm64'> = ['x86_64', 'arm64']) {
+  const source = join(f.bundle, 'macos/o8.app');
+  const dmgApps: Record<string, string> = {};
+  for (const architecture of architectures) {
+    const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
+    mkdirSync(join(cpu.app, '..'), { recursive: true });
+    cpSync(source, cpu.app, { recursive: true, preserveTimestamps: true });
+    for (const name of ['o8', 'speech_recognizer', 'speech-local', 'o8-pi-write']) {
+      writeFileSync(join(cpu.app, 'Contents/MacOS', name), thinMachO(architecture === 'x86_64' ? CPU_TYPE_X86_64 : CPU_TYPE_ARM64));
+    }
+    const archive = spawnSync('tar', ['czf', cpu.updaterArchive, '-C', join(cpu.app, '..'), 'o8.app']);
+    if (archive.status !== 0) throw new Error(`CPU archive fixture failed: ${archive.stderr}`);
+    // All three archive signatures must use the same configured updater key.
+    // The fixture helper generates that key; re-sign all archives under the
+    // final fixture key below rather than retaining earlier generated keys.
+    mkdirSync(join(cpu.dmg, '..'), { recursive: true });
+    writeFileSync(cpu.dmg, 'fixture');
+    dmgApps[cpu.dmg.split('/').at(-1)!] = cpu.app;
+  }
+  const allArchives = [
+    [join(f.bundle, 'macos/o8.app.tar.gz'), join(f.bundle, 'macos/o8.app.tar.gz.sig')],
+    ...architectures.map(architecture => {
+      const cpu = resolveMacosCpuArtifacts(f.root, f.version, architecture);
+      return [cpu.updaterArchive, cpu.updaterSignature];
+    }),
+  ];
+  configureUpdaterSignatures(f.root, allArchives);
+  writeFileSync(join(f.bundle, 'cpu/derivation.json'), JSON.stringify({
+    schema: 'o8/macos-cpu-derivation/v1', version: f.version, sourceBundleSha256: bundleContentSha256(source),
+  }));
+  return { O8_MACOS_CPU_PACKAGES: '1', O8_CHANNEL_TEST_CPU_DMG_APPS: JSON.stringify(dmgApps) };
+}
+
 afterEach(() => {
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe('release channels through the publication entry point', () => {
+  it.each([
+    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
+  ])('publishes Intel-only delivery through the $channel fixture without requiring an arm64 package', ({ channel, version, manifest }) => {
+    const f = fixture(version);
+    const env = { ...addCpuFixtures(f, ['x86_64']), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const result = run(f, channel, [], env);
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'));
+    expect(plan.platforms['darwin-x86_64'].url).toMatch(/o8_x86_64\.app\.tar\.gz$/);
+    expect(plan.platforms['darwin-aarch64']).toEqual({
+      url: `https://github.com/hurttlocker/o8-releases/releases/download/v${version}/o8.app.tar.gz`,
+      signature: readFileSync(join(f.bundle, 'macos/o8.app.tar.gz.sig'), 'utf8').trim(),
+    });
+    const uploads = effects(f).filter(c => c.name === 'gh' && ['create', 'upload'].includes(c.args[1]));
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8.app.tar.gz')))).toBe(true);
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8_x86_64.app.tar.gz')))).toBe(true);
+    expect(uploads.some(c => c.args.some(arg => arg.includes('/cpu/arm64/')))).toBe(false);
+    if (channel === 'preview') expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+  });
+
+  it('does not route or upload an unselected arm64 package during Intel-only delivery', () => {
+    const f = fixture('0.1.741');
+    const env = { ...addCpuFixtures(f), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const arm = resolveMacosCpuArtifacts(f.root, f.version, 'arm64');
+    writeFileSync(arm.updaterSignature, 'unaccepted arm64 package');
+    const result = run(f, 'stable', [], env);
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos/latest.json'), 'utf8'));
+    expect(plan.platforms['darwin-aarch64'].url).toMatch(/\/o8\.app\.tar\.gz$/);
+    expect(effects(f).some(c => c.args.some(arg => arg.includes('/cpu/arm64/')))).toBe(false);
+  });
+
+  it.each(['missing', 'wrong-cpu', 'changed-runtime', 'bad-signature', 'not-notarized'])('refuses Intel-only publication for %s before any publication write', (failure) => {
+    const f = fixture('0.1.741');
+    const env: Record<string, string> = { ...addCpuFixtures(f, ['x86_64']), O8_MACOS_CPU_PACKAGES: 'x86_64' };
+    const cpu = resolveMacosCpuArtifacts(f.root, f.version, 'x86_64');
+    if (failure === 'missing') rmSync(cpu.updaterArchive);
+    if (failure === 'wrong-cpu') writeFileSync(join(cpu.app, 'Contents/MacOS/speech-local'), thinMachO(CPU_TYPE_ARM64));
+    if (failure === 'changed-runtime') writeFileSync(join(cpu.app, 'Contents/runtime.txt'), 'changed runtime');
+    if (failure === 'bad-signature') writeFileSync(cpu.updaterSignature, 'invalid signature');
+    if (failure === 'not-notarized') env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY = '1';
+    const result = run(f, 'stable', [], env);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('CPU package verification failed');
+    expectNoPublicationMutation(f);
+  });
+
+  it.each([
+    { channel: 'stable', version: '0.1.741', manifest: 'latest.json' },
+    { channel: 'preview', version: '0.1.741-preview.1', manifest: 'preview.json' },
+  ])('publishes verified CPU entries through the $channel fixture path and keeps universal uploads', ({ channel, version, manifest }) => {
+    const f = fixture(version);
+    const env = addCpuFixtures(f);
+    const result = run(f, channel, [], env);
+    expect(result.status, result.stderr).toBe(0);
+    const plan = JSON.parse(readFileSync(join(f.bundle, 'macos', manifest), 'utf8'));
+    expect(plan.platforms['darwin-x86_64'].url).toMatch(/o8_x86_64\.app\.tar\.gz$/);
+    expect(plan.platforms['darwin-aarch64'].url).toMatch(/o8_arm64\.app\.tar\.gz$/);
+    const uploads = effects(f).filter(c => c.name === 'gh' && ['create', 'upload'].includes(c.args[1]));
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8.app.tar.gz')))).toBe(true);
+    expect(uploads.some(c => c.args.some(arg => arg.endsWith('/o8_arm64.app.tar.gz')))).toBe(true);
+    if (channel === 'preview') expect(existsSync(join(f.bundle, 'macos/latest.json'))).toBe(false);
+  });
+
+  it.each(['missing', 'wrong-cpu', 'changed-code', 'changed-runtime', 'bad-signature', 'not-notarized'])('refuses CPU publication for %s before any publication write', (failure) => {
+    const f = fixture('0.1.741');
+    const env: Record<string, string> = addCpuFixtures(f);
+    const cpu = resolveMacosCpuArtifacts(f.root, f.version, 'arm64');
+    if (failure === 'missing') rmSync(cpu.updaterArchive);
+    if (failure === 'wrong-cpu') writeFileSync(join(cpu.app, 'Contents/MacOS/speech-local'), thinMachO(CPU_TYPE_X86_64));
+    if (failure === 'changed-code') {
+      const bytes = thinMachO(CPU_TYPE_ARM64);
+      bytes[28] = 1;
+      writeFileSync(join(cpu.app, 'Contents/MacOS/o8'), bytes);
+    }
+    if (failure === 'changed-runtime') writeFileSync(join(cpu.app, 'Contents/runtime.txt'), 'changed runtime');
+    if (failure === 'bad-signature') writeFileSync(cpu.updaterSignature, 'invalid signature');
+    if (failure === 'not-notarized') env.O8_CHANNEL_TEST_FAIL_CPU_NOTARY = '1';
+    const result = run(f, 'stable', [], env);
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('CPU package verification failed');
+    expectNoPublicationMutation(f);
+  });
+
   it('publishes two immutable prereleases without reaching any stable surface', () => {
     const f = fixture();
     const result = run(f, 'preview');

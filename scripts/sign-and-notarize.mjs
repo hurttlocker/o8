@@ -25,10 +25,26 @@ import { stapleAndValidate, submitForNotarization } from './lib/notarization.mjs
 import { assertMacPackageSize } from './lib/mac-package-size.mjs';
 import {
   resolveMacosReleaseArtifacts,
+  resolveMacosCpuArtifacts,
+  assertMacosArchitecture,
+  MACOS_REQUIRED_BINARIES,
   stageMacosDmgApp,
+  verifyMacCpuApp,
+  verifyMacCpuUpdaterArchive,
   verifyUniversalMacApp,
   verifyUniversalMacUpdaterArchive,
 } from './lib/macos-release-artifacts.mjs';
+import { assertCpuPreparationCurrent, macosCpuPackageArchitectures, prepareMacosCpuPackages } from './lib/macos-cpu-packages.mjs';
+
+const args = process.argv.slice(2);
+let architecture;
+if (args.length) {
+  if (args.length !== 2 || args[0] !== '--architecture') {
+    throw new Error('usage: node scripts/sign-and-notarize.mjs [--architecture x86_64|arm64]');
+  }
+  architecture = assertMacosArchitecture(args[1]);
+}
+const cpuArchitectures = macosCpuPackageArchitectures(process.env.O8_MACOS_CPU_PACKAGES);
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
 for (const key of REQUIRED) {
@@ -42,7 +58,9 @@ for (const key of REQUIRED) {
 const root = process.cwd();
 const pkgJson = JSON.parse(execFileSync('cat', [join(root, 'package.json')], { encoding: 'utf8' }));
 const version = pkgJson.version;
-const artifacts = resolveMacosReleaseArtifacts(root, version);
+const artifacts = architecture
+  ? resolveMacosCpuArtifacts(root, version, architecture)
+  : resolveMacosReleaseArtifacts(root, version);
 const BUNDLE = artifacts.bundleDir;
 const APP = artifacts.app;
 const TAR = artifacts.updaterArchive;
@@ -61,6 +79,9 @@ const notarizationCredentials = {
   teamId: process.env.APPLE_TEAM_ID,
   password: process.env.APPLE_PASSWORD,
 };
+const verifyApp = architecture ? (app) => verifyMacCpuApp(app, architecture) : verifyUniversalMacApp;
+const verifyArchive = architecture
+  ? (app, tar) => verifyMacCpuUpdaterArchive(app, tar, architecture) : verifyUniversalMacUpdaterArchive;
 
 if (!existsSync(APP)) {
   console.error(`[sign-and-notarize] missing .app: ${APP}`);
@@ -69,7 +90,12 @@ if (!existsSync(APP)) {
 }
 
 try {
-  console.log('[sign-and-notarize] universal artifact preflight', verifyUniversalMacApp(APP));
+  console.log('[sign-and-notarize] artifact preflight', verifyApp(APP));
+  if (architecture) {
+    const source = resolveMacosReleaseArtifacts(root, version).app;
+    execFileSync('codesign', ['--verify', '--deep', '--strict', source], { stdio: 'pipe' });
+    assertCpuPreparationCurrent(root, version, architecture);
+  }
 } catch (error) {
   console.error(`[sign-and-notarize] refusing non-universal stable artifact: ${error.message}`);
   process.exit(1);
@@ -133,7 +159,7 @@ for (const f of candidates) {
 }
 console.log(`[sign-and-notarize] signing ${machO.length} nested binaries`);
 
-for (const f of machO) {
+for (const f of architecture ? [] : machO) {
   execFileSync('codesign', [
     '--force',
     '--options', 'runtime',
@@ -155,7 +181,7 @@ const speechCandidates = existsSync(macosDir)
 if (speechCandidates.length === 0) {
   console.warn('[sign-and-notarize] WARNING: no speech_recognizer externalBin found in Contents/MacOS — voice STT may not have bundled');
 }
-for (const name of speechCandidates) {
+for (const name of architecture ? [] : speechCandidates) {
   const f = join(macosDir, name);
   let isMachO = false;
   try {
@@ -173,21 +199,32 @@ for (const name of speechCandidates) {
   ], { stdio: 'inherit' });
 }
 
-console.log('[sign-and-notarize] re-sealing .app shell with --deep');
+if (architecture) {
+  // The common native addons are already signed in the verified universal
+  // source. Re-sign only the thinned sidecars, preserving their exact policy.
+  for (const relativePath of MACOS_REQUIRED_BINARIES.filter((path) => path !== 'Contents/MacOS/o8')) {
+    execFileSync('codesign', [
+      '--force', '--preserve-metadata=identifier,entitlements,requirements,flags,runtime',
+      '--timestamp', '--sign', process.env.APPLE_SIGNING_IDENTITY, join(APP, relativePath),
+    ], { stdio: 'inherit' });
+  }
+}
+console.log('[sign-and-notarize] re-sealing .app shell');
 execFileSync('codesign', [
   '--force',
-  '--deep',
-  '--options', 'runtime',
+  ...(architecture
+    ? ['--preserve-metadata=identifier,entitlements,requirements,flags,runtime']
+    : ['--deep', '--options', 'runtime']),
   '--timestamp',
   '--sign', process.env.APPLE_SIGNING_IDENTITY,
-  '--entitlements', ENTITLEMENTS,
+  ...(!architecture ? ['--entitlements', ENTITLEMENTS] : []),
   APP,
 ], { stdio: 'inherit' });
 
 console.log('[sign-and-notarize] verifying signature');
-execFileSync('codesign', ['--verify', '--strict', '--verbose=2', APP], { stdio: 'inherit' });
+execFileSync('codesign', ['--verify', '--deep', '--strict', '--verbose=2', APP], { stdio: 'inherit' });
 
-const ZIP = '/tmp/o8-notarize.zip';
+const ZIP = architecture ? join(BUNDLE, 'o8-notarize.zip') : '/tmp/o8-notarize.zip';
 if (existsSync(ZIP)) rmSync(ZIP);
 console.log('[sign-and-notarize] zipping for notarization');
 execFileSync('ditto', ['-c', '-k', '--keepParent', APP, ZIP], { stdio: 'inherit' });
@@ -201,7 +238,8 @@ stapleAndValidate(APP);
 // Codesigning and stapling rewrite bundle bytes. Re-inspect the final app
 // before creating either distributable so a stale/thin replacement cannot
 // become the arm64 updater payload.
-console.log('[sign-and-notarize] final universal artifact', verifyUniversalMacApp(APP));
+console.log('[sign-and-notarize] final artifact', verifyApp(APP));
+if (architecture) assertCpuPreparationCurrent(root, version, architecture);
 
 console.log('[sign-and-notarize] repackaging .app.tar.gz');
 if (existsSync(TAR)) rmSync(TAR);
@@ -217,7 +255,7 @@ execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], {
   env: { ...process.env, COPYFILE_DISABLE: '1' },
 });
 
-console.log('[sign-and-notarize] verified updater archive', verifyUniversalMacUpdaterArchive(APP, TAR));
+console.log('[sign-and-notarize] verified updater archive', verifyArchive(APP, TAR));
 
 // Recheck the final signed/stapled bytes before updater signing or DMG upload.
 console.log('[sign-and-notarize] final package size', assertMacPackageSize(APP, TAR));
@@ -268,3 +306,12 @@ console.log('[sign-and-notarize] stapling and validating DMG notarization ticket
 stapleAndValidate(DMG);
 
 console.log('[sign-and-notarize] done. app and DMG are notarized; now run scripts/release.mjs to publish');
+
+if (!architecture && cpuArchitectures.length) {
+  prepareMacosCpuPackages(root, version, process.env.O8_MACOS_CPU_PACKAGES);
+  for (const cpu of cpuArchitectures) {
+    execFileSync(process.execPath, [join(root, 'scripts/sign-and-notarize.mjs'), '--architecture', cpu], {
+      cwd: root, stdio: 'inherit', env: process.env,
+    });
+  }
+}
