@@ -13,6 +13,7 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
 import { useSplitResize } from '../hooks/useSplitResize';
+import { SESSION_PANE_INSET } from './SessionPaneFrame';
 import { ResizeEdge } from '../shell/ResizeEdge';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 export { projectLiveSessionMeshParticipants };
@@ -177,10 +178,10 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  paddingTop: 8,
-                  paddingRight: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 8,
+                  paddingTop: SESSION_PANE_INSET,
+                  paddingRight: SESSION_PANE_INSET,
+                  paddingBottom: SESSION_PANE_INSET,
+                  paddingLeft: SESSION_PANE_INSET,
                 }}
               >
                 <ThreadChatPane
@@ -202,10 +203,10 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  paddingTop: 8,
-                  paddingRight: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 8,
+                  paddingTop: SESSION_PANE_INSET,
+                  paddingRight: SESSION_PANE_INSET,
+                  paddingBottom: SESSION_PANE_INSET,
+                  paddingLeft: SESSION_PANE_INSET,
                 }}
               >
                 {renderSessionPane ? renderSessionPane(leaf) : (
