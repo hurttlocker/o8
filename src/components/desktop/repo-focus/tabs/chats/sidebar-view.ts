@@ -1,10 +1,10 @@
 import { attentionRank, type AttentionSubject } from './sections';
 
-export type ChatGroupMode = 'repo' | 'date' | 'flat' | 'chronological' | 'working' | 'scheduled';
+export type ChatGroupMode = 'repo' | 'date' | 'flat' | 'chronological' | 'working' | 'scheduled' | 'manual';
 export const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
 export const CHAT_VIEW_LABELS: Record<ChatGroupMode, string> = {
   flat: 'Priority', chronological: 'Chronological', working: 'Working', scheduled: 'Scheduled',
-  repo: 'By repo', date: 'By date',
+  repo: 'By repo', date: 'By date', manual: 'Manual',
 };
 export function isChatGroupMode(value: unknown): value is ChatGroupMode {
   return typeof value === 'string' && Object.hasOwn(CHAT_VIEW_LABELS, value);
