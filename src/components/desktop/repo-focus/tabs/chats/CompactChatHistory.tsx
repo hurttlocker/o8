@@ -80,6 +80,22 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
       </div>;
     })}{more}
   </ChatHistoryShelf>;
+  if (chatGroupBy === 'chronological') return <>
+    {pinned.length ? <ChatHistoryShelf label="Pinned" action={picker}>
+      {pinned.map(renderHistoryRow)}
+    </ChatHistoryShelf> : null}
+    <ChatHistoryShelf label="Recents" storageKey="o8:chat-chronological-recents-collapsed" action={pinned.length ? undefined : picker}>
+      {deriveHistoryDateGroups<{ modifiedAt: string; item?: ChatHistoryItem; sample?: SidebarFixture }>([
+        ...conversations.map(item => ({ item, modifiedAt: item.modifiedAt })),
+        ...fixtures.map(sample => ({ sample, modifiedAt: sample.updatedAt })),
+      ].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))).map(group => <ChatHistoryShelf key={group.key}
+        label={group.label} storageKey={`o8:chat-chronological-date-${group.key}-collapsed`}>
+        {group.items.map(entry => entry.item ? <Fragment key={entry.item.tabId}>{renderHistoryRow(entry.item)}</Fragment>
+          : <SidebarDemoStates key={entry.sample!.tabId} mode="chronological" fixtures={[entry.sample!]} publishAttention={false}
+            showLabel={false} activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />)}
+      </ChatHistoryShelf>)}{more}
+    </ChatHistoryShelf>
+  </>;
   return <>
     {hasPriority ? <ChatHistoryShelf label="Priority" action={picker}>
       <SidebarDemoStates mode={chatGroupBy} fixtures={priorityFixtures} publishAttention={false}
