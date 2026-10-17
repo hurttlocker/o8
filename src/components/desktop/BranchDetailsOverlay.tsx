@@ -38,6 +38,7 @@ export interface BranchDetailsOverlayProps {
   open: boolean;
   /** Bounding rect of the in-layout capsule the overlay anchors to. */
   anchorRect: DOMRect;
+  headerAnchor?: boolean;
   /** Hover-bridge: keep the overlay open while the cursor is inside it. */
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -86,6 +87,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     overlayRef,
     open,
     anchorRect,
+    headerAnchor,
     onMouseEnter,
     onMouseLeave,
     onToggleCollapsed,
@@ -131,8 +133,9 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
     // wrapper, in-flow card (Q 2026-07-16 — "the edge still has no shadow").
     <div
       ref={overlayRef}
-      role="region"
-      aria-label="Workspace details"
+      role={headerAnchor ? 'dialog' : 'region'}
+      aria-modal={headerAnchor ? false : undefined}
+      aria-label={headerAnchor ? 'Workspace tools' : 'Workspace details'}
       data-workspace-details=""
       aria-hidden={!open}
       inert={!open}
@@ -143,6 +146,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
       }}
       style={{
         ...material.textStyle,
+        backdropFilter: material.overlayStyle.backdropFilter,
+        WebkitBackdropFilter: material.overlayStyle.WebkitBackdropFilter,
         position: 'fixed',
         top,
         right,
@@ -155,7 +160,7 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
         opacity: open ? 1 : 0,
         transform: reducedMotion || open ? 'scale(1)' : 'scale(0.9)',
         transformOrigin: 'top right',
-        transition: reducedMotion ? 'none' : `opacity 150ms ${OVERLAY_EASE}, transform 150ms ${OVERLAY_EASE}`,
+        transition: reducedMotion ? 'none' : `transform 150ms ${OVERLAY_EASE}`,
         pointerEvents: open ? 'auto' : 'none',
       }}
     >
@@ -190,6 +195,8 @@ export function BranchDetailsOverlay(props: BranchDetailsOverlayProps) {
           overflowY: 'auto',
           scrollbarWidth: 'none',
           ...material.surfaceStyle,
+          background: material.overlayStyle.background,
+          backdropFilter: 'none', WebkitBackdropFilter: 'none',
           boxShadow: material.shadow,
         }}
       >
