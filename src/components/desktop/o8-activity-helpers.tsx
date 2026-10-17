@@ -127,7 +127,7 @@ export const FILTER_TABS: { key: O8FeedFilter; label: string; icon: (color: stri
 
 const FEED_ICON_MAP: Record<string, { bg: string; color: string; icon: React.ReactNode }> = {
   commit: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconGitCommit size={11} color={ACTIVITY_COLORS.success} /> },
-  issue: { bg: ACTIVITY_COLORS.mergeBg, color: ACTIVITY_COLORS.merge, icon: <IconAlertCircle size={11} color={ACTIVITY_COLORS.merge} /> },
+  issue: { bg: `var(--o8-activity-issue-bg, ${ACTIVITY_COLORS.mergeBg})`, color: `var(--o8-activity-issue-fg, ${ACTIVITY_COLORS.merge})`, icon: <IconAlertCircle size={11} color={`var(--o8-activity-issue-fg, ${ACTIVITY_COLORS.merge})`} /> },
   pr: { bg: ACTIVITY_COLORS.accentBg, color: ACTIVITY_COLORS.accent, icon: <IconGitPullRequest size={11} color={ACTIVITY_COLORS.accent} /> },
   ci_success: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconCheckCircle size={11} color={ACTIVITY_COLORS.success} /> },
   ci_failure: { bg: ACTIVITY_COLORS.dangerBg, color: ACTIVITY_COLORS.danger, icon: <IconXCircle size={11} color={ACTIVITY_COLORS.danger} /> },
@@ -389,8 +389,8 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
               paddingBottom: 0,
               paddingLeft: 4,
               borderRadius: 4,
-              background: `#${label.color}18`,
-              color: `#${label.color}`,
+              background: `var(--o8-activity-label-bg, #${label.color}18)`,
+              color: `var(--o8-activity-label-fg, #${label.color})`,
               fontSize: 9.5,
               fontWeight: 300,
               letterSpacing: '-0.1px',
@@ -490,8 +490,8 @@ const DETAIL_ROW_STYLE: React.CSSProperties = {
   fontFamily: 'var(--font-sans-system)',
 };
 
-function DetailPill({ label, color }: { label: string; color: string }) {
-  const background = color.startsWith('#') ? `${color}14` : 'var(--t-bg-card)';
+function DetailPill({ label, color, background: fill }: { label: string; color: string; background?: string }) {
+  const background = fill ?? (color.startsWith('#') ? `${color}14` : 'var(--t-bg-card)');
   return (
     <span style={{
       paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
@@ -638,7 +638,7 @@ export function renderExpandedDetail(
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <DetailPill label={item.state} color={item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.merge} />
           {item.labels.slice(0, 4).map((l) => (
-            <DetailPill key={l.name} label={l.name} color={`#${l.color}`} />
+            <DetailPill key={l.name} label={l.name} color={`var(--o8-activity-label-fg, #${l.color})`} background={`var(--o8-activity-label-bg, #${l.color}14)`} />
           ))}
         </div>
         {item.body ? (
