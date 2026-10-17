@@ -30,6 +30,8 @@ export interface WorkspaceHeaderStripProps {
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   }>;
   /** Session owner for the tabs, which may differ from the active pane. */
   tabWorkspaceId?: string | null;

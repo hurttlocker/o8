@@ -18,9 +18,9 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const {
-      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, getTabInventory, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
+      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, getTabInventory, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
     } = useWorkspaceTerminalController(props, ref);
-    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
+    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
     const workspaceInstanceId = useId();
     const handleNewTab = controller.handleNewTab;
     const createTerminalModeShellTab = useCallback(
@@ -212,6 +212,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           : (tab.chatRuntime ?? null),
         packetStatus: tab.orchestrationPacket?.status ?? null,
         orchestratorThreadId: tab.orchestratorThreadId ?? null,
+        repoPath: tab.repo?.localPath ?? null,
       }))
     ), [controller.visibleTabs]);
 
@@ -332,6 +333,11 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         if (!matchWorkspace(detail?.workspaceId)) return;
         if (detail?.tabId && detail.label) handleUpdateTabLabel(detail.tabId, detail.label, { source: 'user' });
       };
+      const onReorder = (event: Event) => {
+        const detail = (event as CustomEvent<{ tabId?: string; targetId?: string; after?: boolean; workspaceId?: string }>).detail;
+        if (!matchWorkspace(detail?.workspaceId) || !detail.tabId || !detail.targetId) return;
+        handleReorderTabs(detail.tabId, detail.targetId, detail.after);
+      };
       const onCleanup = (event: Event) => {
         const detail = (event as CustomEvent<{ workspaceId?: string | null }>).detail;
         if (!matchWorkspace(detail?.workspaceId)) return;
@@ -343,17 +349,19 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           closedTabs: result.closedTabs,
         });
       };
+      window.addEventListener('o8:request-reorder-tabs', onReorder);
       window.addEventListener('o8:request-select-tab', onSelect as EventListener);
       window.addEventListener('o8:request-close-tab', onClose as EventListener);
       window.addEventListener('o8:request-rename-tab', onRename as EventListener);
       window.addEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       return () => {
+        window.removeEventListener('o8:request-reorder-tabs', onReorder);
         window.removeEventListener('o8:request-select-tab', onSelect as EventListener);
         window.removeEventListener('o8:request-close-tab', onClose as EventListener);
         window.removeEventListener('o8:request-rename-tab', onRename as EventListener);
         window.removeEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       };
-    }, [props.canCloseTile, handleSelectTab, handleCloseTab, handleUpdateTabLabel, cleanupFinishedTabs, workspaceInstanceId]);
+    }, [props.canCloseTile, handleSelectTab, handleCloseTab, handleReorderTabs, handleUpdateTabLabel, cleanupFinishedTabs, workspaceInstanceId]);
 
     useEffect(() => {
       if (!cleanupToast) return;

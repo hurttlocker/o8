@@ -1,5 +1,6 @@
 'use client';
 
+import { reorderTabs } from '@/lib/workspace-terminal/reorder-tabs';
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
 import { useTextChatTabs } from './use-text-chat-tabs';
 
@@ -1351,14 +1352,9 @@ export function useWorkspaceTerminalController(
     onActiveRepoContextChange?.(activeRepoContext);
   }, [activeRepoContext, onActiveRepoContextChange]);
 
-  const handleReorderTabs = useCallback((draggedId: string, dropTargetId: string) => {
+  const handleReorderTabs = useCallback((draggedId: string, dropTargetId: string, after?: boolean) => {
     setTabs((prev) => {
-      const fromIdx = prev.findIndex((t) => t.id === draggedId);
-      const toIdx = prev.findIndex((t) => t.id === dropTargetId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
+      const next = reorderTabs(prev, draggedId, dropTargetId, after);
       tabsRef.current = next;
       return next;
     });

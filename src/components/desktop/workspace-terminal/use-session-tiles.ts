@@ -7,6 +7,7 @@
  * pill context menu state, and the split/close/resize/clear callbacks so
  * OrchestratorTab.tsx stays under the 800-line ceiling.
  */
+import { placeThreadPane } from '@/lib/orchestrator/place-thread-pane';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   SessionPillContextMenuItem,
@@ -24,13 +25,11 @@ import {
   createDefaultSessionTileLayout,
   deserializeSessionTileLayout,
   hasAnyAuxLeaf,
-  replaceLeafWithThread,
   reconcileSessionTileParticipants,
   rebalanceAutomaticSessionTiles,
   resizeSessionSplit,
   serializeSessionTileLayout,
   splitChatWithSession,
-  splitLeafWithThread,
   splitSessionWithSession,
   type SessionTileLayout,
   type SessionTileSplitDirection,
@@ -443,14 +442,14 @@ export function useSessionTiles({
     thread: ThreadPanePayload,
     direction: SessionTileSplitDirection,
   ) => {
-    setLayout((current) => splitLeafWithThread(current, targetLeafId, thread, direction));
+    setLayout((current) => placeThreadPane(current, targetLeafId, thread, direction));
   }, []);
 
   const replaceLeafWithThreadPane = useCallback((
     targetLeafId: string,
     thread: ThreadPanePayload,
   ) => {
-    setLayout((current) => replaceLeafWithThread(current, targetLeafId, thread));
+    setLayout((current) => placeThreadPane(current, targetLeafId, thread, 'replace'));
   }, []);
 
   const pruneThreadPane = useCallback((threadId: string) => {
