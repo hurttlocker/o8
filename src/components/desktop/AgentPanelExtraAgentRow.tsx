@@ -159,9 +159,11 @@ export function ExtraAgentRowView({
   repoLabel,
   link,
   roomy = false,
+  showPreview = true,
 }: {
   row: ExtraAgentRow;
   roomy?: boolean;
+  showPreview?: boolean;
   active: boolean;
   onSelectSession?: (sessionKey: string) => void;
   onFocusRow?: (row: ExtraAgentRow) => void;
@@ -286,7 +288,7 @@ export function ExtraAgentRowView({
               fontSize: 11.5, color: 'var(--t-text-faint)', fontWeight: 260 }}>{repoLabel}</span>
           ) : null}
         </span>
-        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        {showPreview && preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           overflow: 'hidden', whiteSpace: 'normal', marginTop: roomy ? 6 : 4, fontSize: 11.5,
           lineHeight: 1.45, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
       </span>

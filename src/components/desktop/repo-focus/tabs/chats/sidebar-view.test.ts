@@ -131,6 +131,27 @@ describe('compact sidebar view through the chat panel', () => {
     await choose('Group by repo'); expect(container.textContent).toContain('project');
     await choose('Group by date'); expect(container.textContent).toContain('Today');
   });
+  it('groups ordinary chronological chats by day after pins and remembers date folds', async () => {
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(12, 0, 0, 0);
+    const older = new Date(); older.setDate(older.getDate() - 3); older.setHours(12, 0, 0, 0);
+    const dated = history.map(item => ({ ...item, messageCount: 2,
+      modifiedAt: item.title === 'Idle' ? yesterday.toISOString()
+        : item.title === 'Decision' ? older.toISOString() : item.modifiedAt }));
+    vi.mocked(fetch).mockImplementation(async url => ({ ok: true, json: async () => String(url).includes('chat-history/list')
+      ? { conversations: dated } : { lanes: [] } }) as Response);
+    await render(); await choose('Chronological');
+    const shelves = [...container.querySelectorAll('[aria-label$=" conversations"]')].map(node => node.getAttribute('aria-label'));
+    expect(shelves).toEqual(['Pinned conversations', 'Recents conversations', 'Today conversations', 'Yesterday conversations', 'Previous 7 days conversations']);
+    expect(rows()).toEqual(['Pinned', 'Running', 'Idle', 'Decision']);
+    expect(container.textContent).not.toContain('Latest update for');
+    const yesterdayToggle = () => container.querySelector<HTMLButtonElement>('[aria-label="Yesterday conversations"] button[aria-expanded]')!;
+    await act(async () => yesterdayToggle().click());
+    expect(rows()).toEqual(['Pinned', 'Running', 'Decision']);
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); root = createRoot(container); await render();
+    expect(yesterdayToggle().getAttribute('aria-expanded')).toBe('false');
+    expect(rows()).toEqual(['Pinned', 'Running', 'Decision']);
+  });
   it('folds each chat section in every view and retains attention while a section is closed', async () => {
     await render();
     const shelfButton = (label: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${label} conversations"] button[aria-expanded]`)!;
