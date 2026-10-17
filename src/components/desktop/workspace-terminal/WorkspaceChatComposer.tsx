@@ -378,6 +378,7 @@ function WorkspaceChatComposerBase({
         </div>
 
         <InputButtons
+          brainActive={active}
           input={submitting || isLaneArchived ? '' : chat.draft}
           hasAttachments={!submitting && !isLaneArchived && (attachments.attachedImages.length > 0 || chat.queuedContextCards.length > 0)}
           enhancing={false}

@@ -703,6 +703,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}
           />
           {footerOverride ?? <InputButtons
+            brainActive={activeComposer}
             input={input}
             hasAttachments={attachedImages.length > 0}
             enhancing={enhancing}

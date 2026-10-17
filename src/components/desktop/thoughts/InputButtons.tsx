@@ -14,6 +14,7 @@ import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/
 import { ComposerSelectorFooterView } from './composer-selector/ComposerSelectorFooter';
 import { SendPill } from './ComposerSendControl';
 import type { ComposerSelectorController } from './composer-selector/useComposerSelectorState';
+import { BrainPipButton } from '../brain/BrainPipButton';
 
 // xhigh stays in the menu but reads as a sibling option to max, NOT as
 // "even better than max". max gets the brand orange to anchor it as the
@@ -443,6 +444,7 @@ export function InputButtons({
   inlineLeadingExtras,
   permissionControl,
   inlineMeterSlot,
+  brainActive = true,
   onBrowsePrompts,
   onSavePrompt,
   onRequestTextareaFocus,
@@ -494,6 +496,7 @@ export function InputButtons({
   inlineLeadingExtras?: ReactNode;
   permissionControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
+  brainActive?: boolean;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
   onBrowsePrompts?: () => void;
@@ -574,14 +577,14 @@ export function InputButtons({
             </>
           )}
           attachControl={(
-            <AttachFilesButton
+            <><BrainPipButton active={brainActive} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} /><AttachFilesButton
               onUploadDiskFiles={onUploadDiskFiles}
               onFileReferenceSelect={onFileReferenceSelect}
               repoPath={repoPath}
               promptBody={input}
               onBrowsePrompts={onBrowsePrompts}
               onSavePrompt={onSavePrompt}
-            />
+            /></>
           )}
           meterControl={inlineMeterSlot}
           micControl={<MicButton />}
@@ -664,6 +667,7 @@ export function InputButtons({
         onBrowsePrompts={onBrowsePrompts}
         onSavePrompt={onSavePrompt}
       />
+      <BrainPipButton active={brainActive} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
       <MicButton />
 
       </div>

@@ -84,6 +84,9 @@ export function HoverPipCard({
   contextKey,
   boundsRef,
   headerContent,
+  id,
+  role = 'region',
+  onVisibilityChange,
   children,
 }: {
   active: boolean;
@@ -98,6 +101,9 @@ export function HoverPipCard({
   contextKey?: string;
   boundsRef?: RefObject<HTMLElement | null>;
   headerContent?: ReactNode;
+  id?: string;
+  role?: 'region' | 'dialog';
+  onVisibilityChange?: (visible: boolean) => void;
   children: (context: {
     orientation: HoverPipOrientation;
     shape: HoverPipShape;
@@ -343,6 +349,7 @@ export function HoverPipCard({
   }, [persistPosition]);
 
   const show = active && available && visibleContext === contextKey && (hoverVisible || manualVisible);
+  useEffect(() => { onVisibilityChange?.(show); }, [onVisibilityChange, show]);
 
   return (
     <AnimatePresence>
@@ -350,7 +357,9 @@ export function HoverPipCard({
         <motion.div
           key={eventName}
           data-hover-pip=""
-          role="region"
+          id={id}
+          role={role}
+          aria-modal={role === 'dialog' ? false : undefined}
           aria-label={`${title} preview`}
           initial={reduceMotion ? false : { scale: 0.96 }}
           animate={{ scale: 1 }}
@@ -377,7 +386,7 @@ export function HoverPipCard({
             transformOrigin: 'top right',
           }}
         >
-          <FloatingSurface contentStyle={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <FloatingSurface overlay={role === 'dialog'} contentStyle={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div
             onPointerDown={onDragStart}
             onPointerMove={onDragMove}
@@ -421,7 +430,7 @@ export function HoverPipCard({
             >
               <OrientationGlyph next={orientation === 'tall' ? 'wide' : 'tall'} />
             </button>
-            <button
+            {onOpen ? <button
               type="button"
               aria-label={openLabel}
               title={openLabel}
@@ -432,7 +441,7 @@ export function HoverPipCard({
               style={controlStyle}
             >
               <PopOutGlyph />
-            </button>
+            </button> : null}
             <button
               type="button"
               aria-label="Close preview"
