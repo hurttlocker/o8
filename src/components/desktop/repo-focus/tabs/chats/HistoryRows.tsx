@@ -300,7 +300,7 @@ export function HistoryChatRow({
         width: '100%',
         minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact ? 33 : 42,
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: preview ? 'flex-start' : 'center',
         gap: 8,
         // Selection + hover both paint on the rounded inset layer below —
         // the row itself stays transparent so the fill never hits the rail's
