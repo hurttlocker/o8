@@ -151,6 +151,16 @@ describe('connected stable CLI updates through the real operator route', () => {
     const response = await request({ runtime: 'claude-code' }, 'fixture-operator', true);
     const stream = await response.text(); expect(stream).toContain('event: error'); expect(stream).not.toContain('event: result'); expect(fixture.calls).toHaveLength(0);
   });
+  it('finishes the owned installation receipt when the progress viewer disconnects', async () => {
+    rmSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-cli-update.json'), { force: true });
+    const response = await request({ runtime: 'claude-code' }, 'fixture-operator', true);
+    const reader = response.body!.getReader();
+    const first = await reader.read(); expect(new TextDecoder().decode(first.value)).toContain('"stage":"checking"');
+    await reader.cancel();
+    await vi.waitFor(() => expect(receipt().status).toBe('succeeded'));
+    expect(fixture.calls).toEqual([{ command: fixture.selected, args: ['update'] }]);
+    expect(existsSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-cli-update.lock'))).toBe(false);
+  });
   it('uses the verified standalone Codex updater and accepts the new owned release target', async () => {
     setup('codex-native'); expect((await request({ runtime: 'codex' })).status).toBe(200);
     expect(fixture.calls).toEqual([{ command: fixture.selected, args: ['update'] }]);
