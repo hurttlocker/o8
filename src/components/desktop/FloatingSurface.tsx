@@ -35,7 +35,9 @@ export function useFloatingSurfaceMaterial(glass?: boolean) {
   };
 }
 
-/** Shared floating treatment for the rail's usage hover, menus and drawers. */
+/** Shared floating treatment for the rail's usage hover, menus and drawers.
+ * Animate ancestor transforms rather than opacity so WebKit can sample the workspace backdrop.
+ */
 export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement> & {
   glass?: boolean;
   contentStyle?: CSSProperties;

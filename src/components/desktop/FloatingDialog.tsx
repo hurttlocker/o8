@@ -39,7 +39,7 @@ export function FloatingDialog({ title, children, onClose, glass, overlay, width
   return createPortal(<div onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 10020, display: 'grid', placeItems: 'center', padding: 16 }}>
     {/* A sibling fog lets the dialog blur the workspace rather than a filtered ancestor. */}
     <div aria-hidden="true" onPointerDown={onClose} style={{ position: 'absolute', inset: 0, background: overlay ? 'rgba(0, 0, 0, 0.05)' : 'color-mix(in srgb, var(--t-canvas-bg) 28%, transparent)', ...(overlay && !isAllGlass ? { backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' } : {}) }} />
-    <motion.div initial={reduceMotion ? false : { opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }} style={{ position: 'relative', width: `min(${width}px, 100%)`, maxHeight: 'calc(100vh - 32px)' }}>
+    <motion.div initial={reduceMotion ? false : { scale: 0.98 }} animate={{ scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }} style={{ position: 'relative', width: `min(${width}px, 100%)`, maxHeight: 'calc(100vh - 32px)' }}>
       <FloatingSurface ref={root} glass={glass} overlay={overlay} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} style={{ borderRadius: 22 }} contentStyle={{ padding: 24, maxHeight: 'calc(100vh - 32px)', boxSizing: 'border-box', overflowY: 'auto', scrollbarWidth: 'none' }}>{children}</FloatingSurface>
     </motion.div>
   </div>, document.body);
