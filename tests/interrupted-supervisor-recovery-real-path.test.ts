@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 import type { SupervisorCallbacks } from '@/lib/supervisor/agent-supervisor';
@@ -17,17 +17,23 @@ vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(asyn
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-interrupted-recovery-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
+const providerGate = join(root, 'provider-start-held');
 mkdirSync(data); mkdirSync(repo);
 execFileSync('git', ['init', '-q', '-b', 'main', repo]);
 execFileSync('git', ['-C', repo, '-c', 'user.name=o8 test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-qm', 'fixture']);
 for (const [key, value] of Object.entries({ O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data,
   CORTEX_IDE_DB_PATH: join(data, 'cortex-ide.db'), CORTEX_IDE_OWNED_CODEX_ROOT: join(data, 'owned-codex'),
   O8_CODEX_BIN: bin, O8_CRASH_SURVIVABLE_WORKERS: '0', O8_WORKER_SANDBOX: '0',
-  O8_TEST_PROVIDER_CAPTURE: join(root, 'starts.jsonl'), O8_TEST_PROVIDER_MODE: join(root, 'mode') })) vi.stubEnv(key, value);
+  O8_TEST_PROVIDER_CAPTURE: join(root, 'starts.jsonl'), O8_TEST_PROVIDER_MODE: join(root, 'mode'),
+  O8_TEST_PROVIDER_GATE: providerGate })) vi.stubEnv(key, value);
 writeFileSync(join(root, 'mode'), 'running');
 writeFileSync(bin, `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
+// A queued-lock fixture can hold provider output until both admissions settle.
+while (fs.existsSync(process.env.O8_TEST_PROVIDER_GATE)) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+}
 fs.appendFileSync(process.env.O8_TEST_PROVIDER_CAPTURE, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}) + '\\n');
 console.log(JSON.stringify({type: 'thread.started', thread_id: 'synthetic-thread'}));
 const mode = fs.readFileSync(process.env.O8_TEST_PROVIDER_MODE, 'utf8');
@@ -43,6 +49,12 @@ const route = await import('@/app/api/runtime/action/route');
 const launchRoute = await import('@/app/api/runtime/launch/route');
 const { panelGateMiddleware } = await import('@/middleware');
 const owned = await import('@/lib/codex/owned');
+// This fixture refreshes owned state explicitly. Its background refresh must
+// not rewrite run records while another case measures artifact admission.
+const refreshTimer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[
+  Symbol.for('o8.ownedSession.refreshTimer.codex')
+];
+if (refreshTimer) clearInterval(refreshTimer);
 const supervisor = await import('@/lib/supervisor/agent-supervisor');
 const { closeDb } = await import('@/lib/db');
 const surfaces: string[] = [];
@@ -74,6 +86,10 @@ async function interrupt(surfaceId: string) {
 function record(surfaceId: string): OwnedSessionRecord {
   return JSON.parse(readFileSync(join(data, 'owned-codex', surfaceId.slice('codex-owned:'.length), 'session.json'), 'utf8'));
 }
+function settled(surfaceId: string): boolean {
+  const session = record(surfaceId);
+  return !session.activeRun && session.recentRuns.every(run => run.pid <= 0 || Boolean(run.childExit));
+}
 const starts = () => { try { return readFileSync(join(root, 'starts.jsonl'), 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
 async function waitFor(read: () => boolean | Promise<boolean>) { await vi.waitFor(async () => expect(await read()).toBe(true), { timeout: 15_000, interval: 30 }); }
 async function launch(mode: 'running' | 'finished' | 'failed') {
@@ -81,7 +97,10 @@ async function launch(mode: 'running' | 'finished' | 'failed') {
   const result = await owned.launchOwnedCodexSession({ cwd: repo, prompt: 'Synthetic provider fixture.', model: MODEL_IDS.raw.openAiGpt61Sol, effort: 'medium' });
   expect(result.ok, result.note).toBe(true); surfaces.push(result.surfaceId);
   await waitFor(async () => { await owned.getOwnedCodexFleetAdditions({ fresh: true }); return Boolean(record(result.surfaceId).threadId); });
-  if (mode !== 'running') await waitFor(() => record(result.surfaceId).recentRuns[0].outcome === (mode === 'failed' ? 'failed' : 'finished'));
+  if (mode !== 'running') await waitFor(() => {
+    const session = record(result.surfaceId);
+    return settled(result.surfaceId) && session.recentRuns[0].outcome === (mode === 'failed' ? 'failed' : 'finished');
+  });
   return result.surfaceId;
 }
 async function action(surfaceId: string, extra: Record<string, unknown> = {}) {
@@ -141,6 +160,15 @@ beforeAll(async () => {
   });
   const list = await rpc('tools/list'); expect(list.result.tools.some((tool: { name: string }) => tool.name === 'cortex_interrupt_agent')).toBe(true);
 }, 20_000);
+afterEach(async () => {
+  afterGuardQueued = undefined;
+  for (const surfaceId of surfaces) {
+    if (record(surfaceId).activeRun) await owned.interruptOwnedCodexSession(surfaceId);
+  }
+  // A prior case must finish writing its owned run before the next case asks
+  // artifact admission to measure the shared runtime root.
+  await waitFor(() => surfaces.every(settled));
+});
 afterAll(async () => {
   afterGuardQueued = undefined;
   supervisor.stopSupervisorLoop(); for (const watched of supervisor.getWatchedAgents()) supervisor.unregisterWatchedAgent(watched.surfaceId);
@@ -274,6 +302,9 @@ it.each(['interrupt', 'resume'] as const)('refuses a queued automatic launch aft
   const original = await launch(transition === 'interrupt' ? 'running' : 'finished');
   const generation = (record(original).activeRun ?? record(original).recentRuns[0]).id;
   writeFileSync(join(root, 'mode'), 'running'); const before = starts();
+  // The queued actions test session-lock ordering, so hold the new providers'
+  // startup output while real artifact admission measures the runtime root.
+  writeFileSync(providerGate, 'held');
   const { ensureDispatchBackendReady } = await import('@/lib/runtimes/shared/dispatch-readiness');
   let entered = false; let release!: () => void;
   const blocked = new Promise<void>(resolve => { release = resolve; });
@@ -300,11 +331,13 @@ it.each(['interrupt', 'resume'] as const)('refuses a queued automatic launch aft
     expect(settled).toBe(false); expect(starts()).toBe(before);
     release();
     expect(await first).toMatchObject({ ok: true });
-    expect(await changed).toMatchObject(transition === 'interrupt' ? { interrupted: true } : { ok: true });
+    const changedResult = await changed;
+    expect(changedResult, JSON.stringify(changedResult)).toMatchObject(transition === 'interrupt' ? { interrupted: true } : { ok: true });
     const refused = await queued;
     expect(refused).toMatchObject({ ok: false, surfaceId: '', note: expect.stringContaining(
       transition === 'interrupt' ? 'interrupted' : 'changed') });
     expect(refused.outcomeUnknown).not.toBe(true);
+    rmSync(providerGate, { force: true });
     const expectedStarts = before + (transition === 'interrupt' ? 1 : 2);
     await waitFor(() => starts() === expectedStarts);
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -313,6 +346,7 @@ it.each(['interrupt', 'resume'] as const)('refuses a queued automatic launch aft
     if (transition === 'interrupt') expect(current).toMatchObject({ id: generation, outcome: 'interrupted' });
     else expect(current.id).not.toBe(generation);
   } finally {
+    rmSync(providerGate, { force: true });
     release(); await first;
   }
 }, 40_000);
