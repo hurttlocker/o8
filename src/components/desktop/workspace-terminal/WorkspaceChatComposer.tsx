@@ -16,6 +16,7 @@ import type { TerminalTab } from '@/components/desktop/workspace-terminal/types'
 import type { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
 import { PendingSteerCard } from '@/components/desktop/thoughts/chat-panel/PendingSteerCard';
+import { BrainPipButton } from '../brain/BrainPipButton';
 import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 import { useWorkspaceComposerSubmit } from './useWorkspaceComposerSubmit';
 import { isOrchestratorBackendSetting } from '@/lib/operator/backend-setting';
@@ -106,6 +107,8 @@ function WorkspaceChatComposerBase({
         pointerEvents: isLaneArchived ? 'none' : 'auto',
       }}
     >
+      <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
+      <BrainPipButton active={active} repoPath={tab.repo?.localPath} conversationKey={tab.id} />
       <div
         ref={hostRef}
         aria-busy={submitting}
@@ -378,7 +381,6 @@ function WorkspaceChatComposerBase({
         </div>
 
         <InputButtons
-          brainActive={active}
           input={submitting || isLaneArchived ? '' : chat.draft}
           hasAttachments={!submitting && !isLaneArchived && (attachments.attachedImages.length > 0 || chat.queuedContextCards.length > 0)}
           enhancing={false}
@@ -395,6 +397,7 @@ function WorkspaceChatComposerBase({
           voiceModeEnabled={voiceMode.enabled}
           onVoiceModeChange={voiceMode.setEnabled}
         />
+      </div>
       </div>
     </div>
   );

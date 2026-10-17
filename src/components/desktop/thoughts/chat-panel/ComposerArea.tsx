@@ -7,6 +7,7 @@ import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import { BrainPipButton } from '../../brain/BrainPipButton';
 import { composerModeSpec, type ComposerMode } from '../composer-mode';
 import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
@@ -343,7 +344,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       {activityContent}
       {sendBufferStatus}
-      <div style={{ position: 'relative' }}>
+      <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
+        <BrainPipButton active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
         <SlashCommandPicker
           suggestions={slashSuggestions}
           activeIndex={activeSlashIndex}
@@ -703,7 +705,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}
           />
           {footerOverride ?? <InputButtons
-            brainActive={activeComposer}
             input={input}
             hasAttachments={attachedImages.length > 0}
             enhancing={enhancing}
