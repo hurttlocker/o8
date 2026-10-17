@@ -12,7 +12,8 @@ vi.mock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async () => ({ pr: null })),
   ensureGitHubPullRequestByHead: vi.fn(async () => ({ pr: null })),
 }));
-vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [] })) }));
+const LIVE_INVENTORY = { meta: { mode: 'live', observablePending: false }, agents: [] };
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: vi.fn(async () => LIVE_INVENTORY) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/lane/durable-review-approval', () => ({ hasDurableApprovedReview: vi.fn(async () => true) }));
 
@@ -21,7 +22,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 const roots = [dataDir];
 const { closeDb } = await import('@/lib/db');
-const { createLane, getLane, updateLane } = await import('@/lib/lane/registry');
+const { archiveLane, createLane, getLane, listLanes, updateLane } = await import('@/lib/lane/registry');
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
@@ -89,7 +90,12 @@ function fixture(location: 'current' | 'registry' = 'current') {
   return { repoPath, worktreePath, lane: getLane(lane.id)!, packet, mission, pull, persist, read };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  // Worktree maintenance is bounded per tick (#3439), so an earlier test's lane
+  // must not take the slot of the lane the next test proves.
+  for (const lane of listLanes()) if (lane.status !== 'archived') archiveLane(lane.id, 'system');
+});
 afterAll(() => { closeDb(); for (const root of roots.reverse()) rmSync(root, { recursive: true, force: true }); });
 
 describe('automatic PR release through the real reaper and durable missions', () => {
@@ -136,17 +142,53 @@ describe('automatic PR release through the real reaper and durable missions', ()
     expect(git(f.worktreePath, 'rev-parse', 'HEAD')).toBe(successor);
   });
 
-  it.each(['stop', 'archive', 'running', 'missing-proof', 'dirty'] as const)('refuses automatic release for %s', async (reason) => {
+  it.each(['stop', 'archive', 'missing-proof', 'dirty'] as const)('refuses automatic release for %s', async (reason) => {
     const f = fixture();
     if (reason === 'stop') f.packet.operatorStopped = true;
     if (reason === 'archive') f.packet.archivedAt = new Date().toISOString();
-    if (reason === 'running') f.packet.status = 'running';
     if (reason === 'missing-proof') upsertGitHubPullRequest({ ...f.pull, headSha: null, mergeCommit: null });
     if (reason === 'dirty') writeFileSync(join(f.worktreePath, 'app.txt'), 'dirty successor');
     f.persist();
     await runWorktreeReaperTick();
     expect(f.read().packets[0].releaseState).toBe('pending');
     expect(getLane(f.lane.id)?.status).toBe('reviewing');
+  });
+
+  it.each(['held', 'running'] as const)('refuses automatic release while a live writer owns a %s packet', async (state) => {
+    // The fixture packet is operator-held; a held packet reconciles to blocked before its writer is read.
+    const f = fixture();
+    const sessionKey = 'codex-owned:auto-release-live-writer';
+    updateLane(f.lane.id, { sessionKey }, 'system');
+    if (state === 'running') f.packet.status = 'running';
+    f.persist();
+    const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+    const inventory = vi.mocked(getRuntimeInventorySnapshot);
+    inventory.mockImplementation(async () => ({ ...LIVE_INVENTORY, agents: [{ sessionKey, runtime: 'codex', status: 'running',
+      runtimeSurface: { ownership: 'owned', capabilities: { interrupt: true, sendInput: true }, lifecycle: { availability: 'running' } } }] }) as never);
+    try {
+      await runWorktreeReaperTick();
+      expect(f.read().packets[0].releaseState).toBe('pending');
+      expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    } finally {
+      inventory.mockImplementation(async () => LIVE_INVENTORY as never);
+    }
+  });
+
+  it('refuses automatic release while the runtime inventory is still warming', async () => {
+    // A warming snapshot lists no agents, which must not read as "no live writer".
+    const f = fixture();
+    updateLane(f.lane.id, { sessionKey: 'codex-owned:auto-release-warming' }, 'system');
+    f.persist();
+    const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+    const inventory = vi.mocked(getRuntimeInventorySnapshot);
+    inventory.mockImplementation(async () => ({ meta: { mode: 'stale', observablePending: true }, agents: [] }) as never);
+    try {
+      await runWorktreeReaperTick();
+      expect(f.read().packets[0].releaseState).toBe('pending');
+      expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    } finally {
+      inventory.mockImplementation(async () => LIVE_INVENTORY as never);
+    }
   });
 
   it('refuses a delayed release after a new steer enters the same lane', async () => {
