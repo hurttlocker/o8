@@ -1,7 +1,7 @@
 {
   "note": "Resource-owning test files red on the Linux runner in run 35178955102 (2026-09-17, #2391). The integration gate reports these as baseline red instead of failing the run when O8_INTEGRATION_BASELINE points here. This list may only shrink: remove a file once it passes, and never add one.",
   "sourceRun": 35178955102,
-  "count": 44,
+  "count": 43,
   "files": [
     {
       "path": "src/app/api/panel/universal-search/route.test.ts",
@@ -138,10 +138,6 @@
     {
       "path": "tests/reset-packet-branch-cleanup.test.ts",
       "firstFailure": "reset_packet clearWorktree branch cleanup > archives only the reset packet lane and retains a branch owned by a live sibling lane"
-    },
-    {
-      "path": "tests/reset-stop-registry-truth.test.ts",
-      "firstFailure": "reset and stop preserve runtime truth > waits for the outgoing current mission handoff before closing its registry packet"
     },
     {
       "path": "tests/runtime-capacity-identity-real-path.test.ts",

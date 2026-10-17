@@ -645,7 +645,7 @@ async function closePacketUnmergedUnlocked(input: {
       };
     }
     detachedSessionRollbacks.length = 0;
-    for (const survivor of survivors) {
+    for (const survivor of survivors.filter((target) => persistedIds.has(target.laneId))) {
       recordLaneEvent(survivor.laneId, 'update', 'system', {
         code: 'kill_unconfirmed',
         packetId: input.packetId,
@@ -668,11 +668,13 @@ async function closePacketUnmergedUnlocked(input: {
       preservedBranches,
       closedAt,
     });
-    recordLaneEvent(lane.id, 'update', 'system', {
-      code: PACKET_DISPOSITION_EVENT_CODE,
-      disposition: packetDisposition,
-      preservationReceipts,
-    });
+    if (persistedIds.has(lane.id)) {
+      recordLaneEvent(lane.id, 'update', 'system', {
+        code: PACKET_DISPOSITION_EVENT_CODE,
+        disposition: packetDisposition,
+        preservationReceipts,
+      });
+    }
     void import('@/lib/receipts/packet-receipt')
       .then(({ createPacketReceiptForClosedPacket }) => createPacketReceiptForClosedPacket({
         packetId: input.packetId,
