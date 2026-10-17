@@ -22,6 +22,21 @@ vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
   };
 });
 
+// Like the kill and archive seams above: the worktree ownership guards (#3346)
+// are proven elsewhere, so cleanup removes the fixture checkout with git itself.
+vi.mock('@/lib/lane/worktree-cleanup', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/worktree-cleanup')>();
+  const { execFileSync } = await import('node:child_process');
+  return {
+    ...actual,
+    cleanupLaneWorktree: async (lane: { repoPath: string; worktreePath?: string | null }) => {
+      if (!lane.worktreePath) return true;
+      execFileSync('git', ['-C', lane.repoPath, 'worktree', 'remove', '--force', lane.worktreePath], { stdio: 'pipe' });
+      return true;
+    },
+  };
+});
+
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-agent-control-persisted-'));
 const operatorToken = 'operator-agent-control-persisted-0123456789abcdef';
 writeFileSync(join(dataDir, 'ws-token'), `${operatorToken}\n`, 'utf8');

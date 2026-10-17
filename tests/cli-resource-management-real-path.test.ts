@@ -203,8 +203,9 @@ describe('o8 repo and project CLI real path', () => {
         path: realpathSync.native(repoA),
         remoteUrl: null,
         exists: true,
-        readiness: 'ready',
-        dispatchable: true,
+        // Add registers without a cold readiness probe; the selected-repo check reports it.
+        readiness: null,
+        dispatchable: null,
         failedCheck: null,
         correctiveAction: null,
       },
