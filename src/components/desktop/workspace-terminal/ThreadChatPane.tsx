@@ -11,6 +11,7 @@
  */
 
 import { useThreadPaneDrag } from './useThreadPaneDrag';
+import { SessionPaneFrame } from './SessionPaneFrame';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { registerPaneThread, unregisterPaneThread } from '@/lib/orchestrator/pane-thread-registry';
@@ -95,21 +96,7 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
   const headerTitle = title || chrome?.activeTargetLabel || 'Chat';
 
   return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: 0,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 10,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        background: 'var(--t-chat-surface-bg, var(--t-panel))',
-        overflow: 'hidden',
-      }}
-    >
+    <SessionPaneFrame>
       {/* The pane header moves the existing chat; its close button stays independent. */}
       <div
         onPointerDown={startPaneDrag}
@@ -193,6 +180,6 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
           onChromeChange={handleChromeChange}
         />
       </div>
-    </div>
+    </SessionPaneFrame>
   );
 }
