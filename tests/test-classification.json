@@ -243,6 +243,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/repo-focus/tabs/chats/sections.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
       "reasons": [
         "apfs-tool"

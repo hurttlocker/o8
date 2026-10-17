@@ -1,5 +1,5 @@
 import { normalizeRepoPath } from '../../utils';
-import { CONVERSATIONS_GROUP_KEY, historyRepoGroupLabel } from './helpers';
+import { CONVERSATIONS_GROUP_KEY, historyBelongsToRepo, historyRepoGroupLabel, type HistoryRepoIdentity } from './helpers';
 import type { RepoFocusRepo } from '../../types';
 import type { ArchivedLaneRow, ChatHistoryItem, RepoHistoryGroup } from './types';
 
@@ -166,7 +166,12 @@ export function deriveShowRepoSuffix(
   return repos.size > 1;
 }
 
-export function repoSuffix(item: { repoName?: string | null; repoPath?: string | null }): string | null {
+export function repoSuffix(item: HistoryRepoIdentity, repos: RepoFocusRepo[] = []): string | null {
+  const registered = repos.filter(repo => historyBelongsToRepo(item, repo))
+    .sort((a, b) => a.localPath.length - b.localPath.length)[0];
+  if (registered) return registered.name;
+  const path = item.repoPath?.trim().replace(/[\\/]\.(?:cortex-)?worktrees[\\/].*$/, '');
+  if (path && path !== item.repoPath?.trim()) return path.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const name = item.repoName?.trim();
   if (name) return name;
   return item.repoPath

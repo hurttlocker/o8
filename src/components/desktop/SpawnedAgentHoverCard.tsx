@@ -187,9 +187,7 @@ export function SpawnedAgentHoverCard({
               letterSpacing: '-0.1px',
               lineHeight: 1.25,
               color: 'var(--t-text)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              overflowWrap: 'anywhere',
             }}
             title={row.name}
           >

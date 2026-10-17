@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } 
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { ScheduledTaskMark } from './ScheduledTaskMark';
+import { SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 
@@ -282,9 +283,9 @@ export function ExtraAgentRowView({
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, height: 17, minWidth: 0 }}>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>{row.name}</span>
+          <span style={{ minWidth: 0, maxWidth: SIDEBAR_TITLE_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
           {repoLabel && dotState !== 'running' ? (
-            <span style={{ minWidth: 0, flexShrink: 1, overflow: 'hidden', whiteSpace: 'nowrap',
+            <span style={{ minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               fontSize: 11.5, color: 'var(--t-text-faint)', fontWeight: 260 }}>{repoLabel}</span>
           ) : null}
         </span>
