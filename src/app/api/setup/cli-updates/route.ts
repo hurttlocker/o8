@@ -3,7 +3,7 @@ import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { CodexUpdateRefusal } from '@/lib/setup/codex-cli-update';
 import { updateSelectedStableCli } from '@/lib/setup/stable-cli-update';
 import { invalidateCliCache } from '@/lib/runtimes/shared/cli-resolver';
-import { checkCliUpdates } from '@/lib/setup/cli-updates';
+import { checkCliUpdates, CLI_UPDATE_RUNTIME_IDS } from '@/lib/setup/cli-updates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,9 +13,9 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const refresh = params.get('refresh') === '1';
     const runtimeId = params.get('runtime') ?? undefined;
-    if (runtimeId && !['codex', 'claude-code', 'grok', 'gemini', 'antigravity'].includes(runtimeId)) return NextResponse.json({ error: 'Unknown CLI.' }, { status: 400 });
+    if (runtimeId && !CLI_UPDATE_RUNTIME_IDS.includes(runtimeId)) return NextResponse.json({ error: 'Unknown CLI.' }, { status: 400 });
     if (refresh) {
-      for (const id of runtimeId ? [runtimeId] : ['codex', 'claude-code', 'grok', 'gemini', 'antigravity']) invalidateCliCache(id);
+      for (const id of runtimeId ? [runtimeId] : CLI_UPDATE_RUNTIME_IDS) invalidateCliCache(id);
     }
     return NextResponse.json({ tools: await checkCliUpdates(refresh, runtimeId), checkedAt: new Date().toISOString() });
   } catch {
@@ -27,17 +27,37 @@ export async function POST(request: Request) {
   if (resolveRequestPrincipal(request) !== 'operator') {
     return NextResponse.json({ code: 'operator-required', error: 'Only the operator can install a CLI update.' }, { status: 403 });
   }
-  let runtimeId: 'codex' | 'claude-code' | 'grok' = 'codex';
+  let runtimeId: import('@/lib/setup/cli-installation').StableCli = 'codex';
   try {
     const body: unknown = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'runtime')
-      || ('runtime' in body && body.runtime !== 'codex' && body.runtime !== 'claude-code' && body.runtime !== 'grok')) {
+      || ('runtime' in body && body.runtime !== 'codex' && body.runtime !== 'claude-code' && body.runtime !== 'grok' && body.runtime !== 'opencode' && body.runtime !== 'gemini')) {
       return NextResponse.json({ code: 'invalid-request', error: 'This action accepts no package, command, version, or path arguments.' }, { status: 400 });
     }
     if ('runtime' in body && body.runtime === 'claude-code') runtimeId = 'claude-code';
     if ('runtime' in body && body.runtime === 'grok') runtimeId = 'grok';
+    if ('runtime' in body && body.runtime === 'opencode') runtimeId = 'opencode';
+    if ('runtime' in body && body.runtime === 'gemini') runtimeId = 'gemini';
   } catch {
     return NextResponse.json({ code: 'invalid-request', error: 'Expected an empty object or a supported runtime.' }, { status: 400 });
+  }
+  if (request.headers.get('accept')?.includes('text/event-stream')) {
+    const encoder = new TextEncoder(); let connected = true;
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: string, data: unknown) => { if (connected) { try { controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); } catch { connected = false; } } };
+        try {
+          const result = await updateSelectedStableCli(runtimeId, stage => send('progress', { runtime: runtimeId, stage }));
+          send('result', result);
+        } catch (error) {
+          const refusal = error instanceof CodexUpdateRefusal ? error : new CodexUpdateRefusal('update-failed', 'Unable to update this CLI.', 503);
+          send('error', { code: refusal.code, error: refusal.message });
+        } finally { if (connected) controller.close(); }
+      },
+      // Closing a view must not interrupt an installer halfway through writing.
+      cancel() { connected = false; },
+    });
+    return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' } });
   }
   try {
     return NextResponse.json(await updateSelectedStableCli(runtimeId));
