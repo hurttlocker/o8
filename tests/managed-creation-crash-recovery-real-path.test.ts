@@ -42,7 +42,8 @@ function waitForFile(candidatePath: string, timeoutMs = 30_000): Promise<void> {
   });
 }
 
-it.each(['git-worktree', 'apfs-cow-clone'] as const)(
+// APFS clones require macOS; crash recovery of Git worktrees runs on every host.
+it.each((process.platform === 'darwin' ? ['git-worktree', 'apfs-cow-clone'] : ['git-worktree']) as Array<'git-worktree' | 'apfs-cow-clone'>)(
   'reclaims a %s workspace after a crash following materialization but before final bind',
   async (isolationKind) => {
     const root = mkdtempSync(path.join(os.tmpdir(), `o8-create-crash-${isolationKind}-`));
@@ -88,9 +89,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
     process.env.O8_WORKTREE_ROOT = worktreeRoot;
     const { WorktreeManager } = await import('@/lib/worktree/manager');
 
-    await expect(new WorktreeManager(repoRoot).cleanup(
-      receipt.id, { force: true, overrideLiveGuard: true },
-    )).resolves.toBe(true);
+    await expect(new WorktreeManager(repoRoot).prune(0)).resolves.toContain(receipt.id);
     expect(existsSync(receipt.worktreePath)).toBe(false);
     const { closeDb } = await import('@/lib/db');
     closeDb();
@@ -221,7 +220,7 @@ it.each(['pr', 'merge'] as const)('replays %s cleanup after a crash following th
   const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
   const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
   const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
-  const { createWorkspaceSnapshot, getWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
+  const { getWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
   const layout = resolveWorktreeRootLayout(repoRoot);
   mkdirSync(layout.primaryBase, { recursive: true });
   const id = 'packet-cleanup-crash-replay';
@@ -244,23 +243,20 @@ it.each(['pr', 'merge'] as const)('replays %s cleanup after a crash following th
     materializationIdentity,
     materializationParentIdentity,
   }));
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: worktreePath, encoding: 'utf8' }).trim();
-  const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: worktreePath, encoding: 'utf8' }).trim();
-  const repositoryUuid = `cleanup-crash-${action}`;
-  createWorkspaceSnapshot({
-    repositoryUuid,
-    packetId: id,
-    laneId: null,
-    originalPath: worktreePath,
-    branch: `inline/${id}`,
-    baseCommit: head,
-    headCommit: head,
-    treeSha: tree,
-    recoveryRef: `refs/o8/recovery/${id}`,
-    diffFingerprint: `${id}-diff`,
-    sessionIdentities: [],
-    creationId: `${id}-created`,
-  });
+  const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+  const { addRepo } = await import('@/lib/repos/registry');
+  const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+  const { captureWorkspaceMaterializationSnapshot } = await import('@/lib/workspace/workspace-materialization-retirement');
+  const repo = await addRepo(repoRoot);
+  const sessionKey = await bindOwnedPacketSession(repoRoot, { id, path: worktreePath }, { packetId: id, branch: `inline/${id}` });
+  const lane = createLane({ repoPath: repoRoot, worktreePath, branch: `inline/${id}`, baseBranch: 'main', runtime: 'codex', packetId: id, sessionKey });
+  // Paused lanes do not schedule terminal cleanup before the crash boundary.
+  setLaneStatus(lane.id, 'paused', 'user', 'fixture_stopped');
+  await captureWorkspaceMaterializationSnapshot(repoRoot, worktreePath, action);
+  // Recovery must see a terminal owner, without racing the registry's async cleanup.
+  const { getSqlite } = await import('@/lib/db');
+  getSqlite().prepare("UPDATE lanes SET status = 'archived' WHERE id = ?").run(lane.id);
+  const repositoryUuid = repo.id;
   const { closeDb } = await import('@/lib/db');
   closeDb();
   const child = spawn(process.execPath, [

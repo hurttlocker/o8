@@ -354,7 +354,7 @@ it('refuses unavailable profiles, foreign or malformed targets, and anonymous ca
     expect((await call('dispatch_mission', {})).isError).toBe(true);
   }
   vi.stubEnv('O8_OPERATOR_MCP_PROFILE', 'full');
-  expect(payload(await call('dispatch_mission', { missionId: 'mission-foreign-fixture' }))).toMatchObject({ error: expect.any(String) });
+  expect((await call('dispatch_mission', { missionId: 'mission-foreign-fixture' })).isError).toBe(true);
   expect((await call('dispatch_mission', { runtime: 'invalid-runtime' })).isError).toBe(true);
   expect((await rpc('tools/call', { name: 'dispatch_mission', arguments: {} }, false)).status).toBe(401);
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');

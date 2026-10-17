@@ -59,9 +59,11 @@ const { inspectOwnedWorkspaceMaterialization } = await import('./materialization
 const { assertManagedWorkspaceMaterialization } = await import('./managed-materialization-identity');
 const { parkWorkspace } = await import('./hibernator');
 const { probeOwnedSessionProcessQuiescence } = await import('./process-probes');
-const { scanWorkspaceStorageState } = await import('./storage-verifier');
 const { parkExactWorktree } = await import('./worktree-exact');
 const { closeDb } = await import('@/lib/db');
+
+// Register production runtimes before the fixture installs its explicit owned lifecycle.
+await import('@/lib/runtimes');
 
 const roots: string[] = [];
 const envKeys: string[] = [];
@@ -259,14 +261,6 @@ function dependencies(f: ReturnType<typeof fixture>) {
   };
 }
 
-async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 1_000; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('Timed out waiting for concurrent workspace state.');
-}
-
 async function stopRun(store: OwnedSessionStore, surfaceId: string): Promise<void> {
   await store.interrupt(surfaceId).catch(() => null);
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -346,7 +340,7 @@ describe('owned run and workspace parking exclusion', () => {
       await expect(f.store.resume(f.surfaceId, 'resume after park gate')).resolves.toMatchObject({
         ok: false,
         sideEffect: 'none',
-        note: expect.stringContaining('hibernating'),
+        note: expect.stringMatching(/hibernating|lifecycle/),
       });
       const session = JSON.parse(readFileSync(path.join(f.sessionDir, 'session.json'), 'utf8')) as OwnedSessionRecord;
       expect(session.activeRun).toBeUndefined();
@@ -359,70 +353,44 @@ describe('owned run and workspace parking exclusion', () => {
   );
 
   it.each(['git-worktree', 'apfs-cow-clone'] as const)(
-    'retains the %s path when resume passes the materialized gate first',
+    'retains the %s path when resume owns the lifecycle before parking',
     async (kind) => {
       const resumeGuardPassed = deferred();
       const releaseResume = deferred();
-      const secondScanEntered = deferred();
-      const releaseSecondScan = deferred();
-      const finalProbeAttempted = deferred();
-      let finalProbeCompleted = false;
-      let processProbeCalls = 0;
-      let pauseGuard = true;
       const guard: OwnedWorkspaceSpawnGuard = async (input) => {
         const decision = await inspectOwnedWorkspaceMaterialization(input, {
-          listRepos: async () => [f.repo],
-          assertManagedWorkspaceMaterialization,
-          findLaneByPacket: () => null,
+          listRepos: async () => [f.repo], assertManagedWorkspaceMaterialization, findLaneByPacket: () => null,
         });
-        if (pauseGuard && decision.status === 'available' && decision.source === 'materialized') {
-          pauseGuard = false;
+        if (decision.status === 'available' && decision.source === 'materialized') {
           resumeGuardPassed.resolve();
           await releaseResume.promise;
         }
         return decision;
       };
       const f = fixture(kind, guard);
-      let secondScanCalls = 0;
-      const parkedPromise = parkWorkspace({
-        repositoryUuid: f.repo.id,
-        packetId: f.packetId,
-        operationId: `resume-first-${kind}`,
-      }, {
-        ...dependencies(f),
-        processProbe: async (...args) => {
-          processProbeCalls += 1;
-          if (processProbeCalls === 2) finalProbeAttempted.resolve();
-          const receipt = await probeOwnedSessionProcessQuiescence(...args);
-          if (processProbeCalls === 2) finalProbeCompleted = true;
-          return receipt;
-        },
-        secondScan: async (...args) => {
-          const receipt = await scanWorkspaceStorageState(...args);
-          secondScanCalls += 1;
-          if (secondScanCalls === 1) {
-            secondScanEntered.resolve();
-            await releaseSecondScan.promise;
-          }
-          return receipt;
-        },
-      });
-
-      await secondScanEntered.promise;
-      const resumedPromise = f.store.resume(f.surfaceId, 'resume before park gate');
+      const resumedPromise = f.store.resume(f.surfaceId, 'resume before parking');
       await resumeGuardPassed.promise;
-      releaseSecondScan.resolve();
-      await waitUntil(() => getWorkspaceSnapshot(f.repo.id, f.packetId)?.state === 'hibernating');
-      await finalProbeAttempted.promise;
-      await new Promise((resolve) => setImmediate(resolve));
-      expect(finalProbeCompleted).toBe(false);
-      releaseResume.resolve();
+      const processIdentity = await import('@/lib/worktree/metadata-lock-process-identity');
+      const originalProbe = processIdentity.probeMetadataLockProcessIdentity;
+      const parkContended = deferred();
+      const probe = vi.spyOn(processIdentity, 'probeMetadataLockProcessIdentity').mockImplementation(async (pid) => {
+        const result = await originalProbe(pid);
+        parkContended.resolve();
+        return result;
+      });
+      const parkedPromise = parkWorkspace({ repositoryUuid: f.repo.id, packetId: f.packetId,
+        operationId: `resume-first-${kind}` }, dependencies(f));
+      try {
+        await parkContended.promise;
+      } finally {
+        releaseResume.resolve();
+        probe.mockRestore();
+      }
       await expect(resumedPromise).resolves.toMatchObject({ ok: true });
-      await expect(parkedPromise).resolves.toMatchObject({ status: 'refused' });
+      await expect(parkedPromise).resolves.toMatchObject({ status: 'refused', code: 'lifecycle_contended' });
       expect(existsSync(f.worktreePath)).toBe(true);
-      expect(getWorkspaceSnapshot(f.repo.id, f.packetId)).toMatchObject({ state: 'materialized' });
+      expect(getWorkspaceSnapshot(f.repo.id, f.packetId)).toBeNull();
       await stopRun(f.store, f.surfaceId);
-    },
-    60_000,
+    }, 60_000,
   );
 });

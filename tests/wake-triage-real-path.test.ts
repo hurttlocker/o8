@@ -261,7 +261,9 @@ describe('wake triage at the review-continuation chokepoint', () => {
     // The only part execution cannot reach: which enqueue the ws-server passes.
     // Both bodies run for real in the tests above and below.
     const source = readFileSync(join(process.cwd(), 'src/ws-server.ts'), 'utf8');
-    expect(source).toContain('queueReviewContinuationTurn(lane, enqueueOrchestratorAutoMessage);');
+    // #3209: review wakes go to the lane's originating chat, through the same triaging function.
+    expect(source).toContain("import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';");
+    expect(source).toContain('queueChatReviewMessage(reviewLane, (repoPath, message) => {');
     expect(source).toContain('queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);');
   });
 });

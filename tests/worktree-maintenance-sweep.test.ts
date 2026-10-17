@@ -5,7 +5,7 @@
  * point must cover both saved repos and transient repos known only by a lane.
  */
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, mkdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -69,34 +69,15 @@ afterAll(async () => {
 });
 
 describe('periodic worktree maintenance', () => {
-  it('reclaims saved-repo orphans and transient-repo terminal worktrees', async () => {
+  it('reclaims a managed terminal workspace and preserves an unmanaged terminal worktree', async () => {
     const savedRepo = await makeRepo('saved');
     const transientRepo = await makeRepo('transient');
-    const savedOrphanPath = await makeWorktree(savedRepo, 'saved-orphan');
+    const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+    const savedOrphan = await createManagedPacketWorktree(savedRepo, {
+      packetId: 'saved-terminal', branch: 'inline/saved-terminal',
+    });
+    const savedOrphanPath = savedOrphan.path;
     const transientTerminalPath = await makeWorktree(transientRepo, 'transient-terminal');
-
-    const stale = new Date(Date.now() - 2 * 60 * 60_000);
-    await Promise.all([
-      utimes(savedOrphanPath, stale, stale),
-      utimes(path.join(savedOrphanPath, '.git'), stale, stale),
-      utimes(path.join(savedOrphanPath, 'seed.txt'), stale, stale),
-    ]);
-
-    const now = new Date().toISOString();
-    await writeFile(path.join(dataDir, 'repos.json'), `${JSON.stringify({
-      version: 1,
-      repos: [{
-        id: 'saved-repo',
-        name: 'saved',
-        localPath: savedRepo,
-        remoteUrl: null,
-        defaultBranch: 'main',
-        isGitRepo: true,
-        setup: {},
-        addedAt: now,
-        lastOpenedAt: now,
-      }],
-    })}\n`, 'utf8');
 
     const [{ createLane }, { getSqlite }, { runWorktreeMaintenanceTick }] = await Promise.all([
       import('@/lib/lane/registry'),
@@ -111,11 +92,21 @@ describe('periodic worktree maintenance', () => {
       packetId: 'transient-terminal',
       worktreePath: transientTerminalPath,
     });
+    const savedLane = createLane({
+      repoPath: savedRepo,
+      branch: 'inline/saved-terminal',
+      baseBranch: 'main', runtime: 'codex', packetId: 'saved-terminal',
+      worktreePath: savedOrphanPath, sessionKey: savedOrphan.sessionKey,
+    });
     getSqlite().prepare('UPDATE lanes SET status = ? WHERE id = ?').run('archived', lane.id);
+    getSqlite().prepare('UPDATE lanes SET status = ? WHERE id = ?').run('archived', savedLane.id);
 
-    await runWorktreeMaintenanceTick();
+    // Maintenance advances bounded discovery phases over successive ticks.
+    for (let tick = 0; tick < 20 && await exists(savedOrphanPath); tick += 1) {
+      await runWorktreeMaintenanceTick();
+    }
 
-    expect(await exists(savedOrphanPath), 'saved repo orphan is reclaimed').toBe(false);
-    expect(await exists(transientTerminalPath), 'transient terminal lane is reclaimed').toBe(false);
+    expect(await exists(savedOrphanPath), 'saved terminal workspace is reclaimed').toBe(false);
+    expect(await exists(transientTerminalPath), 'unmanaged terminal workspace is preserved').toBe(true);
   }, 60_000);
 });

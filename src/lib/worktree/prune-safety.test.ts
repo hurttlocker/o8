@@ -236,7 +236,7 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
     expect(await exists(watchedPath), 'watch-only worktree is prunable').toBe(false);
   }, 60_000);
 
-  it('manager cleanup refuses a live worktree at the deletion seam unless confirmed-kill override is explicit', async () => {
+  it('manager cleanup retains a live worktree even with a legacy override until the process exits', async () => {
     const livePath = await addWorktree('packet-live-cleanup-seam');
     const detach = vi.fn(async () => {});
     vi.doMock('@/lib/workspace/dependency-materializer', async (importOriginal) => ({
@@ -276,8 +276,12 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
     await expect(mgr.cleanup('packet-live-cleanup-seam', {
       force: true,
       overrideLiveGuard: true,
-    })).resolves.toBe(true);
-    expect(await exists(livePath), 'confirmed-kill override permits cleanup').toBe(false);
+    })).resolves.toBe(false);
+    expect(await exists(livePath), 'retirement process authority retains a live workspace').toBe(true);
+    child.kill('SIGKILL');
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    await expect(mgr.cleanup('packet-live-cleanup-seam', { force: true })).resolves.toBe(true);
+    expect(await exists(livePath), 'quiescent standalone workspace can be retired').toBe(false);
   }, 60_000);
 
   it('manager cleanup preserves a same-name replacement introduced at retirement', async () => {
@@ -348,7 +352,7 @@ describe('WorktreeManager.prune() safety guards (#1585)', () => {
 
     await expect(new WorktreeManager(repoRoot).cleanup(
       'packet-corrupt-primary', { force: true },
-    )).rejects.toThrow();
+    )).resolves.toBe(false);
 
     expect(await exists(path.join(target, 'sentinel'))).toBe(true);
   }, 60_000);

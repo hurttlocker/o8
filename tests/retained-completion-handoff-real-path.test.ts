@@ -156,7 +156,7 @@ async function fixture(retained = true) {
     workspaceBinding: { logicalWorkspaceId: 'packet:' + packetId, repositoryUuid: repo.id,
       packetId, cwd: workspacePath, version: 1, verifiedAt: completedAt },
   };
-  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(session));
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify(session), { mode: 0o600 });
   // Read each directly published fixture session from current persisted evidence.
   resetOwnedSessionIndex();
   const exitEvent = recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, exitCode: 0 });
@@ -176,6 +176,8 @@ async function fixture(retained = true) {
     resume: async () => ({ ok: false, note: 'Transcript-only fixture' }),
     interrupt: async () => ({ ok: false, note: 'Transcript-only fixture' }),
   };
+  // Load canonical registrations before installing the transcript fixture.
+  await import('@/lib/runtimes');
   registerRuntime(runtime);
   const packet: OrchestratorPacket = {
     id: packetId, referenceLabel: '#3260', title: summary, summary, runtime: 'codex',
@@ -205,11 +207,16 @@ describe('retained worker completion through the production supervisor callback'
     const decision = await handleAgentCompletion(sessionKey, 'completed', dependencies);
     expect(decision).toMatchObject({ detail: expect.stringContaining('completed its read-only inspection') });
     expect(getLane(lane.id)).toMatchObject({ status: 'completed', outcome: 'no_changes', worktreePath: workspacePath });
-    // Await the real asynchronous cleanup refusal, rather than passing before
-    // the manager has had an opportunity to remove the materialization.
-    await vi.waitFor(() => expect(getLaneEvents(lane.id, 100)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ payload: expect.objectContaining({ phase: 'terminal_cleanup', worktreeRemoved: false }) }),
-    ])), { timeout: 10_000, interval: 50 });
+    // Terminal cleanup advances through the bounded maintenance scheduler.
+    // Wait for its durable refusal receipt before asserting source retention.
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    const { readMaintenanceState } = await import('@/lib/worktree/maintenance-discovery');
+    await vi.waitFor(async () => {
+      await runWorktreeMaintenanceTick();
+      const receipt = readMaintenanceState<{ outcomes: Array<{ scope: string; outcome: string }> }>('last-pass');
+      expect(receipt?.outcomes.some((outcome) => (outcome.scope === lane.id || outcome.scope === workspacePath)
+        && outcome.outcome === 'held: preservation, owner, identity or retention policy refused')).toBe(true);
+    }, { timeout: 30_000, interval: 50 });
     closeDb();
     expect(getWorkspaceRetentionHold(workspacePath, identity)).toEqual(hold);
     expect(await captureWorktreeMaterializationIdentity(workspacePath)).toEqual(identity);
@@ -384,7 +391,7 @@ describe('retained worker completion through the production supervisor callback'
     const sessionDir = join(sessionsRoot, sessionKey.slice('codex-owned:'.length));
     mkdirSync(sessionDir);
     writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({ ...f.session, surfaceId: sessionKey, sessionDir,
-      recentRuns: [{ ...f.session.recentRuns[0], id: 'replacement-run' }] }));
+      recentRuns: [{ ...f.session.recentRuns[0], id: 'replacement-run' }] }), { mode: 0o600 });
     updateLane(f.lane.id, { sessionKey });
     await withWorktreeMetaTransaction(f.repo.localPath, async (transaction) => {
       const metadata = (await transaction.readAll())[f.worktreeId];

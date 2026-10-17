@@ -132,6 +132,16 @@ function setupChild(command = 'manifest-step-one') {
   return execution.children.find((child) => child.command === command) ?? null;
 }
 
+async function bindLaneWorktree(laneId: string, worktreePath: string) {
+  const { getLane, updateLane } = await import('@/lib/lane/registry');
+  const { getWorktreeManager } = await import('@/lib/worktree/launch');
+  const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+  const lane = getLane(laneId)!;
+  const worktree = (await getWorktreeManager(repoPath).list()).find((entry) => entry.path === worktreePath)!;
+  const sessionKey = await bindOwnedPacketSession(repoPath, worktree, { packetId: lane.packetId!, branch: lane.branch });
+  updateLane(laneId, { worktreePath, sessionKey }, 'system');
+}
+
 async function launchPacket(input: {
   packetId: string;
   branch?: string;
@@ -139,7 +149,7 @@ async function launchPacket(input: {
 }) {
   launchSequence += 1;
   const branch = input.branch ?? `issue/1910-lifecycle-${launchSequence}`;
-  const { createLane, updateLane } = await import('@/lib/lane/registry');
+  const { createLane } = await import('@/lib/lane/registry');
   const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
   const lane = createLane({
     repoPath,
@@ -162,7 +172,7 @@ async function launchPacket(input: {
   });
   if (!prepared) throw new Error(`Worktree launch returned no workspace for ${input.packetId}.`);
   if (input.bindWorktree !== false) {
-    updateLane(lane.id, { worktreePath: prepared.cwd }, 'system');
+    await bindLaneWorktree(lane.id, prepared.cwd);
   }
   return { lane, prepared };
 }
@@ -310,7 +320,6 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       getLane,
       getLaneEvents,
       setLaneStatus,
-      updateLane,
     } = await import('@/lib/lane/registry');
     const { prepareLaunchWorktree, getWorktreeManager } = await import('@/lib/worktree/launch');
     const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
@@ -344,7 +353,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       expect((await readWorkspaceManifestReceipt(worktreePath))?.step).toBe('setup:1');
     }, { timeout: 30_000 });
 
-    updateLane(lane.id, { worktreePath }, 'system');
+    await bindLaneWorktree(lane.id, worktreePath);
     setLaneStatus(lane.id, 'failed', 'system', 'cancel manifest setup');
     const prepared = await launchPromise;
     expect(prepared?.cwd).toBe(worktreePath);
@@ -373,7 +382,6 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       getLane,
       getLaneEvents,
       setLaneStatus,
-      updateLane,
     } = await import('@/lib/lane/registry');
     const { prepareLaunchWorktree, getWorktreeManager } = await import('@/lib/worktree/launch');
     const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
@@ -407,7 +415,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       expect((await readWorkspaceManifestReceipt(worktreePath))?.step).toBe('setup:1');
     }, { timeout: 30_000 });
 
-    updateLane(lane.id, { worktreePath }, 'system');
+    await bindLaneWorktree(lane.id, worktreePath);
     setLaneStatus(lane.id, 'completed', 'system', 'completed');
     const prepared = await launchPromise;
     expect(prepared?.cwd).toBe(worktreePath);
@@ -416,11 +424,13 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       (event) => event.verb === 'workspace_manifest_failed',
     )?.payload).toMatchObject({ state: 'cancelled', step: 'setup:1' });
     await waitForNoLaneLeases(lane.id);
-    await vi.waitFor(() => {
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    await vi.waitFor(async () => {
+      await runWorktreeMaintenanceTick();
       expect(existsSync(worktreePath)).toBe(false);
       expect(getLane(lane.id)?.worktreePath).toBeNull();
       expect(getLaneEvents(lane.id, 100).some((event) => (
-        event.payload.phase === 'terminal_cleanup'
+        event.payload.phase === 'bounded_maintenance'
         && event.payload.worktreeRemoved === true
       ))).toBe(true);
     }, { timeout: 30_000 });
@@ -483,7 +493,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
     const { getLaneEvents } = await import('@/lib/lane/registry');
     const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
     const { getWorktreeManager, prepareLaunchWorktree } = await import('@/lib/worktree/launch');
-    const { createLane, updateLane } = await import('@/lib/lane/registry');
+    const { createLane } = await import('@/lib/lane/registry');
     const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
     const packetId = 'packet-manifest-reset';
     const branch = 'issue/1910-lifecycle-reset';
@@ -565,7 +575,7 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
       storageAdmissionOwnerGeneration: storageLease.receipt.ownerGeneration,
       storageAdmissionReservationId: storageLease.reservation.reservationId,
     });
-    updateLane(lane.id, { worktreePath: prepared.cwd }, 'system');
+    await bindLaneWorktree(lane.id, prepared.cwd);
     expect(await readWorkspaceManifestReceipt(prepared.cwd)).toMatchObject({
       laneId: lane.id,
       state: 'completed',

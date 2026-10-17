@@ -159,13 +159,15 @@ it('preserves dirty replacement files when reset and rollback see a changed work
   const worktreeId = `packet-${packetId}`;
   expect(durablePayload.worktrees[worktreeId]).toEqual(mirrored.worktrees[worktreeId]);
   const metaIdentity = lstatSync(metaPath);
-  expect(JSON.parse(durable.mirror_identity_json)).toEqual({
+  // The mirror identity also carries its canonical path and volume (#2353).
+  expect(JSON.parse(durable.mirror_identity_json)).toMatchObject({
     device: metaIdentity.dev,
     inode: metaIdentity.ino,
+    canonicalPath: metaPath,
   });
 }, 30_000);
 
-it('does not hydrate cache bytes after an APFS clone is replaced', async () => {
+it.skipIf(process.platform !== 'darwin')('does not hydrate cache bytes after an APFS clone is replaced', async () => {
   const repoRoot = makeRepo();
   mkdirSync(path.join(repoRoot, '.next', 'cache'), { recursive: true });
   writeFileSync(path.join(repoRoot, '.next', 'cache', 'private-cache'), 'do-not-copy');

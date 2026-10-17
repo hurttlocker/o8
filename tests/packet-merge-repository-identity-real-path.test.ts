@@ -39,6 +39,7 @@ vi.mock('@/lib/realtime/publisher', () => ({
 }));
 
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(process.env.CORTEX_IDE_DATA_DIR!, 'owned-codex');
 
 const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
@@ -51,7 +52,7 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { addRepo } = await import('@/lib/repos/registry');
+const { addRepo, findRepoByLocalPath } = await import('@/lib/repos/registry');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { worktreeRepoKey } = await import('@/lib/worktree/root-layout');
@@ -163,12 +164,26 @@ async function persistDispatchedPacket(
   const reviewedHeadSha = commitAll(workspacePath, `feat: ${label} ${index} [via-o8]`);
 
   const worktreeId = `packet-${packetId}`;
+  // Retirement requires the owned session the lane and worktree record both
+  // name, bound to this exact packet workspace.
+  const sessionKey = `codex-owned:${packetId}`;
+  const sessionDir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, packetId);
+  mkdirSync(sessionDir, { recursive: true });
+  const repo = await findRepoByLocalPath(realpathSync.native(target.repoPath));
+  const now = new Date().toISOString();
+  writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+    surfaceId: sessionKey, packetId, sessionDir, cwd: workspacePath, repoPath: workspacePath,
+    workspaceBinding: { logicalWorkspaceId: `packet:${packetId}`, repositoryUuid: repo!.id,
+      packetId, cwd: workspacePath, version: 1, verifiedAt: now },
+    title: packetId, createdAt: now, updatedAt: now, latestPrompt: 'fixture', latestSummary: 'fixture',
+    recentRuns: [], runIdentityLedger: { version: 1, totalRuns: 0, complete: true },
+  }));
   const materializationIdentity = await captureWorktreeMaterializationIdentity(workspacePath);
   const materializationParentIdentity = await captureWorktreeMaterializationIdentity(relocatedBase);
   await withWorktreeMetaTransaction(target.repoPath, (transaction) => transaction.save(worktreeId, {
     id: worktreeId,
     agentType: 'codex',
-    sessionKey: `codex:${packetId}`,
+    sessionKey,
     baseBranch: 'main',
     createdAt: Date.now(),
     claudeManaged: false,
@@ -187,7 +202,7 @@ async function persistDispatchedPacket(
     baseBranch: 'main',
     runtime: 'codex',
     packetId,
-    sessionKey: `codex:${packetId}`,
+    sessionKey,
     label: `Dispatched ${label} ${index}`,
   });
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');

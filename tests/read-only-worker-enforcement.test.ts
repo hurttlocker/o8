@@ -74,6 +74,7 @@ function createMission(title: string, issueNumber: number, readOnly: boolean): N
       clientMutationId: `read-only-enforcement-${issueNumber}`,
       repoPath,
       requestedRuntime: 'claude-code',
+      dispatchOnCreate: true,
       issues: [{ number: issueNumber, title, body: `Prove ${title}.`, url: '' }],
       launchContext: {
         source: 'cli',
@@ -349,7 +350,7 @@ describe('provider-failed turn lifecycle truth', () => {
     setLaneStatus(lane.id, 'running', 'system', 'session_launched');
     expect(buildDomainLaneSummaries().find((entry) => entry.laneId === lane.id)?.status).toBe('running');
     const synced = await syncOrchestratorControlPlaneState();
-    expect(synced.packets.find((packet) => packet.id === packetId)?.status).toBe('running');
+    expect(synced.packets.find((packet) => packet.id === packetId)?.status, synced.packets.find((packet) => packet.id === packetId)?.blockedReason ?? undefined).toBe('running');
   });
 
   it('persists a zero-exit provider failure as failed instead of review or no-changes success', async () => {
@@ -378,7 +379,7 @@ describe('provider-failed turn lifecycle truth', () => {
 
     const synced = await syncOrchestratorControlPlaneState();
     const packet = synced.packets.find((candidate) => candidate.id === packetId);
-    expect(packet?.status).toBe('failed');
+    expect(packet?.status, packet?.blockedReason ?? undefined).toBe('failed');
     expect(packet?.status).not.toBe('awaiting_review');
     expect(packet?.releaseState).not.toBe('released');
     expect(packet?.lastEventLabel).not.toBe('read_only_completed');

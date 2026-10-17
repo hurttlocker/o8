@@ -42,6 +42,17 @@ writeFileSync(h.claudeBinary, [
   'esac',
 ].join('\n'));
 chmodSync(h.claudeBinary, 0o755);
+// A keyless install proves readiness through its own model listing, so the
+// fixture CLI lists one free model and nothing else.
+const opencodeBinary = path.join(fixtureRoot, 'opencode2');
+writeFileSync(opencodeBinary, [
+  '#!/bin/sh',
+  'if [ "$1" = "models" ]; then printf \'%s\\n\' \'opencode/nemotron-3.5-lightning-free\'; fi',
+  'exit 0',
+].join('\n'));
+chmodSync(opencodeBinary, 0o755);
+const fixtureHome = path.join(fixtureRoot, 'home');
+mkdirSync(fixtureHome);
 
 beforeEach(() => {
   h.antigravity = { installed: false, authenticated: false, detail: 'Fixture absent', fix: 'Sign in' };
@@ -111,8 +122,10 @@ describe('GET /api/setup/detect', () => {
 
   it('reports the installed keyless OpenCode default as composer-ready', async () => {
     h.scanAndLink.mockImplementation((binary) => (
-      binary === 'opencode2' ? '/test/bin/opencode2' : null
+      binary === 'opencode2' ? opencodeBinary : null
     ));
+    // An empty home holds no provider credential, so only the listing can make it ready.
+    vi.stubEnv('HOME', fixtureHome);
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
 
     const { GET } = await import('./route');

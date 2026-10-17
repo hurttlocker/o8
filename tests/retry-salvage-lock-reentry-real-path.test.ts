@@ -28,19 +28,15 @@ vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/codex/owned', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/codex/owned')>();
-  return {
-    ...actual,
-    // The directory-move boundary is stubbed; archival, cost persistence,
-    // packet projection, and both control-plane lock acquisitions run for real.
-    archiveOwnedCodexSession: async (surfaceId: string) => {
-      if (surfaceId !== reapSessions.sessionKey) return actual.archiveOwnedCodexSession(surfaceId);
-      reapSessions.archiveStarted += 1;
-      if (reapSessions.archiveGate) await reapSessions.archiveGate;
-      return { archived: reapSessions.archiveConfirmed };
-    },
-  };
+vi.mock('@/lib/runtimes/shared/owned-session-lifecycle', async (importOriginal) => {
+  const { stubFixtureSessionArchive } = await import('./helpers/owned-session-archive-stub');
+  // The directory-move boundary is stubbed; archival, cost persistence,
+  // packet projection, and both control-plane lock acquisitions run for real.
+  return stubFixtureSessionArchive(await importOriginal(), reapSessions, async () => {
+    reapSessions.archiveStarted += 1;
+    if (reapSessions.archiveGate) await reapSessions.archiveGate;
+    return reapSessions.archiveConfirmed;
+  });
 });
 
 vi.mock('@/lib/runtimes', async (importOriginal) => {

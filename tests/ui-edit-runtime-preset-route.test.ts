@@ -128,6 +128,7 @@ const repoPath = path.join(testRoot, 'repo');
 mkdirSync(dataDir, { recursive: true });
 mkdirSync(repoPath, { recursive: true });
 execFileSync('git', ['init', '-q', '-b', 'main', repoPath]);
+execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture'], { cwd: repoPath });
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 delete process.env.CORTEX_IDE_DB_PATH;
@@ -246,7 +247,7 @@ afterAll(async () => {
 
 describe('UI edit runtime preset dispatch routing', () => {
   it('selects the low-latency preset unless the operator pins a model', async () => {
-    const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { attachSession, createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
     laneCommandMock.mockImplementation(async (command: LaneCommand): Promise<LaneCommandResult> => {
       if (command.verb === 'open_lane') {
         const lane = createLane({
@@ -262,6 +263,11 @@ describe('UI edit runtime preset dispatch routing', () => {
         return { ok: true, laneId: lane.id, note: 'opened', lane };
       }
       if (command.verb === 'launch_session') {
+        const current = getLane(command.laneId);
+        if (current) {
+          attachSession(current.id, `codex-owned:${current.id}`, 'system');
+          setLaneStatus(current.id, 'running', 'system', 'session_launched');
+        }
         const lane = getLane(command.laneId);
         return {
           ok: true,
@@ -287,7 +293,7 @@ describe('UI edit runtime preset dispatch routing', () => {
     const dispatchResult = await dispatchMission({
       missionId: readOrchestratorControlPlaneState().missionId,
     });
-    expect(dispatchResult.dispatched).toBe(1);
+    expect(dispatchResult.dispatched, JSON.stringify(readOrchestratorControlPlaneState().packets.map(({ status, blockedReason, storageAdmission }) => ({ status, blockedReason, storageAdmission })))).toBe(1);
     const launchCommand = laneCommandMock.mock.calls
       .map(([command]) => command as LaneCommand)
       .find((command) => command.verb === 'launch_session');

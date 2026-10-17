@@ -64,7 +64,7 @@ describe('OpenClaw orchestrator spawn preflight', () => {
 
     const error = events.find((event) => event.type === 'error')?.error ?? '';
     expect(error).toContain(missingPath);
-    expect(error).toContain('no longer exists');
+    expect(error).toContain('Repository folder not found');
     expect(error).not.toContain('ENOENT');
     expect(resolveCliMock).not.toHaveBeenCalled();
     expect(spawnMock).not.toHaveBeenCalled();

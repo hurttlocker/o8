@@ -104,13 +104,9 @@ function makeRepo(): string {
   return dir;
 }
 
-function makePacketWorktree(repoPath: string, branch: string, dirName: string): string {
-  const worktreeRoot = join(repoPath, '.cortex-worktrees');
-  const worktreePath = join(worktreeRoot, dirName);
-  mkdirSync(worktreeRoot, { recursive: true });
-  git(repoPath, ['branch', branch]);
-  git(repoPath, ['worktree', 'add', '-q', worktreePath, branch]);
-  return worktreePath;
+async function makePacketWorktree(repoPath: string, branch: string, dirName: string) {
+  const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+  return createManagedPacketWorktree(repoPath, { packetId: dirName.slice('packet-'.length), branch });
 }
 
 function commitFile(cwd: string, fileName: string, body: string, message: string): string {
@@ -224,7 +220,7 @@ function mirrorPullRequest(input: {
 describe('worktree reaper PR merge reconciliation', () => {
   it('archives a reviewing lane when its stamped PR mirror row is merged', { timeout: 20_000 }, async () => {
     const repoPath = makeRepo();
-    const worktreePath = makePacketWorktree(repoPath, 'inline/pr-merged', 'packet-pkt-pr-merged');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, 'inline/pr-merged', 'packet-pkt-pr-merged');
     const lane = createLane({
       repoPath,
       branch: 'inline/pr-merged',
@@ -232,6 +228,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId: 'pkt-pr-merged',
       worktreePath,
+      sessionKey,
     });
     markReviewing(lane.id, 301);
     mirrorPullRequest({
@@ -255,7 +252,7 @@ describe('worktree reaper PR merge reconciliation', () => {
     const repoPath = makeRepo();
     const packetId = 'pkt-pr-merged-clean';
     const branch = 'inline/pr-merged-clean';
-    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean');
     const lane = createLane({
       repoPath,
       branch,
@@ -263,6 +260,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     const reviewedHeadSha = commitFile(worktreePath, 'clean.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
     recordApprovedReview(packetId, reviewedHeadSha);
@@ -291,7 +289,7 @@ describe('worktree reaper PR merge reconciliation', () => {
     const repoPath = makeRepo();
     const packetId = 'pkt-pr-merged-touched';
     const branch = 'inline/pr-merged-touched';
-    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-touched');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-touched');
     const lane = createLane({
       repoPath,
       branch,
@@ -299,6 +297,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     const reviewedHeadSha = commitFile(worktreePath, 'touched.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
     recordApprovedReview(packetId, reviewedHeadSha);
@@ -328,7 +327,7 @@ describe('worktree reaper PR merge reconciliation', () => {
     const repoPath = makeRepo();
     const packetId = 'pkt-pr-merged-clean-busy-main';
     const branch = 'inline/pr-merged-clean-busy-main';
-    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean-busy-main');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean-busy-main');
     const lane = createLane({
       repoPath,
       branch,
@@ -336,6 +335,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     const reviewedHeadSha = commitFile(worktreePath, 'busy.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
     recordApprovedReview(packetId, reviewedHeadSha);
@@ -366,7 +366,7 @@ describe('worktree reaper PR merge reconciliation', () => {
 
   it('preserves dirty terminal work before deleting a PR-merged packet clone', async () => {
     const repoPath = makeRepo();
-    const worktreePath = makePacketWorktree(repoPath, 'inline/pr-merged-dirty', 'packet-pkt-pr-merged-dirty');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, 'inline/pr-merged-dirty', 'packet-pkt-pr-merged-dirty');
     writeFileSync(join(worktreePath, 'dirty.txt'), 'salvaged terminal work\n');
     const lane = createLane({
       repoPath,
@@ -375,6 +375,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId: 'pkt-pr-merged-dirty',
       worktreePath,
+      sessionKey,
     });
     markReviewing(lane.id, 304);
     mirrorPullRequest({
@@ -497,7 +498,7 @@ describe('worktree reaper PR merge reconciliation', () => {
   it('does not archive a running packet whose new branch still equals its base', async () => {
     const repoPath = makeRepo();
     const branch = 'inline/running-before-first-commit';
-    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-running-before-first-commit');
+    const { path: worktreePath, sessionKey } = await makePacketWorktree(repoPath, branch, 'packet-pkt-running-before-first-commit');
     const lane = createLane({
       repoPath,
       branch,
@@ -505,6 +506,7 @@ describe('worktree reaper PR merge reconciliation', () => {
       runtime: 'codex',
       packetId: 'pkt-running-before-first-commit',
       worktreePath,
+      sessionKey,
     });
     markStatus(lane.id, 'running');
 
@@ -513,6 +515,7 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(getLane(lane.id)).toMatchObject({
       status: 'running',
       worktreePath,
+      sessionKey,
     });
     expect(existsSync(worktreePath)).toBe(true);
   });
@@ -560,10 +563,10 @@ describe('worktree reaper PR merge reconciliation', () => {
 
     const result = await sweepTerminalCortexWorktrees(repoPath);
 
-    expect(result.removed).toBe(2);
+    expect(result.removed).toBe(0);
     expect(existsSync(activePath)).toBe(true);
-    expect(existsSync(terminalPath)).toBe(false);
-    expect(existsSync(oldOrphanPath)).toBe(false); // abandoned orphan → swept
+    expect(existsSync(terminalPath)).toBe(true);
+    expect(existsSync(oldOrphanPath)).toBe(true); // Age does not grant ownership of an unmanaged directory.
     expect(existsSync(recentOrphanPath)).toBe(true); // recent orphan → protected (#1497)
     expect(existsSync(contextPath)).toBe(true);
     expect(existsSync(scratchPath)).toBe(true);
