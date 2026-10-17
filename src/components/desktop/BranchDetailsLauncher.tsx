@@ -145,6 +145,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
 
   const isOpen = visible && (header ? headerOpen : !collapsed);
   const toggle = () => {
+    measure();
     if (header) setHeaderOpen(value => !value); else onToggleCollapsed?.();
     window.requestAnimationFrame(() => {
       if (isOpen) {
@@ -187,17 +188,18 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // regardless of open state.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    measure();
-    // The right panel animates the workspace width without a window resize.
-    // Keep the closed drawer's anchor current too, so its first open frame
-    // starts at the rail instead of jumping from the previous panel position.
-    const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    if (workspace) observer?.observe(workspace);
+    const frame = window.requestAnimationFrame(() => {
+      measure();
+      // Observe after resolving the header trigger and its workspace.
+      const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
+      if (workspace) observer?.observe(workspace);
+    });
     const onScrollResize = () => measure();
     window.addEventListener('scroll', onScrollResize, true);
     window.addEventListener('resize', onScrollResize);
     return () => {
+      window.cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener('scroll', onScrollResize, true);
       window.removeEventListener('resize', onScrollResize);
@@ -213,7 +215,6 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // idle frames are a string compare. Closed card costs nothing.
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
-    measure();
     let raf = 0;
     let lastKey = '';
     const glue = () => {
@@ -230,7 +231,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     };
     raf = window.requestAnimationFrame(glue);
     return () => window.cancelAnimationFrame(raf);
-  }, [header, isOpen, measure]);
+  }, [header, isOpen]);
 
   const activePacket = useMemo(
     () => repoPath ? pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath) : null,

@@ -24,6 +24,7 @@ describe('workspace details through the orchestrator rail', () => {
   let repo: string;
   let otherRepo: string;
   let sequence = 0;
+  let initialFrames: FrameRequestCallback[] = [];
   const fetchMock = vi.fn();
   const openPanel = vi.fn();
   const copy = vi.fn();
@@ -43,13 +44,15 @@ describe('workspace details through the orchestrator rail', () => {
   }
   const render = async (path: string | null = repo, visible = true) => {
     await act(async () => root.render(createElement(Harness, { path, visible })));
+    await act(async () => initialFrames.splice(0).forEach(frame => frame(0)));
   };
   const open = async () => { await act(async () => button('Workspace details').click()); };
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-    vi.stubGlobal('requestAnimationFrame', () => 1);
+    initialFrames = [];
+    vi.stubGlobal('requestAnimationFrame', (frame: FrameRequestCallback) => initialFrames.push(frame));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
     repo = `/workspace/rail-${++sequence}`;
     otherRepo = `${repo}-other`;
