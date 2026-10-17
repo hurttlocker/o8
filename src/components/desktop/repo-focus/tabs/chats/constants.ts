@@ -1,5 +1,8 @@
 import type { HistoryRowTone, HistoryToneKey } from './types';
 
+export const SIDEBAR_TITLE_MAX_WIDTH = '28ch';
+export const SIDEBAR_REPO_MAX_WIDTH = '12ch';
+
 export const HISTORY_ROW_TONES: Record<HistoryToneKey, HistoryRowTone> = {
   neutral: {
     key: 'neutral',
