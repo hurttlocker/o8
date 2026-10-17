@@ -352,9 +352,9 @@ export function HoverPipCard({
           data-hover-pip=""
           role="region"
           aria-label={`${title} preview`}
-          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+          initial={reduceMotion ? false : { scale: 0.96 }}
+          animate={{ scale: 1 }}
+          exit={reduceMotion ? undefined : { scale: 0.96 }}
           transition={{ duration: reduceMotion ? 0 : 0.16, ease: 'easeOut' }}
           onMouseEnter={() => {
             cardHoverRef.current = true;

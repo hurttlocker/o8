@@ -126,7 +126,7 @@ describe('completion notifications through the live sidebar components', () => {
         status: status === 'running' ? 'running' : status === 'failed' ? 'error' : 'waiting' },
         active: false, busy: false, band: 'neutral', repoLabel: repo.name, onFocusRow: vi.fn() })));
       const markNode = container.querySelector(`.${mark}`)!;
-      expect(markNode).not.toBeNull(); expect(markNode.parentElement!.textContent).toMatch(/ago|just now/);
+      expect(markNode).not.toBeNull(); expect(markNode.parentElement!.textContent).toMatch(/^\d+[mhd]$/);
       if (status === 'running') expect(container.textContent).not.toContain(repo.name);
       else expect(container.textContent).toContain(repo.name);
       if (status === 'awaiting_input') expect(container.textContent).toContain('Waiting for your reply');
