@@ -55,6 +55,13 @@ export function stepUiZoom(current: number, dir: number): number {
   return UI_ZOOM_STEPS[nextIdx];
 }
 
+/** Convert viewport pointer geometry to the document's layout units. */
+export function readAppliedUiZoom(): number {
+  if (typeof document === 'undefined') return 1;
+  const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
 export function readStoredUiZoom(): number {
   if (typeof window === 'undefined') return UI_ZOOM_DEFAULT;
   try {
