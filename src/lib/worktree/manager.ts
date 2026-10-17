@@ -1829,7 +1829,7 @@ export class WorktreeManager {
   }
 
   private async cleanupOwned(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
-    const meta = await this.loadAllMeta();
+    const meta = await readWorktreeMetaSnapshot(this.repoRoot);
     const entry = meta[worktreeId];
 
     if (entry?.claudeManaged) {
@@ -1876,6 +1876,12 @@ export class WorktreeManager {
         `[worktree-cleanup] REFUSED cleanup without parent ownership ${JSON.stringify(worktreeId)}`,
       );
       return false;
+    }
+    if (entry?.materializationParentIdentity) {
+      const parent = await captureWorktreeMaterializationIdentity(containingBase);
+      await assertWorktreeMaterializationIdentity(containingBase, entry.materializationParentIdentity, {
+        legacyVolumeId: parent.volumeId,
+      });
     }
 
     const retirementAction = opts?.workspaceRetirementAction
