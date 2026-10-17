@@ -116,6 +116,8 @@ Two lanes, one pillar. The people lane covers the surfaces a person works in. Th
 
 The compact transcript subagent card and explicit default-worker picker [#3869](https://github.com/hurttlocker/o8/issues/3869) reuse existing participant identities, workspace navigation and runtime dispatch. Focused component and dispatch-entry tests and light/dark development previews passed. Required PR checks and released-build acceptance remain separate gates; no new automatic runtime-selection policy is introduced.
 
+The development workspace rehearsal [#3876](https://github.com/hurttlocker/o8/issues/3876) demonstrates exact subagent navigation, default versus task-specific worker selection, and review state using local fixtures. Native wide and compact interaction checks passed; the demo launches no workers and preserves the live chat when closed.
+
 Shared GitHub quota and durable PR watching are implemented in [#3606](https://github.com/hurttlocker/o8/pull/3606), and commit-pinned review guides in [#3607](https://github.com/hurttlocker/o8/pull/3607). Paused queue restoration, acknowledged delivery, draft recovery, repository-scoped attachments and narrow-layout corrections are tracked in [#3598](https://github.com/hurttlocker/o8/issues/3598). Browser and route fixtures cover reload, dismissal, repeat actions and uncertain receipts. Queued intent never replays automatically after reload; released-build acceptance remains open.
 
 | Arc | Lane | Done means | State | Gap | Where |
