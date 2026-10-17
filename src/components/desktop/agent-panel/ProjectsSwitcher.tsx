@@ -80,7 +80,7 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
       <button ref={addAnchor} type="button" aria-label="Add repository" disabled={busy} title="Add repository or project" aria-haspopup="menu" aria-expanded={adding} onClick={() => { if (!adding) refreshProjectsFromExternalMutation(); setOpen(false); setAdding((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, adding)} style={{ ...rowStyle, width: 28, minHeight: 28, padding: 6, background: adding ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-muted)' }}><ProjectGlyph kind="add" size={16} /></button>
     </div>
     <ComposerPopover anchorRef={anchor} open={open} align="start" onClose={() => { if (!busy) setOpen(false); }}>
-      <motion.div initial={reduceMotion ? false : { opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
+      <motion.div initial={reduceMotion ? false : { y: -4 }} animate={{ y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
         <FloatingSurface overlay style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 9, paddingRight: 9, height: 35, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', marginBottom: 4 }}>
             <ProjectGlyph kind="search" size={14} /><input aria-label="Search projects" placeholder="Search projects…" value={query} onChange={(event) => setQuery(event.currentTarget.value)} onKeyDown={(event) => {

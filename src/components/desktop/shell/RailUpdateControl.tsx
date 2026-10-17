@@ -146,7 +146,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
         transition: reducedMotion ? 'none' : 'background-color 160ms ease-out, color 160ms ease-out' }}><Download size={19} strokeWidth={1.8} />
         {!appReady && available ? <span style={{ position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: '50%', background: '#3b82f6' }} /> : null}</span>
     </RailActionButton>
-    {open ? createPortal(<motion.div initial={reducedMotion || !animateOpen ? false : { opacity: 0, x: -5, y: 3 }} animate={{ opacity: 1, x: 0, y: 0 }}
+    {open ? createPortal(<motion.div initial={reducedMotion || !animateOpen ? false : { x: -5, y: 3 }} animate={{ x: 0, y: 0 }}
       transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }} style={{ position: 'fixed', ...position, width: 'min(340px, calc(100vw - 24px))', zIndex: 220 }}>
       <FloatingSurface ref={panel} id={id} role="dialog" aria-label="Updates and release notes" aria-modal="false"
       onMouseEnter={cancel} onMouseLeave={leave} onFocus={cancel}
