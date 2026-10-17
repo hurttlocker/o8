@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { parse } from 'smol-toml';
 
-export type StableCli = 'codex' | 'claude-code' | 'grok';
+export type StableCli = 'codex' | 'claude-code' | 'grok' | 'opencode' | 'gemini';
 export type CliInstallation = {
   manager: 'npm' | 'native' | 'homebrew' | 'manual';
   binary: string;
@@ -14,7 +14,8 @@ export type CliInstallation = {
   brew?: string;
   package?: 'codex' | 'claude-code' | 'claude-code@latest';
   packageKind?: 'cask' | 'formula';
-  channel?: 'latest' | 'stable';
+  channel?: 'latest' | 'stable' | 'next';
+  npmPackage?: string;
 };
 
 export async function requireUserOwned(items: string[]): Promise<void> {
@@ -32,22 +33,25 @@ export async function inspectCliInstallation(runtime: StableCli, selected: { pat
   const binary = await realpath(selected.path).catch(() => selected.path);
   const manual: CliInstallation = { manager: 'manual', binary };
   if (process.platform === 'win32' || selected.source === 'env' || /[/\\](?:shims|\.volta[/\\]bin|\.proto[/\\]shims)[/\\]/.test(selected.path)) return manual;
-  const packageName = runtime === 'codex' ? '@openai/codex' : runtime === 'claude-code' ? '@anthropic-ai/claude-code' : '@xai-official/grok';
-  const packageSegment = path.join('lib', 'node_modules', packageName) + path.sep;
-  const packageIndex = binary.lastIndexOf(path.sep + packageSegment);
-  if (packageIndex >= 0) {
+  const command = runtime === 'codex' ? 'codex' : runtime === 'claude-code' ? 'claude' : runtime === 'opencode' ? 'opencode2' : runtime;
+  const packages = runtime === 'opencode' ? ['@opencode-ai/cli', '@opencode/cli']
+    : [runtime === 'codex' ? '@openai/codex' : runtime === 'claude-code' ? '@anthropic-ai/claude-code' : runtime === 'gemini' ? '@google/gemini-cli' : '@xai-official/grok'];
+  for (const packageName of packages) {
+    const packageSegment = path.join('lib', 'node_modules', packageName) + path.sep;
+    const packageIndex = binary.lastIndexOf(path.sep + packageSegment);
+    if (packageIndex < 0) continue;
     const root = binary.slice(0, packageIndex);
     const packageRoot = path.join(root, 'lib/node_modules', packageName);
     try {
       const metadata = JSON.parse(await readFile(path.join(packageRoot, 'package.json'), 'utf8'));
-      const command = runtime === 'codex' ? 'codex' : runtime === 'claude-code' ? 'claude' : 'grok';
       const declared = typeof metadata.bin === 'string' ? metadata.bin : metadata.bin?.[command]
-        ?? (runtime === 'codex' ? 'bin/codex.js' : 'cli.js');
+        ?? (runtime === 'codex' ? 'bin/codex.js' : runtime === 'claude-code' ? 'cli.js' : null);
       const entry = typeof declared === 'string' ? path.resolve(packageRoot, declared) : '';
       if (metadata.name !== packageName || !entry.startsWith(packageRoot + path.sep) || await realpath(entry) !== binary
         || await realpath(path.join(root, 'bin', command)) !== binary) return manual;
       await requireUserOwned([root, path.join(root, 'bin'), path.join(root, 'lib/node_modules'), packageRoot, binary]);
-      return { manager: 'npm', binary, root };
+      return { manager: 'npm', binary, root, npmPackage: packageName,
+        ...(runtime === 'opencode' ? { channel: packageName === '@opencode-ai/cli' ? 'next' : 'latest' } : {}) };
     } catch { return manual; }
   }
   if (runtime === 'codex') {

@@ -93,3 +93,15 @@ describe('GET /api/setup/cli-updates', () => {
     });
   });
 });
+
+it('includes the actual OpenCode 2 binary and compares its complete prerelease channel version', async () => {
+  resolver.mockImplementation(async ({ runtimeId }: { runtimeId: string }) => {
+    if (runtimeId !== 'opencode') throw new Error('not installed');
+    return { path: '/selected/opencode2', version: '0.0.0-beta-100', source: 'env' };
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ version: '0.0.0-beta-200' })));
+  const response = await GET(new Request('http://localhost/api/setup/cli-updates?runtime=opencode&refresh=1'));
+  expect(response.status).toBe(200);
+  expect((await response.json()).tools[0]).toMatchObject({ runtimeId: 'opencode', installedVersion: '0.0.0-beta-100', latestVersion: '0.0.0-beta-200', status: 'update-available' });
+  expect(resolver).toHaveBeenCalledWith(expect.objectContaining({ binaryName: 'opencode2', envOverride: 'O8_OPENCODE_BIN' }));
+});
