@@ -1,0 +1,21 @@
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, expect, it, vi } from 'vitest';
+const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-opencode-version-')));
+const binary = join(directory, 'opencode2');
+writeFileSync(binary, '#!/bin/sh\nprintf "0.0.0-beta-100\\n"\n'); chmodSync(binary, 0o700);
+vi.stubEnv('O8_OPENCODE_BIN', binary);
+vi.stubEnv('CORTEX_IDE_DATA_DIR', join(directory, 'data'));
+vi.mock('server-only', () => ({}));
+const { resolveCli, invalidateCliCache } = await import('@/lib/runtimes/shared/cli-resolver');
+const { GET } = await import('@/app/api/setup/cli-updates/route');
+afterAll(() => { invalidateCliCache('opencode'); vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(directory, { recursive: true, force: true }); });
+it('reports beta updates through the real binary probe even after a runtime cached a shortened version', async () => {
+  invalidateCliCache('opencode');
+  await resolveCli({ runtimeId: 'opencode', binaryName: 'opencode2', envOverride: 'O8_OPENCODE_BIN' });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ version: '0.0.0-beta-200' })));
+  const response = await GET(new Request('http://localhost/api/setup/cli-updates?runtime=opencode'));
+  expect(response.status).toBe(200);
+  expect((await response.json()).tools[0]).toMatchObject({ installedVersion: '0.0.0-beta-100', latestVersion: '0.0.0-beta-200', status: 'update-available' });
+});
