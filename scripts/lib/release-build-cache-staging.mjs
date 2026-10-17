@@ -2,13 +2,26 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, openSync, closeSync, fsyncSync, constants, chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { require as tsRequire } from 'tsx/cjs/api';
+import { fileURLToPath } from 'node:url';
+import { require as tsxRequire } from 'tsx/cjs/api';
 
-const exact = tsRequire('../../src/lib/workspace/exact-parent-operation.ts', import.meta.url);
-const { captureExactDirectoryManifest, purgeExactDirectory } = tsRequire('../../src/lib/workspace/exact-directory-purge.ts', import.meta.url);
-const { guardedWorkspaceInvocation } = tsRequire('../../src/lib/worktree/materialization-execution.ts', import.meta.url);
+// Resolve source aliases against this checkout's tsconfig, not whatever directory the caller runs from.
+function tsRequire(path) {
+  const previous = process.env.TSX_TSCONFIG_PATH;
+  process.env.TSX_TSCONFIG_PATH = fileURLToPath(new URL('../../tsconfig.json', import.meta.url));
+  try {
+    return tsxRequire(path, import.meta.url);
+  } finally {
+    if (previous === undefined) delete process.env.TSX_TSCONFIG_PATH;
+    else process.env.TSX_TSCONFIG_PATH = previous;
+  }
+}
+
+const exact = tsRequire('../../src/lib/workspace/exact-parent-operation.ts');
+const { captureExactDirectoryManifest, purgeExactDirectory } = tsRequire('../../src/lib/workspace/exact-directory-purge.ts');
+const { guardedWorkspaceInvocation } = tsRequire('../../src/lib/worktree/materialization-execution.ts');
 const { probeMetadataLockProcessIdentity, sameMetadataLockProcessIdentity } =
-  tsRequire('../../src/lib/worktree/metadata-lock-process-identity.ts', import.meta.url);
+  tsRequire('../../src/lib/worktree/metadata-lock-process-identity.ts');
 
 function identity(path, kind = 'directory') {
   const stat = lstatSync(path);
