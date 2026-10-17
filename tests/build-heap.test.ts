@@ -1,23 +1,34 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+// The heap bound is applied by the registered build step, which the production
+// build runs once generated-output ownership is reserved (#3457).
+const REGISTERED_BUILD = pathToFileURL(resolve('scripts/lib/registered-build.mjs')).href;
 
 function runBuild(heap?: string) {
   const root = mkdtempSync(join(tmpdir(), 'o8-build-heap-'));
-  mkdirSync(join(root, 'scripts', 'lib'), { recursive: true });
+  mkdirSync(join(root, 'scripts'), { recursive: true });
   mkdirSync(join(root, 'node_modules', 'next', 'dist', 'bin'), { recursive: true });
-  copyFileSync('scripts/build.mjs', join(root, 'scripts', 'build.mjs'));
-  copyFileSync('scripts/lib/release-config.mjs', join(root, 'scripts', 'lib', 'release-config.mjs'));
+  writeFileSync(join(root, 'package.json'), '{"name":"fixture","version":"0.0.0"}');
   writeFileSync(join(root, 'scripts', 'bust-stale-patch-cache.mjs'), '');
   writeFileSync(join(root, 'node_modules', 'next', 'package.json'), '{"name":"next","version":"0.0.0"}');
   writeFileSync(join(root, 'node_modules', 'next', 'dist', 'bin', 'next.js'),
     "require('node:fs').writeFileSync('observed.json', JSON.stringify({ options: process.env.NODE_OPTIONS, args: process.argv.slice(2), production: process.env.NODE_ENV }));");
+  writeFileSync(join(root, 'harness.mjs'), [
+    "import { spawnSync } from 'node:child_process';",
+    `import { runRegisteredBuild } from ${JSON.stringify(REGISTERED_BUILD)};`,
+    'process.exitCode = await runRegisteredBuild((command, args, env) =>',
+    "  spawnSync(command, args, { env: env ?? process.env, stdio: 'inherit' }).status ?? 1);",
+  ].join('\n'));
   const env = { ...process.env };
   delete env.O8_BUILD_HEAP_MIB;
+  delete env.NODE_OPTIONS;
   if (heap !== undefined) env.O8_BUILD_HEAP_MIB = heap;
-  const result = spawnSync(process.execPath, ['scripts/build.mjs'], { cwd: root, env, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['harness.mjs'], { cwd: root, env, encoding: 'utf8' });
   const observed = existsSync(join(root, 'observed.json'))
     ? JSON.parse(readFileSync(join(root, 'observed.json'), 'utf8'))
     : null;

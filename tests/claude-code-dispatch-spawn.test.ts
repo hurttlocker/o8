@@ -44,10 +44,17 @@ vi.mock('@/lib/operator/defaults', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({
+vi.mock('@/lib/claude-code/codex-subscription-proxy', async (importOriginal) => ({
+  // The real module's other exports (its error types and constants) stay real.
+  ...await importOriginal<typeof import('@/lib/claude-code/codex-subscription-proxy')>(),
   ensureCodexSubscriptionProxyReady: ensureCodexSubscriptionProxyReadyMock,
   ensureCodexSubscriptionClaudeConfigDir: ensureCodexSubscriptionClaudeConfigDirMock,
   ensureClaudeCodeWorkerConfigDir: ensureClaudeCodeWorkerConfigDirMock,
+  // Launch prepares the worker config and its credential environment in one step.
+  prepareClaudeCodeWorkerConfig: async (sessionDir: string, source?: string) => ({
+    configDir: await ensureClaudeCodeWorkerConfigDirMock(sessionDir, source),
+    credentialEnv: {},
+  }),
 }));
 
 describe('Claude Code dispatch spawn', () => {
