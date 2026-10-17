@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ChevronDown, Download, RefreshCw } from '../lucide-shims';
 import { FloatingSurface } from '../FloatingSurface';
 import { openExternalUrl } from '@/lib/desktop/open-external';
-import { checkAllUpdates, loadCachedReleaseNotes, refreshCliUpdateView, synchronizeConnectedClis, useUpdateHub } from '@/lib/app-update/update-hub-client';
+import { checkAppUpdates, loadCachedReleaseNotes, refreshCliUpdateView, synchronizeConnectedClis, useUpdateHub } from '@/lib/app-update/update-hub-client';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import type { ReleaseNotes } from '@/lib/app-update/release-notes';
 import type { UpdateProgress } from '@/lib/app-update/client-restart';
@@ -69,25 +69,24 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
   const [position, setPosition] = useState({ left: 0, bottom: 0, maxHeight: 540 });
   const [notes, setNotes] = useState<ReleaseNotes | null>(null);
   const [notesError, setNotesError] = useState(false);
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [currentExpanded, setCurrentExpanded] = useState(false);
   const [allNotes, setAllNotes] = useState(false);
   const pending = hub.app.installing || hub.syncing;
-  const status = hub.cliMessage || hub.checkMessage || hub.app.message;
-  const visibleTools = hub.tools.filter(tool => tool.runtimeId !== 'gemini' && tool.status !== 'not-installed');
-  const available = Boolean(hub.app.version) || visibleTools.some(tool => tool.status === 'update-available');
+  const status = (toolsExpanded ? hub.cliMessage : null) || hub.checkMessage || hub.app.message;
+  const visibleTools = hub.tools.filter(tool => tool.status !== 'not-installed');
+  const available = Boolean(hub.app.version);
   // The filled icon means an o8 update. Connected-CLI updates alone show a small dot.
   const appReady = Boolean(hub.app.version);
-  const cliUpdates = visibleTools.filter(tool => ['codex', 'claude-code', 'grok'].includes(tool.runtimeId) && tool.status === 'update-available');
-  const actionTools = visibleTools.filter(tool => tool.status !== 'current');
-  const currentTools = visibleTools.filter(tool => tool.status === 'current');
-  const rawError = hub.cliError || hub.app.error;
+  const actionTools = visibleTools.filter(tool => tool.status !== 'current' || hub.cliProgress[tool.runtimeId]);
+  const currentTools = visibleTools.filter(tool => tool.status === 'current' && !hub.cliProgress[tool.runtimeId]);
+  const rawError = (toolsExpanded ? hub.cliError : null) || hub.app.error;
   const error = rawError && /abort|timed?\s*out|failed to fetch|fetch is/i.test(rawError) ? 'Update checks couldn’t finish. Try again.' : rawError;
   const cancel = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
   const show = (animate = false) => {
     if (checkingRef.current) return;
     cancel();
     if (!open) setAnimateOpen(animate);
-    void refreshCliUpdateView();
     const rect = trigger.current?.getBoundingClientRect();
     if (rect) setPosition(panelPosition(rect));
     setOpen(true);
@@ -101,7 +100,6 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
     setAllNotes(false);
     void loadCachedReleaseNotes(hub.app.version ?? 'latest').then(value => { if (active) setNotes(value); })
       .catch(() => { if (active) setNotesError(true); });
-    void refreshCliUpdateView();
     return () => { active = false; };
   }, [hub.app.version]);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -124,12 +122,10 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
     if (checkingRef.current || pending) return;
     checkingRef.current = true;
     if (dismiss) close();
-    toast('Checking o8 and connected CLIs…', 'info');
+    toast('Checking o8…', 'info');
     try {
-      const result = await checkAllUpdates();
-      toast(result.hasUpdates ? result.incomplete ? 'Updates are ready. Some checks could not finish.' : 'Updates are ready.'
-        : result.incomplete ? 'Some update checks could not finish. Try again.' : 'o8 and connected CLIs are up to date.',
-      result.incomplete && !result.hasUpdates ? 'error' : result.hasUpdates ? 'info' : 'success');
+      const result = await checkAppUpdates();
+      toast(result.incomplete ? 'The o8 update check could not finish. Try again.' : result.hasUpdates ? 'o8 update is ready.' : 'o8 is up to date.', result.incomplete ? 'error' : result.hasUpdates ? 'info' : 'success');
     } catch { toast('Update checks could not finish. Try again.', 'error'); }
     finally { checkingRef.current = false; }
   };
@@ -159,15 +155,23 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
                 : hub.app.version ? `o8 ${hub.app.version} available` : `o8 ${hub.app.currentVersion} installed`}</div> : null}</div>
           <button type="button" aria-label="Refresh updates" disabled={hub.checking || hub.checkingAll || pending} onClick={() => { void check(); }} style={{ ...button, width: 32, padding: 0 }}><RefreshCw size={14} strokeWidth={1.7} /></button>
         </div>
-        {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} disabled={pending || hub.checkingAll} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
-        {currentTools.length ? <div>
-          <button type="button" aria-expanded={currentExpanded} aria-controls={`${id}-current`} onClick={() => setCurrentExpanded(value => !value)}
-            style={{ ...button, minHeight: 26, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11 }}>
-            <span>Current CLIs · {currentTools.length}</span><ChevronDown size={13} style={{ transform: currentExpanded ? 'rotate(180deg)' : undefined, transition: reducedMotion ? 'none' : 'transform 140ms ease-out' }} />
+        <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
+          <button type="button" aria-label="Tools updates" aria-expanded={toolsExpanded} aria-controls={`${id}-tools`}
+            onClick={() => { setToolsExpanded(value => !value); if (!toolsExpanded) void refreshCliUpdateView(true); }}
+            style={{ ...button, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 0, paddingRight: 0, background: 'transparent' }}>
+            <span>Tools{visibleTools.some(tool => tool.status === 'update-available') ? ' · updates available' : ''}</span><ChevronDown size={13} style={{ transform: toolsExpanded ? 'rotate(180deg)' : undefined }} />
           </button>
-          {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} /></div> : null}
-        </div> : null}
+          {toolsExpanded ? <div id={`${id}-tools`} style={{ display: 'grid', gap: 12, paddingTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ flex: 1, fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Update each tool explicitly. Running sessions stay protected.</span>
+              <button type="button" aria-label="Check tool versions" disabled={hub.checking || pending} onClick={() => { void refreshCliUpdateView(true); }} style={{ ...button, paddingLeft: 6, paddingRight: 6 }}><RefreshCw size={12} /></button></div>
+            {actionTools.length ? <ConnectedCliUpdateRows tools={actionTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} disabled={pending || hub.checkingAll} onUpdate={runtime => { setPinned(true); void synchronizeConnectedClis(runtime).catch(() => {}); }} /> : null}
+            {currentTools.length ? <div>
+              <button type="button" aria-expanded={currentExpanded} aria-controls={`${id}-current`} onClick={() => setCurrentExpanded(value => !value)} style={{ ...button, minHeight: 26, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11 }}><span>Current CLIs · {currentTools.length}</span><ChevronDown size={13} style={{ transform: currentExpanded ? 'rotate(180deg)' : undefined }} /></button>
+              {currentExpanded ? <div id={`${id}-current`} style={{ paddingTop: 9 }}><ConnectedCliUpdateRows tools={currentTools} busy={hub.cliBusy} progress={hub.cliProgress} checking={hub.checking} /></div> : null}
+            </div> : null}
+            {!visibleTools.length ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{hub.checking ? 'Checking installed tools…' : hub.cliError ?? 'No supported CLI installation was found.'}</span> : null}
+          </div> : null}
+        </section>
         {(error || status) ? <div role={error ? 'alert' : 'status'} style={{ fontSize: 11.5, lineHeight: 1.5, color: error ? 'var(--t-danger)' : 'var(--t-text-secondary)' }}>{error || status}</div> : null}
         {hub.app.progress ? <UpdateProgressBar progress={hub.app.progress} reducedMotion={Boolean(reducedMotion)} /> : null}
         {hub.app.blockers ? <div style={{ display: 'grid', gap: 6, fontSize: 11.5, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
@@ -187,17 +191,13 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
             Restart now
           </button> : null}
         </div> : null}
-        {(hub.app.version && !hub.app.blockers) || cliUpdates.length ? <div style={{ display: 'grid', justifyItems: 'start', gap: 6 }}>
+        {hub.app.version && !hub.app.blockers ? <div style={{ display: 'grid', justifyItems: 'start', gap: 6 }}>
           {hub.app.version && !hub.app.blockers ? <button type="button" disabled={pending || hub.checkingAll}
             onClick={() => { setPinned(true); window.dispatchEvent(new Event('o8:install-app-update')); }}
             style={{ ...button, minHeight: 30, color: 'var(--t-accent-contrast, #fff)', background: 'var(--t-accent)', opacity: pending ? 0.65 : 1 }}>
             {hub.app.installing ? 'Updating o8…' : hub.app.downloadOnly ? 'Download o8' : 'Update o8'}
           </button> : null}
-          {cliUpdates.length ? <button type="button" disabled={pending || hub.checkingAll}
-            onClick={() => { setPinned(true); void synchronizeConnectedClis().catch(() => {}); }} style={button}>
-            {hub.syncing ? 'Updating CLIs…' : 'Update connected CLIs'}
-          </button> : null}
-          <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>App and CLI updates are separate. Active sessions wait.</span>
+          <span style={{ fontSize: 10.5, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Updates o8 only. Other tools stay under Tools.</span>
         </div> : null}
         <section style={{ borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 14 }}>
           <div style={{ fontSize: 12.5, fontWeight: 500 }}>{notes?.source === 'changelog' ? 'Latest published changes' : 'What’s changed'}</div>

@@ -1,4 +1,7 @@
-import { compareCliVersions, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { invalidateCliCache, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { getRuntimeInstallInfo } from './runtime-install';
+import { compareUpdateVersions, parseUpdateVersion, CLI_UPDATE_VERSION_PATTERN } from './cli-update-progress';
 import { inspectCliInstallation } from './cli-installation';
 
 export type CliUpdateStatus = 'current' | 'update-available' | 'unknown' | 'not-installed';
@@ -12,6 +15,8 @@ export interface CliUpdateRecord {
   updateUrl: string;
   selectedPath: string | null;
   manager?: 'npm' | 'native' | 'homebrew' | 'manual';
+  updateSupported?: boolean;
+  updateHint?: string;
 }
 
 type CliUpdateSpec = {
@@ -21,16 +26,17 @@ type CliUpdateSpec = {
   envOverride: string;
   extraEnvOverrides?: string[];
   versionArgs?: string[];
-  release: { kind: 'npm'; packageName: string } | { kind: 'github'; repository: string }
+  release: { kind: 'npm'; packageName: string; channel?: string } | { kind: 'github'; repository: string }
     | { kind: 'claude-native'; channel: 'stable' | 'latest' }
     | { kind: 'grok-native' }
+    | { kind: 'manual' }
     | { kind: 'homebrew'; package: string; packageKind: 'cask' | 'formula' };
   updateUrl: string;
 };
 
 // Compare each CLI with its own release channel. Antigravity is a separate Go
 // binary; the Gemini npm package is not an Antigravity update.
-const UPDATE_SPECS: CliUpdateSpec[] = [
+const PROVIDER_UPDATE_SPECS: CliUpdateSpec[] = [
   {
     runtimeId: 'codex', label: 'Codex CLI', binaryName: 'codex',
     envOverride: 'O8_CODEX_BIN', release: { kind: 'npm', packageName: '@openai/codex' },
@@ -48,6 +54,11 @@ const UPDATE_SPECS: CliUpdateSpec[] = [
     updateUrl: 'https://docs.x.ai/build/cli/reference',
   },
   {
+    runtimeId: 'opencode', label: 'OpenCode', binaryName: ORCHESTRATOR_RUNTIMES.opencode.binaryName,
+    envOverride: 'O8_OPENCODE_BIN', release: { kind: 'npm', packageName: '@opencode-ai/cli', channel: 'next' },
+    updateUrl: 'https://dev.opencode.ai/v2/docs/cli/commands/#upgrade',
+  },
+  {
     runtimeId: 'antigravity', label: 'Antigravity CLI', binaryName: 'agy',
     envOverride: 'O8_ANTIGRAVITY_BIN',
     release: { kind: 'github', repository: 'google-antigravity/antigravity-cli' },
@@ -60,20 +71,31 @@ const UPDATE_SPECS: CliUpdateSpec[] = [
   },
 ];
 
+export const CLI_UPDATE_RUNTIME_IDS = Object.freeze([
+  ...PROVIDER_UPDATE_SPECS.map(spec => spec.runtimeId),
+  ...Object.entries(ORCHESTRATOR_RUNTIMES).filter(([id, capability]) => capability.dispatchable && id !== 'pi-builtin'
+    && !PROVIDER_UPDATE_SPECS.some(spec => spec.runtimeId === id)).map(([id]) => id),
+]);
+const UPDATE_SPECS: CliUpdateSpec[] = CLI_UPDATE_RUNTIME_IDS.map(runtimeId => {
+  const known = PROVIDER_UPDATE_SPECS.find(spec => spec.runtimeId === runtimeId);
+  if (known) return known;
+  const capability = ORCHESTRATOR_RUNTIMES[runtimeId as keyof typeof ORCHESTRATOR_RUNTIMES];
+  return { runtimeId, label: capability.label, binaryName: capability.binaryName,
+    envOverride: `O8_${runtimeId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}_BIN`,
+    release: { kind: 'manual' }, updateUrl: getRuntimeInstallInfo(runtimeId)?.link ?? '' };
+});
+
 const LATEST_TTL_MS = 6 * 60 * 60_000;
 const latestCache = new Map<string, { version: string; checkedAt: number }>();
 
-function parseVersion(value: string | undefined): string | null {
-  return value?.match(/(?<!\d)(\d+\.\d+\.\d+)\b/)?.[1] ?? null;
-}
-
 async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean): Promise<string | null> {
+  if (release.kind === 'manual') return null;
   const cacheKey = JSON.stringify(release);
   const cached = latestCache.get(cacheKey);
   if (!refresh && cached && Date.now() - cached.checkedAt < LATEST_TTL_MS) return cached.version;
   try {
     const url = release.kind === 'npm'
-      ? `https://registry.npmjs.org/${encodeURIComponent(release.packageName)}/latest`
+      ? `https://registry.npmjs.org/${encodeURIComponent(release.packageName)}/${release.channel ?? 'latest'}`
       : release.kind === 'github' ? `https://api.github.com/repos/${release.repository}/releases/latest`
         : release.kind === 'homebrew' ? `https://formulae.brew.sh/api/${release.packageKind}/${release.package}.json`
           : release.kind === 'grok-native' ? 'https://x.ai/cli/stable' : `https://downloads.claude.ai/claude-code-releases/${release.channel}`;
@@ -88,8 +110,8 @@ async function latestVersion(release: CliUpdateSpec['release'], refresh: boolean
     const rawVersion = release.kind === 'github' ? body.tag_name
       : release.kind === 'homebrew' && release.packageKind === 'formula' ? body.versions?.stable : body.version;
     const version = typeof rawVersion === 'string'
-      && (release.kind !== 'npm' || /^\d+\.\d+\.\d+$/.test(rawVersion))
-      ? parseVersion(rawVersion) : null;
+      && (release.kind !== 'npm' || /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(rawVersion))
+      ? parseUpdateVersion(rawVersion) : null;
     if (version) latestCache.set(cacheKey, { version, checkedAt: Date.now() });
     return version;
   } catch {
@@ -104,7 +126,10 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
     let manager: CliUpdateRecord['manager'];
     let release = spec.release;
     try {
+      // Other runtime callers may have cached only the numeric base version.
+      if (spec.runtimeId === 'opencode') invalidateCliCache('opencode');
       const selected = await resolveCli({
+        ...(spec.runtimeId === 'opencode' ? { versionPattern: CLI_UPDATE_VERSION_PATTERN } : {}),
         runtimeId: spec.runtimeId,
         binaryName: spec.binaryName,
         envOverride: spec.envOverride,
@@ -112,12 +137,13 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
         versionArgs: spec.versionArgs,
       });
       selectedPath = selected.path;
-      installedVersion = parseVersion(selected.version);
-      if (spec.runtimeId === 'codex' || spec.runtimeId === 'claude-code' || spec.runtimeId === 'grok') {
-        const install = await inspectCliInstallation(spec.runtimeId, selected);
+      installedVersion = parseUpdateVersion(selected.version);
+      if (['codex', 'claude-code', 'grok', 'opencode', 'gemini'].includes(spec.runtimeId)) {
+        const install = await inspectCliInstallation(spec.runtimeId as import('./cli-installation').StableCli, selected);
         manager = install.manager;
+        if (spec.runtimeId === 'opencode' && install.npmPackage) release = { kind: 'npm', packageName: install.npmPackage, channel: install.channel ?? 'latest' };
         if (install.manager === 'homebrew') release = { kind: 'homebrew', package: install.package!, packageKind: install.packageKind! };
-        if (install.manager === 'native' && spec.runtimeId === 'claude-code') release = { kind: 'claude-native', channel: install.channel! };
+        if (install.manager === 'native' && spec.runtimeId === 'claude-code') release = { kind: 'claude-native', channel: install.channel === 'stable' ? 'stable' : 'latest' };
         if (install.manager === 'native' && spec.runtimeId === 'grok') release = { kind: 'grok-native' };
       }
     } catch {
@@ -128,7 +154,7 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
       ? 'not-installed'
       : !installedVersion || !latest
         ? 'unknown'
-        : compareCliVersions(installedVersion, latest) < 0
+        : compareUpdateVersions(installedVersion, latest) < 0
           ? 'update-available'
           : 'current';
     return {
@@ -140,6 +166,8 @@ export async function checkCliUpdates(refresh = false, runtimeId?: string): Prom
       updateUrl: spec.updateUrl,
       selectedPath,
       ...(manager ? { manager } : {}),
+      updateSupported: ['codex', 'claude-code', 'grok', 'opencode', 'gemini'].includes(spec.runtimeId) && manager !== 'manual' && !(spec.runtimeId === 'grok' && manager === 'npm'),
+      ...(release.kind === 'manual' || manager === 'manual' ? { updateHint: 'Use this tool’s original updater, then check its version again.' } : {}),
     };
   }));
 }
