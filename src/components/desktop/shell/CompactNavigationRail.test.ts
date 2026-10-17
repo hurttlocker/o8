@@ -371,3 +371,22 @@ it('keeps weekly house meters separate from short windows, model caps and unsele
     expect(document.querySelector('[data-mcp-scope="rail-usage-preview"]')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it('keeps the usage meter containing block stable while its preview opens on hover and focus', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ capacities: [], tools: [] })));
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const noop = () => {};
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { activeDestination: 'agents', glassSurface: true,
+      onHome: noop, onNewSession: noop, onCreateTerminal: noop, onOpenProjects: noop, onOpenSettings: noop,
+      onOpenPRs: noop, onOpenUsage: noop, onOpenShortcuts: noop })));
+    const button = host.querySelector<HTMLButtonElement>('[aria-label="Runtime usage"]')!;
+    const icon = button.firstElementChild as HTMLElement;
+    const before = icon.style.filter;
+    await act(async () => button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(document.querySelector('[data-mcp-scope="rail-usage-preview"]')).not.toBeNull();
+    expect(icon.style.filter).toBe(before);
+    await act(async () => button.focus()); expect(icon.style.filter).toBe(before);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

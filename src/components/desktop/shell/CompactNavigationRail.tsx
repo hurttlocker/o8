@@ -198,6 +198,7 @@ export function CompactNavigationRail({
       <RailActionButton
         type="button"
         aria-label="Runtime usage"
+        iconGlow={false}
         aria-describedby={usageOpen ? 'o8-rail-usage-tooltip' : undefined}
         tooltipLabel={null}
         onClick={() => { cancelUsageClose(); setUsageOpen(false); onOpenUsage(); }}
