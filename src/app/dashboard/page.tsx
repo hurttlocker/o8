@@ -441,6 +441,7 @@ function DashboardInner() {
     runtime: string | null;
     packetStatus: string | null;
     orchestratorThreadId: string | null;
+    repoPath?: string | null;
   };
   type WorkspaceActivePayload = {
     workspaceId: string | null;
@@ -502,7 +503,7 @@ function DashboardInner() {
             const next = payload.tabs[index];
             return tab.id === next?.id && tab.label === next.label && tab.kind === next.kind
               && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
-              && tab.orchestratorThreadId === next.orchestratorThreadId;
+              && tab.orchestratorThreadId === next.orchestratorThreadId && tab.repoPath === next.repoPath;
           });
         if (previous && previous.tileId === payload.tileId && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount

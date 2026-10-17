@@ -27,6 +27,7 @@ import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
+import { useHeaderTabDrag } from './useHeaderTabDrag';
 import { revealHeaderTab, scrollTabStripFromWheel } from './tab-scroll';
 
 export function WorkspaceHeaderStrip({
@@ -147,6 +148,8 @@ export function HeaderPillStrip({
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   }>;
   activeTabId: string | null;
   /** When set, pill events include this id so the matching
@@ -158,6 +161,7 @@ export function HeaderPillStrip({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
+  const drag = useHeaderTabDrag(scrollRef, tabs, workspaceId);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
   // tabs each pill compacts to just its first significant word. Sibling
   // packets often share a verb ("Add …" × 3), so when the one-word form
@@ -309,6 +313,8 @@ export function HeaderPillStrip({
     >
       <div
         ref={scrollRef}
+        onPointerDownCapture={drag.onPointerDownCapture}
+        onClickCapture={drag.onClickCapture}
         role="tablist"
         aria-label={ariaLabel}
         aria-orientation="horizontal"
@@ -348,8 +354,11 @@ export function HeaderPillStrip({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            style={{ display: 'inline-flex', flexShrink: 0 }}
+            style={{ display: 'inline-flex', flexShrink: 0, position: 'relative' }}
           >
+            {drag.insertion?.id === tab.id ? <span aria-hidden data-tab-insertion={drag.insertion.after ? 'after' : 'before'}
+              style={{ position: 'absolute', top: 3, bottom: 3, width: 1, left: drag.insertion.after ? undefined : -1,
+                right: drag.insertion.after ? -1 : undefined, background: 'var(--t-accent)', pointerEvents: 'none' }} /> : null}
             <HeaderPill
               tab={tab}
               active={tab.id === activeTabId}
@@ -405,6 +414,8 @@ function HeaderPill({
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   };
   active: boolean;
   /** This pill owns the tablist's single Tab stop (roving tabindex). */

@@ -53,6 +53,7 @@ import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextM
 import { projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { ResponsiveSessionSurface } from './ResponsiveSessionSurface';
 import type { ThreadDropAction } from './ThreadDropLayer';
+import { findThreadLeafByThreadId } from '@/lib/orchestrator/session-tiles';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
@@ -614,6 +615,9 @@ function OrchestratorTabInner({
   // never leaves the tree.
   const handleThreadDrop = useCallback((action: ThreadDropAction) => {
     if (action.kind === 'replace-chat') {
+      if (findThreadLeafByThreadId(sessionTiles.layout.root, action.thread.threadId)) {
+        sessionTiles.replaceLeafWithThreadPane(action.leafId, action.thread); return;
+      }
       if (chatChromeState.threadId === action.thread.threadId) return;
       window.dispatchEvent(new Event(HISTORY_NAVIGATION_SUPERSEDED_EVENT));
       if (publishWorkspaceThread) {
@@ -634,6 +638,7 @@ function OrchestratorTabInner({
   }, [
     chatChromeState.threadId,
     sessionTiles.replaceLeafWithThreadPane,
+    sessionTiles.layout,
     sessionTiles.splitLeafWithThreadPane,
     publishWorkspaceThread,
     tabId,

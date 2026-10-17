@@ -10,6 +10,7 @@
  * workspace-thread events.
  */
 
+import { useThreadPaneDrag } from './useThreadPaneDrag';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { registerPaneThread, unregisterPaneThread } from '@/lib/orchestrator/pane-thread-registry';
@@ -34,6 +35,8 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
   const [chrome, setChrome] = useState<ThoughtsChatPanelChromeState | null>(null);
   const chromeRef = useRef<ThoughtsChatPanelChromeState | null>(null);
   const [closeHover, setCloseHover] = useState(false);
+
+  const startPaneDrag = useThreadPaneDrag({ threadId, title, mode, repoPath });
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const sessionTargets = useMemo(
@@ -107,9 +110,12 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
         overflow: 'hidden',
       }}
     >
-      {/* Pane header — title + close, matching the reference's per-pane bar. */}
+      {/* The pane header moves the existing chat; its close button stays independent. */}
       <div
+        onPointerDown={startPaneDrag}
+        title="Drag to move this chat"
         style={{
+          cursor: 'grab', touchAction: 'none', userSelect: 'none',
           height: 32,
           flexShrink: 0,
           display: 'flex',

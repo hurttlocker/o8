@@ -1,5 +1,7 @@
 'use client';
 
+import { trackPointerGesture } from '@/lib/ui/pointer-gesture';
+
 /**
  * thread-drag — window-event bus for dragging a chat/thread row out of the
  * left rail and dropping it into the workspace as a split pane (Claude Code
@@ -15,6 +17,10 @@ export interface ThreadDragPayload {
   title: string;
   mode: 'orchestrator' | 'chat';
   repoPath?: string | null;
+  sidebarItemId?: string;
+  tabId?: string;
+  workspaceId?: string | null;
+  navigationOnly?: boolean;
 }
 
 export interface ThreadDragPoint {
@@ -59,76 +65,21 @@ function emit(name: string, detail: unknown): void {
 export function trackThreadDrag(
   downEvent: { clientX: number; clientY: number; pointerId?: number },
   payload: ThreadDragPayload,
-  options?: { threshold?: number; onActivate?: () => void },
+  options?: { threshold?: number; onActivate?: () => void; source?: HTMLElement },
 ): () => void {
-  const threshold = options?.threshold ?? 6;
-  const startX = downEvent.clientX;
-  const startY = downEvent.clientY;
-  let active = false;
-  let disposed = false;
-
-  const handleMove = (event: PointerEvent) => {
-    if (disposed) return;
-    if (!active) {
-      // Never activate a second drag while one is in flight (overlapping
-      // pointerdowns via multi-touch/trackpad) — the module-level payload is
-      // a singleton and two live drags would corrupt each other's end state.
-      if (activePayload) return;
-      const dx = event.clientX - startX;
-      const dy = event.clientY - startY;
-      if (dx * dx + dy * dy < threshold * threshold) return;
-      active = true;
+  if (activePayload) return () => {};
+  return trackPointerGesture(options?.source, downEvent, {
+    threshold: options?.threshold,
+    onStart: () => {
       activePayload = payload;
       options?.onActivate?.();
-      emit(THREAD_DRAG_START_EVENT, {
-        payload,
-        clientX: event.clientX,
-        clientY: event.clientY,
-      } satisfies ThreadDragStartDetail);
-      // Suppress text selection + show grab cursor for the drag's duration.
-      document.body.style.userSelect = 'none';
-      document.body.style.cursor = 'grabbing';
-    }
-    emit(THREAD_DRAG_MOVE_EVENT, {
-      clientX: event.clientX,
-      clientY: event.clientY,
-    } satisfies ThreadDragMoveDetail);
-  };
-
-  const finish = (event: PointerEvent | null, cancelled: boolean) => {
-    if (disposed) return;
-    disposed = true;
-    document.removeEventListener('pointermove', handleMove);
-    document.removeEventListener('pointerup', handleUp);
-    document.removeEventListener('pointercancel', handleCancel);
-    document.removeEventListener('keydown', handleKey, true);
-    if (!active) return;
-    activePayload = null;
-    document.body.style.userSelect = '';
-    document.body.style.cursor = '';
-    if (cancelled || !event) {
-      emit(THREAD_DRAG_CANCEL_EVENT, null);
-      return;
-    }
-    emit(THREAD_DRAG_END_EVENT, {
-      clientX: event.clientX,
-      clientY: event.clientY,
-    } satisfies ThreadDragEndDetail);
-  };
-
-  const handleUp = (event: PointerEvent) => finish(event, false);
-  const handleCancel = () => finish(null, true);
-  const handleKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      finish(null, true);
-    }
-  };
-
-  document.addEventListener('pointermove', handleMove);
-  document.addEventListener('pointerup', handleUp);
-  document.addEventListener('pointercancel', handleCancel);
-  document.addEventListener('keydown', handleKey, true);
-
-  return () => finish(null, true);
+      emit(THREAD_DRAG_START_EVENT, { payload, clientX: downEvent.clientX, clientY: downEvent.clientY } satisfies ThreadDragStartDetail);
+    },
+    onMove: point => emit(THREAD_DRAG_MOVE_EVENT, { clientX: point.clientX, clientY: point.clientY } satisfies ThreadDragMoveDetail),
+    onEnd: point => {
+      activePayload = null;
+      emit(THREAD_DRAG_END_EVENT, { clientX: point.clientX, clientY: point.clientY } satisfies ThreadDragEndDetail);
+    },
+    onCancel: () => { activePayload = null; emit(THREAD_DRAG_CANCEL_EVENT, null); },
+  });
 }
