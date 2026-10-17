@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
@@ -51,6 +51,8 @@ import {
 } from './chats/sections';
 import { useRowReadState } from './chats/use-row-read-state';
 import { getLastVisited, markVisited } from './chats/read-state';
+import { useSidebarManualOrder } from './chats/use-sidebar-manual-order';
+import { SidebarSortableRow } from './chats/SidebarSortableRow';
 import { EMPTY_CHAT_VIEW_ACTIONS, EMPTY_SIDEBAR_AGENTS, mergeSidebarAgentHistory, sidebarAgentItemId } from './chats/sidebar-agent-navigation';
 import type {
   ArchivedLaneRow,
@@ -400,7 +402,7 @@ export function ChatsTab({
   const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
-  const sortedChatItems = useMemo(() => {
+  const dateSortedChatItems = useMemo(() => {
     return (
     mergeSidebarAgentHistory(sweptThreads.chats, chatGroupBy === 'scheduled' ? [] : agentEntries).filter((item) => {
       if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
@@ -409,6 +411,8 @@ export function ChatsTab({
     }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
     );
   }, [agentEntries, chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
+  const manualOrder = useSidebarManualOrder(dateSortedChatItems);
+  const sortedChatItems = chatGroupBy === 'manual' ? manualOrder.orderedItems : dateSortedChatItems;
   const workingHistoryIds = useMemo(() => {
     void readStateVersion;
     return new Set(sortedChatItems.filter(item => {
@@ -556,15 +560,18 @@ export function ChatsTab({
   }, [broadcastThreadLink, chatGroupBy, clearThreadHoverTimers]);
 
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
+    const wrap = (node: ReactNode) => compact && !archived ? <SidebarSortableRow key={item.tabId} item={item}
+      insertion={manualOrder.insertion} onMove={manualOrder.move} siblings={sortedChatItems}>{node}</SidebarSortableRow>
+      : <Fragment key={item.tabId}>{node}</Fragment>;
     const agent = agentByTabId.get(item.tabId);
-    if (agent) return <Fragment key={item.tabId}>{agent.render({
+    if (agent) return wrap(<Fragment key={item.tabId}>{agent.render({
       roomy: compact && (chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId)),
       showPreview: chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId),
       repoLabel: chatGroupBy === 'repo' ? null : repoSuffix(item, targetRepos),
-    })}</Fragment>;
+    })}</Fragment>);
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
     const packet = historyAttentionPackets.get(item.tabId);
-    return (
+    return wrap(
       <HistoryChatRow
         key={item.tabId}
         item={item}
