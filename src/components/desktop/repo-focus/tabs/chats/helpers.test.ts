@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { historyIsVisibleForRepos } from './helpers';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { formatElapsedAgo, historyIsVisibleForRepos } from './helpers';
 import type { ChatHistoryItem } from './types';
 
 const conversation: ChatHistoryItem = {
@@ -29,5 +29,20 @@ describe('historyIsVisibleForRepos', () => {
       remoteUrl: null,
       defaultBranch: 'main',
     }])).toBe(false);
+  });
+});
+
+describe('compact chat ages', () => {
+  afterEach(() => vi.useRealTimers());
+  it.each([
+    [0, '0m'], [59_000, '0m'], [60_000, '1m'], [59 * 60_000, '59m'],
+    [60 * 60_000, '1h'], [23 * 60 * 60_000, '23h'], [24 * 60 * 60_000, '1d'],
+    [8 * 24 * 60 * 60_000, '8d'], [-60_000, '0m'],
+  ])('renders age %d with only its number and unit', (age, expected) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-17T16:00:00.000Z'));
+    expect(formatElapsedAgo(new Date(Date.now() - age).toISOString())).toBe(expected);
+  });
+  it('keeps an unavailable age compact', () => {
+    expect(formatElapsedAgo('invalid')).toBe('0m');
   });
 });
