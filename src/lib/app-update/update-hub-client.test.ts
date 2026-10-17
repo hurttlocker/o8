@@ -9,7 +9,7 @@ describe('the connected CLI synchronization gate', () => {
   it('shares one check and updates only installed connected providers before verifying the final report', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('update-available')))
       .mockResolvedValueOnce(Response.json({ status: 'succeeded' })).mockResolvedValueOnce(Response.json(report()));
-    await Promise.all([synchronizeConnectedClis(), synchronizeConnectedClis()]);
+    await Promise.all([synchronizeConnectedClis('codex'), synchronizeConnectedClis('codex')]);
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(vi.mocked(fetch).mock.calls[1]?.[1]).toMatchObject({ method: 'POST', body: '{"runtime":"codex"}' });
   });
@@ -17,33 +17,34 @@ describe('the connected CLI synchronization gate', () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('update-available')))
       .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
       .mockResolvedValueOnce(failure === 'failed' ? new Response(null, { status: 503 }) : Response.json(report(failure === 'outdated' ? 'update-available' : 'not-installed')));
-    await expect(synchronizeConnectedClis()).rejects.toThrow();
+    await expect(synchronizeConnectedClis('codex')).rejects.toThrow();
   });
   it('rejects incomplete reports and unavailable release checks without running an installer', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools: [] }));
-    await expect(synchronizeConnectedClis()).rejects.toThrow('incomplete');
+    await expect(synchronizeConnectedClis('codex')).rejects.toThrow('incomplete');
     vi.mocked(fetch).mockResolvedValueOnce(Response.json(report('unknown')));
-    await expect(synchronizeConnectedClis()).rejects.toThrow('release');
+    await expect(synchronizeConnectedClis('codex')).rejects.toThrow('release');
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
   });
-  it('updates other verified CLIs when one release is unknown', async () => {
+  it('updates the explicitly chosen CLI when another release is unknown', async () => {
     const tools = [record('codex', 'unknown'), record('claude-code', 'update-available'), record('grok', 'not-installed')];
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))
       .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
       .mockResolvedValueOnce(Response.json({ tools: tools.map(t => t.runtimeId === 'claude-code' ? { ...t, status: 'current' } : t) }));
-    await expect(synchronizeConnectedClis()).rejects.toThrow('codex');
+    await synchronizeConnectedClis('claude-code');
     expect(vi.mocked(fetch).mock.calls[1]?.[1]?.body).toBe('{"runtime":"claude-code"}');
   });
-  it('continues after an installer refuses and refreshes partial success', async () => {
-    const tools = [record('codex', 'update-available'), record('claude-code', 'update-available'), record('grok', 'not-installed')];
+  it('keeps an installer refusal local to the selected tool', async () => {
+    const tools = [record('codex', 'update-available'), record('claude-code', 'update-available')];
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ tools }))
       .mockResolvedValueOnce(Response.json({ error: 'Active sessions' }, { status: 409 }))
-      .mockResolvedValueOnce(Response.json({ status: 'succeeded' }))
-      .mockResolvedValueOnce(Response.json({ tools: tools.map(t => t.runtimeId === 'claude-code' ? { ...t, status: 'current' } : t) }));
-    await expect(synchronizeConnectedClis()).rejects.toThrow('Active sessions');
+      .mockResolvedValueOnce(Response.json({ tools }));
+    await expect(synchronizeConnectedClis('codex')).rejects.toThrow('Active sessions');
     expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === 'POST').map(([, options]) => options?.body))
-      .toEqual(['{"runtime":"codex"}', '{"runtime":"claude-code"}']);
-    expect(fetch).toHaveBeenCalledTimes(4);
+      .toEqual(['{"runtime":"codex"}']);
+  });
+  it('requires a named tool before checking or updating anything', async () => {
+    await expect(synchronizeConnectedClis()).rejects.toThrow('Choose a tool'); expect(fetch).not.toHaveBeenCalled();
   });
   it('updates only the requested CLI even when another provider is unverifiable', async () => {
     const tools = [record('codex', 'update-available'), record('claude-code', 'unknown'), record('grok', 'not-installed')];
