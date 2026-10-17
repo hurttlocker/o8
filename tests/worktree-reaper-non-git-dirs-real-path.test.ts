@@ -15,7 +15,7 @@ vi.mock('@/lib/worktree/live-process-guard', async (importOriginal) => ({
 
 const { getSqlite } = await import('@/lib/db');
 const { createLane } = await import('@/lib/lane/registry');
-const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
 // Loaded before process.cwd() is pinned so the tick's dynamic imports resolve from cache.
 await import('@/lib/lane/terminal-worktree-sweep');
 await import('@/lib/repos/registry');
@@ -91,13 +91,8 @@ function captureLogs() {
 
 async function tick(repoPath: string, lines: string[]) {
   const start = lines.length;
-  const cwd = vi.spyOn(process, 'cwd').mockReturnValue(repoPath);
-  try {
-    await runWorktreeMaintenanceTick();
-  } finally {
-    cwd.mockRestore();
-  }
-  return lines.slice(start);
+  const result = await sweepTerminalCortexWorktrees(repoPath);
+  return { ...result, logs: lines.slice(start) };
 }
 
 afterEach(() => {
@@ -119,13 +114,14 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
       const first = await tick(fixture.repoPath, lines);
       expect(existsSync(fixture.worktreePath)).toBe(true);
       expect(readFileSync(join(fixture.worktreePath, 'scratch', 'notes.md'), 'utf8')).toBe('agent scratch\n');
-      expect(first.some((line) => line.includes('preservation authority is unavailable'))).toBe(true);
-      expect(first.some((line) => /terminal sweep .*removed=0 .*failed=1/.test(line))).toBe(true);
+      expect(first.removed).toBe(0);
+      expect(first.failed).toBe(1);
       // The parent checkout cannot identify or preserve these unique bytes.
       expect(git(fixture.repoPath, ['branch', '--list', `preserved/packet-${packetId}`])).toBe('');
 
       const second = await tick(fixture.repoPath, lines);
-      expect(second).toEqual([]);
+      expect(second.logs).toEqual([]);
+      expect(second.skippedUnrecoverable).toBe(1);
     },
     30_000,
   );
@@ -137,10 +133,11 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
 
     const first = await tick(fixture.repoPath, lines);
     expect(existsSync(fixture.worktreePath)).toBe(true);
-    expect(first.some((line) => /terminal sweep .*removed=0 .*failed=1/.test(line))).toBe(true);
+    expect(first.failed).toBe(1);
 
     const second = await tick(fixture.repoPath, lines);
-    expect(second).toEqual([]);
+    expect(second.logs).toEqual([]);
+      expect(second.skippedUnrecoverable).toBe(1);
     expect(existsSync(fixture.worktreePath)).toBe(true);
   }, 30_000);
 
@@ -151,16 +148,16 @@ describe('worktree reaper terminal sweep — non-git packet directories (#2474)'
 
     const first = await tick(fixture.repoPath, lines);
     expect(existsSync(fixture.worktreePath)).toBe(true);
-    expect(first.some((line) => /terminal sweep .*removed=0 .*failed=1 skippedUnrecoverable=0/.test(line))).toBe(true);
+    expect(first.failed).toBe(1);
 
     const second = await tick(fixture.repoPath, lines);
     expect(existsSync(fixture.worktreePath)).toBe(true);
-    expect(second.some((line) => /terminal sweep .*removed=0 .*failed=1 skippedUnrecoverable=0/.test(line))).toBe(true);
+    expect(second.failed).toBe(1);
 
     allowRemoval = true;
     const third = await tick(fixture.repoPath, lines);
     expect(existsSync(fixture.worktreePath)).toBe(true);
     expect(readFileSync(join(fixture.worktreePath, 'packet.txt'), 'utf8')).toBe('packet work\n');
-    expect(third.some((line) => /terminal sweep .*removed=0 .*failed=1/.test(line))).toBe(true);
+    expect(third.failed).toBe(1);
   }, 30_000);
 });

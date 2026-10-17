@@ -50,6 +50,7 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-merge-settles-'));
 const tempDirs: string[] = [dataDir];
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
 
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
@@ -57,6 +58,7 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { approveAndMergePacket, submitPacketReview } = await import('@/lib/orchestrator/operator-mission-service');
 const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
+const { readWorktreeMetaSnapshot } = await import('@/lib/worktree/metadata-store');
 
 afterAll(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -113,7 +115,14 @@ describe('#2493 — merge settles when the post-merge cleanup is refused', () =>
     const worktreePath = launch!.cwd;
     tempDirs.push(worktreePath);
 
-    const lane = createLane({ repoPath, worktreePath, branch, baseBranch: 'main', runtime: 'codex', packetId });
+    // Retirement needs exact packet ownership: a registered repo, and an owned
+    // session the lane and the managed worktree record both name.
+    const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+    const worktreeId = Object.values(await readWorktreeMetaSnapshot(repoPath))
+      .find((entry) => entry.packetId === packetId)!.id;
+    const sessionKey = await bindOwnedPacketSession(repoPath, { id: worktreeId, path: worktreePath }, { packetId, branch });
+
+    const lane = createLane({ repoPath, worktreePath, branch, baseBranch: 'main', runtime: 'codex', packetId, sessionKey });
     setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
     writeFileSync(join(worktreePath, 'feature.txt'), 'feature\n');
     git(worktreePath, ['add', 'feature.txt']);
@@ -162,6 +171,6 @@ describe('#2493 — merge settles when the post-merge cleanup is refused', () =>
     expect(getLane(lane.id)?.outcome).toBe('merged');
     const skipped = getLaneEvents(lane.id).find((event) =>
       event.verb === 'update' && event.payload.phase === 'merge_cleanup_skipped');
-    expect(skipped?.payload).toMatchObject({ reason: 'inconclusive', worktreePath });
+    expect(skipped?.payload).toMatchObject({ reason: 'retirement-refused', worktreePath });
   }, 90_000);
 });

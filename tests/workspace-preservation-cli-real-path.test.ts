@@ -73,7 +73,9 @@ async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetI
     threadId: '12345678-1234-1234-1234-123456789abc',
     laneId: undefined,
   };
-  writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify(session));
+  writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify(session), { mode: 0o600 });
+  const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
+  resetOwnedSessionIndex();
   await withWorktreeMetaTransaction(repo.localPath, (transaction) => transaction.save(worktreeId, {
     id: worktreeId, agentType: 'codex', sessionKey: surfaceId, baseBranch: 'main', createdAt: Date.now(),
     claudeManaged: false, taskName: packetId, branchName: branch, status: 'ready', isolationKind: 'git-worktree',
@@ -294,7 +296,7 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     finished = true;
   }, 30_000);
 
-  it('refuses crash replay when the persisted owned binding was archived after exact rename', async () => {
+  it('replays exact retirement using a matching archived owned binding', async () => {
     finished = false;
     const repo = await addRepo(repoPath);
     const source = await ownedWorkspace(repo, 'retirement-replay-owner', 'main');
@@ -317,9 +319,9 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     expect((await lifecycle.archiveSession(source.lane.sessionKey!)).archived).toBe(true);
     closeDb();
     expect(await finishPendingExactManagedDirectoryRetirements(repo.localPath, path.dirname(source.workspacePath), parent))
-      .toEqual({ completed: 0, refused: 1 });
-    expect(readFileSync(path.join(claim.claimPath, '.o8', 'checkpoint.bin'))).toEqual(Buffer.from([0, 255, 128]));
-    expect(readExactWorkspaceClaim('managed-retirement', repo.localPath, source.worktreeId)).not.toBeNull();
+      .toEqual({ completed: 1, refused: 0 });
+    expect(existsSync(claim.claimPath)).toBe(false);
+    expect(readExactWorkspaceClaim('managed-retirement', repo.localPath, source.worktreeId)?.state).toBe('purging');
     finished = true;
   }, 30_000);
 
@@ -341,9 +343,8 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     expect(held.exitCode, held.stderr + held.stdout).toBe(0);
     expect(JSON.parse(held.stdout).hold).toMatchObject({ held: true, holdId: 'source-retention-1' });
     setLaneStatus(source.lane.id, 'completed');
-    await expect.poll(() => getLaneEvents(source.lane.id, 100).some((entry) => (
-      entry.payload.phase === 'terminal_cleanup' && entry.payload.worktreeRemoved === false
-    )), { timeout: 5_000 }).toBe(true);
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    await runWorktreeMaintenanceTick();
     closeDb();
     const manager = new WorktreeManager(repo.localPath);
     expect(await manager.cleanup(source.worktreeId)).toBe(false);
@@ -595,9 +596,13 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     });
     await entered;
     try {
-      await expect(continueOwnedCodexSession(successor.sessionKey!, 'Resume during lifecycle ownership.')).rejects.toThrow('lifecycle owner');
+      await expect(continueOwnedCodexSession(successor.sessionKey!, 'Resume during lifecycle ownership.')).resolves.toMatchObject({
+        ok: false, sideEffect: 'none', note: expect.stringContaining('another lifecycle operation'),
+      });
       runInherited();
-      await expect(inheritedAttempt).rejects.toThrow('lifecycle owner');
+      await expect(inheritedAttempt).resolves.toMatchObject({
+        ok: false, sideEffect: 'none', note: expect.stringContaining('another lifecycle operation'),
+      });
       expect(existsSync(spawnReceipt)).toBe(false);
     } finally { release(); await held; }
     finished = true;

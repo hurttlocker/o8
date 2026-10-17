@@ -4673,8 +4673,7 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "real-path",
-        "worktree-api"
+        "real-path"
       ]
     },
     {

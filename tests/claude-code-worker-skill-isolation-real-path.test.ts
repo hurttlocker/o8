@@ -11,7 +11,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -28,9 +28,7 @@ const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
-  return {
-    ...actual,
-    execFile: ((file: string, args: string[], options: unknown, callback: (...args: unknown[]) => void) => {
+  const execFile = ((file: string, args: string[], options: unknown, callback: (...args: unknown[]) => void) => {
       if (file === '/usr/bin/security') {
         keychainLookupMock();
         const error = Object.assign(new Error('test keychain item unavailable'), { code: 44 });
@@ -43,14 +41,30 @@ vi.mock('node:child_process', async (importOriginal) => {
         return {};
       }
       return actual.execFile(file, args, options as Parameters<typeof actual.execFile>[2], callback);
-    }) as typeof actual.execFile,
+    }) as typeof actual.execFile;
+  const { promisify } = await import('node:util');
+  Object.defineProperty(execFile, promisify.custom, { value: (file: string, args: string[], options: unknown) => (
+    new Promise((resolve, reject) => execFile(file, args, options as never, (error, stdout, stderr) => {
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    }))
+  ) });
+  return {
+    ...actual,
+    execFile,
     spawn: (...args: Parameters<typeof actual.spawn>) => (
-      Array.isArray(args[1]) && args[1].includes('--input-format')
+      Array.isArray(args[1]) && args[1].includes('--input-format') && Boolean((args[2] as { env?: NodeJS.ProcessEnv } | undefined)?.env?.CLAUDE_CONFIG_DIR)
         ? spawnMock(...args)
         : actual.spawn(...args)
     ),
   };
 });
+
+// Exercise the detached launch boundary so the bridge's wrapper process is not mistaken for a worker.
+vi.mock('@/lib/runtime/pty-bridge', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtime/pty-bridge')>(),
+  spawnBridgeTerminalSession: async () => { throw new Error('Fixture uses detached workers.'); },
+}));
 
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>();
@@ -132,6 +146,10 @@ describe('Claude Code worker skill isolation real path', () => {
       return child;
     });
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
+  });
+
+  afterEach(() => {
+    rmSync(path.join(dataDir, 'native-worker-token.json'), { force: true });
   });
 
   afterAll(() => {
@@ -452,10 +470,16 @@ describe('Claude Code worker skill isolation real path', () => {
       runtime: current.runtime ?? 'claude-code',
       packets: [...current.packets.filter((entry) => entry.id !== packetId), packet],
     });
+    execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture'], { cwd: noCredsRepoPath });
+    const { getWorktreeManager } = await import('@/lib/worktree/launch');
+    const worktree = await getWorktreeManager(noCredsRepoPath).create({
+      agentType: 'codex', taskName: packetId, packetId, branchName: packet.branchTarget,
+      baseBranch: 'main', skipSetup: true, isolationPreference: 'git-worktree',
+    });
     const prompt = await buildPacketPrompt(packet, [], 'main', noCredsRepoPath);
     const lane = createLane({
       repoPath: noCredsRepoPath,
-      worktreePath: noCredsRepoPath,
+      worktreePath: worktree.path,
       branch: packet.branchTarget,
       runtime: 'claude-code',
       label: packet.title,
@@ -484,15 +508,8 @@ describe('Claude Code worker skill isolation real path', () => {
     expect(getLane(lane.id)?.status).toBe('idle');
     expect(getLaneEvents(lane.id, 200)).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        verb: 'worker_not_authenticated',
-        payload: expect.objectContaining({
-          runtime: 'claude-code',
-          code: 'worker_not_authenticated',
-        }),
-      }),
-      expect.objectContaining({
         verb: 'status_change',
-        payload: expect.objectContaining({ eventLabel: 'launch_error' }),
+        payload: expect.objectContaining({ eventLabel: 'launch_failed', error: expect.stringContaining('worker_not_authenticated') }),
       }),
     ]));
   }, 30_000);
@@ -549,7 +566,7 @@ describe('Claude Code worker skill isolation real path', () => {
       await expect(ensureClaudeCodeWorkerConfigDir(sessionDir, 'native')).rejects.toMatchObject({
         code: 'worker_not_authenticated',
         reason: process.platform === 'darwin'
-          ? 'No dedicated worker credential is configured. Run `npm run worker:login` from the application source checkout to connect a dedicated worker token.'
+          ? 'No dedicated worker credential is configured. Run `o8 worker login` in an operator terminal to connect a dedicated worker token. No source checkout is needed. Codex workers are unaffected.'
           : 'No live Claude OAuth credential was available to seed.',
       });
       expect(existsSync(path.join(sessionDir, 'claude-code-worker-config', '.credentials.json'))).toBe(false);

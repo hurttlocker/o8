@@ -30,17 +30,12 @@ vi.mock('@/lib/lane/reap-sessions', async (importOriginal) => {
   return { ...actual, killLaneSessionsConfirmed: reapSessions.killLaneSessionsConfirmed };
 });
 
-vi.mock('@/lib/codex/owned', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/codex/owned')>();
-  return {
-    ...actual,
-    archiveOwnedCodexSession: async (surfaceId: string) => {
-      if (surfaceId !== reapSessions.sessionKey) return actual.archiveOwnedCodexSession(surfaceId);
-      reapSessions.archiveStarted += 1;
-      if (reapSessions.archiveGate) await reapSessions.archiveGate;
-      return { archived: true };
-    },
-  };
+vi.mock('@/lib/runtimes/shared/owned-session-lifecycle', async (importOriginal) => {
+  const { stubFixtureSessionArchive } = await import('./helpers/owned-session-archive-stub');
+  return stubFixtureSessionArchive(await importOriginal(), reapSessions, async () => {
+    reapSessions.archiveStarted += 1;
+    if (reapSessions.archiveGate) await reapSessions.archiveGate;
+  });
 });
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-2313-receipt-data-'));

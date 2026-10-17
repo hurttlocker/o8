@@ -8,11 +8,10 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 
@@ -21,7 +20,7 @@ const children: ChildProcess[] = [];
 const roots: string[] = [];
 const sessions: string[] = [];
 const tmuxAvailable = spawnSync('tmux', ['-V'], { stdio: 'ignore' }).status === 0;
-const tsxImport = import.meta.resolve('tsx');
+const cliEntrypoint = join(process.cwd(), 'cli/dist/o8.mjs');
 
 function markerPids(marker: string): number[] {
   try {
@@ -68,19 +67,15 @@ afterEach(async () => {
 });
 
 describe.skipIf(!tmuxAvailable)('streamed o8 run Ctrl-C real entry point', () => {
+  beforeAll(() => {
+    execFileSync(process.execPath, [join(process.cwd(), 'cli/esbuild.config.mjs')], { cwd: process.cwd() });
+  }, 60_000);
+
   it('retains the log and numeric exit receipt after a normal command exit', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-normal-'));
     roots.push(dataDir);
-    const harnessPath = join(dataDir, 'run-harness.mts');
-    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
-    writeFileSync(harnessPath, `
-import { runRun } from ${JSON.stringify(runCommandModule)};
-const code = await runRun({ human: false, verbose: false }, []);
-process.exit(code);
-`);
     const result = spawnSync(process.execPath, [
-      '--import', tsxImport,
-      harnessPath,
+      cliEntrypoint,
       'run', '--', process.execPath, '-e', 'console.log("normal-receipt"); process.exit(7)',
     ], {
       cwd: process.cwd(),
@@ -154,13 +149,6 @@ process.exit(code);
     if (!address || typeof address === 'string') throw new Error('fixture server did not bind');
     const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-interrupt-'));
     roots.push(dataDir);
-    const harnessPath = join(dataDir, 'run-harness.mts');
-    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
-    writeFileSync(harnessPath, `
-import { runRun } from ${JSON.stringify(runCommandModule)};
-const code = await runRun({ human: false, verbose: false }, []);
-process.exit(code);
-`);
     const grandchild = [
       "process.on('SIGINT', () => {})",
       "process.on('SIGTERM', () => {})",
@@ -174,8 +162,7 @@ process.exit(code);
       'setInterval(() => {}, 1000)',
     ].join(';');
     const cli = spawn(process.execPath, [
-      '--import', tsxImport,
-      harnessPath,
+      cliEntrypoint,
       'run', '--', process.execPath, '-e', command,
     ], {
       cwd: process.cwd(),
@@ -248,17 +235,9 @@ process.exit(code);
     if (!address || typeof address === 'string') throw new Error('fixture server did not bind');
     const dataDir = mkdtempSync(join(tmpdir(), 'o8-run-cli-sigterm-'));
     roots.push(dataDir);
-    const harnessPath = join(dataDir, 'run-harness.mts');
-    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
-    writeFileSync(harnessPath, `
-import { runRun } from ${JSON.stringify(runCommandModule)};
-const code = await runRun({ human: false, verbose: false }, []);
-process.exit(code);
-`);
     const command = 'process.stdout.write("before-term\\n"); setInterval(() => {}, 1000)';
     const cli = spawn(process.execPath, [
-      '--import', tsxImport,
-      harnessPath,
+      cliEntrypoint,
       'run', '--detach', '--', process.execPath, '-e', command,
     ], {
       cwd: process.cwd(),
@@ -306,8 +285,7 @@ process.exit(code);
     });
 
     const last = spawnSync(process.execPath, [
-      '--import', tsxImport,
-      harnessPath,
+      cliEntrypoint,
       'run', '--last',
     ], {
       cwd: process.cwd(),
@@ -368,22 +346,9 @@ process.exit(code);
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('fixture server did not bind');
 
-    const harnessPath = join(dataDir, 'run-harness.mts');
-    const runCommandModule = new URL('../cli/src/commands/run.ts', import.meta.url).href;
-    writeFileSync(harnessPath, `
-import { runRun } from ${JSON.stringify(runCommandModule)};
-try {
-  const code = await runRun({ human: false, verbose: false }, []);
-  process.exit(code);
-} catch (error) {
-  process.stderr.write(String(error instanceof Error ? error.message : error));
-  process.exit(typeof error === 'object' && error && 'exit' in error ? Number(error.exit) : 1);
-}
-`);
     const beforeSessions = tmuxSessionNames();
     const cli = spawn(process.execPath, [
-      '--import', tsxImport,
-      harnessPath,
+      cliEntrypoint,
       'run', '--detach', '--', process.execPath, '-e',
       `require('node:fs').writeFileSync(${JSON.stringify(commandMarker)}, 'started')`,
     ], {

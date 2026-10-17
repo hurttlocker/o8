@@ -132,17 +132,6 @@ describe('mission cost persisted-state path', () => {
       }],
     }, null, 2)}\n`);
 
-    await persistSessionCost({
-      sessionKey,
-      runtime: 'opencode',
-      model: 'opencode/deepseek-v4-flash-free',
-      inputTokens: 350,
-      outputTokens: 60,
-      costUsd: 0.0035,
-      repoPath: dataDir,
-    });
-    rmSync(sessionDir, { recursive: true, force: true });
-
     const lane = createLane({
       repoPath: dataDir,
       branch: 'inline/terminal-cost',
@@ -150,6 +139,18 @@ describe('mission cost persisted-state path', () => {
       packetId,
       sessionKey,
     });
+    await persistSessionCost({
+      sessionKey,
+      runtime: 'opencode',
+      model: 'opencode/deepseek-v4-flash-free',
+      inputTokens: 350,
+      outputTokens: 60,
+      costUsd: 0.0035,
+      costSource: 'gateway',
+      repoPath: dataDir,
+    });
+    rmSync(sessionDir, { recursive: true, force: true });
+
     setLaneStatus(lane.id, 'completed', 'system', 'completed');
     const retryLane = createLane({
       repoPath: dataDir,
@@ -245,7 +246,7 @@ describe('mission cost persisted-state path', () => {
       outputTokens: 80,
       totalCostUsd: 0.0045,
       hasTelemetry: true,
-      costSource: 'estimate',
+      costSource: 'gateway',
     }]);
     expect(status.cost.tokensByRuntime.opencode).toEqual({
       inputTokens: 450,
@@ -377,6 +378,13 @@ describe('mission cost persisted-state path', () => {
     const packetId = 'packet-rebound-session-cost';
     const firstSession = 'opencode-owned:rebound-cost-first';
     const secondSession = 'opencode-owned:rebound-cost-second';
+    const lane = createLane({
+      repoPath: dataDir,
+      branch: 'inline/rebound-session-cost',
+      runtime: 'opencode',
+      packetId,
+      sessionKey: firstSession,
+    });
     await persistSessionCost({
       sessionKey: firstSession,
       runtime: 'opencode',
@@ -386,6 +394,7 @@ describe('mission cost persisted-state path', () => {
       costUsd: 0.003,
       repoPath: dataDir,
     });
+    attachSession(lane.id, secondSession, 'system');
     await persistSessionCost({
       sessionKey: secondSession,
       runtime: 'opencode',
@@ -395,14 +404,6 @@ describe('mission cost persisted-state path', () => {
       costUsd: 0.007,
       repoPath: dataDir,
     });
-    const lane = createLane({
-      repoPath: dataDir,
-      branch: 'inline/rebound-session-cost',
-      runtime: 'opencode',
-      packetId,
-      sessionKey: firstSession,
-    });
-    attachSession(lane.id, secondSession, 'system');
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: 'PKT-REBOUND-COST',

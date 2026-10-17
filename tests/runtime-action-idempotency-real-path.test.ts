@@ -162,7 +162,7 @@ describe('legacy runtime action persisted idempotency', () => {
 
       expect(response.status).toBe(500);
       expect(response.headers.get('content-type')).toContain('application/json');
-      await expect(response.json()).resolves.toMatchObject({ error: 'runtime idempotency write failed' });
+      await expect(response.json()).resolves.toEqual({ error: 'Unable to perform runtime action' }); // #3434 hides raw text
       expect(h.perform).not.toHaveBeenCalled();
     } finally {
       bind.mockRestore();

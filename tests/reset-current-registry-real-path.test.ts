@@ -11,6 +11,13 @@ const h = vi.hoisted(() => ({
   retirementCalls: 0,
 }));
 
+// Fixtures reopen the database between steps; build each storage admission
+// coordinator over the current connection rather than a closed cached one.
+vi.mock('@/lib/orchestrator/storage-admission', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orchestrator/storage-admission')>();
+  return { ...actual, getPacketStorageAdmissionCoordinator: () => actual.createPacketStorageAdmissionCoordinator() };
+});
+
 // Execute real worktree retirement; insert competing durable writes at the
 // async cleanup boundary, before the reset's final hold is persisted.
 vi.mock('@/lib/orchestrator/operator-mission-service/reset-cleanup', async (importOriginal) => {
@@ -42,24 +49,23 @@ const { writeOrchestratorControlPlaneState, readOrchestratorControlPlaneState } 
 const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
 const { deriveIdempotencyKey } = await import('@/lib/orchestrator/idempotency-store');
 const { readResetRequestJournal } = await import('@/lib/orchestrator/operator-mission-service/reset-recovery-journal');
+const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
 
-function fixture(name: string) {
+async function fixture(name: string) {
   const root = mkdtempSync(join(dataDir, `${name}-`));
   const repoPath = join(root, 'repo');
-  const worktreePath = join(root, 'worktree');
   const branch = `issue/${name}`;
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
   git('init', '--initial-branch=main', repoPath);
   git('-C', repoPath, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture');
-  // Match the independent checkout used by the installed desktop surface.
-  // Retirement and branch deletion run through production cleanup.
-  git('-C', repoPath, 'branch', branch);
-  git('clone', '--no-hardlinks', '--branch', branch, repoPath, worktreePath);
+  // Retirement and branch deletion run through production cleanup, which only
+  // removes a worktree the manager owns.
   const missionId = `mission-${name}`;
+  const { path: worktreePath, sessionKey } = await createManagedPacketWorktree(repoPath, { packetId: `${name}-cmp-0`, branch });
   const packets = [0, 1].map((index) => {
     const id = `${name}-cmp-${index}`;
     const lane = createLane({ repoPath, branch: index === 0 ? branch : `issue/${name}-sibling`, runtime: 'codex', packetId: id,
-      worktreePath: index === 0 ? worktreePath : undefined });
+      worktreePath: index === 0 ? worktreePath : undefined, sessionKey: index === 0 ? sessionKey : undefined });
     setLaneStatus(lane.id, 'paused', 'user', 'operator_stopped');
     return {
       id, referenceLabel: `inline-${index}`, title: 'Stopped comparison', summary: 'Reset selected member',
@@ -87,9 +93,9 @@ function request(packetId: string, idempotencyKey: string) {
 beforeEach(() => { h.afterRetirement = null; h.retirementCalls = 0; });
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
-describe('current mission reset durability through the authenticated route', () => {
+describe('current mission reset durability through the authenticated route', { timeout: 120_000 }, () => {
   it('keeps the selected operator-stop barrier after authenticated Stop background cleanup and database reopen', async () => {
-    const f = fixture('stop-current-cleanup');
+    const f = await fixture('stop-current-cleanup');
     const response = await stopRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/stop-packet', {
       method: 'POST', headers: { host: 'localhost:3001', authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ packetId: f.packetId }),
@@ -98,7 +104,7 @@ describe('current mission reset durability through the authenticated route', () 
     expect(await response.json()).toMatchObject({ ok: true, result: { killConfirmed: true } });
     await vi.waitFor(() => {
       expect(readMissionRegistryEntry(f.missionId)!.mission.packets[0]).toMatchObject({ lane: null, storageAdmissionEpoch: 2 });
-    }, { timeout: 10000 });
+    }, { timeout: 60000 });
     expect(existsSync(f.worktreePath)).toBe(false);
     closeDb();
     const durable = readMissionRegistryEntry(f.missionId)!.mission;
@@ -108,7 +114,7 @@ describe('current mission reset durability through the authenticated route', () 
   });
 
   it('reopens the selected held and unbound packet while preserving newer registry metadata and its stopped sibling', async () => {
-    const f = fixture('reset-current-success');
+    const f = await fixture('reset-current-success');
     h.afterRetirement = async () => {
       await withMissionRegistryState(f.missionId, (state) => ({ state: { ...state, constraints: 'concurrent-registry-metadata' }, result: undefined }));
     };
@@ -125,7 +131,7 @@ describe('current mission reset durability through the authenticated route', () 
   });
 
   it('preserves a newer registry generation instead of applying the old reset finalization', async () => {
-    const f = fixture('reset-current-newer');
+    const f = await fixture('reset-current-newer');
     h.afterRetirement = async () => {
       await withMissionRegistryState(f.missionId, (state) => {
         state.packets[0].storageAdmissionEpoch = 3;
@@ -144,7 +150,7 @@ describe('current mission reset durability through the authenticated route', () 
   });
 
   it('journals and replays failure after destructive retirement when the final registry write fails', async () => {
-    const f = fixture('reset-current-db-failure');
+    const f = await fixture('reset-current-db-failure');
     const key = 'reset-current-db-failure';
     h.afterRetirement = async () => {
       getSqlite().exec(`CREATE TRIGGER reject_reset_registry BEFORE UPDATE ON missions

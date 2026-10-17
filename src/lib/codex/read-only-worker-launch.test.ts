@@ -132,7 +132,18 @@ describe('owned Codex read-only argv', () => {
     },
   );
 
-  it('launches a read-only packet with approvals off and no nested inner sandbox', async () => {
+  // A read-only launch runs inside the macOS sandbox-exec profile; every other
+  // host refuses it before spawning, so the launched argv exists only on macOS.
+  it.skipIf(process.platform === 'darwin')('refuses a read-only launch without the macOS sandbox', async () => {
+    const result = await launchOwnedCodexSession({
+      cwd: repoPath, prompt: 'inspect the repository', workMode: 'read-only',
+    });
+    expect(result).toMatchObject({ ok: false });
+    expect(result.note).toContain('requires an OS-enforced sandbox');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('launches a read-only packet with approvals off and no nested inner sandbox', async () => {
     const args = await spawnedArgs('read-only');
     expect(indexOfSequence(args, CODEX_READ_ONLY_LAUNCH_FLAGS)).toBeGreaterThan(-1);
     // The blanket bypass flag must be gone entirely, not merely reordered: it
