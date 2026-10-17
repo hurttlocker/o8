@@ -20,13 +20,11 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 ## Now
 
-First-run acceptance is the immediate engineering priority. Published stable is 0.1.781. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+First-run acceptance is the immediate engineering priority. Published stable is 0.1.795. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 
-Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/hurttlocker/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246). Managed development environment cleanup is tracked in [#3337](https://github.com/hurttlocker/o8/issues/3337). These are source and development checks; installed first-run acceptance remains open.
+Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/hurttlocker/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246). These are source and development checks; installed first-run acceptance remains open.
 
 Direct tool sign-in recovery, explicit workspace continuation, restart intent, and focus and sound follow-through are implemented in [#3374](https://github.com/hurttlocker/o8/pull/3374). A ready discovery result enables continuation; opening a sign-in surface never starts authentication automatically. Source completion does not establish installed acceptance or a release; voice and mobile acceptance remain with their existing work.
-
-Workspace polish is tracked in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Acceptance covers quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation retain their existing issues: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance.
 
 Update-service source work has closed. Closure does not establish deployed endpoint behavior, delivery in the installed updater, or trustworthy active-install counts. New-install usage analytics, existing opt-out preservation and matching privacy documentation remain a separate delivery gate. [#2882](https://github.com/hurttlocker/o8/issues/2882)
 
@@ -37,6 +35,12 @@ Outside contributors should choose one open, unclaimed task from the [two contri
 Broad remote-project expansion is outside this month's default queue. Existing separately scoped remote and plugin work keeps its own owner, bounded acceptance and release decision; it is not automatically part of the first-run candidate. Remote recovery and continuation proof remains incomplete. [#2282](https://github.com/hurttlocker/o8/issues/2282)
 
 Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-worker, collision and isolated-mode acceptance remain open. Linux and Windows product validation stay parked; running existing tests on Linux does not change that status. [#2772](https://github.com/hurttlocker/o8/issues/2772), [#1672](https://github.com/hurttlocker/o8/issues/1672), [#2204](https://github.com/hurttlocker/o8/issues/2204)
+
+## Source work awaiting installed acceptance
+
+Managed development environment cleanup source work has closed in [#3337](https://github.com/hurttlocker/o8/issues/3337). First-run installed acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246) and [#2211](https://github.com/hurttlocker/o8/issues/2211).
+
+Workspace polish source work has closed in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Its checks cover quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation source work has also closed: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance. The restoration and reconnect changes are integrated in [#3716](https://github.com/hurttlocker/o8/pull/3716).
 
 ## What we need to prove
 
