@@ -12,7 +12,8 @@ vi.mock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async () => ({ pr: null })),
   ensureGitHubPullRequestByHead: vi.fn(async () => ({ pr: null })),
 }));
-vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [] })) }));
+const LIVE_INVENTORY = { meta: { mode: 'live', observablePending: false }, agents: [] };
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: vi.fn(async () => LIVE_INVENTORY) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/lane/durable-review-approval', () => ({ hasDurableApprovedReview: vi.fn(async () => true) }));
 
@@ -162,14 +163,31 @@ describe('automatic PR release through the real reaper and durable missions', ()
     f.persist();
     const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
     const inventory = vi.mocked(getRuntimeInventorySnapshot);
-    inventory.mockImplementation(async () => ({ agents: [{ sessionKey, runtime: 'codex', status: 'running',
+    inventory.mockImplementation(async () => ({ ...LIVE_INVENTORY, agents: [{ sessionKey, runtime: 'codex', status: 'running',
       runtimeSurface: { ownership: 'owned', capabilities: { interrupt: true, sendInput: true }, lifecycle: { availability: 'running' } } }] }) as never);
     try {
       await runWorktreeReaperTick();
       expect(f.read().packets[0].releaseState).toBe('pending');
       expect(getLane(f.lane.id)?.status).toBe('reviewing');
     } finally {
-      inventory.mockImplementation(async () => ({ agents: [] }) as never);
+      inventory.mockImplementation(async () => LIVE_INVENTORY as never);
+    }
+  });
+
+  it('refuses automatic release while the runtime inventory is still warming', async () => {
+    // A warming snapshot lists no agents, which must not read as "no live writer".
+    const f = fixture();
+    updateLane(f.lane.id, { sessionKey: 'codex-owned:auto-release-warming' }, 'system');
+    f.persist();
+    const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+    const inventory = vi.mocked(getRuntimeInventorySnapshot);
+    inventory.mockImplementation(async () => ({ meta: { mode: 'stale', observablePending: true }, agents: [] }) as never);
+    try {
+      await runWorktreeReaperTick();
+      expect(f.read().packets[0].releaseState).toBe('pending');
+      expect(getLane(f.lane.id)?.status).toBe('reviewing');
+    } finally {
+      inventory.mockImplementation(async () => LIVE_INVENTORY as never);
     }
   });
 

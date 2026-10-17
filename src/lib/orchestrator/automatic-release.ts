@@ -20,16 +20,19 @@ export function canApplyAutomaticRelease(packet: OrchestratorPacket, lane: Lane,
 /**
  * A live writer on the lane's session can still add commits, whatever the
  * packet status says: an operator-held packet reconciles to `blocked` before
- * its writer is checked. An unreadable inventory refuses too.
+ * its writer is checked. Only a live, fresh inventory can show there is none;
+ * a warming or stale snapshot, or one that cannot be read, refuses.
  */
 async function laneHasActiveWriter(lane: Lane): Promise<boolean> {
   if (!lane.sessionKey) return false;
   try {
     const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
-    const agent = (await getRuntimeInventorySnapshot({ fresh: true })).agents
-      .find((candidate) => candidate.sessionKey === lane.sessionKey);
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+    if (snapshot.meta?.mode !== 'live' || snapshot.meta.observablePending) return true;
+    const agent = snapshot.agents.find((candidate) => candidate.sessionKey === lane.sessionKey);
     return Boolean(agent && runtimeTruthHasActiveWriter(runtimeTruthFromInventoryAgent(agent)));
-  } catch {
+  } catch (error) {
+    console.warn('[automatic-release] runtime inventory unavailable; release held:', error instanceof Error ? error.message : error);
     return true;
   }
 }
