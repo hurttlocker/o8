@@ -12,6 +12,7 @@ import { SidebarDemoStates, sidebarFixtureAttention } from './SidebarDemoStates'
 import { attentionRank, deriveHistoryDateGroups } from './sections';
 import { usePublishSidebarAttention } from './sidebar-view-store';
 import type { ChatHistoryItem, ChatsTabProps, RepoHistoryGroup } from './types';
+import type { ChatViewAction } from './sidebar-agent-navigation';
 
 interface Props {
   chatGroupBy: ChatGroupMode;
@@ -32,11 +33,12 @@ interface Props {
   activeSessionKey?: string | null;
   onOpenHistoryChat: ChatsTabProps['onOpenHistoryChat'];
   scheduledSessions?: ReactNode;
+  viewActions?: readonly ChatViewAction[];
 }
 export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, remainder,
   flatHistoryItems, flatHistoryDateGroups, flatHistoryRepoGroups, collapsedRepoGroups,
   repoByGroupKey, toggleRepoGroup, onCreateOrchestratorForRepo, renderHistoryRow,
-  hiddenChatCount, showMore, fixtures, activeSessionKey, onOpenHistoryChat, scheduledSessions }: Props) {
+  hiddenChatCount, showMore, fixtures, activeSessionKey, onOpenHistoryChat, scheduledSessions, viewActions }: Props) {
   const source = chatGroupBy === 'chronological' ? flatHistoryItems : remainder;
   const pinned = source.filter(item => item.pinned);
   const conversations = source.filter(item => !item.pinned);
@@ -45,7 +47,7 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   const priorityFixtures = fixtures.filter(sample => staysInWorkingView(sidebarFixtureAttention(sample)));
   const settledFixtures = fixtures.filter(sample => !priorityFixtures.includes(sample));
   const hasPriority = chatGroupBy === 'flat' && (priority.length > 0 || priorityFixtures.length > 0);
-  const picker = <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />;
+  const picker = <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} actions={viewActions} />;
   const demos = <SidebarDemoStates mode={chatGroupBy} fixtures={fixtures} publishAttention={false}
     activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat} />;
   const more = hiddenChatCount > 0 ? <button type="button" onClick={showMore}

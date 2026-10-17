@@ -9,6 +9,7 @@ import { CHAT_GROUP_BY_KEY, staysInWorkingView } from './sidebar-view';
 import type { ChatHistoryItem } from './types';
 import type { IdeWorkspaceSession } from '../../types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { SidebarAgentEntry } from './sidebar-agent-navigation';
 
 vi.mock('@/components/desktop/OrchestratorHoverCard', () => ({ OrchestratorHoverCard: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -28,6 +29,14 @@ const packets = ['Running', 'Decision'].map((title) => ({
   queueState: 'queued', releaseState: 'pending',
 }) satisfies OrchestratorPacket);
 
+const workerEntry: SidebarAgentEntry = {
+  row: { key: 'lane:worker', origin: 'CLI', status: 'running', runtime: 'codex', model: null,
+    name: 'Worker task', subtitle: '', lastActivityAt: Date.now(), sessionKey: 'worker-session', repoPath: repo.localPath,
+    packetId: 'worker-packet', laneId: 'worker', laneStatus: 'running', outcome: null, outcomeNote: null, lastEventLabel: null },
+  pinned: false, active: false, attention: { status: 'running' },
+  render: () => createElement('span', { 'data-worker': 'true' }, 'Worker task'),
+};
+
 describe('compact sidebar view through the chat panel', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -37,7 +46,7 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => root.render(createElement(Fragment, null, createElement(SidebarHeaderActions, { onSearch }), createElement(ChatsTab, {
       repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
       activeSessionKey: active, onOpenHistoryChat: onOpen, packets,
-      agentsSection: (workingOnly) => createElement('span', { 'data-workers': String(workingOnly) }, 'Workers'),
+      agentEntries: [workerEntry],
     }))));
   };
   const rows = () => Array.from(container.querySelectorAll('[role="button"][title]:not([aria-expanded])')).map((row) => row.getAttribute('title')?.split(' · ')[0]);
@@ -72,15 +81,15 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search chats"]')!.click());
     expect(onSearch).toHaveBeenCalledOnce();
   });
-  it('persists working shelves, keeps pins and decisions, and forwards the worker filter', async () => {
+  it('persists working shelves and keeps pins, decisions and workers in the normal groups', async () => {
     await render(); await choose('Working');
     expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision']));
     expect(rows()).toContain('Pinned');
-    expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Working conversations"] [data-worker]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('working');
     await render('thoughts-Running'); expect(rows()).not.toContain('Idle');
     await act(async () => root.unmount()); root = createRoot(container); await render('thoughts-Running');
-    expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Working conversations"] [data-worker]')).not.toBeNull();
     expect(rows()).not.toContain('Idle');
   });
   it('orders Priority, Pinned and dated history without duplicates and remembers date folds', async () => {
@@ -197,11 +206,11 @@ describe('compact sidebar view through the chat panel', () => {
     const show = async () => act(async () => root.render(createElement(Fragment, null,
       createElement(SidebarHeaderActions), createElement(ChatsTab, { repos: [repo], variant: 'mini',
         groupMode: 'flat', showLiveSessions: false, packets, ideWorkspaceSessions: sessions,
-        onOpenHistoryChat: onOpen, agentsSection: createElement('span', null, 'Worker section') }))));
+        onOpenHistoryChat: onOpen, agentEntries: [workerEntry] }))));
     await show(); await choose('Scheduled');
     expect(rows()).toContain('Pinned'); expect(rows()).not.toContain('Idle'); expect(rows()).not.toContain('Running');
     expect(container.textContent).toContain('Owned scheduled run');
-    expect(container.querySelector<HTMLElement>('[data-sidebar-workers]')?.style.display).toBe('none');
+    expect(container.querySelector('[data-worker]')).toBeNull();
     expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('scheduled');
     const scheduled = container.querySelector<HTMLButtonElement>('[aria-label="Scheduled conversations"] button[aria-expanded]')!;

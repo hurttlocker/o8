@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorPacket, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../../types';
+import type { SidebarAgentEntry, ChatViewAction } from './sidebar-agent-navigation';
 
 export interface ChatHistoryItem {
   tabId: string;
@@ -53,8 +53,8 @@ export interface ChatsTabProps {
   groupMode?: 'sections' | 'flat';
   showKindInMeta?: boolean;
   packets?: OrchestratorPacket[];
-  /** Flat Agents section rendered between Chats and Archived. */
-  agentsSection?: ReactNode | ((workingOnly: boolean) => ReactNode);
+  agentEntries?: readonly SidebarAgentEntry[];
+  agentViewActions?: readonly ChatViewAction[];
   /** When set (mini variant, repo grouping), each repo group header gets a
    *  hover-revealed [+] that spawns a fresh orchestrator session scoped to
    *  that repo — Cursor's contextual New Agent pattern. */
