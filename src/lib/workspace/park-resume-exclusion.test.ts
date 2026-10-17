@@ -81,7 +81,11 @@ function deferred(): Deferred {
 }
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  return execFileSync('git', [
+    '-c', 'user.name=o8 test',
+    '-c', 'user.email=o8-test@example.test',
+    ...args,
+  ], { cwd, encoding: 'utf8' }).trim();
 }
 
 function adapter(
