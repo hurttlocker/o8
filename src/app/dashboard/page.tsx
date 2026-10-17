@@ -20,7 +20,8 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
-import { ResizeEdge } from '@/components/desktop/shell/ResizeEdge';
+import { RightPanelResizeEdge } from '@/components/desktop/shell/RightPanelResizeEdge';
+import { useColumnResize, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '@/components/desktop/hooks/useColumnResize';
 import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
 import { ProjectsPage } from '@/components/desktop/ProjectsPage';
 import { WorkspaceUtilityProvider } from '@/components/desktop/canvas/WorkspaceUtilityContext';
@@ -3427,93 +3428,16 @@ function DashboardInner() {
     setO8AllRepos(true);
   }, []);
 
-  // ── Left drag handle ──
-  // Live drags bypass React entirely: a dashboard commit costs ~40ms in dev
-  // (measured 2026-07-10, ~24fps webview during drag), so routing every
-  // mousemove through setState makes the content reflow in chunky steps
-  // behind the cursor (Q's retest recording). During the drag we write the
-  // width straight onto the column and footer DOM nodes — the browser reflows
-  // the flex layout natively at frame rate — and commit state ONCE on
-  // mouseup. The flag is released a frame after the commit so the framer
-  // transitions never see the width jump as something to animate.
-  const startLeftDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const startW = leftWidth;
-    const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
-    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
-    const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (colEl) colEl.style.width = `${w}px`;
-        if (footEl) footEl.style.width = `${w}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      setLeftWidth(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [leftWidth, setLeftWidth]);
-
-  // ── Right drag handle ──
-  // Right/O8 drags share the left handle's direct-DOM pattern. The right
-  // column is two nested motion.divs — the inner (chat-panel) holds the
-  // panel width, its parent shell holds width+10 (drag handle + margin).
-  const startRightColumnDrag = useCallback((
-    e: React.MouseEvent,
-    startW: number,
-    min: number,
-    max: number,
-    commit: (w: number) => void,
-  ) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const innerEl = document.querySelector<HTMLElement>('[data-mcp-scope="chat-panel"]');
-    const shellEl = innerEl?.parentElement ?? null;
-    const widthAt = (x: number) => Math.min(Math.max(startW + (startX - x), min), max);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (innerEl) innerEl.style.width = `${w}px`;
-        if (shellEl) shellEl.style.width = `${w + 10}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      commit(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, []);
-  const startRightDrag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH, setRightWidth);
-  }, [rightWidth, setRightWidth, startRightColumnDrag]);
-
-  // ── O8 panel drag handle ──
-  const startO8Drag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, o8Width, MIN_O8_PANEL_WIDTH, MAX_O8_PANEL_WIDTH, setO8Width);
-  }, [o8Width, setO8Width, startRightColumnDrag]);
+  const startColumnResize = useColumnResize(setPanelDragActive);
+  const startLeftDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'left', min: 160, max: 500, commit: setLeftWidth });
+  }, [setLeftWidth, startColumnResize]);
+  const startRightDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', min: MIN_RIGHT_PANEL_WIDTH, max: MAX_RIGHT_PANEL_WIDTH, commit: setRightWidth });
+  }, [setRightWidth, startColumnResize]);
+  const startO8Drag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', min: MIN_O8_PANEL_WIDTH, max: MAX_O8_PANEL_WIDTH, commit: setO8Width });
+  }, [setO8Width, startColumnResize]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
@@ -4760,7 +4684,7 @@ function DashboardInner() {
             // a floating opaque card would break glass-panel parity).
             paddingTop: effectiveGlassSurface ? 5 : 4,
             paddingLeft: effectiveGlassSurface ? 0 : 4,
-            paddingRight: 5,
+            paddingRight: 0,
             paddingBottom: effectiveGlassSurface ? 0 : 4,
           }}
         >
@@ -4837,7 +4761,7 @@ function DashboardInner() {
           status bar's old left band was an empty anchor after its utilities
           moved out. */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden', containerType: 'inline-size' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', minWidth: 0, overflow: 'hidden', containerType: 'inline-size' }}>
 
       {/* ── Center: Workspace Surface ── */}
       <div data-mcp-scope="workspace" aria-hidden={rightPanelMaximized} inert={rightPanelMaximized} style={{
@@ -4969,10 +4893,9 @@ function DashboardInner() {
             // fade/slide and then snapping the center when it unmounts.
             // overflow:hidden clips the fixed-width content during the
             // collapse; the inner keeps its own drag-resize width animation.
-            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
-            // + the inner's 4px right margin so nothing clips when open.
+            // The chrome allowance covers the divider and outer panel inset.
             initial={false}
-            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
+            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : RIGHT_COLUMN_CHROME + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -4981,24 +4904,16 @@ function DashboardInner() {
               display: 'flex',
               height: '100%',
               flexShrink: 0,
-              maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 420px))',
-              overflow: 'hidden',
+              maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE}px))`,
+              overflow: showRightPanelColumn ? 'visible' : 'hidden',
             }}
           >
-            {!rightPanelMaximized ? <ResizeEdge aria-label="Right panel width"
-              aria-valuemin={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
-              aria-valuemax={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
-              aria-valuenow={rightPanelKind === 'o8' ? o8Width : rightWidth}
-              onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-                event.preventDefault();
-                const delta = event.key === 'ArrowLeft' ? 16 : -16;
-                if (rightPanelKind === 'o8') setO8Width((width) => Math.max(MIN_O8_PANEL_WIDTH, Math.min(MAX_O8_PANEL_WIDTH, width + delta)));
-                else setRightWidth((width) => Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width + delta)));
-              }}
-              style={{ width: 6 }}
-              glowStyle={{ top: 22, bottom: 22, left: 6, transform: 'none' }}
+            {!rightPanelMaximized ? <RightPanelResizeEdge
+              width={rightPanelKind === 'o8' ? o8Width : rightWidth}
+              minimum={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
+              maximum={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
+              onStartDrag={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
+              onResize={rightPanelKind === 'o8' ? setO8Width : setRightWidth}
             /> : null}
 
             <motion.div
@@ -5009,7 +4924,7 @@ function DashboardInner() {
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',
-                maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 430px))',
+                maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE + RIGHT_COLUMN_CHROME}px))`,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
