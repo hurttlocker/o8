@@ -3,3 +3,6 @@ The operator writes and reviews these notes before the release.
 A successful ship publishes them. Archive the file as `<version>.md` through
 a reviewed follow-up PR after publication; the ship script does not modify
 protected main.
+
+For affected older updaters, see the
+[0.1.796 recovery instructions](../docs/operations/updater-recovery.md).
