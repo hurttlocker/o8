@@ -4,12 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { useComposerDraftLifecycle } from './useComposerDraftLifecycle';
 import type { ContextualConversation } from './contextual-turn';
-function Harness({ open, injected, contextual }: { open: boolean; injected?: { id: string; text: string }; contextual?: boolean }) {
-  const [input, setInput] = useState(contextual ? 'My unsent reply' : '');
+function Harness({ open, injected, contextual, ownerTabId }: { open: boolean; injected?: { id: string; text: string }; contextual?: boolean; ownerTabId?: string }) {
+  const [input, setInput] = useState(contextual || ownerTabId ? 'My unsent reply' : '');
   const [, setPreEnhanceInput] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversation: ContextualConversation | undefined = contextual ? { requestContext: 'Thread metadata' } : undefined;
-  useComposerDraftLifecycle({ open, input, draftInjection: injected, contextualConversation: conversation, setInput, setPreEnhanceInput, inputRef });
+  useComposerDraftLifecycle({ open, input, draftInjection: injected, contextualConversation: conversation, ownerTabId, setInput, setPreEnhanceInput, inputRef });
   return <textarea ref={inputRef} value={input} readOnly />;
 }
 let host: HTMLDivElement; let root: Root;
@@ -28,4 +28,12 @@ it('preserves the reply draft when a contextual surface is closed and reopened',
   await act(async () => root.render(createElement(Harness, { open: false, contextual: true })));
   await act(async () => root.render(createElement(Harness, { open: true, contextual: true })));
   expect(host.querySelector('textarea')!.value).toBe('My unsent reply');
+});
+it('preserves an unsent workspace-tab draft through repeated utility navigation before a thread exists', async () => {
+  await act(async () => root.render(createElement(Harness, { open: true, ownerTabId: 'fresh-tab' })));
+  for (let round = 0; round < 3; round++) {
+    await act(async () => root.render(createElement(Harness, { open: false, ownerTabId: 'fresh-tab' })));
+    await act(async () => root.render(createElement(Harness, { open: true, ownerTabId: 'fresh-tab' })));
+    expect(host.querySelector('textarea')!.value).toBe('My unsent reply');
+  }
 });
