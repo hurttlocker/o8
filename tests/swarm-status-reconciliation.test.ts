@@ -83,7 +83,7 @@ async function readMissionPacket(packetId: string): Promise<OrchestratorPacket> 
 }
 
 function renderCard(packet: OrchestratorPacket): string {
-  return renderToStaticMarkup(createElement(SwarmStatusCard, { packets: [packet] }));
+  return renderToStaticMarkup(createElement(SwarmStatusCard, { packets: [packet], defaultExpanded: true }));
 }
 
 describe('#1635 swarm status reconciliation', () => {

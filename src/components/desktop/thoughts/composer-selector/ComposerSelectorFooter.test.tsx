@@ -391,7 +391,7 @@ describe('ComposerSelectorFooter', () => {
   it('restores advanced worker settings without adding them to the mode menu', async () => {
     await act(async () => root.render(createElement(Harness, { initialMode: 'fusion' })));
     const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(3);
+    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(1);
     expect(workers.textContent).toContain('Workers');
     act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click());
     expect(container.querySelector('[role="menu"]')?.textContent).not.toMatch(/Fusion|Compare plans/);
@@ -887,6 +887,8 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
     const popover = container.querySelector<HTMLElement>('[data-testid="composer-selector-popover"]')!;
     const workerScroll = container.querySelector<HTMLElement>('[data-testid="composer-selector-workers-scroll"]')!;
+    expect(container.querySelector('[data-testid="worker-selection-scope"]')?.textContent).toContain('The orchestrator can select another available runtime');
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label')).toContain('Default worker:');
     expect(popover.style.overflowY).toBe('hidden');
     expect(workerScroll.style.overflowY).toBe('auto');
     expect(workerScroll.style.scrollbarWidth).toBe('none');
