@@ -236,14 +236,14 @@ export function HistoryChatRow({
     dragActivatedRef.current = false;
     dragDisposeRef.current?.();
     dragDisposeRef.current = trackThreadDrag(
-      { clientX: event.clientX, clientY: event.clientY },
+      { clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId },
       {
         threadId: item.tabId,
         title: item.title,
         mode: historySection(item) === 'orchestrator' ? 'orchestrator' : 'chat',
         repoPath: item.repoPath ?? null,
       },
-      { onActivate: () => { dragActivatedRef.current = true; } },
+      { source: event.currentTarget, onActivate: () => { dragActivatedRef.current = true; } },
     );
   };
   const rowTone = active
