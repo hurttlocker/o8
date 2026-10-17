@@ -249,6 +249,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/repo-focus/tabs/chats/sidebar-agent-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
       "reasons": [
         "apfs-tool"

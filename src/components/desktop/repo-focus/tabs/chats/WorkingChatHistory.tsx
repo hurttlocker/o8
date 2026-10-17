@@ -9,10 +9,11 @@ import { SidebarDemoStates, sidebarFixtureAttention } from './SidebarDemoStates'
 import type { ChatGroupMode } from './sidebar-view';
 import { usePublishSidebarAttention } from './sidebar-view-store';
 import type { ChatHistoryItem, ChatsTabProps } from './types';
+import type { ChatViewAction } from './sidebar-agent-navigation';
 
 /** Keep pinned conversations anchored while active work and quiet history fold independently. */
 export function WorkingChatHistory({ items, workingIds, fixtures, activeSessionKey, renderHistoryRow,
-  onOpenHistoryChat, onChangeView, showAll, onShowMore }: {
+  onOpenHistoryChat, onChangeView, showAll, onShowMore, viewActions }: {
   items: ChatHistoryItem[];
   workingIds: ReadonlySet<string>;
   fixtures: SidebarFixture[];
@@ -22,12 +23,13 @@ export function WorkingChatHistory({ items, workingIds, fixtures, activeSessionK
   onChangeView: (mode: ChatGroupMode) => void;
   showAll: boolean;
   onShowMore: () => void;
+  viewActions?: readonly ChatViewAction[];
 }) {
   const pinned = items.filter(item => item.pinned);
   const working = items.filter(item => !item.pinned && workingIds.has(item.tabId));
   const settled = items.filter(item => !item.pinned && !workingIds.has(item.tabId));
   usePublishSidebarAttention(fixtures.filter(sample => attentionRank(sidebarFixtureAttention(sample)) > 0).length);
-  const picker = <ChatGroupPicker mode="working" onChange={onChangeView} />;
+  const picker = <ChatGroupPicker mode="working" onChange={onChangeView} actions={viewActions} />;
   return <>
     {pinned.length ? <ChatHistoryShelf label="Pinned" action={picker}>
       {pinned.map(renderHistoryRow)}

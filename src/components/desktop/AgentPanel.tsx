@@ -423,7 +423,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             </div>
           ) : null}
 
-          <ChatsTab
+          <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession}
+            packets={orchestratorMissionState?.packets ?? orchestratorPackets}
+            renderContent={(agentEntries, agentViewActions) => <ChatsTab
             repos={railReposForChats}
             ideWorkspaceSessions={ideWorkspaceSessions}
             activeSessionKey={activeSessionKey}
@@ -438,11 +440,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             showKindInMeta
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
-            // Agents stay flat between Chats and Archived, never nested under a chat.
-            agentsSection={(workingOnly) => (
-              <AgentPanelExtraAgents workingOnly={workingOnly} activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} packets={orchestratorMissionState?.packets ?? orchestratorPackets} />
-            )}
-          />
+            agentEntries={agentEntries}
+            agentViewActions={agentViewActions}
+          />} />
         </section>
 
         {/* AgentPanelEmptyState ("No active agents") removed — it tracked
