@@ -4,6 +4,37 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 /** Discovery and launch share one runtime/effort contract. */
 export const CORTEX_WORKER_TOOLS = [
   {
+    name: 'cortex_shared_team_status',
+    description: 'Inspect this orchestrator chat’s Shared team: checkout, members, dirty and committed paths, outside-scope edits, and an exact review ID with HEAD, paths and fingerprints. Read the diff before committing or explicitly reconciling independent edits. Status alone does not approve changes.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cortex_finish_shared_team',
+    description: 'After all Shared workers settle, review and commit their combined scoped changes, run verification, then archive the team receipt and release checkout ownership. Refuses live workers, uncommitted team edits, and unreconciled independent changes. Preserves all source and reviewed independent edits.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reviewSummary: { type: 'string', description: 'Concise summary of the combined diff and review findings.' },
+        verification: { type: 'string', description: 'Commands and outcomes used to verify the combined result.' },
+      },
+      required: ['reviewSummary', 'verification'],
+    },
+  },
+  {
+    name: 'cortex_reconcile_shared_team',
+    description: 'Explicitly acknowledge independently reviewed checkout changes before Finish. First inspect team status and review the actual diff. Submit its exact review ID, HEAD and every review path. Preserves original baseline, receipts and all source. Refuses active or unknown workers, stale review, incomplete acknowledgement and uncommitted worker edits. Does not release ownership or grant control over other agents.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reviewId: { type: 'string', description: 'Exact review.id from cortex_shared_team_status after inspecting the current diff.' },
+        reviewedHead: { type: 'string', description: 'Exact review.head from the same status.' },
+        acknowledgedPaths: { type: 'array', items: { type: 'string' }, description: 'Every exact review.paths entry, including pre-existing edits, without omissions.' },
+        reviewSummary: { type: 'string', description: 'What independent changes were reviewed and why preserving them is appropriate.' },
+      },
+      required: ['reviewId', 'reviewedHead', 'acknowledgedPaths', 'reviewSummary'],
+    },
+  },
+  {
     name: 'cortex_correct_workers',
     description: 'Deliver an operator correction to exact owned workers of this conversation. First read eligible targets and run IDs by omitting targets. Then choose send (idle worker), pause-and-send (interrupt then resume the same worker), or stop (no resume). Set holdMerges only for an explicit no-merge instruction; it persists a binding session restriction before delivery. Delivered means runtime acceptance, not model acknowledgement. Unknown delivery must be inspected, never blindly repeated. Does not change runtime, model, permissions or workspace.',
     inputSchema: { type: 'object', properties: {
