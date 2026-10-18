@@ -141,6 +141,8 @@ Composer Brain routing [#3863](https://github.com/hurttlocker/o8/issues/3863) pr
 
 Saved Preview layouts [#3119](https://github.com/hurttlocker/o8/issues/3119) now offer visible Close preview and Open in Browser actions, preserving the surviving terminal and reclaiming its workspace space. A saved obsolete tile no longer mounts another browser iframe. Development acceptance does not imply publication.
 
+Source-editor recovery [#3122](https://github.com/hurttlocker/o8/issues/3122) uses bundled editor and language-worker assets, shows readable source while initialization is pending or unavailable, and retries with a fresh loader. Inactive file tabs inherit workspace visibility so an editor cannot paint over a chat. Source/chat switching is verified in development; installed acceptance remains separate.
+
 Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
 
 ## 6. Runs where you are
