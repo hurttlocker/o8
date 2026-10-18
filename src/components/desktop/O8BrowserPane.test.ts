@@ -11,6 +11,7 @@ import {
   readBrowserPaneState,
   type BrowserTab,
 } from '@/lib/browser/pane-state';
+import { browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
 import { O8BrowserPane } from './O8BrowserPane';
 
 const browserRuntime = vi.hoisted(() => ({ nativeEnabled: false, inTauri: false }));
@@ -149,6 +150,27 @@ describe('O8BrowserPane durable entry path', () => {
 
     expect(container.textContent).toContain('Navigate again to reopen this page');
     expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('reloads the current native document while retaining its durable tab', async () => {
+    browserRuntime.nativeEnabled = true;
+    browserRuntime.inTauri = true;
+    const scopeKey = 'browser-native-reload';
+    const tabs: BrowserTab[] = [{ id: 'reload-tab', url: 'http://localhost:4888/', title: 'App', surface: 'native' }];
+    seedDurableScope(scopeKey, tabs, 'reload-tab');
+    vi.mocked(browserViewEval).mockClear();
+    vi.mocked(browserViewNavigate).mockClear();
+    await act(async () => root.render(createElement(O8BrowserPane, { stateScopeKey: scopeKey })));
+    const native = container.querySelector('[data-testid="native-surface"]');
+    const beforeReload = readBrowserPaneState(scopeKey);
+    const reload = container.querySelector<HTMLButtonElement>('button[title="Reload"]');
+    expect(reload).not.toBeNull();
+    await act(async () => reload!.click());
+    expect(browserViewEval).toHaveBeenCalledExactlyOnceWith('location.reload()');
+    expect(browserViewNavigate).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="native-surface"]')).toBe(native);
+    expect(readBrowserPaneState(scopeKey)).toEqual(beforeReload);
+    expect(readBrowserPaneState(scopeKey)?.activeTabId).toBe('reload-tab');
   });
 
   it.each([2, 5])('names active and hovered close controls and preserves surviving tabs at %s-tab density', async (count) => {
