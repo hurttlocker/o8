@@ -262,7 +262,8 @@ export function HistoryChatRow({
   return (
     <div
       role="button"
-      title={[item.title, repoSuffix(item), item.repoBranch, item.repoPath, statusLabel].filter(Boolean).join(' · ')}
+      title={onHoverChange && (hovered || keyboardFocused) ? undefined : [item.title, repoSuffix(item), item.repoBranch, item.repoPath, statusLabel].filter(Boolean).join(' · ')}
+      aria-label={`${item.title} · ${statusLabel}`}
       onFocus={(event) => {
         setKeyboardFocused(event.currentTarget.matches(':focus-visible'));
         onHoverChange?.(event.currentTarget.getBoundingClientRect());

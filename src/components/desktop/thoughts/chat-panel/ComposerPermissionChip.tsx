@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { FloatingSurface } from '../../FloatingSurface';
-import { useComposerChipCompact } from '../composer-compact-context';
+import { motion, useReducedMotion } from 'framer-motion';
 import { ComposerPopover } from './ComposerPopover';
 import type { ThoughtsChatPermissionMode } from './types';
 
@@ -17,20 +17,23 @@ export function ComposerPermissionChip({ mode, onChange, fullAccessDetail = 'Can
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const compact = useComposerChipCompact();
+  const reduceMotion = useReducedMotion();
   const label = mode === 'full' ? 'Full access' : 'Plan only';
   return <>
-    <button ref={triggerRef} type="button" aria-label={`Permissions: ${label}`} title={label}
+    <button ref={triggerRef} type="button" aria-label={`Permissions: ${label}`} title={`${label} · ${mode === 'full' ? fullAccessDetail : 'Inspect and propose without edits'}`}
       aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 24, paddingTop: 0, paddingBottom: 0,
-        paddingLeft: 6, paddingRight: 6, border: 0, borderRadius: 7, background: 'transparent',
-        color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 10.5, fontWeight: 300,
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, paddingTop: 0, paddingBottom: 0,
+        paddingLeft: 0, paddingRight: 0, border: 0, borderRadius: 7, background: 'transparent',
+        color: mode === 'full' ? 'var(--t-brand-orange)' : 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 300,
         fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" />
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <motion.g initial={false} animate={{ opacity: mode === 'full' ? 1 : 0, scale: mode === 'full' ? 1 : 0.8 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} style={{ transformOrigin: '12px 12px' }}>
+          <rect x="4" y="11" width="16" height="10" rx="3" /><path d="M8 11V7a4 4 0 0 1 7.5-2M12 15v2" />
+        </motion.g>
+        <motion.g initial={false} animate={{ opacity: mode === 'plan' ? 1 : 0, scale: mode === 'plan' ? 1 : 0.8 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} style={{ transformOrigin: '12px 12px' }}>
+          <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8M8 17h5" />
+        </motion.g>
       </svg>
-      {!compact ? <span>{label}</span> : null}
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
     </button>
     <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => { setOpen(false); triggerRef.current?.focus(); }} align="start">
       <FloatingSurface role="menu" aria-label="Permissions for next message" style={{ width: 232 }} contentStyle={{ padding: 6 }}>

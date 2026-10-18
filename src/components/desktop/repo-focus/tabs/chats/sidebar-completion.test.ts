@@ -13,6 +13,8 @@ import { COMPLETION_START_KEY, getLastVisited, markVisited } from './read-state'
 import type { ChatHistoryItem } from './types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
+vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: vi.fn() }));
+
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const repo = { id: 'project', name: 'project', localPath: '/tmp/sidebar-project', remoteUrl: null, defaultBranch: 'main' };
 const started = Date.now() - 60_000;

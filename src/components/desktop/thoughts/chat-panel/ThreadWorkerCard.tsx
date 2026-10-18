@@ -14,13 +14,13 @@ export function useThreadWorkers({ threadId, repoPath, busy, agents }: {
   busy: boolean;
   agents: Array<{ sessionKey?: string; status?: string }>;
 }) {
-  const [saved, setSaved] = useState<{ threadId: string; workers: SwarmSessionView[] } | null>(null);
+  const [saved, setSaved] = useState<{ threadId: string; repoPath: string; workers: SwarmSessionView[] } | null>(null);
   const [refreshVersion, requestRefresh] = useReducer(value => value + 1, 0);
   useSharedDesktopWs(undefined, {
     onRealtimeEvent: event => {
       if (event.channel !== 'mutation') return;
       const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
-      if (saved?.threadId === threadId && saved.workers.some(worker => worker.sessionKey === (mutation?.surfaceId ?? mutation?.sessionKey))) requestRefresh();
+      if (saved?.threadId === threadId && saved.repoPath === repoPath && saved.workers.some(worker => worker.sessionKey === (mutation?.surfaceId ?? mutation?.sessionKey))) requestRefresh();
     },
   });
   useEffect(() => {
@@ -34,7 +34,7 @@ export function useThreadWorkers({ threadId, repoPath, busy, agents }: {
         if (!response.ok) return;
         const payload = await response.json() as { threadId?: string; workers?: SwarmSessionView[] };
         if (!controller.signal.aborted && current === revision && payload.threadId === threadId && Array.isArray(payload.workers)) {
-          setSaved({ threadId, workers: payload.workers });
+          setSaved({ threadId, repoPath, workers: payload.workers });
         }
       } catch { /* Retain the last membership receipt; never infer new members from the repo. */ }
     };
@@ -47,7 +47,7 @@ export function useThreadWorkers({ threadId, repoPath, busy, agents }: {
     const stopRefresh = startDurableRefresh({ refresh, intervalMs: DEGRADED_FALLBACK_REFRESH_MS, events: ['o8:lifecycle-reconcile'] });
     return () => { stopRefresh(); controller.abort(); window.removeEventListener('cortex:agent-supervisor-update', launched); };
   }, [threadId, repoPath, busy, refreshVersion]);
-  const workers = saved?.threadId === threadId ? saved.workers : [];
+  const workers = saved?.threadId === threadId && saved.repoPath === repoPath ? saved.workers : [];
   return workers.map(worker => ({ ...worker,
     status: agents.find(agent => agent.sessionKey === worker.sessionKey)?.status ?? worker.status,
   }));

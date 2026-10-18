@@ -610,6 +610,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               <ComposerArea
                 ref={textareaRef}
                 activeComposer={focused && canSteer && !sending && steerReceipt !== 'unknown'}
+                showBrain={false}
                 inputLabel={`Message ${name}`}
                 placeholder={`Message ${recipientLabel}…`}
                 literalInput
