@@ -533,7 +533,7 @@ export function createTileRegistry({
       description: 'Global operator shell for scratch commands, quick command execution, and non-repo-specific utilities.',
       singleton: true,
       hideHeader: true,
-      render: ({ tileId }) => (
+      render: ({ tileId, content }) => (
         <ContextualPanel
           ref={(handle) => registerContextualPanelHandle(tileId, handle)}
           sendTerminalCreate={sendTerminalCreate}
@@ -543,6 +543,8 @@ export function createTileRegistry({
           sendTerminalDetach={sendTerminalDetach}
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
+          visible={content.kind !== 'contextual-panel' || !content.hidden}
+          onHide={() => handleCloseTile(tileId)}
           repoPath={workspaceTerminalPreferredRepo?.localPath ?? globalRepoEntries[0]?.localPath ?? null}
           repoLabel={workspaceTerminalPreferredRepo?.name ?? globalRepoEntries[0]?.name ?? null}
           registeredRepos={globalRepoEntries}

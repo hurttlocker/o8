@@ -61,6 +61,8 @@ export interface ContextualPanelProps {
   onSplitVertical?: () => void;
   panelLabel?: string;
   showPanelLabel?: boolean;
+  visible?: boolean;
+  onHide?: () => void;
   onClose: () => void;
 }
 
@@ -94,6 +96,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       panelLabel = 'Bottom Panel',
       showPanelLabel = true,
       onClose,
+      visible = true,
+      onHide,
     },
     ref,
   ) {
@@ -197,9 +201,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
 
     // Create default shell tab on mount / reconnect
     useEffect(() => {
-      if (!termWsConnected || tabsRef.current.length > 0 || pendingTabIdsRef.current.length > 0) return;
+      if (!visible || !termWsConnected || tabsRef.current.length > 0 || pendingTabIdsRef.current.length > 0) return;
       createBottomTab(CLI_AGENTS[0]);
-    }, [createBottomTab, termWsConnected]);
+    }, [createBottomTab, termWsConnected, visible]);
 
     // Imperative handle for dashboard event routing
     useImperativeHandle(ref, () => ({
@@ -607,8 +611,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
 
           <button
             type="button"
-            onClick={onClose}
-            aria-label={`Close ${panelLabelLower}`}
+            onClick={onHide ?? onClose}
+            aria-label={onHide ? 'Hide bottom panel' : `Close ${panelLabelLower}`}
+            title={onHide ? 'Hide panel. Terminals keep running.' : 'Close this terminal view'}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -647,7 +652,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   sendTerminalInput={sendTerminalInput}
                   sendTerminalResize={sendTerminalResize}
                   sendTerminalDetach={sendTerminalDetach}
-                  visible={tab.id === activeTabId}
+                  visible={visible && tab.id === activeTabId}
                   readOnly={tab.readOnly}
                   onNewShell={!tab.readOnly ? createShell : undefined}
                   onClose={() => { void handleCloseTab(tab.id); }}

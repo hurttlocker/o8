@@ -110,11 +110,12 @@ export function TileContainer({
     return { leaves, leafRects, splitFrames };
   }, [layout.root]);
 
-  const totalLeaves = leaves.length;
+  const visibleLeaves = leaves.filter((leaf) => leaf.content.kind !== 'contextual-panel' || leaf.content.hidden !== true);
+  const totalLeaves = visibleLeaves.length;
   const leafSignature = leaves.map((leaf) => leaf.id).join('|');
   const focusedPaneId = paneFocus?.leaves === leafSignature && leaves.some((leaf) => leaf.id === paneFocus.tileId)
     ? paneFocus.tileId : null;
-  const allTerminalPanes = leaves.every((leaf) => leaf.content.kind === 'terminal');
+  const allTerminalPanes = visibleLeaves.every((leaf) => leaf.content.kind === 'terminal');
   const showPaneHeader = allTerminalPanes && totalLeaves > 1;
   const primaryLeaf = leaves.find((leaf) => leaf.id === 'tile-root' && leaf.content.kind === 'terminal');
   const primaryRect = focusedPaneId && focusedPaneId !== 'tile-root'
@@ -209,13 +210,14 @@ export function TileContainer({
       }}
     >
       {leaves.map((leaf, index) => {
+        const hiddenPanel = leaf.content.kind === 'contextual-panel' && leaf.content.hidden === true;
         const hiddenByFocus = Boolean(focusedPaneId && focusedPaneId !== leaf.id);
         const rect = focusedPaneId === leaf.id
           ? { left: 0, top: 0, width: 1, height: 1 }
           : leafRects.get(leaf.id);
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
-        const isActive = !hiddenByFocus && leaf.id === activeTileId;
+        const isActive = !hiddenPanel && !hiddenByFocus && leaf.id === activeTileId;
         // Per-edge: half the gap on edges facing siblings; zero on edges
         // flush with the workspace boundary. Adjacent leaves contribute
         // half + half = LEAF_GAP visible in the middle, fully transparent
@@ -239,12 +241,15 @@ export function TileContainer({
             data-tile-id={leaf.id}
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
+            aria-hidden={hiddenPanel || hiddenByFocus}
+            inert={hiddenPanel || hiddenByFocus}
             onMouseDown={() => onActivateTile(leaf.id)}
             onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
               position: 'absolute',
+              display: hiddenPanel ? 'none' : undefined,
               left: `${rect.left * 100}%`,
               top: `${rect.top * 100}%`,
               width: `${rect.width * 100}%`,
