@@ -537,6 +537,8 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
         if (pendingNativeEngine.current === attempt) pendingNativeEngine.current = null;
         if (!active) return;
         window.clearTimeout(timer);
+        // Keep native diagnostics useful without logging SDK errors or credentials.
+        console.error('[auth] native Clerk init failed; retry in Account settings');
         setConnectionUnavailable(true);
       });
     return () => {

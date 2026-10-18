@@ -56,7 +56,7 @@ export function AccountTab() {
   const signedIn = auth.isLoaded && auth.signedIn;
   const unavailable = auth.accountConnection ? auth.accountConnection === 'unavailable' : !auth.isLoaded && accountReadTimedOut;
   const identity = signedIn ? auth.user?.name || auth.user?.email || 'Signed in' : auth.isLoaded ? 'Local desktop profile' : unavailable ? 'Account unavailable' : 'Loading account…';
-  const serial = signedIn && founder ? String(founder.operatorNumber).padStart(3, '0') : null;
+  const serial = auth.isLoaded && (signedIn || !auth.clerkEnabled) && founder ? String(founder.operatorNumber).padStart(3, '0') : null;
 
   return (
     <div style={{ maxWidth: SETTINGS_CONTENT_MAX_WIDTH, padding: 8, fontFamily: APP_FONT_STACK }}>
