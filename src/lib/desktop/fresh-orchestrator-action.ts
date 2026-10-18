@@ -7,6 +7,7 @@ import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/typ
 export const FRESH_ORCHESTRATOR_EVENT = 'o8:request-fresh-orchestrator';
 export const FRESH_ACTION_ATTRIBUTE = 'data-o8-fresh-session-action';
 export const FRESH_RECEIPT_ATTRIBUTE = 'data-o8-fresh-session-receipt';
+export const FRESH_RECEIPT_TIMEOUT_MS = 8_000;
 export interface FreshOrchestratorRequest {
   requestId: string;
   expiresAt: number;
@@ -84,7 +85,17 @@ export function registerFreshOrchestratorAction(root: HTMLElement, owner: Owner)
         root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, status: 'error', code: 'freshness_not_proven' }));
         return;
       }
-      root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, tabId }));
+      const pending = JSON.stringify({ ...receipt, tabId });
+      root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, pending);
+      // Registration rotates on the tab's React commit. Keep this bounded
+      // expiry on the captured root, including after a disconnected caller or
+      // unmount, without touching a replacement root or replaying creation.
+      window.setTimeout(() => {
+        if (root.getAttribute(FRESH_RECEIPT_ATTRIBUTE) !== pending) return;
+        root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({
+          ...receipt, tabId, status: 'unknown', code: 'verification_timeout', automaticReplay: false,
+        }));
+      }, FRESH_RECEIPT_TIMEOUT_MS);
     } catch {
       root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, status: 'error', code: 'creation_failed' }));
     }
