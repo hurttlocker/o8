@@ -330,7 +330,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   };
 
   return (
-    <div data-settings-shell style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+    <div data-settings-shell style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent' }}>
       <style>{`
         [data-settings-shell], [data-settings-shell] * {
           scrollbar-width: none !important;

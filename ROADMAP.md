@@ -112,6 +112,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Settings shell [#3958](https://github.com/hurttlocker/o8/issues/3958) keeps its shared header transparent while the content body retains its active palette. Development verification and release remain separate.
+
 Chat section disclosure [#3954](https://github.com/hurttlocker/o8/issues/3954) places chevrons after section labels and reveals them on hover or keyboard focus. The shared header keeps label geometry, toggle state and neighboring actions stable. Development verification and release remain separate.
 
 Terminal appearance [#3949](https://github.com/hurttlocker/o8/issues/3949) applies the active palette before canvas consumers read it. Existing workspace and contextual terminals keep their output and attachment through light, dark and All Glass changes; glass keeps the shared translucent backdrop. Development checks, native acceptance, reviewed merge and release remain separate.
