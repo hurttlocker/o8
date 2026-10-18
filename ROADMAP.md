@@ -161,6 +161,8 @@ Fresh-session receipts [#3804](https://github.com/hurttlocker/o8/issues/3804) pu
 
 Native Browser reload [#3801](https://github.com/hurttlocker/o8/issues/3801) reloads the current document instead of navigating to its existing address. Attached development verifies fresh HTML and module code after a cached-module update, while the tab identity and selection remain stable. Packaged acceptance and release remain separate.
 
+Browser overlay detection [#3799](https://github.com/hurttlocker/o8/issues/3799) accounts for effective ancestor opacity before hiding the native child. Transparent cached portals do not count as painted covers; visible covers and explicit occlusion still hide and restore the child. Controlled development reproduction and rendered regressions are recorded separately from remaining native visual acceptance.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
