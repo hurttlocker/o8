@@ -10,6 +10,8 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
@@ -45,13 +47,13 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, readOnly = false, onNewShell, onClose },
   ref,
 ) {
-  const { themeId, surface } = useTheme();
+  const { themeId, surface, workspaceGlass } = useTheme();
   // Glass surface: the bottom terminal reads as part of the chrome, so it
   // bleeds the vibrancy like every other glass panel instead of painting a
   // solid near-black slab (Q ruling 2026-07-14). Solid surface keeps the
   // opaque paper terminal. Kept in a ref so the init effect sees the current
   // value without re-initializing the terminal.
-  const glass = surface === 'glass';
+  const glass = surface === 'glass' || (workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell());
   const glassRef = useRef(glass);
   glassRef.current = glass;
   const containerRef = useRef<HTMLDivElement>(null);

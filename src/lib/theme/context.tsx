@@ -20,7 +20,7 @@ import {
   createContext,
   useContext,
   useState,
-  useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   useRef,
@@ -471,7 +471,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Mount once without animation, then animate on every subsequent change.
   const mountedRef = useRef(false);
   const prevWorkspaceGlassRef = useRef(false);
-  useEffect(() => {
+  // Canvas consumers read CSS tokens in passive effects; stamp the palette first.
+  useLayoutEffect(() => {
     const root = document.documentElement;
     if (!effectiveWorkspaceGlass) {
       // Exit sweep BEFORE the palette re-applies: the all-glass overrides sit
