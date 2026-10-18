@@ -62,11 +62,12 @@ export function WorkerCorrectionDock({ label, summary, count, state, active = tr
         else if (event.shiftKey && event.target === first) { event.preventDefault(); trigger.current?.focus(); }
       }
     }}>
-    <button ref={trigger} type="button" aria-label={`${label}: ${summary}`} aria-expanded={expanded} aria-controls={id} title={summary} data-worker-state={state}
+    <button ref={trigger} type="button" aria-label={`${label}: ${summary}`} aria-expanded={expanded} aria-controls={id} data-worker-state={state}
       onPointerDown={() => setKeyboard(false)} onClick={() => { if (pinned && expanded) close(); else { reveal(); setPinned(true); } }}
       style={{ position: 'relative', height: 37, width: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, border: 0, borderRadius: 8, pointerEvents: 'auto',
         fontFamily: 'var(--font-sans-system)', fontSize: 11, fontWeight: 300, cursor: 'pointer',
-        background: expanded ? 'var(--t-panel-hover)' : 'transparent', color: state !== 'idle' ? AGENT_STATUS_ACCENT[state] : expanded ? 'var(--t-text-muted)' : 'var(--t-text-faint)' }}>
+        background: 'transparent', color: expanded ? 'var(--t-accent)' : state !== 'idle' ? AGENT_STATUS_ACCENT[state] : 'var(--t-text-faint)',
+        transition: reducedMotion ? 'none' : 'color 150ms ease-out' }}>
       <span aria-hidden data-worker-count="" style={{ position: 'absolute', top: 2, left: 0, right: 0,
         fontSize: 9.5, fontWeight: 300, lineHeight: '12px', fontVariantNumeric: 'tabular-nums' }}>{count || (state === 'failed' || state === 'review' ? '!' : '0')}</span>
       <svg aria-hidden width="26" height="16" viewBox="0 0 26 16" fill="none" style={{ position: 'absolute', bottom: 5, flexShrink: 0 }}>

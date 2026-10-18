@@ -206,6 +206,10 @@ it('shows the membership count on the transparent composer trigger', async () =>
   expect(trigger.getAttribute('aria-label')).toContain('1 running');
   expect(trigger.style.background).toBe('transparent');
   expect(trigger.style.width).toBe('44px');
+  await act(async () => trigger.click());
+  expect(trigger.style.background).toBe('transparent');
+  expect(trigger.style.color).toBe('var(--t-accent)');
+  expect(trigger.hasAttribute('title')).toBe(false);
 });
 
 it('keeps the total stable as a crew settles and preserves native workers without granting controls', async () => {
