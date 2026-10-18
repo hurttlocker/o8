@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
+import { isLoopbackHostname } from '@/lib/auth/loopback-request';
 import { accountIdentity } from '@/lib/auth/account-identity';
 import { openAccountSettings } from '@/lib/auth/open-account-settings';
 import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
@@ -35,6 +36,7 @@ export interface O8AuthUser {
 export interface O8AuthState {
   /** Whether Clerk is configured in this build at all. */
   clerkEnabled: boolean;
+  localWorkspaceOnly?: boolean;
   /** Clerk finished resolving its session state. */
   isLoaded: boolean;
   signedIn: boolean;
@@ -486,11 +488,17 @@ type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['ini
  * never blocking startup.
  */
 function ClerkSessionHost({ children }: { children: ReactNode }) {
-  const [engine, setEngine] = useState<NativeClerk | 'web' | null>(null);
+  const [engine, setEngine] = useState<NativeClerk | 'web' | 'local' | null>(null);
 
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!isTauri) {
+      if (process.env.NODE_ENV === 'development'
+        && CLERK_PUBLISHABLE_KEY?.startsWith('pk_live_')
+        && isLoopbackHostname(globalThis.location?.hostname)) {
+        setEngine('local');
+        return;
+      }
       setEngine('web');
       return;
     }
@@ -517,6 +525,10 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
 
   if (engine === null) {
     return <O8AuthContext.Provider value={DISABLED_STATE}>{children}</O8AuthContext.Provider>;
+  }
+
+  if (engine === 'local') {
+    return <O8AuthContext.Provider value={{ ...DISABLED_STATE, localWorkspaceOnly: true }}>{children}</O8AuthContext.Provider>;
   }
 
   if (engine === 'web') {
