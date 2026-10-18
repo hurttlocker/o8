@@ -116,6 +116,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
+
 Settings shell [#3958](https://github.com/hurttlocker/o8/issues/3958) keeps its shared header transparent while the content body retains its active palette. Development verification and release remain separate.
 
 Composer worker status [#3953](https://github.com/hurttlocker/o8/issues/3953) uses one compact count at the composer edge. The existing popup keeps worker identities, states, pane navigation and activity receipts; the transcript no longer duplicates the live group. Recorded membership determines the count, and completed work does not imply a merge. Development verification and release remain separate.
