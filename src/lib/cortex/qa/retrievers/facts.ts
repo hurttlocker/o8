@@ -23,6 +23,7 @@
  */
 
 import 'server-only';
+import { currentComposerBrainRoute } from '@/lib/operator/composer-brain-context';
 
 import path from 'node:path';
 
@@ -225,7 +226,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
     // overhead for the common path).
     // Managed Brain has one payer. This optional scorer has its own
     // OpenAI/local embedding route, so keep lexical retrieval for this query.
-    const useHybridScorer = isHybridScorerEnabled() && !usesManagedBrainInferenceSync();
+    const useHybridScorer = !currentComposerBrainRoute()?.runtime && isHybridScorerEnabled() && !usesManagedBrainInferenceSync();
     const embeddingColSql = useHybridScorer ? ', embedding' : '';
     const records = sqlite
       .prepare(

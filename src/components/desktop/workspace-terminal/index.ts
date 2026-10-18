@@ -1,6 +1,5 @@
 export * from '@/components/desktop/workspace-terminal/constants';
 export * from '@/components/desktop/workspace-terminal/icons';
-export * from '@/components/desktop/workspace-terminal/PreviewPane';
 export * from '@/components/desktop/workspace-terminal/TabBar';
 export * from '@/components/desktop/workspace-terminal/types';
 export * from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';

@@ -517,13 +517,8 @@ export function useTileLayout({
       }
       return [...current, preview];
     });
-    ensureTileKind('preview', {
-      direction: 'vertical',
-      preferredKinds: ['terminal', 'contextual-panel'],
-      ratio: 0.56,
-      selectedPreviewId: preview.id,
-    });
-  }, [ensureTileKind]);
+    // Discovery feeds the Browser launcher; terminal output must not open another viewer.
+  }, []);
 
   const handleSelectPreviewTile = useCallback((tileId: string, previewId: string) => {
     const currentTile = findTile(tileLayout.root, tileId);
