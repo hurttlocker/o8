@@ -20,7 +20,7 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 ## Now
 
-First-run acceptance is the immediate engineering priority. Published stable is 0.1.796. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+First-run acceptance is the immediate engineering priority. Published stable is 0.1.797. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 
 Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/hurttlocker/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246). These are source and development checks; installed first-run acceptance remains open.
 
