@@ -98,6 +98,8 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Runtime connection evidence [#2214](https://github.com/hurttlocker/o8/issues/2214) carries observed providers, source kinds and actual check times into Providers, dispatch and CLI/MCP status. Empty probes stay indeterminate; configured carriers remain distinct from verified provider access. Account identity and external tools remain explicitly unreported when the runtime exposes no evidence.
+
 Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
 
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.

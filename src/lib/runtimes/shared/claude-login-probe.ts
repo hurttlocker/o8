@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import { hasClaudeEnvCredential, hasLiveClaudeOAuth } from '@/lib/claude-code/oauth-credential';
 import { readNativeWorkerToken, requiresNativeWorkerToken } from '@/lib/claude-code/worker-token';
+import type { ConnectionSource } from './connection-evidence';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 
 const execFileAsync = promisify(execFile);
@@ -107,14 +108,15 @@ export async function hasStoredClaudeOAuthCredential(): Promise<boolean> {
 export async function detectNativeClaudeAuth(binaryPath: string): Promise<{
   authenticated: boolean;
   loginState: ClaudeLoginState;
+  source?: ConnectionSource;
 }> {
-  if (hasClaudeEnvCredential()) return { authenticated: true, loginState: 'logged_in' };
+  if (hasClaudeEnvCredential()) return { authenticated: true, loginState: 'logged_in', source: 'environment' };
   if (requiresNativeWorkerToken()) {
     const authenticated = Boolean(await readNativeWorkerToken());
-    return { authenticated, loginState: authenticated ? 'logged_in' : 'logged_out' };
+    return { authenticated, loginState: authenticated ? 'logged_in' : 'logged_out', source: 'credential_file' };
   }
   const loginState = await probeClaudeLoginState(binaryPath);
-  if (loginState === 'logged_in') return { authenticated: true, loginState };
-  if (loginState === 'logged_out') return { authenticated: false, loginState };
-  return { authenticated: await hasStoredClaudeOAuthCredential(), loginState };
+  if (loginState === 'logged_in') return { authenticated: true, loginState, source: 'cli_report' };
+  if (loginState === 'logged_out') return { authenticated: false, loginState, source: 'cli_report' };
+  return { authenticated: await hasStoredClaudeOAuthCredential(), loginState, source: 'credential_file' };
 }

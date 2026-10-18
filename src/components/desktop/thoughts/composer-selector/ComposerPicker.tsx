@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { RuntimeConnectionSummary } from '../../onboarding/RuntimeConnectionSummary';
 import { AcpModelPicker } from '../AcpModelPicker';
 import { useRuntimeInventory } from '../../onboarding/useRuntimeInventory';
 import { RuntimeToolsPanel } from '../../onboarding/RuntimeToolsPanel';
@@ -62,6 +63,7 @@ export function ComposerPicker({ state, composerModelGroups, onModelChange, onBa
   const houses: House[] = composerModelGroups.filter((group) => group === leadGroup || group.key === 'o8' || (group.key === 'acp' && acpAvailable) || installed.some((item) => item.id === runtimeForLead(group.key)))
     .map((group) => ({ id: group.key, label: group.key === 'claude' ? 'Claude Code' : group.label, ready: group.key === 'o8' || (group.key === 'acp' ? acpAvailable : ready(runtimeForLead(group.key))), group }));
   const house = houses.find((item) => item.id === houseId);
+  const connection = tools.inventory?.find(item => item.id === runtimeForLead(house?.id as OrchestratorBackendSetting ?? null, tools.inventory ?? []))?.connection;
   const searchable = house?.group?.searchable;
   const normalizedQuery = query.trim().toLowerCase();
   const choices: Pick[] = houses.flatMap(item => (item.group?.options ?? []).map(option => ({
@@ -138,6 +140,7 @@ export function ComposerPicker({ state, composerModelGroups, onModelChange, onBa
         </div>
         <div ref={contentRef} onKeyDown={keyDown} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingTop: 8, paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 24, paddingRight: 8, paddingLeft: 8, fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)' }}><span>Orchestrator</span><span>{houseId === 'favorites' ? 'Favorites' : house?.label}</span></div>
+          {house && !['acp', 'o8'].includes(house.id) ? <div style={{ paddingTop: 4, paddingRight: 8, paddingBottom: 8, paddingLeft: 8 }}><RuntimeConnectionSummary connection={connection} /></div> : null}
           {house?.id === 'acp' ? <ModelPickerRow label="Use agent default" testId="lead-acp-default" selected={state.leadBackend === 'acp' && !state.leadModelId} disabled={!house.ready || saving || Boolean(pending)} onSelect={() => { void commit({ group: house.group, favorite: { house: 'acp', id: '', label: 'Agent default' } }); }} /> : null}
           {searchable && house ? <AcpModelPicker key={house.id} backend={house.id} width={310} embedded defaultProvider={house.id === 'muse' ? 'meta' : 'openrouter'} allowEffortVariants favorites={favorites.filter(favorite => favorite.house === house.id)} onToggleFavorite={toggleFavorite} value={state.leadModelId} disabled={saving || Boolean(pending) || !house.ready}
             onSelect={(id) => { void select({ favorite: { house: house.id, id, label: id }, group: house.group }); }} /> : <>

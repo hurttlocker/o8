@@ -1,3 +1,4 @@
+import type { RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { MODEL_IDS } from '@/lib/models';
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
@@ -14,6 +15,7 @@ export interface SetupRuntime {
   fix: string;
   builtIn?: { backend: Exclude<OrchestratorBackendSetting, 'auto'>; planDetail: string };
   piSetup?: PiUserSetup;
+  connection?: RuntimeConnectionEvidence;
 }
 
 export interface RuntimeActivity {

@@ -3,9 +3,9 @@ import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const defaults = vi.hoisted(() => ({ updateField: vi.fn(), builtInReady: true }));
+const defaults = vi.hoisted(() => ({ updateField: vi.fn(), builtInReady: true, connection: null as import('@/lib/runtimes/shared/connection-evidence').RuntimeConnectionEvidence | null }));
 vi.mock('./useModelSettings', () => ({ useModelSettings: () => ({
-  data: { dispatchableRuntimes: [{ id: 'pi-builtin', available: defaults.builtInReady, detail: defaults.builtInReady ? 'Bundled and ready' : 'Requires Node 22.19 or newer', fix: 'Update the runtime' }], values: { codexWorkerEffort: 'high', claudeWorkerEffort: 'high', orchestratorModel: 'sonnet' }, sources: {} },
+  data: { dispatchableRuntimes: [...(defaults.connection ? [{ id: 'codex', available: false, connection: defaults.connection }] : []), { id: 'pi-builtin', available: defaults.builtInReady, detail: defaults.builtInReady ? 'Bundled and ready' : 'Requires Node 22.19 or newer', fix: 'Update the runtime' }], values: { codexWorkerEffort: 'high', claudeWorkerEffort: 'high', orchestratorModel: 'sonnet' }, sources: {} },
   loading: false, notice: null, busyField: null, updateField: defaults.updateField,
 }) }));
 vi.mock('./APIKeysTab', () => ({
@@ -35,6 +35,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   defaults.updateField.mockClear();
   defaults.builtInReady = true;
+  defaults.connection = null;
   request.mockReset();
   request.mockImplementation(async (url: string) => Response.json(url === '/api/v2/keys' ? { providers: keyProviders }
     : url === '/api/setup/detect' ? { tools: [{ id: 'codex', detected: true, ready: true, path: '/fixture/codex', version: '1.2.3' }] }
@@ -211,5 +212,20 @@ it.each([true, false])('keeps the bundled worker discoverable with truthful read
   expect(pane.textContent).toContain(ready ? 'Bundled and ready' : 'Requires Node 22.19 or newer');
   expect(pane.textContent).not.toContain('Binary path');
   expect(pane.textContent).not.toContain('Sign in through');
+  expect(request.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
+});
+
+it('shows the same indeterminate connection evidence despite an older positive binary-only check', async () => {
+  defaults.connection = {
+    state: 'indeterminate', providers: [], observations: [{ source: 'cli_report', outcome: 'unknown' }],
+    checkedAt: Date.parse('2026-10-18T20:00:00Z'), account: 'not_reported', externalTools: 'not_inspected',
+  };
+  await act(async () => root.render(createElement(ProvidersTab)));
+  const pane = container.querySelector('[role="tabpanel"]:not([hidden])')!;
+  expect(pane.textContent).toContain('Connection unknown');
+  expect(pane.textContent).toContain('CLI report: unknown');
+  expect(pane.textContent).toContain('2026-10-18T20:00:00.000Z');
+  expect(pane.textContent).toContain('Account identity not reported');
+  expect(defaults.updateField).not.toHaveBeenCalled();
   expect(request.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false);
 });
