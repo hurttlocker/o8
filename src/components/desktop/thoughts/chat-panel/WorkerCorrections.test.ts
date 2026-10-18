@@ -199,12 +199,40 @@ it('hands off the expanded surface between transcript and composer without remov
   expect(calls).toHaveLength(0); expect(delivered).not.toHaveBeenCalled();
 });
 
-it('uses an accessible line-only trigger with no resting background', async () => {
+it('shows the membership count on the transparent composer trigger', async () => {
   await render();
   const trigger = button('Correct workers');
-  expect(trigger.textContent).toBe('');
+  expect(trigger.textContent).toBe('1');
+  expect(trigger.getAttribute('aria-label')).toContain('1 running');
   expect(trigger.style.background).toBe('transparent');
   expect(trigger.style.width).toBe('44px');
+  await act(async () => trigger.click());
+  expect(trigger.style.background).toBe('transparent');
+  expect(trigger.style.color).toBe('var(--t-accent)');
+  expect(trigger.hasAttribute('title')).toBe(false);
+});
+
+it('keeps the total stable as a crew settles and preserves native workers without granting controls', async () => {
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ workers: [], corrections: [] }) } as Response);
+  const sessions = Array.from({ length: 6 }, (_, index) => ({ sessionKey: `codex-owned:${index}`, name: `Task ${index}`, runtime: 'codex', status: 'running' }));
+  const props = { repoPath: '/repo', threadId: 'thoughts-one', draft: 'Keep this draft', hasAttachments: false, working: false, onDelivered: delivered };
+  await act(async () => root.render(createElement(WorkerCorrections, { ...props, workerContext: { packets: [], sessions,
+    scouts: [{ id: 'native-one', label: 'Native research', status: 'failed' }] } })));
+  const trigger = button('Correct workers');
+  expect(trigger.textContent).toBe('7');
+  expect(trigger.getAttribute('aria-label')).toContain('6 running');
+  expect(trigger.getAttribute('aria-label')).toContain('1 failed');
+  await act(async () => trigger.click());
+  expect(document.body.querySelector('[aria-label="Subagents: 7"]')).not.toBeNull();
+  expect(document.body.textContent).toContain('Native research');
+  expect(document.body.querySelector('input[type=checkbox]')).toBeNull();
+  await act(async () => root.render(createElement(WorkerCorrections, { ...props, workerContext: { packets: [],
+    sessions: sessions.map(session => ({ ...session, status: 'completed' })), scouts: [{ id: 'native-one', label: 'Native research', status: 'unknown' }] } })));
+  expect(trigger.textContent).toBe('7');
+  expect(trigger.getAttribute('aria-label')).toContain('6 completed');
+  expect(trigger.getAttribute('aria-label')).toContain('1 unconfirmed');
+  expect(trigger.getAttribute('aria-label')).not.toContain('running');
+  expect(calls).toHaveLength(0); expect(delivered).not.toHaveBeenCalled();
 });
 
 it('omits the dock for an empty chat and reveals it when worker membership arrives', async () => {
