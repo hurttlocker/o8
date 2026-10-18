@@ -39,6 +39,7 @@ import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { SessionTransformMenu } from './SessionTransformMenu';
 import { WorkerPaneSummary } from './WorkerPaneSummary';
+import { hasWorkerReviewAction, WorkerReviewAction } from './WorkerReviewAction';
 import type { TerminalStatusState } from '@/lib/terminal-status/resolve';
 
 interface AgentTilePaneProps {
@@ -466,6 +467,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       }}
     >
       <div
+        data-worker-pane-header
         style={{
           height: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 10,
@@ -520,6 +522,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} />
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
             type="button"
@@ -552,7 +555,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
-      <WorkerPaneSummary packet={packet} onOpenReview={onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
+      <WorkerPaneSummary packet={packet} onOpenReview={hasWorkerReviewAction(packet) ? undefined : onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
 
       <div
         ref={scrollRef}
