@@ -62,6 +62,7 @@ import { useOrchestratorModelState } from './composer-selector/useOrchestratorMo
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
+import { useBufferedOrchestratorSend } from './chat-panel/useBufferedOrchestratorSend';
 import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
@@ -1946,24 +1947,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return true;
   }, [collideEnabled, isOrchestratorMode, orchStream.status, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
 
-  const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
-    if (!isOrchestratorMode) return null;
-    const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(text, composerModeRef.current, soloOrchestrator);
-    track('orchestrator.message');
-    return sendOrchestrator(displayMessage, {
-      permissionMode,
-      backend: composerBackendTurnOverride(orchestratorBackend),
-      thinkingEffort,
-      model: orchestratorModel,
-      wireMessage,
-      displayMessage,
-      orchestrationMode: turnOrchestrationMode,
-      collide: collideEnabled,
-      ...(images.length > 0 ? { attachments: images } : {}),
-    });
-  }, [collideEnabled, isOrchestratorMode, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
+  const { dispatch: dispatchBufferedOrchestratorSend, capture: captureQueuedSend } = useBufferedOrchestratorSend({
+    active: isOrchestratorMode, backend: orchestratorBackend, model: orchestratorModel, effort: thinkingEffort,
+    permissionMode, mode: composerModeRef.current, solo: soloOrchestrator, collide: collideEnabled,
+    projectId: threadProjectId, context: contextualConversation?.requestContext, send: sendOrchestrator,
+  });
 
-  const { sendBuffer, handleSend: handleComposerSend, attachmentError } = useDefaultComposerSendBuffer({
+  const { sendBuffer, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
     active: isOrchestratorMode, backend: orchestratorBackend,
     busy: displayWaiting,
     threadId,
@@ -1974,7 +1964,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput,
     addAttachedImage,
     clearAttachments,
-    dispatch: dispatchBufferedOrchestratorSend,
+    dispatch: dispatchBufferedOrchestratorSend, captureQueuedSend,
     interrupt: orchStream.interrupt,
     undoSend: orchStream.undoSend,
     shouldBypass: (text) => Boolean(parseOrchestratorSlashCommand(text) || parseModeRoutingPrefix(text)),
@@ -2248,7 +2238,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUndoEnhance={handleUndoEnhance}
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
-        onSteer={handleComposerSend}
+        onSteer={handleSteer} queueSaving={queueSaving}
         sendBufferStatus={isOrchestratorMode || attachmentError ? (
           <ComposerSendBufferStatus
             attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}

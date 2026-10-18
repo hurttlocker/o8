@@ -242,7 +242,10 @@ import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orch
 import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
 import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
 import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
-import { createSharedWorkerHeartbeat } from './lib/ws-server/shared-worker-heartbeat';
+import { createChatContinuationHeartbeat, publishComposerQueueChange } from './lib/ws-server/composer-queue-heartbeat';
+import { withImmediateComposerSend, orchestratorContinuationAbortKey as orchestratorAbortKey } from './lib/ws-server/composer-send-admission';
+import { sendLeadTerminalStatus } from './lib/ws-server/lead-terminal-status';
+import { holdComposerSends } from './lib/orchestrator/composer-queue';
 import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
   findLeadThreadBinding,
@@ -252,7 +255,6 @@ import {
   queueLeadWorkerReturn,
   sendLeadThreadMessage,
   stopLead,
-  waitForLead,
 } from './lib/orchestrator/lead-lifecycle';
 import { resolveLeadRepoPath, validateLeadAttachments } from './lib/orchestrator/lead-contract';
 import { manualReviewRequested } from './lib/lane/review-mode';
@@ -1076,11 +1078,6 @@ async function estimateThreadTokens(threadId: string): Promise<number> {
 /** Composite key for `orchestratorSubscriptions` (`agent` is '' for codex/claude). */
 function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, agent: string): string {
   return `${clientId}::${backend}::${agent}`;
-}
-
-/** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
-function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string, threadId: string | null): string {
-  return `${repoPath}::${backend}::${agent}::${threadId ?? ''}`;
 }
 
 function readTaskArtifactActionStamp(raw: unknown): TaskArtifactActionStamp | null {
@@ -5134,6 +5131,19 @@ function sendOrchestratorInterruptAck(client: ClientState, input: {
 
 async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
+  const threadId = resolveMsgThreadId(msg);
+  if (!repoPath || !threadId?.startsWith('thoughts-')) return handleOrchestratorSendMsgAdmitted(client, msg);
+  try {
+    await withImmediateComposerSend({ repoPath, threadId }, () => handleOrchestratorSendMsgAdmitted(client, msg));
+  } catch (error) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: error instanceof Error ? error.message : 'Unable to admit this message.',
+      ...orchestratorCommandAckCorrelation(resolveOrchestratorCommandCorrelationId(msg)) } });
+  }
+}
+
+async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
@@ -5206,7 +5216,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
             admittedTurnId: leadReceipt.admittedTurnId,
           },
         });
-        void sendLeadTerminalStatus(client, leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor)
+        void sendLeadTerminalStatus(message => send(client, message), leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor)
           .catch((error) => console.warn('[ws-server] Persistent lead terminal status watch failed:', error));
         return;
       }
@@ -5300,58 +5310,6 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   }
 }
 
-async function sendLeadTerminalStatus(
-  client: ClientState,
-  leadId: string,
-  turnId: string,
-  afterCursor: number,
-): Promise<void> {
-  const deadline = Date.now() + 10 * 60_000;
-  let cursor = afterCursor;
-  while (Date.now() < deadline) {
-    const receipt = await waitForLead({
-      leadId,
-      turnId,
-      afterCursor: cursor,
-      waitMs: Math.min(30_000, deadline - Date.now()),
-    });
-    cursor = receipt.cursor;
-    const leadStatus = receipt.lead.status;
-    const status = leadStatus === 'stopped' ? 'stopped' : receipt.requestedTurn?.status;
-    if (!status || status === 'queued' || status === 'running' || status === 'waiting_workers') continue;
-    const assistantText = receipt.requestedTurn?.resultText
-      ?? receipt.requestedTurn?.outcome?.summary
-      ?? receipt.requestedTurn?.error
-      ?? '';
-    if (assistantText) {
-      send(client, {
-        channel: 'orchestrator',
-        event: 'output',
-        data: {
-          text: assistantText,
-          repoPath: receipt.lead.repoPath,
-          threadId: receipt.lead.threadId,
-          backend: receipt.lead.routing.backend,
-          assistantMessageId: `lead-assistant-${receipt.requestedTurn?.id}`,
-        },
-      });
-    }
-    send(client, {
-      channel: 'orchestrator',
-      event: 'status',
-      data: {
-        status: status === 'failed' || status === 'stopped' ? 'dead' : 'ready',
-        leadStatus: status,
-        repoPath: receipt.lead.repoPath,
-        threadId: receipt.lead.threadId,
-        backend: receipt.lead.routing.backend,
-        lead: receipt.lead,
-        admittedTurnId: turnId,
-      },
-    });
-    return;
-  }
-}
 
 async function handleOrchestratorSendMsgOnce(
   client: ClientState,
@@ -6267,7 +6225,10 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
-  if (threadId) stopSharedWorkerReturns(repoPath, threadId);
+  if (threadId) {
+    stopSharedWorkerReturns(repoPath, threadId); holdComposerSends({ repoPath, threadId });
+    publishComposerQueueChange(threadId);
+  }
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
   if (leadBinding) {
     const correlationId = resolveOrchestratorCommandCorrelationId(msg);
@@ -9759,7 +9720,7 @@ async function bootstrapWsServer() {
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
-      onHeartbeat: createSharedWorkerHeartbeat({
+      onHeartbeat: createChatContinuationHeartbeat({
         readTranscript: fetchRuntimeTranscript,
         isBusy: (repoPath, origin) => orchestratorInflightAborts.has(orchestratorAbortKey(repoPath, origin.backend, '', origin.threadId))
           || getOrchestratorBackend(origin.backend).peekSession(repoPath, undefined, origin.threadId)?.status === 'busy',
