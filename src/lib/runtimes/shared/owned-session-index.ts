@@ -24,6 +24,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
 import { readOwnedSessionMetadata } from './owned-session/metadata-read';
+import type { OwnedSessionRecord } from './owned-session/types';
 
 export interface OwnedActiveRun {
   id?: string;
@@ -101,47 +102,49 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
   return roots;
 }
 
-/** Resolve a pane's identity after its owned session leaves the live fleet. */
-export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedSessionDisplay | null> {
+/** Exact read-only lookup, including archives; never creates a live session root. */
+export async function readOwnedSessionRecord(surfaceId: string): Promise<OwnedSessionRecord | null> {
   const root = ownedRoots().find((entry) => surfaceId.startsWith(entry.marker));
   if (!root) return null;
   const directory = surfaceId.slice(root.marker.length);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(directory)) return null;
 
   for (const base of [root.root, archiveRootForOwnedSessionRoot(root.root)]) {
-    let parsed: {
-      surfaceId?: unknown;
-      title?: unknown;
-      model?: unknown;
-      activeRun?: unknown;
-      recentRuns?: Array<{ outcome?: unknown; startedAt?: unknown }>;
-    };
+    let parsed: OwnedSessionRecord;
     try {
       parsed = await readOwnedSessionMetadata(path.join(base, directory, 'session.json'));
     } catch {
       continue;
     }
     if (parsed.surfaceId !== surfaceId) continue;
-    const outcome = Array.isArray(parsed.recentRuns)
-      ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
-      : null;
-    const status = parsed.activeRun ? 'running'
-      : outcome === 'finished' ? 'completed'
-        : outcome === 'failed' ? 'failed'
-          : outcome === 'interrupted' ? 'interrupted'
-            : 'idle';
-    return {
-      sessionKey: surfaceId,
-      name: typeof parsed.title === 'string' && parsed.title.trim()
-        ? parsed.title.trim().slice(0, 120)
-        : root.marker.slice(0, -7),
-      model: typeof parsed.model === 'string' && parsed.model.trim()
-        ? parsed.model.trim().slice(0, 120) : null,
-      runtime: root.marker.slice(0, -7),
-      status,
-    };
+    return parsed;
   }
   return null;
+}
+
+/** Resolve a pane's identity after its owned session leaves the live fleet. */
+export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedSessionDisplay | null> {
+  const parsed = await readOwnedSessionRecord(surfaceId);
+  if (!parsed) return null;
+  const runtime = surfaceId.slice(0, surfaceId.indexOf('-owned:'));
+  const outcome = Array.isArray(parsed.recentRuns)
+    ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
+    : null;
+  const status = parsed.activeRun ? 'running'
+    : outcome === 'finished' ? 'completed'
+      : outcome === 'failed' ? 'failed'
+        : outcome === 'interrupted' ? 'interrupted'
+          : 'idle';
+  return {
+    sessionKey: surfaceId,
+    name: typeof parsed.title === 'string' && parsed.title.trim()
+      ? parsed.title.trim().slice(0, 120)
+      : runtime,
+    model: typeof parsed.model === 'string' && parsed.model.trim()
+      ? parsed.model.trim().slice(0, 120) : null,
+    runtime,
+    status,
+  };
 }
 
 const INDEX_TTL_MS = 2_000;

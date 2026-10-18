@@ -183,6 +183,21 @@ describe('orchestrator socket — first-turn streaming race', () => {
     expect(h.currentAssistantRef.current?.id).toBe('assistant-123');
   });
 
+  it('starts automatic turns at their persisted user boundary without replacing the originating reply', () => {
+    const h = makeHarness({ status: 'ready', messages: [userMsg, { id: 'origin', role: 'assistant', text: 'Workers launched.' }], threadId: 'thoughts-parent' });
+    const data = { threadId: 'thoughts-parent', userMessageId: 'result-user', assistantMessageId: 'result-answer', message: 'Worker results received.', timestamp: 200 };
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data: { ...data, threadId: 'thoughts-other' } });
+    expect(h.setMessages).not.toHaveBeenCalled();
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { ...data, text: 'Result summary.' } });
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data });
+    expect(h.currentAssistantRef.current).toMatchObject({ id: 'result-answer', chunks: ['Result summary.'] });
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>((rows, [update]) => typeof update === 'function' ? update(rows) : update,
+      [userMsg, { id: 'origin', role: 'assistant', text: 'Workers launched.' }]);
+    expect(messages.map(row => row.id)).toEqual(['orch-user-1', 'origin', 'result-user']);
+    expect(messages[1].text).toBe('Workers launched.');
+  });
+
   it('a tool-use event also promotes to busy instead of dropping the pill', () => {
     const h = makeHarness({ status: 'ready' });
 

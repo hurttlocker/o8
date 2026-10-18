@@ -10,6 +10,8 @@ import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-typ
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface SharedCheckoutMember {
+  /** Exact assistant turn that launched this worker; absent on older receipts. */
+  parentTurnId?: string;
   workerRouting?: WorkerRouting;
   carrier?: ClaudeCodeModelSource | null;
   executionCarrier?: ExecutionCarrierId | null;
@@ -151,6 +153,14 @@ export function readSharedCheckoutTeam(input: TeamInput): SharedCheckoutTeam | n
 /** Read-only workspace restoration. No branch check: a drifted team still needs to be visible. */
 export function readActiveSharedCheckoutTeam(repoPath: string): SharedCheckoutTeam | null {
   return readFile(teamLocation({ repoPath, parentThreadId: '' }).file);
+}
+
+/** Validate checkout identity without scanning dirty files or claiming new ownership. */
+export function assertSharedCheckoutOwner(input: TeamInput): void {
+  const location = teamLocation(input);
+  const team = readFile(location.file);
+  if (!team) throw new Error('Shared checkout ownership is no longer active.');
+  assertOwner(team, input, location.path, currentCheckout(location.path).branch);
 }
 
 export function inspectSharedCheckoutTeam(input: TeamInput) {
@@ -323,6 +333,7 @@ export async function ensureSharedCheckoutTeam(input: TeamInput): Promise<Shared
 }
 
 export async function recordSharedCheckoutMember(input: TeamInput & {
+  parentTurnId?: string;
   surfaceId: string;
   runtime: string;
   taskName: string;
@@ -337,6 +348,7 @@ export async function recordSharedCheckoutMember(input: TeamInput & {
     if (!existing) throw new Error('Shared worker has no path reservation.');
     if (existing.surfaceId && existing.surfaceId !== input.surfaceId) throw new Error('Shared worker mutation was reused for another surface.');
     existing.surfaceId = input.surfaceId;
+    if (input.parentTurnId && !existing.parentTurnId) existing.parentTurnId = input.parentTurnId;
     existing.state = 'running';
     writeTeam(location.file, team);
     return team;
