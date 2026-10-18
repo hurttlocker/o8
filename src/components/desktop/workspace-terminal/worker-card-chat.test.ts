@@ -4,7 +4,10 @@ import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { OrchestratorDataValue } from '../orchestrator-data-context';
-import { ThreadWorkerCard } from '../thoughts/chat-panel/ThreadWorkerCard';
+import { ThreadWorkerCard, useThreadWorkers } from '../thoughts/chat-panel/ThreadWorkerCard';
+import { projectThreadWorkerGroups } from '../thoughts/chat-panel/thread-worker-groups';
+import { TranscriptTurns } from '../transcript/TranscriptTurns';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { SwarmStatusCard, packetsForOrchestratorThread } from '../thoughts/chat-panel/SwarmStatusCard';
 import { SessionTileSurface } from './SessionTileSurface';
 import { useSessionTiles } from './use-session-tiles';
@@ -49,7 +52,8 @@ function Workspace({ current = packets }: { current?: OrchestratorPacket[] }) {
 it('opens existing mixed-runtime worker chats beside the parent and steers only the selected worker', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
-  vi.stubGlobal('crypto', { randomUUID: () => 'mutation-worker-card' });
+  let identity = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `mutation-worker-card-${++identity}` });
   const fetcher = vi.fn(async (_input: RequestInfo | URL, options?: RequestInit) => Response.json(options?.method === 'POST' ? { ok: true } : { agents: [], messages: [] }));
   vi.stubGlobal('fetch', fetcher);
   context.value = { agents: packets.map(entry => ({ name: entry.title, status: 'running', runtime: entry.runtime, sessionKey: entry.lane!.sessionKey })),
@@ -78,7 +82,7 @@ it('opens existing mixed-runtime worker chats beside the parent and steers only 
     const sends = fetcher.mock.calls.filter(([, options]) => options?.method === 'POST');
     expect(sends).toHaveLength(1);
     expect(sends[0][0]).toBe('/api/runtime/action');
-    expect(JSON.parse(sends[0][1]!.body as string)).toEqual({ action: 'steer', surfaceId: 'claude-code-owned:Review worker', clientMutationId: 'mutation-worker-card', message: 'Review the current patch' });
+    expect(JSON.parse(sends[0][1]!.body as string)).toEqual({ action: 'steer', surfaceId: 'claude-code-owned:Review worker', clientMutationId: expect.stringMatching(/^mutation-worker-card-\d+$/), message: 'Review the current patch' });
     expect(host.querySelector('[data-worker-steer-receipt]')).toBeNull();
     expect(input.value).toBe('');
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="Orchestrator draft"]')!.value).toBe('Keep my orchestrator draft');
@@ -115,18 +119,29 @@ it('reopens a completed Shared worker from saved membership and retains independ
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('crypto', { randomUUID: () => 'shared-followup' });
-  const worker = { sessionKey: 'codex-owned:shared-real', name: 'Shared worker', runtime: 'codex', status: 'completed' };
+  const worker = { sessionKey: 'codex-owned:shared-real', name: 'Shared worker', runtime: 'codex', status: 'completed', parentTurnId: 'assistant-shared' };
   const fetcher = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => Response.json(
     String(input).includes('/shared-team/active?') ? { threadId: 'thoughts-parent', workers: [worker, worker] }
       : options?.method === 'POST' ? { ok: true } : { agents: [], messages: [] }));
   vi.stubGlobal('fetch', fetcher);
   context.value = { agents: [worker], missionState: { packets: [] }, workspaceTargets: [], onMissionStateChange: vi.fn() } as unknown as OrchestratorDataValue;
+  const entries: MobileTranscriptEntry[] = [
+    { id: 'user-shared', role: 'user', text: 'Delegate this inspection' },
+    { id: 'assistant-shared', role: 'assistant', text: 'The worker inspected the code.' },
+  ];
   function SharedWorkspace() {
+    const sessions = useThreadWorkers({ threadId: 'thoughts-parent', repoPath: '/repo', busy: false, agents: [worker] });
+    const { groups } = projectThreadWorkerGroups({ entries, sessions, packets: [], busy: false });
     const tiles = useSessionTiles({ tabId: 'shared-card-proof', repoPath: '/repo', threadId: 'thoughts-parent', liveSessionKeys: [worker.sessionKey], active: true });
     return createElement(SessionTileSurface, { layout: tiles.layout, focusedSessionKey: tiles.focusedSessionKey,
       onResizeSplit: tiles.resizeSplit, onCloseLeaf: tiles.closeSessionLeafById, onFocusSession: tiles.setFocusedSessionKey,
       chatSlot: createElement('section', null,
-        createElement(ThreadWorkerCard, { threadId: 'thoughts-parent', repoPath: '/repo', busy: false, agents: [worker], packets: [], defaultExpanded: true, onFocusSession: key => tiles.splitSessionFromMenu(key, 'vertical') }),
+        createElement(TranscriptTurns, { entries, busy: false,
+          nodes: entries.map(entry => createElement('div', { key: entry.id, 'data-o8-message-id': entry.id }, entry.text)),
+          turnContent: new Map([...groups].map(([id, group]) => [id,
+            createElement(ThreadWorkerCard, { key: id, group, onFocusSession: key => tiles.splitSessionFromMenu(key, 'vertical') }),
+          ])),
+        }),
         createElement('textarea', { 'aria-label': 'Parent input', defaultValue: 'Parent draft' })),
     });
   }
@@ -134,6 +149,8 @@ it('reopens a completed Shared worker from saved membership and retains independ
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   try {
     await act(async () => root.render(createElement(SharedWorkspace)));
+    expect(host.querySelectorAll('[role="group"][aria-label="Subagents: 1"]')).toHaveLength(1);
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="group"][aria-label="Subagents: 1"] button')!.click());
     expect(host.querySelectorAll('[title="Open Shared worker"]')).toHaveLength(1);
     const before = fetcher.mock.calls.length;
     await act(async () => realtime.onEvent?.({ channel: 'mutation', data: { mutation: { surfaceId: 'codex-owned:unrelated' } } }));

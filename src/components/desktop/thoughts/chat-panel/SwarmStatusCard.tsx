@@ -30,6 +30,9 @@ export interface SwarmScoutView {
 
 /** Exact session membership from a saved Shared-team receipt. */
 export interface SwarmSessionView {
+  parentTurnId?: string | null;
+  returnStatus?: 'pending' | 'running' | 'delivered' | 'held' | null;
+  returnReason?: string | null;
   model?: string | null;
   effort?: string | null;
   sessionKey: string;
@@ -38,7 +41,18 @@ export interface SwarmSessionView {
   status: string;
 }
 
+function sessionReturnState(session: SwarmSessionView) {
+  const label = session.returnStatus === 'pending' ? 'Result queued'
+    : session.returnStatus === 'running' ? 'Returning result'
+      : session.returnStatus === 'held' ? 'Result needs attention' : null;
+  if (!label) return null;
+  const reason = session.returnReason?.replace(/\s+/g, ' ').trim();
+  const detail = reason ? `${label}: ${reason}` : label;
+  return { label, detail };
+}
+
 function sessionTone(status: string): StatusTone {
+  if (status === 'waiting' || status === 'awaiting_input' || status === 'needs-input') return { label: 'Waiting for input', state: 'review' };
   if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
   if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
   if (status === 'running') return { label: 'Running', state: 'running' };
@@ -97,8 +111,8 @@ function scoutTone(status: SwarmScoutView['status']): StatusTone {
   }
 }
 
-function CrewRow({ title, sub, status, onClick }: {
-  title: string; sub: string; status: StatusTone; onClick?: () => void;
+function CrewRow({ title, sub, status, onClick, detail }: {
+  title: string; sub: string; status: StatusTone; onClick?: () => void; detail?: string;
 }) {
   const style = {
     width: '100%', display: 'grid', gridTemplateColumns: '14px minmax(0, 1fr) auto',
@@ -113,11 +127,12 @@ function CrewRow({ title, sub, status, onClick }: {
     <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <span style={{ color: 'var(--t-text)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       <span style={{ marginTop: 4, color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{sub}</span>
+      {detail ? <span style={{ marginTop: 4, color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{detail.length > 180 ? `${detail.slice(0, 177)}…` : detail}</span> : null}
     </span>
     <span style={{ color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 300, lineHeight: 1.25, textAlign: 'right', maxWidth: 82 }}>{status.label}</span>
   </>;
   return onClick
-    ? <button type="button" onClick={onClick} title={`Open ${title}`} style={style}
+    ? <button type="button" onClick={onClick} title={detail ? `Open ${title}\n${detail}` : `Open ${title}`} style={style}
       onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
       onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}>{content}</button>
     : <div style={style}>{content}</div>;
@@ -164,6 +179,10 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
   const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status)), ...shared.map(session => sessionTone(session.status))];
   const totals = new Map<string, number>();
   for (const { label } of statuses) totals.set(label.toLowerCase(), (totals.get(label.toLowerCase()) ?? 0) + 1);
+  for (const session of shared) {
+    const label = sessionReturnState(session)?.label;
+    if (label) totals.set(label, (totals.get(label) ?? 0) + 1);
+  }
   const summary = [...totals].map(([label, total]) => `${total} ${label}`).join(' · ');
   const runtimes = [...participants.map(participant => resolveDisplayRuntime(byId.get(participant.id)!)), ...native.map(() => 'claude-code' as const), ...shared.map(session => runtimeFromWorkerSessionKey(session.sessionKey))];
   if (!count) return null;
@@ -205,7 +224,7 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
       {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
-        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)}
+        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)} detail={sessionReturnState(session)?.detail}
         onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
     </div> : null}
   </div>;
