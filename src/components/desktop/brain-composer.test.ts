@@ -29,7 +29,7 @@ it('anchors Brain to the composer, sends only on submit, and restores focus with
     const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Open Brain"]'); expect(trigger).not.toBeNull(); expect(trigger!.hasAttribute('data-brain-dock-tab')).toBe(true);
     await act(async () => { trigger!.focus(); trigger!.click(); });
     const panel = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Brain preview"]')!;
-    expect(panel).not.toBeNull(); expect(panel.getBoundingClientRect).toBeDefined(); expect(Number.parseFloat(panel.style.top) + Number.parseFloat(panel.style.height)).toBeLessThan(600); expect(trigger!.getAttribute('aria-expanded')).toBe('true'); expect(panel.textContent).toContain('o8 managed');
+    expect(panel).not.toBeNull(); expect(panel.getBoundingClientRect).toBeDefined(); expect(Number.parseFloat(panel.style.top) + Number.parseFloat(panel.style.height)).toBeLessThan(600); expect(trigger!.getAttribute('aria-expanded')).toBe('true'); expect(panel.textContent).toContain('Connected runtime when available');
     expect(vi.mocked(fetch).mock.calls.filter(call => String(call[0]).includes('/api/cortex/ask'))).toHaveLength(0);
     await act(async () => openComposerBrain({ repoPath: '/preview/other', prompt: 'Wrong repo' }));
     expect(panel.querySelector('textarea')!.value).toBe('');
