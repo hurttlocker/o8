@@ -2,6 +2,7 @@ import { stripPersistedTabs, type PersistedChatCheckpoint, type PersistedTabStat
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { decodeTerminalBase64 } from './terminal-base64';
+import { isWorkspaceUtilityKind } from '../canvas/workspace-utility-navigation';
 import { retainTranscriptEntries } from '@/lib/transcripts/store';
 import {
   adHocLaneTitle,
@@ -529,7 +530,9 @@ export function computeCloseTab(
     // Prefer the Orchestrator tab as the fallback so closing a CLI/chat session
     // returns the user to the brain rather than skipping into the Assistant.
     const orchestrator = remaining.find((entry) => entry.kind === 'orchestrator');
-    nextActiveId = orchestrator
+    const returnTab = tab.kind === 'canvas' && isWorkspaceUtilityKind(tab.canvasTab?.kind)
+      ? remaining.find((entry) => entry.id === tab.canvasTab?.meta?.returnTabId) : undefined;
+    nextActiveId = returnTab ? returnTab.id : orchestrator
       ? orchestrator.id
       : remaining[Math.min(index, remaining.length - 1)].id;
   } else if (tabId === activeTabId) {

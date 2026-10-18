@@ -149,6 +149,8 @@ Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms 
 
 Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116) exposes Open workspace directly beside each project and labels details separately from editing. Development checks cover repeated opening and failure recovery. Required PR checks and released-build acceptance remain separate gates.
 
+Workspace utility navigation [#3133](https://github.com/hurttlocker/o8/issues/3133) retains the originating tab and tab order, including a fresh unsent conversation. A workspace composer keeps its draft while hidden. Persistence and native development checks remain distinct from released-build acceptance.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
