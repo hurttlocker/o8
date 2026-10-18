@@ -2772,7 +2772,8 @@ function DashboardInner() {
   // and selects its Browser tab. The Browser tab itself is no longer in the
   // O8 panel's tab strip; it lives in the title bar so we can hover-extend
   // it with a quick port menu.
-  const handleOpenBrowser = useCallback(() => {
+  const handleOpenBrowser = useCallback((url?: string) => {
+    if (typeof url === 'string' && url) setO8BrowserUrl(url);
     setRightPanelKind('o8');
     openRightPanelFromUser();
     setO8ActiveTab('browser');
@@ -3831,6 +3832,7 @@ function DashboardInner() {
     handleAgentPanelChatInjection,
     handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleOpenCI,
@@ -3884,6 +3886,7 @@ function DashboardInner() {
     workspaceTerminalHandlesRef,
     handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleSplitTile,
     handleAgentPanelChatInjection,
     ensureWorkspaceTerminalTile,
