@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AgentStatusDot } from '@/components/desktop/AgentStatusDot';
+import { ComposerArea } from '@/components/desktop/thoughts/chat-panel/ComposerArea';
+import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 import { ChatMessageList } from '@/components/desktop/thoughts/chat-panel/ChatMessageList';
 import { SwarmStatusCard, swarmPacketStatus } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { WorkersChip } from '@/components/desktop/thoughts/composer-selector/ComposerSelectorChips';
@@ -72,7 +74,7 @@ export function SubagentDemoPanel({ onClose }: { onClose: () => void }) {
       openWorker(next[0]);
       setSelectionSources(current => ({ ...current, [next[0].id]: override ? 'Task override' : 'Default worker at delegation' }));
     }
-    setDraft('Check the final interaction');
+    setDraft('');
     draftRef.current?.focus();
   };
   const status = selected ? swarmPacketStatus(selected) : null;
@@ -93,33 +95,17 @@ export function SubagentDemoPanel({ onClose }: { onClose: () => void }) {
       <button type="button" style={button} onClick={reset}>Reset demo</button>
       <button ref={closeRef} type="button" style={button} onClick={onClose}>Back to live</button>
     </header>
-    <div style={{ overflowY: 'auto', scrollbarWidth: 'none', minHeight: 0, padding: 12, flex: 1 }}>
-      <p style={{ ...caption, marginTop: 0, marginBottom: 12 }}>Examples, not installed availability. Send a demo message to see the reply and delegation card. No real workers or provider calls.</p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 12 }}>
-        <section aria-label="Demo orchestrator conversation" style={{ ...pane, flexGrow: 2, display: 'flex', flexDirection: 'column' }}>
-          <div data-demo-transcript style={{ display: 'flex', flexDirection: 'column', height: 'min(580px, 56vh)', minHeight: 220 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', overflowY: 'auto', scrollbarWidth: 'none', minHeight: 0, padding: 12, flex: 1 }}>
+      <p style={{ ...caption, flexShrink: 0, marginTop: 0, marginBottom: 12 }}>Examples, not installed availability. Send a demo message to see the reply and delegation card. No real workers or provider calls.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 12, flex: 1, minHeight: 0 }}>
+        <section aria-label="Demo orchestrator conversation" style={{ ...pane, flexGrow: 2, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 180 }}>
+          <div data-demo-transcript style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <ChatMessageList displayMessages={messages} displayWaiting={false} activeTargetLabel="Orchestrator"
               activeTargetColor="var(--t-accent)" thoughtsMutedGlass="var(--t-input-bg)"
               thoughtsElevatedBorder="var(--t-border)" thoughtsElevatedShadow="none" isOrchestratorMode
               emptyStateFallback={<div style={{ padding: 24 }}><p style={{ fontSize: 15, fontWeight: 300 }}>Start with a message</p><p style={caption}>Send the example below, then open any worker from the reply.</p></div>}
               bottomContent={packets.length ? <SwarmStatusCard packets={packets} defaultExpanded onFocusPacket={openWorker} /> : null} />
           </div>
-          <form onSubmit={event => { event.preventDefault(); send(); }} style={{ padding: 12, borderTop: '1px solid var(--t-border)' }}>
-            <textarea ref={draftRef} aria-label="Demo message" value={draft} onChange={event => setDraft(event.target.value)} rows={3}
-              onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }}
-              style={{ width: '100%', boxSizing: 'border-box', resize: 'none', border: 0, background: 'transparent', color: 'var(--t-text)', fontFamily: 'inherit', fontSize: 13, fontWeight: 300, lineHeight: 1.5, scrollbarWidth: 'none' }} />
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-              <WorkersChip mode="multitask" runtime={runtime} model={null} open={pickerOpen} saving={false} buttonRef={workerRef} onClick={() => setPickerOpen(value => !value)} />
-              {packets.length ? <select aria-label="Runtime for demo task" value={override} onChange={event => setOverride(event.target.value as DemoRuntime | '')} style={{ ...button, maxWidth: '100%' }}>
-                <option value="">Use default for next task</option>
-                {DEMO_RUNTIMES.map(choice => <option key={choice} value={choice}>This task: {composerRuntimeLabel(choice)}</option>)}
-              </select> : <span style={caption}>First message: all {DEMO_RUNTIMES.length} supported worker examples</span>}
-              <button type="submit" disabled={!draft.trim()} style={{ ...button, marginLeft: 'auto', color: 'var(--t-accent)', opacity: draft.trim() ? 1 : 0.5 }}>Send demo message</button>
-            </div>
-            {pickerOpen ? <div role="group" aria-label="Demo default worker choices" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, maxHeight: 140, overflowY: 'auto', scrollbarWidth: 'none' }}>
-              {DEMO_RUNTIMES.map(choice => <button key={choice} type="button" style={button} aria-pressed={runtime === choice} onClick={() => { setRuntime(choice); setPickerOpen(false); workerRef.current?.focus(); }}>{composerRuntimeLabel(choice)}</button>)}
-            </div> : null}
-          </form>
         </section>
         {selected && status ? <section aria-label="Selected demo worker" data-demo-worker={selected.id} style={pane}>
           <header style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, borderBottom: '1px solid var(--t-border)' }}>
@@ -149,5 +135,29 @@ export function SubagentDemoPanel({ onClose }: { onClose: () => void }) {
         </section> : null}
       </div>
     </div>
+    <ComposerArea ref={draftRef} activeComposer inputLabel="Message Orchestrator" placeholder="Message Orchestrator…" literalInput
+      composerMode="multitask"
+      input={draft} onInputChange={setDraft} onSubmit={send}
+      isOrchestratorMode displayWaiting={false} chatMessages={messages}
+      activeTargetLabel="Orchestrator" targetAgentExists thoughtsBodyBackground="var(--t-canvas-bg)"
+      enhancing={false} preEnhanceInput={null} onEnhance={() => undefined} onUndoEnhance={() => undefined}
+      onSlashCommand={command => setDraft(command)} modelLabel="Orchestrator" isolatedModelSelection
+      effort="adaptive" onEffortChange={() => undefined} adaptiveEnabled
+      displayMessagesCount={messages.length} hasAssistantActivity
+      footerOverride={<InputButtons input={draft} onSubmit={send} modelLabel="Orchestrator"
+        enhancing={false} preEnhanceInput={null} onEnhance={() => undefined} onUndoEnhance={() => undefined}
+        inlineLeadingExtras={<WorkersChip mode="multitask" runtime={runtime} model={null}
+          open={pickerOpen} saving={false} buttonRef={workerRef} onClick={() => setPickerOpen(value => !value)} />} />}
+      contextLocationSlot={<>
+        {packets.length ? <select aria-label="Runtime for demo task" value={override}
+          onChange={event => setOverride(event.target.value as DemoRuntime | '')} style={{ ...button, maxWidth: '100%' }}>
+          <option value="">Use default for next task</option>
+          {DEMO_RUNTIMES.map(choice => <option key={choice} value={choice}>This task: {composerRuntimeLabel(choice)}</option>)}
+        </select> : <span style={caption}>First message: all {DEMO_RUNTIMES.length} supported worker examples</span>}
+        {pickerOpen ? <div role="group" aria-label="Demo default worker choices" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 140, overflowY: 'auto', scrollbarWidth: 'none' }}>
+          {DEMO_RUNTIMES.map(choice => <button key={choice} type="button" style={button} aria-pressed={runtime === choice}
+            onClick={() => { setRuntime(choice); setPickerOpen(false); workerRef.current?.focus(); }}>{composerRuntimeLabel(choice)}</button>)}
+        </div> : null}
+      </>} />
   </section>;
 }
