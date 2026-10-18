@@ -35,7 +35,7 @@ export async function runBoundChatContinuation(
   let completed = false;
   let turnError: string | null = null;
   let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: expected.effort,
-    mode: resolveTurnReceiptMode(expected.backend, expected.mode),
+    mode: resolveTurnReceiptMode(expected.backend, expected.mode, expected.pickedMode),
     permissionMode: expected.permissionMode, pickedMode: expected.pickedMode };
   const data = { repoPath: input.repoPath, threadId: expected.threadId, backend: backend.id, model: expected.model, assistantMessageId };
   const persist = (sessionId: string | null, done?: Extract<OrchestratorEvent, { type: 'done' }>) => upsertMobileOrchestratorAssistantMessage({
