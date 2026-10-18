@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
 import { Internet, Server as ServerIcon } from 'iconoir-react';
@@ -10,6 +10,7 @@ import { DEGRADED_FALLBACK_REFRESH_MS, REALTIME_FALLBACK_REFRESH_MS, startDurabl
 import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 import { FloatingSurface } from '../FloatingSurface';
+import { readAppliedUiZoom } from '@/lib/appearance/ui-zoom';
 
 type PortKind = 'page' | 'service';
 
@@ -43,7 +44,7 @@ type FooterPortsOnPortPreview = (port: number, url: string, repo?: string) => vo
 
 /** Fixed-position coords for the popover — which edges are set depends on
  *  `placement`, so the shape carries all four as optional. */
-type PopoverPos = { top?: number; bottom?: number; left?: number; right?: number };
+type PopoverPos = { top?: number; bottom?: number; left?: number; right?: number; maxHeight?: number };
 
 // 44px min-height per Apple HIG — a generous click target for opening a dev server.
 const PAGE_ROW_STYLE = {
@@ -107,9 +108,9 @@ export function FooterPorts({
   /**
    * Where the popover opens from. `footer` anchors above the status bar (its
    * original home); `rail` anchors to the LEFT of the trigger, for the branch
-   * rail on the window's right edge (Q 2026-07-16).
+   * rail on the window's right edge. `above` opens over the workspace tools card.
    */
-  placement?: 'footer' | 'rail';
+  placement?: 'footer' | 'rail' | 'above';
   /**
    * Supply the trigger instead of the default count badge. The rail passes its
    * globe button, so the ports hover rides a control that already exists rather
@@ -181,6 +182,7 @@ export function FooterPorts({
 
   useEffect(() => {
     return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
       if (longPressTimer.current) clearTimeout(longPressTimer.current);
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
@@ -250,40 +252,54 @@ export function FooterPorts({
     }
   };
 
-  // ── Buckets ──
+  const positionPopover = useCallback(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const zoom = readAppliedUiZoom();
+    const width = window.innerWidth / zoom;
+    const height = window.innerHeight / zoom;
+    const left = rect.left / zoom;
+    const right = rect.right / zoom;
+    const top = rect.top / zoom;
+    const bottom = rect.bottom / zoom;
+    const above = placement === 'above' && (top >= 128 || top >= height - bottom);
+    setPopoverPos(placement === 'above'
+      ? { right: Math.max(8, width - right), ...(above
+        ? { bottom: height - top + 8, maxHeight: Math.max(40, top - 16) }
+        : { top: bottom + 8, maxHeight: Math.max(40, height - bottom - 16) }) }
+      : placement === 'rail'
+        ? { top: Math.max(8, Math.min(top, height - 260)), right: Math.max(8, width - left + 8) }
+        : { bottom: 48, left: Math.max(8, Math.min(left - 4, width - 228)) });
+  }, [placement]);
+  useEffect(() => {
+    if (!open) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation();
+      setOpen(false); setActionTarget(null);
+    };
+    window.addEventListener('resize', positionPopover);
+    window.addEventListener('scroll', positionPopover, true);
+    document.addEventListener('keydown', key, true);
+    return () => {
+      window.removeEventListener('resize', positionPopover);
+      window.removeEventListener('scroll', positionPopover, true);
+      document.removeEventListener('keydown', key, true);
+    };
+  }, [open, positionPopover]);
+
   const pages = ports.filter((p) => p.kind === 'page');
   const services = ports.filter((p) => p.kind === 'service');
-
   const hasAnyPort = pages.length > 0 || services.length > 0;
-  // The default badge is nothing but a ports readout, so it hides when there's
-  // nothing to read. A custom trigger owns its own action and must stay.
   if (!hasAnyPort && !renderTrigger) return null;
-
   const showPopover = () => {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
-    // Nothing to show — don't open an empty card over the rail.
     if (!hasAnyPort) return;
-    const rect = anchorRef.current?.getBoundingClientRect();
-    if (rect) {
-      setPopoverPos(
-        placement === 'rail'
-          // Opens leftward: the rail hugs the window's right edge, so anchoring
-          // left would run the card off-screen. Top-aligned to the trigger,
-          // clamped so a tall list can't push it past the bottom.
-          ? {
-              top: Math.max(8, Math.min(rect.top, window.innerHeight - 260)),
-              right: Math.max(8, window.innerWidth - rect.left + 8),
-            }
-          : { bottom: 48, left: Math.max(8, rect.left - 4) },
-      );
-    }
-    setOpen(true);
+    positionPopover(); setOpen(true);
   };
   const scheduleHide = () => {
-    hideTimer.current = setTimeout(() => {
-      setOpen(false);
-      exitActionMode();
-    }, 200);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => { setOpen(false); exitActionMode(); }, 200);
   };
 
   const hasPages = pages.length > 0;
@@ -430,16 +446,19 @@ export function FooterPorts({
       )}
       {open && typeof document !== 'undefined' ? createPortal(
         <FloatingSurface
+          overlay
+          data-ports-popover
           data-stationary-chrome="true"
           onMouseEnter={showPopover}
           onMouseLeave={scheduleHide}
-          contentStyle={{ padding: 6, maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' }}
+          contentStyle={{ padding: 6, maxHeight: popoverPos.maxHeight ?? 'calc(100vh - 32px)', overflowY: 'auto', overscrollBehavior: 'contain', scrollbarWidth: 'none' }}
           style={{
             position: 'fixed',
             ...popoverPos,
             minWidth: 220,
             maxWidth: 320,
-            zIndex: 9999,
+            // Nested above the workspace tools portal (layer 10000).
+            zIndex: 10001,
             fontFamily: 'var(--font-sans-system)',
           }}
         >
