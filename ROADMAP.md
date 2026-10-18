@@ -98,6 +98,8 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
+
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.
 
 Mobile voice intent resolution is implemented in [#3146](https://github.com/hurttlocker/o8/pull/3146). Entry-point tests cover paired-device access, confirmed choices scoped to a submitted chat and repository, and offline replay. Paired-phone and provider acceptance remain open.
