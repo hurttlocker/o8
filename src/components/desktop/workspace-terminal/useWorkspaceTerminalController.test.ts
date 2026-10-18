@@ -63,6 +63,7 @@ function ControllerHarness({
   const controller = useWorkspaceTerminalController(props, controllerRef);
   return createElement('div', {
     'data-tabs': JSON.stringify(controller.tabs),
+    'data-active-tab': controller.effectiveActiveTabId,
     'data-sessions': JSON.stringify(controller.tabs.map((tab) => [tab.id, tab.tmuxSession])),
   });
 }
@@ -78,6 +79,7 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     experimental.chat = false;
     restoreHarness.savedSession = null;
     restoreHarness.validatedPromise = new Promise((resolve) => {
@@ -97,6 +99,34 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('returns from Automations to the exact terminal or file without changing tab identity or order', async () => {
+    const controllerRef = { current: null as TerminalTabHandle | null };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'utility-return-fixture', defaultTab: 'terminal', autoCreateDefaultTab: false,
+      termWsConnected: false, sendTerminalCreate: vi.fn(), sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(),
+      sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(), sendTerminalDetach: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props })));
+    let fileId = '';
+    await act(async () => { fileId = controllerRef.current!.openInspectorTab({ id: 'source-file', label: 'README.md', kind: 'file', resourceId: '/repo/README.md' }); });
+    for (const entry of ['terminal-b', fileId]) {
+      await act(async () => { controllerRef.current!.focusTab(entry); });
+      const before = JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!);
+      for (let round = 0; round < 3; round++) {
+        let utilityId = '';
+        await act(async () => { utilityId = controllerRef.current!.openInspectorTab({ id: 'automations', kind: 'automations', label: 'Automations', resourceId: 'automations' }); });
+        expect(container.firstElementChild!.getAttribute('data-active-tab')).toBe(utilityId);
+        // Reopening the already active page must not overwrite its return target.
+        await act(async () => { controllerRef.current!.openInspectorTab({ id: 'automations', kind: 'automations', label: 'Automations', resourceId: 'automations' }); });
+        await act(async () => { controllerRef.current!.closeActiveTab(); });
+        expect(container.firstElementChild!.getAttribute('data-active-tab')).toBe(entry);
+        expect(JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!)).toEqual(before);
+      }
+    }
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
+    expect(props.sendTerminalDetach).not.toHaveBeenCalled();
   });
 
   it.each([false, true])('opens only a fresh orchestrator for a rail drop when experimental chat is %s', async (experimentalChat) => {
