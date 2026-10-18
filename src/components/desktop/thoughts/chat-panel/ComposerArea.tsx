@@ -35,13 +35,14 @@ import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { ComposerQueueActions } from './ComposerQueueActions';
-import { WorkerCorrections } from './WorkerCorrections';
+import { WorkerCorrections, type WorkerCorrectionContext } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
   activityContent?: React.ReactNode;
+  workerContext?: WorkerCorrectionContext;
   inputLabel?: string;
   placeholder?: string;
   literalInput?: boolean;
@@ -128,6 +129,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   chatMessages,
   workerPackets,
   activityContent,
+  workerContext,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -347,13 +349,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         />
       ) : null}
       {activityContent}
-      {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
-        key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
-        draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting}
-        onDelivered={sent => { if (input === sent) onInputChange(''); }}
-      /> : null}
       {sendBufferStatus}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
+        {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+          key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
+          draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
+          onDelivered={sent => { if (input === sent) onInputChange(''); }}
+        /> : null}
         <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
         <SlashCommandPicker
           suggestions={slashSuggestions}

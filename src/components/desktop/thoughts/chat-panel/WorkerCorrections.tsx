@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { CorrectableWorker, WorkerCorrectionMode, WorkerCorrectionPayload, WorkerCorrectionReceipt } from '@/lib/orchestrator/worker-correction-types';
+import { SwarmStatusCard, visibleSwarmPackets, type SwarmSessionView } from './SwarmStatusCard';
+import { WorkerCorrectionDock } from './WorkerCorrectionDock';
 import { RamsButton } from '../../settings/RamsButton';
 
 const labels: Record<WorkerCorrectionReceipt['deliveries'][number]['status'], string> = {
@@ -11,11 +13,15 @@ const labels: Record<WorkerCorrectionReceipt['deliveries'][number]['status'], st
   unavailable: 'Unavailable', unknown: 'Outcome unknown', held: 'Held',
 };
 
+export type WorkerCorrectionContext = Pick<ComponentProps<typeof SwarmStatusCard>, 'packets' | 'sessions' | 'onFocusPacket' | 'onFocusSession'>;
+
 /** Uses the ordinary composer's draft; corrections never create another message editor. */
-export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, onDelivered, working }: {
+export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, onDelivered, working, active = true, workerContext }: {
   repoPath: string; threadId: string; draft: string; hasAttachments: boolean; onDelivered: (draft: string) => void; working: boolean;
+  active?: boolean; workerContext?: WorkerCorrectionContext;
 }) {
-  const [open, setOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [workers, setWorkers] = useState<CorrectableWorker[]>([]);
   const [corrections, setCorrections] = useState<WorkerCorrectionReceipt[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -45,7 +51,7 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
     if ((mutation?.action === 'worker-correction' && mutation.surfaceId === threadId) || mutation?.action === 'worker-return') void refresh();
   } });
   useEffect(() => {
-    setWorkers([]); setCorrections([]); setSelected([]); setOpen(false); setHoldMerges(false); setBusy(false); setError(null); requestRef.current = null;
+    setWorkers([]); setCorrections([]); setSelected([]); setActivityOpen(false); setRulesOpen(false); setHoldMerges(false); setBusy(false); setError(null); requestRef.current = null;
     try { requestRef.current = JSON.parse(localStorage.getItem(storageKey) ?? 'null'); } catch { /* No saved delivery. */ }
     setPendingRequest(Boolean(requestRef.current));
   }, [scope, storageKey]);
@@ -93,40 +99,59 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
     finally { if (scopeRef.current === scope) setBusy(false); }
   };
   const unavailableDraft = !draft.trim() || draft.trim().length > 2000 || hasAttachments;
-  return <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-muted)', paddingTop: 4, paddingBottom: 4 }}>
-    <RamsButton variant="ghost" onClick={() => { setOpen(!open); if (!open) void refresh(); }} aria-expanded={open} aria-controls={`worker-corrections-${threadId}`}>
-      {corrections.length ? 'Worker corrections' : 'Correct workers'}
-    </RamsButton>
-    {open ? <div id={`worker-corrections-${threadId}`} style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, paddingBottom: 8 }}>
-      <span>Use the message in your composer. Choose the workers it applies to.</span>
-      {workers.map(worker => <label key={worker.surfaceId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <input type="checkbox" checked={selected.includes(worker.surfaceId)} disabled={busy} onChange={event => setSelected(current => event.target.checked ? [...current, worker.surfaceId] : current.filter(id => id !== worker.surfaceId))} />
-        {worker.taskName} · {worker.runtime} · {worker.running ? 'Working' : 'Idle'}
-      </label>)}
-      {!workers.length ? <span>No active workers with supported correction controls. Archived or stopped workers remain unchanged.</span> : null}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={holdMerges} disabled={busy} onChange={event => setHoldMerges(event.target.checked)} />
-        Block o8 merges for this chat until I remove the session rule
-      </label>
-      {pendingRequest ? <span>A saved correction needs a delivery receipt. Checking reuses that request and never resends an admitted correction.</span> : null}
-      {hasAttachments ? <span>Worker corrections currently accept text. Send attachments through the worker’s regular composer.</span> : null}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <RamsButton variant="ghost" busy={busy} disabled={!pendingRequest && (unavailableDraft || (!targets.length && !holdMerges))} onClick={() => void send(targets.some(worker => worker.running) ? 'pause-and-send' : 'send')}>
-          {pendingRequest ? 'Check pending correction' : targets.some(worker => worker.running) ? 'Pause and correct selected' : targets.length ? 'Send correction' : 'Save merge restriction'}
-        </RamsButton>
-        <RamsButton variant="ghost" disabled={busy || pendingRequest || !targets.length} onClick={() => void send('stop')}>Stop selected</RamsButton>
-      </div>
-      {showProgress ? <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <progress aria-label="Delivering correction" style={{ width: 64, height: 4 }} />
-        {corrections.find(item => item.id === requestRef.current?.id)?.deliveries.filter(item => !['pending', 'sending'].includes(item.status)).length ?? 0} of {requestRef.current?.payload.targets.length ?? 0} worker receipts received
-      </div> : null}
-      {error ? <span role="alert" style={{ color: 'var(--t-error)' }}>{error}</span> : null}
-      {corrections.slice(0, 5).map(correction => <div key={correction.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 4 }}>
-        <span>{correction.payload.message}</span>
+  // Keep durable names after Stop removes a worker from the correctable list.
+  const sessions: SwarmSessionView[] = [...(workerContext?.sessions ?? [])];
+  for (const worker of workers) {
+    const saved = sessions.findIndex(item => item.sessionKey === worker.surfaceId);
+    const current = { sessionKey: worker.surfaceId, name: worker.taskName, runtime: worker.runtime, status: worker.running ? 'running' : 'idle' };
+    if (saved < 0) sessions.push(current);
+    else sessions[saved] = { ...sessions[saved], ...current };
+  }
+  const packets = visibleSwarmPackets(workerContext?.packets ?? []);
+  if (!sessions.length && !packets.length && !pendingRequest && !error) return null;
+  const names = new Map(sessions.map(session => [session.sessionKey, session.name]));
+  const summary = busy ? 'Sending correction' : pendingRequest ? 'Check delivery' : selected.length ? `${selected.length} selected` : workers.length ? `Workers · ${workers.length}` : 'Workers';
+  return <WorkerCorrectionDock key={`${scope}:${active}`} active={active} label={corrections.length ? 'Worker corrections' : 'Correct workers'} summary={summary}
+    attention={busy || pendingRequest || Boolean(error)} onOpen={() => void refresh()}>
+    <SwarmStatusCard {...workerContext} packets={packets} sessions={sessions} defaultExpanded crewMaxHeight="min(240px, 30vh)"
+      selection={{ available: workers.map(worker => worker.surfaceId), selected, disabled: busy || pendingRequest,
+        onToggle: id => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]) }} />
+    {workers.length ? <span>{targets.length ? `Your composer message will go to ${targets.length === 1 ? targets[0].taskName : `${targets.length} selected workers`}.` : 'Select workers, then write your correction in the composer.'}</span>
+      : <span>No workers currently support corrections. Open a worker card to view its conversation.</span>}
+    {pendingRequest ? <span>A saved correction needs a delivery receipt. Checking reuses that request and never resends an admitted correction.</span> : null}
+    {hasAttachments ? <span>Worker corrections accept text. Send attachments through the worker’s regular composer.</span> : null}
+    {draft.trim().length > 2000 ? <span>Keep the correction within 2,000 characters.</span> : null}
+    {workers.length || pendingRequest || holdMerges ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <RamsButton busy={busy} disabled={!pendingRequest && (unavailableDraft || (!targets.length && !holdMerges))} onClick={() => void send(targets.some(worker => worker.running) ? 'pause-and-send' : 'send')}>
+        {pendingRequest ? 'Check pending correction' : targets.some(worker => worker.running) ? 'Pause and correct selected' : targets.length ? 'Send correction' : 'Save merge restriction'}
+      </RamsButton>
+      {targets.length ? <RamsButton variant="ghost" disabled={busy || pendingRequest} onClick={() => void send('stop')}>Stop selected</RamsButton> : null}
+    </div> : null}
+    {showProgress ? <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <progress aria-label="Delivering correction" style={{ width: 64, height: 4 }} />
+      {corrections.find(item => item.id === requestRef.current?.id)?.deliveries.filter(item => !['pending', 'sending'].includes(item.status)).length ?? 0} of {requestRef.current?.payload.targets.length ?? 0} worker receipts received
+    </div> : null}
+    {error ? <span role="alert" style={{ color: 'var(--t-error)' }}>{error}</span> : null}
+    <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
+      <RamsButton variant="ghost" aria-expanded={activityOpen} onClick={() => setActivityOpen(value => !value)}>View activity{corrections.length ? ` · ${corrections.length}` : ''}</RamsButton>
+      <RamsButton variant="ghost" aria-expanded={rulesOpen} onClick={() => setRulesOpen(value => !value)}>Chat rules</RamsButton>
+    </div>
+    {rulesOpen ? <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={holdMerges} disabled={busy || pendingRequest} onChange={event => setHoldMerges(event.target.checked)} />
+      Block o8 merges with this correction. Remove saved restrictions in this chat’s session rules.
+    </label> : null}
+    {activityOpen ? <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowWrap: 'anywhere' }}>
+      <span>Delivery receipts record what the runtime accepted. They do not confirm the worker applied the correction.</span>
+      {!corrections.length ? <span>No corrections recorded in this chat.</span> : null}
+      {corrections.slice(0, 5).map(correction => <div key={correction.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--t-divider-subtle)', paddingTop: 10 }}>
+        <span style={{ color: 'var(--t-text)' }}>{correction.payload.message}</span>
+        {correction.createdAt ? <time dateTime={new Date(correction.createdAt).toISOString()} style={{ fontSize: 10 }}>{new Date(correction.createdAt).toLocaleString()}</time> : null}
         {correction.ruleId ? <span>Merge restriction saved. Manage it in this chat’s session rules.</span> : null}
-        {correction.deliveries.map(delivery => <span key={delivery.surfaceId} title={delivery.note}>
-          {workers.find(worker => worker.surfaceId === delivery.surfaceId)?.taskName ?? delivery.surfaceId}: {labels[delivery.status]}. {delivery.note}
-        </span>)}
+        {correction.deliveries.map(delivery => <div key={delivery.surfaceId} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span>{names.get(delivery.surfaceId) ?? 'Worker'} · {labels[delivery.status]}</span>
+          <span>{delivery.note}</span>
+          <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>{delivery.surfaceId}</span>
+        </div>)}
       </div>)}
     </div> : null}
-  </div>;
+  </WorkerCorrectionDock>;
 }

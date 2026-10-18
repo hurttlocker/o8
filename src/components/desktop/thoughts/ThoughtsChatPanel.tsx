@@ -52,6 +52,7 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
+import { WorkerDisclosureProvider } from './chat-panel/WorkerDisclosure';
 import { ThreadWorkerCard, useThreadWorkers } from './chat-panel/ThreadWorkerCard';
 import { projectThreadWorkerGroups } from './chat-panel/thread-worker-groups';
 import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
@@ -2094,7 +2095,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     <ThreadWorkerCard key={id} group={group} onFocusSession={onFocusSession} onFocusPacket={onFocusPacket} />,
   ]));
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
-  return (
+  return (<WorkerDisclosureProvider key={`${resolvedRepoPath}:${threadId}`}>
     <div
       style={{
         containerType: 'size',
@@ -2217,17 +2218,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
+        workerContext={{ packets: threadWorkerPackets, sessions: threadWorkers, onFocusPacket, onFocusSession }}
         activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
           busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onFocusPacket} /> : undefined}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
-        // Feed the EFFECTIVE transcript (orchestrator streams live into
-        // orchStream.messages, not the raw chatMessages state). The status bar's
-        // awaitingReply / runningTools / latestUserMessageId derive from this —
-        // with raw chatMessages the streamed reply never lands here, so
-        // awaitingReply stays true forever and the Working latch never releases
-        // (#stuck-working-indicator, 2026-06-19). displayMessagesCount below
-        // already used displayMessages; this aligns the list with it.
+        // Use the effective streamed transcript so Working clears when the reply lands.
         thoughtsBodyBackground={thoughtsBodyBackground}
         enhancing={enhancing}
         preEnhanceInput={preEnhanceInput}
@@ -2304,5 +2300,5 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       })() : null}
       </div>
     </div>
-  );
+  </WorkerDisclosureProvider>);
 });
