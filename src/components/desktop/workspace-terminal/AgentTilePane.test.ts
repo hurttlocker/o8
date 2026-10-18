@@ -239,6 +239,7 @@ describe('AgentTilePane worker identity', () => {
     expect(host?.querySelector('[data-worker-model]')?.parentElement?.parentElement?.textContent).toContain('Worker');
     expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
     expect(host?.querySelector('[data-o8-composer-root]')).not.toBeNull();
+    expect(host?.querySelector('[data-brain-dock-tab]')).toBeNull();
     expect(host?.querySelector('[data-testid="composer-send-control"]')).not.toBeNull();
     expect(host?.textContent).not.toContain('To @Worker · Steer');
     expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');

@@ -58,6 +58,6 @@ describe('buildMissionRenderItems', () => {
       emptyStateFallback: null,
     }));
 
-    expect(html).toContain('GPT-6 Astra · high · Multitask');
+    expect(html).toContain('GPT-6 Astra · high · Worktrees');
   });
 });

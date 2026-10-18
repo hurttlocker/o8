@@ -8,6 +8,7 @@ import {
   clampEffortToLead,
   composerSupportsFastMode,
   cycleComposerSelectorMode,
+  defaultComposerMode,
   isHotComposerEffort,
   providerMarkForLead,
   providerMarkForRuntime,
@@ -225,13 +226,13 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
     });
-    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Shared', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Worktrees', fast: 'Shared', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
     expect(resolved.orchestrationMode).toBe(execution);
     expect(resolved.workerRuntimeLabel).toBe(runtime);
     expect(resolved.workerModelLabel).toBe(workerModel);
   });
 
-  it('offers Shared only for compatible leads and cycles the three visible modes', () => {
+  it('offers Shared only for compatible leads and cycles the two checkout choices', () => {
     expect(composerSupportsFastMode('codex')).toBe(true);
     expect(composerSupportsFastMode('claude')).toBe(true);
     expect(composerSupportsFastMode('fable')).toBe(true);
@@ -241,13 +242,16 @@ describe('composer selector state', () => {
     expect(cycleComposerSelectorMode('solo', 1, 'openclaw')).toBe('multitask');
     expect(cycleComposerSelectorMode('solo', 1, 'codex')).toBe('fast');
     expect(cycleComposerSelectorMode('fast', 1, 'codex')).toBe('multitask');
-    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('solo');
-    expect(cycleComposerSelectorMode('fusion', 1, 'codex')).toBe('solo');
+    expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('fusion', 1, 'codex')).toBe('fast');
     const state = resolveComposerSelectorState({
       mode: 'fast', leadModelId: 'external', leadModelLabel: 'External', leadBackend: 'openclaw',
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'medium', adaptiveEnabled: false,
     });
-    expect(state.mode).toBe('multitask');
+    expect(state.mode).toBe('solo');
+    expect(defaultComposerMode('codex')).toBe('fast');
+    expect(defaultComposerMode('claude')).toBe('fast');
+    expect(defaultComposerMode('acp')).toBe('solo');
   });
 
   it('resolves mode and worker settings by session, thread, then operator default', () => {

@@ -315,7 +315,9 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => root.render(createElement(Harness, { permissions: true, onSend })));
     const footer = container.querySelector('[data-testid="composer-selector-footer"]')!;
     const permission = footer.querySelector<HTMLButtonElement>('[aria-label="Permissions: Full access"]')!;
-    expect(permission.textContent).toContain('Full access');
+    expect(permission.textContent).toBe('');
+    expect(permission.title).toContain('Full access');
+    expect(permission.style.width).toBe('28px');
     expect(container.querySelector('[data-o8-composer-context-row] [aria-haspopup="listbox"]')).not.toBeNull();
     act(() => permission.click());
     act(() => container.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="false"]')!.click());
@@ -330,7 +332,7 @@ describe('ComposerSelectorFooter', () => {
     act(() => resize?.([{ contentRect: { width: 360 } } as ResizeObserverEntry], {} as ResizeObserver));
     expect(footer.querySelector('[aria-label="Permissions: Plan only"]')?.textContent).toBe('');
     act(() => resize?.([{ contentRect: { width: 640 } } as ResizeObserverEntry], {} as ResizeObserver));
-    expect(footer.querySelector('[aria-label="Permissions: Plan only"]')?.textContent).toBe('Plan only');
+    expect(footer.querySelector('[aria-label="Permissions: Plan only"]')?.textContent).toBe('');
     await act(async () => root.render(createElement(Harness, { permissions: true, messages: 0, waiting: true })));
     expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
   });
@@ -379,12 +381,12 @@ describe('ComposerSelectorFooter', () => {
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Multitask'))!.click());
+      .find((button) => button.textContent?.includes('Worktrees'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
 
     act(() => mode.click());
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Solo'))!.click());
+      .find((button) => button.textContent?.includes('Shared'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
@@ -438,7 +440,7 @@ describe('ComposerSelectorFooter', () => {
     expect(modeText).not.toMatch(/Compare plans|Fusion/);
     act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
       .find(button => button.textContent?.includes(shared.long))!.click());
-    expect(mode.textContent).toContain(shared.short);
+    expect(mode.textContent).toBe('');
     expect(mode.getAttribute('aria-label')).toBe(`Mode: ${shared.long}`);
     expect(mode.title).toContain(shared.long);
   });
@@ -527,17 +529,17 @@ describe('ComposerSelectorFooter', () => {
     }
   });
 
-  it('cycles Solo, Shared and Multitask with Shift+Tab and keeps textarea focus', async () => {
+  it('cycles Shared and Worktrees with Shift+Tab and keeps textarea focus', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
     act(() => { root.render(createElement(RealComposerHarness)); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     const textarea = container.querySelector<HTMLTextAreaElement>('textarea')!;
     textarea.focus();
-    for (const label of ['Shared', 'Multitask', 'Solo']) {
+    for (const label of ['Shared', 'Worktrees', 'Shared']) {
       await act(async () => {
         textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, shiftKey: true, bubbles: true, cancelable: true }));
       });
-      expect(container.querySelector('[data-testid="composer-selector-mode"]')?.textContent).toContain(label);
+      expect(container.querySelector('[data-testid="composer-selector-mode"]')?.getAttribute('aria-label')).toContain(label);
       expect(document.activeElement).toBe(textarea);
     }
   });
@@ -576,7 +578,7 @@ describe('ComposerSelectorFooter', () => {
     const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
     act(() => mode.click());
     const choices = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    expect(choices.map(button => button.textContent)).toEqual([expect.stringContaining('Solo'), expect.stringContaining('Shared'), expect.stringContaining('Multitask')]);
+    expect(choices.map(button => button.textContent)).toEqual([expect.stringContaining('Shared'), expect.stringContaining('Worktrees')]);
     expect(choices.some(button => /Fusion|Compare plans/.test(button.textContent ?? ''))).toBe(false);
     act(() => choices.find(button => button.textContent?.includes('Shared'))!.click());
     expect(container.querySelector('[data-testid="composer-selector-thinking"]')?.textContent).toContain('high');
@@ -593,7 +595,7 @@ describe('ComposerSelectorFooter', () => {
 
   it('keeps worker models out of the orchestrator search', async () => {
     await act(async () => root.render(createElement(Harness)));
-    selectMode('Multitask');
+    selectMode('Worktrees');
     await openLeadHouse('codex');
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     act(() => {
@@ -607,7 +609,7 @@ describe('ComposerSelectorFooter', () => {
 
   it('selects an orchestrator search result with Enter', async () => {
     await act(async () => root.render(createElement(Harness)));
-    selectMode('Multitask');
+    selectMode('Worktrees');
     await openLeadHouse('codex');
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     act(() => {
@@ -663,7 +665,7 @@ describe('ComposerSelectorFooter', () => {
 
   it('moves keyboard focus through model choices without entering worker settings', async () => {
     await act(async () => root.render(createElement(Harness)));
-    selectMode('Multitask');
+    selectMode('Worktrees');
     await openLeadHouse('codex');
     const search = container.querySelector<HTMLInputElement>('[data-testid="composer-selector-search"]')!;
     act(() => { search.focus(); search.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); });
@@ -754,7 +756,7 @@ describe('ComposerSelectorFooter', () => {
     const topEffort = container.querySelector('[data-testid="real-composer-effort"]')?.textContent;
     act(() => modeTrigger.click());
     const choices = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    expect(choices.map(button => button.textContent)).toEqual(['Solo', 'Shared', 'Multitask']);
+    expect(choices.map(button => button.textContent)).toEqual(['Shared', 'Worktrees']);
     act(() => choices.find(button => button.textContent === 'Shared')!.click());
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe(topEffort);
     expect(modelTrigger.title).toContain('Shared');
