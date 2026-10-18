@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import type { SetupRuntime } from '@/lib/setup/runtime-recommendation';
+import { RuntimeConnectionSummary } from './RuntimeConnectionSummary';
 import { getRuntimeInstallInfo } from '@/lib/setup/runtime-install';
 
 const quietButton: CSSProperties = {
@@ -22,6 +23,10 @@ export function RuntimeToolsPanel({ inventory, loading, error, onRefresh, initia
   return (
     <div style={{ fontFamily: 'var(--font-sans-system)', fontSize: 11, color: 'var(--t-text-muted)' }}>
       {error ? <div role="alert" style={{ padding: 8, color: 'var(--t-brand-red)' }}>{error}</div> : null}
+      {inventory?.filter(item => item.installed || item.available).map(item => <div key={item.id} style={{ paddingTop: 8, paddingRight: 8, paddingBottom: 8, paddingLeft: 8 }}>
+        <div style={{ color: 'var(--t-text)', marginBottom: 4 }}>{item.label}</div>
+        <RuntimeConnectionSummary connection={item.connection} />
+      </div>)}
       <details open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary style={{ ...quietButton, display: 'list-item', marginLeft: 8 }}>Add tools</summary>
         <div style={{ maxHeight: 240, overflowY: 'auto', paddingLeft: 8, paddingRight: 8 }}>

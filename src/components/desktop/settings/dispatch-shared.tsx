@@ -1,5 +1,7 @@
 'use client';
 
+import type { RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
+
 /**
  * Shared types, option constants, and the PickerMenu control for the Dispatch
  * settings tab (OperatorDefaultsTab + DispatchFoundersSection). Split out so
@@ -183,6 +185,7 @@ export interface OperatorDefaultsResponse {
     id: DispatchRuntime;
     label: string;
     available: boolean;
+    connection?: RuntimeConnectionEvidence;
     unavailableReason: 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | null;
     detail: string;
     fix: string;

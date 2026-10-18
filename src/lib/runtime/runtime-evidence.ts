@@ -11,6 +11,7 @@ import {
 import { cachedAcpModels, probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { getAllRuntimes } from '@/lib/runtimes';
+import { runtimeConnection, type RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { detectRuntimeAuthStatus } from '@/lib/runtimes/shared/auth-detect';
 import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -92,6 +93,7 @@ export interface RuntimeEvidenceEntry extends RuntimeEvidenceDefinition {
   installed: boolean;
   ready: boolean;
   installedVersion: string | null;
+  connection: RuntimeConnectionEvidence;
   checkedAt: string;
   localCarrier: {
     os: NodeJS.Platform;
@@ -616,6 +618,7 @@ export async function getRuntimeEvidenceSnapshot(options: {
         : Boolean(binaryPath && adapter),
       installedVersion: binaryPath ? await probeVersion(binaryPath) : null,
       checkedAt: now.toISOString(),
+      connection: runtimeConnection(authStatus),
       localCarrier: {
         os: process.platform,
         architecture: process.arch,

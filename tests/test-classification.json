@@ -833,6 +833,13 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/connection-evidence-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/opencode-service-skew.test.ts",
       "reasons": [
         "child-process",
