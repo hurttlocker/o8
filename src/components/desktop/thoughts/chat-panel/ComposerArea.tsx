@@ -345,7 +345,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       {activityContent}
       {sendBufferStatus}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
-        <BrainPipButton active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
+        <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
         <SlashCommandPicker
           suggestions={slashSuggestions}
           activeIndex={activeSlashIndex}
