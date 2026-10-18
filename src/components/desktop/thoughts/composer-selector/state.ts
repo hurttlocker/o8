@@ -284,7 +284,10 @@ export function composerSelectorModeSpec(mode: ComposerSelectorMode): ComposerSe
 }
 
 export function composerSupportsFastMode(backend: OrchestratorBackendSetting): boolean {
-  return backend === 'codex' || backend === 'claude' || backend === 'fable';
+  // Both bundled lead IDs receive the thread-bound cortex delegation surface.
+  // ACP-only leads do not yet carry that surface, so do not infer support from installation.
+  return backend === 'codex' || backend === 'claude' || backend === 'fable'
+    || backend === 'pi' || backend === 'o8';
 }
 
 export function cycleComposerSelectorMode(

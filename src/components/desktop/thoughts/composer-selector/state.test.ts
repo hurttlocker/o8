@@ -235,6 +235,8 @@ describe('composer selector state', () => {
     expect(composerSupportsFastMode('codex')).toBe(true);
     expect(composerSupportsFastMode('claude')).toBe(true);
     expect(composerSupportsFastMode('fable')).toBe(true);
+    expect(composerSupportsFastMode('pi')).toBe(true);
+    expect(composerSupportsFastMode('o8')).toBe(true);
     expect(composerSupportsFastMode('openclaw')).toBe(false);
     expect(cycleComposerSelectorMode('solo', 1, 'openclaw')).toBe('multitask');
     expect(cycleComposerSelectorMode('solo', 1, 'codex')).toBe('fast');

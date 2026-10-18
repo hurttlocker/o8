@@ -10,6 +10,8 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 import { invalidateRuntimeInventory } from '../../onboarding/useRuntimeInventory';
 import { ComposerPicker } from './ComposerPicker';
 import { useComposerSelectorState } from './useComposerSelectorState';
+import { ModeChip } from './ModeChip';
+import { composeComposerTurnMessage } from '../composer-mode';
 
 vi.mock('@/lib/entitlement/context', () => ({ useEntitlement: () => ({ plan: 'free' }) }));
 vi.mock('../chat-panel/ComposerPopover', () => ({ ComposerPopover: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? createElement('div', null, children) : null }));
@@ -26,7 +28,11 @@ function Harness() {
   const [model, setModel] = useState('gpt-6-astra');
   const [effort, setEffort] = useState<ThinkingEffort>('high');
   const controller = useComposerSelectorState({ enabled: true, mode: 'fast', backend, modelId: model, modelLabel: backend === 'o8' ? 'o8' : 'Astra', effort, operatorDefaultEffort: 'high', adaptiveEnabled: false, threadId: null, onEffortChange: setEffort, onBackendChange: (next, nextModel) => { setBackend(next); setModel(nextModel ?? ''); } });
-  return createElement(ComposerPicker, { ...controller });
+  return createElement('div', null,
+    createElement(ComposerPicker, { ...controller }),
+    createElement(ModeChip, { state: controller.state, onModeChange: vi.fn() }),
+    createElement('output', { 'data-testid': 'wire-mode' }, JSON.stringify(composeComposerTurnMessage('Read package.json', controller.state.mode, false))),
+  );
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 15));
 const click = async (selector: string) => { await act(async () => { container.querySelector<HTMLButtonElement>(selector)!.click(); await settle(); }); };
@@ -57,6 +63,12 @@ it('offers one built-in Pi lead under o8 without an installed CLI or a Customize
   expect(container.textContent).not.toContain('built-in Pi');
   await click('[data-testid="lead-row-o8-free"]');
   expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toBe('o8');
+  expect(container.querySelector('[data-testid="composer-selector-mode"]')?.getAttribute('aria-label')).toBe('Mode: Shared');
+  expect(container.querySelector('[data-testid="wire-mode"]')?.textContent).toContain('[Mode: Fast]');
+  await click('[data-testid="composer-selector-mode"]');
+  const shared = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button => button.textContent?.includes('Shared'));
+  expect(shared?.disabled).toBe(false);
+  expect(shared?.getAttribute('aria-checked')).toBe('true');
   expect(container.querySelector('[data-testid="composer-selector-popover"]')).toBeNull();
   expect(writes).toEqual([]);
 });
