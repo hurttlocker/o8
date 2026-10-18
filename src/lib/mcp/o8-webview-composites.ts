@@ -307,12 +307,13 @@ async function waitForEval(
   code: string,
   predicate: (value: Record<string, unknown>) => boolean,
   timeoutMs: number,
+  terminal?: (value: Record<string, unknown>) => boolean,
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + timeoutMs;
   let latest: Record<string, unknown> = {};
   while (Date.now() <= deadline) {
     latest = await evalJson(client, code);
-    if (isOk(latest) && predicate(latest)) {
+    if ((isOk(latest) && predicate(latest)) || terminal?.(latest)) {
       return latest;
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -393,7 +394,12 @@ export function createO8WebviewCompositeHandlers(getClient: () => O8WebviewClien
         }
         // A pending app callback receipt is not completion. Observe React's
         // full inventory and active enabled composer; never repeat dispatch.
-        const observed = await waitForEval(client, freshSessionScript('observe', request), value => value.ok === true, 7_500);
+        const observed = await waitForEval(client, freshSessionScript('observe', request), value => value.ok === true, 7_500,
+          value => value.status === 'unknown' || value.status === 'error');
+        if (!isOk(observed) && observed.status === 'pending') {
+          const settled = await evalJson(client, freshSessionScript('timeout', request));
+          return jsonResult({ ...settled, automaticReplay: false }, !isOk(settled));
+        }
         if (!isOk(observed)) return jsonResult({ ok: false, requestId, ...observed, automaticReplay: false, ...(observed.status === 'pending' ? {} : { mutationOutcome: 'unknown' }) }, true);
         const focused = await evalJson(client, freshSessionScript('focus', request));
         return jsonResult({ ...focused, ...(warning ? { warning } : {}) }, !isOk(focused));

@@ -41,6 +41,7 @@ import {
 } from './settings/shared';
 import { SettingsNavItem } from './settings/SettingsNavItem';
 import { FeedbackSettingsEntry } from '@/components/desktop/FeedbackSheet';
+import { SettingsHistoryHeader } from './settings/SettingsHistoryHeader';
 import { useSettingsSectionNavigation } from './settings/useSettingsSectionNavigation';
 import { GeneralTab } from './settings/GeneralTab';
 import { ProvidersTab } from './settings/ProvidersTab';
@@ -65,13 +66,7 @@ import { requestO8Capability } from '@/lib/auth/capabilities';
 
 export type { SettingsTab } from './settings/shared';
 
-function BackSettingsIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z" />
-    </svg>
-  );
-}
+
 
 function GearNavIcon({ size = 16 }: { size?: number }) {
   return (
@@ -119,7 +114,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [openNavTab, setOpenNavTab] = useState<SettingsTab | null>(null);
-  const { contentRef, navigate, notice, targetSection, navigationId } = useSettingsSectionNavigation(activeTab, setActiveTab);
+  const { contentRef, navigate, notice, targetSection, navigationId, canBack, canForward, back, forward } = useSettingsSectionNavigation(activeTab, setActiveTab);
   const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
@@ -347,48 +342,7 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           height: 0 !important;
         }
       `}</style>
-      {onClose ? (
-        <header data-tauri-drag-region style={{ flexShrink: 0, paddingTop: 12, paddingRight: 24, paddingBottom: 12, paddingLeft: 24, borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-          <button
-            type="button"
-            aria-label="Back to workspace"
-            title="Back to workspace"
-            onClick={onClose}
-            style={{
-              gap: 8,
-              fontFamily: APP_FONT_STACK,
-              fontSize: 13,
-              height: 34,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider-subtle)',
-              background: 'var(--t-bg-card)',
-              color: 'var(--t-text-muted)',
-              cursor: 'pointer',
-              transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
-            }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.background = 'var(--t-panel-hover)';
-              event.currentTarget.style.borderColor = 'var(--t-panel-border)';
-              event.currentTarget.style.color = 'var(--t-text)';
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = 'var(--t-bg-card)';
-              event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-              event.currentTarget.style.color = 'var(--t-text-muted)';
-            }}
-          >
-            <BackSettingsIcon />
-            Back to workspace
-          </button>
-        </header>
-      ) : null}
+      <SettingsHistoryHeader canBack={canBack} canForward={canForward} back={back} forward={forward} onClose={onClose} />
       <div
         style={{
           flex: 1,

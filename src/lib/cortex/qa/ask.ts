@@ -41,6 +41,7 @@ import {
 } from '@/lib/cortex/qa/semantic-cache';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
+import { currentComposerBrainRoute } from '@/lib/operator/composer-brain-context';
 import { brainRouteCacheKeySync, usesManagedBrainInferenceSync } from '@/lib/operator/brain-routing';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ export { findSemanticMatch } from '@/lib/cortex/qa/semantic-cache';
  * embedding failure (silent miss, never an error).
  */
 async function getSemanticCached(question: string, scope: string): Promise<CacheEntry | null> {
+  if (currentComposerBrainRoute()?.runtime) return null;
   const now = Date.now();
   const candidates: Array<{ key: string; vector: number[] }> = [];
   for (const [key, entry] of answerCache) {
@@ -113,6 +115,7 @@ async function getSemanticCached(question: string, scope: string): Promise<Cache
 /** Fire-and-forget: attach the question embedding to a stored entry so future
  *  near-duplicates can hit it semantically. */
 function attachVector(key: string, question: string): void {
+  if (currentComposerBrainRoute()?.runtime) return;
   void embedQuestion(normalizeQuestionForCache(question))
     .then((vector) => {
       if (!vector) return;
@@ -495,7 +498,7 @@ export async function runAskPipeline(
   }
 
   // Pre-warm the Haiku REPL while classify + retrieve run (see askCortex).
-  if (!usesManagedBrainInferenceSync()) void prewarmHaiku();
+  if (!currentComposerBrainRoute() && !usesManagedBrainInferenceSync()) void prewarmHaiku();
 
   const grepRows = await routeGrepArm(question, repoPath);
   let classification: Awaited<ReturnType<typeof classifyQuestion>> = {
@@ -515,13 +518,15 @@ export async function runAskPipeline(
       bm25Variants: [question],
     }).catch(() => null);
     try {
-      classification = await classifyQuestion(question);
+      classification = currentComposerBrainRoute()?.runtime
+        ? { class: 'B', bm25Variants: [question] }
+        : await classifyQuestion(question);
     } catch (err) {
       console.warn('[qa][ask] classifier error:', err);
       classification = { class: 'B', bm25Variants: [question] };
     }
     // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
-    if (classification.class === 'B' && !usesManagedBrainInferenceSync()) void prewarmSonnetCli();
+    if (classification.class === 'B' && !currentComposerBrainRoute() && !usesManagedBrainInferenceSync()) void prewarmSonnetCli();
 
     const retrievalStart = Date.now();
     try {
