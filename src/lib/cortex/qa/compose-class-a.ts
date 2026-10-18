@@ -1,4 +1,5 @@
 import 'server-only';
+import { composeConnectedBrain } from './compose-connected';
 
 import {
   buildCitationHandle,
@@ -65,6 +66,7 @@ export async function composeClassA(
   emit: SseEmit,
   options: ComposeOptions = {},
 ): Promise<void> {
+  if (await composeConnectedBrain(question, repoPath, topRows, emit, options)) return;
   flushBrainQuotaAlerts(emit);
   const lookup = buildCitationLookup(topRows);
   const rowsJson = JSON.stringify(

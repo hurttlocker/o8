@@ -112,6 +112,7 @@ export interface CallCodexOptions {
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   /** CLI invocation timeout. Default 30s — Codex bootstrap is ~15s. */
   timeoutMs?: number;
+  readOnly?: boolean;
 }
 
 /** Default Engineering Brain Codex model when operator settings are unavailable. */
@@ -212,6 +213,8 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
     outputFile: tmpFile,
     reasoningEffort: route.reasoningEffort,
   });
+  if (opts.readOnly) cliArgs.push('--ignore-user-config', '--sandbox', 'read-only', '-c', 'approval_policy="never"',
+    '-c', 'tools.image_generation=false', '--disable', 'apps', '--disable', 'plugins');
   console.info(`[qa][codex] launching model=${route.model} effort=${route.reasoningEffort ?? 'runtime-default'}`);
 
   // tmpdir cwd so no project .codex/ config bleeds in.

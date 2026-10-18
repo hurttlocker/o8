@@ -3,7 +3,6 @@ import { MODEL_IDS } from '@/lib/models';
 
 export const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
 export const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b[^\s)"]*/g;
-export const IGNORED_PORTS = new Set([3000, 3002]);
 export const ORCHESTRATED_TAB_AUTO_ARCHIVE_MS = 10 * 60_000;
 
 export const CLI_AGENTS = [
