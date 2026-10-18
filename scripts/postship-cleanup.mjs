@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
 import { boundBuildEnvironment } from './lib/release-build-profile.mjs';
+import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
 
 const runFile = promisify(execFile);
 
@@ -113,7 +114,7 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
     const target = path.resolve(root, relativePath);
     if (relativePath === '.next') {
       try {
-        const env = boundBuildEnvironment(root);
+        const env = resolveReleaseBuildEnvironment(root, boundBuildEnvironment(root));
         const marker = await lstat(path.join(root, '.o8-generated-output-store')).catch(error => {
           if (error.code !== 'ENOENT') throw error;
           return null;

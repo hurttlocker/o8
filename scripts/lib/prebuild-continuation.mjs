@@ -17,7 +17,7 @@ import {
   restoreReleaseBuildCache,
   writeReleaseBuildCachePhaseReceipt,
 } from './release-build-cache.mjs';
-import { resolveReleaseConfig } from './release-config.mjs';
+import { resolveReleaseBuildEnvironment } from './release-config.mjs';
 
 /** Probe before registration creates any output, while the caller owns exclusion. */
 export function prebuildPreflight() {
@@ -32,11 +32,13 @@ export function prebuildPreflight() {
 export async function runPrebuild({ runBuild, canReuse }) {
   const root = process.cwd();
   const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
-  const releaseConfig = resolveReleaseConfig(root);
   const env = process.env;
+  const buildEnv = resolveReleaseBuildEnvironment(root, env);
   let producerRun;
-  if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && releaseConfig.clerkPublishableKey) {
-    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = releaseConfig.clerkPublishableKey;
+  if (buildEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY !== env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    // Registered build phases also read process.env, so retain prebuild's
+    // existing process-wide propagation of this one public client setting.
+    env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = buildEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
     console.log('[tauri-prebuild] Clerk publishable key loaded from release config');
   }
   const cacheRoot = resolveReleaseBuildCacheRoot(env);

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveReleaseConfig } from '../scripts/lib/release-config.mjs';
+import { resolveReleaseBuildEnvironment, resolveReleaseConfig } from '../scripts/lib/release-config.mjs';
 
 const roots: string[] = [];
 
@@ -42,5 +42,27 @@ describe('release config', () => {
 
     expect(config).not.toHaveProperty('feedbackWebhookUrl');
     expect(JSON.stringify(config)).not.toContain('private.test');
+  });
+
+  it('adds only the public client setting and preserves the caller and lifecycle routing', () => {
+    const root = fixture({ clerkPublishableKey: ' pk_test_from_file ',
+      githubOAuthClientId: 'file-client', sentryDsn: 'file-dsn' });
+    const env = Object.freeze({ O8_DATA_DIR: '/build-profile', CORTEX_IDE_DB_PATH: '/build-profile/state.db',
+      UNRELATED_SETTING: 'preserved' });
+    expect(resolveReleaseBuildEnvironment(root, env)).toEqual({ ...env,
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_from_file' });
+    expect(env).not.toHaveProperty('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+  });
+
+  it('preserves the explicit compiler value byte-for-byte instead of substituting file config', () => {
+    const root = fixture({ clerkPublishableKey: 'pk_test_from_file' });
+    const env = Object.freeze({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ' pk_test_from_env ' });
+    expect(resolveReleaseBuildEnvironment(root, env)).toEqual(env);
+  });
+
+  it('uses file config for an empty public-client environment value', () => {
+    const root = fixture({ clerkPublishableKey: 'pk_test_from_file' });
+    expect(resolveReleaseBuildEnvironment(root, { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: '' }))
+      .toEqual({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_from_file' });
   });
 });
