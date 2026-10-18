@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
 
-const native = vi.hoisted(() => ({ model: '', write: vi.fn(), open: vi.fn(), navigate: vi.fn() }));
+const native = vi.hoisted(() => ({ model: '', topPill: false, write: vi.fn(), open: vi.fn(), navigate: vi.fn() }));
 vi.mock('@/lib/tauri/bridge', () => ({
   isTauri: () => true,
   accessibilityPermissionGranted: async () => true,
@@ -12,8 +12,12 @@ vi.mock('@/lib/tauri/bridge', () => ({
   openSystemSettings: vi.fn(), openVoiceSettings: native.open,
   backgroundModeIsEnabled: async () => false, backgroundModeSet: vi.fn(),
   agentGetEscalation: async () => 'auto', agentSetEscalation: vi.fn(),
-  voicePrefsGet: async () => ({ groq_api_key_set: true }),
-  voicePrefsSet: async (key: string, value: string) => { native.write(key, value); if (key === 'symon_brain_model') native.model = value; },
+  voicePrefsGet: async () => ({ groq_api_key_set: true, ...(native.topPill ? { dictation_top_pill: true } : {}) }),
+  voicePrefsSet: async (key: string, value: string | boolean) => {
+    native.write(key, value);
+    if (key === 'symon_brain_model') native.model = String(value);
+    if (key === 'dictation_top_pill') native.topPill = value === true;
+  },
   externalKeyboardFnState: async () => null,
   symonBrainState: async () => ({
     provider: 'codex', tier: 'worker', model: native.model || null,
@@ -53,4 +57,23 @@ it('saves model choices, opens Symon, and routes credential management to API Ke
     expect(native.navigate).toHaveBeenCalledWith('api-keys');
     expect(native.write.mock.calls.every(([key]) => key === 'symon_brain_model')).toBe(true);
   } finally { act(() => root.unmount()); container.remove(); }
+});
+
+it('defaults the top pill off, saves the toggle and restores it when settings reopen', async () => {
+  native.topPill = false;
+  native.write.mockClear();
+  const container = document.createElement('div'); document.body.append(container);
+  let root = createRoot(container);
+  const onButton = () => [...container.querySelectorAll('button')].find(button => button.textContent === 'On')!;
+  try {
+    await act(async () => root.render(createElement(VoiceTab)));
+    expect(onButton().getAttribute('aria-pressed')).toBe('false');
+    expect(container.textContent).toContain('⌘⌥,');
+    await act(async () => onButton().click());
+    expect(native.write).toHaveBeenLastCalledWith('dictation_top_pill', true);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => root.render(createElement(VoiceTab)));
+    expect(onButton().getAttribute('aria-pressed')).toBe('true');
+  } finally { await act(async () => root.unmount()); container.remove(); native.topPill = false; }
 });

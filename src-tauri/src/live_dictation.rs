@@ -281,6 +281,25 @@ fn focused_element_for_pid(pid: i32) -> Option<(CFType, CFType)> {
     Some((app, focused))
 }
 
+fn focused_window_anchor(pid: i32) -> Option<CaretAnchor> {
+    let raw = unsafe { AXUIElementCreateApplication(pid) };
+    if raw.is_null() {
+        return None;
+    }
+    let app = unsafe { CFType::wrap_under_create_rule(raw) };
+    unsafe { let _ = AXUIElementSetMessagingTimeout(app.as_CFTypeRef(), 0.2); }
+    let window = copy_attribute(app.as_CFTypeRef(), "AXFocusedWindow")?;
+    let frame = element_frame(window.as_CFTypeRef())?;
+    // An unavailable text selection must still keep feedback with the focused
+    // application. Anchor near that window's lower center, never o8's window.
+    Some(CaretAnchor {
+        x: frame.origin.x + frame.size.width / 2.0,
+        y: frame.origin.y + frame.size.height - 1.0,
+        width: 1.0,
+        height: 1.0,
+    })
+}
+
 /// Resolve the focused editable ONCE and derive both the caret anchor and (when
 /// `want_target`) the streaming target from it. This merges what used to be two
 /// separate main-thread round-trips — one per derived value, each re-resolving
@@ -298,13 +317,14 @@ fn capture_focused_on_main(want_target: bool) -> (Option<Target>, Option<CaretAn
         return (None, None);
     }
     let Some((_, focused)) = focused_element_for_pid(pid) else {
-        return (None, None);
+        return (None, focused_window_anchor(pid));
     };
     let element = focused.as_CFTypeRef();
     // Read the selection once and share it: the anchor needs it for
     // AXBoundsForRange, the target for the prefix/suffix split.
     let selection_value = copy_attribute(element, "AXSelectedTextRange");
-    let anchor = anchor_for(element, selection_value.as_ref().map(|v| v.as_CFTypeRef()));
+    let anchor = anchor_for(element, selection_value.as_ref().map(|v| v.as_CFTypeRef()))
+        .or_else(|| focused_window_anchor(pid));
     let target = if want_target {
         capture_target_from_element(element, pid, selection_value.as_ref())
     } else {
