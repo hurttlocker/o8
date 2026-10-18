@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       const workers = await Promise.all([...members.values()].map(async member => {
         const session = await readOwnedSessionDisplay(member.surfaceId!);
         return { sessionKey: member.surfaceId!, name: member.taskName, runtime: member.runtime,
+          model: session?.model ?? member.workerRouting?.selectedModel ?? null, effort: member.workerRouting?.selectedEffort ?? null,
           status: session?.status ?? 'unknown' };
       }));
       return NextResponse.json({ threadId, workers }, { headers: { 'Cache-Control': 'no-store' } });

@@ -48,7 +48,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
-import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { CORTEX_WORKER_TOOLS } from './cortex-worker-tools';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -107,7 +107,7 @@ const PARENT_THREAD_ID = process.env.CORTEX_THREAD_ID || '';
 const FAST_CAPABILITY = process.env.CORTEX_FAST_CAPABILITY || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
-const { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = createCortexDelegationHandlers({
+const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = createCortexDelegationHandlers({
   apiBase: API_BASE,
   repoPath: REPO_PATH,
   parentThreadId: PARENT_THREAD_ID,
@@ -305,37 +305,7 @@ const TOOLS: McpTool[] = [
     },
   },
   // ── Delegation tools ──
-  {
-    name: 'cortex_launch_agent',
-    description:
-      'Launch a worker session for a new task. To start an existing prepared mission, call the operator dispatch_mission tool with its missionId; do not launch a worker to dispatch it. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
-      'When runtime/model are omitted, the operator\'s saved dispatch defaults are used. Returns the selected routing receipt ' +
-      'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string', description: 'The task for the agent to complete. Be specific and actionable.' },
-        repoPath: { type: 'string', description: 'Absolute repo path. Defaults to the current repo.' },
-        taskName: { type: 'string', description: 'Short task name shown in the UI.' },
-        isolate: { type: 'boolean', description: 'Legacy isolation flag. False is accepted only with checkoutMode: "shared" from an o8 orchestrator chat.' },
-        checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Fast mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
-        assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Fast mode: exact non-overlapping relative files or directories this worker owns.' },
-        runtime: {
-          type: 'string',
-          enum: listDispatchableRuntimes(),
-          description: 'Optional worker runtime id; omit it to use the operator\'s saved dispatch default. '
-            + '"pi-builtin" is the built-in Pi worker that ships with o8. "pi" is the operator\'s own Pi CLI and runs only when it is installed.',
-        },
-        model: { type: 'string', description: 'Optional runtime-specific model id.' },
-        workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
-        readOnly: {
-          type: 'boolean',
-          description: 'Set true for inspect, investigate, verify, or report tasks that must not change files. A clean zero-diff exit then completes as evidence.',
-        },
-      },
-      required: ['prompt'],
-    },
-  },
+  ...CORTEX_WORKER_TOOLS,
   {
     name: 'cortex_shared_team_status',
     description: 'Inspect this orchestrator chat’s Fast team: shared checkout, members, initial dirty paths, changed and committed paths, and edits outside assigned scopes. Read this before a group commit.',
@@ -1360,6 +1330,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_resolve_approval: handleResolveApproval,
   cortex_propose_spec: handleProposeSpec,
   lane_touches: handleLaneTouches,
+  cortex_worker_catalog: handleWorkerCatalog,
   cortex_launch_agent: handleLaunchAgent,
   cortex_shared_team_status: handleSharedTeamStatus,
   cortex_finish_shared_team: handleFinishSharedTeam,

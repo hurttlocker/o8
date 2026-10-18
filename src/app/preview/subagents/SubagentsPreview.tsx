@@ -5,7 +5,6 @@ import { SubagentDemoPanel } from '@/components/desktop/workspace-terminal/Subag
 import { SwarmStatusCard } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { ComposerPicker } from '@/components/desktop/thoughts/composer-selector/ComposerPicker';
 import { resolveComposerSelectorState } from '@/components/desktop/thoughts/composer-selector/state';
-import { FALLBACK_COMPOSER_WORKER_DEFAULTS } from '@/components/desktop/thoughts/composer-selector/worker-settings';
 import { COMPOSER_MODEL_GROUPS } from '@/components/desktop/thoughts/ModelThinkingChip';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { getPalette, resolveTheme } from '@/lib/theme/registry';
@@ -31,7 +30,6 @@ export function SubagentsPreview() {
   const [narrow, setNarrow] = useState(false);
   const [chatDemo, setChatDemo] = useState(false);
   const [opened, setOpened] = useState('');
-  const [defaults, setDefaults] = useState(FALLBACK_COMPOSER_WORKER_DEFAULTS);
   const theme = resolveTheme(getPalette(dark ? 'dark' : 'light'), 'solid');
   const state = resolveComposerSelectorState({
     mode: 'multitask', leadBackend: 'codex', leadModelId: '', leadModelLabel: 'Codex',
@@ -53,9 +51,8 @@ export function SubagentsPreview() {
       <div style={{ border: '1px solid var(--t-border)', borderRadius: 16, background: 'var(--t-input-bg)', padding: 12 }}>
         <p style={{ marginTop: 0, marginBottom: 16, fontSize: 13, color: 'var(--t-text-muted)' }}>Describe the next task…</p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-          <ComposerPicker state={state} defaults={defaults} composerModelGroups={COMPOSER_MODEL_GROUPS}
-            onEffortChange={() => {}} onRuntimeChange={() => {}} onWorkerStartModeChange={() => {}}
-            onWorkerModelChange={(model, runtime) => { setDefaults(value => ({ ...value, defaultDispatchModel: model ?? '', defaultDispatchRuntime: runtime ?? value.defaultDispatchRuntime })); }} />
+          <ComposerPicker state={state} composerModelGroups={COMPOSER_MODEL_GROUPS}
+            onEffortChange={() => {}} />
         </div>
       </div>
     </section>}

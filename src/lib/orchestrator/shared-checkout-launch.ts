@@ -3,7 +3,10 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { launchRuntimeSurface } from '@/lib/runtime/actions';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
+import type { ThinkingEffort } from './thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import type { WorkerRouting, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 import { failSharedCheckoutMember, recordSharedCheckoutMember, reserveSharedCheckoutMember, validateSharedCheckoutPaths } from './shared-checkout-team';
 
@@ -14,6 +17,10 @@ export async function launchSharedCheckoutWorker(input: {
   taskName: string;
   runtime: OrchestratorRuntime;
   model: string | null;
+  effort?: ThinkingEffort | null;
+  carrier?: ClaudeCodeModelSource | null;
+  executionCarrier?: ExecutionCarrierId | null;
+  workerRouting?: WorkerRouting;
   readOnly: boolean;
   clientMutationId: string;
   repoInProject: boolean;
@@ -53,6 +60,9 @@ export async function launchSharedCheckoutWorker(input: {
       projectRepoPath: team.path,
       taskName: input.taskName,
       model: input.model ?? undefined,
+      effort: input.effort ?? undefined,
+      executionCarrier: input.executionCarrier ?? undefined,
+      ...(input.carrier ? { claudeCodeCarrier: input.carrier, claudeCodeModel: input.model ?? undefined } : {}),
       clientMutationId: input.clientMutationId,
       isolate: false,
       skipSetup: true,

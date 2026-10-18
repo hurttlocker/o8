@@ -271,4 +271,21 @@ describe('worker model routing real path', () => {
       workerRouting: { selectedModel: 'gpt-5.6-terra', selectedEffort: 'high' },
     });
   }, 30_000);
+  it('honors a persisted adaptive reset when the scheduler launches a packet with saved high effort', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ subscriptionProfile: 'both', defaultDispatchRuntime: 'codex', defaultDispatchModel: 'gpt-5.6-sol', codexWorkerEffort: 'high', parallelCap: 4 });
+    const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    const repoPath = makeRepo();
+    const created = await createMission({ issues: [{ number: 90005, title: 'adaptive packet', body: 'Inspect only', url: '' }], repoPath,
+      runtime: 'codex', requestedRuntime: 'codex', requestedModel: 'gpt-5.6-sol', constraints: '' });
+    // Delegate persists this reset; restart/scheduler must consume durable state.
+    await withLockedState(state => { state.packets[0]!.workerRouting!.requestedEffort = 'adaptive'; state.packets[0]!.workerRouting!.selectedEffort = null; });
+    await dispatchMission({ missionId: created.missionId });
+    const calls = await waitForArgvCalls(5);
+    expect(calls[4]?.some(arg => arg.startsWith('model_reasoning_effort='))).toBe(false);
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    expect(currentMissionState().packets[0]?.workerRouting).toMatchObject({ requestedEffort: 'adaptive', selectedEffort: null });
+  });
+
 });

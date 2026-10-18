@@ -14,17 +14,11 @@ import type { ComposerWorkerDefaults, WorkerModelChange } from './worker-setting
 
 export function ComposerSelectorFooterView({
   state,
-  defaults,
   composerModelGroups,
   onModeChange,
   onModelChange,
   onBackendChange,
   onEffortChange,
-  onRuntimeChange,
-  onWorkerModelChange,
-  onWorkerEffortChange,
-  workerLocks,
-  onWorkerStartModeChange,
   saving = false,
   leadingControls,
   permissionControl,
@@ -92,16 +86,10 @@ export function ComposerSelectorFooterView({
       ) : null}
       <ComposerPicker
         state={state}
-        defaults={defaults}
         composerModelGroups={composerModelGroups}
         onModelChange={onModelChange}
         onBackendChange={onBackendChange}
         onEffortChange={onEffortChange}
-        onRuntimeChange={onRuntimeChange}
-        onWorkerModelChange={onWorkerModelChange}
-        onWorkerEffortChange={onWorkerEffortChange}
-        workerLocks={workerLocks}
-        onWorkerStartModeChange={onWorkerStartModeChange}
         onRequestTextareaFocus={onRequestTextareaFocus}
         saving={saving}
       />

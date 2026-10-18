@@ -538,7 +538,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${triggerModelLabel} · ${mode.long} · ${effortTitle} ${selectedLabel}`}
+        title={canOpen ? `${triggerModelLabel} · ${mode.long} · ${effortTitle} ${selectedLabel}` : triggerModelLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{

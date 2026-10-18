@@ -34,12 +34,13 @@ writeFileSync(join(dataDir, 'ws-token'), token);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [], 'gpt-5.6-sol': [] } }) }));
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),
   requestRealtimeRefresh: vi.fn(),
 }));
 // The stale-write race is under test, not this machine's installs (#3657 refuses a runtime that is not installed).
-vi.mock('@/lib/runtimes/shared/runtime-installed', () => ({ runtimeNotInstalledReason: vi.fn(async () => null) }));
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtime/inventory', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/runtime/inventory')>(),
   getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: [], runtimes: [] })),
