@@ -4535,6 +4535,12 @@
       ]
     },
     {
+      "path": "tests/session-merge-restriction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/session-transform-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5090,6 +5096,15 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worker-corrections-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
       ]
     },
     {

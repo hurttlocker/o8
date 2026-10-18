@@ -10,6 +10,7 @@ import { providerFromConfig } from './controlled-provider';
 import path from 'node:path';
 import { registerOwnedSessionLifecycle } from '../owned-session-lifecycle';
 import { assertAutomaticRecoveryGeneration, requestedAutomaticRecoveryRun, registerOwnedRecoveryStore } from './automatic-recovery';
+import { assertOwnedActionAdmission, holdPendingOwnedCorrections } from './action-admission';
 import { randomUUID } from 'node:crypto';
 import { OwnedArtifactAdmissionError, withOwnedArtifactAdmission } from './artifact-admission';
 
@@ -291,6 +292,7 @@ export function createOwnedSessionStore(
 
   async function resumeInner(surfaceId: string, prompt: string) {
     let session = await io.findSession(surfaceId);
+    assertOwnedActionAdmission(session);
     refuseOwnedSingleAttemptResume(session);
     const automaticRunId = requestedAutomaticRecoveryRun(surfaceId);
     if (automaticRunId) assertAutomaticRecoveryGeneration(session, automaticRunId);
@@ -341,6 +343,7 @@ export function createOwnedSessionStore(
       }
 
       if (automaticRunId) assertAutomaticRecoveryGeneration(await io.findSession(surfaceId), automaticRunId);
+      assertOwnedActionAdmission(await io.findSession(surfaceId));
       const run = await runController.spawnOwnedRun(session, prompt.trim(), 'resume');
       if (run.outcome === 'failed' && coldRestored) {
         await rollbackColdRestore();
@@ -364,15 +367,18 @@ export function createOwnedSessionStore(
   }
 
   function interrupt(surfaceId: string) {
+    holdPendingOwnedCorrections(surfaceId);
     return withSurfaceLock(surfaceId, () => interruptInner(surfaceId));
   }
 
   async function interruptInner(surfaceId: string) {
     const session = await io.findSession(surfaceId);
+    assertOwnedActionAdmission(session);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
     }
     await runController.refreshSession(session, true, false);
+    assertOwnedActionAdmission(session);
 
     if (session.activeRun?.spawnState === 'prepared') {
       return {

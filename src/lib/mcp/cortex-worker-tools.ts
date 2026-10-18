@@ -4,6 +4,17 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 /** Discovery and launch share one runtime/effort contract. */
 export const CORTEX_WORKER_TOOLS = [
   {
+    name: 'cortex_correct_workers',
+    description: 'Deliver an operator correction to exact owned workers of this conversation. First read eligible targets and run IDs by omitting targets. Then choose send (idle worker), pause-and-send (interrupt then resume the same worker), or stop (no resume). Set holdMerges only for an explicit no-merge instruction; it persists a binding session restriction before delivery. Delivered means runtime acceptance, not model acknowledgement. Unknown delivery must be inspected, never blindly repeated. Does not change runtime, model, permissions or workspace.',
+    inputSchema: { type: 'object', properties: {
+      targets: { type: 'array', maxItems: 8, items: { type: 'object', properties: { surfaceId: { type: 'string' }, runId: { type: 'string' } }, required: ['surfaceId', 'runId'], additionalProperties: false } },
+      message: { type: 'string', maxLength: 2000 },
+      mode: { type: 'string', enum: ['send', 'pause-and-send', 'stop'] },
+      holdMerges: { type: 'boolean', description: 'Add an explicit no-merge restriction. False never removes an existing restriction.' },
+      idempotencyKey: { type: 'string', description: 'Stable identity for this correction. Reuse only to inspect the identical request after an uncertain response.' },
+    } },
+  },
+  {
     name: 'cortex_wait_workers',
     description: 'Read recorded workers belonging to this conversation and workspace. First call returns a snapshot and opaque cursor; pass afterCursor to wait for a relevant recorded change, for at most 30 seconds. Use surface IDs from launch or fleet relatedWorkers. Includes exact run/outcome and result-delivery receipts; absent evidence stays unknown. Observation never adopts control of a session.',
     inputSchema: {

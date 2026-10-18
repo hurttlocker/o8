@@ -66,6 +66,7 @@ import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
+import { withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { captureWorkspaceMaterializationSnapshot } from '@/lib/workspace/workspace-materialization-retirement';
 
@@ -710,12 +711,12 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       });
 
       try {
-        await fastForwardBaseBranch({
+        await withSessionMergePublication(lane.packetId, () => fastForwardBaseBranch({
           repoPath: lane.repoPath,
           baseBranch: lane.baseBranch,
           candidateRef: integrationRef,
           candidateSha: mergeCandidateSha,
-        });
+        }));
       } catch (error) {
         return createFastForwardFailureApproval(input, error);
       }
@@ -737,7 +738,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     let pushedToOrigin = false, pushError: string | undefined;
     if (originPushAvailable) {
       try {
-        await pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha);
+        await withSessionMergePublication(lane.packetId, () => pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha));
         pushedToOrigin = true;
         console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
       } catch (error) {
