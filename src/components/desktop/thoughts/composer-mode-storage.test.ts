@@ -12,6 +12,14 @@ import { composeComposerTurnMessage } from './composer-mode';
 describe('composer mode storage', () => {
   beforeEach(() => localStorage.clear());
 
+  it('defaults a fresh chat to shared without changing an explicit saved restriction', () => {
+    expect(readStoredComposerMode('fresh')).toBe('fast');
+    expect(localStorage.getItem(composerModeStorageKey('fresh'))).toBeNull();
+    expect(readStoredComposerMode('unsupported', 'solo')).toBe('solo');
+    localStorage.setItem(composerModeStorageKey('restricted'), 'solo');
+    expect(readStoredComposerMode('restricted')).toBe('solo');
+  });
+
   it('migrates a legacy swarm flag to Fusion once unless a stored mode wins', () => {
     const legacyTab = 'legacy-tab';
     localStorage.setItem(legacySwarmStorageKey(legacyTab), '1');

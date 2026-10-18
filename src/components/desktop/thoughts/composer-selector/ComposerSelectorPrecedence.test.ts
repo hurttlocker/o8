@@ -113,7 +113,7 @@ describe('composer selector real-path precedence', () => {
 
   it('restores each tab mode while keeping the worker pool out of every composer mode', async () => {
     writeStoredComposerMode('tab-a', 'moa');
-    for (const [tabId, label] of [['tab-a', 'Mode: Compare plans'], ['tab-b', 'Mode: Solo'], ['tab-a', 'Mode: Compare plans']]) {
+    for (const [tabId, label] of [['tab-a', 'Mode: Compare plans'], ['tab-b', 'Mode: Delegation off'], ['tab-a', 'Mode: Compare plans']]) {
       await act(async () => {
         root.render(createElement(RealComposerHarness, { key: tabId, tabId, threadId: `thread-${tabId}` }));
         await new Promise(resolve => setTimeout(resolve, 30));

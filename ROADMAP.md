@@ -114,6 +114,10 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Settings shell [#3958](https://github.com/hurttlocker/o8/issues/3958) keeps its shared header transparent while the content body retains its active palette. Development verification and release remain separate.
+
+Composer worker status [#3953](https://github.com/hurttlocker/o8/issues/3953) uses one compact count at the composer edge. The existing popup keeps worker identities, states, pane navigation and activity receipts; the transcript no longer duplicates the live group. Recorded membership determines the count, and completed work does not imply a merge. Development verification and release remain separate.
+
 Project-led navigation [#3957](https://github.com/hurttlocker/o8/issues/3957) places the existing assistant action under Home and starts the chat rail with projects. Empty project and conversation views expose the existing creation actions after loading. Viewing the rail does not launch work. Development verification and release remain separate.
 
 Chat section disclosure [#3954](https://github.com/hurttlocker/o8/issues/3954) places chevrons after section labels and reveals them on hover or keyboard focus. The shared header keeps label geometry, toggle state and neighboring actions stable. Development verification and release remain separate.
@@ -245,3 +249,7 @@ Start from a tracking issue above, open its checklist, and pick an unchecked chi
 ## Not on this map
 
 Bug fixes, chores, security advisories, and dependency work are tracked as plain issues, not as roadmap arcs.
+
+Composer controls [#3961](https://github.com/hurttlocker/o8/issues/3961) use compact named access and checkout icons. Compatible new chats default to Shared; workers are delegated when requested or useful, with Worktrees available explicitly. Saved no-delegation choices and forced-single surfaces stay restricted. Permissions, capability checks and historical wire parsing remain authoritative. Development verification and release remain separate.
+
+Conversation worker hover [#3967](https://github.com/hurttlocker/o8/issues/3967) reuses the existing chat preview for recorded shared and worktree workers. Identity and status remain scoped to the hovered parent; development verification and release remain separate.
