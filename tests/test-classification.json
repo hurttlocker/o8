@@ -2133,6 +2133,15 @@
       ]
     },
     {
+      "path": "tests/cortex-worker-observation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cost-ledger-real-path.test.ts",
       "reasons": [
         "child-process",
