@@ -127,6 +127,8 @@ Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the def
 
 The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/issues/3880) now uses explicit ordered receipt timestamps. This removes an accidental dependency on wall-clock monotonicity while preserving the production stale-transition guard and its regression coverage.
 
+Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
