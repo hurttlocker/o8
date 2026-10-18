@@ -176,7 +176,7 @@ export const O8_WEBVIEW_BROWSER_TOOLS: McpTool[] = [
       type: 'object',
       properties: {
         selector: { type: 'string', description: 'CSS selector of the input or textarea.' },
-        text: { type: 'string', description: 'Text to type.' },
+        text: { type: 'string', description: 'Replacement text. Empty text clears the field; whitespace is preserved.' },
         submit: { type: 'boolean', description: 'Press Enter / requestSubmit after typing.' },
         surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
       },
@@ -234,9 +234,10 @@ export function createO8WebviewBrowserHandlers(): Record<string, ToolHandler> {
       return browserAgentPost('rect', agentArgs);
     }),
     o8_browser_type: async (args) => withStructuredErrors(async () => {
+      if (typeof args.text !== 'string') throw new McpInputError('text must be a string');
       const agentArgs: Record<string, unknown> = {
         selector: requiredString(args, 'selector'),
-        text: requiredString(args, 'text'),
+        text: args.text,
       };
       if (args.submit === true) agentArgs.submit = true;
       if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;

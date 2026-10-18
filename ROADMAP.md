@@ -131,6 +131,8 @@ The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/iss
 
 Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now opens newly announced apps in the existing Browser instead of adding a second terminal viewer. Retained output is marked across WebSocket transports; repeat announcements from a terminal session do not reopen a closed page. Ports exposes an immediate clickable app list. The old inline viewer is retired. Development and regression acceptance are tracked separately from CI and installed releases.
 
+Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) accepts an empty string to clear a field and preserves leading spaces, trailing spaces and line breaks. Controlled-field event coverage and native development checks are separate from required PR CI and released-build acceptance.
+
 Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
 
 ## 6. Runs where you are
