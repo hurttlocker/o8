@@ -195,6 +195,8 @@ Honor an explicit runtime, model or effort in the operator's message. Otherwise 
 
 A refused pin is a blocker to resolve, not permission to silently substitute another provider. Report the refusal and ask only if a different choice needs the operator's decision. Do not modify saved runtime pools, provider credentials, model defaults or permission settings to make a task dispatch. Existing Solo, shared-checkout, isolated-worktree and approval controls still apply. Discovery never grants ownership of an external session. A card click opens the existing worker session and must never spawn a replacement.
 
+Track recorded workers by the exact surface IDs returned by launch or `cortex_fleet_status` (`relatedWorkers` restores this conversation's handles, including archived teams). Call `cortex_wait_workers` with at most eight related IDs for an immediate snapshot, then pass its opaque `cursor` as `afterCursor` for one bounded wait of at most 30 seconds instead of repeated status polling. A recorded run outcome and its result-delivery receipt are separate evidence; missing receipts mean unknown. Read results with `cortex_read_transcript`; entry IDs and `nextCursor` support incremental `sinceId` reads, and truncation is explicitly reported. Observation does not authorize steering unrelated sessions or overriding Solo or permission restrictions.
+
 ### When the user gives you an intent
 
 In a SINGLE turn, do all of this:

@@ -49,6 +49,7 @@ import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-poli
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
 import { CORTEX_WORKER_TOOLS } from './cortex-worker-tools';
+import { createWorkerObservationHandlers } from './worker-observation';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -132,8 +133,8 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_fleet_status',
     description:
-      'List all active AI agent sessions (Claude Code and Codex). ' +
-      'Returns agent names, status, workspace, branch, runtime, and last activity.',
+      'List registered runtime sessions with exact handles, observed ownership and capabilities. ' +
+      'relatedWorkers lists persisted workers for this parent conversation, including archived shared teams. Discovery grants no mutation authority.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -345,7 +346,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_read_transcript',
     description:
-      'Read the recent transcript of a Codex agent session. Shows what the agent has been doing — messages, tool calls, and outputs.',
+      'Read a runtime transcript with stable entry IDs. Pass nextCursor as sinceId to read newer entries. Text previews disclose truncation and use a bounded response budget.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -355,8 +356,10 @@ const TOOLS: McpTool[] = [
         },
         limit: {
           type: 'number',
-          description: 'Number of transcript entries to return. Default 20.',
+          description: 'Number of transcript entries to return, 1 to 100. Default 20.',
         },
+        sinceId: { type: 'string', description: 'Existing transcript entry ID; return entries after it.' },
+        maxTextChars: { type: 'integer', minimum: 100, maximum: 12000, description: 'Maximum characters per text preview. Default 4000; total text is bounded to 24000 characters.' },
       },
       required: ['sessionKey'],
     },
@@ -625,28 +628,9 @@ function jsonResult(data: unknown, isError = false): McpToolResult {
   return textResult(JSON.stringify(data), isError);
 }
 
-async function handleFleetStatus(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const fresh = args.fresh ? '1' : '';
-    const data = await apiFetch(`/api/runtime/inventory?fresh=${fresh}`) as Record<string, unknown>;
-    const allAgents = (data.agents ?? []) as Array<Record<string, unknown>>;
-    // Filter to the supported local coding runtimes only.
-    const agents = allAgents.filter((a) => a.runtime === 'claude-code' || a.runtime === 'codex');
-    // Return a concise summary
-    const summary = agents.map((a) => ({
-      name: a.name,
-      runtime: a.runtime,
-      status: a.status,
-      workspace: a.workspace,
-      branch: a.branch,
-      task: a.currentTask,
-      lastActive: a.lastEventAt,
-    }));
-    return jsonResult({ agentCount: agents.length, agents: summary });
-  } catch (err) {
-    return textResult(`Failed to fetch fleet status: ${safeErrorText(err)}`, true);
-  }
-}
+const { handleFleetStatus, handleReadTranscript, handleWaitWorkers } = createWorkerObservationHandlers({
+  repoPath: REPO_PATH, parentThreadId: PARENT_THREAD_ID,
+}, apiFetch);
 
 async function handleListIssues(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
@@ -888,30 +872,6 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
     return textResult(`Steer failed: ${safeErrorText(result)}`, true);
   } catch (err) {
     return textResult(`Failed to steer agent: ${safeErrorText(err)}`, true);
-  }
-}
-
-async function handleReadTranscript(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const sessionKey = args.sessionKey as string;
-    if (!sessionKey) return textResult('sessionKey is required', true);
-
-    const limit = (args.limit as number) || 20;
-    const qs = `?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`;
-    const data = await apiFetch(`/api/runtime/transcript${qs}`) as Record<string, unknown>;
-    const transcript = (data.transcript ?? []) as Array<Record<string, unknown>>;
-
-    const entries = transcript.map((e) => ({
-      role: e.role,
-      text: typeof e.text === 'string' && e.text.length > 500 ? e.text.slice(0, 500) + '...' : e.text,
-      tool: e.toolName ?? null,
-      file: e.filePath ?? null,
-      time: e.timestampLabel,
-    }));
-
-    return jsonResult({ entryCount: entries.length, transcript: entries });
-  } catch (err) {
-    return textResult(`Failed to read transcript: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1331,6 +1291,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_propose_spec: handleProposeSpec,
   lane_touches: handleLaneTouches,
   cortex_worker_catalog: handleWorkerCatalog,
+  cortex_wait_workers: handleWaitWorkers,
   cortex_launch_agent: handleLaunchAgent,
   cortex_shared_team_status: handleSharedTeamStatus,
   cortex_finish_shared_team: handleFinishSharedTeam,

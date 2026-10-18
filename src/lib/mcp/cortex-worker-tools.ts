@@ -4,6 +4,19 @@ import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilitie
 /** Discovery and launch share one runtime/effort contract. */
 export const CORTEX_WORKER_TOOLS = [
   {
+    name: 'cortex_wait_workers',
+    description: 'Read recorded workers belonging to this conversation and workspace. First call returns a snapshot and opaque cursor; pass afterCursor to wait for a relevant recorded change, for at most 30 seconds. Use surface IDs from launch or fleet relatedWorkers. Includes exact run/outcome and result-delivery receipts; absent evidence stays unknown. Observation never adopts control of a session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        surfaceIds: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: 'One to eight exact recorded worker surface IDs belonging to this parent.' },
+        afterCursor: { type: 'string', description: 'Opaque cursor from the previous response for the same workers. Omit for an immediate snapshot.' },
+        timeoutMs: { type: 'integer', minimum: 0, maximum: 30000, description: 'Bounded wait; defaults to 10000 ms. Zero reads immediately.' },
+      },
+      required: ['surfaceIds'],
+    },
+  },
+  {
     name: 'cortex_worker_catalog',
     description: 'Read the configured worker pool and readiness. Pass a runtime to discover its model ids, supported effort and configured carrier. Use before choosing a worker for each task. Does not start a provider turn or change Settings. Unavailable choices must not be silently replaced.',
     inputSchema: { type: 'object', properties: { runtime: { type: 'string', enum: listDispatchableRuntimes(), description: 'Optional eligible runtime to inspect its model catalog.' } } },
