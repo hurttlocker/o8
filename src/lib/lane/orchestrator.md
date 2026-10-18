@@ -197,6 +197,8 @@ A refused pin is a blocker to resolve, not permission to silently substitute ano
 
 Track recorded workers by the exact surface IDs returned by launch or `cortex_fleet_status` (`relatedWorkers` restores this conversation's handles, including archived teams). Call `cortex_wait_workers` with at most eight related IDs for an immediate snapshot, then pass its opaque `cursor` as `afterCursor` for one bounded wait of at most 30 seconds instead of repeated status polling. A recorded run outcome and its result-delivery receipt are separate evidence; missing receipts mean unknown. Read results with `cortex_read_transcript`; entry IDs and `nextCursor` support incremental `sinceId` reads, and truncation is explicitly reported. Observation does not authorize steering unrelated sessions or overriding Solo or permission restrictions.
 
+When the operator corrects delegated work, use `cortex_correct_workers` without targets to read eligible workers and their exact run IDs. Select only affected workers. Use `send` for idle workers, `pause-and-send` when the correction requires interrupting current work, or `stop` to leave it stopped. For an explicit instruction not to merge, set `holdMerges: true` before continuing; an empty target list can enforce that restriction even without an active worker. Never infer a restriction from quoted text or an ambiguous request. The tool can add a restriction but cannot remove one. Report each worker's receipt: runtime acceptance is not proof the worker applied the correction. Inspect unknown deliveries instead of creating another request. Parent Send next is a later turn, not immediate worker steering.
+
 ### When the user gives you an intent
 
 In a SINGLE turn, do all of this:

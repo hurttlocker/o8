@@ -232,7 +232,9 @@ describe('desktop and preview packet mutation callers construct correlated bodie
     const cortexSource = readFileSync(join(ROOT, 'src/lib/mcp/cortex-mcp-server.ts'), 'utf8');
     expect(cortexSource).toContain('pollCorrelatedMcpApiMutation');
     expect(cortexSource).toContain("{ action: 'steer', surfaceId, message }");
-    expect(cortexSource).toContain("{ action: 'interrupt', surfaceId }");
+    const delegationSource = readFileSync(join(ROOT, 'src/lib/mcp/cortex-delegation-handlers.ts'), 'utf8');
+    expect(delegationSource).toContain("{ action: 'interrupt', surfaceId }");
+    expect(delegationSource).toContain('pollCorrelatedMcpApiMutation');
 
     const missionSource = readFileSync(join(ROOT, 'src/lib/mcp/operator-mission-tools.ts'), 'utf8');
     expect(missionSource).toContain('pollCorrelatedMcpMutation');

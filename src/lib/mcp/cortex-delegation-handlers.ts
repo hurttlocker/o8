@@ -15,6 +15,7 @@ function jsonResult(value: unknown): ToolResult {
 }
 
 export function createCortexDelegationHandlers(config: {
+  apiFetch: (path: string, options?: RequestInit) => Promise<unknown>;
   apiBase: string;
   repoPath: string;
   parentThreadId: string;
@@ -160,5 +161,38 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
-  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam };
+  async function handleCorrectWorkers(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      if (!config.repoPath || !config.parentThreadId) return textResult('Worker corrections require a persisted parent conversation.', true);
+      const path = '/api/orchestrator/worker-corrections';
+      if (args.targets === undefined) return jsonResult(await config.apiFetch(`${path}?${new URLSearchParams({ repoPath: config.repoPath, threadId: config.parentThreadId })}`));
+      return jsonResult(await config.apiFetch(path, { method: 'POST', body: JSON.stringify({ repoPath: config.repoPath,
+        threadId: config.parentThreadId, id: args.idempotencyKey, payload: { targets: args.targets, message: args.message,
+          mode: args.mode, holdMerges: args.holdMerges === true } }) }));
+    } catch (error) { return textResult(`Worker correction failed: ${safeErrorText(error)}`, true); }
+  }
+
+  async function handleInterruptAgent(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const surfaceId = args.surfaceId as string;
+      if (!surfaceId) return textResult('surfaceId is required', true);
+
+      const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
+        url: `${config.apiBase}/api/runtime/action`,
+        authorization: `Bearer ${config.wsToken}`,
+        body: { action: 'interrupt', surfaceId },
+        parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
+        correlationField: 'clientMutationId',
+      });
+
+      if (result.ok) {
+        return jsonResult({ ok: true, note: result.note });
+      }
+      return textResult(`Interrupt failed: ${safeErrorText(result)}`, true);
+    } catch (err) {
+      return textResult(`Failed to interrupt agent: ${safeErrorText(err)}`, true);
+    }
+  }
+
+  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleCorrectWorkers, handleInterruptAgent };
 }

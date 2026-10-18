@@ -43,6 +43,7 @@ import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
+import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -895,6 +896,9 @@ async function dispatchUnlocked(
       if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (merge)`);
       }
+
+      try { assertSessionMergeAllowed(lane.packetId); }
+      catch (error) { return { ok: false, laneId: lane.id, note: error instanceof Error ? error.message : 'Session restriction unavailable; merge held.' }; }
 
       // #3740 — a held mission merges only by the operator's hand. Checked after
       // every other gate, so the card means "ready to merge, held by the mission".

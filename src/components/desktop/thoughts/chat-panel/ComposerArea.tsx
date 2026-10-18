@@ -35,6 +35,7 @@ import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { ComposerQueueActions } from './ComposerQueueActions';
+import { WorkerCorrections } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
@@ -346,6 +347,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         />
       ) : null}
       {activityContent}
+      {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+        key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
+        draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting}
+        onDelivered={sent => { if (input === sent) onInputChange(''); }}
+      /> : null}
       {sendBufferStatus}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
         <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />

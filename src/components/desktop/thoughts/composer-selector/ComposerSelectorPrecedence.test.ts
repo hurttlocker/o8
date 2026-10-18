@@ -19,6 +19,8 @@ import { writeStoredComposerMode } from '../composer-mode-storage';
 import type { ComposerSelectorMode } from './state';
 import type { ComposerWorkerDefaults } from './worker-settings';
 
+vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: vi.fn() }));
+
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
 

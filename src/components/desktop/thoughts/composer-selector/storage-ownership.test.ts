@@ -10,6 +10,7 @@ const directPersistenceSeams: Record<string, string> = {
   'AcpModelPicker.tsx': 'Owns the recent-model list for each searchable backend picker.',
   'ThoughtsChatPanel.tsx': 'Owns the one-shot suppression flag for automatic thread restoration.',
   'chat-panel/TaskArtifactCard.tsx': 'Owns unsent task-artifact drafts keyed by artifact id.',
+  'chat-panel/WorkerCorrections.tsx': 'Owns pending correction identity and exact payload per repository and conversation, preventing duplicate delivery after reload.',
   'chat-panel/useAgentVoiceMode.ts': 'Owns the per-agent voice-mode preference.',
   'composer-mode-storage.ts': 'Owns tab-scoped composer mode persistence and legacy migration.',
   'composer-selector/state.ts': 'Owns selector feature flags plus global and per-thread effort maps.',

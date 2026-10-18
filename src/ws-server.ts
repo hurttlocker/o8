@@ -246,6 +246,7 @@ import { createChatContinuationHeartbeat, publishComposerQueueChange } from './l
 import { withImmediateComposerSend, orchestratorContinuationAbortKey as orchestratorAbortKey } from './lib/ws-server/composer-send-admission';
 import { sendLeadTerminalStatus } from './lib/ws-server/lead-terminal-status';
 import { holdComposerSends } from './lib/orchestrator/composer-queue';
+import { holdWorkerCorrections } from './lib/orchestrator/worker-corrections';
 import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
   findLeadThreadBinding,
@@ -6226,7 +6227,7 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
   if (threadId) {
-    stopSharedWorkerReturns(repoPath, threadId); holdComposerSends({ repoPath, threadId });
+    stopSharedWorkerReturns(repoPath, threadId); holdComposerSends({ repoPath, threadId }); holdWorkerCorrections({ repoPath, threadId });
     publishComposerQueueChange(threadId);
   }
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;

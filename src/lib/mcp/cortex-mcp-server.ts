@@ -108,7 +108,8 @@ const PARENT_THREAD_ID = process.env.CORTEX_THREAD_ID || '';
 const FAST_CAPABILITY = process.env.CORTEX_FAST_CAPABILITY || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
-const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = createCortexDelegationHandlers({
+const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleCorrectWorkers, handleInterruptAgent } = createCortexDelegationHandlers({
+  apiFetch,
   apiBase: API_BASE,
   repoPath: REPO_PATH,
   parentThreadId: PARENT_THREAD_ID,
@@ -875,28 +876,6 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
   }
 }
 
-async function handleInterruptAgent(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const surfaceId = args.surfaceId as string;
-    if (!surfaceId) return textResult('surfaceId is required', true);
-
-    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
-      url: `${API_BASE}/api/runtime/action`,
-      authorization: `Bearer ${WS_TOKEN}`,
-      body: { action: 'interrupt', surfaceId },
-      parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
-      correlationField: 'clientMutationId',
-    });
-
-    if (result.ok) {
-      return jsonResult({ ok: true, note: result.note });
-    }
-    return textResult(`Interrupt failed: ${safeErrorText(result)}`, true);
-  } catch (err) {
-    return textResult(`Failed to interrupt agent: ${safeErrorText(err)}`, true);
-  }
-}
-
 // ── Conversational MCP registration ──
 
 function serversFromDiscreteArgs(args: Record<string, unknown>): ParsedMcpServer[] {
@@ -1296,6 +1275,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_shared_team_status: handleSharedTeamStatus,
   cortex_finish_shared_team: handleFinishSharedTeam,
   cortex_steer_agent: handleSteerAgent,
+  cortex_correct_workers: handleCorrectWorkers,
   cortex_read_transcript: handleReadTranscript,
   cortex_interrupt_agent: handleInterruptAgent,
   register_mcp: handleRegisterMcp,

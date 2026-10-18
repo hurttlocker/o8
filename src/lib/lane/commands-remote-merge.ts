@@ -7,6 +7,7 @@ import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-histo
 import { getLane, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { fetchWorkerRun } from '@/lib/worker/runs';
+import { SessionMergeRestrictionError, withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
@@ -144,14 +145,17 @@ export async function performRemoteCustomerMerge(
         mergeArgs.push('-X', command.strategy);
       }
       mergeArgs.push(actualBranch);
-      await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
-      if (historyPlan.kind === 'squash') {
-        await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], {
-          windowsHide: true,
-          cwd: lane.repoPath,
-        });
-      }
+      await withSessionMergePublication(lane.packetId, async () => {
+        await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
+        if (historyPlan.kind === 'squash') {
+          await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], { windowsHide: true, cwd: lane.repoPath });
+        }
+      });
     } catch (mergeErr) {
+      if (mergeErr instanceof SessionMergeRestrictionError) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'session_merge_restricted');
+        return { ok: false, laneId: lane.id, note: mergeErr.message };
+      }
       let conflictFiles: string[] = [];
       try {
         const { stdout: unmerged } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
@@ -199,11 +203,11 @@ export async function performRemoteCustomerMerge(
     let pushedToOrigin = false;
     let pushError: string | undefined;
     try {
-      await execFileAsync('git', ['push', 'origin', lane.baseBranch], {
+      await withSessionMergePublication(lane.packetId, () => execFileAsync('git', ['push', 'origin', lane.baseBranch], {
         windowsHide: true,
         cwd: lane.repoPath,
         timeout: 60_000,
-      });
+      }));
       pushedToOrigin = true;
       console.log(`[remote-merge] Pushed ${lane.baseBranch} to origin after merging ${actualBranch}`);
     } catch (pushErr) {
