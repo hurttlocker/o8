@@ -25,7 +25,7 @@ interface HoverTranscript {
 const CARD_WIDTH = 348;
 const CARD_HEIGHT_ESTIMATE = 242;
 
-export function resolveHoverPosition(anchorRect: DOMRect) {
+export function resolveHoverPosition(anchorRect: DOMRect, estimatedHeight = CARD_HEIGHT_ESTIMATE) {
   const viewportWidth = typeof window === 'undefined' ? 1440 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 900 : window.innerHeight;
   const margin = 14;
@@ -34,8 +34,8 @@ export function resolveHoverPosition(anchorRect: DOMRect) {
     left = Math.max(margin, anchorRect.left - CARD_WIDTH - 14);
   }
   let top = anchorRect.top - 4;
-  if (top + CARD_HEIGHT_ESTIMATE + margin > viewportHeight) {
-    top = Math.max(margin, viewportHeight - CARD_HEIGHT_ESTIMATE - margin);
+  if (top + estimatedHeight + margin > viewportHeight) {
+    top = Math.max(margin, viewportHeight - estimatedHeight - margin);
   }
   return { left, top };
 }
