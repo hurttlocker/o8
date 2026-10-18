@@ -149,6 +149,8 @@ Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms 
 
 Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116) exposes Open workspace directly beside each project and labels details separately from editing. Development checks cover repeated opening and failure recovery. Required PR checks and released-build acceptance remain separate gates.
 
+Workspace utility navigation [#3133](https://github.com/hurttlocker/o8/issues/3133) retains the originating tab and tab order, including a fresh unsent conversation. A workspace composer keeps its draft while hidden. Persistence and native development checks remain distinct from released-build acceptance.
+
 Saved repository recovery [#3870](https://github.com/hurttlocker/o8/issues/3870) can restore a validated registered-repository path without waiting for a worktree scan. External paths still require exact authoritative membership, and stale inventory cannot overwrite a newer removal. Native recovery and automated evidence remain separate from release inclusion.
 
 ## 6. Runs where you are
