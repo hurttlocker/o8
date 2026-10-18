@@ -1,6 +1,11 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { focusSwarmPacket, packetsForOrchestratorThread, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
+import { SwarmStatusCard, focusSwarmPacket, packetsForOrchestratorThread, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function packet(): OrchestratorPacket {
   return {
@@ -94,5 +99,54 @@ describe('focusSwarmPacket', () => {
     expect(packetsForOrchestratorThread([direct, attributed, stale], 'thoughts-current'))
       .toEqual([direct, attributed]);
     expect(packetsForOrchestratorThread([direct], null)).toEqual([]);
+  });
+});
+
+describe('subagent disclosure', () => {
+  it('shows native failure and missing receipts without offering unsupported worker controls', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(SwarmStatusCard, {
+        packets: [], defaultExpanded: true,
+        scouts: [{ id: 'native-failed', label: 'Inspect auth', status: 'failed' }, { id: 'native-unknown', label: 'Inspect routes', status: 'unknown' }],
+      })));
+      expect(host.textContent).toContain('1 failed · 1 unconfirmed');
+      expect(host.textContent).toContain('Inspect auth');
+      expect(host.textContent).toContain('Managed by this conversation');
+      expect(host.querySelector('[data-swarm-crew]')?.querySelector('button')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  });
+
+  it('starts compact, counts durable identities once, and opens the current worker binding', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    const focus = vi.fn();
+    const running = packet();
+    const review = { ...packet(), id: 'pkt-review', title: 'Review changes', status: 'awaiting_review' as const };
+    try {
+      await act(async () => root.render(createElement(SwarmStatusCard, { packets: [running, running, review], onFocusPacket: focus })));
+      const toggle = host.querySelector<HTMLButtonElement>('[aria-expanded]')!;
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(toggle?.textContent).toContain('2 subagents');
+      expect(toggle?.textContent).toContain('1 running');
+      expect(toggle?.textContent).toContain('1 awaiting review');
+      expect(host.textContent).not.toContain('Fix worker focus');
+      await act(async () => toggle.click());
+      expect(toggle.getAttribute('aria-controls')).toBe(host.querySelector('[data-swarm-crew]')?.id);
+      const rebound = { ...running, lane: { ...running.lane!, sessionKey: 'session-new' } };
+      await act(async () => root.render(createElement(SwarmStatusCard, { packets: [rebound, review], onFocusPacket: focus })));
+      await act(async () => host.querySelector<HTMLButtonElement>('[title="Open Fix worker focus"]')!.click());
+      expect(focus).toHaveBeenCalledWith(rebound);
+      expect(host.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
   });
 });

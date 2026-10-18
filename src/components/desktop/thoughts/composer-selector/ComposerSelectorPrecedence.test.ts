@@ -227,7 +227,7 @@ describe('composer selector real-path precedence', () => {
     await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Provider Deepseek"]')!.click(); });
     await act(async () => { document.querySelector<HTMLButtonElement>('[title="deepseek.deepseek-v4-pro"]')!.click(); });
     const workerChip = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workerChip.getAttribute('aria-label')).toBe('Workers: 2 3code, deepseek.deepseek-v4-pro');
+    expect(workerChip.getAttribute('aria-label')).toBe('Default worker: 2 3code, deepseek.deepseek-v4-pro');
     expect(workerChip.getAttribute('aria-label')).not.toContain('openrouter/openai/gpt-5.6');
     expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
 
@@ -261,7 +261,7 @@ describe('composer selector real-path precedence', () => {
     expect(operatorValues.threecodeWorkerModel).toBe('deepseek.deepseek-v4-pro');
     expect(container.querySelector('[data-testid="composer-selector-test-lead"]')?.textContent).toBe('gpt-5.6-sol');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label'))
-      .toBe('Workers: 2 3code, deepseek.deepseek-v4-pro');
+      .toBe('Default worker: 2 3code, deepseek.deepseek-v4-pro');
   });
   it('persists CLI worker thinking independently and uses provider defaults for other workers', async () => {
     operatorValues = { ...operatorValues, defaultDispatchRuntime: 'codex', codexWorkerEffort: 'adaptive' };
