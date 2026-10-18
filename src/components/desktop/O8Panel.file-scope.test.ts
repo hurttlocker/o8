@@ -33,6 +33,35 @@ let host: HTMLDivElement; let root: Root;
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear(); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 describe('panel file scope', () => {
+  it('offers a single working route to the main terminal when the right bridge is unavailable', async () => {
+    let finish: (() => void) | undefined;
+    const onOpenMainTerminal = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    const recovery = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open main terminal');
+    expect(recovery).toBeDefined();
+    expect(host.textContent).toContain('The right-panel terminal is unavailable');
+    await act(async () => { recovery!.click(); recovery!.click(); });
+    expect(onOpenMainTerminal).toHaveBeenCalledOnce();
+    expect(recovery!.disabled).toBe(true);
+    await act(async () => finish?.());
+    expect(recovery!.disabled).toBe(false);
+    await act(async () => root.render(createElement(O8Panel, { activeTab: 'files', onOpenMainTerminal })));
+    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    expect(host.textContent).toContain('Open main terminal');
+  });
+
+  it('keeps a failed terminal recovery actionable and displays its actual reason', async () => {
+    const onOpenMainTerminal = vi.fn().mockRejectedValueOnce(new Error('The workspace is still restoring.')).mockResolvedValue(undefined);
+    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    const recovery = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open main terminal');
+    expect(recovery).toBeDefined();
+    await act(async () => recovery!.click());
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('The workspace is still restoring.');
+    await act(async () => recovery!.click());
+    expect(onOpenMainTerminal).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it('ignores foreign Browser navigation and can restore the same parent URL after a legacy override', async () => {
     const original = 'http://localhost/original'; const other = 'http://localhost/other';
     await act(async () => root.render(createElement(O8Panel, { activeTab: 'browser', browserUrl: original, browserStateKey: 'owned-browser', onActiveTabChange: vi.fn() })));

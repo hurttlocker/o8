@@ -191,6 +191,7 @@ import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { createDashboardChromeKeydownHandler } from './dashboard-chrome-shortcuts';
+import { openMainTerminal } from '@/app/dashboard/open-main-terminal';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -5035,6 +5036,13 @@ function DashboardInner() {
                           sendTerminalDetach={sendTerminalDetach}
                           sendAgentKill={sendAgentKill}
                           termWsConnected={termWsConnected}
+                          onOpenMainTerminal={(repoPath) => openMainTerminal({
+                            handles: workspaceTerminalHandlesRef.current,
+                            repoPath,
+                            repo: repoPath ? { localPath: repoPath, name: globalRepoEntries.find((repo) => repo.localPath === repoPath)?.name ?? 'Project' } : undefined,
+                            activate: setActiveTileId,
+                            waitForTarget: () => waitForWorkspaceTerminalTarget({ repoPath, fallbackToAnyExisting: !repoPath }),
+                          })}
                         />
                       </OrchestratorDataProvider>
                     </Suspense>
