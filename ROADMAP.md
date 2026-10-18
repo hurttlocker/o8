@@ -131,6 +131,8 @@ The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/iss
 
 Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now opens newly announced apps in the existing Browser instead of adding a second terminal viewer. Retained output is marked across WebSocket transports; repeat announcements from a terminal session do not reopen a closed page. Ports exposes an immediate clickable app list. The old inline viewer is retired. Development and regression acceptance are tracked separately from CI and installed releases.
 
+Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) accepts an empty string to clear a field and preserves leading spaces, trailing spaces and line breaks. Controlled-field event coverage and native development checks are separate from required PR CI and released-build acceptance.
+
 Composer Brain routing [#3863](https://github.com/hurttlocker/o8/issues/3863) prefers an authenticated native Codex or Claude connection and uses the Terra or Sonnet answer tier. Explicit Codex Brain model choices remain effective. Managed Brain is the fallback when neither supported native connection is ready; other runtime inference adapters remain separate work. Connected conversation retrieval is lexical and does not start paid semantic embedding calls. Native Codex acceptance, fixture coverage and released-build acceptance remain separate gates.
 
 ## 6. Runs where you are
