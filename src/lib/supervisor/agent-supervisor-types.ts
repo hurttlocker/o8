@@ -64,6 +64,8 @@ export interface AgentCompletionDecision {
 }
 
 export interface SupervisorCallbacks {
+  /** Durable ordinary-chat returns share the supervisor heartbeat, including when no lane is watched. */
+  onHeartbeat?: () => void;
   fetchFleetStatus(): Promise<AgentStatusEntry[]>;
   fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
   steerAgent(surfaceId: string, message: string, automaticRecoveryRunId?: string): Promise<void>;

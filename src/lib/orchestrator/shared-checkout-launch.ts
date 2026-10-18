@@ -9,6 +9,8 @@ import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-typ
 import type { WorkerRouting, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 import { failSharedCheckoutMember, recordSharedCheckoutMember, reserveSharedCheckoutMember, validateSharedCheckoutPaths } from './shared-checkout-team';
+import { captureSharedWorkerOrigin } from './shared-worker-origin';
+import { registerSharedWorkerParent } from './shared-worker-returns';
 
 export async function launchSharedCheckoutWorker(input: {
   repoPath: string;
@@ -27,6 +29,7 @@ export async function launchSharedCheckoutWorker(input: {
   assignedPaths: string[];
 }) {
   const assignedPaths = validateSharedCheckoutPaths(input.assignedPaths);
+  const origin = captureSharedWorkerOrigin(input.repoPath, input.parentThreadId);
   const team = await reserveSharedCheckoutMember({ ...input, runtime: input.runtime, paths: assignedPaths });
   const recovered = await findOwnedLaunchByMutationId(input.clientMutationId);
   if (recovered && recovered.cwd !== team.path) {
@@ -78,17 +81,20 @@ export async function launchSharedCheckoutWorker(input: {
   }
   if (!result.ok || !result.surfaceId) {
     if (result.surfaceId) {
-      await recordSharedCheckoutMember({ ...input, surfaceId: result.surfaceId, runtime: input.runtime, taskName: input.taskName });
+      await recordSharedCheckoutMember({ ...input, parentTurnId: origin?.turnId, surfaceId: result.surfaceId, runtime: input.runtime, taskName: input.taskName });
+      if (origin) registerSharedWorkerParent({ repoPath: input.repoPath, surfaceId: result.surfaceId, origin });
     }
     await failSharedCheckoutMember(input);
     return { ok: false as const, error: result.note, teamId: team.id, surfaceId: result.surfaceId ?? null };
   }
   await recordSharedCheckoutMember({
     ...input,
+    parentTurnId: origin?.turnId,
     surfaceId: result.surfaceId,
     runtime: input.runtime,
     taskName: input.taskName,
   });
+  if (origin) registerSharedWorkerParent({ repoPath: input.repoPath, surfaceId: result.surfaceId, origin });
   try {
     const { wsPort } = resolvePortInfo();
     const response = await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {

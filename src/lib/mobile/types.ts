@@ -337,6 +337,7 @@ export interface MobileTranscriptCommand {
 }
 
 export interface MobileTurnReceipt {
+  permissionMode?: 'full' | 'plan';
   leadModel: string;
   effort: ThinkingEffort;
   mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';

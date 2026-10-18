@@ -1,7 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
-import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { isPaneOwnedThread } from '@/lib/orchestrator/pane-thread-registry';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
@@ -10,6 +9,7 @@ import {
 } from './shared';
 import { parseTerminalTurnReceipt, parseTerminalUsage } from './terminal-receipt';
 import { parseHandoffEventData } from './handoff-socket';
+import { createAssistantState, continuationUserMessage } from './continuation-start';
 
 interface RefLike<T> {
   current: T;
@@ -95,9 +95,6 @@ interface CreateOrchestratorMessageHandlerOptions {
   wsRef: RefLike<WebSocket | null>;
 }
 
-/** ACP message/thought chunks and proxy deltas are verbatim text slices. */
-const VERBATIM_STREAM_BACKENDS = new Set(['o8', 'acp', 'hermes', 'opencode']);
-
 // RC1 seam 3 — stale-busy reconcile window. A subscribe/reconnect snapshot must
 // NOT downgrade a genuinely live 'busy' (the first-turn re-subscribe race: a
 // snapshot 'ready' can land right after send() optimistically set 'busy', before
@@ -128,25 +125,6 @@ function parseSnapshotTurn(value: unknown): OrchestratorSnapshotTurn | null | un
     settledAt: turn.settledAt,
     outcome: turn.outcome,
     assistantMessageId: turn.assistantMessageId,
-  };
-}
-
-function createAssistantState(
-  resetEpochRef: RefLike<number>,
-  assistantMessageId?: unknown,
-  backend?: unknown,
-  model?: unknown,
-): CurrentAssistantStreamState {
-  return {
-    id: typeof assistantMessageId === 'string' && assistantMessageId.trim()
-      ? assistantMessageId.trim()
-      : `assistant-${Date.now()}`,
-    chunks: [],
-    thinkingChunks: [],
-    epoch: resetEpochRef.current,
-    backend: isOrchestratorBackendId(backend) ? backend : undefined,
-    model: typeof model === 'string' && model.trim() ? model.trim() : undefined,
-    verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
   };
 }
 
@@ -291,6 +269,15 @@ export function createOrchestratorMessageHandler(
     }
 
     switch (msg.event) {
+      case 'turn-start': {
+        const entry = continuationUserMessage(msg.data);
+        if (!entry || options.currentAssistantRef.current?.id === msg.data?.assistantMessageId
+          || options.messagesRef.current.some(message => message.id === entry.id)) break;
+        if (options.currentAssistantRef.current) options.flushCurrentAssistant();
+        options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend, msg.data?.model);
+        setTranscriptMessages(previous => previous.some(message => message.id === entry.id) ? previous : [...previous, entry]);
+        break;
+      }
       case 'handoff': {
         const handoff = parseHandoffEventData(msg.data);
         if (!handoff) break;

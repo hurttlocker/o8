@@ -242,6 +242,8 @@ import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orch
 import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
 import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
 import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
+import { createSharedWorkerHeartbeat } from './lib/ws-server/shared-worker-heartbeat';
+import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -5759,6 +5761,7 @@ async function handleOrchestratorSendMsgOnce(
             const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode);
             const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
             activeAssistantReceipt = {
+              permissionMode,
               leadModel: event.leadModel,
               effort: event.effort,
               mode,
@@ -6264,6 +6267,7 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
+  if (threadId) stopSharedWorkerReturns(repoPath, threadId);
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
   if (leadBinding) {
     const correlationId = resolveOrchestratorCommandCorrelationId(msg);
@@ -9755,6 +9759,19 @@ async function bootstrapWsServer() {
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
+      onHeartbeat: createSharedWorkerHeartbeat({
+        readTranscript: fetchRuntimeTranscript,
+        isBusy: (repoPath, origin) => orchestratorInflightAborts.has(orchestratorAbortKey(repoPath, origin.backend, '', origin.threadId))
+          || getOrchestratorBackend(origin.backend).peekSession(repoPath, undefined, origin.threadId)?.status === 'busy',
+        registerAbort: (repoPath, origin, controller) => {
+          const key = orchestratorAbortKey(repoPath, origin.backend, '', origin.threadId);
+          if (orchestratorInflightAborts.has(key)) throw new Error('Parent chat is already working.');
+          orchestratorInflightAborts.set(key, controller);
+          return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+        },
+        publish: (threadId, sessionName, event, data) => broadcastToOrchestratorSession(
+          orchestratorRouteSessionName(sessionName, threadId), JSON.stringify({ channel: 'orchestrator', event, data })),
+      }),
       async fetchFleetStatus() {
         // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.
         // The supervisor only needs to detect status changes, not millisecond-fresh data.
