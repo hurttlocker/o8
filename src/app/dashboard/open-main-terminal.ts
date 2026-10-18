@@ -11,7 +11,7 @@ export async function openMainTerminal({ handles, repoPath, activate, waitForTar
 }): Promise<void> {
   for (const [tileId, handle] of handles) {
     const snapshot = handle.getTabsSnapshot();
-    const terminals = snapshot.tabs.filter((tab) => tab.kind === 'terminal' && (!repoPath || tab.repoPath === repoPath));
+    const terminals = snapshot.tabs.filter((tab) => tab.kind === 'terminal' && !tab.terminalExited && (!repoPath || tab.repoPath === repoPath));
     const tab = terminals.find((candidate) => candidate.id === snapshot.activeTabId) ?? terminals[0];
     if (tab && handle.focusTab(tab.id)) {
       activate(tileId);
@@ -21,7 +21,7 @@ export async function openMainTerminal({ handles, repoPath, activate, waitForTar
   const target = await waitForTarget();
   // A target can mount while recovery waits for workspace restoration.
   const snapshot = target.handle.getTabsSnapshot();
-  const existing = snapshot.tabs.find((tab) => tab.kind === 'terminal' && (!repoPath || tab.repoPath === repoPath));
+  const existing = snapshot.tabs.find((tab) => tab.kind === 'terminal' && !tab.terminalExited && (!repoPath || tab.repoPath === repoPath));
   if (!existing || !target.handle.focusTab(existing.id)) target.handle.openTerminalTab(repo);
   activate(target.tileId);
 }

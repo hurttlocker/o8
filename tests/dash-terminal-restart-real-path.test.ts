@@ -21,6 +21,8 @@ type WireFrame = {
     data?: string;
     requestId?: string;
     sessionName?: string;
+    exitCode?: number;
+    exitCodeSource?: string;
   };
 };
 
@@ -233,6 +235,23 @@ afterAll(async () => {
 }, 45_000);
 
 describe.runIf(tmuxAvailable)('dashboard terminal restart through the real WebSocket path', () => {
+  it.each([{ directPty: true, code: 0 }, { directPty: true, code: 7 }, { directPty: false, code: 7 }])('reports exit provenance for a real shell: %j', async ({ directPty, code }) => {
+    const client = await connectClient();
+    const requestId = `exit-${directPty}-${code}`;
+    client.socket.send(JSON.stringify({ type: 'terminal-create', cols: 100, rows: 25, requestId, directPty, cwd: repoDir }));
+    await waitFor(() => client.frames.some((frame) => frame.event === 'created' && frame.data?.requestId === requestId), 'exit fixture creation');
+    const sessionName = client.frames.find((frame) => frame.event === 'created' && frame.data?.requestId === requestId)!.data!.sessionName!;
+    client.socket.send(JSON.stringify({ type: 'terminal-attach', sessionName, cols: 100, rows: 25 }));
+    await waitFor(() => client.frames.some((frame) => frame.event === 'attached' && frame.data?.sessionName === sessionName), 'exit fixture attachment');
+    client.socket.send(JSON.stringify({ type: 'terminal-input', sessionName, data: `printf 'O8_EXIT_MARKER_${code}\\n'; exit ${code}\n` }));
+    await waitFor(() => client.frames.some((frame) => frame.event === 'exited' && frame.data?.sessionName === sessionName), 'real shell exit');
+    const exit = client.frames.find((frame) => frame.event === 'exited' && frame.data?.sessionName === sessionName)!.data!;
+    expect(exit.exitCodeSource).toBe(directPty ? 'process' : 'transport');
+    if (directPty) expect(exit.exitCode).toBe(code);
+    expect(terminalText(client.frames, sessionName)).toContain(`O8_EXIT_MARKER_${code}`);
+    client.socket.close();
+  }, 35_000);
+
   it('reclaims one owned tmux session with scrollback and the same running interactive program after server loss', async () => {
     const first = await connectClient();
     first.socket.send(JSON.stringify({

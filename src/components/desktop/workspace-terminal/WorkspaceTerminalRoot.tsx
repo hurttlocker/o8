@@ -415,6 +415,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           termWsConnected={controller.termWsConnected}
           panelRefs={panelRefs}
           onCloseTab={controller.handleCloseTab}
+          onNewTerminal={createTerminalModeShellTab}
           onRunInTerminal={controller.handleRunCommandInTerminal}
           onOpenWorkspaceCommitTab={controller.handleOpenWorkspaceCommitTab}
           onUpdateLlmSummary={controller.handleUpdateLlmSummary}

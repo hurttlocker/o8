@@ -10,6 +10,9 @@ import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/ter
 import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-terminal/terminal-hidden-buffer';
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import { decodeTerminalBase64 } from './terminal-base64';
+import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
+import { TerminalExitNotice } from './TerminalExitNotice';
+import { retainTerminalExitBuffer } from './terminal-exit-buffer';
 import type { InlineImage, XtermPanelHandle, XtermPanelProps } from './xterm-panel-types';
 export type { InlineImage, XtermPanelHandle, XtermPanelProps } from './xterm-panel-types';
 import {
@@ -64,13 +67,14 @@ function sendBenchTerminalVisibility(
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, readOnly = false, inputLocked = false, screenReaderMode = false, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
+  { tmuxSession, exitState, onNewShell, onClose, readOnly = false, inputLocked = false, screenReaderMode = false, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
   ref,
 ) {
   const { themeId } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const termRef = useRef<any>(null);
+  const exitBufferRef = useRef<ReturnType<typeof retainTerminalExitBuffer> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -105,7 +109,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     cancel(resetTerm);
   };
   const [error, setError] = useState<string | null>(null);
-  const [exited, setExited] = useState(false);
+  const exitRef = useRef<TerminalExitState | undefined>(exitState);
+  const [exited, setExited] = useState<TerminalExitState | undefined>(exitState);
   const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
   const imageCountRef = useRef(0);
 
@@ -126,7 +131,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         proposedDimensions,
       });
       recordTerminalBenchDimensions(tmuxSession, term.cols, term.rows);
-      if (!readOnly) sendTerminalResize(tmuxSession, term.cols, term.rows);
+      if (!readOnly && !exitRef.current) sendTerminalResize(tmuxSession, term.cols, term.rows);
     } catch (error) {
       recordTerminalBenchEvent('xterm-fit', {
         sessionName: tmuxSession,
@@ -146,7 +151,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     awaitingVisibilityRef.current = false;
     const queuedInput = queuedInputRef.current;
     queuedInputRef.current = [];
-    if (!readOnly) for (const data of queuedInput) sendTerminalInput(tmuxSession, data);
+    if (!readOnly && !exitRef.current) for (const data of queuedInput) sendTerminalInput(tmuxSession, data);
   }, [readOnly, sendTerminalInput, tmuxSession]);
 
   const finishRevealAfterPaint = useCallback((epoch: number) => {
@@ -318,7 +323,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           const finishReplay = () => {
             if (termRef.current !== term || snapshotReplayGenerationRef.current !== replayGeneration) return;
             snapshotReplayEpochRef.current = null;
-            term.options.disableStdin = readOnly || inputLockedRef.current;
+            term.options.disableStdin = readOnly || inputLockedRef.current || Boolean(exitRef.current);
           };
           if (epoch !== visibilityEpochRef.current || !visibleRef.current) {
             hiddenNeedsResyncRef.current = true;
@@ -330,7 +335,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       } catch {
         if (snapshotReplayGenerationRef.current === replayGeneration) {
           snapshotReplayEpochRef.current = null;
-          term.options.disableStdin = readOnly || inputLockedRef.current;
+          term.options.disableStdin = readOnly || inputLockedRef.current || Boolean(exitRef.current);
         }
         recordTerminalDiagnostic({ code: 'terminal_resync_failed', sessionName: tmuxSession });
       }
@@ -352,8 +357,28 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         waitedMs: typeof diagnostic.waitedMs === 'number' ? diagnostic.waitedMs : undefined,
       });
     },
-    setError: (nextError: string) => setError(nextError),
-    setExited: () => setExited(true),
+    setError: (nextError: string) => { if (!exitRef.current) setError(nextError); },
+    setExited: (exitCode, onSnapshot) => {
+      if (exitRef.current) return;
+      exitRef.current = terminalExitState(exitCode);
+      queuedInputRef.current = [];
+      cancelReveal(false);
+      revealHoldRef.current = false;
+      const term = termRef.current;
+      if (term) term.options.disableStdin = true;
+      for (const chunk of pendingChunksRef.current.splice(0)) term?.write(decodeTerminalBase64(chunk));
+      const bytes = hiddenBufferRef.current.drain();
+      if (bytes.byteLength) term?.write(bytes);
+      const finish = () => {
+        const current = readTerminalText(term, TERMINAL_SCROLLBACK_LINES);
+        const state = terminalExitState(exitCode, exitBufferRef.current?.read() ?? current);
+        if (term && state.transcript !== current) { term.reset(); term.options.disableStdin = true; term.write(state.transcript.replace(/\n/g, '\r\n')); }
+        exitRef.current = state;
+        setExited(state);
+        onSnapshot?.(state);
+      };
+      if (term) term.write('', finish); else finish();
+    },
   }), [fitTerminal, flushHiddenBytes, queueHiddenBytes, readOnly, tmuxSession]);
 
   useEffect(() => (
@@ -369,11 +394,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   }, [tmuxSession, visible]);
 
   useEffect(() => {
-    if (termRef.current) termRef.current.options.disableStdin = readOnly || inputLocked || snapshotReplayEpochRef.current !== null;
+    if (termRef.current) termRef.current.options.disableStdin = readOnly || inputLocked || Boolean(exitRef.current) || snapshotReplayEpochRef.current !== null;
   }, [inputLocked, readOnly]);
 
   useEffect(() => {
-    if (!sendTerminalVisibility) return;
+    if (!sendTerminalVisibility || exitRef.current) return;
     const epoch = visibilityEpochRef.current + 1;
     visibilityEpochRef.current = epoch;
     awaitingVisibilityRef.current = visible;
@@ -443,7 +468,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           lineHeight: lineHeight ?? 1.45,
           cursorBlink: true,
           cursorStyle: 'block',
-          disableStdin: readOnly || inputLockedRef.current,
+          disableStdin: readOnly || inputLockedRef.current || Boolean(exitRef.current),
           screenReaderMode,
           allowTransparency: transparent === true,
           allowProposedApi: true,
@@ -481,6 +506,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         }
 
         term.open(containerRef.current);
+        exitBufferRef.current = retainTerminalExitBuffer(term);
         termRef.current = term;
         fitAddonRef.current = fitAddon;
         recordTerminalBenchEvent('xterm-created', {
@@ -496,7 +522,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           })
           : null;
         term.onData((data) => {
-          if (readOnly || inputLockedRef.current) return;
+          if (readOnly || inputLockedRef.current || exitRef.current) return;
           if (awaitingVisibilityRef.current) {
             queuedInputRef.current.push(data);
             return;
@@ -544,6 +570,10 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
             ...(fitError ? { error: fitError } : {}),
           });
           recordTerminalBenchDimensions(tmuxSession, liveTerm.cols, liveTerm.rows);
+          if (exitRef.current) {
+            liveTerm.write(exitRef.current.transcript.replace(/\n/g, '\r\n'));
+            return;
+          }
           if (spawnReveal) {
             revealHoldRef.current = revealMinPlay === true;
             revealCancelRef.current = startSpawnReveal(liveTerm, {
@@ -620,6 +650,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       observerRef.current = null;
       cleanupPromise?.then((cleanup) => cleanup?.());
       if (termRef.current) {
+        exitBufferRef.current?.dispose(); exitBufferRef.current = null;
         termRef.current.dispose();
         termRef.current = null;
       }
@@ -634,7 +665,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // attaches again. The server replays scrollback into the clean buffer,
   // which makes a duplicate attach visually idempotent.
   useEffect(() => {
-    if (connectionEpoch === undefined || connectionEpoch < 1) return;
+    if (connectionEpoch === undefined || connectionEpoch < 1 || exitRef.current) return;
     const term = termRef.current;
     if (!term) return;
     cancelReveal(false);
@@ -692,24 +723,6 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     );
   }
 
-  if (exited) {
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#64748b',
-          fontSize: 13,
-          fontFamily: 'ui-monospace, monospace',
-        }}
-      >
-        Session ended
-      </div>
-    );
-  }
-
   return (
     <div
       data-o8-term-panel={tmuxSession}
@@ -723,6 +736,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         overflow: 'hidden',
       }}
     >
+      {exited ? <TerminalExitNotice state={exited} onNewShell={onNewShell} onClose={onClose} /> : null}
       {inlineImages.map((image) => (
         <div
           key={image.id}
