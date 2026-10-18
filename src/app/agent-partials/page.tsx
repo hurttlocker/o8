@@ -1,41 +1,17 @@
 'use client';
 
 /**
- * /agent-partials — the OUTSIDE-THE-WINDOW live agent-transcription HUD.
- *
- * This route is the body of a THIRD always-on-top, transparent, fully
- * click-through Tauri window labeled `agent-partials` (NEVER `main` — see the
- * label-discipline note in `src-tauri/src/agent_partials_window.rs`). The Rust
- * side creates that window after the bundled Next server is up, anchors it
- * bottom-center on the monitor the main o8 window sits on, and applies the
- * transparent / level-25 / nonactivating / ignore-cursor-events recipe. This
- * page only has to:
- *
- *   1. Subscribe to the broadcast `o8:stt-event` (Rust `app.emit`, which reaches
- *      every window). Same payload shape as `useNativeDictation` / the dock.
- *   2. LATCH on an AGENT-lane session only: the ONLY event that carries
- *      `lane: 'agent'` at the start is `system-start` (fn_hotkey.rs). Later
- *      `partial` / `final` / `level` events are just `origin: 'system'` with NO
- *      lane, so we latch agent-ness from that start until a terminal event
- *      (`system-idle` / `error` / `system-pasted`) tears it down. A plain Fn
- *      dictation emits `system-start` with NO lane, so it NEVER latches → this
- *      HUD can never show for Fn dictation. Copied from `symon-voice-presence`.
- *   3. Render the big black partials bar — the visual language of the in-canvas
- *      SymonVoicePresencePill scaled up so it reads across a room. The in-canvas
- *      pill's listening/partial rendering is suppressed while this surface owns
- *      it (see the comment in `symon-voice-presence.tsx`).
- *
- * The window is ALWAYS-ON; visibility is controlled HERE by rendering nothing
- * (the window is transparent, so nothing rendered = invisible) unless an
- * agent-lane dictation is live.
- *
- * Inline styles only (repo rule). This is a floating black HUD, intentionally
- * palette-independent (like the dock), so raw dark rgba is acceptable here.
+ * Native caret-local dictation feedback (or the saved legacy HUD placement).
+ * One surface owns capture, measured levels, processing, delivered text and
+ * dismissal. Agent dictation can yield to an in-canvas composer claim.
+ * This transparent, nonactivating window never changes the paste target.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { isTauri } from '@/lib/tauri/bridge';
+import { SystemDictationSession } from '@/lib/dictation/system-dictation-session';
+import { SymonMark, SymonPolishMark, SymonWaveform } from '@/components/desktop/dictation/SymonVisuals';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,23 +20,20 @@ export const dynamic = 'force-dynamic';
 const FONT =
   '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif';
 
-// Terminal STT types that ALWAYS tear the HUD down, regardless of lane — this is
-// what guarantees a no-lane `error` mid-session still clears the latch. NOT
-// `complete` / `ready`: those recognizer-teardown signals can arrive between
-// `final` and the agent's `polished`, and treating them as terminal would kill
-// the bar early.
+// Recognizer complete/ready precede delivery and must not dismiss processing.
 const TERMINAL = new Set(['system-idle', 'error', 'system-pasted']);
 
 // Keep the last text visible for a beat before the exit fade, so the final /
 // polished command reads "briefly" (the agent flow emits system-idle right after
 // polished, so without this hold the final text would never be seen).
-const DISMISS_DELAY_MS = 600;
+const DISMISS_DELAY_MS = 900;
 // Defensive auto-clear if a terminal event is somehow missed — never strand a
 // black bar on screen.
 const SAFETY_MS = 60_000;
 /** Delay before the FIRST paint of a session — gives an in-canvas surface claim
  *  time to land so the HUD never flashes over a composer that owns the partials. */
 const PAINT_GRACE_MS = 300;
+const DICTATION_PAINT_GRACE_MS = 32;
 
 // Symon surfaces honor the app's Glass vs Solid appearance (the
 // reduce-transparency axis). This floating HUD lives at the SAME origin as the
@@ -86,14 +59,18 @@ function readAppSurface(): AppSurface {
   }
 }
 
-type Phase = 'listening' | 'final';
+type Phase = 'starting' | 'listening' | 'transcribing' | 'polishing' | 'final' | 'error';
 type PartialsSurface = 'caret' | 'hud';
 
 interface SttPayload {
   type?: string;
   origin?: string;
   lane?: string;
+  sessionId?: number;
+  startId?: string;
+  level?: number;
   text?: string;
+  clipboardOnly?: boolean;
   // Plain Fn dictation carries no lane. The Rust side tags visible partials with
   // `hud: true` and names the selected surface; new installs default to the
   // cursor-local surface while the legacy screen bar remains selectable.
@@ -104,7 +81,10 @@ interface SttPayload {
 
 interface HudState {
   phase: Phase;
+  level: number;
+  agent: boolean;
   text: string;
+  clipboardOnly: boolean;
   surface: PartialsSurface;
   mode: 'dictation' | 'smart-compose';
 }
@@ -130,6 +110,7 @@ export default function AgentPartialsPage() {
   const graceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const claimSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentActiveRef = useRef(false);
+  const sessionRef = useRef(new SystemDictationSession());
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -173,25 +154,27 @@ export default function AgentPartialsPage() {
         safetyTimerRef.current = null;
       }
     };
-    const teardown = () => {
+    const teardown = (delay = DISMISS_DELAY_MS) => {
       agentActiveRef.current = false;
+      sessionRef.current.finish();
       clearSafety();
       clearDismiss();
       // Hold the last text a beat, then unmount → exit animation plays.
       dismissTimerRef.current = setTimeout(() => {
         dismissTimerRef.current = null;
         setState(null);
-      }, DISMISS_DELAY_MS);
+      }, delay);
     };
     const activate = (
       surface: PartialsSurface,
       mode: 'dictation' | 'smart-compose',
+      agent: boolean,
     ) => {
       agentActiveRef.current = true;
       setAppSurface(readAppSurface());
       clearDismiss();
       clearSafety();
-      safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
+      safetyTimerRef.current = setTimeout(() => teardown(), SAFETY_MS);
       // PAINT GRACE (2026-07-08 live-hit): the canvas composer's surface CLAIM
       // races this system-start — both fan out from the same keypress, and the
       // claim can land a beat late (or get missed by the broadcast entirely; a
@@ -202,12 +185,12 @@ export default function AgentPartialsPage() {
       graceTimerRef.current = setTimeout(() => {
         graceTimerRef.current = null;
         setGraceElapsed(true);
-      }, PAINT_GRACE_MS);
+      }, agent ? PAINT_GRACE_MS : DICTATION_PAINT_GRACE_MS);
       sessionStartedAtRef.current = Date.now();
       setElapsedSeconds(0);
-      setState({ phase: 'listening', text: '', surface, mode });
+      setState({ phase: 'starting', level: 0, agent, text: '', clipboardOnly: false, surface, mode });
     };
-    const showText = (phase: Phase, text: string) => {
+    const showText = (phase: Phase, text: string, clipboardOnly = false) => {
       // A new frame of live text — keep the HUD alive (cancel any pending fade)
       // AND re-arm the stranded-bar safety. The safety exists for a missed
       // terminal event; a live frame is proof the session is NOT stranded.
@@ -216,10 +199,16 @@ export default function AgentPartialsPage() {
       // 2026-07-13: "the partials just left and I'm still talking").
       clearDismiss();
       clearSafety();
-      safetyTimerRef.current = setTimeout(teardown, SAFETY_MS);
-      setState((current) => ({
+      safetyTimerRef.current = setTimeout(() => teardown(), SAFETY_MS);
+      setState((current) => current && (
+        (phase === 'listening' && current.phase !== 'listening' && current.phase !== 'starting')
+        || (phase === 'transcribing' && current.phase === 'polishing')
+      ) ? current : ({
         phase,
+        level: phase === 'listening' ? current?.level ?? 0 : 0,
+        agent: current?.agent ?? false,
         text,
+        clipboardOnly,
         surface: current?.surface ?? 'caret',
         mode: current?.mode ?? 'dictation',
       }));
@@ -230,6 +219,7 @@ export default function AgentPartialsPage() {
       // System-origin only (`system-pasted` is system by construction, even if
       // the origin field is absent on some emit paths).
       if (p.origin !== 'system' && type !== 'system-pasted') return;
+      if (!sessionRef.current.accepts(p)) return;
 
       // Activate on an AGENT-lane system-start (Right-Option Symon agent) or a
       // plain Fn system-start tagged `hud: true`. The surface field chooses the
@@ -240,6 +230,7 @@ export default function AgentPartialsPage() {
           activate(
             p.surface === 'hud' ? 'hud' : 'caret',
             p.mode === 'smart-compose' ? 'smart-compose' : 'dictation',
+            p.lane === 'agent',
           );
         }
         return;
@@ -248,22 +239,45 @@ export default function AgentPartialsPage() {
       // Terminal events ALWAYS tear down, regardless of lane — a no-lane `error`
       // mid-session still clears the latch here.
       if (TERMINAL.has(type ?? '')) {
-        teardown();
+        if (agentActiveRef.current && type === 'system-pasted') {
+          showText('final', p.text ?? '', p.clipboardOnly === true);
+        } else if (agentActiveRef.current && type === 'error') {
+          showText('error', p.text || 'Dictation failed.');
+        } else {
+          // A discarded brush or silence must not linger as "Listening".
+          setState(null);
+        }
+        teardown(type === 'error' ? 2500 : DISMISS_DELAY_MS);
         return;
       }
 
-      // Everything else requires the agent latch (or an explicit `lane: agent`
-      // on the event itself, e.g. `polished`). Fn partials carry no lane and
-      // never latch, so they fall through here.
+      // Later frames use the start latch; plain Fn frames have no agent lane.
       if (!agentActiveRef.current && p.lane !== 'agent') return;
 
       const text = (p.text ?? '').trim();
       switch (type) {
+        case 'status':
+          if (text === 'listening') showText('listening', '');
+          break;
         case 'partial':
           showText('listening', text);
           break;
         case 'final':
-          if (text) showText('final', text);
+          showText('transcribing', text);
+          break;
+        case 'audio_file':
+          setState(current => current?.phase === 'listening' || current?.phase === 'starting'
+            ? { ...current, phase: 'transcribing', level: 0 } : current);
+          break;
+        case 'composing':
+        case 'polishing':
+          setState(current => current ? { ...current, phase: 'polishing', level: 0 } : current);
+          break;
+        case 'level':
+          if (typeof p.level === 'number' && Number.isFinite(p.level)) {
+            setState(current => current?.phase === 'listening' || current?.phase === 'starting'
+              ? { ...current, phase: 'listening', level: Math.max(0, Math.min(1, p.level!)) } : current);
+          }
           break;
         case 'polished':
           // Agent-mode polished command. Show it, then fade — the agent flow
@@ -405,7 +419,8 @@ export default function AgentPartialsPage() {
   }, [state?.phase, state]);
 
   const display = state
-    ? state.text || (state.phase === 'listening' ? 'Listening' : '')
+    ? state.text || (state.phase === 'starting' ? 'Starting microphone…'
+      : state.phase === 'listening' ? 'Listening' : 'Finishing dictation…')
     : '';
   const rise = prefersReducedMotion ? 0 : 4;
   const caretLocal = state?.surface === 'caret';
@@ -471,35 +486,36 @@ export default function AgentPartialsPage() {
           >
             {/* Compact header — a soft "Listening" tier label + a status dot.
                 Kept thin + faint so the transcript is the star. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span
-                aria-hidden
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: 999,
-                  background: '#34d399',
-                  boxShadow: '0 0 8px rgba(52, 211, 153, 0.7)',
-                  flexShrink: 0,
-                  animation: prefersReducedMotion
-                    ? undefined
-                    : 'o8PartialsPulse 1.6s ease-in-out infinite',
-                }}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 24 }}>
+              <SymonMark size={16} active={state.phase === 'listening'} />
               <span
                 style={{
                   fontSize: 10,
                   fontWeight: 300,
-                  letterSpacing: '0.08em',
+                  letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   color: 'rgba(255, 255, 255, 0.55)',
                   lineHeight: 1,
                 }}
               >
-                {state.mode === 'smart-compose'
-                  ? 'Symon · Compose'
-                  : caretLocal ? 'Symon' : 'Symon · Listening'}
+                {`Symon · ${state.phase === 'starting' ? 'Starting'
+                  : state.phase === 'listening' ? 'Listening'
+                  : state.phase === 'transcribing' ? 'Transcribing'
+                    : state.phase === 'polishing' ? (state.mode === 'smart-compose' ? 'Composing' : 'Polishing')
+                      : state.phase === 'error' ? 'Dictation stopped' : state.agent ? 'Sent to agent' : state.clipboardOnly ? 'Copied' : 'Pasted'}`}
               </span>
+              {state.phase === 'listening' ? (
+                <span aria-label="Microphone level" style={{ marginLeft: 'auto', display: 'flex' }}>
+                  <SymonWaveform level={state.level} width={90} live />
+                </span>
+              ) : state.phase === 'polishing' || state.phase === 'transcribing' ? (
+                <div
+                  aria-label={state.phase === 'polishing' ? 'Polishing' : 'Transcribing'}
+                  style={{ marginLeft: 'auto', display: 'flex' }}
+                >
+                  <SymonPolishMark active width={96} />
+                </div>
+              ) : null}
               {!caretLocal && state.phase === 'listening' && elapsedSeconds >= 10 ? (
                 <span
                   style={{
@@ -553,9 +569,6 @@ export default function AgentPartialsPage() {
                 {display}
               </span>
             </div>
-            <style>
-              {'@keyframes o8PartialsPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }'}
-            </style>
           </motion.div>
         ) : null}
       </AnimatePresence>
