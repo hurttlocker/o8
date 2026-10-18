@@ -5717,8 +5717,8 @@ async function handleOrchestratorSendMsgOnce(
 
         switch (event.type) {
           case 'turn_receipt': {
-            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode);
             const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
+            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode, pickedMode);
             activeAssistantReceipt = {
               permissionMode,
               leadModel: event.leadModel,

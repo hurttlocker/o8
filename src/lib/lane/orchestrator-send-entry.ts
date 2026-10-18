@@ -22,11 +22,15 @@ export function orchestratorModeAllowsBackendFallback(rawOrchestrationMode: unkn
 export function resolveTurnReceiptMode(
   backendId: OrchestratorBackendId,
   rawOrchestrationMode: unknown,
+  pickedMode?: ComposerWireMode,
 ): ComposerWireMode {
   const executionMode = resolveOrchestratorExecutionMode(rawOrchestrationMode);
   if (executionMode === 'single') return 'solo';
   if (executionMode === 'fusion') return 'fusion';
-  return backendId === 'collide' ? 'moa' : 'multitask';
+  if (backendId === 'collide') return 'moa';
+  // Shared dispatch uses the fleet engine; that is not a change to the mode
+  // selected by the operator. Solo and Fusion overrides above still win.
+  return pickedMode === 'fast' ? 'fast' : 'multitask';
 }
 
 /** Backend invocation seam used by ws-server's orchestrator-send handler. */
