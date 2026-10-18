@@ -5,9 +5,10 @@ import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetSta
 import type { ContextualConversation } from './contextual-turn';
 
 /** Apply an inserted draft once, and preserve drafts owned by contextual chats. */
-export function useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, setInput, setPreEnhanceInput, inputRef }: {
+export function useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, ownerTabId, setInput, setPreEnhanceInput, inputRef }: {
   open: boolean; input: string; draftInjection?: { id: string; text: string } | null;
   contextualConversation?: ContextualConversation;
+  ownerTabId?: string;
   setInput: Dispatch<SetStateAction<string>>; setPreEnhanceInput: Dispatch<SetStateAction<string | null>>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
@@ -33,12 +34,12 @@ export function useComposerDraftLifecycle({ open, input, draftInjection, context
     if (wasOpen && !open) { inputAtBlur.current = input; lastDraftId.current = draftInjection?.id ?? null; return; }
     if (!open || wasOpen) return;
     const newDraft = (draftInjection?.id ?? null) !== lastDraftId.current;
-    if (inputAtBlur.current.trim() && !newDraft && !contextualConversation) {
+    if (inputAtBlur.current.trim() && !newDraft && !contextualConversation && !ownerTabId) {
       setInput(''); setPreEnhanceInput(null); setShowDraftClearedToast(true);
       if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
       toastTimer.current = window.setTimeout(() => { setShowDraftClearedToast(false); toastTimer.current = null; }, 1800);
     }
     inputAtBlur.current = ''; lastDraftId.current = draftInjection?.id ?? null;
-  }, [contextualConversation, draftInjection?.id, input, open, setInput, setPreEnhanceInput]);
+  }, [contextualConversation, draftInjection?.id, input, open, ownerTabId, setInput, setPreEnhanceInput]);
   return showDraftClearedToast;
 }

@@ -224,6 +224,8 @@ it('keeps o8 primary and requires expanding Tools before any explicit CLI update
     expect(popup.textContent).not.toContain('codex');
     const tools = popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!;
     expect(tools).not.toBeNull(); expect(tools.getAttribute('aria-expanded')).toBe('false');
+    const notesHeading = [...popup.querySelectorAll('div')].find(element => element.textContent === 'What’s changed')!;
+    expect(notesHeading.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => tools.click());
     expect(popup.textContent).toContain('codex');
     expect(popup.textContent).not.toMatch(/claude-code|grok|gemini|Fetch is aborted/);
