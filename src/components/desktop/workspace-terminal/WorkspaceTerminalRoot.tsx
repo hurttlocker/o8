@@ -5,8 +5,6 @@ import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } 
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
 import { registerFreshOrchestratorAction } from '@/lib/desktop/fresh-orchestrator-action';
-import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
-import { ResizeEdge } from '../shell/ResizeEdge';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
 import { useTerminalMode } from '@/components/desktop/workspace-terminal/use-terminal-mode';
@@ -18,9 +16,9 @@ import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/c
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const {
-      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, getTabInventory, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, panelRefs, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
+      activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, containerDivRef, getTabInventory, effectiveActiveTabId, finishedTabCount, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, panelRefs, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs,
     } = useWorkspaceTerminalController(props, ref);
-    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleClosePreview, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleDragStart, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, isDragging, previewHeight, previews, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
+    const controller = { activeRepo: controllerActiveRepo, activeTab: controllerActiveTab, attachWorkspaceTerminalSession, cleanupFinishedTabs: controllerCleanupFinishedTabs, effectiveActiveTabId, finishedTabCount, handleCloseTab: controllerHandleCloseTab, handleConsumeChatDraftInjection, handleReorderTabs, handleNewChatGPTPlanTab: controllerHandleNewChatGPTPlanTab, handleNewLLMChatTab: controllerHandleNewLLMChatTab, handleNewTab: controllerHandleNewTab, openRemoteTerminalTab, handleOpenWorkspaceCommitTab, handleRestoreLatestCheckpoint, handleRunCommandInTerminal, handleSaveCheckpoint, handleSelectTab: controllerHandleSelectTab, handleUpdateChatMessages, handleUpdateChatModel, handleUpdateChatSessionKey, handleUpdateLinkedIssue, handleUpdateLlmSummary, handleUpdateTabLabel: controllerHandleUpdateTabLabel, handleUpdateTabMode, primaryRestoreSettled, spawnChatTab, spawnFleetCanvasTab: controllerSpawnFleetCanvasTab, spawnOrchestratorTab: controllerSpawnOrchestratorTab, spawnSingleRuntimeTab, tabs, termWsConnected, undoCleanup: controllerUndoCleanup, visibleTabs };
     const workspaceInstanceId = useId();
     const handleNewTab = controller.handleNewTab;
     const createTerminalModeShellTab = useCallback(
@@ -41,7 +39,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       workspaceActive: props.activeWorkspaceSurface === true,
       workspaceId: workspaceInstanceId,
     });
-    const hasPreviews = (props.showPreviewPane ?? true) && controller.previews.length > 0;
     const [cleanupToast, setCleanupToast] = useState<{
       id: number;
       closedCount: number;
@@ -399,34 +396,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           position: 'relative',
         }}
       >
-        {hasPreviews ? (
-          <div
-            style={{
-              height: `${controller.previewHeight * 100}%`,
-              minHeight: 120,
-              display: terminalMode.active ? 'none' : 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              flexShrink: 0,
-              animation: 'slide-in-preview 300ms ease-out',
-              pointerEvents: controller.isDragging ? 'none' : 'auto',
-            }}
-          >
-            <PreviewPane
-              previews={controller.previews}
-              onElementSelect={props.onPreviewSelection}
-              onRefresh={() => undefined}
-              onClose={controller.handleClosePreview}
-            />
-          </div>
-        ) : null}
-
-        {hasPreviews && !terminalMode.active ? (
-          <ResizeEdge orientation="horizontal" aria-label="Resize preview and terminal" tabIndex={-1}
-            onMouseDown={controller.handleDragStart} dragging={controller.isDragging}
-            style={{ height: 8, zIndex: 20 }} />
-        ) : null}
-
         {/* The full-width "Reconnecting to workspace runtime" banner used
             to live here. It covered the workspace tab strip whenever
             the WS dropped. The same state now surfaces as a compact

@@ -109,6 +109,8 @@ function LayoutRestoreHarness({
   onResizeSplit,
   onUnverifiedIds,
   onTerminalHandles,
+  onPreviewDetected,
+  onPreviews,
   registeredRepos,
   repoInventoryRevision = 0,
   refreshRestoredRepoState = async () => true,
@@ -120,6 +122,8 @@ function LayoutRestoreHarness({
   onResizeSplit?: (resize: (splitId: string, ratio: number) => void) => void;
   onUnverifiedIds?: (ids: ReadonlySet<string>) => void;
   onTerminalHandles?: (handles: Map<string, TerminalTabHandle>) => void;
+  onPreviewDetected?: (detect: ReturnType<typeof useTileLayout>['handlePreviewDetected']) => void;
+  onPreviews?: (previews: ReturnType<typeof useTileLayout>['workspacePreviews']) => void;
   registeredRepos: RepoRegistryEntry[];
   repoInventoryRevision?: number;
   refreshRestoredRepoState?: (validatedPaths: readonly string[]) => Promise<boolean>;
@@ -152,6 +156,13 @@ function LayoutRestoreHarness({
   });
 
   const { handleSplitTile, handleResizeSplit } = restored;
+
+  useEffect(() => {
+    onPreviewDetected?.(restored.handlePreviewDetected);
+  }, [onPreviewDetected, restored.handlePreviewDetected]);
+  useEffect(() => {
+    onPreviews?.(restored.workspacePreviews);
+  }, [onPreviews, restored.workspacePreviews]);
 
   useEffect(() => {
     onLayout(layout, restored.tileLayoutHydrated, restored.restoredRepoValidationState);
@@ -231,6 +242,28 @@ describe('useTileLayout browser-origin restore', () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('lists newly detected local apps for Browser without auto-docking another viewer', async () => {
+    let detect: ReturnType<typeof useTileLayout>['handlePreviewDetected'] = () => undefined;
+    let previews: ReturnType<typeof useTileLayout>['workspacePreviews'] = [];
+    let latest = createDefaultTileLayout();
+    const onLayout = (layout: TileLayout) => { latest = layout; };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ repos: [], validatedRestorePaths: [] })));
+    await act(async () => root.render(createElement(LayoutRestoreHarness, {
+      registeredRepos: [], onLayout,
+      onPreviewDetected: value => { detect = value; },
+      onPreviews: value => { previews = value; },
+    })));
+    const original = serializeTileLayout(latest);
+    for (let repeat = 0; repeat < 3; repeat++) {
+      await act(async () => detect({ id: 'local-1', tabId: 'shell', port: 61234, url: 'http://localhost:61234', detectedAt: 1 }));
+      expect(serializeTileLayout(latest)).toBe(original);
+    }
+    await act(async () => detect({ id: 'local-2', tabId: 'shell', port: 61235, url: 'http://localhost:61235', detectedAt: 2 }));
+    expect(previews.map(preview => preview.port)).toEqual([61234, 61235]);
+    expect(collectLeafNodes(latest.root)).toHaveLength(1);
+    expect(serializeTileLayout(latest)).toBe(original);
   });
 
   it('places the requested chat or terminal in a newly split workspace pane', async () => {
