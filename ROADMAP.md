@@ -245,3 +245,5 @@ Start from a tracking issue above, open its checklist, and pick an unchecked chi
 ## Not on this map
 
 Bug fixes, chores, security advisories, and dependency work are tracked as plain issues, not as roadmap arcs.
+
+Conversation worker hover [#3967](https://github.com/hurttlocker/o8/issues/3967) reuses the existing chat preview for recorded shared and worktree workers. Identity and status remain scoped to the hovered parent; development verification and release remain separate.
