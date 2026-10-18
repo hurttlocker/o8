@@ -241,3 +241,5 @@ Start from a tracking issue above, open its checklist, and pick an unchecked chi
 ## Not on this map
 
 Bug fixes, chores, security advisories, and dependency work are tracked as plain issues, not as roadmap arcs.
+
+Composer controls [#3961](https://github.com/hurttlocker/o8/issues/3961) use compact named access and checkout icons. Compatible new chats default to Shared; workers are delegated when requested or useful, with Worktrees available explicitly. Saved no-delegation choices and forced-single surfaces stay restricted. Permissions, capability checks and historical wire parsing remain authoritative. Development verification and release remain separate.

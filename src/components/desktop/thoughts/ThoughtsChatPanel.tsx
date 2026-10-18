@@ -268,7 +268,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
   useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
   // The mode ref keeps sends in sync with the selected composer mode.
-  const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
+  const [composerMode, setComposerMode] = useState<ComposerMode>(contextualConversation || lockedMode === 'single' || initialMode === 'single' ? 'solo' : 'fast');
   const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
   // MoA IS the Collide backend — keep the chip and the model-picker's Mode

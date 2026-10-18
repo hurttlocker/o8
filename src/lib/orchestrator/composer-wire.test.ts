@@ -14,6 +14,7 @@ const MODES: ComposerWireMode[] = ['solo', 'multitask', 'fast', 'moa'];
 
 /** Directives as o8 shipped them before #2153 — still on the wire from old clients. */
 const LEGACY_MULTITASK = '[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. Review and merge through the gate as they finish.';
+const LEGACY_FAST = '[Mode: Fast] Decompose independent work by file ownership. Call `cortex_launch_agent` once per worker in parallel in this turn with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.';
 const LEGACY_MOA = '[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. Review and merge through the gate as they finish.';
 
 describe('composer mode directives', () => {
@@ -32,6 +33,9 @@ describe('composer mode directives', () => {
   it('requires scoped shared launches and a single orchestrator review in Fast mode', () => {
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('checkoutMode: "shared"');
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('assignedPaths');
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('Delegate only when the user asks');
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('Work directly for small tasks');
+    expect(COMPOSER_MODE_DIRECTIVES.fast).not.toContain('in parallel in this turn');
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('one orchestrator-owned commit');
   });
 
@@ -64,6 +68,7 @@ describe('composeComposerWireMessage', () => {
 
 describe('stripKnownComposerWirePreamble', () => {
   it('still strips the pre-#2153 directives sent by older clients', () => {
+    expect(stripKnownComposerWirePreamble(`${LEGACY_FAST}\n\nInspect this`)).toBe('Inspect this');
     expect(stripKnownComposerWirePreamble(`${LEGACY_MULTITASK}\n\nFan this out`)).toBe('Fan this out');
     expect(stripKnownComposerWirePreamble(`${LEGACY_MOA}\n\nFan this out`)).toBe('Fan this out');
   });

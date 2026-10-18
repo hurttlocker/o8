@@ -301,7 +301,8 @@ describe('composer fresh operator defaults at the send seam', () => {
       await waitForPayload(1);
     });
     expect(sentTurnPayloads()).toHaveLength(1);
-    expect(sentTurnPayloads()[0]).toMatchObject({ type: 'orchestrator-send', displayMessage: 'operator requested work', backend: 'codex' });
+    expect(sentTurnPayloads()[0]).toMatchObject({ type: 'orchestrator-send', displayMessage: 'operator requested work', backend: 'codex', orchestrationMode: 'fleet', pickedMode: 'fast' });
+    expect(sentTurnPayloads()[0].message).toContain('Delegate only when the user asks');
     // Let this mount's 800ms history debounce land against its own synthetic
     // transport before the next test installs a real history-route fixture.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
@@ -395,7 +396,9 @@ describe('composer fresh operator defaults at the send seam', () => {
       expect(sentTurnPayloads()[0]?.repoPath).toBe(newRepo);
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 950)); });
       const record = await GET_CHAT(new NextRequest(`http://127.0.0.1/api/v2/chat-history?tabId=${tabId}`));
-      expect((await record.json()).repoPath).toBe(newRepo);
+      const persisted = await record.json();
+      expect(persisted.repoPath).toBe(newRepo);
+      expect(persisted.messages.find((message: { role: string }) => message.role === 'user')).toMatchObject({ content: 'Continue in the new repository' });
       await act(async () => {
         panelRef.current!.loadThread(tabId);
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -624,7 +627,7 @@ describe('composer fresh operator defaults at the send seam', () => {
       const resetModeTrigger = selectorEnabled
         ? host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')
         : host.querySelector<HTMLButtonElement>('button[aria-label^="Mode:"]');
-      expect(resetModeTrigger?.textContent ?? resetModeTrigger?.getAttribute('aria-label')).toContain('Solo');
+      expect(resetModeTrigger?.getAttribute('aria-label')).toContain(selectorEnabled ? 'Delegation off' : 'Solo');
 
       let payload: Record<string, unknown> = {};
       await act(async () => {
@@ -668,20 +671,20 @@ describe('composer fresh operator defaults at the send seam', () => {
     });
 
     const modeTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
-    expect(modeTrigger.textContent).toContain('Fusion');
+    expect(modeTrigger.getAttribute('aria-label')).toContain('Fusion');
     const leadTrigger = host.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
     act(() => leadTrigger.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-house-claude"]')!.click());
     act(() => document.querySelector<HTMLButtonElement>('[data-testid="lead-row-claude-sonnet-5"]')!.click());
 
-    expect(modeTrigger.textContent).toContain('Fusion');
+    expect(modeTrigger.getAttribute('aria-label')).toContain('Fusion');
     const handoff = [...host.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === 'Hand off')!;
     await act(async () => {
       handoff.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(modeTrigger.textContent).toContain('Solo');
+    expect(modeTrigger.getAttribute('aria-label')).toContain('Delegation off');
     expect(readStoredOrchestratorModel(repoPath)).toBe('claude-sonnet-5');
 
     let payload: Record<string, unknown> = {};
