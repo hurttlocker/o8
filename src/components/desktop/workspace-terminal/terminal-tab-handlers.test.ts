@@ -83,6 +83,14 @@ describe('terminal preview decoding through the output handler', () => {
     expect(detectLocalhostPreviews(data, 'session', [], ports)).toEqual([]);
   });
 
+  it('opens normal dev ports and ignores the current app and WebSocket ports from runtime metadata', () => {
+    vi.stubGlobal('window', { location: { port: '47681' }, __O8_WS_PORT__: 47686 });
+    try {
+      const data = Buffer.from('http://localhost:3000 http://localhost:3002 http://localhost:47681 http://localhost:47686').toString('base64');
+      expect(detectLocalhostPreviews(data, 'session', [], new Set()).map(preview => preview.port)).toEqual([3000, 3002]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('ignores malformed output without disrupting the terminal caller', () => {
     expect(detectLocalhostPreviews('invalid!', 'session', [], new Set())).toEqual([]);
   });

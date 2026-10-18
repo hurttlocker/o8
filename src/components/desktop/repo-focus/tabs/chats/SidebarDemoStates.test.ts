@@ -57,7 +57,7 @@ describe('seeded states through the actual compact chat panel', () => {
   });
   it('opens the saved sample in its repo context and keeps its state visible after reading', async () => {
     await render(); await act(async () => setSidebarView('flat'));
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="merged"] button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="merged"] [data-o8-agent-row]')!.click());
     expect(open).toHaveBeenCalledWith('thoughts-sidebar-demo-test-merged', 'Demo · merged', {
       name: repo.name, localPath: repo.localPath, branch: 'demo/merged',
     });
@@ -104,7 +104,7 @@ describe('seeded states through the actual compact chat panel', () => {
   it('retains unread completed samples in Working until read, with notifications even when folded', async () => {
     await render(); await act(async () => setSidebarView('working'));
     expect(stateNames()).toContain('finished');
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] [data-o8-agent-row]')!.click());
     expect(stateNames()).not.toContain('finished');
     expect(container.querySelector('[aria-label="Settled conversations"]')?.textContent).toContain('Settled');
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] button[aria-expanded="true"]')!.click());

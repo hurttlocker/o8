@@ -9,7 +9,7 @@ import { SettingsGroup, SettingsRow } from './grouped';
 export function CliUpdatePrompt() {
   const hub = useUpdateHub();
   useEffect(() => { void refreshCliUpdateView(); }, []);
-  const installed = hub.tools.filter(tool => tool.status !== 'not-installed');
+  const installed = hub.tools.filter(tool => tool.status !== 'not-installed' && tool.runtimeId !== 'qoder');
   return <section style={{ marginTop: 28 }}>
     <SettingsGroup header="Tools" footnote="o8 updates separately. Choose each CLI explicitly; updates keep the selected installation and wait for its running sessions.">
       <SettingsRow label="Check tool versions" subtitle={hub.checking ? 'Checking the versions o8 will launch…' : hub.cliError ?? 'Check installed tools against their own release channels.'}
