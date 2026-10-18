@@ -15,12 +15,12 @@ const subscribe = () => () => {};
 const clientSnapshot = () => true;
 const serverSnapshot = () => false;
 
-export function BrainPipButton({ repoPath, conversationKey, active = true }: { repoPath?: string | null; conversationKey?: string | null; active?: boolean }) {
+export function BrainPipButton({ repoPath, conversationKey, preferredRuntime, active = true }: { repoPath?: string | null; conversationKey?: string | null; preferredRuntime?: string; active?: boolean }) {
   const auth = useO8Auth();
-  return <ScopedBrainPip key={JSON.stringify([auth.user?.id, repoPath, conversationKey])} repoPath={repoPath} active={active} />;
+  return <ScopedBrainPip key={JSON.stringify([auth.user?.id, repoPath, conversationKey])} repoPath={repoPath} active={active} preferredRuntime={preferredRuntime} />;
 }
 
-function ScopedBrainPip({ repoPath, active }: { repoPath?: string | null; active: boolean }) {
+function ScopedBrainPip({ repoPath, active, preferredRuntime }: { repoPath?: string | null; active: boolean; preferredRuntime?: string }) {
   const client = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
   const reduceMotion = useReducedMotion();
   const id = useId();
@@ -31,7 +31,7 @@ function ScopedBrainPip({ repoPath, active }: { repoPath?: string | null; active
   const [draft, setDraft] = useState('');
   const [context, setContext] = useState('');
   const [layout, setLayout] = useState<ReturnType<typeof brainDockLayout> | null>(null);
-  const chat = useBrainConversation(`composer-brain:${id}`, repoPath, context || JSON.stringify({ repoPath }), 'workspace context');
+  const chat = useBrainConversation(`composer-brain:${id}`, repoPath, context || JSON.stringify({ repoPath }), 'workspace context', preferredRuntime);
   const close = useCallback(() => { setOpen(false); setHovered(false); setKeyboardFocus(false); }, []);
   const show = useCallback(() => {
     const button = trigger.current; const anchor = button?.closest<HTMLElement>('[data-brain-composer-anchor]') ?? button?.parentElement;

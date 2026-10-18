@@ -1,7 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, type RefObject } from 'react';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { fetchFreshOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
+import { useEffect, useRef, type RefObject } from 'react';
 import { MarkdownRender, proseWithoutBrainCitationMarkers } from '../o8-panel/markdown-render';
 import { BrainGlyph } from './BrainGlyph';
 import type { useBrainConversation } from './useBrainConversation';
@@ -12,14 +10,6 @@ export function BrainConversation({ chat, draft, setDraft, height, close, trigge
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
-  const { flags } = useEntitlement();
-  const [route, setRoute] = useState<string | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetchFreshOperatorDefaultsValues(controller.signal).then(response => response.ok ? response.json() : null)
-      .then((data: { values?: { brainRoutingMode?: string } } | null) => { if (!controller.signal.aborted) setRoute(data?.values?.brainRoutingMode ?? null); }).catch(() => {});
-    return () => controller.abort();
-  }, []);
   useEffect(() => {
     const card = input.current?.closest('[data-hover-pip]');
     const launcher = trigger.current;
@@ -35,7 +25,7 @@ export function BrainConversation({ chat, draft, setDraft, height, close, trigge
     };
   }, [close, trigger]);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; }, [chat.messages]);
-  const managed = route === 'auto' && flags['proxy.inference'];
+  const routeLabel = chat.route ? chat.route.runtime ? `${chat.route.runtime === 'codex' ? 'Codex' : 'Claude'} · ${chat.route.model}` : 'o8 managed' : 'Connected runtime when available';
   return <div style={{ height, minHeight: 0, display: 'flex', flexDirection: 'column', color: 'var(--t-text)' }}>
     <div ref={log} role="log" aria-label="Brain conversation" aria-live="polite" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', overscrollBehavior: 'contain', paddingTop: 14, paddingRight: 16, paddingBottom: 14, paddingLeft: 16 }}>
       {!chat.messages.length ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, paddingTop: 12 }}>
@@ -60,7 +50,7 @@ export function BrainConversation({ chat, draft, setDraft, height, close, trigge
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 22, paddingTop: 5, paddingLeft: 4, paddingRight: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 300 }}>
-        <span title="Follows your existing Brain model settings">{managed ? 'o8 managed' : route === 'subscription' ? 'Connected runtime' : 'Your Brain settings'}</span><span style={{ flex: 1 }} />
+        <span title="Uses your connected runtime first, with managed Brain as the fallback">{routeLabel}</span><span style={{ flex: 1 }} />
         {chat.messages.length ? <button type="button" onClick={chat.clear} style={{ border: 0, background: 'transparent', color: 'var(--t-text-faint)', font: 'inherit', cursor: 'pointer' }}>Clear conversation</button> : null}
       </div>
     </form>
