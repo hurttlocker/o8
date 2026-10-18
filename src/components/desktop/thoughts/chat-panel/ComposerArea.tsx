@@ -41,6 +41,7 @@ import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
+  showBrain?: boolean;
   activityContent?: React.ReactNode;
   workerContext?: WorkerCorrectionContext;
   inputLabel?: string;
@@ -116,6 +117,7 @@ interface ComposerAreaProps {
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
+  showBrain = true,
   inputLabel,
   placeholder,
   literalInput = false,
@@ -356,7 +358,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
           onDelivered={sent => { if (input === sent) onInputChange(''); }}
         /> : null}
-        <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
+        {showBrain ? <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} /> : null}
         <SlashCommandPicker
           suggestions={slashSuggestions}
           activeIndex={activeSlashIndex}

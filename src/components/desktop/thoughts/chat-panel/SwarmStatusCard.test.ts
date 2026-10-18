@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { SwarmStatusCard, focusSwarmPacket, packetsForOrchestratorThread, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
+import { SwarmStatusCard, focusSwarmPacket, packetsForOrchestratorThread, projectSwarmView, SWARM_CREW_SCROLL_STYLE } from './SwarmStatusCard';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,6 +31,26 @@ function packet(): OrchestratorPacket {
     },
   };
 }
+
+it('counts recorded identities once across the compact and expanded worker views', () => {
+  const session = { sessionKey: 'session-123', name: 'Same worker', runtime: 'codex', status: 'running' };
+  const native = { id: 'native-one', label: 'Native task', status: 'unknown' as const };
+  const view = projectSwarmView({ packets: [packet(), packet()], sessions: [session, session], scouts: [native, native] });
+  expect(view.count).toBe(2);
+  expect(view.summary).toBe('1 running · 1 unconfirmed');
+  expect(view.state).toBe('running');
+});
+
+it('prioritizes actionable states without treating completed work as merged', () => {
+  const running = packet();
+  const failed = { ...packet(), id: 'failed', status: 'failed' as const };
+  const review = { ...packet(), id: 'review', status: 'awaiting_review' as const };
+  expect(projectSwarmView({ packets: [running, failed, review] }).state).toBe('failed');
+  expect(projectSwarmView({ packets: [running, review] }).state).toBe('review');
+  const complete = { ...packet(), status: 'released' as const, releaseState: 'released' as const };
+  expect(projectSwarmView({ packets: [complete] }).state).toBe('idle');
+  expect(projectSwarmView({ packets: [{ ...complete, releaseStatePayload: { mergeCommit: 'abc123' } }] }).state).toBe('merged');
+});
 
 describe('focusSwarmPacket', () => {
   afterEach(() => {

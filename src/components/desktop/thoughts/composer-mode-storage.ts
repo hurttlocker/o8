@@ -15,8 +15,8 @@ function isComposerMode(value: string | null): value is ComposerMode {
   return value === 'solo' || value === 'multitask' || value === 'fast' || value === 'moa' || value === 'fusion';
 }
 
-export function readStoredComposerMode(tabId: string): ComposerMode {
-  if (typeof window === 'undefined') return 'solo';
+export function readStoredComposerMode(tabId: string, fallback: ComposerMode = 'fast'): ComposerMode {
+  if (typeof window === 'undefined') return fallback;
   try {
     const stored = window.localStorage.getItem(composerModeStorageKey(tabId));
     if (isComposerMode(stored)) {
@@ -25,12 +25,12 @@ export function readStoredComposerMode(tabId: string): ComposerMode {
       }
       return stored;
     }
-    if (window.localStorage.getItem(legacySwarmStorageKey(tabId)) !== '1') return 'solo';
+    if (window.localStorage.getItem(legacySwarmStorageKey(tabId)) !== '1') return fallback;
     window.localStorage.setItem(composerModeStorageKey(tabId), 'fusion');
     window.localStorage.setItem(legacySwarmStorageKey(tabId), '0');
     return 'fusion';
   } catch {
-    return 'solo';
+    return fallback;
   }
 }
 
