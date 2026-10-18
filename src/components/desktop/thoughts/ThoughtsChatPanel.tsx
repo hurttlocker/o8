@@ -52,7 +52,8 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
-import { ThreadWorkerCard } from './chat-panel/ThreadWorkerCard';
+import { ThreadWorkerCard, useThreadWorkers } from './chat-panel/ThreadWorkerCard';
+import { projectThreadWorkerGroups } from './chat-panel/thread-worker-groups';
 import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
@@ -86,7 +87,6 @@ import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { TranscriptActivity } from '../transcript/TranscriptActivity';
-import { transcriptScouts } from '../transcript/activity';
 import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
@@ -2085,14 +2085,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     handleCopyMarkdownRef.current = handleCopyMarkdown;
   }, [handleCopyMarkdown]);
 
-  // Native Claude scouts (Task-tool sub-agents) fanned out this turn. They
-  // aren't packets, so we surface them in the live crew card by reading the
-  // active assistant turn's Task tool calls. Status is tied to the turn
-  // (busy → running) rather than per-tool completion: parallel scouts fire
-  // together and the serial tool-done heuristic can't track them individually.
+  // Saved assistant origins keep each worker beside its original turn.
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
-  const orchestratorScouts = isOrchestratorMode ? transcriptScouts(displayMessages, displayWaiting) : [];
+  const threadWorkers = useThreadWorkers({ threadId: isOrchestratorMode ? threadId : null, repoPath: resolvedRepoPath, busy: displayWaiting, agents });
+  const workerGroups = projectThreadWorkerGroups({ entries: isOrchestratorMode ? displayMessages : [], packets: isOrchestratorMode ? threadWorkerPackets : [], sessions: threadWorkers, busy: displayWaiting });
+  const workerTurnContent = new Map([...workerGroups.groups].map(([id, group]) => [id,
+    <ThreadWorkerCard key={id} group={group} onFocusSession={onFocusSession} onFocusPacket={onFocusPacket} />,
+  ]));
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (
     <div
@@ -2153,12 +2153,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             emptyStateFallback={fallbackEmptyState}
             composeFirst={composeFirst}
             topContent={transcriptTopContent}
+            turnContent={workerTurnContent}
             bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
-              <ThreadWorkerCard threadId={threadId} repoPath={resolvedRepoPath} busy={displayWaiting} agents={agents} onFocusSession={onFocusSession}
-                packets={threadWorkerPackets}
-                scouts={orchestratorScouts}
-                onFocusPacket={onFocusPacket}
-              />
+              <ThreadWorkerCard group={workerGroups.unattributed} unattributed onFocusSession={onFocusSession} onFocusPacket={onFocusPacket} />
             ) : null}
             isOrchestratorMode={isOrchestratorMode}
             suggestedReplyMessageId={suggestedReplyMessageId}

@@ -5,9 +5,10 @@ import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketC
 import { DEGRADED_FALLBACK_REFRESH_MS, startDurableRefresh } from '@/lib/panel/durable-refresh';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import { SwarmStatusCard, type SwarmSessionView } from './SwarmStatusCard';
+import type { ThreadWorkerGroup } from './thread-worker-groups';
 
-/** The existing Shared-team ledger owns membership; fleet evidence owns live status. */
-export function ThreadWorkerCard({ threadId, repoPath, busy, agents, ...card }: ComponentProps<typeof SwarmStatusCard> & {
+/** One thread membership subscription supplies every historical turn card. */
+export function useThreadWorkers({ threadId, repoPath, busy, agents }: {
   threadId: string | null;
   repoPath: string | null;
   busy: boolean;
@@ -47,7 +48,20 @@ export function ThreadWorkerCard({ threadId, repoPath, busy, agents, ...card }: 
     return () => { stopRefresh(); controller.abort(); window.removeEventListener('cortex:agent-supervisor-update', launched); };
   }, [threadId, repoPath, busy, refreshVersion]);
   const workers = saved?.threadId === threadId ? saved.workers : [];
-  return <SwarmStatusCard {...card} sessions={workers.map(worker => ({ ...worker,
+  return workers.map(worker => ({ ...worker,
     status: agents.find(agent => agent.sessionKey === worker.sessionKey)?.status ?? worker.status,
-  }))} />;
+  }));
+}
+
+export function ThreadWorkerCard({ group, unattributed = false, onFocusPacket, onFocusSession }: {
+  group: ThreadWorkerGroup;
+  unattributed?: boolean;
+  onFocusPacket?: ComponentProps<typeof SwarmStatusCard>['onFocusPacket'];
+  onFocusSession?: (sessionKey: string) => void;
+}) {
+  if (!group.packets.length && !group.sessions.length && !group.scouts.length) return null;
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+    {unattributed ? <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>Subagents without a confirmed turn</span> : null}
+    <SwarmStatusCard {...group} onFocusPacket={onFocusPacket} onFocusSession={onFocusSession} />
+  </div>;
 }
