@@ -115,3 +115,56 @@ it('retains account-less startup when no account client is configured', async ()
   expect(container.querySelector('output')?.textContent).toBe('resolved');
 });
 
+it('bounds a pending native initialization without signing out and coalesces retry observation', async () => {
+  vi.useFakeTimers();
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  let resolve!: (value: object) => void;
+  mocks.nativeInit.mockReturnValue(new Promise(value => { resolve = value; }));
+  await mount(true);
+  expect(container.querySelector('output')?.textContent).toBe('pending');
+  expect(mocks.nativeInit).toHaveBeenCalledOnce();
+  await act(async () => vi.advanceTimersByTimeAsync(8000));
+  expect(container.textContent).toContain('Account unavailable');
+  expect(container.querySelector('output')?.textContent).toBe('pending');
+  const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
+  await act(async () => retry.click());
+  expect(container.textContent).toContain('Connecting account');
+  expect(container.textContent).not.toContain('Account unavailable');
+  expect(mocks.nativeInit).toHaveBeenCalledOnce();
+  await act(async () => resolve(mocks.engine));
+  expect(mocks.providers.at(-1)?.Clerk).toBe(mocks.engine);
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Sign in to o8')).toBe(true);
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+});
+
+it('retries a failed native initialization without falling back to browser cookies', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  mocks.nativeInit.mockRejectedValueOnce(new Error('unavailable'));
+  await mount();
+  expect(container.textContent).toContain('Account unavailable');
+  expect(mocks.providers).toHaveLength(0);
+  const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
+  await act(async () => retry.click());
+  expect(mocks.nativeInit).toHaveBeenCalledTimes(2);
+  expect(mocks.providers.at(-1)?.Clerk).toBe(mocks.engine);
+  expect(container.textContent).not.toContain('Account unavailable');
+});
+
+it('keeps ordinary API traffic on the original fetch after recovering native initialization', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  const nativeFetch = vi.mocked(globalThis.fetch);
+  const pluginFetch = vi.fn(async () => Response.json({ ok: true }));
+  mocks.nativeInit.mockImplementationOnce(async () => {
+    // The native plugin patches fetch before awaiting its initialization.
+    globalThis.fetch = pluginFetch;
+    throw new Error('unavailable');
+  });
+  await mount();
+  const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
+  await act(async () => retry.click());
+  await globalThis.fetch('/api/panel/status');
+  expect(nativeFetch).toHaveBeenCalledWith('/api/panel/status', undefined);
+  expect(pluginFetch).not.toHaveBeenCalled();
+  await globalThis.fetch('https://clerk.o8.run/v1/client');
+  expect(pluginFetch).toHaveBeenCalledWith('https://clerk.o8.run/v1/client', undefined);
+});
