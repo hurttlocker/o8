@@ -151,6 +151,8 @@ Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116
 
 Workspace utility navigation [#3133](https://github.com/hurttlocker/o8/issues/3133) retains the originating tab and tab order, including a fresh unsent conversation. A workspace composer keeps its draft while hidden. Persistence and native development checks remain distinct from released-build acceptance.
 
+Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3108) uses one Threads control beside the task identity and Refresh. Ordinary project list and detail navigation remain available. Native development acceptance uses simulated task data; it does not establish remote execution acceptance.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
