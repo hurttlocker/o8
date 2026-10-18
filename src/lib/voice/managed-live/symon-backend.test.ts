@@ -77,3 +77,85 @@ it('removes CONNECTING startup listeners and owns only one heartbeat across reco
     second.close(); expect(vi.getTimerCount()).toBe(0);
   } finally { vi.useRealTimers(); }
 });
+
+it('keeps Symon working during conversation and resumes results and deliberate follow-ups on the same session', async () => {
+  const socket = new Socket(); fixtures.socket = socket;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({session:{sessionId:'symon-busy',engine:'claude',model:'configured'}})));
+  const {getManagedSymonBackend} = await import('./symon-backend'); const backend = await getManagedSymonBackend();
+  const firstVoice = vi.fn(async()=>{}); const detach = backend.subscribe!(firstVoice);
+  const fallback = vi.fn(async()=>{});
+  const work = backend.delegate('original task','task-1',fallback);
+  socket.receive({channel:'symon',type:'symon-text-delta',sessionId:'symon-busy',turnId:'task-1',delta:'Verified partial output'});
+  expect(backend.context()).toContain('partial output');
+  await backend.delegate('Actually change the active task','correction',fallback);
+  expect(socket.sent.filter(frame=>frame.type==='symon-text-turn')).toHaveLength(1);
+  expect(firstVoice).toHaveBeenLastCalledWith(expect.stringContaining('Immediate steering is unsupported'),true);
+  await backend.delegate('queue verify the result','follow-up',fallback);
+  socket.receive({channel:'symon',type:'symon-text-done',sessionId:'symon-busy',turnId:'task-1',status:'unconfirmed'});
+  expect(socket.sent.filter(frame=>frame.type==='symon-text-turn')).toHaveLength(1);
+  detach(); const resumedVoice = vi.fn(async()=>{}); backend.subscribe!(resumedVoice);
+  socket.receive({channel:'symon',type:'symon-text-done',sessionId:'symon-busy',turnId:'task-1',status:'done'});
+  await work;
+  expect(resumedVoice).toHaveBeenCalledWith('Verified partial output',true);
+  expect(socket.sent.filter(frame=>frame.type==='symon-text-turn')).toHaveLength(2);
+  expect(socket.sent.at(-1)).toMatchObject({sessionId:'symon-busy',turnId:'follow-up',text:'verify the result'});
+  socket.receive({channel:'symon',type:'symon-text-done',sessionId:'symon-busy',turnId:'task-1',status:'done'});
+  expect(socket.sent.filter(frame=>frame.type==='symon-text-turn')).toHaveLength(2);
+  expect(socket.sent.some(frame=>frame.type==='symon-text-interrupt')).toBe(false);
+  socket.receive({channel:'symon',type:'symon-text-done',sessionId:'symon-busy',turnId:'follow-up',status:'done'});
+  socket.close();
+});
+
+it('does not drain explicit follow-up on a nonterminal done-frame status', async () => {
+  const socket = new Socket(); fixtures.socket = socket;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ session: { sessionId:'s', engine:'claude', model:'m' } })));
+  const { getManagedSymonBackend } = await import('./symon-backend');
+  const backend = await getManagedSymonBackend(); const update=vi.fn(async()=>{});
+  void backend.delegate('first','one',update);
+  await backend.delegate('queue second','two',update);
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-done',turnId:'one',status:'running'});
+  expect(socket.sent.filter(f=>f.type==='symon-text-turn')).toHaveLength(1);
+  socket.close();
+});
+
+it('reconciles all running tasks before draining a reattached completed task follow-up', async () => {
+  const socket = new Socket(); fixtures.socket = socket;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ session: { sessionId:'s', engine:'claude', model:'m' } })));
+  const { getManagedSymonBackend } = await import('./symon-backend');
+  const backend = await getManagedSymonBackend(); const update=vi.fn(async()=>{});
+  void backend.delegate('first','one',update);
+  await backend.delegate('queue second','two',update);
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-attached',ok:true, transcript:[], turns:[
+    {turnId:'one',status:'done',text:'complete'}, {turnId:'external-task',status:'running'}
+  ]});
+  expect(socket.sent.filter(f=>f.type==='symon-text-turn')).toHaveLength(1);
+  socket.close();
+});
+
+it('does not resurrect a completed turn from a stale running snapshot', async () => {
+  const socket = new Socket(); fixtures.socket = socket;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ session: { sessionId:'s', engine:'claude', model:'m' } })));
+  const { getManagedSymonBackend } = await import('./symon-backend');
+  const backend=await getManagedSymonBackend(); const update=vi.fn(async()=>{});
+  void backend.delegate('first','one',update);
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-done',turnId:'one',status:'done'});
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-attached',ok:true,transcript:[],turns:[{turnId:'one',status:'running'}]});
+  void backend.delegate('second','two',update);
+  expect(socket.sent.filter(f=>f.type==='symon-text-turn')).toHaveLength(2);
+  socket.close();
+});
+
+it('retains a locally confirmed result when a stale attach omits it', async () => {
+  const socket = new Socket(); fixtures.socket = socket;
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ session: { sessionId:'s', engine:'claude', model:'m' } })));
+  const { getManagedSymonBackend } = await import('./symon-backend');
+  const backend=await getManagedSymonBackend(); const update=vi.fn(async()=>{});
+  const first=backend.delegate('first','one',update);
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-delta',turnId:'one',delta:'Verified fresh result'});
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-done',turnId:'one',status:'done'});
+  await first;
+  expect(backend.context()).toContain('Verified fresh result');
+  socket.receive({channel:'symon',sessionId:'s',type:'symon-text-attached',ok:true,transcript:[],turns:[{turnId:'one',status:'running'}]});
+  expect(backend.context()).toContain('Verified fresh result');
+  socket.close();
+});

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { LiveConversationBridge, LiveFollowupQueue, voiceFollowupIntent } from '@/lib/voice/managed-live/conversation-bridge';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { startManagedLive, type LiveSession, type LiveState } from '@/lib/voice/managed-live/session';
@@ -22,8 +23,17 @@ export function ManagedLiveButton(props: Props) {
   const session = useRef<LiveSession | null>(null);
   const generation = useRef(0);
   const startup = useRef<AbortController | null>(null);
+  const bridge = useRef(new LiveConversationBridge());
+  const followup = useRef(new LiveFollowupQueue());
   const pending = useRef(new Map<string, { userId: string; update: (text: string, spoken?: boolean) => Promise<void>; resolve: () => void; notified?: boolean }>());
   useEffect(() => { current.current = props; }, [props]);
+  const submit = useCallback((text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>) => {
+    const receipt = current.current.send(text);
+    if (!receipt) { void update('The conversation did not accept the request.'); return Promise.resolve(); }
+    const completion = new Promise<void>(resolve => { pending.current.set(id, { userId: receipt.userMessageId, update, resolve }); });
+    void update('Request submitted to the existing conversation. Acceptance and completion are not yet confirmed.', false).catch(() => {});
+    return completion;
+  }, []);
   useEffect(() => {
     let alive = true;
     void fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } })
@@ -33,12 +43,13 @@ export function ManagedLiveButton(props: Props) {
   useEffect(() => {
     generation.current++;
     const tasks = pending.current;
+    const queued = followup.current;
     return () => {
       generation.current += 1;
       startup.current?.abort();
       void session.current?.close(); session.current = null;
       for (const item of tasks.values()) item.resolve();
-      tasks.clear();
+      tasks.clear(); queued.cancel();
     };
   }, [props.binding]);
   useEffect(() => {
@@ -54,7 +65,20 @@ export function ManagedLiveButton(props: Props) {
         : terminal.outcome === 'interrupted' ? 'The backend confirmed interruption.' : terminal.text || 'The backend reported failure. Check the conversation for details.';
       void item.update(reply).catch(() => {}).finally(item.resolve);
     }
-  }, [props.terminals]);
+    const queued = followup.current.pending;
+    if (queued && !props.busy && pending.current.size === 0) {
+      const terminal = props.terminals[queued.afterTaskId];
+      if (!terminal || terminal.outcome === 'unconfirmed') return;
+      const latestUser = props.messages.findLast(message => message.role === 'user');
+      if (latestUser?.id !== queued.afterTaskId) {
+        followup.current.cancel();
+        void bridge.current.publish('Queued follow-up was not sent because the active task changed. Please confirm it again.').catch(() => {});
+        return;
+      }
+      const next = followup.current.take(queued.afterTaskId, true);
+      if (next) void submit(next.text, next.id, bridge.current.publish).catch(() => {});
+    }
+  }, [props.terminals, props.busy, props.messages, submit]);
   if (!available) return null;
   const active = state === 'live' || state === 'connecting' || state === 'closing';
   const toggle = async () => {
@@ -69,25 +93,38 @@ export function ManagedLiveButton(props: Props) {
     setState('connecting'); setDetail('');
     try {
       const live = await startManagedLive({ binding,
-        context: () => current.current.messages.slice(-12).map(m => `${m.role}: ${m.text}`).join('\n'),
+        subscribe: bridge.current.subscribe,
+        context: () => {
+          const userId = current.current.messages.findLast(message => message.role === 'user')?.id;
+          const terminal = userId ? current.current.terminals[userId] : undefined;
+          return `Backend status: ${current.current.busy ? 'working; completion not confirmed' : 'not currently reporting busy'}. Last correlated task outcome: ${terminal ? `${terminal.outcome}: ${terminal.text.slice(-600)}` : 'unknown; do not infer completion from partial text'}. Queued follow-up: ${followup.current.pending?.text.slice(0, 400) ?? 'none'}.\n${current.current.messages.slice(-3).map(m => `${m.role}: ${m.text.slice(-400)}`).join('\n')}`;
+        },
         delegate: async (text, id, update) => {
           if (current.current.binding !== binding) return;
+          const reply = (message: string, spoken = true) => bridge.current.publish(message, spoken, update);
+          const intent = voiceFollowupIntent(text);
+      if (intent.kind === 'clarify') { await reply('That queue request includes a condition, example or withdrawal, so nothing was queued or submitted. Please give one clear follow-up request if you want it queued.'); return; }
+          if (intent.kind === 'cancel') { await reply(followup.current.cancel() ? 'Queued follow-up canceled before submission. The running task is unchanged.' : 'There is no queued follow-up. The running task is unchanged.'); return; }
           if (/^\s*(stop|cancel)(\s+(that|this|the task|working))?[.!]?\s*$/i.test(text)) {
-            for (const [key, task] of pending.current) pending.current.set(key, { ...task, update });
+            for (const [key, task] of pending.current) pending.current.set(key, { ...task, update: reply });
+            followup.current.cancel();
             current.current.interrupt();
             // interrupt() is optimistic. Never turn its local ready state into a stop receipt.
-            await update('Stop requested. The backend has not yet confirmed cancellation.');
+            await reply('Stop requested. The backend has not yet confirmed cancellation.');
             return;
           }
           if (current.current.busy || pending.current.size > 0) {
-            await update('The existing task is still running. Use the conversation steering control to apply this correction; I have not started another task.');
+            const taskId = pending.current.values().next().value?.userId
+              ?? current.current.messages.findLast(message => message.role === 'user')?.id;
+            if (intent.kind === 'queue' && taskId) {
+              const accepted = followup.current.enqueue(id, intent.text, taskId);
+              await reply(accepted ? 'Follow-up queued for this task to finish. It has not been submitted or applied, and the current task continues unchanged. Say cancel queued to remove it.' : 'A follow-up is already queued. Cancel it before replacing it.');
+            } else {
+              await reply('We can keep talking while the backend works. This runtime cannot apply an immediate correction without interrupting it, so I have not changed the task. To request a later continuation, say queue followed by the request.');
+            }
             return;
           }
-          const receipt = current.current.send(text);
-          if (!receipt) { await update('The conversation did not accept the request.'); return; }
-          const completion = new Promise<void>(resolve => { pending.current.set(id, { userId: receipt.userMessageId, update, resolve }); });
-          void update('Request submitted to the existing conversation. Completion is not yet confirmed.', false).catch(() => {});
-          await completion;
+          await submit(intent.kind === 'queue' ? intent.text : text, id, reply);
         },
       }, (next, message) => { if (generation.current === started) { setState(next); setDetail(message ?? ''); } }, controller.signal);
       if (generation.current !== started) { await live.close(); setState(live.state); } else session.current = live;

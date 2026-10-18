@@ -26,7 +26,7 @@ it('serializes same-poll delegations and waits for correlated terminal even if a
   const task = fixture.backend!.delegate('Do this', 'one', update);
   await fixture.backend!.delegate('Another task', 'two', blocked);
   expect(send).toHaveBeenCalledOnce();
-  expect(blocked).toHaveBeenCalledWith(expect.stringContaining('still running'));
+  expect(blocked).toHaveBeenCalledWith(expect.stringContaining('cannot apply an immediate correction'));
   // Optimistic ready and a partial assistant bubble are not terminal evidence.
   await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [
     { id: 'user-1', role: 'user', text: 'Do this' }, { id: 'assistant', role: 'assistant', text: 'partial' },
@@ -67,4 +67,70 @@ it('offers explicit resume after closure without reconnecting itself', async () 
   await act(async () => container.querySelector('button')!.click());
   expect(container.querySelector('button')!.textContent).toBe('Disconnect voice');
   expect(fixture.backend!.binding).toBe(props.binding);
+});
+
+it('queues only explicit follow-up consent, waits for exact terminal, and delivers after voice resume', async () => {
+  const send = vi.fn().mockReturnValueOnce({userMessageId:'user-one'}).mockReturnValueOnce({userMessageId:'user-two'});
+  const props = {binding:'same-thread',messages:[],busy:false,terminals:{},send,interrupt:vi.fn()};
+  await act(async()=>root.render(createElement(ManagedLiveButton,props)));
+  await act(async()=>container.querySelector('button')!.click());
+  const update = vi.fn(async()=>{});
+  const first = fixture.backend!.delegate('Start task','first',update);
+  await fixture.backend!.delegate('Actually change it','correction',update);
+  expect(send).toHaveBeenCalledTimes(1);
+  await fixture.backend!.delegate('queue check the tests','follow-up',update);
+  expect(update).toHaveBeenLastCalledWith(expect.stringContaining('not been submitted or applied'));
+  const messages = [{id:'user-one',role:'user' as const,text:'Start task'}];
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'unconfirmed',text:''}}})));
+  expect(send).toHaveBeenCalledTimes(1);
+  await act(async()=>container.querySelector('button')!.click());
+  await act(async()=>container.querySelector('button')!.click());
+  const resumed = vi.fn(async()=>{}); fixture.backend!.subscribe!(resumed);
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'completed',text:'Verified original result'}}})));
+  await first;
+  expect(send).toHaveBeenNthCalledWith(2,'check the tests');
+  expect(resumed).toHaveBeenCalledWith('Verified original result',true);
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'completed',text:'Verified original result'}}})));
+  expect(send).toHaveBeenCalledTimes(2); expect(props.interrupt).not.toHaveBeenCalled();
+});
+
+it('cancels deliberate queue without interrupting the doer', async () => {
+  const props = {binding:'same-thread',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(),interrupt:vi.fn()};
+  await act(async()=>root.render(createElement(ManagedLiveButton,props)));
+  await act(async()=>container.querySelector('button')!.click());
+  const update=vi.fn(async()=>{});
+  await fixture.backend!.delegate('queue next step','queue',update);
+  await fixture.backend!.delegate('cancel queued','cancel',update);
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
+  expect(props.send).not.toHaveBeenCalled(); expect(props.interrupt).not.toHaveBeenCalled();
+});
+
+it('does not auto-submit a follow-up after the same utterance withdraws queue consent', async () => {
+  const props={binding:'same',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
+  await act(async()=>root.render(createElement(ManagedLiveButton,props)));
+  await act(async()=>container.querySelector('button')!.click());
+  await fixture.backend!.delegate('queue check tests, actually do not queue that','q',vi.fn(async()=>{}));
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
+  expect(props.send).not.toHaveBeenCalled();
+});
+
+it('drops queued consent across the real keyed conversation remount', async () => {
+  const props={key:'a',binding:'a',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
+  await act(async()=>root.render(createElement(ManagedLiveButton,props)));
+  await act(async()=>container.querySelector('button')!.click());
+  const oldBackend=fixture.backend!;
+  await oldBackend.delegate('queue check tests','q',vi.fn(async()=>{}));
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,key:'b',binding:'b',busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
+  await act(async()=>container.querySelector('button')!.click());
+  expect(fixture.backend!.binding).toBe('b'); expect(props.send).not.toHaveBeenCalled();
+});
+
+it('does not drain a follow-up when a different user turn owns current conversation', async () => {
+  const props={binding:'same',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
+  await act(async()=>root.render(createElement(ManagedLiveButton,props)));
+  await act(async()=>container.querySelector('button')!.click());
+  await fixture.backend!.delegate('queue check tests','q',vi.fn(async()=>{}));
+  const messages=[...props.messages,{id:'external',role:'user' as const,text:'Other work'}];
+  await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
+  expect(props.send).not.toHaveBeenCalled();
 });

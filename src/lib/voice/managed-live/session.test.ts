@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { LiveConversationBridge } from './conversation-bridge';
 import { LiveTranscript, startManagedLive } from './session';
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'operator-fixture' }));
 class Peer {
@@ -253,6 +254,34 @@ describe('managed Live transport', () => {
     await vi.advanceTimersByTimeAsync(29800); expect(live.state).toBe('live');
     await vi.advanceTimersByTimeAsync(500);
     expect(live.state).toBe('closed');
+  });
+  it('keeps polling and updating context during unresolved work, then delivers results to the resumed talker without old delegation IDs', async () => {
+    const bus = new LiveConversationBridge(); let context = 'Current task is working'; let starts = 0;
+    const closed = new Set<string>(); const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') return Response.json({id:`voice-${++starts}`,sdp:'answer'});
+      if (body.action === 'close') { closed.add(body.id); return Response.json({state:'closing'}); }
+      if (body.action === 'event') return Response.json({state:'submitted'});
+      return Response.json({events:closed.has(body.id) ? [{cursor:3,event:{type:'session.closed',usage:{seconds:15}}}] : body.id === 'voice-1' ? [
+        {cursor:1,event:{type:'session.input_transcript.delta',event_id:'speech',delta:'Work on this',start_ms:0,end_ms:1}},
+        {cursor:2,event:{type:'session.delegation.created',event_id:'delegation',delegation:{id:'old-delegation',target:'client'}}},
+      ] : []});
+    }));
+    const delegate = vi.fn(() => new Promise<void>(() => {}));
+    const backend = {binding:'same-task',context:()=>context,delegate,subscribe:bus.subscribe};
+    const first = await startManagedLive(backend,()=>{}); await flush();
+    expect(delegate).toHaveBeenCalledOnce();
+    context = 'Verified progress: one step finished; task still working';
+    await vi.advanceTimersByTimeAsync(1250);
+    expect(requests.some(r=>r.action==='event' && (r.event as Record<string,unknown>).type==='session.thinking.append' && String((r.event as Record<string,unknown>).content).includes('one step finished'))).toBe(true);
+    const closing = first.close(); await vi.advanceTimersByTimeAsync(250); await closing;
+    const second = await startManagedLive(backend,()=>{}); await bus.publish('Backend confirmed the result');
+    const result = requests.findLast(r=>r.action==='event');
+    expect(result).toMatchObject({id:'voice-2',event:{type:'session.commentary.append',delegation_id:null,content:'Backend confirmed the result'}});
+    expect(delegate).toHaveBeenCalledOnce();
+    const end = second.close(); await vi.advanceTimersByTimeAsync(250); await end;
+    expect(vi.getTimerCount()).toBe(0);
   });
   it('preserves exact transcript fragments and deduplicates delegation events', () => {
     const t = new LiveTranscript();

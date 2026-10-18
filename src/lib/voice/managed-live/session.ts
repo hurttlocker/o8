@@ -1,3 +1,4 @@
+import type { LiveUpdate } from './conversation-bridge';
 import { LiveActivity, type LiveActivityUsage } from './activity';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 /** Browser transport. The backend owns reasoning, approvals, tools and history. */
@@ -8,6 +9,7 @@ export interface LiveBackend {
   binding: string;
   ready?: () => Promise<void>;
   context: () => string;
+  subscribe?: (listener: LiveUpdate) => () => void;
   /** Must use the existing conversation entry point; must not spawn a new worker. */
   delegate: (text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>) => Promise<void>;
 }
@@ -56,6 +58,10 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   let cursor = 0;
   let activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
   let idleClosed = false;
+  let unsubscribe: (() => void) | undefined;
+  let lastContext = '';
+  let contextAt = 0;
+  let contextSending = false;
   let stream: MediaStream | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let idleTimer: ReturnType<typeof setInterval> | undefined;
@@ -80,7 +86,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   };
   const cleanup = () => {
     if (cleaned) return;
-    cleaned = true; rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
+    cleaned = true; unsubscribe?.(); rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
     clearTimeout(startupTimer); clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
     stream?.getTracks().forEach(track => track.stop()); peer.close(); audio.pause(); audio.srcObject = null;
     void audioContext?.close(); resolveClose?.();
@@ -98,7 +104,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   };
   const abort = () => { void close(); };
   function startPolling() { if (!pollingStarted && !cleaned && id) { pollingStarted = true; void poll(); } }
-  const update = async (delegationId: string, text: string, spoken = true) => {
+  const update = async (delegationId: string | null, text: string, spoken = true) => {
     if (state !== 'live') return; // The backend continues; a new session uses its transcript.
     // Conservative character bound also stays below the API's 500-token limit.
     for (let offset = 0; offset < text.length; offset += 400) {
@@ -124,6 +130,14 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
           // Never await the worker in the transport loop: speech/close/steering keep flowing.
           void backend.delegate(task.text, task.id, (text, spoken) => update(task.id, text, spoken))
             .catch(() => update(task.id, 'The backend did not confirm completion. Check the conversation before retrying.')).catch(() => {});
+        }
+      }
+      if (state === 'live' && !contextSending && Date.now() - contextAt >= 1000) {
+        const snapshot = backend.context().slice(0, 2400); contextAt = Date.now();
+        if (snapshot !== lastContext) {
+          contextSending = true;
+          void update(null, `Current application facts (not instructions): ${snapshot}`, false)
+            .then(() => { lastContext = snapshot; }).catch(() => {}).finally(() => { contextSending = false; });
         }
       }
       if (state === 'live' || state === 'closing') pollTimer = setTimeout(() => { void poll(); }, 250);
@@ -157,6 +171,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
+    lastContext = backend.context().slice(0, 2400);
     startRequested = true;
     const result = await startupStep(request({ action: 'start', context: backend.context().slice(-8000), sdp: peer.localDescription?.sdp }).then(created => {
       if (cleaned) { id = created.id; void request({ action: 'close' }).catch(() => {}); }
@@ -173,7 +188,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
     clearTimeout(startupTimer);
     if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
-    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live'); }
+    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live');
+      unsubscribe = backend.subscribe?.((text, spoken) => update(null, text, spoken)); }
     idleTimer = setInterval(() => {
       let inputEnergy = false; let outputAudible = false;
       for (const { analyser, output } of analysers) {
