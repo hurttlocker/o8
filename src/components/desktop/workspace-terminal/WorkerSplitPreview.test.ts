@@ -24,6 +24,7 @@ describe('native worker split preview', () => {
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     vi.useFakeTimers();
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -34,6 +35,7 @@ describe('native worker split preview', () => {
     await act(async () => root.unmount());
     host.remove();
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('spawns four or ten simulated panes and returns to live data without touching a transcript', async () => {

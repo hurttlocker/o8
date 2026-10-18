@@ -2,7 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { SubagentDemoPanel } from '@/components/desktop/workspace-terminal/SubagentDemoPanel';
+
+vi.mock('@/lib/pretext', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/pretext')>(), usePretextHeight: () => 24 }));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -14,6 +17,7 @@ const click = async (label: string) => {
 };
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   network = vi.fn(() => { throw new Error('Demo made a network request'); });
   vi.stubGlobal('fetch', network);
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Demo persisted settings'); });
@@ -26,6 +30,7 @@ afterEach(async () => {
 });
 
 it('opens the exact worker and reconciles review and failure in the real card without dispatch', async () => {
+  await click('Send demo message');
   await click('Open Review keyboard navigation');
   expect(host.querySelector('[data-demo-worker]')?.getAttribute('data-demo-worker')).toBe('demo-review');
   await click('Simulate failure');
@@ -39,17 +44,33 @@ it('opens the exact worker and reconciles review and failure in the real card wi
 });
 
 it('uses the chosen default only for new work and honors a task override', async () => {
+  await click('Send demo message');
   await click('Default worker: Codex, runtime default');
   await click('Claude Code');
-  await click('Add demo task');
+  await click('Send demo message');
   expect(host.querySelector('[data-demo-worker]')?.textContent).toContain('Claude Code');
   await click('Open Refine the composer layout');
   expect(host.querySelector('[data-demo-worker]')?.textContent).toContain('Codex');
   await click('Reset demo');
+  await click('Send demo message');
   const select = host.querySelector<HTMLSelectElement>('select[aria-label="Runtime for demo task"]')!;
   await act(async () => { select.value = 'claude-code'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-  await click('Add demo task');
+  await click('Send demo message');
   expect(host.querySelector('[data-demo-worker]')?.textContent).toContain('Task override');
   expect(host.querySelector('[data-demo-worker]')?.textContent).toContain('Claude Code');
+  expect(network).not.toHaveBeenCalled();
+});
+
+it('starts as a chat and places every dispatchable runtime after the prompt and reply', async () => {
+  expect(host.querySelector('[data-swarm-crew]')).toBeNull();
+  await click('Send demo message');
+  const transcript = host.querySelector('[data-demo-transcript]')!;
+  const text = transcript.textContent!;
+  expect(text.indexOf('Delegate this work')).toBeLessThan(text.indexOf('I’ll split'));
+  expect(text.indexOf('I’ll split')).toBeLessThan(text.indexOf('subagents'));
+  for (const capability of Object.values(ORCHESTRATOR_RUNTIMES).filter(item => item.dispatchable)) {
+    expect(transcript.querySelector('[data-swarm-crew]')?.textContent).toContain(capability.label);
+  }
+  expect(host.textContent).toContain('Examples, not installed availability');
   expect(network).not.toHaveBeenCalled();
 });
