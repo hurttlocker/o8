@@ -6,7 +6,7 @@ import type { LiveBackend } from '@/lib/voice/managed-live/session';
 const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
 vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
-  fixture.backend = backend; onState('live'); return { state: 'live', close: async () => {}, activity() {} };
+  fixture.backend = backend; onState('live'); return { state: 'live', close: async () => { onState('closed'); }, activity() {} };
 } }));
 import { ManagedLiveButton } from './ManagedLiveButton';
 let root: Root; let container: HTMLDivElement;
@@ -43,4 +43,15 @@ it('serializes same-poll delegations and waits for correlated terminal even if a
     terminals: { 'user-1': { outcome: 'interrupted', text: 'partial' } } })));
   await task;
   expect(update).toHaveBeenLastCalledWith('The backend confirmed interruption.');
+});
+
+it('allows voice restart when the app remounts with the new binding key', async () => {
+  const props = { key: 'repo:thread:claude:model', binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
+  await act(async () => root.render(createElement(ManagedLiveButton, {...props, key:'repo:other-thread:codex:model', binding:'repo:other-thread:codex:model'})));
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.disabled).toBe(false);
+  expect(fixture.backend!.binding).toBe('repo:other-thread:codex:model');
 });

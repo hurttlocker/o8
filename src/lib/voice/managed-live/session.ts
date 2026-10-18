@@ -39,6 +39,8 @@ export class LiveTranscript {
 
 export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal): Promise<LiveSession> {
   let state: LiveState = 'connecting';
+  let cleaned = false;
+  let pollingStarted = false;
   let id = '';
   let cursor = 0;
   let lastActivity = Date.now();
@@ -52,7 +54,10 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
-  const transition = (next: LiveState, detail?: string) => { state = next; onState(next, detail); };
+  const transition = (next: LiveState, detail?: string) => {
+    if (state === 'closed' || (cleaned && next !== 'closed')) return;
+    state = next; onState(next, detail);
+  };
   const activity = () => { lastActivity = Date.now(); };
   const request = async (body: Record<string, unknown>) => {
     const response = await fetch('/api/voice/live', { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: `Bearer ${getMobileWsToken()}` },
@@ -62,6 +67,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     return data;
   };
   const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true; signal?.removeEventListener('abort', abort);
     clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
     window.removeEventListener('pointerdown', activity); window.removeEventListener('keydown', activity);
     stream?.getTracks().forEach(track => track.stop()); peer.close(); audio.pause(); audio.srcObject = null;
@@ -74,9 +81,12 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     closePromise = new Promise(resolve => { resolveClose = resolve; });
     // Keep the peer and poll alive until the provider confirms terminal usage.
     closeTimer = setTimeout(() => { transition('unknown', 'Voice closure is unconfirmed. Backend work continues.'); cleanup(); }, 15_000);
-    void request({ action: 'close' }).catch(() => { transition('unknown', 'Voice closure is unconfirmed.'); cleanup(); });
+    void request({ action: 'close' }).catch(() => { if (state !== 'closed') { transition('unknown', 'Voice closure is unconfirmed.'); cleanup(); } });
+    startPolling();
     return closePromise;
   };
+  const abort = () => { void close(); };
+  function startPolling() { if (!pollingStarted && !cleaned && id) { pollingStarted = true; void poll(); } }
   const update = async (delegationId: string, text: string, spoken = true) => {
     if (state !== 'live') return; // The backend continues; a new session uses its transcript.
     // Conservative character bound also stays below the API's 500-token limit.
@@ -105,14 +115,16 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
         }
       }
       if (state === 'live' || state === 'closing') pollTimer = setTimeout(() => { void poll(); }, 250);
-    } catch { transition('unknown', 'Voice connection lost. Backend work may still be running.'); cleanup(); }
+    } catch { if (state !== 'closed') { transition('unknown', 'Voice connection lost. Backend work may still be running.'); cleanup(); } }
   }
   try {
     transition('connecting');
     await backend.ready?.();
     signal?.throwIfAborted();
+    if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     signal?.throwIfAborted();
+    if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     stream.getTracks().forEach(track => peer.addTrack(track, stream!));
     const analysers: AnalyserNode[] = [];
     // Audio level (input AND actual output) is authoritative for idle detection.
@@ -123,14 +135,23 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
       audioContext!.createMediaStreamSource(source).connect(analyser); analysers.push(analyser);
     };
     watch(stream);
-    peer.ontrack = event => { const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote); void audio.play().catch(() => { void close(); }); } };
+    peer.ontrack = event => { if (cleaned) return; const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote); void audio.play().catch(() => { void close(); }); } };
     peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') void close(); };
     peer.createDataChannel('oai-events'); // Provider channel is restricted; controls use the sideband.
     await peer.setLocalDescription(await peer.createOffer());
     signal?.throwIfAborted();
+    if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     const result = await request({ action: 'start', context: backend.context().slice(-8000), sdp: peer.localDescription?.sdp });
     id = result.id;
+    if (cleaned || closePromise) {
+      void request({ action: 'close' }).catch(() => {});
+      startPolling();
+      return { close, activity, get state() { return state; } };
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) void close();
     await peer.setRemoteDescription({ type: 'answer', sdp: result.sdp });
+    if (cleaned) return { close, activity, get state() { return state; } };
     if (!closePromise && !signal?.aborted) transition('live');
     activity();
     window.addEventListener('pointerdown', activity); window.addEventListener('keydown', activity);
@@ -141,8 +162,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
       }
       if (state === 'live' && Date.now() - lastActivity >= 60_000) void close();
     }, 200);
-    void poll();
-    signal?.addEventListener('abort', () => { void close(); }, { once: true });
+    startPolling();
     if (signal?.aborted) await close();
     return { close, activity, get state() { return state; } };
   } catch (error) {
