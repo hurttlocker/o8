@@ -3,7 +3,7 @@ import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { useRepoTargetMenu } from './useRepoTargetMenu';
 import { AttachFilesButton } from './AttachFilesButton';
-import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
+import { ComposerModeChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
 import { SessionRulesChip } from './SessionRulesChip';
@@ -702,17 +702,7 @@ export function InputButtons({
           composerMode={selectorControls?.state.mode ?? composerMode}
         />
       ) : null}
-      {composerMode && (selectorControls?.state.mode ?? composerMode) !== 'solo' ? (
-        <FleetWorkerChip
-          compact={compact}
-          defaults={selectorControls?.defaults}
-          workerModelLocked={selectorControls?.workerModelLocked}
-          saving={selectorControls?.savingWorkerDefaults}
-          onRuntimeChange={selectorControls?.onRuntimeChange}
-          onWorkerModelChange={selectorControls?.onWorkerModelChange}
-          onWorkerStartModeChange={selectorControls?.onWorkerStartModeChange}
-        />
-      ) : null}
+
 
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}
