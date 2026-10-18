@@ -135,6 +135,8 @@ Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) acce
 
 Settings page history [#3853](https://github.com/hurttlocker/o8/issues/3853), a keyboard-accessible Brain conversation beside the composer [#3854](https://github.com/hurttlocker/o8/issues/3854), and chat-local sidebar review actions [#3855](https://github.com/hurttlocker/o8/issues/3855) are implemented in development. Native Settings and Brain checks and focused review-target checks passed. Required PR checks and released-build acceptance remain pending.
 
+Optional tool updates [#3862](https://github.com/hurttlocker/o8/issues/3862) follow o8 status and release notes. Each tool starts with an Update action and a compatibility notice; custom installations keep their original updater. Qoder is omitted from this update surface. Native development checks and released-build acceptance remain separate gates.
+
 Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
 
 ## 6. Runs where you are
