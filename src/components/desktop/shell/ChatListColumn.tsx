@@ -2,7 +2,8 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 
-export const NAVIGATION_RAIL_WIDTH = 68;
+import { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
+export { NAVIGATION_RAIL_WIDTH } from './shell-geometry';
 
 /** Keep the list instance and scroll containers alive while its column is closed. */
 export function ChatListColumn({ visible, width, overlay, onClose, children }: {
@@ -35,7 +36,7 @@ export function ChatListColumn({ visible, width, overlay, onClose, children }: {
         maxWidth: overlay
           ? `calc(100vw / var(--ui-zoom, 1) - ${NAVIGATION_RAIL_WIDTH + 12}px)`
           : `max(160px, calc(100vw / var(--ui-zoom, 1) - ${NAVIGATION_RAIL_WIDTH + 492}px))`,
-        height: '100%',
+        height: overlay ? 'calc(100% - var(--o8-shell-edge-inset, 0px))' : '100%',
         minHeight: 0,
         position: overlay ? 'absolute' : 'relative',
         left: overlay ? NAVIGATION_RAIL_WIDTH : undefined,

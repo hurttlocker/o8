@@ -38,7 +38,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, toggle
     <ColumnHeaderStrip
       drag
       bottomHairline={!inCard}
-      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 2.5 } : {}) }}
+      style={{ ...(inCard ? { background: 'transparent' } : {}), ...(!windowControls ? { paddingLeft: 14 } : {}) }}
       // Compact rail controls share the workspace header centerline. The traffic
       // lights center on the same line: tao's inset semantics are
       // center = (buttonHeight + y) / 2 (bitmap-verified 2026-07-15: y=15

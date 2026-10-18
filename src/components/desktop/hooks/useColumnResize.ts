@@ -13,7 +13,7 @@ export function useColumnResize(setDragging: (value: boolean) => void) {
   const dispose = useRef<(() => void) | null>(null);
   useEffect(() => () => dispose.current?.(), []);
   return useCallback((event: PointerEvent<HTMLDivElement>, options: {
-    side: 'left' | 'right'; min: number; max: number; commit: (width: number) => void;
+    side: 'left' | 'right'; chrome?: number; min: number; max: number; commit: (width: number) => void;
   }) => {
     if (event.button !== 0 || !event.isPrimary) return;
     event.preventDefault(); dispose.current?.();
@@ -25,10 +25,11 @@ export function useColumnResize(setDragging: (value: boolean) => void) {
     const footer = options.side === 'left' ? column.querySelector<HTMLElement>('[data-o8-left-footer]') : null;
     const before = { column: column.style.width, shell: shell?.style.width, footer: footer?.style.width };
     const zoom = readAppliedUiZoom();
+    const chrome = options.chrome ?? RIGHT_COLUMN_CHROME;
     const startWidth = column.getBoundingClientRect().width / zoom;
     const available = options.side === 'right' ? shell?.parentElement?.getBoundingClientRect().width ?? 0 : 0;
     const maximum = options.side === 'right' && available > 0
-      ? Math.min(options.max, Math.max(0, available / zoom - WORKSPACE_RESERVE - RIGHT_COLUMN_CHROME)) : options.max;
+      ? Math.min(options.max, Math.max(0, available / zoom - WORKSPACE_RESERVE - chrome)) : options.max;
     const minimum = Math.min(options.min, maximum);
     const widthAt = (x: number) => Math.max(minimum, Math.min(maximum,
       startWidth + (x - event.clientX) / zoom * (options.side === 'left' ? 1 : -1)));
@@ -36,7 +37,7 @@ export function useColumnResize(setDragging: (value: boolean) => void) {
     let width = startWidth;
     const paint = (value: number) => {
       column.style.width = `${value}px`;
-      if (shell) shell.style.width = `${value + RIGHT_COLUMN_CHROME}px`;
+      if (shell) shell.style.width = `${value + chrome}px`;
       if (footer) footer.style.width = `${value}px`;
     };
     const finish = (value: number, commit: boolean) => {

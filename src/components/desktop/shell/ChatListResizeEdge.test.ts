@@ -18,7 +18,7 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
     const handle = host.querySelector<HTMLElement>('[role="separator"]')!;
     const edge = host.querySelector<HTMLElement>('[data-resize-glow]')!;
     const glow = edge;
-    expect(edge.style.top).toBe('53px'); expect(edge.style.bottom).toBe('0px');
+    expect(edge.style.top).toBe('calc(var(--o8-shell-header-height, 35px) + 18px)'); expect(edge.style.bottom).toBe('0px');
     expect(glow.style.opacity).toBe('0'); expect(glow.style.borderRadius).toBe('');
     expect(handle.style.width).toBe('4px');
     await act(async () => edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
@@ -35,7 +35,7 @@ it('keeps a full-height drag target, lights only the straight edge, and preserve
     await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
     expect(handle.getAttribute('aria-valuenow')).toBe('484');
     await act(async () => root.render(createElement(Harness, { glass: false })));
-    expect(host.querySelector<HTMLElement>('[data-resize-glow]')?.style.top).toBe('18px');
+    expect(host.querySelector<HTMLElement>('[data-resize-glow]')?.style.top).toBe('calc(var(--o8-shell-header-height, 0px) + 18px)');
     expect(host.querySelector<HTMLElement>('[data-resize-glow]')?.style.bottom).toBe('18px');
   } finally {
     await act(async () => root.unmount()); host.remove();

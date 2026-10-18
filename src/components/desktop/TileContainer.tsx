@@ -40,6 +40,8 @@ export interface TileContentDefinition<TContent extends TileContent = TileConten
 export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>;
 
 interface TileContainerProps {
+  /** Solid workspace surfaces share straight seams; glass keeps separate cards. */
+  joined?: boolean;
   activeTileId: string | null;
   paneLabels?: ReadonlyMap<string, string>;
   keepPrimarySessionAlive?: boolean;
@@ -73,6 +75,7 @@ const LEAF_RADIUS = 14;
  * panel no longer remounts the workspace terminal above it.
  */
 export function TileContainer({
+  joined = false,
   activeTileId,
   paneLabels,
   keepPrimarySessionAlive = false,
@@ -84,6 +87,8 @@ export function TileContainer({
   onResizeSplit,
   onSplitTile,
 }: TileContainerProps) {
+  const leafGap = joined ? 1 : LEAF_GAP;
+  const leafRadius = joined ? 0 : LEAF_RADIUS;
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
   const [paneDragging, setPaneDragging] = useState(false);
@@ -122,10 +127,10 @@ export function TileContainer({
     ? null : focusedPaneId === 'tile-root'
       ? { left: 0, top: 0, width: 1, height: 1 }
       : leafRects.get('tile-root');
-  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? LEAF_GAP / 2 : 0;
-  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
+  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? leafGap / 2 : 0;
+  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? leafGap / 2 : 0;
+  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? leafGap / 2 : 0;
+  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? leafGap / 2 : 0;
 
   useEffect(() => {
     const update = (drag: WorkspacePaneDrag) => {
@@ -223,17 +228,17 @@ export function TileContainer({
         // half + half = LEAF_GAP visible in the middle, fully transparent
         // so the chrome shows through.
         const epsilon = 0.001;
-        const halfGap = LEAF_GAP / 2;
+        const halfGap = leafGap / 2;
         const padLeft = rect.left > epsilon ? halfGap : 0;
         const padRight = rect.left + rect.width < 1 - epsilon ? halfGap : 0;
         const padTop = rect.top > epsilon ? halfGap : 0;
         const padBottom = rect.top + rect.height < 1 - epsilon ? halfGap : 0;
         // Round only corners adjacent to a gap so the leaves keep the
         // workspace boundary crisp.
-        const radiusTL = (padTop || padLeft) ? LEAF_RADIUS : 0;
-        const radiusTR = (padTop || padRight) ? LEAF_RADIUS : 0;
-        const radiusBL = (padBottom || padLeft) ? LEAF_RADIUS : 0;
-        const radiusBR = (padBottom || padRight) ? LEAF_RADIUS : 0;
+        const radiusTL = (padTop || padLeft) ? leafRadius : 0;
+        const radiusTR = (padTop || padRight) ? leafRadius : 0;
+        const radiusBL = (padBottom || padLeft) ? leafRadius : 0;
+        const radiusBR = (padBottom || padRight) ? leafRadius : 0;
         return (
           <div
             key={leaf.id}
