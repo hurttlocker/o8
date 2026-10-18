@@ -147,6 +147,8 @@ Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) r
 
 Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
 
+Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116) exposes Open workspace directly beside each project and labels details separately from editing. Development checks cover repeated opening and failure recovery. Required PR checks and released-build acceptance remain separate gates.
+
 Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3108) uses one Threads control beside the task identity and Refresh. Ordinary project list and detail navigation remain available. Native development acceptance uses simulated task data; it does not establish remote execution acceptance.
 
 ## 6. Runs where you are
