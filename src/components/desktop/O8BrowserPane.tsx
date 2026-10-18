@@ -24,7 +24,7 @@ import {
   isLoopbackBrowserUrl,
   normalizeBrowserUrl,
 } from '@/lib/browser/url';
-import { isTauri, browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
+import { isTauri, browserViewEval } from '@/lib/tauri/bridge';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import {
   activeUrlFromBrowserPaneSnapshot,
@@ -272,10 +272,10 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
 
   const handleReload = useCallback(() => {
     if (!activeTab?.url) return;
-    // Native path: re-navigating to the same URL reloads the page in the child
-    // window — no iframe-key toggle (which would unmount + flash the surface).
+    // Reload the current document so the browser revalidates its subresources.
+    // Ordinary navigation can combine fresh HTML with cached application code.
     if (nativeEnabled) {
-      void browserViewNavigate(activeTab.url);
+      void browserViewEval('location.reload()');
       return;
     }
     // Force iframe reload by toggling URL

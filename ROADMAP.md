@@ -159,6 +159,8 @@ Browser tab closure [#3909](https://github.com/hurttlocker/o8/issues/3909) expos
 
 Fresh-session receipts [#3804](https://github.com/hurttlocker/o8/issues/3804) publish completion only after exact mounted-tab and post-focus verification. Unverified creation expires to an explicit unknown result without replay, and terminal or newer receipts remain intact. Real-root creation and surface-state regressions are verified; native and packaged acceptance remain separate gates.
 
+Native Browser reload [#3801](https://github.com/hurttlocker/o8/issues/3801) reloads the current document instead of navigating to its existing address. Attached development verifies fresh HTML and module code after a cached-module update, while the tab identity and selection remain stable. Packaged acceptance and release remain separate.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
