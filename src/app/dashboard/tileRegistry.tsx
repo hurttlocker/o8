@@ -5,7 +5,7 @@ import { Suspense, type Dispatch, type MutableRefObject, type SetStateAction } f
 import { toast } from '@/components/shared/ConfirmToastHost';
 import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
-import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
+import { LegacyPreviewRecovery } from '@/components/desktop/LegacyPreviewRecovery';
 import type { TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { RemoteTerminalDetails, TerminalTab, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
@@ -91,7 +91,6 @@ export interface TileRegistryDeps {
   globalRepoEntries: RepoRegistryEntry[];
   handleAgentPanelChatInjection: (payload: AgentPanelChatInjectionPayload) => void;
   handleOpenBrowser: (url?: string) => void;
-  handleClosePreviewTileItem: (tileId: string, previewId: string) => void;
   handleCloseTile: (tileId: string) => void;
   handleLaunchWorkspaceAgent: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   handleLaunchWorkspaceRepoTask: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
@@ -100,7 +99,6 @@ export interface TileRegistryDeps {
   handlePreviewDetected: (preview: DetectedLocalhostPreview) => void;
   handlePreviewSelection: (selection: PreviewSelectionPayload) => void;
   handleSelectCommit: (hash: string, meta?: Record<string, string>) => void;
-  handleSelectPreviewTile: (tileId: string, previewId: string) => void;
   handleSelectRegisteredRepo: (repoId: string) => Promise<void>;
   handleSplitTile: (tileId: string, direction: 'vertical' | 'horizontal', initialTab?: 'orchestrator' | 'chat' | 'terminal' | 'remote', placeBefore?: boolean) => string | null;
   handleThoughtsMissionStateChange: (
@@ -151,7 +149,6 @@ export function createTileRegistry({
   globalRepoEntries,
   handleAgentPanelChatInjection,
   handleOpenBrowser,
-  handleClosePreviewTileItem,
   handleCloseTile,
   handleLaunchWorkspaceAgent,
   handleLaunchWorkspaceRepoTask,
@@ -160,7 +157,6 @@ export function createTileRegistry({
   handlePreviewDetected,
   handlePreviewSelection,
   handleSelectCommit,
-  handleSelectPreviewTile,
   handleSelectRegisteredRepo,
   handleSplitTile,
   handleThoughtsMissionStateChange,
@@ -491,15 +487,14 @@ export function createTileRegistry({
     },
     preview: {
       label: 'Preview',
-      description: 'Tabbed localhost previews detected from the workspace terminal.',
+      description: 'Close a saved Preview pane or move its local app to Browser.',
       singleton: true,
       render: ({ content, tileId }) => (
-        <LocalhostPreviewTabs
+        <LegacyPreviewRecovery
           previews={workspacePreviews}
-          selectedPreviewId={content.kind === 'preview' ? content.selectedPreviewId ?? null : null}
-          onSelectPreview={(previewId) => handleSelectPreviewTile(tileId, previewId)}
-          onClosePreview={(previewId) => handleClosePreviewTileItem(tileId, previewId)}
-          onElementSelect={handlePreviewSelection}
+          selectedPreviewId={content.kind === 'preview' ? content.selectedPreviewId : null}
+          onOpenBrowser={handleOpenBrowser}
+          onClose={() => handleCloseTile(tileId)}
         />
       ),
     },
