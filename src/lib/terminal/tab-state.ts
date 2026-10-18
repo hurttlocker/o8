@@ -4,6 +4,7 @@
  */
 
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import type { TerminalExitState } from '@/lib/terminal/exit-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
 import {
@@ -29,6 +30,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
+  terminalExit?: TerminalExitState;
   readOnly?: boolean; // live run view: never send input to an attached PTY
   remoteMachine?: { id: string; label: string; sessionId: string };
   chatRuntime?: OrchestratorRuntime; // for kind='chat' (CLI Session)

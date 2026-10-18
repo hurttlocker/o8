@@ -20,6 +20,7 @@ import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { attachLiveAgentTerminalTab } from '@/components/desktop/contextual-panel/live-agent-terminal';
 import { useContextualTabClose } from '@/components/desktop/contextual-panel/use-tab-close';
+import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
 
 import { CLI_AGENTS, AgentGlyph, AgentDot, TerminalIcon, FilesIcon, PlusIcon, XIcon, BOTTOM_PANEL_SURFACES, SURFACE_LABELS, BottomUtilitySurface, type CliAgent } from './contextual-panel/surfaces';
 
@@ -31,7 +32,7 @@ export interface ContextualPanelHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
-  setTermExited: (sessionName: string) => void;
+  setTermExited: (sessionName: string, exitCode?: number | null) => void;
   /** Returns the current tmux session name, or null if not connected */
   getSession: () => string | null;
   /** Ensure a terminal exists, then run the command inside it. */
@@ -69,6 +70,7 @@ export interface ContextualPanelTab {
   kind: BottomPanelSurfaceKind;
   agentId?: (typeof CLI_AGENTS)[number]['id'];
   tmuxSession: string | null;
+  terminalExit?: TerminalExitState;
   /** true for `o8 run` agent-run views — live output, input guarded. */
   readOnly?: boolean;
   createdAt: number;
@@ -247,19 +249,21 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       setTermError: (sessionName: string, error: string) => {
         xtermRefs.current.get(sessionName)?.setError(error);
       },
-      setTermExited: (sessionName: string) => {
-        xtermRefs.current.get(sessionName)?.setExited();
+      setTermExited: (sessionName: string, exitCode?: number | null) => {
+        if (!tabsRef.current.some((tab) => tab.tmuxSession === sessionName)) return;
+        xtermRefs.current.get(sessionName)?.setExited(exitCode);
+        setTabs((current) => current.map((tab) => tab.tmuxSession === sessionName ? { ...tab, terminalExit: terminalExitState(exitCode) } : tab));
       },
       getSession: () => tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal')?.tmuxSession ?? null,
       runCommand: (command: string) => {
         // Skip read-only watch tabs (`o8 run` views) — never inject into an agent's PTY.
-        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal' && !entry.readOnly);
+        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal' && !entry.readOnly && !entry.terminalExit);
         if (activeTab?.tmuxSession) {
           sendTerminalInput(activeTab.tmuxSession, command + '\n');
           return;
         }
 
-        const existingShell = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.agentId === 'shell' && entry.tmuxSession);
+        const existingShell = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.agentId === 'shell' && entry.tmuxSession && !entry.terminalExit);
         if (existingShell?.tmuxSession) {
           setActiveTabId(existingShell.id);
           sendTerminalInput(existingShell.tmuxSession, command + '\n');
@@ -645,6 +649,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   sendTerminalDetach={sendTerminalDetach}
                   visible={tab.id === activeTabId}
                   readOnly={tab.readOnly}
+                  onNewShell={!tab.readOnly ? createShell : undefined}
+                  onClose={() => { void handleCloseTab(tab.id); }}
                 />
               ) : tab.kind === 'terminal' ? (
                 <div

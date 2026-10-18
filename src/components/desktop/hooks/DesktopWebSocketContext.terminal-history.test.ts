@@ -20,6 +20,22 @@ class Socket {
   }
 }
 
+it.each(['shared', 'standalone'] as const)('%s exit transport preserves known codes and leaves missing or invalid status unknown', async transport => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('WebSocket', Socket); Socket.instances = [];
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const onTerminalExited = vi.fn();
+  const useConnection = transport === 'shared' ? useSharedDesktopWs : useDesktopWebSocket;
+  function Consumer() { useConnection(undefined, { onTerminalExited }); return null; }
+  try {
+    await act(async () => root.render(transport === 'shared' ? createElement(DesktopWebSocketProvider, null, createElement(Consumer)) : createElement(Consumer)));
+    const socket = Socket.instances.at(-1)!;
+    for (const [raw, source, expected] of [[0, 'process', 0], [17, 'process', 17], [undefined, 'process', null], ['invalid', 'process', null], [1.5, 'process', null], [0, undefined, null], [7, 'transport', null]] as const) {
+      await act(async () => socket.onmessage?.({ data: JSON.stringify({ channel: 'terminal', event: 'exited', data: { sessionName: 'ended-owned', exitCode: raw, exitCodeSource: source } }) } as MessageEvent));
+      expect(onTerminalExited).toHaveBeenLastCalledWith('ended-owned', expected);
+    }
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); }
+});
+
 it.each(['shared', 'standalone'] as const)('%s transport renders retained output without treating replay as a new preview', async transport => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('WebSocket', Socket); Socket.instances = [];
   const meta = document.createElement('meta'); meta.name = 'ws-token'; meta.content = 'test-local-token'; document.head.append(meta);

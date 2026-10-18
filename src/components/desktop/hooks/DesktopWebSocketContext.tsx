@@ -11,6 +11,8 @@
 
 'use client';
 
+import { terminalProcessExitCode } from '@/lib/terminal/exit-state';
+
 import {
   createContext,
   useContext,
@@ -426,7 +428,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
             data.source === 'tmux' ? 'tmux' : 'scrollback',
           );
           else if (eventType === 'diagnostic' && data) dispatch('onTerminalDiagnostic', data);
-          else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, (data.exitCode as number) ?? 0);
+          else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, terminalProcessExitCode(data.exitCode, data.exitCodeSource));
           else if (eventType === 'error' && data) dispatch('onTerminalError', data.sessionName as string, (data.error as string) ?? 'Unknown error');
           else if (eventType === 'image' && data) dispatch('onTerminalImage', data.sessionName as string, data.imageB64 as string, (data.filename as string) ?? 'image.png');
           break;

@@ -20,6 +20,19 @@ beforeEach(async () => {
 });
 
 describe('terminal state restore without a registered repo', () => {
+  it.each([0, 9, null])('restores ended output and exit status %s without attaching or respawning a dead shell', async (exitCode) => {
+    const terminalExit = { exitCode, transcript: 'FINAL-PERSISTED-MARKER\nlast line' };
+    const tab = { id: 'ended-shell', label: 'Terminal 1', kind: 'terminal' as const, cliAgent: 'shell', tmuxSession: 'cortex-dash-ended-fixture', terminalExit, createdAt: 1, lastActivity: 2 };
+    const persisted = buildPersistedState([tab], tab.id);
+    const save = await POST(new Request(stateUrl, { method: 'POST', body: JSON.stringify(persisted) }));
+    expect(save.status).toBe(200);
+    const read = await GET(new Request(stateUrl));
+    const restored = await computeRestoredTabs(await read.json(), { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => { throw new Error('Do not replace an ended terminal'); } });
+    expect(restored?.tabs[0]).toMatchObject({ id: tab.id, tmuxSession: tab.tmuxSession, terminalExit });
+    expect(restored?.sessionsToAttach).toEqual([]);
+    expect(restored?.deadTerminalTabs).toEqual([]);
+  });
+
   it.each([false, true])('keeps the newer selected conversation when canonical state is newer: %s', async (canonicalIsNewer) => {
     const repoPath = path.join(dataDir, 'registered-repo');
     writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1,

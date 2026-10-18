@@ -1,3 +1,5 @@
+import type { TerminalExitState } from '@/lib/terminal/exit-state';
+
 export interface InlineImage {
   id: string;
   dataUrl: string;
@@ -6,6 +8,9 @@ export interface InlineImage {
 
 export interface XtermPanelProps {
   tmuxSession: string;
+  exitState?: TerminalExitState;
+  onNewShell?: () => void;
+  onClose?: () => void;
   /** Observe an existing run without writing keystrokes into its PTY. */
   readOnly?: boolean;
   inputLocked?: boolean;
@@ -59,5 +64,5 @@ export interface XtermPanelHandle {
   recordDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
-  setExited: () => void;
+  setExited: (exitCode?: number | null, onSnapshot?: (state: TerminalExitState) => void) => void;
 }

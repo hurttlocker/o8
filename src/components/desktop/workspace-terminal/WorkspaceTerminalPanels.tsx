@@ -44,6 +44,7 @@ interface WorkspaceTerminalPanelsProps {
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   onCloseTab: (tabId: string) => void;
+  onNewTerminal?: (repo?: RegisteredRepo) => void;
   onRunInTerminal: (command: string) => void;
   onOpenWorkspaceCommitTab: (hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => void;
   onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
@@ -76,6 +77,7 @@ function WorkspaceTerminalPanelsBase({
   termWsConnected,
   panelRefs,
   onCloseTab,
+  onNewTerminal,
   onRunInTerminal,
   onOpenWorkspaceCommitTab,
   onUpdateLlmSummary,
@@ -248,6 +250,9 @@ function WorkspaceTerminalPanelsBase({
             tmuxSession={tab.tmuxSession}
             readOnly={tab.readOnly}
             inputLocked={tab.remoteLaunchPending}
+            exitState={tab.terminalExit}
+            onNewShell={!tab.readOnly && !tab.remoteMachine && onNewTerminal ? () => onNewTerminal(tab.repo) : undefined}
+            onClose={() => onCloseTab(tab.id)}
             panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
@@ -549,6 +554,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession,
   readOnly,
   inputLocked,
+  exitState,
+  onNewShell,
+  onClose,
   panelRefs,
   sendTerminalAttach,
   sendTerminalInput,
@@ -562,6 +570,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession: string;
   readOnly?: boolean;
   inputLocked?: boolean;
+  exitState?: TerminalTab['terminalExit'];
+  onNewShell?: () => void;
+  onClose?: () => void;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
   sendTerminalInput: WorkspaceTerminalPanelsProps['sendTerminalInput'];
@@ -614,6 +625,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
             else panelRefs.current.delete(tmuxSession);
           }}
           tmuxSession={tmuxSession}
+          exitState={exitState}
+          onNewShell={onNewShell}
+          onClose={onClose}
           readOnly={readOnly}
           inputLocked={inputLocked}
           connectionEpoch={connectionEpoch}

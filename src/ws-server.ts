@@ -1935,7 +1935,7 @@ function registerTerminalAttachment(attachment: TerminalAttachment, recordClient
     }
 
     const exitMsg = JSON.stringify({
-      channel: 'terminal', event: 'exited', data: { sessionName, exitCode },
+      channel: 'terminal', event: 'exited', data: { sessionName, exitCode, exitCodeSource: att.snapshotSource === 'tmux' ? 'transport' : 'process' },
     });
     for (const cid of att.clientIds) {
       const c = clients.get(cid);
