@@ -249,22 +249,43 @@ fn reposition(
     let win = window.clone();
     let app = app.clone();
     let _ = window.run_on_main_thread(move || {
+        if surface == crate::live_dictation::PartialsSurface::Caret {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::{NSEvent, NSScreen};
+            use crate::overlay_geometry::{caret_local_frame, LogicalScreen, LogicalWindowFrame};
+
+            let Some(mtm) = MainThreadMarker::new() else { return; };
+            let screens = NSScreen::screens(mtm);
+            let Some(primary) = screens.firstObject() else { return; };
+            let primary_rect = primary.frame();
+            let primary_top = primary_rect.origin.y + primary_rect.size.height;
+            let logical_screens = screens.iter().enumerate().map(|(index, screen)| {
+                let rect = screen.frame();
+                LogicalScreen {
+                    x: rect.origin.x,
+                    y: primary_top - (rect.origin.y + rect.size.height),
+                    width: rect.size.width,
+                    height: rect.size.height,
+                    scale_factor: screen.backingScaleFactor(),
+                    is_primary: index == 0,
+                }
+            }).collect::<Vec<_>>();
+            let mouse = NSEvent::mouseLocation();
+            let caret = anchor.map(|a| LogicalWindowFrame { x: a.x, y: a.y, width: a.width, height: a.height });
+            if let Some(frame) = caret_local_frame(
+                &logical_screens, caret, (mouse.x, primary_top - mouse.y),
+                (CARET_WIDTH, CARET_HEIGHT), CARET_GAP,
+            ) {
+                if !crate::overlay_geometry::set_frame_points(&win, frame, primary_top) {
+                    log::warn!("[agent-partials] failed to apply caret point geometry");
+                }
+            }
+            return;
+        }
         let main = app.get_webview_window("main");
 
-        // Caret mode follows the monitor containing the captured AX caret. The
-        // legacy HUD keeps its main-window monitor behavior.
-        let anchor_monitor = anchor.and_then(|caret| {
-            win.available_monitors().ok()?.into_iter().find(|monitor| {
-                let scale = monitor.scale_factor();
-                let x = monitor.position().x as f64 / scale;
-                let y = monitor.position().y as f64 / scale;
-                let width = monitor.size().width as f64 / scale;
-                let height = monitor.size().height as f64 / scale;
-                caret.x >= x && caret.x < x + width && caret.y >= y && caret.y < y + height
-            })
-        });
-        let monitor = anchor_monitor
-            .or_else(|| main.as_ref().and_then(|m| m.current_monitor().ok().flatten()))
+        // The explicitly selected legacy HUD retains its window/screen anchor.
+        let monitor = main.as_ref().and_then(|m| m.current_monitor().ok().flatten())
             .or_else(|| win.current_monitor().ok().flatten())
             .or_else(|| win.primary_monitor().ok().flatten());
         let Some(monitor) = monitor else {
@@ -276,37 +297,13 @@ fn reposition(
         let mon_w = monitor.size().width as f64 / scale;
         let mon_h = monitor.size().height as f64 / scale;
 
-        let (frame_width, frame_height) = if surface
-            == crate::live_dictation::PartialsSurface::Caret
-        {
-            (CARET_WIDTH, CARET_HEIGHT)
-        } else {
-            (PARTIALS_WIDTH, PARTIALS_HEIGHT)
-        };
+        let (frame_width, frame_height) = (PARTIALS_WIDTH, PARTIALS_HEIGHT);
         if !crate::overlay_geometry::set_content_size_points(
             &win,
             frame_width,
             frame_height,
         ) {
             log::warn!("[agent-partials] failed to apply native point size");
-        }
-
-        if surface == crate::live_dictation::PartialsSurface::Caret {
-            if let Some(caret) = anchor {
-                let max_x = (mon_x + mon_w - frame_width).max(mon_x);
-                let max_y = (mon_y + mon_h - frame_height).max(mon_y);
-                let below = caret.y + caret.height + CARET_GAP;
-                let above = caret.y - frame_height - CARET_GAP;
-                let raw_y = if below + frame_height <= mon_y + mon_h {
-                    below
-                } else {
-                    above
-                };
-                let x = (caret.x + caret.width + CARET_GAP).clamp(mon_x, max_x);
-                let y = raw_y.clamp(mon_y, max_y);
-                let _ = win.set_position(tauri::LogicalPosition::new(x, y));
-                return;
-            }
         }
 
         // WINDOW anchor only when the operator is actively working in o8:
