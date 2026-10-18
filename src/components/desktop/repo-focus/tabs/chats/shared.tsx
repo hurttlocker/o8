@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '../../../lucide-shims';
@@ -44,6 +45,9 @@ export function SectionLabel({
   controls?: string;
   status?: ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const reducedMotion = useReducedMotion();
   const commonStyle = {
     paddingTop: compact ? 10 : 12,
     paddingRight: 12,
@@ -83,13 +87,23 @@ export function SectionLabel({
         letterSpacing: 'inherit',
       }}
     >
-      {collapsed ? <ChevronRight size={12} strokeWidth={1.8} /> : <ChevronDown size={12} strokeWidth={1.8} />}
       <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      <span aria-hidden="true" data-section-chevron="" style={{
+        display: 'flex', flexShrink: 0, width: 12, height: 12,
+        opacity: hovered || focused ? 1 : 0,
+        transition: reducedMotion ? 'none' : 'opacity 120ms ease-out',
+      }}>
+        {collapsed ? <ChevronRight size={12} strokeWidth={1.8} /> : <ChevronDown size={12} strokeWidth={1.8} />}
+      </span>
     </button>
   ) : <span style={{ flex: 1, minWidth: 0 }}>{label}</span>;
 
   return (
-    <div style={{ ...commonStyle, display: 'flex', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box' }}>
+    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)} onBlurCapture={event => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+      }}
+      style={{ ...commonStyle, display: 'flex', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box' }}>
       {toggle}
       {status}
       {action ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{action}</div> : null}
@@ -125,23 +139,16 @@ function RepoGroupLabel({
   noIcon?: boolean;
   /** Drawer state — only meaningful when onToggle is provided. */
   collapsed?: boolean;
-  /** When set, the whole header toggles the repo drawer (Cursor pattern). */
+  /** When set, the whole header toggles the repo drawer. */
   onToggle?: () => void;
   /** Hover-revealed [+] — spawn a new session scoped to this repo. */
   onCreate?: () => void;
   createTitle?: string;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const reducedMotion = useReducedMotion();
   const toggleable = Boolean(onToggle);
-  // Leading 11px slot keeps its exact geometry (OCD rule: icons stay where
-  // they are). At rest the folder reads as identity; the chevron only takes
-  // the slot when the drawer is collapsed (state must read at a glance) or
-  // while hovering a toggleable header (affordance).
-  const leadingGlyph = toggleable && collapsed
-      ? <ChevronRight size={11} strokeWidth={2} />
-      : toggleable
-        ? <ChevronDown size={11} strokeWidth={2} />
-        : noIcon ? null : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />;
   return (
     <div
       role={toggleable ? 'button' : undefined}
@@ -152,6 +159,8 @@ function RepoGroupLabel({
       onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onToggle?.(); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -168,11 +177,7 @@ function RepoGroupLabel({
         userSelect: 'none',
       }}
     >
-      {/* Folder glyph (or empty spacer for non-repo groups like
-          Conversations) — Antigravity-style repo-prefix. Sized to match
-          the 11px chevron in adjacent SectionLabel headers (Spawned
-          agents, Archived) so labels start at the same x position. */}
-      <span
+      {!noIcon ? <span
         aria-hidden
         style={{
           width: 11,
@@ -184,22 +189,30 @@ function RepoGroupLabel({
           flexShrink: 0,
         }}
       >
-        {leadingGlyph}
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          fontSize: 11,
-          lineHeight: '14px',
-          fontWeight: 500,
-          letterSpacing: '-0.1px',
-        }}
-      >
-        {label}
+        <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />
+      </span> : null}
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          style={{
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            fontSize: 11,
+            lineHeight: '14px',
+            fontWeight: 500,
+            letterSpacing: '-0.1px',
+          }}
+        >
+          {label}
+        </span>
+        {toggleable ? <span aria-hidden="true" data-section-chevron="" style={{
+          display: 'flex', flexShrink: 0, width: 12, height: 12,
+          opacity: hovered || focused ? 1 : 0,
+          transition: reducedMotion ? 'none' : 'opacity 120ms ease-out',
+        }}>
+          {collapsed ? <ChevronRight size={12} strokeWidth={1.8} /> : <ChevronDown size={12} strokeWidth={1.8} />}
+        </span> : null}
       </span>
       {onCreate ? (
         <button
@@ -224,8 +237,8 @@ function RepoGroupLabel({
             fontSize: 13,
             lineHeight: '13px',
             fontWeight: 400,
-            opacity: hovered ? 1 : 0,
-            transition: 'opacity 120ms ease',
+            opacity: hovered || focused ? 1 : 0,
+            transition: reducedMotion ? 'none' : 'opacity 120ms ease-out',
             flexShrink: 0,
           }}
         >
