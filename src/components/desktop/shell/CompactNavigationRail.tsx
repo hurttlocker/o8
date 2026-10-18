@@ -18,6 +18,7 @@ import { RailMoreMenu } from './RailMoreMenu';
 import { RailActionButton } from './RailActionButton';
 import { RailUpdateControl } from './RailUpdateControl';
 import { SidebarBrand } from './SidebarBrand';
+import { SymonIcon } from '../agent-panel/SidebarActionIcons';
 import type { WorkspaceUtilityKind } from '../canvas/workspace-utility-navigation';
 import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
 import type { WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
@@ -176,6 +177,7 @@ export function CompactNavigationRail({
       }}
     >
       <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' && !workspacePage ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
+      <RailActionButton type="button" aria-label="Symon" onClick={() => window.dispatchEvent(new Event('o8:symon-voice-toggle'))} style={railButton}><SymonIcon size={20} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run orchestrator" onPointerDown={event => startPaneDrag(event, 'orchestrator')} onClick={event => clickPaneAction(event, onNewSession)} style={{ ...railButton, cursor: 'grab', touchAction: 'none' }}><Play size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run terminal" onPointerDown={event => startPaneDrag(event, 'terminal')} onClick={event => clickPaneAction(event, onCreateTerminal)} style={{ ...railButton, cursor: 'grab', touchAction: 'none' }}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Canvas mode" onClick={() => window.location.assign('/preview/canvas-glass')} style={railButton}>
