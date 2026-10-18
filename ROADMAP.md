@@ -147,6 +147,8 @@ Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) r
 
 Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
 
+Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116) exposes Open workspace directly beside each project and labels details separately from editing. Development checks cover repeated opening and failure recovery. Required PR checks and released-build acceptance remain separate gates.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
