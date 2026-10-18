@@ -1,4 +1,4 @@
-import { streamSimple, type Context, type Model, type AssistantMessageEvent } from '@earendil-works/pi-ai/compat';
+import type { Context, Model, AssistantMessageEvent } from '@earendil-works/pi-ai/compat';
 import type { InferenceRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 export type PiModelTransport = (context: Context, signal: AbortSignal) => AsyncIterable<AssistantMessageEvent>;
@@ -117,6 +117,9 @@ export function createManagedPiTransport(options: ManagedPiTransportOptions): Pi
       }
       return response;
     };
+    // The SDK exports this module only for ESM; the dev host also loads us via CommonJS.
+    const { streamSimple } = await import('@earendil-works/pi-ai/compat');
+    requestSignal.throwIfAborted();
     const stream = streamSimple(options.model, context, {
       apiKey: 'host-transport-only', fetch: guardedFetch, signal: requestSignal,
       onProviderStreamEvent: (chunk) => {
