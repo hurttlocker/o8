@@ -28,12 +28,13 @@ function ThreadPreview({ taskId, jobId, attempt }: { taskId: string; jobId: stri
   </div>;
 }
 
-export function ThreadDetail({ task, active, evidenceRevision, onBack, actions }: {
+export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, showHeader = true }: {
   task: TaskPoolTask;
   active: boolean;
   evidenceRevision: number;
   onBack: () => void;
   actions: ReactNode;
+  showHeader?: boolean;
 }) {
   const context = useOrchestratorData();
   const [evidence, setEvidence] = useState<Evidence | null>(null);
@@ -103,10 +104,10 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+      {showHeader ? <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
         <ActionButton label="Threads" onClick={onBack} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{task.title}</span>
-      </div>
+      </div> : null}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
         <div style={{ fontSize: 10, fontWeight: 260, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>{THREAD_GROUPS.find((group) => group.id === task.group)?.label ?? task.status} · {threadModelLabel(task)} · {task.execution || (task.workerRouting?.selectedRuntime ?? task.runtime) === 'cloud' ? 'Remote worker' : 'Local worker'}{task.branch ? ` · ${task.branch}` : ''}</div>
         <p style={{ fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{threadStatusLine(task)}</p>
