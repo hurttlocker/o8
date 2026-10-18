@@ -5,7 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorDataValue } from '../orchestrator-data-context';
+import { SessionTranscriptPane } from '../SessionTranscriptPane';
 import * as actionReceipt from '@/lib/orchestrator/action-receipt';
+
+const context = vi.hoisted(() => ({ value: null as OrchestratorDataValue | null }));
+vi.mock('../orchestrator-data-context', () => ({ useOrchestratorData: () => context.value }));
 
 const transcriptMock = vi.hoisted(() => ({
   slice: {
@@ -396,4 +401,23 @@ describe('canSteerAgentState', () => {
     expect(canSteerAgentState({ status: 'idle' }, { status: 'released' })).toBe(false);
     expect(canSteerAgentState(null, null)).toBe(false);
   });
+});
+
+it('opens review from the matching worker header with its exact lane and repository, without merging', async () => {
+  const openReview = vi.fn(); const request = vi.fn(async (_input: RequestInfo | URL) => Response.json({})); vi.stubGlobal('fetch', request);
+  const packets = ['alpha', 'beta'].map(id => ({ id, title: `Work ${id}`, status: 'awaiting_review',
+    lane: { laneId: `lane-${id}`, sessionKey: `session-${id}`, repoPath: `/projects/${id}` },
+  } as OrchestratorPacket));
+  context.value = { agents: [], missionState: { packets }, onOpenO8Panel: openReview } as unknown as OrchestratorDataValue;
+  try {
+    act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
+    const headers = host!.querySelectorAll('[data-worker-pane-header]');
+    expect(headers).toHaveLength(2);
+    act(() => headers[1].querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
+    expect(openReview).toHaveBeenCalledExactlyOnceWith({ tab: 'review', reviewLaneId: 'lane-beta', repoPath: '/projects/beta' });
+    expect(request.mock.calls.some(call => String(call[0]).includes('/merge'))).toBe(false);
+    context.value = { ...context.value, missionState: { packets: packets.map(packet => ({ ...packet, status: 'running' })) } } as OrchestratorDataValue;
+    act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
+    expect(host!.querySelector('[data-worker-pane-header] [data-worker-open-review]')).toBeNull();
+  } finally { context.value = null; }
 });

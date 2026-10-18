@@ -83,4 +83,22 @@ describe('/api/browser/agent localization verbs', () => {
     expect(mocks.evalJs.mock.calls[0][0]).toContain('browser_view_eval_result');
     expect(mocks.evalJs.mock.calls[0][0]).toContain('.localize(');
   });
+
+  it('preserves a pending Browser observation instead of treating dispatch as opened', async () => {
+    const envelope = { ok: false, status: 'pending', requestId: 'observed-browser-request', automaticReplay: false, actionDispatched: true, reason: 'browser-not-visible' };
+    mocks.evalJs.mockResolvedValue({ result: JSON.stringify(envelope) });
+    const response = await POST(request('open', { requestId: envelope.requestId, timeoutMs: 0 }));
+    expect(await response.json()).toEqual(envelope);
+    expect(mocks.evalJs).toHaveBeenCalledOnce();
+    expect(mocks.evalJs.mock.calls[0][0]).not.toContain('new CustomEvent');
+  });
+
+  it('leaves a missing Browser request unavailable without dispatching a new open', async () => {
+    const envelope = { ok: false, status: 'unavailable', requestId: 'missing-browser-request', automaticReplay: false, actionDispatched: null, reason: 'request-not-found' };
+    mocks.evalJs.mockResolvedValue({ result: JSON.stringify(envelope) });
+    const response = await POST(request('open', { requestId: envelope.requestId, timeoutMs: 0 }));
+    expect(await response.json()).toEqual(envelope);
+    expect(mocks.evalJs).toHaveBeenCalledOnce();
+    expect(mocks.evalJs.mock.calls[0][0]).not.toContain('new CustomEvent');
+  });
 });
