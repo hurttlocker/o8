@@ -40,8 +40,9 @@ function git(cwd: string, ...args: string[]): string {
 
 function changedPaths(path: string): string[] {
   const tracked = git(path, 'diff', '--no-renames', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean);
+  const staged = git(path, 'diff', '--cached', '--no-renames', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean);
   const untracked = git(path, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-  return [...new Set([...tracked, ...untracked])].sort();
+  return [...new Set([...tracked, ...staged, ...untracked])].sort();
 }
 
 function changedFingerprint(root: string, relativePath: string): string {

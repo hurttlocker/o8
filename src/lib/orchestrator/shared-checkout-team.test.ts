@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +23,32 @@ function fixture() {
   git(repoPath, 'add', 'README.md');
   git(repoPath, '-c', 'user.name=o8 test', '-c', 'user.email=test@o8.local', 'commit', '-m', 'fixture');
   return { root, repoPath };
+}
+
+function stagedOnlyFixture() {
+  const { root, repoPath } = fixture();
+  const file = join(repoPath, 'README.md');
+  const working = readFileSync(file);
+  const head = git(repoPath, 'rev-parse', 'HEAD');
+  const mode = git(repoPath, 'ls-files', '--stage', '--', 'README.md').split(' ')[0]!;
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: repoPath, encoding: 'utf8', input: '# staged operator edit\n',
+  }).trim();
+  git(repoPath, 'update-index', '--cacheinfo', mode, blob, 'README.md');
+  expect(git(repoPath, 'status', '--porcelain', '--', 'README.md')).toBe('MM README.md');
+  expect(git(repoPath, 'show', ':README.md')).not.toBe(git(repoPath, 'show', 'HEAD:README.md'));
+  expect(git(repoPath, 'diff', '--binary', 'HEAD', '--', 'README.md')).toBe('');
+  expect(readFileSync(file)).toEqual(working);
+  const indexPath = git(repoPath, 'rev-parse', '--path-format=absolute', '--git-path', 'index');
+  return { root, repoPath, file, working, head, indexPath, index: readFileSync(indexPath),
+    entries: git(repoPath, 'ls-files', '--stage', '-z') };
+}
+
+function expectStagedOnlyStatePreserved(state: ReturnType<typeof stagedOnlyFixture>) {
+  expect(git(state.repoPath, 'rev-parse', 'HEAD')).toBe(state.head);
+  expect(git(state.repoPath, 'ls-files', '--stage', '-z')).toBe(state.entries);
+  expect(readFileSync(state.indexPath)).toEqual(state.index);
+  expect(readFileSync(state.file)).toEqual(state.working);
 }
 
 afterEach(() => {
@@ -133,6 +159,37 @@ describe('shared checkout team', () => {
     symlinkSync(root, join(repoPath, 'elsewhere'));
     await expect(reserveSharedCheckoutMember({ ...input, runtime: 'codex', taskName: 'B', clientMutationId: 'b', paths: ['elsewhere/output'] }))
       .rejects.toThrow(/escapes the checkout/);
+    expect(readSharedCheckoutTeam(input)).toBeNull();
+  });
+
+  it('protects a staged-only baseline after restoring its persisted team', async () => {
+    const state = stagedOnlyFixture();
+    const input = { repoPath: state.repoPath, parentThreadId: 'thoughts-staged-restored', dataDir: join(state.root, 'state') };
+    const team = await ensureSharedCheckoutTeam(input);
+    const receiptPath = join(input.dataDir, 'shared-checkout-teams', `${team.id}.json`);
+    const receipt = readFileSync(receiptPath);
+    expect.soft(team.initialChangedPaths).toEqual(['README.md']);
+    expect.soft(readSharedCheckoutTeam(input)?.initialChangedFingerprints).toHaveProperty('README.md');
+    expect(await ensureSharedCheckoutTeam(input)).toEqual(team);
+    expect.soft(inspectSharedCheckoutTeam(input)).toMatchObject({
+      initialChangedPaths: ['README.md'], baselineClean: false, baselineDrift: [], scopeClean: true,
+    });
+    await expect.soft(reserveSharedCheckoutMember({
+      ...input, runtime: 'codex', taskName: 'A', clientMutationId: 'a', paths: ['README.md'],
+    })).rejects.toThrow(/dirty before the team/);
+    expectStagedOnlyStatePreserved(state);
+    expect(readFileSync(receiptPath)).toEqual(receipt);
+    expect(readSharedCheckoutTeam(input)).toEqual(team);
+  });
+
+  it('does not create a team for an overlapping staged-only first reservation', async () => {
+    const state = stagedOnlyFixture();
+    const input = { repoPath: state.repoPath, parentThreadId: 'thoughts-staged-first', dataDir: join(state.root, 'state') };
+    expect(readSharedCheckoutTeam(input)).toBeNull();
+    await expect.soft(reserveSharedCheckoutMember({
+      ...input, runtime: 'codex', taskName: 'A', clientMutationId: 'a', paths: ['README.md'],
+    })).rejects.toThrow(/dirty before the team/);
+    expectStagedOnlyStatePreserved(state);
     expect(readSharedCheckoutTeam(input)).toBeNull();
   });
 
