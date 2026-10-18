@@ -12,7 +12,7 @@ import { renderTerminalBytes } from './helpers/headless-terminal';
 type WireFrame = {
   channel?: string;
   event?: string;
-  data?: { data?: string; requestId?: string; sessionName?: string };
+  data?: { data?: string; requestId?: string; sessionName?: string; historical?: boolean };
 };
 
 const ESC = String.fromCharCode(27);
@@ -264,8 +264,29 @@ describe.runIf(tmuxAvailable)('dashboard terminal CSI S through WebSocket and xt
       return Buffer.from(frame.data.data, 'base64').toString('utf8').includes('000');
     });
     expect(scrollbackFrame?.data?.data).toBeTypeOf('string');
+    expect(scrollbackFrame?.data?.historical).toBe(true);
     const replayRows = await renderPayload(scrollbackFrame!.data!.data!);
     const visibleRows = numberedLines((await restored.renderedRows()).join('\n'));
     expect([...replayRows, ...visibleRows.filter((row) => !replayRows.includes(row))]).toEqual(captureRows);
+
+    // New attachments must identify retained bytes every time, so a closed
+    // localhost preview cannot be rediscovered from these historical frames.
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const reattached = await connectRenderedClient();
+      reattached.socket.send(JSON.stringify({
+        type: 'terminal-attach', sessionName: fixedSession, cols: COLS, rows: ROWS,
+      }));
+      await waitFor(() => reattached.frames.some((frame) => (
+        frame.channel === 'terminal' && frame.event === 'data'
+        && frame.data?.data && Buffer.from(frame.data.data, 'base64').toString('utf8').includes('000')
+      )), 'retained output after reattachment');
+      const replay = reattached.frames.find(frame => (
+        frame.channel === 'terminal' && frame.event === 'data'
+        && frame.data?.data && Buffer.from(frame.data.data, 'base64').toString('utf8').includes('000')
+      ));
+      expect(replay?.data?.historical).toBe(true);
+      reattached.socket.close();
+      await once(reattached.socket, 'close');
+    }
   }, 60_000);
 });

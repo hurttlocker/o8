@@ -33,3 +33,22 @@ it('opens above its parent tool card and keeps the child reachable until Escape'
     expect(document.querySelector('[data-ports-popover]')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it('clicking Ports immediately opens the local-app list and clicking a row opens its URL', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const openBrowser = vi.fn();
+  try {
+    await act(async () => root.render(createElement(FooterPorts, {
+      placement: 'above', onPortPreview: openBrowser,
+      renderTrigger: () => createElement('button', { type: 'button' }, 'Ports'),
+    })));
+    const trigger = host.querySelector<HTMLButtonElement>('button')!;
+    await act(async () => trigger.click());
+    const panel = document.querySelector<HTMLElement>('[data-ports-popover]')!;
+    expect(panel).not.toBeNull();
+    await act(async () => panel.querySelector<HTMLButtonElement>('button')!.click());
+    expect(openBrowser).toHaveBeenCalledExactlyOnceWith(8765, 'http://localhost:8765', 'site');
+    expect(document.querySelector('[data-ports-popover]')).toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

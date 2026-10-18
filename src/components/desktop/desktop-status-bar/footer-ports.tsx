@@ -402,7 +402,7 @@ export function FooterPorts({
       style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
     >
       {renderTrigger ? (
-        <div onClick={onTriggerClick ?? (() => setOpen((v) => !v))} style={{ display: 'inline-flex' }}>
+        <div onClick={onTriggerClick ?? showPopover} style={{ display: 'inline-flex' }}>
           {renderTrigger({ pageCount: pages.length })}
         </div>
       ) : (
