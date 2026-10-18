@@ -1,3 +1,4 @@
+import { LiveActivity, type LiveActivityUsage } from './activity';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 /** Browser transport. The backend owns reasoning, approvals, tools and history. */
 export type LiveState = 'idle' | 'connecting' | 'live' | 'closing' | 'closed' | 'unknown' | 'error';
@@ -14,6 +15,7 @@ export interface LiveSession {
   close: () => Promise<void>;
   activity: () => void;
   readonly state: LiveState;
+  readonly usage: LiveActivityUsage;
 }
 export class LiveTranscript {
   private fragments: Array<{ text: string; start: number; end: number }> = [];
@@ -37,13 +39,23 @@ export class LiveTranscript {
   }
 }
 
-export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal): Promise<LiveSession> {
+export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: { idleTimeoutMs?: number }): Promise<LiveSession> {
   let state: LiveState = 'connecting';
   let cleaned = false;
   let pollingStarted = false;
   let id = '';
+  let startRequested = false;
+  let rejectStartup: (error: Error) => void = () => {};
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  const startupDeadline = new Promise<never>((_resolve, reject) => {
+    rejectStartup = reject;
+    startupTimer = setTimeout(() => reject(new Error('Voice connection setup timed out. Closure may still be reconciling.')), 45_000);
+  });
+  void startupDeadline.catch(() => {});
+  const startupStep = <T,>(operation: Promise<T>) => Promise.race([operation, startupDeadline]);
   let cursor = 0;
-  let lastActivity = Date.now();
+  let activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
+  let idleClosed = false;
   let stream: MediaStream | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let idleTimer: ReturnType<typeof setInterval> | undefined;
@@ -58,7 +70,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     if (state === 'closed' || (cleaned && next !== 'closed')) return;
     state = next; onState(next, detail);
   };
-  const activity = () => { lastActivity = Date.now(); };
+  const activity = () => {}; // UI interactions are not evidence of speech.
   const request = async (body: Record<string, unknown>) => {
     const response = await fetch('/api/voice/live', { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: `Bearer ${getMobileWsToken()}` },
       body: JSON.stringify({ ...body, binding: backend.binding, ...(id ? { id } : {}) }) });
@@ -68,9 +80,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   };
   const cleanup = () => {
     if (cleaned) return;
-    cleaned = true; signal?.removeEventListener('abort', abort);
-    clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
-    window.removeEventListener('pointerdown', activity); window.removeEventListener('keydown', activity);
+    cleaned = true; rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
+    clearTimeout(startupTimer); clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
     stream?.getTracks().forEach(track => track.stop()); peer.close(); audio.pause(); audio.srcObject = null;
     void audioContext?.close(); resolveClose?.();
   };
@@ -104,7 +115,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
       for (const entry of data.events as Array<{ cursor: number; event: LiveEvent }>) {
         if (entry.cursor <= cursor) continue;
         cursor = entry.cursor;
-        if (entry.event.type === 'session.closed') { transition('closed'); cleanup(); return; }
+        activityPolicy.observe(entry.event, Date.now());
+        if (entry.event.type === 'session.closed') { transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined); cleanup(); return; }
         if (entry.event.type === 'o8.transport.unknown') { transition('unknown', 'Voice disconnected; backend work is unchanged.'); cleanup(); return; }
         const task = transcript.observe(entry.event);
         if (task && state === 'live') {
@@ -119,55 +131,65 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   }
   try {
     transition('connecting');
-    await backend.ready?.();
+    await startupStep(Promise.resolve(backend.ready?.()));
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const capturedStream = await startupStep<MediaStream>(navigator.mediaDevices.getUserMedia({ audio: true }).then(captured => {
+      if (cleaned) captured.getTracks().forEach(track => track.stop());
+      return captured;
+    }));
+    stream = capturedStream;
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
-    stream.getTracks().forEach(track => peer.addTrack(track, stream!));
-    const analysers: AnalyserNode[] = [];
-    // Audio level (input AND actual output) is authoritative for idle detection.
-    // Transcript gaps and backend waiting do not keep the paid session alive.
+    capturedStream.getTracks().forEach(track => peer.addTrack(track, stream!));
+    const analysers: Array<{ analyser: AnalyserNode; output: boolean }> = [];
+    // Energy corroborates transcript evidence only; it never independently resets idle.
     audioContext = new AudioContext();
-    const watch = (source: MediaStream) => {
+    const watch = (source: MediaStream, output = false) => {
       const analyser = audioContext!.createAnalyser(); analyser.fftSize = 256;
-      audioContext!.createMediaStreamSource(source).connect(analyser); analysers.push(analyser);
+      audioContext!.createMediaStreamSource(source).connect(analyser); analysers.push({ analyser, output });
     };
-    watch(stream);
-    peer.ontrack = event => { if (cleaned) return; const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote); void audio.play().catch(() => { void close(); }); } };
+    watch(capturedStream);
+    peer.ontrack = event => { if (cleaned) return; const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote, true); void audio.play().catch(() => { void close(); }); } };
     peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') void close(); };
     peer.createDataChannel('oai-events'); // Provider channel is restricted; controls use the sideband.
-    await peer.setLocalDescription(await peer.createOffer());
+    await startupStep(peer.setLocalDescription(await startupStep(peer.createOffer())));
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
-    const result = await request({ action: 'start', context: backend.context().slice(-8000), sdp: peer.localDescription?.sdp });
+    activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
+    startRequested = true;
+    const result = await startupStep(request({ action: 'start', context: backend.context().slice(-8000), sdp: peer.localDescription?.sdp }).then(created => {
+      if (cleaned) { id = created.id; void request({ action: 'close' }).catch(() => {}); }
+      return created;
+    }));
     id = result.id;
     if (cleaned || closePromise) {
-      void request({ action: 'close' }).catch(() => {});
+      if (!cleaned) void request({ action: 'close' }).catch(() => {});
       startPolling();
-      return { close, activity, get state() { return state; } };
+      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
     }
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) void close();
-    await peer.setRemoteDescription({ type: 'answer', sdp: result.sdp });
-    if (cleaned) return { close, activity, get state() { return state; } };
-    if (!closePromise && !signal?.aborted) transition('live');
-    activity();
-    window.addEventListener('pointerdown', activity); window.addEventListener('keydown', activity);
+    await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
+    clearTimeout(startupTimer);
+    if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live'); }
     idleTimer = setInterval(() => {
-      for (const analyser of analysers) {
+      let inputEnergy = false; let outputAudible = false;
+      for (const { analyser, output } of analysers) {
         const values = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(values);
-        if (values.some(value => Math.abs(value - 128) > 5)) activity();
+        const energy = values.some(value => Math.abs(value - 128) > 5);
+        if (output) outputAudible ||= energy && !audio.paused; else inputEnergy ||= energy;
       }
-      if (state === 'live' && Date.now() - lastActivity >= 60_000) void close();
+      if (state === 'live' && activityPolicy.shouldClose(Date.now(), inputEnergy, outputAudible)) { idleClosed = true; void close(); }
     }, 200);
     startPolling();
     if (signal?.aborted) await close();
-    return { close, activity, get state() { return state; } };
+    return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
   } catch (error) {
+    if (cleaned && startRequested) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
     if (id) { void request({ action: 'close' }).catch(() => {}); }
-    transition(id ? 'unknown' : 'error', error instanceof Error ? error.message : 'Could not connect voice');
+    transition(id || startRequested ? 'unknown' : 'error', error instanceof Error ? error.message : 'Could not connect voice');
     cleanup(); throw error;
   }
 }

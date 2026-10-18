@@ -182,6 +182,78 @@ describe('managed Live transport', () => {
     expect(requests.filter(request=>request.action==='close' && request.id==='late-funded')).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('bounds hung provider setup and closes a late funded ID exactly once', async () => {
+    let finishStart!: (response: Response) => void;
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') return new Promise<Response>(resolve => { finishStart = resolve; });
+      return Response.json({events:[]});
+    }));
+    const states: string[] = [];
+    const starting = startManagedLive({binding:'a',context:()=>'',delegate:vi.fn()}, state=>states.push(state));
+    const rejected = expect(starting).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(45_000); await rejected;
+    expect(states.at(-1)).toBe('unknown');
+    finishStart(Response.json({id:'late-timeout',sdp:'answer'})); await flush();
+    expect(requests.filter(r=>r.action==='close' && r.id==='late-timeout')).toHaveLength(1);
+    expect(states).not.toContain('live'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('bounds hung microphone setup and stops a late granted stream without funding', async () => {
+    let grant!: (stream: unknown) => void; const stop = vi.fn();
+    vi.stubGlobal('navigator', {mediaDevices:{getUserMedia:()=>new Promise(resolve=>{grant=resolve;})}});
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    const starting = startManagedLive({binding:'a',context:()=>'',delegate:vi.fn()},()=>{});
+    const rejected = expect(starting).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(45_000); await rejected;
+    grant({getTracks:()=>[{stop}]}); await flush();
+    expect(stop).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('uses delayed speech timestamps and gives explicit resume an independent idle and usage budget', async () => {
+    const origin = Date.now(); let starts = 0; const closed = new Set<string>();
+    const closeTimes: number[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if(body.action==='start') return Response.json({id:`session-${++starts}`,sdp:'answer'});
+      if(body.action==='close') { closed.add(body.id); closeTimes.push(Date.now()-origin); return Response.json({state:'closing'}); }
+      if(closed.has(body.id)) return Response.json({events:[{cursor:3,event:{type:'session.closed',usage:{seconds:body.id==='session-1'?51:30}}}]});
+      const delayed = body.id==='session-1' && Date.now()-origin >= 28000;
+      return Response.json({events:delayed?[{cursor:1,event:{type:'session.input_transcript.delta',event_id:'speech',delta:'hello',start_ms:19000,end_ms:20000}}]:[]});
+    }));
+    const backend={binding:'a',context:()=>'',delegate:vi.fn()};
+    const first = await startManagedLive(backend,()=>{});
+    await vi.advanceTimersByTimeAsync(49800); expect(first.state).toBe('live');
+    await vi.advanceTimersByTimeAsync(500); expect(first.state).toBe('closed');
+    expect(closeTimes[0]).toBe(50000);
+    expect(first.usage.providerConnectedSeconds).toBe(51);
+    expect(first.usage.recognizedSpeechSecondsDiagnostic).toBe(1);
+    const second = await startManagedLive(backend,()=>{});
+    expect(second.usage.providerConnectedSeconds).toBeNull();
+    expect(second.usage.recognizedSpeechSecondsDiagnostic).toBe(0);
+    await vi.advanceTimersByTimeAsync(29800); expect(second.state).toBe('live');
+    await vi.advanceTimersByTimeAsync(500); expect(second.state).toBe('closed');
+    expect(starts).toBe(2); expect(backend.delegate).not.toHaveBeenCalled();
+    expect(second.usage.providerConnectedSeconds).toBe(30);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('gives slow startup a full initial inactivity window after readiness', async () => {
+    let finishStart!: (response: Response) => void;
+    let atStart!: () => void;
+    const reached = new Promise<void>(resolve => {atStart=resolve;}); let closed=false;
+    vi.stubGlobal('fetch', vi.fn(async(_url,init)=>{
+      const body=JSON.parse(init.body);
+      if(body.action==='start'){atStart();return new Promise<Response>(resolve=>{finishStart=resolve;});}
+      if(body.action==='close'){closed=true;return Response.json({state:'closing'});}
+      return Response.json({events:closed?[{cursor:1,event:{type:'session.closed',usage:{seconds:32}}}]:[]});
+    }));
+    const starting=startManagedLive({binding:'a',context:()=>'',delegate:vi.fn()},()=>{});
+    await reached; await vi.advanceTimersByTimeAsync(32000);
+    finishStart(Response.json({id:'slow',sdp:'answer'})); const live=await starting;
+    expect(live.state).toBe('live');
+    await vi.advanceTimersByTimeAsync(29800); expect(live.state).toBe('live');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(live.state).toBe('closed');
+  });
   it('preserves exact transcript fragments and deduplicates delegation events', () => {
     const t = new LiveTranscript();
     t.observe({ type: 'session.input_transcript.delta', event_id: '1', delta: 'Check ', start_ms: 0, end_ms: 10 });
@@ -191,7 +263,11 @@ describe('managed Live transport', () => {
     expect(t.observe(event)).toBeNull();
     expect(t.observe({ ...event, event_id: '4' })).toBeNull();
   });
-  it('closes after real inactivity, waits for terminal usage, and retains backend work', async () => {
+  it('closes after 30 seconds despite noise, typing and explicit UI activity; retains backend work', async () => {
+    class NoisyContext extends AudioContextFixture {
+      createAnalyser() { return { fftSize: 256, getByteTimeDomainData: (data: Uint8Array) => data.fill(160) }; }
+    }
+    vi.stubGlobal('AudioContext', NoisyContext);
     let closed = false;
     const requests: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
@@ -203,9 +279,13 @@ describe('managed Live transport', () => {
     const backend = { binding: 'repo:thread:claude', context: () => 'Existing conversation', delegate: vi.fn() };
     const states: string[] = [];
     const live = await startManagedLive(backend, state => states.push(state));
-    await vi.advanceTimersByTimeAsync(59_800); expect(live.state).toBe('live');
+    await vi.advanceTimersByTimeAsync(29_000);
+    window.dispatchEvent(new Event('keydown')); window.dispatchEvent(new Event('pointerdown')); live.activity();
+    await vi.advanceTimersByTimeAsync(800); expect(live.state).toBe('live');
     await vi.advanceTimersByTimeAsync(500); expect(live.state).toBe('closed');
     expect(states).toContain('closing');
+    expect(live.usage.providerConnectedSeconds).toBe(60);
+    expect(live.usage.recognizedSpeechSecondsDiagnostic).toBe(0);
     expect(requests.filter(r => r.action === 'start')).toHaveLength(1);
     expect(requests.every(r => r.binding === backend.binding)).toBe(true);
     expect(backend.delegate).not.toHaveBeenCalled();

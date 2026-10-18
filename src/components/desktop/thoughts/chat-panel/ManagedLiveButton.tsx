@@ -95,10 +95,10 @@ export function ManagedLiveButton(props: Props) {
   };
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
     <button type="button" onClick={() => { void toggle(); }} disabled={state === 'closing'}
-      aria-label={active ? 'Disconnect managed voice' : 'Start managed voice for this conversation'}
+      aria-label={active ? 'Disconnect managed voice' : state === 'closed' ? 'Resume managed voice for this conversation' : 'Start managed voice for this conversation'}
       aria-pressed={active} title={detail || 'Managed voice uses a separate voice allowance. Your selected agent stays in charge.'}
       style={{ background: 'transparent', color: 'var(--t-text-muted)', border: '1px solid var(--t-border)', borderRadius: 6, fontSize: 11, fontWeight: 300, paddingTop: 3, paddingBottom: 3, paddingLeft: 6, paddingRight: 6 }}>
-      {state === 'connecting' ? 'Connecting voice…' : state === 'closing' ? 'Closing voice…' : active ? 'Disconnect voice' : 'Voice'}
+      {state === 'connecting' ? 'Connecting voice…' : state === 'closing' ? 'Closing voice…' : active ? 'Disconnect voice' : state === 'closed' ? 'Resume voice' : 'Voice'}
     </button>
     {detail ? <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>{detail}</span> : null}
   </span>;

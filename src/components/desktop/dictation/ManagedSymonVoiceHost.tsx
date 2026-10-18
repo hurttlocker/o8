@@ -35,17 +35,17 @@ export function ManagedSymonVoiceHost() {
     window.addEventListener('o8:managed-symon-toggle', listener);
     return () => { alive = false; startup.current?.abort(); window.removeEventListener('o8:managed-symon-toggle', listener); void session.current?.close(); };
   }, []);
-  if ((state === 'idle' || state === 'closed') && !confirmation) return null;
+  if (state === 'idle' && !confirmation) return null;
   return <><div role="status" style={{ position: 'fixed', bottom: 70, right: 24, zIndex: 1000,
     background: 'var(--t-bg-card)', color: 'var(--t-text)', maxWidth: 420 }}>
     {confirmation ? <><p>{confirmation.tool}: {confirmation.summary}</p>
       {confirmation.steps.map((step, index) => <p key={index}>{index + 1}. {step}</p>)}
       <button type="button" onClick={() => confirmation.decide(false)}>Decline</button>
       <button type="button" onClick={() => confirmation.decide(true)}>Approve this action</button></> : null}
-  </div><button type="button" onClick={() => { startup.current?.abort(); void session.current?.close(); }}
+  </div><button type="button" onClick={() => { if (state === 'closed') window.dispatchEvent(new Event('o8:managed-symon-toggle')); else { startup.current?.abort(); void session.current?.close(); } }}
     title={detail || 'Disconnect voice. Backend tasks and context remain active.'}
     style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 1000, background: 'var(--t-bg-card)', color: 'var(--t-text)',
       border: '1px solid var(--t-border)', borderRadius: 8, paddingTop: 6, paddingBottom: 6, paddingLeft: 12, paddingRight: 12, fontSize: 11, fontWeight: 300 }}>
-    Symon voice: {state}{detail ? ` · ${detail}` : ''}
+    {state === 'closed' ? 'Resume Symon voice' : `Symon voice: ${state}`}{detail ? ` · ${detail}` : ''}
   </button></>;
 }

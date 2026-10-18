@@ -55,3 +55,16 @@ it('allows voice restart when the app remounts with the new binding key', async 
   expect(container.querySelector('button')!.disabled).toBe(false);
   expect(fixture.backend!.binding).toBe('repo:other-thread:codex:model');
 });
+
+it('offers explicit resume after closure without reconnecting itself', async () => {
+  const props = { binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  const previous = fixture.backend;
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.textContent).toBe('Resume voice');
+  expect(fixture.backend).toBe(previous);
+  await act(async () => container.querySelector('button')!.click());
+  expect(container.querySelector('button')!.textContent).toBe('Disconnect voice');
+  expect(fixture.backend!.binding).toBe(props.binding);
+});
