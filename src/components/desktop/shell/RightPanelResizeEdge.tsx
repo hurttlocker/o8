@@ -5,11 +5,12 @@ import { readAppliedUiZoom } from '@/lib/appearance/ui-zoom';
 import { ResizeEdge } from './ResizeEdge';
 import { COLUMN_HANDLE_WIDTH, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '../hooks/useColumnResize';
 
-export function RightPanelResizeEdge({ width, minimum, maximum, onStartDrag, onResize }: {
-  width: number; minimum: number; maximum: number;
+export function RightPanelResizeEdge({ width, minimum, maximum, joined = false, onStartDrag, onResize }: {
+  width: number; minimum: number; maximum: number; joined?: boolean;
   onStartDrag: PointerEventHandler<HTMLDivElement>;
   onResize: (width: number) => void;
 }) {
+  const chrome = joined ? 1 : RIGHT_COLUMN_CHROME;
   const host = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState<{ width: number; max: number } | null>(null);
   useLayoutEffect(() => {
@@ -20,22 +21,22 @@ export function RightPanelResizeEdge({ width, minimum, maximum, onStartDrag, onR
     const measure = () => {
       const zoom = readAppliedUiZoom();
       const next = { width: column.getBoundingClientRect().width / zoom,
-        max: Math.min(maximum, Math.max(0, container.getBoundingClientRect().width / zoom - WORKSPACE_RESERVE - RIGHT_COLUMN_CHROME)) };
+        max: Math.min(maximum, Math.max(0, container.getBoundingClientRect().width / zoom - WORKSPACE_RESERVE - chrome)) };
       setMeasured(current => current?.width === next.width && current.max === next.max ? current : next);
     };
     const observer = new ResizeObserver(measure);
     observer.observe(column); observer.observe(container);
     measure();
     return () => observer.disconnect();
-  }, [maximum]);
+  }, [maximum, chrome]);
   const max = measured?.max ?? maximum;
   const min = Math.min(minimum, max);
   const current = measured?.width ?? width;
   return <ResizeEdge ref={host} aria-label="Right panel width" aria-valuemin={min} aria-valuemax={max} aria-valuenow={current}
-    onPointerDown={onStartDrag} linePosition={COLUMN_HANDLE_WIDTH + 0.5} hitSlop={8}
+    onPointerDown={onStartDrag} linePosition={joined ? 0.5 : COLUMN_HANDLE_WIDTH + 0.5} hitSlop={8}
     onKeyDown={event => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
       onResize(Math.max(min, Math.min(max, current + (event.key === 'ArrowLeft' ? 16 : -16))));
-    }} style={{ width: COLUMN_HANDLE_WIDTH }} glowStyle={{ top: 22, bottom: 22 }} />;
+    }} style={{ width: joined ? 1 : COLUMN_HANDLE_WIDTH }} glowStyle={joined ? { top: 'var(--o8-shell-header-height, 40px)', bottom: 0 } : { top: 22, bottom: 22 }} />;
 }

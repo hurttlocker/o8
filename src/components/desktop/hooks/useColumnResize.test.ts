@@ -11,12 +11,12 @@ function pointer(target: EventTarget, type: string, x: number, id = 1) {
   Object.defineProperties(event, { pointerId: { value: id }, isPrimary: { value: true } });
   target.dispatchEvent(event);
 }
-function Harness() {
+function Harness({ chrome }: { chrome?: number }) {
   const [, dragging] = useState(false);
   const start = useColumnResize(dragging);
   return createElement('div', null, createElement('div', null,
     createElement(ResizeEdge, { 'aria-label': 'Right panel width', onPointerDown: event => start(event, {
-      side: 'right', min: 280, max: 1600, commit,
+      side: 'right', chrome, min: 280, max: 1600, commit,
     }) }), createElement('div', { 'data-mcp-scope': 'chat-panel', style: { width: 440 } })));
 }
 beforeEach(async () => {
@@ -60,4 +60,12 @@ it.each(['Escape', 'pointercancel', 'blur', 'unmount'])('restores the rendered w
   expect(column.style.width).toBe('440px'); expect(commit).not.toHaveBeenCalled();
   expect(document.body.style.cursor).toBe('crosshair'); expect(document.body.style.userSelect).toBe('text');
   document.body.style.cursor = ''; document.body.style.userSelect = '';
+});
+
+it('keeps the same workspace reserve with a joined one-pixel seam', async () => {
+  await act(async () => root.render(createElement(Harness, { chrome: 1 })));
+  const { edge, column } = measure(1, 350, 900);
+  await act(async () => { pointer(edge, 'pointerdown', 500); pointer(document, 'pointermove', 100); pointer(document, 'pointerup', 0); });
+  expect(commit).toHaveBeenCalledExactlyOnceWith(479);
+  expect(column.parentElement?.style.width).toBe('480px');
 });
