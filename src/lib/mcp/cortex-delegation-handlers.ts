@@ -1,7 +1,7 @@
 import { apiError, safeErrorText } from '@/lib/mcp/api-error';
 import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
-import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
@@ -161,6 +161,23 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
+  const handleReconcileSharedTeam = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    if (!config.repoPath || !config.parentThreadId) {
+      return textResult('This tool requires a persisted o8 orchestrator chat.', true);
+    }
+    if (typeof args.reviewId !== 'string' || typeof args.reviewedHead !== 'string'
+      || typeof args.reviewSummary !== 'string' || !Array.isArray(args.acknowledgedPaths)
+      || !args.acknowledgedPaths.every((path) => typeof path === 'string')) {
+      return textResult('Provide the exact status review ID, HEAD, paths, and an explicit review summary.', true);
+    }
+    try {
+      const receipt = await reconcileSharedCheckoutTeam({ repoPath: config.repoPath, parentThreadId: config.parentThreadId,
+        reviewId: args.reviewId, reviewedHead: args.reviewedHead, acknowledgedPaths: args.acknowledgedPaths,
+        reviewSummary: args.reviewSummary });
+      return jsonResult({ ok: true, receipt, note: 'Reviewed checkout state recorded. Source is unchanged; Finish must still verify settled workers and this exact state.' });
+    } catch (error) { return textResult(`Shared team reconciliation refused: ${safeErrorText(error)}`, true); }
+  };
+
   async function handleCorrectWorkers(args: Record<string, unknown>): Promise<ToolResult> {
     try {
       if (!config.repoPath || !config.parentThreadId) return textResult('Worker corrections require a persisted parent conversation.', true);
@@ -194,5 +211,5 @@ export function createCortexDelegationHandlers(config: {
     }
   }
 
-  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleCorrectWorkers, handleInterruptAgent };
+  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleReconcileSharedTeam, handleCorrectWorkers, handleInterruptAgent };
 }

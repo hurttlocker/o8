@@ -34,6 +34,19 @@ export interface SharedCheckoutTeam {
   initialChangedPaths: string[];
   initialChangedFingerprints: Record<string, string>;
   members: SharedCheckoutMember[];
+  reconciliations?: SharedCheckoutReconciliation[];
+}
+
+interface SharedCheckoutReview {
+  id: string;
+  head: string;
+  paths: string[];
+  fingerprints: Record<string, string>;
+}
+
+interface SharedCheckoutReconciliation extends SharedCheckoutReview {
+  reviewedAt: string;
+  reviewSummary: string;
 }
 
 interface TeamInput {
@@ -43,13 +56,18 @@ interface TeamInput {
 }
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5_000, windowsHide: true }).trim();
+  return gitRaw(cwd, ...args).trim();
+}
+
+function gitRaw(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5_000, windowsHide: true });
 }
 
 function changedPaths(path: string): string[] {
-  const tracked = git(path, 'diff', '--no-renames', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean);
-  const untracked = git(path, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
-  return [...new Set([...tracked, ...untracked])].sort();
+  const tracked = gitRaw(path, 'diff', '--no-renames', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean);
+  const staged = gitRaw(path, 'diff', '--cached', '--no-renames', '--name-only', '-z', 'HEAD').split('\0').filter(Boolean);
+  const untracked = gitRaw(path, 'ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean);
+  return [...new Set([...tracked, ...staged, ...untracked])].sort();
 }
 
 function changedFingerprint(root: string, relativePath: string): string {
@@ -57,8 +75,8 @@ function changedFingerprint(root: string, relativePath: string): string {
   const digest = createHash('sha256');
   digest.update(git(root, 'status', '--porcelain', '-z', '--', relativePath));
   digest.update(git(root, 'diff', '--binary', 'HEAD', '--', relativePath));
-  if (!existsSync(file)) return digest.update('missing').digest('hex');
-  const info = lstatSync(file);
+  const info = lstatSync(file, { throwIfNoEntry: false });
+  if (!info) return digest.update('missing').digest('hex');
   digest.update(String(info.mode));
   if (info.isSymbolicLink()) digest.update(readlinkSync(file));
   else if (info.isFile()) digest.update(readFileSync(file));
@@ -71,7 +89,7 @@ function changedFingerprints(root: string, paths: string[]): Record<string, stri
 }
 
 function committedPaths(path: string, baseHead: string): string[] {
-  return git(path, 'diff', '--no-renames', '--name-only', '-z', baseHead, 'HEAD').split('\0').filter(Boolean).sort();
+  return gitRaw(path, 'diff', '--no-renames', '--name-only', '-z', baseHead, 'HEAD').split('\0').filter(Boolean).sort();
 }
 
 function teamLocation(input: TeamInput): { id: string; file: string; lock: string; path: string } {
@@ -177,6 +195,26 @@ export function inspectSharedCheckoutTeam(input: TeamInput) {
   const claimed = team.members.filter((member) => member.state !== 'failed' || member.surfaceId).flatMap((member) => member.paths);
   const outsideClaims = [...new Set([...newPaths, ...committed])]
     .filter((path) => !claimed.some((scope) => pathsOverlap(path, scope))).sort();
+  const reviewPaths = [...new Set([...current, ...committed, ...team.initialChangedPaths])].sort();
+  // A directory/gitlink dirty marker cannot prove the nested content reviewed.
+  const unsupportedReviewPaths = reviewPaths.filter((path) => {
+    const info = lstatSync(join(team.path, path), { throwIfNoEntry: false });
+    return info && !info.isFile() && !info.isSymbolicLink();
+  });
+  const fingerprints = Object.fromEntries(reviewPaths.map((path) => [path, createHash('sha256')
+    .update(changedFingerprint(team.path, path))
+    // The staged version is separate from both HEAD and the working file.
+    .update(gitRaw(team.path, 'diff', '--cached', '--binary', 'HEAD', '--', path))
+    .digest('hex')]));
+  const review: SharedCheckoutReview = {
+    id: createHash('sha256').update(JSON.stringify({ path: team.path, branch: team.branch,
+      head: checkout.head, baseHead: team.baseHead, createdAt: team.createdAt, parent: team.parentThreadId,
+      baseline: team.initialChangedFingerprints, members: team.members, fingerprints })).digest('hex'),
+    head: checkout.head,
+    paths: reviewPaths,
+    fingerprints,
+  };
+  const reconciliation = team.reconciliations?.findLast((receipt) => receipt.id === review.id) ?? null;
   return {
     team,
     currentHead: checkout.head,
@@ -188,6 +226,9 @@ export function inspectSharedCheckoutTeam(input: TeamInput) {
     outsideClaims,
     scopeClean: outsideClaims.length === 0 && baselineDrift.length === 0,
     baselineClean: team.initialChangedPaths.length === 0,
+    review,
+    reconciliation,
+    unsupportedReviewPaths,
   };
 }
 
@@ -355,6 +396,62 @@ export async function recordSharedCheckoutMember(input: TeamInput & {
   });
 }
 
+async function assertMembersSettled(team: SharedCheckoutTeam): Promise<void> {
+  const { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } = await import('@/lib/runtimes/shared/owned-session-index');
+  for (const member of team.members) {
+    if (member.state === 'failed' && !member.surfaceId) continue;
+    if (!member.surfaceId) throw new Error(`Worker ${member.taskName} has no settled launch receipt.`);
+    const launch = await findOwnedLaunchByMutationId(member.clientMutationId);
+    if (!launch || launch.surfaceId !== member.surfaceId || launch.cwd !== team.path) {
+      throw new Error(`Worker ${member.taskName} has no matching owned runtime completion receipt.`);
+    }
+    const active = await lookupOwnedActiveRunFresh(member.surfaceId);
+    if (launch.outcome === 'running' || active?.pid !== undefined || active?.tmuxSession !== undefined) {
+      throw new Error(`Worker ${member.taskName} is still active. Wait for it to finish or interrupt it first.`);
+    }
+  }
+}
+
+/** Acknowledge only an exact, explicitly reviewed checkout state. No Git or
+ * source mutation, and the original baseline remains the provenance authority. */
+export async function reconcileSharedCheckoutTeam(input: TeamInput & {
+  reviewId: string;
+  reviewedHead: string;
+  acknowledgedPaths: string[];
+  reviewSummary: string;
+}): Promise<SharedCheckoutReconciliation> {
+  if (!input.reviewSummary.trim()) throw new Error('Reconciliation requires an explicit review summary.');
+  const location = teamLocation(input);
+  return withLock(location.lock, async () => {
+    const team = readFile(location.file);
+    if (!team) throw new Error('There is no active Shared team in this checkout.');
+    assertOwner(team, input, location.path, currentCheckout(location.path).branch);
+    await assertMembersSettled(team);
+    const status = inspectSharedCheckoutTeam(input);
+    if (!status || status.review.id !== input.reviewId || status.review.head !== input.reviewedHead) {
+      throw new Error('Checkout review is stale. Inspect and review the current changes before reconciling.');
+    }
+    if (status.unsupportedReviewPaths.length) {
+      throw new Error(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
+    }
+    const acknowledged = [...input.acknowledgedPaths].sort();
+    if (JSON.stringify(acknowledged) !== JSON.stringify(status.review.paths)) {
+      throw new Error('Acknowledge every exact path in the reviewed checkout, without omissions or extra paths.');
+    }
+    const workerEdits = status.newPaths.filter((path) => !status.outsideClaims.includes(path));
+    if (workerEdits.length) throw new Error(`Team edits are still uncommitted: ${workerEdits.join(', ')}`);
+    if (status.reconciliation) return status.reconciliation;
+    if (!status.outsideClaims.length && !status.baselineDrift.length) {
+      throw new Error('No independent checkout changes need reconciliation. Use Finish after reviewing the team.');
+    }
+    const receipt: SharedCheckoutReconciliation = { ...status.review,
+      reviewedAt: new Date().toISOString(), reviewSummary: input.reviewSummary.trim() };
+    team.reconciliations = [...(team.reconciliations ?? []), receipt];
+    writeTeam(location.file, team);
+    return receipt;
+  });
+}
+
 /** Release checkout ownership only after every owned worker has settled and
  * the orchestrator has committed/reviewed the team's scoped work. */
 export async function finishSharedCheckoutTeam(input: TeamInput & {
@@ -370,29 +467,21 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
     if (!team) throw new Error('There is no active Fast team in this checkout.');
     const checkout = currentCheckout(location.path);
     assertOwner(team, input, location.path, checkout.branch);
-    const { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } = await import('@/lib/runtimes/shared/owned-session-index');
-    for (const member of team.members) {
-      if (member.state === 'failed' && !member.surfaceId) continue;
-      if (!member.surfaceId) throw new Error(`Worker ${member.taskName} has no settled launch receipt.`);
-      const launch = await findOwnedLaunchByMutationId(member.clientMutationId);
-      if (!launch || launch.surfaceId !== member.surfaceId || launch.cwd !== team.path) {
-        throw new Error(`Worker ${member.taskName} has no matching owned runtime completion receipt.`);
-      }
-      const active = await lookupOwnedActiveRunFresh(member.surfaceId);
-      if (launch.outcome === 'running' || active?.pid !== undefined || active?.tmuxSession !== undefined) {
-        throw new Error(`Worker ${member.taskName} is still active. Wait for it to finish or interrupt it first.`);
-      }
-    }
+    await assertMembersSettled(team);
     const status = inspectSharedCheckoutTeam(input);
     if (!status) throw new Error('Shared team review state disappeared.');
-    if (status.outsideClaims.length > 0) {
+    if (status.unsupportedReviewPaths.length) {
+      throw new Error(`Nested repositories or special files need separate review: ${status.unsupportedReviewPaths.join(', ')}`);
+    }
+    if (status.outsideClaims.length > 0 && !status.reconciliation) {
       throw new Error(`Changes outside worker scopes need review: ${status.outsideClaims.join(', ')}`);
     }
-    if (status.baselineDrift.length > 0) {
+    if (status.baselineDrift.length > 0 && !status.reconciliation) {
       throw new Error(`Pre-existing operator edits changed during this team: ${status.baselineDrift.join(', ')}`);
     }
-    if (status.newPaths.length > 0) {
-      throw new Error(`Team edits are still uncommitted: ${status.newPaths.join(', ')}`);
+    const uncommitted = status.newPaths.filter((path) => !status.reconciliation || !status.outsideClaims.includes(path));
+    if (uncommitted.length > 0) {
+      throw new Error(`Team edits are still uncommitted: ${uncommitted.join(', ')}`);
     }
     const archive = join(location.file, '..', 'archive');
     mkdirSync(archive, { recursive: true });

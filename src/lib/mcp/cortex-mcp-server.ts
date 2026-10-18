@@ -108,7 +108,7 @@ const PARENT_THREAD_ID = process.env.CORTEX_THREAD_ID || '';
 const FAST_CAPABILITY = process.env.CORTEX_FAST_CAPABILITY || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
-const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleCorrectWorkers, handleInterruptAgent } = createCortexDelegationHandlers({
+const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleReconcileSharedTeam, handleCorrectWorkers, handleInterruptAgent } = createCortexDelegationHandlers({
   apiFetch,
   apiBase: API_BASE,
   repoPath: REPO_PATH,
@@ -308,23 +308,6 @@ const TOOLS: McpTool[] = [
   },
   // ── Delegation tools ──
   ...CORTEX_WORKER_TOOLS,
-  {
-    name: 'cortex_shared_team_status',
-    description: 'Inspect this orchestrator chat’s Fast team: shared checkout, members, initial dirty paths, changed and committed paths, and edits outside assigned scopes. Read this before a group commit.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'cortex_finish_shared_team',
-    description: 'After all Fast workers settle, review and commit their combined scoped changes, run verification, then archive the team receipt and release checkout ownership. Refuses live workers, uncommitted team edits, and changes outside scopes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        reviewSummary: { type: 'string', description: 'Concise summary of the combined diff and review findings.' },
-        verification: { type: 'string', description: 'Commands and outcomes used to verify the combined result.' },
-      },
-      required: ['reviewSummary', 'verification'],
-    },
-  },
   {
     name: 'cortex_steer_agent',
     description:
@@ -1274,6 +1257,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_launch_agent: handleLaunchAgent,
   cortex_shared_team_status: handleSharedTeamStatus,
   cortex_finish_shared_team: handleFinishSharedTeam,
+  cortex_reconcile_shared_team: handleReconcileSharedTeam,
   cortex_steer_agent: handleSteerAgent,
   cortex_correct_workers: handleCorrectWorkers,
   cortex_read_transcript: handleReadTranscript,
