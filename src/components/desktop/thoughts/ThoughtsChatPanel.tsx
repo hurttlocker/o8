@@ -738,7 +738,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     openRef.current = open;
   }, [open]);
 
-  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, setInput, setPreEnhanceInput, inputRef });
+  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, ownerTabId: scopeTabId, setInput, setPreEnhanceInput, inputRef });
 
   // Right-click "Add to chat" on an inline o8.md image relays here (via the
   // dashboard, so only the VISIBLE tab consumes it). Apply once per id (ref
