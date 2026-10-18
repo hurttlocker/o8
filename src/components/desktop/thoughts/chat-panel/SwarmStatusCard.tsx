@@ -7,6 +7,7 @@ import { runtimeFromWorkerSessionKey } from '@/lib/orchestrator/worker-launch-co
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import { projectWorkerParticipants } from '@/lib/orchestrator/participant-projection';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import { useWorkerDisclosure } from './WorkerDisclosure';
 import { ProviderMarkGlyph } from '../composer-selector/provider-marks';
 import { providerMarkForRuntime } from '../composer-selector/state';
 
@@ -55,6 +56,7 @@ function sessionTone(status: string): StatusTone {
   if (status === 'waiting' || status === 'awaiting_input' || status === 'needs-input') return { label: 'Waiting for input', state: 'review' };
   if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
   if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
+  if (status === 'idle') return { label: 'Idle', state: 'idle' };
   if (status === 'running') return { label: 'Running', state: 'running' };
   if (status === 'failed') return { label: 'Failed', state: 'failed' };
   return { label: 'Unconfirmed', state: 'idle' };
@@ -111,8 +113,16 @@ function scoutTone(status: SwarmScoutView['status']): StatusTone {
   }
 }
 
-function CrewRow({ title, sub, status, onClick, detail }: {
+export interface WorkerCardSelection {
+  available: string[];
+  selected: string[];
+  disabled: boolean;
+  onToggle: (sessionKey: string) => void;
+}
+
+function CrewRow({ title, sub, status, onClick, detail, selection }: {
   title: string; sub: string; status: StatusTone; onClick?: () => void; detail?: string;
+  selection?: { checked: boolean; disabled: boolean; onChange: () => void };
 }) {
   const style = {
     width: '100%', display: 'grid', gridTemplateColumns: '14px minmax(0, 1fr) auto',
@@ -131,11 +141,16 @@ function CrewRow({ title, sub, status, onClick, detail }: {
     </span>
     <span style={{ color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 300, lineHeight: 1.25, textAlign: 'right', maxWidth: 82 }}>{status.label}</span>
   </>;
-  return onClick
+  const row = onClick
     ? <button type="button" onClick={onClick} title={detail ? `Open ${title}\n${detail}` : `Open ${title}`} style={style}
       onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
       onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}>{content}</button>
     : <div style={style}>{content}</div>;
+  return selection ? <div style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', alignItems: 'center' }}>
+    <input type="checkbox" aria-label={`Select ${title}`} checked={selection.checked} disabled={selection.disabled}
+      onChange={selection.onChange} style={{ marginLeft: 12, accentColor: 'var(--t-accent)', cursor: selection.disabled ? 'default' : 'pointer' }} />
+    {row}
+  </div> : row;
 }
 
 /** Only recorded parent identity associates a worker with this conversation. */
@@ -160,15 +175,25 @@ export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (pa
   } }));
 }
 
-export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSession, onFocusPacket, defaultExpanded = false }: {
+export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSession, onFocusPacket, defaultExpanded = false, selection, coordinated = false, crewMaxHeight }: {
   packets: OrchestratorPacket[]; scouts?: SwarmScoutView[];
   sessions?: SwarmSessionView[];
   onFocusSession?: (sessionKey: string) => void;
   onFocusPacket?: (packet: OrchestratorPacket) => void;
   defaultExpanded?: boolean;
+  selection?: WorkerCardSelection;
+  coordinated?: boolean;
+  crewMaxHeight?: number | string;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [localExpanded, setExpanded] = useState(defaultExpanded);
   const panelId = useId();
+  const disclosure = useWorkerDisclosure();
+  const expanded = coordinated && disclosure ? disclosure.activeId === panelId : localExpanded;
+  const toggle = () => {
+    if (coordinated && disclosure) {
+      if (expanded) disclosure.deactivate(panelId); else disclosure.activate(panelId);
+    } else setExpanded(value => !value);
+  };
   const active = visibleSwarmPackets(packets);
   const byId = new Map(active.map(packet => [packet.id, packet]));
   const participants = projectWorkerParticipants({ packets: active });
@@ -185,6 +210,9 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
   }
   const summary = [...totals].map(([label, total]) => `${total} ${label}`).join(' · ');
   const runtimes = [...participants.map(participant => resolveDisplayRuntime(byId.get(participant.id)!)), ...native.map(() => 'claude-code' as const), ...shared.map(session => runtimeFromWorkerSessionKey(session.sessionKey))];
+  const selectionFor = (key: string | null | undefined) => key && selection?.available.includes(key) ? {
+    checked: selection.selected.includes(key), disabled: selection.disabled, onChange: () => selection.onToggle(key),
+  } : undefined;
   if (!count) return null;
 
   return <div role="group" aria-label={`Subagents: ${count}`} style={{
@@ -192,7 +220,7 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
     borderStyle: 'solid', borderColor: 'var(--t-border)', background: 'var(--t-input-bg)', overflow: 'hidden',
   }}>
     <button type="button" aria-expanded={expanded} aria-controls={panelId}
-      onClick={() => setExpanded(value => !value)} style={{
+      onClick={toggle} style={{
         display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, width: '100%',
         paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12,
         borderWidth: 0, background: 'transparent', color: 'var(--t-text)', textAlign: 'left',
@@ -212,19 +240,19 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
       </span>
       <svg aria-hidden width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : undefined }}><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </button>
-    {expanded ? <div id={panelId} data-swarm-crew="scrollable" style={SWARM_CREW_SCROLL_STYLE}>
+    {expanded ? <div id={panelId} data-swarm-crew="scrollable" style={{ ...SWARM_CREW_SCROLL_STYLE, ...(crewMaxHeight ? { maxHeight: crewMaxHeight } : {}) }}>
       {participants.map(participant => {
         const packet = byId.get(participant.id)!;
         const detail = packet.blockedReason?.trim() || participant.lifecycle.lastEventLabel;
         return <CrewRow key={participant.id} title={packet.title?.trim() || 'Worker'}
           sub={`${packetRuntimeModelDisplayLabel(packet)}${detail ? ` · ${detail}` : ''}`}
-          status={swarmPacketStatus(packet)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
+          status={swarmPacketStatus(packet)} selection={selectionFor(participant.sessionKey)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
       })}
       {native.map(scout => <CrewRow key={`native:${scout.id}`} title={scout.label}
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
       {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
-        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)} detail={sessionReturnState(session)?.detail}
+        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)} selection={selectionFor(session.sessionKey)} detail={sessionReturnState(session)?.detail}
         onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
     </div> : null}
   </div>;

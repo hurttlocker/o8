@@ -62,6 +62,6 @@ export function ThreadWorkerCard({ group, unattributed = false, onFocusPacket, o
   if (!group.packets.length && !group.sessions.length && !group.scouts.length) return null;
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
     {unattributed ? <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--t-text-faint)' }}>Subagents without a confirmed turn</span> : null}
-    <SwarmStatusCard {...group} onFocusPacket={onFocusPacket} onFocusSession={onFocusSession} />
+    <SwarmStatusCard coordinated {...group} onFocusPacket={onFocusPacket} onFocusSession={onFocusSession} />
   </div>;
 }
