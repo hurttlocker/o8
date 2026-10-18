@@ -8,16 +8,12 @@ import { AgentStatusDot, AGENT_STATUS_ACCENT } from './AgentStatusDot';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { packetRuntimeModelDisplayLabel, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import { useThreadWorkers } from './thoughts/chat-panel/ThreadWorkerCard';
-import { packetsForOrchestratorThread, projectSwarmView, swarmPacketStatus, swarmSessionStatus } from './thoughts/chat-panel/SwarmStatusCard';
+import { packetsForOrchestratorThread, projectSwarmView, swarmPacketStatus, swarmSessionStatus, type SwarmSessionView } from './thoughts/chat-panel/SwarmStatusCard';
 
 const AGENT_LIST_CAP = 6;
 const NO_LIVE_AGENTS: Array<{ sessionKey?: string; status?: string }> = [];
 
-/** One existing conversation hover, backed by recorded parent membership. */
-export function OrchestratorHoverCard({
-  title, repoLabel, backendLabel, branchLabel, workspacePath, updatedAt, threadId,
-  packets, anchorRect, onMouseEnter, onMouseLeave,
-}: {
+interface OrchestratorHoverCardProps {
   title: string;
   repoLabel: string | null;
   backendLabel: string | null;
@@ -29,8 +25,23 @@ export function OrchestratorHoverCard({
   anchorRect: DOMRect | null;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
-}) {
-  const sessions = useThreadWorkers({ threadId: threadId ?? null, repoPath: workspacePath ?? null, busy: false, agents: NO_LIVE_AGENTS });
+}
+
+/** Metadata-only previews do not subscribe to worker transport. */
+export function OrchestratorHoverCard(props: OrchestratorHoverCardProps) {
+  return props.threadId && props.workspacePath
+    ? <ThreadOrchestratorHoverCard {...props} />
+    : <HoverContent {...props} sessions={[]} />;
+}
+
+function ThreadOrchestratorHoverCard(props: OrchestratorHoverCardProps) {
+  const sessions = useThreadWorkers({ threadId: props.threadId ?? null, repoPath: props.workspacePath ?? null, busy: false, agents: NO_LIVE_AGENTS });
+  return <HoverContent {...props} sessions={sessions} />;
+}
+
+function HoverContent({ title, repoLabel, backendLabel, branchLabel, workspacePath, updatedAt, threadId,
+  packets, anchorRect, onMouseEnter, onMouseLeave, sessions,
+}: OrchestratorHoverCardProps & { sessions: SwarmSessionView[] }) {
   const { byId, participants, shared, count } = projectSwarmView({ packets: packetsForOrchestratorThread(packets, threadId), sessions });
   const workers = [
     ...participants.map(participant => {
