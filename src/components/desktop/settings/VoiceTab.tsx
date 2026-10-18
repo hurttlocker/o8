@@ -149,6 +149,7 @@ export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab,
   // secret; `groq_api_key_set` is the redacted presence flag.
   const [groqKeySet, setGroqKeySet] = useState(false);
   const [partialsSurface, setPartialsSurface] = useState<'caret' | 'hud' | 'off'>('caret');
+  const [topPillEnabled, setTopPillEnabled] = useState(false);
   const [leftControlAsFn, setLeftControlAsFn] = useState(false);
   // #2158: the EFFECTIVE remap state — the pref ANDed with "a non-Apple external
   // keyboard is attached". Null until the first read (or outside Tauri).
@@ -186,6 +187,7 @@ export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab,
     const savedSurface = prefs
       && (prefs as Record<string, unknown>).dictation_partials_surface;
     setPartialsSurface(savedSurface === 'hud' || savedSurface === 'off' ? savedSurface : 'caret');
+    setTopPillEnabled(prefs?.dictation_top_pill === true);
     setLeftControlAsFn(
       Boolean(prefs && (prefs as Record<string, unknown>).external_symon_left_control === true),
     );
@@ -198,7 +200,7 @@ export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab,
     if (esc === 'off' || esc === 'auto' || esc === 'deep') setEscalation(esc);
   }, [tauri, refreshPermissions]);
 
-  useEffect(() => { void loadAll(); }, [loadAll]);
+  useEffect(() => { void Promise.resolve().then(loadAll); }, [loadAll]);
 
   // Re-poll permissions when the window regains focus — the user typically
   // grants in System Settings then tabs back, so the status should update.
@@ -467,6 +469,23 @@ export function VoiceTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab,
                       { value: 'toggle', label: 'Tap' },
                       { value: 'hold', label: 'Hold' },
                     ]}
+                  />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<CaptionsIcon />}
+                label="Top pill"
+                subtitle="Off by default. Dictation stays in the text modal; voice controls and approvals appear when needed. Open Voice Settings anytime with ⌘⌥,."
+                accessory={
+                  <SettingsSegmented
+                    value={topPillEnabled ? 'on' : 'off'}
+                    onChange={(value) => {
+                      const enabled = value === 'on';
+                      setTopPillEnabled(enabled);
+                      void voicePrefsSet('dictation_top_pill', enabled);
+                    }}
+                    options={[{ value: 'off', label: 'Off' }, { value: 'on', label: 'On' }]}
                   />
                 }
                 divider
