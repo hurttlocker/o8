@@ -34,7 +34,10 @@ vi.mock('node:fs', async (original) => {
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: ready }));
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
-  prepareWorkerSandbox: async (input: { binary: string; args: string[] }) => input,
+  prepareWorkerSandbox: async (input: { binary: string; args: string[]; finalDenyPaths?: string[]; readOwnerInstructions?: boolean }) => {
+    if (input.finalDenyPaths?.length) expect(input.readOwnerInstructions).toBe(false);
+    return input;
+  },
 }));
 
 import { POST } from '@/app/api/plugins/mcp/route';

@@ -18,7 +18,9 @@ describe.skipIf(process.platform !== 'darwin')('controlled provider native files
     execFileSync('git', ['-C', repo, '-c', 'user.email=fixture@example.invalid', '-c', 'user.name=fixture', 'commit', '-m', 'fixture'], { stdio: 'pipe' });
     const fakeHome = join(root, 'synthetic-home');
     mkdirSync(join(fakeHome, '.codex'), { recursive: true }); mkdirSync(join(fakeHome, '.claude'));
-    const secrets = [join(fakeHome, '.codex', 'auth.json'), join(fakeHome, '.claude', '.credentials.json')];
+    mkdirSync(join(fakeHome, '.o8'));
+    const secrets = [join(fakeHome, '.codex', 'auth.json'), join(fakeHome, '.claude', '.credentials.json'),
+      join(fakeHome, 'AGENTS.md'), join(fakeHome, 'CLAUDE.md'), join(fakeHome, '.o8', 'OPERATING_AGREEMENT.md')];
     for (const file of secrets) writeFileSync(file, 'synthetic credential; never a real account');
     const check = `const fs=require('node:fs');const result={approved:fs.readFileSync(${JSON.stringify(join(repo, 'value.txt'))},'utf8'),denied:[]};
       for(const path of ${JSON.stringify([...secrets, join(repo, 'excluded.txt')])}){try{fs.readFileSync(path);result.denied.push(false)}catch{result.denied.push(true)}}
@@ -32,7 +34,7 @@ describe.skipIf(process.platform !== 'darwin')('controlled provider native files
       finalAllowExecPaths: [process.execPath] });
     const result = JSON.parse(execFileSync(prepared.binary, prepared.args,
       { cwd: repo, env: { NODE_ENV: 'test', PATH: '/usr/bin:/bin', HOME: fakeHome }, encoding: 'utf8', timeout: 5000 }));
-    expect(result).toEqual({ approved: '40\n', denied: [true, true, true], writeDenied: true });
+    expect(result).toEqual({ approved: '40\n', denied: [true, true, true, true, true, true], writeDenied: true });
     expect(readFileSync(join(repo, 'value.txt'), 'utf8')).toBe('40\n');
   });
 });

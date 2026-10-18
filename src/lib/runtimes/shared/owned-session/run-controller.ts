@@ -547,6 +547,7 @@ export function createOwnedRunController({
           args: spawnArgs,
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
+          readOwnerInstructions: !controlledSandbox,
           finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
