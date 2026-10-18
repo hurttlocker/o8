@@ -12,6 +12,7 @@ import {
 } from '@/lib/orchestrator/session-tiles';
 import { compactWorkerScrollRows, projectResponsiveAutomaticSessionTiles, sessionTileViewportBand, type SessionTileViewportBand } from '@/lib/orchestrator/session-tile-responsive';
 import { SessionTileSurface } from './SessionTileSurface';
+import { WorkerReviewAction } from './WorkerReviewAction';
 
 const WORKERS = [
   { name: 'Cosmo', task: 'Map the handoff path', status: 'Working', note: 'Tracing the request and reply.' },
@@ -54,6 +55,7 @@ function MockWorkerPane({
 }) {
   const index = Number(leaf.sessionKey?.split(':')[1] ?? 1) - 1;
   const worker = WORKERS[index] ?? WORKERS[0];
+  const [reviewOpen, setReviewOpen] = useState(false);
   const statusColor = worker.status === 'Needs input'
     ? 'var(--t-warning, #e9a23b)'
     : worker.status === 'Review'
@@ -102,6 +104,7 @@ function MockWorkerPane({
           <span style={{ width: 5, height: 5, borderRadius: 999, background: statusColor }} />
           {worker.status}
         </span>
+        <WorkerReviewAction packet={{ title: worker.task, status: worker.status === 'Review' ? 'awaiting_review' : 'running' }} onOpenReview={() => setReviewOpen(value => !value)} />
         <button type="button" aria-label={`Close ${worker.name} preview`} onClick={(event) => { event.stopPropagation(); onClose(); }} style={{ border: 0, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
@@ -109,6 +112,7 @@ function MockWorkerPane({
         <div style={{ color: 'var(--t-text)', fontSize: 13, lineHeight: 1.4, fontWeight: 500 }}>{worker.task}</div>
         <div style={{ marginTop: 18, paddingTop: 11, paddingRight: 12, paddingBottom: 11, paddingLeft: 12, borderRadius: 10, background: 'var(--t-hover)', color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
           {worker.note}
+          {reviewOpen ? <div role="status" style={{ marginTop: 10, color: 'var(--t-text)' }}>Review preview for @{worker.name}. This simulated task has no changes to merge.</div> : null}
         </div>
       </div>
       <div style={{ paddingTop: 9, paddingRight: 12, paddingBottom: 9, paddingLeft: 12, borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--t-divider-subtle, var(--t-border))', color: 'var(--t-text-faint)', fontSize: 11 }}>

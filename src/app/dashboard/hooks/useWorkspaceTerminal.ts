@@ -549,10 +549,10 @@ export function useWorkspaceTerminal({
         }
       }
     },
-    onTerminalData: (sessionName: string, data: string) => {
+    onTerminalData: (sessionName: string, data: string, historical?: boolean) => {
       terminalRef.current?.writeToTerminal(data);
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
-        handle.writeToTerminal(sessionName, data);
+        handle.writeToTerminal(sessionName, data, historical);
       }
       for (const handle of contextualPanelHandlesRef.current.values()) {
         handle.writeToTerminal(sessionName, data);

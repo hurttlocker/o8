@@ -18,6 +18,7 @@ import {
 import { O8WebviewClient, type O8WindowOperation } from '@/lib/mcp/o8-webview-client';
 import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
 import { O8_WEBVIEW_ASYNC_EVAL_GUARD } from '@/lib/mcp/o8-webview-async-eval-guard';
+import { requestBrowserOpen } from '@/lib/mcp/o8-browser-open';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -492,8 +493,14 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
       }
       cand = hits;
     }
-    const el = cand[0];
-    if (!el) return { clicked: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
+    const matched = cand[0];
+    if (!matched) return { clicked: false, actionDispatched: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
+    const el = matched.closest(CLICKABLE) || matched;
+    const unavailable = '[disabled]:not(fieldset),[aria-disabled="true" i],[inert]';
+    const linked = el.tagName === 'LABEL' ? el.control : null;
+    const blocker = matched.closest(unavailable) || (el.matches(':disabled') ? el : null)
+      || (linked && (linked.closest(unavailable) || (linked.matches(':disabled') ? linked : null)));
+    if (blocker) return { clicked: false, actionDispatched: false, reason: blocker.hasAttribute('inert') ? 'inert' : 'disabled', matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName };
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
     const r = el.getBoundingClientRect();
     const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
@@ -513,7 +520,7 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
       ['click', MouseEvent, Object.assign({ buttons: 0, detail: 1 }, mo)],
     ];
     for (const [type, Ctor, init] of seq) { try { el.dispatchEvent(new Ctor(type, init)); } catch (e) {} }
-    return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
+    return { clicked: true, actionDispatched: true, outcome: 'input-dispatched', matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
   })()`;
 }
 
@@ -594,14 +601,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     }),
 
     o8_view_open_browser: async (args) => withStructuredErrors(async () => {
-      const url = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : null;
-      // Dispatch the window event O8Panel listens for: switch to the Browser tab
-      // and (if a URL is given) navigate the inner iframe. Fire-and-forget inside
-      // evalJs — the handler runs synchronously, so the browser opens even if the
-      // eval transport reports a busy-thread timeout.
-      const code = `(() => { try { window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: ${JSON.stringify(url)} } })); return 'opened'; } catch (err) { return 'error: ' + String((err && err.message) || err); } })()`;
-      const result = await getClient().evalJs(code);
-      return jsonResult({ ok: true, url, raw: result.result });
+      const receipt = await requestBrowserOpen(getClient(), args);
+      return jsonResult(receipt, receipt.ok !== true);
     }),
 
     o8_view_scroll: async (args) => withStructuredErrors(async () => {

@@ -84,7 +84,7 @@ export function WorkspaceHeaderStrip({
         </>
       }
       center={usePillStrip || headerLabel || paneCount ? (
-        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
           {usePillStrip ? (
             <HeaderPillStrip
               tabs={tabs}
