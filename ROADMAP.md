@@ -127,6 +127,8 @@ Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the def
 
 The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/issues/3880) now uses explicit ordered receipt timestamps. This removes an accidental dependency on wall-clock monotonicity while preserving the production stale-transition guard and its regression coverage.
 
+Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now opens newly announced apps in the existing Browser instead of adding a second terminal viewer. Retained output is marked across WebSocket transports; repeat announcements from a terminal session do not reopen a closed page. Ports exposes an immediate clickable app list. The old inline viewer is retired. Development and regression acceptance are tracked separately from CI and installed releases.
+
 Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
 
 ## 6. Runs where you are

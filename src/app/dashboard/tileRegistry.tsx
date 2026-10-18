@@ -90,6 +90,7 @@ export interface TileRegistryDeps {
   focusOrchestrationPacketLane: (packet: OrchestratorPacket) => void;
   globalRepoEntries: RepoRegistryEntry[];
   handleAgentPanelChatInjection: (payload: AgentPanelChatInjectionPayload) => void;
+  handleOpenBrowser: (url?: string) => void;
   handleClosePreviewTileItem: (tileId: string, previewId: string) => void;
   handleCloseTile: (tileId: string) => void;
   handleLaunchWorkspaceAgent: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
@@ -149,6 +150,7 @@ export function createTileRegistry({
   focusOrchestrationPacketLane,
   globalRepoEntries,
   handleAgentPanelChatInjection,
+  handleOpenBrowser,
   handleClosePreviewTileItem,
   handleCloseTile,
   handleLaunchWorkspaceAgent,
@@ -479,7 +481,7 @@ export function createTileRegistry({
             sendTerminalVisibility={sendTerminalVisibility}
             sendTerminalDetach={sendTerminalDetach}
             termWsConnected={termWsConnected}
-            onPreviewDetected={handlePreviewDetected}
+            onPreviewDetected={(preview) => { handlePreviewDetected(preview); handleOpenBrowser(preview.url); }}
             onPreviewSelection={handlePreviewSelection}
             showPreviewPane={false}
           />
