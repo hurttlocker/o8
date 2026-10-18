@@ -4047,6 +4047,13 @@
       ]
     },
     {
+      "path": "tests/release-build-cache-environment.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
+      ]
+    },
+    {
       "path": "tests/release-build-cache.test.ts",
       "reasons": [
         "child-process",
