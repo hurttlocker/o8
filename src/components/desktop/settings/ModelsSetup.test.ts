@@ -32,7 +32,7 @@ describe('model setup navigation', () => {
     defaultsFetch.mockImplementation(async () => Response.json(defaults));
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).startsWith('/api/panel/operator-defaults')) return Response.json({ dispatchableRuntimes: [
-        { id: 'gemini', label: 'Gemini', available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
+        { id: 'gemini', label: 'Gemini', installed: true, available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
         { id: 'antigravity', label: 'Antigravity', available: true, unavailableReason: null, detail: '', fix: '' },
       ] });
       if (String(input) === '/api/setup/detect') return Response.json({ tools: [
@@ -62,6 +62,18 @@ describe('model setup navigation', () => {
     act(() => api.click());
     expect(navigate).toHaveBeenCalledWith('api-keys');
     expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'local endpoint', { founder: false })[0]?.tab).toBe('local-models');
+  });
+
+  it('enables an available worker without changing the preferred runtime or model', async () => {
+    await act(async () => root.render(createElement(ModelsTab)));
+    const allow = container.querySelector<HTMLButtonElement>('[aria-label="Allow Antigravity workers"]');
+    expect(allow).not.toBeNull();
+    await act(async () => allow!.click());
+    expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ workerRuntimes: ['codex', 'antigravity'] }),
+    }));
+    const unavailable = container.querySelector<HTMLButtonElement>('[aria-label="Allow Gemini workers"]');
+    expect(unavailable?.disabled).toBe(true);
   });
 
   it('saves the metered task limit from Dispatch without writing provider settings', async () => {

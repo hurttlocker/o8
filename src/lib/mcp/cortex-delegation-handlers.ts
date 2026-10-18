@@ -46,6 +46,9 @@ export function createCortexDelegationHandlers(config: {
           taskName: args.taskName || undefined,
           isolate: args.isolate !== false,
           checkoutMode,
+          ...(config.parentThreadId ? { parentThreadId: config.parentThreadId } : {}),
+          requestedEffort: args.requestedEffort,
+          thinkingEffort: args.thinkingEffort,
           ...(checkoutMode === 'shared' ? {
             parentThreadId: config.parentThreadId,
             fastCapability: config.fastCapability,
@@ -101,6 +104,18 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
+  const handleWorkerCatalog = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const params = new URLSearchParams({ repoPath: config.repoPath });
+    if (typeof args.runtime === 'string' && args.runtime) params.set('runtime', args.runtime);
+    try {
+      const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
+        headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
+      });
+      const payload = await response.json();
+      return response.ok ? jsonResult(payload) : textResult(safeErrorText(payload), true);
+    } catch (error) { return textResult(`Worker catalog unavailable: ${safeErrorText(error)}`, true); }
+  };
+
   const handleSharedTeamStatus = async (): Promise<ToolResult> => {
     if (!config.repoPath || !config.parentThreadId) {
       return textResult('This tool requires a persisted o8 orchestrator chat.', true);
@@ -145,5 +160,5 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
-  return { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam };
+  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam };
 }

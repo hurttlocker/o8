@@ -30,6 +30,8 @@ export interface SwarmScoutView {
 
 /** Exact session membership from a saved Shared-team receipt. */
 export interface SwarmSessionView {
+  model?: string | null;
+  effort?: string | null;
   sessionKey: string;
   name: string;
   runtime: string;
@@ -203,7 +205,7 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
       {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
-        sub={`${runtimeModelDisplayLabel(runtimeFromWorkerSessionKey(session.sessionKey))} · Shared checkout`} status={sessionTone(session.status)}
+        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)}
         onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
     </div> : null}
   </div>;

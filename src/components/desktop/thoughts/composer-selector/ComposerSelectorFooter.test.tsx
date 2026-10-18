@@ -350,7 +350,7 @@ describe('ComposerSelectorFooter', () => {
       .toBe(footer?.querySelector('[data-testid="composer-selector-mic"]'));
   });
 
-  it('renders the Marks lead meter and only mounts workers outside Solo', async () => {
+  it('renders the lead meter without a worker picker in either execution mode', async () => {
     await act(async () => { root.render(createElement(Harness)); });
     const expectedEfforts = supportedEffortsForLead('codex', 'gpt-5.6-sol', true);
     const lead = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-lead"]')!;
@@ -378,9 +378,7 @@ describe('ComposerSelectorFooter', () => {
     act(() => mode.click());
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Multitask'))!.click());
-    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(1);
-    expect(workers.textContent).toContain('Codex');
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
 
     act(() => mode.click());
     act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -388,14 +386,6 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
-  it('restores advanced worker settings without adding them to the mode menu', async () => {
-    await act(async () => root.render(createElement(Harness, { initialMode: 'fusion' })));
-    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workers.querySelectorAll('[data-provider-mark]')).toHaveLength(1);
-    expect(workers.textContent).toContain('Workers');
-    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!.click());
-    expect(container.querySelector('[role="menu"]')?.textContent).not.toMatch(/Fusion|Compare plans/);
-  });
 
   it('browses a house without changing the lead and closes immediately on model choice', async () => {
     await act(async () => root.render(createElement(Harness)));
@@ -492,32 +482,6 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="real-composer-effort"]')?.textContent).toBe('xhigh');
   });
 
-  it('uses the full runtime label in the bounded workers chip', async () => {
-    vi.mocked(fetch).mockImplementation(async (input) => new Response(JSON.stringify(
-      String(input).includes('include=values') ? {
-        values: {
-          defaultDispatchRuntime: 'opencode',
-          defaultDispatchModel: '',
-          opencodeWorkerModel: null,
-          workerStartMode: 'autonomous',
-        },
-        sources: {},
-      } : { dispatchableRuntimes: listDispatchableRuntimes().map((id) => ({ id, label: id, available: true, unavailableReason: null, detail: '', fix: '' })) },
-    ), { status: 200 }));
-    await act(async () => { root.render(createElement(Harness)); });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
-    const mode = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
-    act(() => mode.click());
-    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Multitask'))!.click());
-
-    const workers = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!;
-    expect(workers.textContent).toContain('OpenCode');
-    expect(workers.textContent).not.toContain('OpenCode 2');
-    expect(workers.style.maxWidth).not.toBe('');
-    expect(workers.querySelector<HTMLElement>('[data-testid="composer-selector-workers-label"]')?.style.textOverflow)
-      .toBe('ellipsis');
-  });
 
   it('keeps Solo focused on models and shows concise effort consequences', async () => {
     entitlementState.plan = 'founder';
@@ -636,9 +600,7 @@ describe('ComposerSelectorFooter', () => {
     });
     expect(container.querySelector('[data-testid^="worker-row-"]')).toBeNull();
     expect(container.querySelector('[data-testid^="lead-row-"]')).toBeNull();
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
-    expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Worker models');
-    expect(container.querySelector('[data-testid^="lead-row-"]')).toBeNull();
+    expect(container.querySelector('[data-testid="composer-selector-workers"]')).toBeNull();
   });
 
   it('selects an orchestrator search result with Enter', async () => {
@@ -881,22 +843,6 @@ describe('ComposerSelectorFooter', () => {
     expect(container.querySelector('[data-testid="composer-selector-lead-effort"]')).not.toBeNull();
   });
 
-  it('bounds worker houses and models without additional startup choices', async () => {
-    await act(async () => root.render(createElement(Harness)));
-    selectMode('Multitask');
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
-    const popover = container.querySelector<HTMLElement>('[data-testid="composer-selector-popover"]')!;
-    const workerScroll = container.querySelector<HTMLElement>('[data-testid="composer-selector-workers-scroll"]')!;
-    expect(container.querySelector('[data-testid="worker-selection-scope"]')?.textContent).toContain('The orchestrator can select another available runtime');
-    expect(container.querySelector('[data-testid="composer-selector-workers"]')?.getAttribute('aria-label')).toContain('Default worker:');
-    expect(popover.style.overflowY).toBe('hidden');
-    expect(workerScroll.style.overflowY).toBe('auto');
-    expect(workerScroll.style.scrollbarWidth).toBe('none');
-    expect(container.querySelectorAll('[data-testid^="worker-house-"]')).toHaveLength(listDispatchableRuntimes().length);
-    expect(workerScroll.querySelectorAll('[data-testid^="worker-row-"]').length).toBeGreaterThan(1);
-    expect(container.querySelector('[data-testid="composer-selector-worker-start"]')).toBeNull();
-    expect(container.querySelector('[data-testid="composer-selector-worker-options"]')).toBeNull();
-  });
 
   it('shows a configured local Codex default as the selected lead', async () => {
     localStorage.setItem('o8:composer-selector-v1', '1');
@@ -908,29 +854,6 @@ describe('ComposerSelectorFooter', () => {
     const selectedLeadHouses = [...container.querySelectorAll<HTMLButtonElement>('[data-testid^="lead-house-"][aria-pressed="true"]')];
     expect(selectedLeadHouses).toHaveLength(1);
     expect(selectedLeadHouses[0]?.dataset.testid).toBe('lead-house-codex');
-  });
-  it('shows only installed worker choices and refreshes without changing the selected worker', async () => {
-    let claudeReady = false;
-    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
-      values: { defaultDispatchRuntime: 'codex', defaultDispatchModel: '', opencodeWorkerModel: null, workerStartMode: 'autonomous' },
-      sources: {}, dispatchableRuntimes: [
-        { id: 'codex', label: 'Codex', available: true, unavailableReason: null, detail: 'Ready', fix: '' },
-        { id: 'claude-code', label: 'Claude Code', available: claudeReady, unavailableReason: claudeReady ? null : 'not_installed', detail: '', fix: 'Install Claude Code' },
-        { id: 'gemini', label: 'Gemini', available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
-      ],
-    })));
-    await act(async () => root.render(createElement(Harness)));
-    selectMode('Multitask');
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-workers"]')!.click());
-    expect(container.querySelector('[data-testid="worker-row-claude-code"]')).toBeNull();
-    expect(container.querySelector('[data-testid="worker-house-gemini"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="worker-house-codex"]')?.getAttribute('aria-pressed')).toBe('true');
-    claudeReady = true;
-    act(() => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Coding tools+')!.click());
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Refresh tools')!.click());
-    expect(container.querySelector('[data-testid="worker-house-claude-code"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="worker-house-codex"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 
   it('persists favorites without changing the lead and selects them in one click after reopening', async () => {

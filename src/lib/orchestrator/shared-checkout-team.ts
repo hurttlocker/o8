@@ -4,9 +4,15 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathS
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 
+import type { WorkerRouting } from './types';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface SharedCheckoutMember {
+  workerRouting?: WorkerRouting;
+  carrier?: ClaudeCodeModelSource | null;
+  executionCarrier?: ExecutionCarrierId | null;
   surfaceId: string | null;
   runtime: string;
   taskName: string;
@@ -208,6 +214,9 @@ export function validateSharedCheckoutPaths(paths: string[]): string[] {
 }
 
 export async function reserveSharedCheckoutMember(input: TeamInput & {
+  workerRouting?: WorkerRouting;
+  carrier?: ClaudeCodeModelSource | null;
+  executionCarrier?: ExecutionCarrierId | null;
   clientMutationId: string;
   runtime: string;
   taskName: string;
@@ -238,7 +247,11 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
     const existing = team.members.find((member) => member.clientMutationId === input.clientMutationId);
     if (existing) {
       if (existing.runtime !== input.runtime || existing.taskName !== input.taskName
-        || JSON.stringify(existing.paths) !== JSON.stringify(paths)) {
+        || JSON.stringify(existing.paths) !== JSON.stringify(paths)
+        || existing.workerRouting?.selectedModel !== input.workerRouting?.selectedModel
+        || existing.workerRouting?.requestedEffort !== input.workerRouting?.requestedEffort
+        || (existing.carrier ?? null) !== (input.carrier ?? null)
+        || (existing.executionCarrier ?? null) !== (input.executionCarrier ?? null)) {
         throw new Error('Shared worker mutation was reused with different scope or runtime.');
       }
       return team;
@@ -261,6 +274,9 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
       launchedAt: new Date().toISOString(),
       paths,
       state: 'reserved',
+      ...(input.workerRouting ? { workerRouting: input.workerRouting } : {}),
+      ...(input.carrier ? { carrier: input.carrier } : {}),
+      ...(input.executionCarrier ? { executionCarrier: input.executionCarrier } : {}),
     });
     writeTeam(location.file, team);
     return team;
