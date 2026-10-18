@@ -66,7 +66,7 @@ export function registerFreshOrchestratorAction(root: HTMLElement, owner: Owner)
     const roots = Array.from(document.querySelectorAll<HTMLElement>('[data-o8-workspace-root][data-o8-workspace-active="true"]')).filter(visible);
     if (!owner.enabled || !visible(root) || roots.length !== 1 || roots[0] !== root
       || root.getAttribute('aria-disabled') === 'true'
-      || document.querySelector('[role="dialog"], [aria-modal="true"]')
+      || Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"]')).some(visible)
       || value.capability !== capability || root.getAttribute(FRESH_ACTION_ATTRIBUTE) !== capability
       || value.workspaceId !== owner.workspaceId || value.repoPath !== owner.repo.localPath
       || value.activeTabId !== owner.activeTabId
