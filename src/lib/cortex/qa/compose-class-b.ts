@@ -1,4 +1,5 @@
 import 'server-only';
+import { composeConnectedBrain } from './compose-connected';
 
 import {
   buildCitationLookup,
@@ -30,6 +31,7 @@ export async function composeClassB(
   emit: SseEmit,
   options: ComposeOptions = {},
 ): Promise<void> {
+  if (await composeConnectedBrain(question, repoPath, topRows, emit, options)) return;
   const lookup = buildCitationLookup(topRows);
   // O8_EVAL_MODE=1 routes Class B through OpenRouter (non-streaming) instead
   // of Sonnet CLI. ~14-16s saved per multi-fact case during eval iteration.

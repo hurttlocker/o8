@@ -7,6 +7,7 @@ import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/typ
 export const FRESH_ORCHESTRATOR_EVENT = 'o8:request-fresh-orchestrator';
 export const FRESH_ACTION_ATTRIBUTE = 'data-o8-fresh-session-action';
 export const FRESH_RECEIPT_ATTRIBUTE = 'data-o8-fresh-session-receipt';
+export const FRESH_RECEIPT_TIMEOUT_MS = 8_000;
 export interface FreshOrchestratorRequest {
   requestId: string;
   expiresAt: number;
@@ -65,7 +66,7 @@ export function registerFreshOrchestratorAction(root: HTMLElement, owner: Owner)
     const roots = Array.from(document.querySelectorAll<HTMLElement>('[data-o8-workspace-root][data-o8-workspace-active="true"]')).filter(visible);
     if (!owner.enabled || !visible(root) || roots.length !== 1 || roots[0] !== root
       || root.getAttribute('aria-disabled') === 'true'
-      || document.querySelector('[role="dialog"], [aria-modal="true"]')
+      || Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"]')).some(visible)
       || value.capability !== capability || root.getAttribute(FRESH_ACTION_ATTRIBUTE) !== capability
       || value.workspaceId !== owner.workspaceId || value.repoPath !== owner.repo.localPath
       || value.activeTabId !== owner.activeTabId
@@ -84,7 +85,17 @@ export function registerFreshOrchestratorAction(root: HTMLElement, owner: Owner)
         root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, status: 'error', code: 'freshness_not_proven' }));
         return;
       }
-      root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, tabId }));
+      const pending = JSON.stringify({ ...receipt, tabId });
+      root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, pending);
+      // Registration rotates on the tab's React commit. Keep this bounded
+      // expiry on the captured root, including after a disconnected caller or
+      // unmount, without touching a replacement root or replaying creation.
+      window.setTimeout(() => {
+        if (root.getAttribute(FRESH_RECEIPT_ATTRIBUTE) !== pending) return;
+        root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({
+          ...receipt, tabId, status: 'unknown', code: 'verification_timeout', automaticReplay: false,
+        }));
+      }, FRESH_RECEIPT_TIMEOUT_MS);
     } catch {
       root.setAttribute(FRESH_RECEIPT_ATTRIBUTE, JSON.stringify({ ...receipt, status: 'error', code: 'creation_failed' }));
     }

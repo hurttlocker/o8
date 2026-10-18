@@ -7,6 +7,7 @@ import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-webview-tools';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { requestBrowserOpen } from '@/lib/mcp/o8-browser-open';
 
 type EmbeddedVerb = 'read' | 'localize' | 'rect' | 'click' | 'type' | 'probe' | 'grab';
 
@@ -269,11 +270,9 @@ export async function POST(request: NextRequest) {
 
     const client = webviewClient();
     if (verb === 'open') {
-      const url = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : null;
-      const code = `(() => { try { window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: ${JSON.stringify(url)} } })); return '{"ok":true}'; } catch (err) { return JSON.stringify({ ok: false, error: String((err && err.message) || err) }); } })()`;
-      const result = await client.evalJs(code);
-      if (packetId) recordAction(packetId, verb, args, true, url ?? undefined);
-      return NextResponse.json({ ok: true, url, raw: result.result });
+      const receipt = await requestBrowserOpen(client, args);
+      if (packetId) recordAction(packetId, verb, args, receipt.ok, typeof receipt.url === 'string' ? receipt.url : undefined);
+      return NextResponse.json(receipt);
     }
 
     // Native browser-view first (Stage 4) — the panel surface when the operator's
