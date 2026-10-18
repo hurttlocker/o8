@@ -158,8 +158,8 @@ describe('managed Live transport', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
   it('closes a late funded id after pre-id peer failure has already cleaned up', async () => {
-    let peer!: Peer;
-    class CapturedPeer extends Peer { constructor() { super(); peer = this; } }
+    const peers: Peer[] = [];
+    class CapturedPeer extends Peer { constructor() { super(); peers.push(this); } }
     vi.stubGlobal('RTCPeerConnection', CapturedPeer);
     let finishStart!: (response: Response) => void;
     let atStart!: () => void;
@@ -173,7 +173,7 @@ describe('managed Live transport', () => {
     }));
     const states: string[] = [];
     const starting = startManagedLive({binding:'a',context:()=>'',delegate:vi.fn()},state=>states.push(state));
-    await startReached; peer.connectionState = 'failed'; (peer.onconnectionstatechange as unknown as (() => void))?.();
+    await startReached; const peer = peers[0]; peer.connectionState = 'failed'; (peer.onconnectionstatechange as unknown as (() => void))?.();
     await flush(); expect(vi.getTimerCount()).toBe(0);
     finishStart(Response.json({id:'late-funded',sdp:'answer'}));
     const live = await starting; await flush();
