@@ -1,5 +1,7 @@
 'use client';
 
+import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
+import { ManagedLiveButton } from './chat-panel/ManagedLiveButton';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
@@ -97,7 +99,7 @@ import {
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
-import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
+import { contextualOperatorDefaults, type ContextualConversation } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
 import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
@@ -1506,30 +1508,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
   const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
-    const handoffMode = backendSwitch.currentHandoffMode();
     const sendingThreadId = threadIdRef.current;
-    return orchStream.send(message, {
-      ...options, pickedMode: composerModeRef.current,
-      wireMessage: contextualTurnMessage(options.wireMessage ?? message, contextualConversation?.requestContext),
-      ...(handoffMode ? { handoffMode } : {}),
-      beforeSend: async (signal) => {
-        const ready = await ensureSelectedRepoPersisted(signal);
-        if (!ready && !signal.aborted && threadIdRef.current === sendingThreadId) {
-          setInput((draft) => draft ? `${message}\n\n${draft}` : message);
-          for (const image of options.attachments ?? []) {
-            addAttachedImage({ name: image.name ?? 'Image', dataUri: image.dataUri,
-              mimeType: image.dataUri.match(/^data:([^;]+);/)?.[1] ?? 'image/png' });
-          }
-        }
-        return ready;
+    return sendBoundComposerTurn(orchStream.send, message, options, {
+      pickedMode: composerModeRef.current, requestContext: contextualConversation?.requestContext,
+      handoffMode: backendSwitch.currentHandoffMode(), ensureSelectedRepoPersisted,
+      restoreDraft: () => {
+        if (threadIdRef.current !== sendingThreadId) return;
+        setInput((draft) => draft ? `${message}\n\n${draft}` : message);
+        for (const image of options.attachments ?? []) addAttachedImage({ name: image.name ?? 'Image', dataUri: image.dataUri,
+          mimeType: image.dataUri.match(/^data:([^;]+);/)?.[1] ?? 'image/png' });
       },
-      resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
-        repoPath: resolvedRepoPath,
-        backend: orchestratorBackend,
-        localModel: contextualConversation ? orchestratorModel : undefined,
-        backendSourceRef, setBackend: setOrchestratorBackend,
-        setModel: setOrchestratorModel, setOperatorDefaults,
-      }, signal, options),
+      resolveOptions: (signal) => resolveFreshComposerTurnOptions({ repoPath: resolvedRepoPath, backend: orchestratorBackend,
+        localModel: contextualConversation ? orchestratorModel : undefined, backendSourceRef, setBackend: setOrchestratorBackend,
+        setModel: setOrchestratorModel, setOperatorDefaults }, signal, options),
     });
   }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, orchestratorModel, resolvedRepoPath, setOrchestratorModel, contextualConversation]);
 
@@ -2279,7 +2270,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
-        composerLeadingExtras={composerLeadingExtras}
+        composerLeadingExtras={<>{composerLeadingExtras}{isOrchestratorMode && threadId && resolvedRepoPath ? <ManagedLiveButton
+          key={`${resolvedRepoPath}:${threadId}:${orchestratorBackend}:${orchestratorModel}`}
+          binding={JSON.stringify([resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel])}
+          messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
+          send={(text) => sendOrchestrator(text, { pinBackend: true, permissionMode, backend: composerBackendTurnOverride(orchestratorBackend),
+            resolveTurnOptions: async () => ({ backend: composerBackendTurnOverride(orchestratorBackend), model: orchestratorModel }),
+            thinkingEffort, model: orchestratorModel, orchestrationMode: composeComposerTurnMessage(text, composerModeRef.current, soloOrchestrator).orchestrationMode })}
+        /> : null}</>}
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}

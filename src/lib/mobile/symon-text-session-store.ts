@@ -17,6 +17,9 @@ export interface SymonTextTranscriptEntry {
 
 export interface SymonTextSessionRecord extends SymonClientSubject {
   sessionId: string;
+  reattachable?: boolean;
+  pendingTurnIds?: string[];
+  completedTurns?: Array<{ turnId: string; status: string; text: string }>;
   model: string;
   effort: string;
   /** Only a newly selected automatic default may retry a pre-execution rejection. */
@@ -160,6 +163,19 @@ export function bindSymonTextEffectiveModel(
   };
   persist(records);
   return records[index];
+}
+
+/** Authenticated attachment heartbeat and durable uncertainty marker; no task replay. */
+export function touchSymonTextAttachment(sessionId: string, turnId?: string, terminal = false, now = Date.now(), result?: { status: string; text: string }): SymonTextSessionRecord | null {
+  const records = active(loadAll(), now);
+  const index = records.findIndex(record => record.sessionId === sessionId);
+  if (index < 0) return null;
+  const record = records[index];
+  const pending = new Set(record.pendingTurnIds ?? []);
+  if (turnId) { if (terminal) pending.delete(turnId); else pending.add(turnId); }
+  const completed = result && turnId ? [...(record.completedTurns ?? []).filter(turn => turn.turnId !== turnId), { turnId, status: result.status, text: result.text.slice(-4000) }].slice(-24) : record.completedTurns;
+  records[index] = { ...record, pendingTurnIds: [...pending], completedTurns: completed, lastActivityAt: now };
+  persist(records); return records[index];
 }
 
 export function dropSymonTextSession(sessionId: string): boolean {

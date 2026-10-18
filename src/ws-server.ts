@@ -1,3 +1,4 @@
+import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -109,6 +110,7 @@ import {
   dropSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
+  touchSymonTextAttachment,
   updateSymonTextMachine,
   type SymonTextSessionRecord,
 } from '@/lib/mobile/symon-text-session-store';
@@ -3794,6 +3796,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'symon-tool-call':
       void handleSymonToolCall(client, msg);
       break;
+    case 'symon-text-attach':
+      handleSymonTextAttach(client, msg);
+      break;
     case 'symon-text-turn':
       handleSymonTextTurn(client, msg);
       break;
@@ -3837,6 +3842,7 @@ type SymonTextTurnState = {
   turnId: string;
   terminal: boolean;
   interruptRequested?: boolean;
+  resultStatus?: string; resultText?: string;
 };
 
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
@@ -3955,13 +3961,14 @@ function textTurnKey(sessionId: string, turnId: string): string {
 
 function pushSymonTextDone(
   turn: SymonTextTurnState,
-  status: 'done' | 'failed' | 'interrupted',
+  status: 'done' | 'failed' | 'interrupted' | 'unconfirmed',
   detail?: string,
   activeMachine?: SymonMachineIdentity,
   selectionPending: boolean = false,
 ): void {
   if (turn.terminal) return;
-  turn.terminal = true;
+  turn.terminal = status !== 'unconfirmed'; turn.resultStatus = status;
+  if (turn.terminal && symonTextTurns.get(textTurnKey(turn.sessionId, turn.turnId)) === turn) touchSymonTextAttachment(turn.sessionId, turn.turnId, true, Date.now(), { status, text: turn.resultText ?? '' });
   const client = clients.get(turn.clientId);
   if (client) {
     send(client, {
@@ -3978,7 +3985,7 @@ function pushSymonTextDone(
       ...(detail ? { detail } : {}),
     });
   }
-  setTimeout(() => symonTextTurns.delete(textTurnKey(turn.sessionId, turn.turnId)), 5 * 60_000).unref();
+  if (turn.terminal) setTimeout(() => { const key = textTurnKey(turn.sessionId, turn.turnId); if (symonTextTurns.get(key) === turn) symonTextTurns.delete(key); }, 5 * 60_000).unref();
 }
 
 async function interruptSymonTextNative(sessionId: string, turnId: string): Promise<boolean> {
@@ -4063,7 +4070,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       try {
         outcome = await pollNative();
       } catch (error) {
-        pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
+        pushSymonTextDone(turn, 'unconfirmed', error instanceof Error ? error.message : 'Planner bridge failed.');
         return;
       }
       if (outcome.state === 'pending') continue;
@@ -4079,12 +4086,12 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
           })
           : null;
         if (!confirmation) {
-          pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
+          pushSymonTextDone(turn, 'unconfirmed', 'The desktop returned an uncorrelated confirmation; native work remains unresolved.');
           return;
         }
         if (!mirroredConfirmations.has(confirmation.confirmationId)) {
           if (!symonConfirmationTracker.register(confirmation, Date.now())) {
-            pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+            pushSymonTextDone(turn, 'unconfirmed', 'Confirmation identity collision; native work remains unresolved.');
             return;
           }
           mirroredConfirmations.add(confirmation.confirmationId);
@@ -4100,7 +4107,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
         const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
         if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
-        const answer = outcome.result.text;
+        const answer = outcome.result.text; turn.resultText = answer;
         appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
         const owner = clients.get(turn.clientId);
         if (owner && answer) {
@@ -4115,7 +4122,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
         pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
         return;
       }
-      pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
+      pushSymonTextDone(turn, outcome.state === 'done' ? 'failed' : 'unconfirmed', outcome.detail || outcome.error || 'Planner turn outcome is unconfirmed.');
       return;
     }
     if (!turn.terminal) {
@@ -4123,12 +4130,21 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
         turn.interruptRequested = true;
         await interruptSymonTextNative(turn.sessionId, turn.turnId);
       }
-      pushSymonTextDone(turn, 'failed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
+      pushSymonTextDone(turn, 'unconfirmed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
         loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true);
     }
   } finally {
     await reconcileSelection();
   }
+}
+
+function handleSymonTextAttach(client: ClientState, msg: Record<string, unknown>): void {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const result = attachSymonTextSession({ sessionId, client, record: loadSymonTextSession(sessionId),
+    owners: symonTextOwners, turns: symonTextTurns, connected: id => clients.has(id) });
+  if (result.ok) touchSymonTextAttachment(sessionId);
+  send(client, { channel: 'symon', type: 'symon-text-attached', sessionId, ...result });
+  if (result.ok) for (const confirmation of symonConfirmationTracker.pendingForSession(sessionId, Date.now())) pushSymonConfirmRequired(client.id, confirmation);
 }
 
 function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>): void {
@@ -4137,14 +4153,17 @@ function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>):
   const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 8_000) : '';
   if (!sessionId || !turnId || !text || sessionId.length > 160 || turnId.length > 160) return;
   const record = loadSymonTextSession(sessionId);
-  if (!record || !symonTextClientMatches(record, client)) {
-    const rejected: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
-    pushSymonTextDone(rejected, 'failed', 'Text session is missing, stale, or belongs to another client.');
+  if (!record || !symonTextClientMatches(record, client) || (record.reattachable && symonTextOwners.get(sessionId) !== client.id)) {
+    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Text session is missing, stale, or belongs to another client.' });
     return;
   }
+  if (record.reattachable && record.pendingTurnIds?.some(id => id !== turnId)) {
+    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Existing task is still active or unconfirmed; no new task was started.' }); return;
+  }
   const key = textTurnKey(sessionId, turnId);
-  if (symonTextTurns.has(key)) return;
+  if (symonTextTurns.has(key) || record.completedTurns?.some(turn => turn.turnId === turnId)) return;
   const turn: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
+  touchSymonTextAttachment(sessionId, turnId);
   symonTextTurns.set(key, turn);
   symonTextOwners.set(sessionId, client.id);
   void chainOnKey(symonTextChains, sessionId, () => runSymonTextTurn(turn, text));
@@ -4299,12 +4318,13 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
   const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
   if (!sessionId) return;
   const textSession = loadSymonTextSession(sessionId);
-  if (textSession && symonTextClientMatches(textSession, client)) {
+  if (textSession && symonTextClientMatches(textSession, client) && (!textSession.reattachable || symonTextOwners.get(sessionId) === client.id)) {
     for (const turn of symonTextTurns.values()) {
       if (turn.sessionId !== sessionId || turn.terminal) continue;
       void interruptSymonTextNative(turn.sessionId, turn.turnId);
-      pushSymonTextDone(turn, 'interrupted');
+      pushSymonTextDone(turn, textSession.reattachable ? 'unconfirmed' : 'interrupted');
     }
+    if (textSession.reattachable && textSession.pendingTurnIds?.length) return;
     symonTextOwners.delete(sessionId);
     dropSymonTextSession(sessionId);
     endSymonMachineSession(sessionId);
@@ -4817,6 +4837,7 @@ function cleanupSymonForClient(clientId: string): void {
   for (const [sessionId, ownerId] of Array.from(symonTextOwners.entries())) {
     if (ownerId !== clientId) continue;
     symonTextOwners.delete(sessionId);
+    if (loadSymonTextSession(sessionId)?.reattachable) continue;
     for (const turn of symonTextTurns.values()) {
       if (turn.sessionId !== sessionId || turn.terminal) continue;
       void interruptSymonTextNative(turn.sessionId, turn.turnId);
@@ -5288,6 +5309,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       event: 'error',
       data: {
         error: error instanceof Error ? error.message : 'Failed to reserve orchestrator command',
+        voiceTerminal: { userMessageId: `orch-user-${correlationId}`, outcome: 'failed', text: 'The backend did not accept this request.' },
         repoPath,
         threadId,
         backend: backendId,
@@ -5739,7 +5761,7 @@ async function handleOrchestratorSendMsgOnce(
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
+            data: { status: 'ready', voiceTerminal: { userMessageId, outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed', text: assistantText.value }, repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
           }));
         }
       };
@@ -6002,7 +6024,7 @@ async function handleOrchestratorSendMsgOnce(
     // subscribers. Every event is tagged with its actual backend (and `agent`,
     // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
     const resolveQuotaFallback = (currentModel: string | null = model ?? null) => (
-      orchestratorModeAllowsBackendFallback(msg.orchestrationMode)
+      orchestratorModeAllowsBackendFallback(msg.orchestrationMode, msg.pinBackend)
         ? resolveCrossHouseFallback({
             role: crossHouseRole,
             backend: activeBackend.id,
@@ -6230,6 +6252,7 @@ async function handleOrchestratorSendMsgOnce(
       event: 'error' as const,
       data: {
         error: err instanceof Error ? err.message : 'Failed to send message',
+        voiceTerminal: { userMessageId, outcome: commandAccepted ? 'unconfirmed' : 'failed', text: commandAccepted ? '' : 'The backend did not accept this request.' },
         ...(projectError?.toPayload() ?? {}),
         repoPath,
         threadId,

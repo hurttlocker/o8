@@ -15,8 +15,8 @@ export function resolveOrchestratorExecutionBackendId(
 }
 
 /** Solo must stay on the selected runtime rather than silently changing houses. */
-export function orchestratorModeAllowsBackendFallback(rawOrchestrationMode: unknown): boolean {
-  return resolveOrchestratorExecutionMode(rawOrchestrationMode) !== 'single';
+export function orchestratorModeAllowsBackendFallback(rawOrchestrationMode: unknown, pinBackend: unknown = false): boolean {
+  return pinBackend !== true && resolveOrchestratorExecutionMode(rawOrchestrationMode) !== 'single';
 }
 
 export function resolveTurnReceiptMode(
