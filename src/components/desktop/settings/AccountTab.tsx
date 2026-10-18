@@ -49,7 +49,9 @@ export function AccountTab() {
   return (
     <div style={{ maxWidth: SETTINGS_CONTENT_MAX_WIDTH, padding: 8, fontFamily: APP_FONT_STACK }}>
       <TabHeading title="Account" subtitle="Your o8 profile and sign-in." />
-      <SettingsGroup header="Profile" footnote="Sign-in is optional. Your local workspace remains available without an account.">
+      <SettingsGroup header="Profile" footnote={auth.localWorkspaceOnly
+        ? 'Your local workspace is available. Use the desktop app or a development account configuration to sign in.'
+        : 'Sign-in is optional. Your local workspace remains available without an account.'}>
         <SettingsRow
           icon={<AccountIcon />}
           label={identity}
