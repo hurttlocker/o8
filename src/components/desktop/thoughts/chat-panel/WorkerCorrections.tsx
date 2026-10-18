@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'r
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { CorrectableWorker, WorkerCorrectionMode, WorkerCorrectionPayload, WorkerCorrectionReceipt } from '@/lib/orchestrator/worker-correction-types';
-import { SwarmStatusCard, visibleSwarmPackets, type SwarmSessionView } from './SwarmStatusCard';
+import { SwarmStatusCard, visibleSwarmPackets, projectSwarmView, type SwarmSessionView } from './SwarmStatusCard';
 import { WorkerCorrectionDock } from './WorkerCorrectionDock';
 import { RamsButton } from '../../settings/RamsButton';
 
@@ -13,7 +13,7 @@ const labels: Record<WorkerCorrectionReceipt['deliveries'][number]['status'], st
   unavailable: 'Unavailable', unknown: 'Outcome unknown', held: 'Held',
 };
 
-export type WorkerCorrectionContext = Pick<ComponentProps<typeof SwarmStatusCard>, 'packets' | 'sessions' | 'onFocusPacket' | 'onFocusSession'>;
+export type WorkerCorrectionContext = Pick<ComponentProps<typeof SwarmStatusCard>, 'packets' | 'sessions' | 'scouts' | 'onFocusPacket' | 'onFocusSession'>;
 
 /** Uses the ordinary composer's draft; corrections never create another message editor. */
 export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, onDelivered, working, active = true, workerContext }: {
@@ -108,11 +108,13 @@ export function WorkerCorrections({ repoPath, threadId, draft, hasAttachments, o
     else sessions[saved] = { ...sessions[saved], ...current };
   }
   const packets = visibleSwarmPackets(workerContext?.packets ?? []);
-  if (!sessions.length && !packets.length && !pendingRequest && !error) return null;
+  const crew = projectSwarmView({ packets, sessions, scouts: workerContext?.scouts });
+  if (!crew.count && !corrections.length && !pendingRequest && !error) return null;
   const names = new Map(sessions.map(session => [session.sessionKey, session.name]));
-  const summary = busy ? 'Sending correction' : pendingRequest ? 'Check delivery' : selected.length ? `${selected.length} selected` : workers.length ? `Workers · ${workers.length}` : 'Workers';
+  const action = busy ? 'Sending correction' : pendingRequest ? 'Check delivery' : error ? 'Controls need attention' : selected.length ? `${selected.length} selected` : null;
+  const summary = [`${crew.count} ${crew.count === 1 ? 'worker' : 'workers'}`, crew.summary, action].filter(Boolean).join(' · ');
   return <WorkerCorrectionDock key={`${scope}:${active}`} active={active} label={corrections.length ? 'Worker corrections' : 'Correct workers'} summary={summary}
-    attention={busy || pendingRequest || Boolean(error)} onOpen={() => void refresh()}>
+    count={crew.count} state={error ? 'failed' : pendingRequest ? 'review' : busy ? 'running' : crew.state} onOpen={() => void refresh()}>
     <SwarmStatusCard {...workerContext} packets={packets} sessions={sessions} defaultExpanded crewMaxHeight="min(240px, 30vh)"
       selection={{ available: workers.map(worker => worker.surfaceId), selected, disabled: busy || pendingRequest,
         onToggle: id => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]) }} />

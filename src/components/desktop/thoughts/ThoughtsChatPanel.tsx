@@ -53,7 +53,7 @@ import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/Profile
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
 import { WorkerDisclosureProvider } from './chat-panel/WorkerDisclosure';
-import { ThreadWorkerCard, useThreadWorkers } from './chat-panel/ThreadWorkerCard';
+import { useThreadWorkers } from './chat-panel/ThreadWorkerCard';
 import { projectThreadWorkerGroups } from './chat-panel/thread-worker-groups';
 import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
@@ -2086,14 +2086,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     handleCopyMarkdownRef.current = handleCopyMarkdown;
   }, [handleCopyMarkdown]);
 
-  // Saved assistant origins keep each worker beside its original turn.
+  // Keep recorded turn origins; expose live worker status once at the composer.
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
   const threadWorkers = useThreadWorkers({ threadId: isOrchestratorMode ? threadId : null, repoPath: resolvedRepoPath, busy: displayWaiting, agents });
   const workerGroups = projectThreadWorkerGroups({ entries: isOrchestratorMode ? displayMessages : [], packets: isOrchestratorMode ? threadWorkerPackets : [], sessions: threadWorkers, busy: displayWaiting });
-  const workerTurnContent = new Map([...workerGroups.groups].map(([id, group]) => [id,
-    <ThreadWorkerCard key={id} group={group} onFocusSession={onFocusSession} onFocusPacket={onFocusPacket} />,
-  ]));
+  const workerScouts = [...workerGroups.groups.values(), workerGroups.unattributed].flatMap(group => group.scouts);
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (<WorkerDisclosureProvider key={`${resolvedRepoPath}:${threadId}`}>
     <div
@@ -2154,10 +2152,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             emptyStateFallback={fallbackEmptyState}
             composeFirst={composeFirst}
             topContent={transcriptTopContent}
-            turnContent={workerTurnContent}
-            bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
-              <ThreadWorkerCard group={workerGroups.unattributed} unattributed onFocusSession={onFocusSession} onFocusPacket={onFocusPacket} />
-            ) : null}
             isOrchestratorMode={isOrchestratorMode}
             suggestedReplyMessageId={suggestedReplyMessageId}
             suggestedReplies={chipsForLastAssistant}
@@ -2218,7 +2212,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
-        workerContext={{ packets: threadWorkerPackets, sessions: threadWorkers, onFocusPacket, onFocusSession }}
+        workerContext={{ packets: threadWorkerPackets, sessions: threadWorkers, scouts: workerScouts, onFocusPacket, onFocusSession }}
         activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
           busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onFocusPacket} /> : undefined}
         activeTargetLabel={activeTargetLabel}
