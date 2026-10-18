@@ -750,6 +750,7 @@ export function ChatsTab({
       ) : null}
       {threadHover ? (
         <OrchestratorHoverCard
+          threadId={threadHover.item.tabId}
           title={threadHover.item.title}
           repoLabel={repoSuffix(threadHover.item)}
           branchLabel={threadHover.item.repoBranch}

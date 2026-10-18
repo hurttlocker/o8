@@ -52,7 +52,7 @@ function sessionReturnState(session: SwarmSessionView) {
   return { label, detail };
 }
 
-function sessionTone(status: string): StatusTone {
+export function swarmSessionStatus(status: string): StatusTone {
   if (status === 'waiting' || status === 'awaiting_input' || status === 'needs-input') return { label: 'Waiting for input', state: 'review' };
   if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
   if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
@@ -186,7 +186,7 @@ export function projectSwarmView({ packets, scouts = [], sessions = [] }: {
   const packetSessions = new Set(participants.map(participant => participant.sessionKey));
   const shared = [...new Map(sessions.map(session => [session.sessionKey, session])).values()].filter(session => !packetSessions.has(session.sessionKey));
   const count = participants.length + native.length + shared.length;
-  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status)), ...shared.map(session => sessionTone(session.status))];
+  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status)), ...shared.map(session => swarmSessionStatus(session.status))];
   const totals = new Map<string, number>();
   for (const { label } of statuses) totals.set(label.toLowerCase(), (totals.get(label.toLowerCase()) ?? 0) + 1);
   for (const session of shared) {
@@ -264,7 +264,7 @@ export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSe
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
       {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
-        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={sessionTone(session.status)} selection={selectionFor(session.sessionKey)} detail={sessionReturnState(session)?.detail}
+        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={swarmSessionStatus(session.status)} selection={selectionFor(session.sessionKey)} detail={sessionReturnState(session)?.detail}
         onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
     </div> : null}
   </div>;
