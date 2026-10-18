@@ -2,6 +2,7 @@ import 'server-only';
 
 import { resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { getEntitlementSync } from '@/lib/entitlement/store';
+import { currentComposerBrainRoute } from './composer-brain-context';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getOperatorDefaultsSync } from './defaults';
 
@@ -13,8 +14,10 @@ export type EffectiveBrainRoute = 'managed' | 'subscription' | 'legacy';
  * reachable only after the operator selects subscription mode.
  */
 export function resolveEffectiveBrainRouteSync(): EffectiveBrainRoute {
+  const composer = currentComposerBrainRoute();
+  if (composer?.runtime) return 'subscription';
   const values = getOperatorDefaultsSync().values;
-  if (values.brainRoutingMode === 'subscription') return 'subscription';
+  if (!composer && values.brainRoutingMode === 'subscription') return 'subscription';
   try {
     return getEntitlementSync().flags['proxy.inference'] === true ? 'managed' : 'legacy';
   } catch {
@@ -24,7 +27,8 @@ export function resolveEffectiveBrainRouteSync(): EffectiveBrainRoute {
 
 /** Cache identity includes the policy and entitlement state, never a token. */
 export function brainRouteCacheKeySync(): string {
-  return resolveEffectiveBrainRouteSync();
+  const route = currentComposerBrainRoute();
+  return route ? `conversation:${route.runtime ?? 'managed'}:${route.model ?? ''}` : resolveEffectiveBrainRouteSync();
 }
 
 export function usesManagedBrainInferenceSync(): boolean {
@@ -34,7 +38,8 @@ export function usesManagedBrainInferenceSync(): boolean {
 /** Whether the configured subscription profile permits Claude Brain calls. */
 export function resolveBrainUseClaudeCliSync(): boolean {
   const values = getOperatorDefaultsSync().values;
-  return resolveEffectiveBrainRouteSync() !== 'managed'
+  return (!currentComposerBrainRoute()?.runtime || currentComposerBrainRoute()?.runtime === 'claude-code')
+    && resolveEffectiveBrainRouteSync() !== 'managed'
     && values.subscriptionProfile !== 'codex-only'
     && values.brainUseClaudeCli;
 }
@@ -63,7 +68,8 @@ export function resolveBrainSpeculativeWarmupAllowedSync(): boolean {
 
 /** Whether the configured subscription profile permits Codex Brain calls. */
 export function resolveBrainUseCodexCliSync(): boolean {
-  return resolveEffectiveBrainRouteSync() !== 'managed'
+  return (!currentComposerBrainRoute()?.runtime || currentComposerBrainRoute()?.runtime === 'codex')
+    && resolveEffectiveBrainRouteSync() !== 'managed'
     && getOperatorDefaultsSync().values.subscriptionProfile !== 'claude-only';
 }
 
