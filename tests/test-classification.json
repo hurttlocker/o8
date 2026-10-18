@@ -345,6 +345,7 @@
       "path": "src/lib/codex/read-only-worker-launch.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli"
       ]
     },

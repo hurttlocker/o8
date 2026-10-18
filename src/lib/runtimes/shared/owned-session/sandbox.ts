@@ -35,6 +35,7 @@ import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { backingProjectConfigPaths } from './project-config';
+import { ownerInstructionPaths } from './owner-instructions';
 
 const execFileAsync = promisify(execFile);
 
@@ -541,6 +542,8 @@ export interface PrepareWorkerSandboxInput {
   extraReadPaths?: string[];
   /** Read only the linked checkout's exact backing project configuration. */
   readBackingProjectConfig?: boolean;
+  /** Exact immutable owner policies for native workers; never external carriers. */
+  readOwnerInstructions?: boolean;
   extraDenyPaths?: string[];
   trustedReadWritePaths?: string[];
   finalDenyPaths?: string[];
@@ -687,6 +690,11 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   const finalAllowRead = await resolveAll([
     ...(input.finalAllowReadPaths ?? []), ...projectConfigPaths,
   ]);
+  // Never resolve these again after validation: a replaced symlink must not
+  // manufacture a grant on its new target. These remain exact literal paths.
+  const ownerInstructions = input.readOwnerInstructions ? await ownerInstructionPaths(homeReal) : [];
+  finalImmutableWrite.push(...ownerInstructions);
+  finalAllowRead.push(...ownerInstructions);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
 
   // Runtime state may live inside the denied o8 data tree, but its grant must
