@@ -24,7 +24,7 @@ import {
   isLoopbackBrowserUrl,
   normalizeBrowserUrl,
 } from '@/lib/browser/url';
-import { isTauri, browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
+import { isTauri, browserViewEval } from '@/lib/tauri/bridge';
 import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import {
   activeUrlFromBrowserPaneSnapshot,
@@ -182,7 +182,6 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   const lastNavigatedUrl = useRef<string | null>(null);
   useEffect(() => {
     if (!navigateToUrl || navigateToUrl === lastNavigatedUrl.current) return;
-    lastNavigatedUrl.current = navigateToUrl;
     const normalized = normalizeBrowserUrl(navigateToUrl);
     if (!normalized) return;
     // Check if a tab with this URL already exists
@@ -191,6 +190,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
       let cancelled = false;
       queueMicrotask(() => {
         if (cancelled) return;
+        lastNavigatedUrl.current = navigateToUrl;
         setActiveTabId(existing.id);
         setUrlInput(normalized);
       });
@@ -202,6 +202,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
+      lastNavigatedUrl.current = navigateToUrl;
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(id);
       setUrlInput(normalized);
@@ -271,10 +272,10 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
 
   const handleReload = useCallback(() => {
     if (!activeTab?.url) return;
-    // Native path: re-navigating to the same URL reloads the page in the child
-    // window — no iframe-key toggle (which would unmount + flash the surface).
+    // Reload the current document so the browser revalidates its subresources.
+    // Ordinary navigation can combine fresh HTML with cached application code.
     if (nativeEnabled) {
-      void browserViewNavigate(activeTab.url);
+      void browserViewEval('location.reload()');
       return;
     }
     // Force iframe reload by toggling URL
@@ -454,6 +455,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
               {(showLabel && (isActive || isHovered)) || (!showLabel && isHovered) ? (
                 <button
                   type="button"
+                  aria-label={`Close ${tab.title || browserTitleFromUrl(tab.url)}`}
                   onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

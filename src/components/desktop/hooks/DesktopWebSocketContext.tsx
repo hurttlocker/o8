@@ -408,7 +408,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           break;
         case 'terminal':
           if (eventType === 'created' && data) dispatch('onTerminalCreated', data.sessionName as string, data.requestId as string | undefined);
-          else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string);
+          else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string, data.historical === true);
           else if (eventType === 'attached' && data) {
             dispatch('onTerminalAttached', data.sessionName as string);
             if (typeof data.cols === 'number' && typeof data.rows === 'number') {
