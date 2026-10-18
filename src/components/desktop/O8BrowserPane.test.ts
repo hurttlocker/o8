@@ -8,8 +8,10 @@ import {
   BROWSER_PANE_STATE_VERSION,
   BROWSER_PANE_STORAGE_KEY,
   getBrowserPaneTabs,
+  readBrowserPaneState,
   type BrowserTab,
 } from '@/lib/browser/pane-state';
+import { browserViewEval, browserViewNavigate } from '@/lib/tauri/bridge';
 import { O8BrowserPane } from './O8BrowserPane';
 
 const browserRuntime = vi.hoisted(() => ({ nativeEnabled: false, inTauri: false }));
@@ -148,6 +150,61 @@ describe('O8BrowserPane durable entry path', () => {
 
     expect(container.textContent).toContain('Navigate again to reopen this page');
     expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('reloads the current native document while retaining its durable tab', async () => {
+    browserRuntime.nativeEnabled = true;
+    browserRuntime.inTauri = true;
+    const scopeKey = 'browser-native-reload';
+    const tabs: BrowserTab[] = [{ id: 'reload-tab', url: 'http://localhost:4888/', title: 'App', surface: 'native' }];
+    seedDurableScope(scopeKey, tabs, 'reload-tab');
+    vi.mocked(browserViewEval).mockClear();
+    vi.mocked(browserViewNavigate).mockClear();
+    await act(async () => root.render(createElement(O8BrowserPane, { stateScopeKey: scopeKey })));
+    const native = container.querySelector('[data-testid="native-surface"]');
+    const beforeReload = readBrowserPaneState(scopeKey);
+    const reload = container.querySelector<HTMLButtonElement>('button[title="Reload"]');
+    expect(reload).not.toBeNull();
+    await act(async () => reload!.click());
+    expect(browserViewEval).toHaveBeenCalledExactlyOnceWith('location.reload()');
+    expect(browserViewNavigate).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="native-surface"]')).toBe(native);
+    expect(readBrowserPaneState(scopeKey)).toEqual(beforeReload);
+    expect(readBrowserPaneState(scopeKey)?.activeTabId).toBe('reload-tab');
+  });
+
+  it.each([2, 5])('names active and hovered close controls and preserves surviving tabs at %s-tab density', async (count) => {
+    browserRuntime.nativeEnabled = true;
+    browserRuntime.inTauri = true;
+    const scopeKey = `browser-close-${count}`;
+    const tabs: BrowserTab[] = Array.from({ length: count }, (_, index) => ({
+      id: `tab-${index + 1}`, url: `https://example.com/${index + 1}`,
+      title: `Tab ${index + 1}`, surface: 'native',
+    }));
+    seedDurableScope(scopeKey, tabs, tabs[0].id);
+    await act(async () => root.render(createElement(O8BrowserPane, { stateScopeKey: scopeKey })));
+    expect(container.querySelector('button[aria-label="Close Tab 1"]')).not.toBeNull();
+    const last = container.querySelector<HTMLElement>(`[title="Tab ${count}"]`)!;
+    await act(async () => last.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    const closeLast = container.querySelector<HTMLButtonElement>(`button[aria-label="Close Tab ${count}"]`);
+    expect(closeLast).not.toBeNull();
+    await act(async () => closeLast!.click());
+    expect(getBrowserPaneTabs(scopeKey).map(tab => tab.id)).toEqual(tabs.slice(0, -1).map(tab => tab.id));
+    expect(readBrowserPaneState(scopeKey)?.activeTabId).toBe('tab-1');
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Close Tab 1"]')!.click());
+    expect(getBrowserPaneTabs(scopeKey).map(tab => tab.id)).toEqual(tabs.slice(1, -1).map(tab => tab.id));
+    expect(readBrowserPaneState(scopeKey)?.activeTabId).toBe(count === 2 ? null : 'tab-2');
+  });
+
+  it('names the empty-tab close action and persists deliberate closure', async () => {
+    const scopeKey = 'browser-close-empty';
+    seedDurableScope(scopeKey, [{ id: 'empty', url: '', title: 'New Tab', surface: 'embedded' }], 'empty');
+    await act(async () => root.render(createElement(O8BrowserPane, { stateScopeKey: scopeKey })));
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="Close New Tab"]');
+    expect(close).not.toBeNull();
+    await act(async () => close!.click());
+    expect(getBrowserPaneTabs(scopeKey)).toEqual([]);
+    expect(container.textContent).toContain('No active previews');
   });
 
   it('persists drag reordering through the pane state seam', async () => {
