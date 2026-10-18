@@ -139,6 +139,8 @@ Optional tool updates [#3862](https://github.com/hurttlocker/o8/issues/3862) fol
 
 Composer Brain routing [#3863](https://github.com/hurttlocker/o8/issues/3863) prefers an authenticated native Codex or Claude connection and uses the Terra or Sonnet answer tier. Explicit Codex Brain model choices remain effective. Managed Brain is the fallback when neither supported native connection is ready; other runtime inference adapters remain separate work. Connected conversation retrieval is lexical and does not start paid semantic embedding calls. Native Codex acceptance, fixture coverage and released-build acceptance remain separate gates.
 
+Saved Preview layouts [#3119](https://github.com/hurttlocker/o8/issues/3119) now offer visible Close preview and Open in Browser actions, preserving the surviving terminal and reclaiming its workspace space. A saved obsolete tile no longer mounts another browser iframe. Development acceptance does not imply publication.
+
 Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
 
 ## 6. Runs where you are
