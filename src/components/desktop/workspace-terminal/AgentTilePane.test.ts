@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -17,13 +17,6 @@ const transcriptMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/transcripts/useTranscript', () => ({
   useTranscript: () => transcriptMock.slice,
-}));
-
-vi.mock('framer-motion', () => ({
-  AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: {
-    form: ({ children, ...props }: { children?: ReactNode }) => createElement('form', props, children),
-  },
 }));
 
 vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
@@ -240,7 +233,9 @@ describe('AgentTilePane worker identity', () => {
     expect(host?.querySelector('[data-worker-model]')?.textContent).toBe('· gpt-6-sol');
     expect(host?.querySelector('[data-worker-model]')?.parentElement?.parentElement?.textContent).toContain('Worker');
     expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
-    expect(host?.textContent).toContain('To @Worker · Steer');
+    expect(host?.querySelector('[data-o8-composer-root]')).not.toBeNull();
+    expect(host?.querySelector('[data-testid="composer-send-control"]')).not.toBeNull();
+    expect(host?.textContent).not.toContain('To @Worker · Steer');
     expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');
   });
 
@@ -337,7 +332,7 @@ describe('AgentTilePane worker identity', () => {
       const check = [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Check receipt');
       check?.click();
     });
-    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Steer accepted');
+    expect(host?.querySelector('[data-worker-steer-receipt]')).toBeNull();
     expect(receipt).toHaveBeenCalledTimes(2);
     expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
     expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body)).clientMutationId).toBe('one-steer-id');
@@ -364,6 +359,16 @@ describe('classifyAgentTileStatus', () => {
 });
 
 describe('canSteerAgentState', () => {
+  it('keeps completed owned conversations available without enabling unrelated external sessions or failed packets', () => {
+    for (const sessionKey of ['codex-owned:one', 'claude-code-owned:two']) {
+      expect(canSteerAgentState({ status: 'completed' }, null, sessionKey)).toBe(true);
+      expect(canSteerAgentState({ status: 'idle' }, null, sessionKey)).toBe(true);
+      expect(canSteerAgentState({ status: 'failed' }, null, sessionKey)).toBe(false);
+      expect(canSteerAgentState({ status: 'completed' }, { status: 'failed' }, sessionKey)).toBe(false);
+    }
+    expect(canSteerAgentState({ status: 'completed' }, null, 'external:other')).toBe(false);
+  });
+
   it('keeps the composer available for a huddle waiting on direction', () => {
     expect(canSteerAgentState(
       { status: 'idle' },

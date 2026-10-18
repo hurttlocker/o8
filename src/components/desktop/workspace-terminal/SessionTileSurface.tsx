@@ -165,6 +165,7 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
+                  paddingBottom: leaves.length > 1 ? SESSION_PANE_INSET : 0,
                   '--o8-compose-first-rail-clearance': leaves.some((entry) => entry.kind === 'session') ? '0px' : undefined,
                 } as CSSProperties}
               >

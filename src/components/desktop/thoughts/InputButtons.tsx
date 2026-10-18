@@ -608,7 +608,7 @@ export function InputButtons({
       gap: 6,
       paddingTop: 4,
       paddingRight: 8,
-      paddingBottom: 6,
+      paddingBottom: 8,
       paddingLeft: 10,
     }}>
       {/* Left controls — the flexible group. As the composer narrows this

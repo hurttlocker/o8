@@ -68,3 +68,24 @@ describe('active Fast team workspace read', () => {
       ]);
   });
 });
+
+it('reads finished Shared membership after restart, deduplicates receipts, and excludes a different parent in the same repo', async () => {
+  const { createHash } = await import('node:crypto');
+  const root = mkdtempSync(join(tmpdir(), 'o8-team-history-')); roots.push(root);
+  const repoPath = realpathSync(root); const state = join(root, 'state');
+  vi.stubEnv('O8_DATA_DIR', state);
+  vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', join(state, 'owned-codex'));
+  const id = createHash('sha256').update(repoPath).digest('hex').slice(0, 24);
+  const archive = join(state, 'shared-checkout-teams', 'archive'); mkdirSync(archive, { recursive: true });
+  const member = { surfaceId: 'codex-owned:completed', runtime: 'codex', taskName: 'Finished work', state: 'running', clientMutationId: 'history-owned' };
+  for (const suffix of ['100', '101']) writeFileSync(join(archive, `${id}-${suffix}.json`), JSON.stringify({ path: repoPath, parentThreadId: 'thoughts-parent', members: [member] }));
+  writeFileSync(join(archive, `${id}-200.json`), JSON.stringify({ path: repoPath, parentThreadId: 'thoughts-other', members: [{ ...member, surfaceId: 'codex-owned:unrelated' }] }));
+  const owned = join(state, 'owned-codex', 'completed'); mkdirSync(owned, { recursive: true });
+  writeFileSync(join(owned, 'session.json'), JSON.stringify({ surfaceId: member.surfaceId, launchMutationId: member.clientMutationId, cwd: repoPath, repoPath, recentRuns: [{ outcome: 'finished' }] }));
+  const url = `http://localhost/api/orchestrator/shared-team/active?repoPath=${encodeURIComponent(repoPath)}&threadId=thoughts-parent`;
+  for (let read = 0; read < 2; read++) {
+    const response = await GET(new NextRequest(url, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ threadId: 'thoughts-parent', workers: [{ sessionKey: member.surfaceId, name: member.taskName, runtime: 'codex', status: 'completed' }] });
+  }
+});
