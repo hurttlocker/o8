@@ -85,6 +85,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   inputLockedRef.current = inputLocked;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const transparentRef = useRef(transparent);
+  transparentRef.current = transparent;
   const revealCancelRef = useRef<((resetTerm: boolean) => void) | null>(null);
   /** While true, incoming PTY chunks queue instead of painting (min-play). */
   const revealHoldRef = useRef(false);
@@ -470,12 +472,12 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           cursorStyle: 'block',
           disableStdin: readOnly || inputLockedRef.current || Boolean(exitRef.current),
           screenReaderMode,
-          allowTransparency: transparent === true,
+          allowTransparency: true,
           allowProposedApi: true,
           scrollback: TERMINAL_SCROLLBACK_LINES,
           theme: {
             ...buildXtermTheme(),
-            ...(transparent ? { background: 'rgba(0,0,0,0)' } : {}),
+            ...(transparentRef.current ? { background: 'rgba(0,0,0,0)' } : {}),
             ...(themeOverrides ?? {}),
           },
         });
@@ -657,7 +659,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
-  }, [tmuxSession, readOnly, screenReaderMode, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalVisibility, fitTerminal, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
+  }, [tmuxSession, readOnly, screenReaderMode, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalVisibility, fitTerminal, fontSize, lineHeight, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never
