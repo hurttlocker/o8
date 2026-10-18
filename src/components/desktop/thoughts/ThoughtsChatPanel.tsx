@@ -52,7 +52,8 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
-import { packetsForOrchestratorThread, SwarmStatusCard } from './chat-panel/SwarmStatusCard';
+import { ThreadWorkerCard } from './chat-panel/ThreadWorkerCard';
+import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
@@ -198,7 +199,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
-  onLaunchPacket?: (packet: OrchestratorPacket) => void;
+  onFocusPacket?: (packet: OrchestratorPacket) => void;
+  onFocusSession?: (sessionKey: string) => void;
   onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
   // Called with the latest user message text in chat mode so the parent
   // can stash it on the tab record and the tab strip can show a 3-word
@@ -254,7 +256,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onModePersist,
   onSpawnSingleTab,
   onSpawnChatTab,
-  onLaunchPacket,
+  onFocusPacket, onFocusSession,
   onChromeChange,
   onChatSummary,
   suppressAutoRestore = false, suppressRuntimePrewarm = false,
@@ -2098,9 +2100,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // active assistant turn's Task tool calls. Status is tied to the turn
   // (busy → running) rather than per-tool completion: parallel scouts fire
   // together and the serial tool-done heuristic can't track them individually.
-  // Worker packets this thread dispatched. One list, two consumers: the crew
-  // card's rows and the composer status bar's worker count — so the number
-  // under the composer is the number of rows on screen (#2148).
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
   const orchestratorScouts = isOrchestratorMode ? transcriptScouts(displayMessages, displayWaiting) : [];
@@ -2165,10 +2164,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             composeFirst={composeFirst}
             topContent={transcriptTopContent}
             bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
-              <SwarmStatusCard
+              <ThreadWorkerCard threadId={threadId} repoPath={resolvedRepoPath} busy={displayWaiting} agents={agents} onFocusSession={onFocusSession}
                 packets={threadWorkerPackets}
                 scouts={orchestratorScouts}
-                onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
+                onFocusPacket={onFocusPacket}
               />
             ) : null}
             isOrchestratorMode={isOrchestratorMode}
@@ -2232,7 +2231,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
         activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
-          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onLaunchPacket ? packet => { void onLaunchPacket(packet); } : undefined} /> : undefined}
+          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onFocusPacket} /> : undefined}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
         // Feed the EFFECTIVE transcript (orchestrator streams live into

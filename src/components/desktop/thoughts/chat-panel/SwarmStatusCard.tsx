@@ -2,7 +2,8 @@
 
 import { useId, useState } from 'react';
 import { AgentStatusDot, agentStatusToDotState, type AgentDotState } from '@/components/desktop/AgentStatusDot';
-import { packetRuntimeModelDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
+import { packetRuntimeModelDisplayLabel, resolveDisplayRuntime, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { runtimeFromWorkerSessionKey } from '@/lib/orchestrator/worker-launch-context';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import { projectWorkerParticipants } from '@/lib/orchestrator/participant-projection';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
@@ -25,6 +26,22 @@ export interface SwarmScoutView {
   id: string;
   label: string;
   status: 'running' | 'done' | 'failed' | 'stopped' | 'unknown';
+}
+
+/** Exact session membership from a saved Shared-team receipt. */
+export interface SwarmSessionView {
+  sessionKey: string;
+  name: string;
+  runtime: string;
+  status: string;
+}
+
+function sessionTone(status: string): StatusTone {
+  if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
+  if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
+  if (status === 'running') return { label: 'Running', state: 'running' };
+  if (status === 'failed') return { label: 'Failed', state: 'failed' };
+  return { label: 'Unconfirmed', state: 'idle' };
 }
 
 const VISIBLE_STATUSES = new Set<OrchestratorPacketStatus>([
@@ -126,8 +143,10 @@ export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (pa
   } }));
 }
 
-export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultExpanded = false }: {
+export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSession, onFocusPacket, defaultExpanded = false }: {
   packets: OrchestratorPacket[]; scouts?: SwarmScoutView[];
+  sessions?: SwarmSessionView[];
+  onFocusSession?: (sessionKey: string) => void;
   onFocusPacket?: (packet: OrchestratorPacket) => void;
   defaultExpanded?: boolean;
 }) {
@@ -137,12 +156,14 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultEx
   const byId = new Map(active.map(packet => [packet.id, packet]));
   const participants = projectWorkerParticipants({ packets: active });
   const native = [...new Map(scouts.map(scout => [scout.id, scout])).values()];
-  const count = participants.length + native.length;
-  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status))];
+  const packetSessions = new Set(participants.map(participant => participant.sessionKey));
+  const shared = [...new Map(sessions.map(session => [session.sessionKey, session])).values()].filter(session => !packetSessions.has(session.sessionKey));
+  const count = participants.length + native.length + shared.length;
+  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status)), ...shared.map(session => sessionTone(session.status))];
   const totals = new Map<string, number>();
   for (const { label } of statuses) totals.set(label.toLowerCase(), (totals.get(label.toLowerCase()) ?? 0) + 1);
   const summary = [...totals].map(([label, total]) => `${total} ${label}`).join(' · ');
-  const runtimes = [...participants.map(participant => resolveDisplayRuntime(byId.get(participant.id)!)), ...native.map(() => 'claude-code' as const)];
+  const runtimes = [...participants.map(participant => resolveDisplayRuntime(byId.get(participant.id)!)), ...native.map(() => 'claude-code' as const), ...shared.map(session => runtimeFromWorkerSessionKey(session.sessionKey))];
   if (!count) return null;
 
   return <div role="group" aria-label={`Subagents: ${count}`} style={{
@@ -181,6 +202,9 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultEx
       {native.map(scout => <CrewRow key={`native:${scout.id}`} title={scout.label}
         sub="Claude Code · Native subagent · Managed by this conversation"
         status={scoutTone(scout.status)} />)}
+      {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
+        sub={`${runtimeModelDisplayLabel(runtimeFromWorkerSessionKey(session.sessionKey))} · Shared checkout`} status={sessionTone(session.status)}
+        onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
     </div> : null}
   </div>;
 }

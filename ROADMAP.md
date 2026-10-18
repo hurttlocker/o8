@@ -112,6 +112,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Live worker chat navigation [#3881](https://github.com/hurttlocker/o8/issues/3881) opens an existing delegated worker beside its parent using the shared session surface and independent shared composers. Card clicks only navigate; stale or unrelated parent membership cannot launch work. Native follow-up, same-session hide/reopen, reload, and matching composer geometry passed. Successful sends add no receipt row. TypeScript, 39 focused checks and the frozen combined-checkout hermetic gate (7,065 passed, 4 skipped) passed; PR review, merge, installed acceptance and release remain separate.
+
 Two lanes, one pillar. The people lane covers the surfaces a person works in. The agents lane covers whether another program can drive o8 through a real interface instead of imitating a mouse.
 
 The compact transcript subagent card and explicit default-worker picker [#3869](https://github.com/hurttlocker/o8/issues/3869) reuse existing participant identities, workspace navigation and runtime dispatch. Focused component and dispatch-entry tests and light/dark development previews passed. Required PR checks and released-build acceptance remain separate gates; no new automatic runtime-selection policy is introduced.
