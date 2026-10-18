@@ -153,6 +153,8 @@ Workspace utility navigation [#3133](https://github.com/hurttlocker/o8/issues/31
 
 Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3108) uses one Threads control beside the task identity and Refresh. Ordinary project list and detail navigation remain available. Native development acceptance uses simulated task data; it does not establish remote execution acceptance.
 
+Saved repository recovery [#3870](https://github.com/hurttlocker/o8/issues/3870) can restore a validated registered-repository path without waiting for a worktree scan. External paths still require exact authoritative membership, and stale inventory cannot overwrite a newer removal. Native recovery and automated evidence remain separate from release inclusion.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
