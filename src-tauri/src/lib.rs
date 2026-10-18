@@ -18,6 +18,7 @@ mod dock_window;
 #[cfg(target_os = "macos")]
 mod first_run_install;
 mod fn_hotkey;
+mod voice_surfaces;
 mod launch_updater;
 mod update_ping;
 #[cfg(target_os = "macos")]
@@ -2116,53 +2117,7 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         }
         log::info!("[boot] sidecar answering at {}ms — the dashboard can load", boot_ms());
 
-        // Window creation must run on the main thread.
-        let app_main = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            dock_window::create(&app_main, api_port);
-            // Outside-the-window live agent-transcription HUD (bottom-center).
-            // Same server-up prerequisite as the dock — it loads /agent-partials
-            // on the same port.
-            agent_partials_window::create(&app_main, api_port);
-            // Symon Spatial Context — the draw-on-screen ink overlay. Sized to
-            // the cursor's monitor + mouse-captured only during an agent hold
-            // (arm/disarm); click-through + transparent at rest.
-            spatial_ink_window::create(&app_main, api_port);
-        });
-        // Relay the canvas composer's partials-surface CLAIM directly to the HUD
-        // window. The canvas emits it as a JS broadcast, and cross-webview
-        // broadcasts can miss secondary windows (the dock's known failure mode,
-        // 2026-07-08 live-hit: the HUD painted an empty bar over the canvas
-        // because the claim never arrived). Rust listen → emit_to is reliable.
-        //
-        // CRITICAL: the forward MUST use a DIFFERENT event name. `listen_any`
-        // hears EVERY emit — including this handler's own `emit_to` — so
-        // re-emitting under the same name recursed until the thread's stack
-        // blew (2026-07-09 crash ×2: EXC_BAD_ACCESS / stack_overflow abort on
-        // tokio-rt-worker, triggered the moment the canvas claimed). The HUD
-        // page listens for both the direct name and the `-fwd` relay name.
-        #[cfg(target_os = "macos")]
-        {
-            use tauri::Listener;
-            let relay = app.clone();
-            app.listen_any("o8:agent-partials-claim", move |event| {
-                if let Ok(payload) =
-                    serde_json::from_str::<serde_json::Value>(event.payload())
-                {
-                    let _ = relay.emit_to(
-                        agent_partials_window::PARTIALS_LABEL,
-                        "o8:agent-partials-claim-fwd",
-                        payload,
-                    );
-                }
-            });
-        }
-        // JS → Rust listeners for the ink page (first-stroke capture trigger,
-        // stroke payload at finalize, page-side disarm request).
-        spatial_ink_window::register_listeners(&app);
-        // Stash the resolved port for the lazily-created Symon Points overlay
-        // (point_overlay builds its window on first [POINT:...] tag, not here).
-        point_overlay::init(api_port);
+        crate::voice_surfaces::create(&app, api_port);
         // Fleet visibility in the dock — the worker-pulse poller drives the
         // idle sliver's orbiting dot + count while packets are in flight.
         #[cfg(target_os = "macos")]
@@ -4343,7 +4298,12 @@ mod stt_engine {
     /// live morph (recording waveform + transcript + paste flash) reliably lands
     /// in the second webview — `app.emit` broadcast can miss the dock. The
     /// agent-partials HUD gets the same direct delivery for the same reason.
-    fn emit_stt(app: &AppHandle, origin: &str, payload: serde_json::Value) {
+    fn emit_stt(app: &AppHandle, origin: &str, mut payload: serde_json::Value) {
+        // Direct delivery and broadcast share one gesture identity, including
+        // when a recognizer frame interleaves with those duplicate starts.
+        if payload["type"] == "system-start" && payload["startId"].is_null() {
+            payload["startId"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
+        }
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
@@ -4366,6 +4326,10 @@ mod stt_engine {
             );
         }
         let _ = app.emit("o8:stt-event", payload);
+    }
+
+    pub(crate) fn emit_system_stt(app: &AppHandle, payload: serde_json::Value) {
+        emit_stt(app, "system", payload);
     }
 
     fn with_agent_lane(mut payload: serde_json::Value) -> serde_json::Value {
@@ -4613,8 +4577,7 @@ mod stt_engine {
                 emit_agent_stt(app, idle);
                 crate::fn_hotkey::clear_agent_event_session(Some(session_id));
             } else {
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                let _ = app.emit("o8:stt-event", idle);
+                emit_stt(app, "system", idle);
             }
         } else {
             let _ = app.emit(
@@ -4660,8 +4623,7 @@ mod stt_engine {
             emit_agent_stt(app, error);
             crate::fn_hotkey::clear_agent_event_session(Some(session_id));
         } else if system_origin {
-            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", error.clone());
-            let _ = app.emit("o8:stt-event", error);
+            emit_stt(app, "system", error);
         } else {
             let _ = app.emit("o8:stt-event", error);
         }
@@ -4847,12 +4809,7 @@ mod stt_engine {
                         {
                             let idle =
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(
-                                crate::dock_window::DOCK_LABEL,
-                                "o8:stt-event",
-                                idle.clone(),
-                            );
-                            let _ = app.emit("o8:stt-event", idle);
+                            emit_stt(&app, "system", idle);
                         }
                         return;
                     }
@@ -4869,12 +4826,7 @@ mod stt_engine {
                             }
                             let idle =
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(
-                                crate::dock_window::DOCK_LABEL,
-                                "o8:stt-event",
-                                idle.clone(),
-                            );
-                            let _ = app.emit("o8:stt-event", idle);
+                            emit_stt(&app, "system", idle);
                         }
                         #[cfg(not(target_os = "macos"))]
                         let _ = t;
@@ -4915,6 +4867,14 @@ mod stt_engine {
             let polished = if crate::stt::polish::is_available()
                 && !crate::stt::polish::should_skip_polish(&ctx)
             {
+                // Publish the actual processing phase before the provider call.
+                let origin = origin_str();
+                emit_session_stt(
+                    &app,
+                    origin,
+                    Some(session_id),
+                    serde_json::json!({ "type": "polishing", "origin": origin, "sessionId": session_id }),
+                );
                 crate::stt::polish::polish(&ctx)
             } else {
                 raw_text.clone()
@@ -4951,8 +4911,7 @@ mod stt_engine {
                 // The dock was morphed to 'recording' on ask-start; return it to
                 // idle now — the Ask answer panel takes over when the answer lands.
                 let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                let _ = app.emit("o8:stt-event", idle);
+                emit_stt(&app, "system", idle);
                 crate::dictation_history::record("ask", &polished, None);
                 crate::spawn_ask_and_speak(app.clone(), polished);
                 return;
@@ -5040,9 +4999,7 @@ mod stt_engine {
                     // false "Pasted". Symon parity: never claim a paste it didn't
                     // make. emit_to(DOCK_LABEL) + broadcast (same reliable path).
                     let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                    let _ =
-                        app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                    let _ = app.emit("o8:stt-event", idle);
+                    emit_stt(&app, "system", idle);
                 } else {
                     // In-app delivery (#1542 slim-down + composer-focus fix):
                     // when o8 itself is frontmost, a synthetic Cmd+V into our
@@ -5153,12 +5110,7 @@ mod stt_engine {
                             "sessionId": session_id,
                             "text": message,
                         });
-                        let _ = app.emit_to(
-                            crate::dock_window::DOCK_LABEL,
-                            "o8:stt-event",
-                            error.clone(),
-                        );
-                        let _ = app.emit("o8:stt-event", error);
+                        emit_stt(&app, "system", error);
                     } else {
                         let pasted = serde_json::json!({
                             "type": "system-pasted",
@@ -5172,12 +5124,7 @@ mod stt_engine {
                             // than a false "pasted".
                             "clipboardOnly": !paste_outcome.did_paste(),
                         });
-                        let _ = app.emit_to(
-                            crate::dock_window::DOCK_LABEL,
-                            "o8:stt-event",
-                            pasted.clone(),
-                        );
-                        let _ = app.emit("o8:stt-event", pasted);
+                        emit_stt(&app, "system", pasted);
                         // Cue: paste landed (#1208).
                         crate::sound::play_sound("Done");
                     }
@@ -5894,13 +5841,18 @@ fn voice_prefs_get() -> serde_json::Value {
 /// `reading_speed`, `tts_provider`, `tts_voice_id`, etc. macOS only (#1673).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
+fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value) -> Result<(), String> {
+    let top_pill = if key == "dictation_top_pill" { value.as_bool() } else { None };
     let external_symon_left_control = if key == "external_symon_left_control" {
         value.as_bool()
     } else {
         None
     };
     crate::stt::keys::set_pref(&key, value)?;
+    if let Some(enabled) = top_pill {
+        use tauri::Emitter;
+        let _ = app.emit("o8:top-pill-preference", serde_json::json!({ "enabled": enabled }));
+    }
     if let Some(enabled) = external_symon_left_control {
         // #2158: hand the pref to the device watcher, which re-evaluates at once
         // and arms the tap only while a non-Apple external keyboard is attached.
@@ -8583,6 +8535,19 @@ pub fn run() {
                         }
                     }
 
+                    // Voice Settings stays reachable with the top pill disabled
+                    // and without bringing the main workspace to the front.
+                    if let Ok(sc) = "CommandOrControl+Alt+,".parse::<Shortcut>() {
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |app, _sc, event| {
+                            if event.state == ShortcutState::Pressed {
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || open_voice_settings(handle));
+                            }
+                        }) {
+                            log::warn!("[hotkey] failed to register voice settings: {e}");
+                        }
+                    }
+
                     // Ctrl+Alt+R (primary) + Ctrl+Shift+R (legacy) → speak the
                     // current text selection aloud (voice P4 "say").
                     // History: Ctrl+Shift+S → Ctrl+Shift+R 2026-07-07 ("S is a
@@ -9103,7 +9068,11 @@ pub fn run() {
             // the main thread via `run_on_main_thread`, exactly where it ran
             // before, so we introduce no new set_var/getenv race.
             match boot_mode {
-                BootMode::Attached => {}
+                BootMode::Attached => {
+                    // The attached daemon is already verified and listening.
+                    // Voice windows belong to this shell, not the daemon.
+                    voice_surfaces::create(app.handle(), api_port);
+                }
                 BootMode::Bundled => {
                     let app_handle = app.handle().clone();
                     let server_dir = server_dir.clone();
@@ -9197,7 +9166,10 @@ pub fn run() {
                         }
                     });
                 }
-                BootMode::DevServerRunning | BootMode::NoBundle => {}
+                BootMode::DevServerRunning => {
+                    voice_surfaces::create(app.handle(), api_port);
+                }
+                BootMode::NoBundle => {}
             }
 
             #[cfg(target_os = "macos")]
