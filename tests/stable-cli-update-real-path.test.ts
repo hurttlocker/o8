@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ home: '', selected: '', root: '', mode: 'native', version: '2.0.1', busy: false,
+const fixture = vi.hoisted(() => ({ home: '', selected: '', root: '', mode: 'native', version: '2.0.1', target: '2.0.2', busy: false,
   externalBusy: false, fail: false, wrongVersion: false, changedOwner: false, source: 'which', calls: [] as Array<{ command: string; args: string[] }> }));
 // Installation checks resolve executable paths; the mocked home must use the same canonical root.
 const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-stable-cli-route-')));
@@ -29,7 +29,12 @@ vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[
   if (command === '/bin/ps') { callback(null, { stdout: fixture.externalBusy ? `claude ${fixture.selected}` : '', stderr: '' }); return; }
   fixture.calls.push({ command, args });
   if (fixture.fail) { callback(new Error('fixture install failure')); return; }
-  if (!fixture.wrongVersion) fixture.version = '2.0.2';
+  if (!fixture.wrongVersion) fixture.version = fixture.target;
+  if (fixture.mode.startsWith('opencode-')) {
+    const packageName = fixture.mode === 'opencode-old-npm' ? '@opencode-ai/cli' : '@opencode/cli';
+    const file = join(fixture.root, 'lib/node_modules', packageName, 'package.json');
+    const metadata = JSON.parse(readFileSync(file, 'utf8')); metadata.version = fixture.version; writeFileSync(file, JSON.stringify(metadata));
+  }
   if (fixture.mode === 'grok-native') { writeFileSync(join(fixture.root, 'downloads/grok-linux-x86_64'), 'updated owned Grok fixture'); }
   if (fixture.mode === 'native' || fixture.mode === 'codex-native') {
     const codex = fixture.mode === 'codex-native';
@@ -48,15 +53,15 @@ vi.mock('node:child_process', () => ({ execFile: (command: string, args: string[
   callback(null, { stdout: '', stderr: '' });
 } }));
 const route = await import('@/app/api/setup/cli-updates/route');
-const request = (body: unknown = { runtime: 'claude-code' }, token = 'fixture-operator') => route.POST(new Request('http://localhost/api/setup/cli-updates', {
-  method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+const request = (body: unknown = { runtime: 'claude-code' }, token = 'fixture-operator', stream = false) => route.POST(new Request('http://localhost/api/setup/cli-updates', {
+  method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(stream ? { Accept: 'text/event-stream' } : {}) }, body: JSON.stringify(body),
 }));
 const receipt = (runtime = 'claude-code') => JSON.parse(readFileSync(join(process.env.CORTEX_IDE_DATA_DIR!, `${runtime}-cli-update.json`), 'utf8'));
 function setup(mode: string) {
   rmSync(fixture.home, { recursive: true, force: true });
-  fixture.mode = mode; fixture.version = '2.0.1'; fixture.calls = []; fixture.busy = false;
+  fixture.mode = mode; fixture.version = '2.0.1'; fixture.target = '2.0.2'; fixture.calls = []; fixture.busy = false;
   fixture.externalBusy = false; fixture.fail = false; fixture.wrongVersion = false; fixture.changedOwner = false; fixture.source = 'which';
-  const command = mode.startsWith('codex-') ? 'codex' : mode.startsWith('grok-') ? 'grok' : 'claude';
+  const command = mode.startsWith('codex-') ? 'codex' : mode.startsWith('grok-') ? 'grok' : mode.startsWith('opencode-') ? 'opencode2' : mode === 'gemini-npm' ? 'gemini' : 'claude';
   mkdirSync(join(fixture.home, '.o8/bin'), { recursive: true });
   fixture.selected = join(fixture.home, '.o8/bin', command);
   if (mode === 'grok-native') {
@@ -77,14 +82,15 @@ function setup(mode: string) {
     writeFileSync(target, 'owned native fixture'); chmodSync(target, 0o700);
     const launcher = join(fixture.home, '.local/bin', command); symlinkSync(target, launcher); symlinkSync(launcher, fixture.selected);
     mkdirSync(join(fixture.home, '.claude')); writeFileSync(join(fixture.home, '.claude/settings.json'), '{"autoUpdatesChannel":"stable"}');
-  } else if (mode === 'npm' || mode === 'grok-npm') {
+  } else if (['npm', 'grok-npm', 'opencode-npm', 'opencode-old-npm', 'gemini-npm'].includes(mode)) {
     fixture.root = join(fixture.home, 'node');
     mkdirSync(join(fixture.root, 'bin'), { recursive: true });
-    const packageName = mode === 'grok-npm' ? '@xai-official/grok' : '@anthropic-ai/claude-code';
+    const packageName = mode === 'grok-npm' ? '@xai-official/grok' : mode === 'opencode-old-npm' ? '@opencode-ai/cli' : mode === 'opencode-npm' ? '@opencode/cli' : mode === 'gemini-npm' ? '@google/gemini-cli' : '@anthropic-ai/claude-code';
     for (const [name, binary] of [[packageName, command], ['npm', 'npm-cli.js']]) {
       const packageRoot = join(fixture.root, 'lib/node_modules', name); mkdirSync(join(packageRoot, 'bin'), { recursive: true });
       const target = join(packageRoot, 'bin', binary); writeFileSync(target, 'owned npm fixture'); chmodSync(target, 0o700);
-      writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ name, bin: { [command]: `bin/${command}` } }));
+      writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ name, version: fixture.version, bin: { [command]: `bin/${command}` }, ...(mode.startsWith('opencode-') && name === packageName ? { scripts: { postinstall: 'node ./postinstall.mjs' } } : {}) }));
+      if (mode.startsWith('opencode-') && name === packageName) writeFileSync(join(packageRoot, 'postinstall.mjs'), '// owned fixture hook');
       symlinkSync(target, join(fixture.root, 'bin', binary === command ? command : 'npm'));
     }
     symlinkSync(join(fixture.root, 'bin', command), fixture.selected);
@@ -125,6 +131,36 @@ describe('connected stable CLI updates through the real operator route', () => {
     expect(fixture.calls[0]?.args).toEqual(expect.arrayContaining(['--prefix', fixture.root, '--ignore-scripts', '@anthropic-ai/claude-code@2.0.2']));
     expect(receipt()).toMatchObject({ status: 'succeeded', manager: 'npm' });
   });
+  it.each(['opencode-old-npm', 'opencode-npm'])('streams OpenCode progress for %s through the real route and persists the selected owner', async mode => {
+    setup(mode);
+    if (mode === 'opencode-old-npm') { fixture.version = '0.0.0-beta-100'; fixture.target = '0.0.0-beta-200'; }
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ version: fixture.target })));
+    const response = await request({ runtime: 'opencode' }, 'fixture-operator', true);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    const stream = await response.text();
+    expect(stream).toContain('"stage":"checking"'); expect(stream).toContain('"stage":"installing"'); expect(stream).toContain('"stage":"verifying"'); expect(stream).toContain('event: result');
+    const packageName = mode === 'opencode-old-npm' ? '@opencode-ai/cli' : '@opencode/cli';
+    expect(fixture.calls[0]?.args).toEqual(expect.arrayContaining(['--prefix', fixture.root, `${packageName}@${fixture.target}`, '--ignore-scripts']));
+    expect(fixture.calls[1]).toEqual({ command: process.execPath, args: [join(fixture.root, 'lib/node_modules', packageName, 'postinstall.mjs')] });
+    expect(receipt('opencode')).toMatchObject({ runtime: 'opencode', status: 'succeeded', selectedPath: fixture.selected, targetVersion: fixture.target });
+    expect(fetch).toHaveBeenCalledWith(`https://registry.npmjs.org/${encodeURIComponent(packageName)}/${mode === 'opencode-old-npm' ? 'next' : 'latest'}`, expect.anything());
+    expect(existsSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'opencode-cli-update.lock'))).toBe(false);
+  });
+  it('streams a refusal without installing or claiming a verified result', async () => {
+    fixture.busy = true;
+    const response = await request({ runtime: 'claude-code' }, 'fixture-operator', true);
+    const stream = await response.text(); expect(stream).toContain('event: error'); expect(stream).not.toContain('event: result'); expect(fixture.calls).toHaveLength(0);
+  });
+  it('finishes the owned installation receipt when the progress viewer disconnects', async () => {
+    rmSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-cli-update.json'), { force: true });
+    const response = await request({ runtime: 'claude-code' }, 'fixture-operator', true);
+    const reader = response.body!.getReader();
+    const first = await reader.read(); expect(new TextDecoder().decode(first.value)).toContain('"stage":"checking"');
+    await reader.cancel();
+    await vi.waitFor(() => expect(receipt().status).toBe('succeeded'));
+    expect(fixture.calls).toEqual([{ command: fixture.selected, args: ['update'] }]);
+    expect(existsSync(join(process.env.CORTEX_IDE_DATA_DIR!, 'claude-code-cli-update.lock'))).toBe(false);
+  });
   it('uses the verified standalone Codex updater and accepts the new owned release target', async () => {
     setup('codex-native'); expect((await request({ runtime: 'codex' })).status).toBe(200);
     expect(fixture.calls).toEqual([{ command: fixture.selected, args: ['update'] }]);
@@ -164,7 +200,7 @@ describe('connected stable CLI updates through the real operator route', () => {
   it('refuses worker authority, package arguments, unsupported runtimes, and custom selected paths without an install', async () => {
     expect((await request({ runtime: 'claude-code' }, 'fixture-worker')).status).toBe(403);
     expect((await request({ runtime: 'claude-code', command: 'anything' })).status).toBe(400);
-    expect((await request({ runtime: 'gemini' })).status).toBe(400);
+    expect((await request({ runtime: 'not-a-runtime' })).status).toBe(400);
     fixture.source = 'env'; expect((await request()).status).toBe(409);
     expect(fixture.calls).toHaveLength(0);
   });

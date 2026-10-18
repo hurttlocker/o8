@@ -195,15 +195,15 @@ it('checks updates on click and opens the panel with the result', async () => {
     const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!;
     await act(async () => trigger.click());
     expect(updateCheck).toHaveBeenCalledOnce();
-    expect(notify).toHaveBeenCalledWith('Checking o8 and connected CLIs…', 'info');
-    expect(notify).toHaveBeenCalledWith('o8 and connected CLIs are up to date.', 'success');
+    expect(notify).toHaveBeenCalledWith('Checking o8…', 'info');
+    expect(notify).toHaveBeenCalledWith('o8 is up to date.', 'success');
     expect(document.querySelector('[aria-label="Updates and release notes"]')?.textContent).toContain('You’re up to date.');
     expect(install).not.toHaveBeenCalled();
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
   } finally { unregister(); window.removeEventListener('o8:install-app-update', install); await act(async () => root.unmount()); host.remove(); }
 });
 
-it('shows ready updates in blue, folds current CLIs, and offers separate app and CLI update actions', async () => {
+it('keeps o8 primary and requires expanding Tools before any explicit CLI update', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
@@ -221,6 +221,10 @@ it('shows ready updates in blue, folds current CLIs, and offers separate app and
     expect(trigger.querySelector('[data-update-dot]')).toBeNull();
     await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
     const popup = document.querySelector<HTMLElement>('[aria-label="Updates and release notes"]')!;
+    expect(popup.textContent).not.toContain('codex');
+    const tools = popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!;
+    expect(tools).not.toBeNull(); expect(tools.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => tools.click());
     expect(popup.textContent).toContain('codex');
     expect(popup.textContent).not.toMatch(/claude-code|grok|gemini|Fetch is aborted/);
     expect(popup.textContent).toContain('Update checks couldn’t finish');
@@ -238,7 +242,7 @@ it('shows ready updates in blue, folds current CLIs, and offers separate app and
     await act(async () => { await checkAllUpdates(); }); unregister();
     expect(popup.textContent).toContain('Updates are ready.');
     act(() => update.click()); expect(install).toHaveBeenCalledOnce();
-    expect([...popup.querySelectorAll('button')].some(button => button.textContent === 'Update connected CLIs')).toBe(true);
+    expect([...popup.querySelectorAll('button')].some(button => button.textContent === 'Update connected CLIs')).toBe(false);
     expect(popup.querySelector('[aria-label="Update codex"]')).not.toBeNull();
     expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method)).toBe(true);
     await act(async () => publishAppUpdateView({ version: '0.1.901', outcome: 'available', installing: false, message: 'Restart is waiting for lanes and terminals to become idle.', error: null, downloadOnly: false }));
@@ -315,7 +319,7 @@ it('opens quick settings from the avatar, keeps account details in Settings, and
   }
 });
 
-it('shows only installed supported CLIs and keeps legacy Gemini out of the ready state', async () => {
+it('shows installed CLIs under Tools while keeping the default ready state specific to o8', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const tools = [{ runtimeId: 'codex', label: 'Codex CLI', status: 'not-installed' },
     { runtimeId: 'claude-code', label: 'Claude Code', status: 'current' },
@@ -333,14 +337,15 @@ it('shows only installed supported CLIs and keeps legacy Gemini out of the ready
     expect(host.querySelector('[data-update-ready]')).toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Updates"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })));
     const popup = document.querySelector('[aria-label="Updates and release notes"]')!;
+    await act(async () => popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!.click());
     await act(async () => [...popup.querySelectorAll('button')].find(button => button.textContent?.startsWith('Current CLIs'))!.click());
     expect(popup.textContent).toContain('Grok Build'); expect(popup.textContent).toContain('Claude Code');
-    expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).not.toContain('Gemini CLI');
+    expect(popup.textContent).not.toContain('Codex CLI'); expect(popup.textContent).toContain('Gemini CLI');
     tools[2]!.status = 'update-available';
     await act(async () => refreshCliUpdateView(true));
     // A CLI update alone shows the small dot; the filled icon is reserved for an o8 update.
     expect(host.querySelector('[data-update-ready]')).toBeNull();
-    expect(host.querySelector('[data-cli-update-ready]')).not.toBeNull();
+    expect(host.querySelector('[data-cli-update-ready]')).toBeNull();
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
@@ -369,5 +374,24 @@ it('keeps weekly house meters separate from short windows, model caps and unsele
     expect(codex.style.width).toBe(claude.style.width);
     expect(Number.parseFloat(codex.style.bottom)).toBeGreaterThan(Number.parseFloat(claude.style.bottom));
     expect(document.querySelector('[data-mcp-scope="rail-usage-preview"]')).toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+it('keeps the usage meter containing block stable while its preview opens on hover and focus', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ capacities: [], tools: [] })));
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const noop = () => {};
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { activeDestination: 'agents', glassSurface: true,
+      onHome: noop, onNewSession: noop, onCreateTerminal: noop, onOpenProjects: noop, onOpenSettings: noop,
+      onOpenPRs: noop, onOpenUsage: noop, onOpenShortcuts: noop })));
+    const button = host.querySelector<HTMLButtonElement>('[aria-label="Runtime usage"]')!;
+    const icon = button.firstElementChild as HTMLElement;
+    const before = icon.style.filter;
+    await act(async () => button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    expect(document.querySelector('[data-mcp-scope="rail-usage-preview"]')).not.toBeNull();
+    expect(icon.style.filter).toBe(before);
+    await act(async () => button.focus()); expect(icon.style.filter).toBe(before);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
