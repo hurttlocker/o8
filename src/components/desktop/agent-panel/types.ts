@@ -198,6 +198,7 @@ export interface WorkspaceAgentLaunchRequest {
 }
 
 export interface AgentPanelProps {
+  onOpenChatReview?: (laneId: string, repoPath: string | null) => void;
   /** Global destinations and account controls live in the adjacent navigation rail. */
   navigationRail?: boolean;
   activeSessionKey?: string | null;
