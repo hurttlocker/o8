@@ -165,6 +165,8 @@ Native Browser reload [#3801](https://github.com/hurttlocker/o8/issues/3801) rel
 
 Browser overlay detection [#3799](https://github.com/hurttlocker/o8/issues/3799) accounts for effective ancestor opacity before hiding the native child. Transparent cached portals do not count as painted covers; visible covers and explicit occlusion still hide and restore the child. Controlled development reproduction and rendered regressions are recorded separately from remaining native visual acceptance.
 
+Fresh-session dialog guards [#3916](https://github.com/hurttlocker/o8/issues/3916) ignore invisible cached portals at the app-owned creation boundary while visible dialogs still refuse creation. Real-root tests cover direct requests, late visibility changes and multiple dialogs without weakening identity or inventory checks.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.

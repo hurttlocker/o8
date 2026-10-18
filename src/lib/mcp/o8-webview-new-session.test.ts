@@ -82,6 +82,27 @@ function requestFromReceipt(): FreshOrchestratorRequest {
   return { requestId: receipt.requestId, workspaceId: receipt.workspaceId, repoPath: receipt.repoPath,
     activeTabId: 'used-tab', tabIds: receipt.tabIds, capability: 'old-capability', expiresAt: 0 };
 }
+function cachedDialog() {
+  const portal = document.createElement('div');
+  portal.setAttribute('role', 'dialog');
+  portal.setAttribute('aria-modal', 'true');
+  portal.setAttribute('aria-hidden', 'true');
+  portal.setAttribute('inert', '');
+  portal.style.opacity = '0';
+  const body = document.createElement('div');
+  body.style.backgroundColor = 'rgb(38, 38, 38)';
+  portal.append(body);
+  document.body.append(portal);
+  expect(portal.getBoundingClientRect().width).toBeGreaterThan(0);
+  return portal;
+}
+function inspectedRequest(): FreshOrchestratorRequest {
+  const inspected = JSON.parse(dom.window.eval(freshSessionScript('inspect')));
+  expect(inspected.ok).toBe(true);
+  const { workspaceId, repoPath, activeTabId, tabIds, capability } = inspected;
+  return { requestId: 'direct-owner-request', expiresAt: Date.now() + 5_000,
+    workspaceId, repoPath, activeTabId, tabIds, capability };
+}
 async function mount(activeTabId: string, withBlank = true) {
   scope += 1;
   saved = {
@@ -176,6 +197,41 @@ describe('registered genuine fresh-session action through the real root/controll
     surface().setAttribute('aria-disabled', 'true');
     expect(await run()).toMatchObject({ ok: false, actionDispatched: false });
     expect(dispatches).toBe(0);
+  });
+  it('creates once and publishes completion with an invisible cached dialog', async () => {
+    await mount('used-tab'); const before = inventory();
+    cachedDialog();
+    const result = await run();
+    expect(result).toMatchObject({ ok: true, status: 'completed' });
+    expect(inventory()).toEqual([...before, result.tabId]);
+    expect(dispatches).toBe(1);
+    expect(await readSurface()).toMatchObject({ freshSessionReceipt: { requestId: result.requestId, status: 'completed' } });
+  });
+  it('refuses the same cached dialog when it paints visibly despite aria-hidden and inert', async () => {
+    await mount('used-tab'); const before = inventory();
+    cachedDialog().style.opacity = '1';
+    expect(await run()).toMatchObject({ ok: false, actionDispatched: false });
+    expect(inventory()).toEqual(before); expect(dispatches).toBe(0);
+  });
+  it('rechecks a dialog made visible after script inspection at the owner boundary', async () => {
+    await mount('used-tab'); const before = inventory(); const portal = cachedDialog();
+    surface().addEventListener(FRESH_ORCHESTRATOR_EVENT, () => { portal.style.opacity = '1'; }, { capture: true, once: true });
+    expect(await run()).toMatchObject({ ok: false, code: 'target_changed_or_unavailable', actionDispatched: false });
+    expect(inventory()).toEqual(before); expect(dispatches).toBe(1);
+  });
+  it('refuses a direct otherwise valid owner request while a dialog is visible', async () => {
+    await mount('used-tab'); const before = inventory(); const request = inspectedRequest();
+    cachedDialog().style.opacity = '1';
+    await act(async () => surface().dispatchEvent(new CustomEvent(FRESH_ORCHESTRATOR_EVENT, { detail: request })));
+    expect(JSON.parse(surface().getAttribute(FRESH_RECEIPT_ATTRIBUTE)!)).toMatchObject({ status: 'error', code: 'target_changed_or_unavailable', actionDispatched: false });
+    expect(inventory()).toEqual(before); expect(dispatches).toBe(1);
+  });
+  it('does not let a hidden first dialog mask another visible dialog at the owner boundary', async () => {
+    await mount('used-tab'); const before = inventory(); cachedDialog(); const request = inspectedRequest();
+    cachedDialog().style.opacity = '1';
+    await act(async () => surface().dispatchEvent(new CustomEvent(FRESH_ORCHESTRATOR_EVENT, { detail: request })));
+    expect(JSON.parse(surface().getAttribute(FRESH_RECEIPT_ATTRIBUTE)!)).toMatchObject({ status: 'error', code: 'target_changed_or_unavailable', actionDispatched: false });
+    expect(inventory()).toEqual(before); expect(dispatches).toBe(1);
   });
   it('refuses a mismatched requested repo or missing action', async () => {
     await mount('used-tab');
