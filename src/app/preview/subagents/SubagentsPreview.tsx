@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties } from 'react';
+import { SubagentDemoPanel } from '@/components/desktop/workspace-terminal/SubagentDemoPanel';
 import { SwarmStatusCard } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { ComposerPicker } from '@/components/desktop/thoughts/composer-selector/ComposerPicker';
 import { resolveComposerSelectorState } from '@/components/desktop/thoughts/composer-selector/state';
@@ -28,6 +29,7 @@ const packets: OrchestratorPacket[] = [
 export function SubagentsPreview() {
   const [dark, setDark] = useState(true);
   const [narrow, setNarrow] = useState(false);
+  const [chatDemo, setChatDemo] = useState(false);
   const [opened, setOpened] = useState('');
   const [defaults, setDefaults] = useState(FALLBACK_COMPOSER_WORKER_DEFAULTS);
   const theme = resolveTheme(getPalette(dark ? 'dark' : 'light'), 'solid');
@@ -41,8 +43,9 @@ export function SubagentsPreview() {
     <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
       <button style={button} onClick={() => setDark(value => !value)}>{dark ? 'Light' : 'Dark'} theme</button>
       <button style={button} onClick={() => setNarrow(value => !value)}>{narrow ? 'Wide' : 'Narrow'} view</button>
+      <button style={button} onClick={() => setChatDemo(value => !value)}>{chatDemo ? 'Card preview' : 'Open chat demo'}</button>
     </div>
-    <section style={{ maxWidth: narrow ? 340 : 640, marginTop: 0, marginRight: 'auto', marginBottom: 0, marginLeft: 'auto' }}>
+    {chatDemo ? <div style={{ height: 'calc(100vh - 110px)', maxWidth: narrow ? 360 : undefined, marginTop: 0, marginRight: 'auto', marginBottom: 0, marginLeft: 'auto' }}><SubagentDemoPanel onClose={() => setChatDemo(false)} /></div> : <section style={{ maxWidth: narrow ? 340 : 640, marginTop: 0, marginRight: 'auto', marginBottom: 0, marginLeft: 'auto' }}>
       <h1 style={{ fontSize: 18, fontWeight: 300 }}>Subagents</h1>
       <p style={{ fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Development preview with illustrative task receipts. No workers are launched; selections stay on this page.</p>
       <SwarmStatusCard packets={packets} scouts={[{ id: 'preview-native', label: 'Inspect existing patterns', status: 'unknown' }]} onFocusPacket={packet => setOpened(packet.title)} />
@@ -55,6 +58,6 @@ export function SubagentsPreview() {
             onWorkerModelChange={(model, runtime) => { setDefaults(value => ({ ...value, defaultDispatchModel: model ?? '', defaultDispatchRuntime: runtime ?? value.defaultDispatchRuntime })); }} />
         </div>
       </div>
-    </section>
+    </section>}
   </main>;
 }

@@ -150,3 +150,26 @@ describe('subagent disclosure', () => {
     }
   });
 });
+
+
+it('uses sidebar status marks and requires a merge receipt before showing merged', async () => {
+  const host = document.createElement('div'); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(createElement(SwarmStatusCard, { defaultExpanded: true, packets: [
+      packet(), { ...packet(), id: 'failed', title: 'Failure', status: 'failed' },
+      { ...packet(), id: 'review', title: 'Review', status: 'awaiting_review' },
+      { ...packet(), id: 'complete', title: 'Complete', status: 'released', releaseState: 'released' },
+      { ...packet(), id: 'merged', title: 'Merge', status: 'released', releaseState: 'released', releaseStatePayload: { mergeCommit: 'abc123' } },
+    ] })));
+    const mark = (title: string) => host.querySelector(`[title="Open ${title}"] .o8-fam`)!;
+    expect(mark('Fix worker focus').classList.contains('fam-working')).toBe(true);
+    expect((mark('Fix worker focus') as HTMLElement).style.getPropertyValue('--fam-c')).toBe('var(--t-accent)');
+    expect(mark('Failure').classList.contains('fam-stopped')).toBe(true);
+    expect(mark('Review').classList.contains('fam-review')).toBe(true);
+    expect(mark('Complete').classList.contains('fam-merged')).toBe(false);
+    expect(mark('Merge').classList.contains('fam-merged')).toBe(true);
+    expect(host.textContent).toContain('1 completed');
+    expect(host.textContent).toContain('1 merged');
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

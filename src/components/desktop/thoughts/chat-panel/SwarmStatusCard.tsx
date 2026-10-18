@@ -1,7 +1,8 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { orchestratorStatusTone, packetRuntimeModelDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
+import { AgentStatusDot, agentStatusToDotState, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { packetRuntimeModelDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import { projectWorkerParticipants } from '@/lib/orchestrator/participant-projection';
 import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
@@ -31,7 +32,7 @@ const VISIBLE_STATUSES = new Set<OrchestratorPacketStatus>([
   'blocked', 'failed', 'released', 'archived',
 ]);
 
-type StatusTone = { label: string; color: string };
+type StatusTone = { label: string; state: AgentDotState };
 
 function packetCardStatus(packet: OrchestratorPacket): OrchestratorPacketStatus {
   const terminal = packetTerminalState(packet);
@@ -49,22 +50,31 @@ export function visibleSwarmPackets(packets: OrchestratorPacket[]): Orchestrator
   });
 }
 
-function packetTone(packet: OrchestratorPacket): StatusTone {
+export function swarmPacketStatus(packet: OrchestratorPacket): StatusTone {
   const status = packetCardStatus(packet);
   if (packet.operatorStopped && status !== 'released' && status !== 'archived') {
-    return { label: 'Stopped', color: 'var(--t-text-muted)' };
+    return { label: 'Stopped', state: 'idle' };
   }
-  const tone = orchestratorStatusTone(status);
-  return { label: status === 'awaiting_review' ? 'Awaiting review' : tone.label, color: tone.dot };
+  if (status === 'released') {
+    return packet.releaseState === 'released' && packet.releaseStatePayload?.mergeCommit?.trim()
+      ? { label: 'Merged', state: 'merged' }
+      : { label: 'Completed', state: 'idle' };
+  }
+  const labels: Record<OrchestratorPacketStatus, string> = {
+    draft: 'Draft', queued: 'Queued', launching: 'Launching', idle: 'Waiting', running: 'Running',
+    awaiting_review: 'Awaiting review', recovering: 'Recovering', failed: 'Failed', blocked: 'Blocked',
+    released: 'Completed', archived: 'Archived',
+  };
+  return { label: labels[status], state: agentStatusToDotState(status) };
 }
 
 function scoutTone(status: SwarmScoutView['status']): StatusTone {
   switch (status) {
-    case 'running': return { label: 'Running', color: orchestratorStatusTone('running').dot };
-    case 'done': return { label: 'Done', color: 'var(--t-text-muted)' };
-    case 'failed': return { label: 'Failed', color: orchestratorStatusTone('failed').dot };
-    case 'stopped': return { label: 'Stopped', color: 'var(--t-text-muted)' };
-    default: return { label: 'Unconfirmed', color: 'var(--t-text-faint)' };
+    case 'running': return { label: 'Running', state: 'running' };
+    case 'done': return { label: 'Done', state: 'idle' };
+    case 'failed': return { label: 'Failed', state: 'failed' };
+    case 'stopped': return { label: 'Stopped', state: 'idle' };
+    default: return { label: 'Unconfirmed', state: 'idle' };
   }
 }
 
@@ -72,7 +82,7 @@ function CrewRow({ title, sub, status, onClick }: {
   title: string; sub: string; status: StatusTone; onClick?: () => void;
 }) {
   const style = {
-    width: '100%', display: 'grid', gridTemplateColumns: '6px minmax(0, 1fr) auto',
+    width: '100%', display: 'grid', gridTemplateColumns: '14px minmax(0, 1fr) auto',
     alignItems: 'center', gap: 10, minHeight: 44,
     paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12,
     borderWidth: 0, borderTopWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider-subtle)',
@@ -80,7 +90,7 @@ function CrewRow({ title, sub, status, onClick }: {
     fontFamily: 'var(--font-sans-system)',
   } as const;
   const content = <>
-    <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: status.color }} />
+    <AgentStatusDot state={status.state} label={status.label} />
     <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <span style={{ color: 'var(--t-text)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
       <span style={{ marginTop: 4, color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{sub}</span>
@@ -128,7 +138,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultEx
   const participants = projectWorkerParticipants({ packets: active });
   const native = [...new Map(scouts.map(scout => [scout.id, scout])).values()];
   const count = participants.length + native.length;
-  const statuses = [...participants.map(participant => packetTone(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status))];
+  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status))];
   const totals = new Map<string, number>();
   for (const { label } of statuses) totals.set(label.toLowerCase(), (totals.get(label.toLowerCase()) ?? 0) + 1);
   const summary = [...totals].map(([label, total]) => `${total} ${label}`).join(' · ');
@@ -136,7 +146,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultEx
   if (!count) return null;
 
   return <div role="group" aria-label={`Subagents: ${count}`} style={{
-    display: 'flex', flexDirection: 'column', borderRadius: 12, borderWidth: 1,
+    display: 'flex', flexDirection: 'column', flexShrink: 0, borderRadius: 12, borderWidth: 1,
     borderStyle: 'solid', borderColor: 'var(--t-border)', background: 'var(--t-input-bg)', overflow: 'hidden',
   }}>
     <button type="button" aria-expanded={expanded} aria-controls={panelId}
@@ -166,7 +176,7 @@ export function SwarmStatusCard({ packets, scouts = [], onFocusPacket, defaultEx
         const detail = packet.blockedReason?.trim() || participant.lifecycle.lastEventLabel;
         return <CrewRow key={participant.id} title={packet.title?.trim() || 'Worker'}
           sub={`${packetRuntimeModelDisplayLabel(packet)}${detail ? ` · ${detail}` : ''}`}
-          status={packetTone(packet)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
+          status={swarmPacketStatus(packet)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
       })}
       {native.map(scout => <CrewRow key={`native:${scout.id}`} title={scout.label}
         sub="Claude Code · Native subagent · Managed by this conversation"
