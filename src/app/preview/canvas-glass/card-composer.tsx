@@ -12,9 +12,9 @@
  *    style mutation off the render path.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { FONT } from './ui';
-import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { ComposerDictationContext, useComposerDictation } from '@/components/desktop/dictation/ComposerDictation';
 import { MicButton } from '@/components/desktop/thoughts/MicButton';
 
 export function CardComposer({
@@ -23,6 +23,7 @@ export function CardComposer({
   onSubmit,
   busy = false,
   placeholder,
+  scopeKey,
   model,
   anticipate = false,
 }: {
@@ -31,6 +32,7 @@ export function CardComposer({
   onSubmit: () => void;
   busy?: boolean;
   placeholder: string;
+  scopeKey: string;
   /** Model label shown as a quiet chip before the send button (bench parity). */
   model?: string;
   /** Input Anticipation focus ring — fades in as the pointer nears. OFF by
@@ -45,32 +47,10 @@ export function CardComposer({
   const ringRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Latest value + onChange kept in refs so the dictation fill closure
-  // (registered once on focus, invoked async when speech lands) appends to the
-  // current draft instead of a stale snapshot.
-  const valueRef = useRef(value);
-  const onChangeRef = useRef(onChange);
-  useEffect(() => {
-    valueRef.current = value;
-    onChangeRef.current = onChange;
-  }, [onChange, value]);
-
-  // Register this composer as the dictation target on focus — speech is
-  // transcribed by the shared DictationHost and routed back through `fill`,
-  // appended to whatever is already typed. Same engine the default IDE
-  // composer uses; null host (no provider) is a no-op (mic hides itself).
-  const host = useDictationHostOptional();
-  const registerForDictation = useCallback(() => {
-    const node = textareaRef.current;
-    if (!node || !host) return;
-    host.setActiveComposer({
-      node,
-      fill: (text: string) => {
-        const current = valueRef.current.trim();
-        onChangeRef.current(current ? `${current} ${text}` : text);
-      },
-    });
-  }, [host]);
+  const dictationId = useComposerDictation({
+    nodeRef: textareaRef, active: false, scopeKey,
+    onText: text => onChange(value.trim() ? `${value.trim()} ${text}` : text),
+  });
 
   useEffect(() => {
     if (!anticipate) return;
@@ -124,7 +104,6 @@ export function CardComposer({
         ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        onFocus={registerForDictation}
         onPointerDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
@@ -151,7 +130,7 @@ export function CardComposer({
         ) : null}
         {/* Push-to-talk — speak instead of type. Canvas-tinted idle color so it
             sits flush with the send arrow. Hidden when no dictation host. */}
-        <MicButton idleColor="var(--cnv-ink-muted)" />
+        <ComposerDictationContext.Provider value={dictationId}><MicButton idleColor="var(--cnv-ink-muted)" /></ComposerDictationContext.Provider>
         <button
           type="button"
           aria-label="Send"

@@ -20,6 +20,7 @@ import { BrainPipButton } from '../brain/BrainPipButton';
 import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 import { useWorkspaceComposerSubmit } from './useWorkspaceComposerSubmit';
 import { isOrchestratorBackendSetting } from '@/lib/operator/backend-setting';
+import { ComposerDictationContext } from '../dictation/ComposerDictation';
 import { useAgentVoiceMode } from '@/components/desktop/thoughts/chat-panel/useAgentVoiceMode';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
@@ -92,6 +93,7 @@ function WorkspaceChatComposerBase({
   const { submit: handleSubmit, submitting, error: submitError } = useWorkspaceComposerSubmit(chat, attachments, tab.repo?.localPath, active && !isLaneArchived);
 
   return (
+    <ComposerDictationContext.Provider value={voiceMode.dictationId}>
     <div
       style={{
         paddingTop: 12,
@@ -400,6 +402,7 @@ function WorkspaceChatComposerBase({
       </div>
       </div>
     </div>
+    </ComposerDictationContext.Provider>
   );
 }
 

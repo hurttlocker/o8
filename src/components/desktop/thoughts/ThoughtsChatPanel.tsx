@@ -1987,7 +1987,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
 
-  useAgentVoiceMode({
+  const { dictationId } = useAgentVoiceMode({
     active: open,
     dictationOnly: true,
     busy: isChatMode ? waitingForReply : displayWaiting,
@@ -1995,7 +1995,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     fillInput,
     messages: displayMessages,
     sendNow,
-    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`,
+    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`, composerScopeKey: threadId ?? 'draft',
   });
 
   useImperativeHandle(ref, () => ({
@@ -2200,7 +2200,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      <ComposerArea
+      <ComposerArea dictationId={dictationId}
         ref={inputRef} activeComposer={open}
         inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
         placeholder={contextualConversation?.placeholder}

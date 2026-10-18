@@ -5,7 +5,7 @@
  *
  * Mounted once at the dashboard level. Exposes a context so any
  * composer mic button can `start()` the same session and any pill
- * anchor ref can be plugged in. The Ctrl+M global hold listener lives
+ * anchor ref can be plugged in. The Ctrl+Z global hold listener lives
  * here too (window-focused only — we'll add a Tauri global hotkey in
  * a later phase).
  */
@@ -28,25 +28,22 @@ import { useSymonEditBridge } from './useSymonEditBridge';
 import type { DictationStartOptions } from './types';
 import { stopPlaybackForDictation } from '@/lib/tts/dictation-barge-in';
 
+interface ComposerTarget { id: string; node: HTMLTextAreaElement; fill: (text: string) => void }
+
 interface DictationHostContextValue {
   /** True when a dictation session is active. */
   active: boolean;
   /** Begin recording. Idempotent if already active. */
-  start: (options: DictationStartOptions) => Promise<void>;
+  start: (options: DictationStartOptions, composerId?: string) => Promise<void>;
   /** Stop recording and submit for transcribe + polish. */
-  stopAndSubmit: () => void;
+  stopAndSubmit: (composerId?: string) => void;
   /** Cancel without submitting. */
-  cancel: () => void;
+  cancel: (composerId?: string) => void;
   /** Snapshot for read-only consumers (mic button uses this for its visual). */
   snapshotState: 'idle' | 'requesting-mic' | 'recording' | 'transcribing' | 'polishing' | 'success' | 'error';
-  /**
-   * Register the active composer. Pill anchors to `node`; polished
-   * transcript is delivered via `fill`. Sticky — blurring the
-   * composer (e.g. clicking the mic button) does NOT unregister.
-   * Another composer focusing replaces this registration. Call with
-   * null to unregister explicitly (e.g. on unmount).
-   */
-  setActiveComposer: (composer: { node: HTMLElement; fill: (text: string) => void } | null) => void;
+  ownerId: string | null;
+  registerComposer: (composer: ComposerTarget) => () => void;
+  activateComposer: (id: string) => void;
 }
 
 const DictationHostContext = createContext<DictationHostContextValue | null>(null);
@@ -200,7 +197,7 @@ export function DictationHost({ children }: DictationHostProps) {
   }, []);
 
   const engine = nativeAvailable ? nativeDictation : webDictation;
-  const { snapshot, start: startInternal, stopAndSubmit, cancel } = engine;
+  const { snapshot, start: startInternal, stopAndSubmit: stopInternal, cancel: cancelInternal } = engine;
 
   const anchorRef = useRef<HTMLElement | null>(null);
   const fillRef = useRef<((text: string) => void) | null>(null);
@@ -210,43 +207,92 @@ export function DictationHost({ children }: DictationHostProps) {
   // late-attaching anchor.
   const [anchorVersion, setAnchorVersion] = useState(0);
 
-  const setActiveComposer = useCallback((composer: { node: HTMLElement; fill: (text: string) => void } | null) => {
-    if (composer) {
-      anchorRef.current = composer.node;
-      fillRef.current = composer.fill;
-    } else {
-      anchorRef.current = null;
-      fillRef.current = null;
+  const composers = useRef(new Map<string, ComposerTarget>());
+  const activeId = useRef<string | null>(null);
+  const recordingTarget = useRef<ComposerTarget | null>(null);
+  const starting = useRef(false);
+  const [startPending, setStartPending] = useState(false);
+  const recordingSequence = useRef(0);
+  const keyboardSession = useRef<number | null>(null);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const cancel = useCallback((id?: string) => {
+    if (id && recordingTarget.current?.id !== id) return;
+    recordingTarget.current = null;
+    keyboardSession.current = null;
+    setOwnerId(null);
+    cancelInternal();
+  }, [cancelInternal]);
+  const stopAndSubmit = useCallback((id?: string) => {
+    if (id && recordingTarget.current?.id !== id) return;
+    if (snapshot.state === 'requesting-mic' || (starting.current && snapshot.state === 'idle')) {
+      cancel(id);
+      return;
     }
-    setAnchorVersion((v) => v + 1);
+    stopInternal();
+  }, [cancel, snapshot.state, stopInternal]);
+  const activateComposer = useCallback((id: string) => {
+    const target = composers.current.get(id);
+    if (!target) return;
+    activeId.current = id;
+    anchorRef.current = target.node;
+    fillRef.current = target.fill;
+    setAnchorVersion(value => value + 1);
   }, []);
+  const registerComposer = useCallback((target: ComposerTarget) => {
+    composers.current.set(target.id, target);
+    return () => {
+      if (composers.current.get(target.id) !== target) return;
+      composers.current.delete(target.id);
+      if (recordingTarget.current === target) cancel(target.id);
+      if (activeId.current === target.id) {
+        activeId.current = null;
+        anchorRef.current = null;
+        fillRef.current = null;
+      }
+    };
+  }, [cancel]);
+  useEffect(() => {
+    if (snapshot.state === 'idle' && !starting.current) {
+      recordingTarget.current = null;
+      setOwnerId(null);
+    }
+  }, [snapshot.state]);
 
-  // Wrap `start` so the host always routes onComplete through the
-  // active composer's fill callback. Callers (mic button, Ctrl+Z
-  // shortcut) only need to pass surface/context — the host owns the
-  // delivery path.
-  const start = useCallback((options: DictationStartOptions) => {
+  // Pin the destination before asking for a microphone. Focus changes only
+  // affect the next recording; a closed/replaced draft never receives late text.
+  const start = useCallback(async (options: DictationStartOptions, id?: string) => {
+    if (starting.current || recordingTarget.current || snapshot.state !== 'idle') return;
+    const target = composers.current.get(id ?? activeId.current ?? '');
+    if (!target || !target.node.isConnected || target.node.disabled || target.node.readOnly
+      || target.node.closest('[inert]')) return;
+    recordingSequence.current += 1;
+    starting.current = true;
+    setStartPending(true);
+    recordingTarget.current = target;
+    setOwnerId(target.id);
     stopPlaybackForDictation();
-    return startInternal({
-      ...options,
-      onComplete: (text) => {
-        if (text && fillRef.current) {
-          fillRef.current(text);
-        } else if (text) {
-          // Fallback: no composer registered yet. Surface a one-shot
-          // event so a late-mounting consumer could still grab it.
-          window.dispatchEvent(new CustomEvent('o8:dictation-complete', { detail: { text } }));
-        }
-        options.onComplete?.(text);
-      },
-      onAbort: (reason) => {
-        if (reason) {
-          window.dispatchEvent(new CustomEvent('o8:dictation-aborted', { detail: { reason } }));
-        }
-        options.onAbort?.(reason);
-      },
-    });
-  }, [startInternal]);
+    try {
+      await startInternal({
+        ...options,
+        onComplete: text => {
+          if (recordingTarget.current !== target || composers.current.get(target.id) !== target || !target.node.isConnected) return;
+          if (text) target.fill(text);
+          options.onComplete?.(text);
+        },
+        onAbort: reason => {
+          if (recordingTarget.current !== target) return;
+          if (reason) window.dispatchEvent(new CustomEvent('o8:dictation-aborted', { detail: { reason } }));
+          options.onAbort?.(reason);
+        },
+      });
+    } finally {
+      // Native permission/startup may finish after cancellation. Revoke the
+      // late engine session before allowing another composer to start.
+      if (recordingTarget.current !== target) cancelInternal();
+      starting.current = false;
+      setStartPending(false);
+    }
+  }, [cancelInternal, snapshot.state, startInternal]);
 
   // Ctrl+Z hold-to-talk. Press starts dictation, release stops + submits.
   // On macOS Cmd+Z is native undo for textareas; Ctrl+Z is unbound, so
@@ -255,7 +301,6 @@ export function DictationHost({ children }: DictationHostProps) {
   // make this configurable when those platforms ship. Auto-repeat is
   // filtered via event.repeat.
   useEffect(() => {
-    let pressed = false;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
       // Ctrl+Z only — explicitly NOT Cmd+Z (native undo on macOS).
@@ -267,22 +312,23 @@ export function DictationHost({ children }: DictationHostProps) {
       // Block when already recording — release will end this session.
       if (snapshot.state !== 'idle') return;
       event.preventDefault();
-      pressed = true;
+      const previousSession = recordingSequence.current;
       // Host's `start` wrapper handles delivery to the active composer
       // — we just need to fire it.
       void start({ surface: 'orchestrator', onComplete: () => {} });
+      if (recordingSequence.current !== previousSession) keyboardSession.current = recordingSequence.current;
     };
     const handleKeyUp = (event: KeyboardEvent) => {
-      if (!pressed) return;
+      if (keyboardSession.current === null) return;
       if ((event.key || '').toLowerCase() !== 'z' && !event.ctrlKey) return;
-      pressed = false;
-      stopAndSubmit();
+      const session = keyboardSession.current;
+      keyboardSession.current = null;
+      if (session === recordingSequence.current) stopAndSubmit();
     };
     const handleBlur = () => {
-      if (pressed) {
-        pressed = false;
-        cancel();
-      }
+      const session = keyboardSession.current;
+      keyboardSession.current = null;
+      if (session !== null && session === recordingSequence.current) cancel();
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -295,19 +341,24 @@ export function DictationHost({ children }: DictationHostProps) {
   }, [cancel, snapshot.state, start, stopAndSubmit]);
 
   const value = useMemo<DictationHostContextValue>(() => ({
-    active: snapshot.state !== 'idle',
+    active: startPending || snapshot.state !== 'idle',
     start,
     stopAndSubmit,
     cancel,
     snapshotState: snapshot.state,
-    setActiveComposer,
-  }), [cancel, setActiveComposer, snapshot.state, start, stopAndSubmit]);
+    ownerId,
+    registerComposer,
+    activateComposer,
+  }), [activateComposer, cancel, ownerId, registerComposer, snapshot.state, start, startPending, stopAndSubmit]);
 
   // Wrap anchorRef into a refobject the pill expects.
-  const pillAnchorRef = useMemo(() => ({
-    get current() { return anchorRef.current; },
-    set current(_v: HTMLElement | null) { /* read-only proxy */ },
-  } as React.RefObject<HTMLElement | null>), [anchorVersion]);
+  const pillAnchorRef = useMemo(() => {
+    void anchorVersion;
+    return {
+      get current() { return recordingTarget.current?.node ?? anchorRef.current; },
+      set current(_v: HTMLElement | null) { /* read-only proxy */ },
+    } as React.RefObject<HTMLElement | null>;
+  }, [anchorVersion]);
 
   return (
     <DictationHostContext.Provider value={value}>

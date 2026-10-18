@@ -1,5 +1,6 @@
 'use client';
 
+import { ComposerDictationContext, useComposerDictation } from '../../dictation/ComposerDictation';
 import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
@@ -40,7 +41,7 @@ import { addComposerFileReference, readComposerFileReferences, writeComposerFile
 import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
-  activeComposer?: boolean;
+  activeComposer?: boolean; dictationId?: string;
   showBrain?: boolean;
   activityContent?: React.ReactNode;
   workerContext?: WorkerCorrectionContext;
@@ -116,7 +117,7 @@ interface ComposerAreaProps {
 }
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
-  activeComposer = false,
+  activeComposer = false, dictationId,
   showBrain = true,
   inputLabel,
   placeholder,
@@ -191,6 +192,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     if (typeof inputRef === 'function') inputRef(node);
     else if (inputRef) inputRef.current = node;
   }, [inputRef]);
+  const localDictationId = useComposerDictation({
+    active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
+    scopeKey: JSON.stringify([repoPath, sessionRulesThreadId, inputLabel]),
+    onText: text => {
+      if (text) onInputChange(`${input}${input && !/\s$/.test(input) ? ' ' : ''}${text}`);
+    },
+  });
   const now = useComposerClock(activeComposer && isOrchestratorMode);
   const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
   useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
@@ -328,6 +336,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
+    <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
       paddingTop: 24,
       paddingRight: 12,
@@ -786,5 +795,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       ) : null}
     </div>
+    </ComposerDictationContext.Provider>
   );
 });
