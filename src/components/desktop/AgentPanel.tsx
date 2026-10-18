@@ -423,7 +423,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             </div>
           ) : null}
 
-          <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession}
+          <AgentPanelExtraAgents onOpenChatReview={props.onOpenChatReview} activeSessionKey={activeSessionKey} onSelectSession={onSelectSession}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             renderContent={(agentEntries, agentViewActions) => <ChatsTab
             repos={railReposForChats}

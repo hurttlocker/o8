@@ -20,15 +20,16 @@ const liveSessions = [sessionKey];
 
 function Workspace() {
   const tiles = useSessionTiles({ tabId: 'visibility-fixture-tab', repoPath: '/workspace/fixture', liveSessionKeys: liveSessions, active: true });
+  const { toggleTileSession } = tiles;
   // The outer dashboard receives this lane-navigation event. Keep that router
   // boundary local to the fixture while exercising the real row and pane hooks.
   useEffect(() => {
     const select = (event: Event) => {
-      if ((event as CustomEvent<{ laneId?: string }>).detail?.laneId === lane.id) tiles.toggleTileSession(sessionKey);
+      if ((event as CustomEvent<{ laneId?: string }>).detail?.laneId === lane.id) toggleTileSession(sessionKey);
     };
     window.addEventListener('o8:focus-spawned-agent-lane', select);
     return () => window.removeEventListener('o8:focus-spawned-agent-lane', select);
-  }, [tiles.toggleTileSession]);
+  }, [toggleTileSession]);
   return createElement(Fragment, null,
     createElement(AgentPanelExtraAgents, { onSelectSession: tiles.toggleTileSession }),
     createElement(SessionTileSurface, { layout: tiles.layout, chatSlot: createElement('p', null, 'Orchestrator'), focusedSessionKey: tiles.focusedSessionKey,
@@ -48,8 +49,8 @@ it('hides and reopens the same running worker from Agents without a lifecycle re
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   try {
     await act(async () => root.render(createElement(Workspace)));
-    const workerRow = () => host.querySelector<HTMLButtonElement>('[role="list"][aria-label="Agents"] button[title*="Fixture worker"]')
-      ?? [...host.querySelectorAll<HTMLButtonElement>('[role="list"][aria-label="Agents"] button')].find(button => button.textContent?.includes('Fixture worker'))!;
+    const workerRow = () => host.querySelector<HTMLButtonElement>('[role="list"][aria-label="Agents"] [data-o8-agent-row][title*="Fixture worker"]')
+      ?? [...host.querySelectorAll<HTMLButtonElement>('[role="list"][aria-label="Agents"] [data-o8-agent-row]')].find(button => button.textContent?.includes('Fixture worker'))!;
     expect(workerRow()).toBeDefined();
     for (let repeat = 0; repeat < 2; repeat++) {
       await act(async () => workerRow().click());
