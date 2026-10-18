@@ -330,6 +330,15 @@ export function useTileLayout({
   const handleCloseTile = useCallback((tileId: string) => {
     // Never close the WorkspaceTerminal tile
     const tile = findTile(tileLayout.root, tileId);
+    if (tile?.type === 'leaf' && tile.content.kind === 'contextual-panel') {
+      if (countLeaves(tileLayout.root) < 2) return;
+      setTileLayout({ ...tileLayout, root: replaceTileContent(tileLayout.root, tileId, { ...tile.content, hidden: true }) });
+      if (activeTileId === tileId) {
+        const next = collectLeafNodes(tileLayout.root).find((leaf) => leaf.id !== tileId && (leaf.content.kind !== 'contextual-panel' || !leaf.content.hidden));
+        if (next) setActiveTileId(next.id);
+      }
+      return;
+    }
     // Protect the LAST terminal tile — but allow closing extras
     if (tile?.type === 'leaf' && tile.content.kind === 'terminal') {
       const allTerminals = collectLeafContentKinds(tileLayout.root).filter(k => k === 'terminal');
@@ -425,6 +434,9 @@ export function useTileLayout({
   ) => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, kind);
     if (existingLeaf) {
+      if (existingLeaf.content.kind === 'contextual-panel' && existingLeaf.content.hidden) {
+        setTileLayout({ ...tileLayout, root: replaceTileContent(tileLayout.root, existingLeaf.id, { ...existingLeaf.content, hidden: false }) });
+      }
       if (kind === 'preview' && options?.selectedPreviewId && existingLeaf.content.kind === 'preview') {
         setTileLayout({
           ...tileLayout,
@@ -499,6 +511,10 @@ export function useTileLayout({
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
+      if (existingLeaf.content.kind === 'contextual-panel' && existingLeaf.content.hidden) {
+        ensureTileKind('contextual-panel');
+        return;
+      }
       if (countLeaves(tileLayout.root) > 1) {
         handleCloseTile(existingLeaf.id);
       }
