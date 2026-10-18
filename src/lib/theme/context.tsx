@@ -16,6 +16,7 @@
  *   - themes: ResolvedTheme[] for legacy enumerators
  */
 
+import { DARK_FRAME_MATERIAL, WORKSPACE_GLASS_VEIL } from './glass-material';
 import {
   createContext,
   useContext,
@@ -127,7 +128,7 @@ const WORKSPACE_GLASS_OVERRIDES: Record<string, string> = {
   // then the veil OPENS toward the bottom and lets the blurred desktop
   // bloom through — the dynamic range is what reads as liquid. Wins over
   // applyThemeVars' Tauri passthrough force (overrides apply after it).
-  '--t-bg-gradient': 'linear-gradient(180deg, rgba(10, 12, 18, 0.78) 0%, rgba(10, 12, 18, 0.44) 55%, rgba(10, 12, 18, 0.06) 100%)',
+  '--t-bg-gradient': WORKSPACE_GLASS_VEIL,
   // Ink is WHITE on the glass (Q ruling 2026-07-17: "in the all-glass mode
   // inside of the composer, all of that text needs to be white"). The dark
   // palette's slate muted/secondary inks (#5f6b7a / #8b95a3) read muddy on
@@ -484,7 +485,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
       document.body.style.removeProperty('background');
       delete root.dataset.workspaceGlass;
-      if (prevWorkspaceGlassRef.current) {
+      if (prevWorkspaceGlassRef.current && resolved.paletteId !== 'dark') {
         // One-time material restore when actually LEAVING all-glass — the
         // FullScreenUI material must not linger under the other modes.
         (window as unknown as { __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } })
@@ -519,16 +520,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         'important',
       );
       // All-glass material (bake-off 2026-07-17, display-capture compared):
-      // FullScreenUI melts the desktop into structureless color fields — the
-      // Apple liquid look. The per-OS chrome material stays for regular glass;
-      // applyThemeVars re-asserts it when this mode exits.
+      // FullScreenUI diffuses the desktop inside the rounded native mask.
+      // Dark desktop chrome uses the same material under its even tint.
+    }
+    if (!webMachineSurface && !nonMacShell && resolved.paletteId === 'dark') {
       (window as unknown as { __TAURI_INTERNALS__?: { invoke?: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } })
-        .__TAURI_INTERNALS__?.invoke?.('set_canvas_material', { material: 'fullscreen' })
+        .__TAURI_INTERNALS__?.invoke?.('set_canvas_material', { material: effectiveWorkspaceGlass ? 'fullscreen' : DARK_FRAME_MATERIAL })
         ?.catch(() => {});
     }
     prevWorkspaceGlassRef.current = effectiveWorkspaceGlass;
     mountedRef.current = true;
-  }, [effectiveWorkspaceGlass, resolved]);
+  }, [effectiveWorkspaceGlass, resolved, webMachineSurface, nonMacShell]);
 
   const setPalette = useCallback((id: PaletteId) => {
     setPaletteId(id);
@@ -589,7 +591,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       paletteId,
       setPalette,
       palettes: PALETTES,
-      surface,
+      surface: effectiveSurface,
       reduceTransparency,
       setReduceTransparency,
       systemReduceTransparency,
@@ -605,7 +607,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [
       paletteId,
       setPalette,
-      surface,
+      effectiveSurface,
       reduceTransparency,
       setReduceTransparency,
       systemReduceTransparency,

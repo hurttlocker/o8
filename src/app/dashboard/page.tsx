@@ -9,7 +9,7 @@ import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
+import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
@@ -20,6 +20,8 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
+import { DARK_FRAME_GLASS_TINT } from '@/lib/theme/glass-material';
+import { SHELL_EDGE_INSET, SHELL_HEADER_HEIGHT, workspaceFrameCorners } from '@/components/desktop/shell/shell-geometry';
 import { RightPanelResizeEdge } from '@/components/desktop/shell/RightPanelResizeEdge';
 import { useColumnResize, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '@/components/desktop/hooks/useColumnResize';
 import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
@@ -324,7 +326,7 @@ function DashboardInner() {
   // mode the card paints --t-bg and lets the chrome flip own transparency +
   // light ink (matches the right O8Panel); in solid mode it keeps the opaque
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
-  const { surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
+  const { paletteId, surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
   // Mount gate for surface-dependent INLINE styles. SSR can't read the client's
   // localStorage surface preference, so it always renders the 'solid' default;
@@ -774,6 +776,8 @@ function DashboardInner() {
     return () => document.removeEventListener('scroll', resetBodyScroll, true);
   }, []);
   const compactShell = viewportBands?.compact ?? false;
+  const joinedWorkspaceFrame = !compactShell && !effectiveGlassSurface;
+  const rightColumnChrome = joinedWorkspaceFrame ? 1 : RIGHT_COLUMN_CHROME;
   const getResponsiveViewportWidth = useCallback(() => (
     viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
   ), []);
@@ -3433,11 +3437,11 @@ function DashboardInner() {
     startColumnResize(event, { side: 'left', min: 160, max: 500, commit: setLeftWidth });
   }, [setLeftWidth, startColumnResize]);
   const startRightDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    startColumnResize(event, { side: 'right', min: MIN_RIGHT_PANEL_WIDTH, max: MAX_RIGHT_PANEL_WIDTH, commit: setRightWidth });
-  }, [setRightWidth, startColumnResize]);
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_RIGHT_PANEL_WIDTH, max: MAX_RIGHT_PANEL_WIDTH, commit: setRightWidth });
+  }, [setRightWidth, startColumnResize, rightColumnChrome]);
   const startO8Drag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    startColumnResize(event, { side: 'right', min: MIN_O8_PANEL_WIDTH, max: MAX_O8_PANEL_WIDTH, commit: setO8Width });
-  }, [setO8Width, startColumnResize]);
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_O8_PANEL_WIDTH, max: MAX_O8_PANEL_WIDTH, commit: setO8Width });
+  }, [setO8Width, startColumnResize, rightColumnChrome]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
@@ -4339,9 +4343,15 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--t-bg-gradient)',
-      backdropFilter: 'blur(18px) saturate(1.02)',
-      WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
+      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      ...(!compactShell ? {
+        ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
+        ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
+        ['--o8-shell-header-bg' as string]: 'transparent',
+        ['--o8-shell-header-border' as string]: 'none',
+      } : {}),
+      backdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
+      WebkitBackdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
       color: 'var(--t-text)',
       fontFamily: 'var(--font-sans-system)',
       overflow: 'hidden',
@@ -4588,7 +4598,7 @@ function DashboardInner() {
       </AnimatePresence>
 
       {settingsTakeoverActive && (
-        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginLeft: compactShell ? 0 : NAVIGATION_RAIL_WIDTH }}>
+        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginLeft: compactShell ? 0 : NAVIGATION_RAIL_WIDTH, marginRight: compactShell ? 0 : SHELL_EDGE_INSET, marginBottom: compactShell ? 0 : SHELL_EDGE_INSET }}>
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings…</div>}>
             <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
           </Suspense>
@@ -4609,6 +4619,8 @@ function DashboardInner() {
         overflow: 'hidden',
         minHeight: 0, // critical: allow flex children to shrink for scroll
         position: 'relative',
+        paddingRight: compactShell ? 0 : SHELL_EDGE_INSET,
+        paddingBottom: compactShell ? 0 : SHELL_EDGE_INSET,
       }}>
       {/* Navigation retains its own column whether chats are open or closed. */}
       {showCompactNavigationRail ? <div aria-hidden="true" style={{ width: NAVIGATION_RAIL_WIDTH, flexShrink: 0 }} /> : null}
@@ -4620,16 +4632,13 @@ function DashboardInner() {
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
         const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
-        // Shared header + content — composed differently per surface (see below):
-        // glass floats the panel as a Lisse card with the header/footer
-        // transparent; solid keeps the paper card with the header inside.
+        // The header belongs to the outer frame; only the reading surface
+        // below it paints a card.
         const leftHeader = (
           <LeftHeaderStrip
             sidebarVisible={showSidebarColumn} onToggleSidebar={toggleSidebarFromChrome}
             windowControls={!showCompactNavigationRail} onSearch={handlePaletteOpen}
-            // Solid: the strip renders inside the floating card and must be
-            // the same continuous tone (Claude-desktop float, Q 2026-07-17).
-            inCard={!effectiveGlassSurface}
+            inCard
           />
         );
         const leftContent = (
@@ -4674,84 +4683,35 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-desktop float (Q ruling 2026-07-17, supersedes the 07-16
-            // flush dock): in SOLID surfaces the sidebar is a floating inset
-            // card — 4px of window-backdrop air on left, top, AND bottom, all
-            // four corners rounded — lights in its top, account row in its
-            // bottom, so everything right of it reads as the workspace. GLASS
-            // keeps the transparent-chrome treatment (chrome paints nothing;
-            // a floating opaque card would break glass-panel parity).
-            paddingTop: effectiveGlassSurface ? 5 : 4,
-            paddingLeft: effectiveGlassSurface ? 0 : 4,
+            paddingTop: compactShell ? 4 : 0,
+            paddingLeft: 0,
             paddingRight: 0,
-            paddingBottom: effectiveGlassSurface ? 0 : 4,
+            paddingBottom: 0,
           }}
         >
-          {effectiveGlassSurface ? (
-            // GLASS — mirror the center workspace + right O8Panel: the header
-            // strip and the footer below are transparent vibrancy, and the
-            // panel itself is a self-contained floating Lisse squircle card
-            // (all four corners). data-chrome-surface flips ink to light so the
-            // tinted --t-bg surface reads the same as the other glass panels.
-            <>
-              {leftHeader}
-              <SmoothCorners
-                data-chrome-surface="true"
-                // Dock corners (Q ruling 2026-07-16): flush left edge + flush
-                // bottom → left side and bottom-right are HARD; only the
-                // top-right keeps the card curve. The window's own 12px
-                // corner mask shapes the bottom-left.
-                corners={{ topLeft: 0, topRight: 14, bottomLeft: 0, bottomRight: 0, smoothing: 0.6 }}
-                autoEffects={false}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  background: 'var(--t-bg)',
-                }}
-              >
-                {leftContent}
-              </SmoothCorners>
-            </>
-          ) : (
-            // SOLID — self-contained paper card with the sidebar footer inside.
-            <div
-              data-chrome-surface="true"
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                // Claude-desktop float (Q 2026-07-17): the card never touches
-                // a window edge, so all four corners carry the same curve. The
-                // hairline is load-bearing — card and backdrop are near-equal
-                // tones, so without it the 4px air is invisible and the float
-                // reads flush.
-                borderTopLeftRadius: 14,
-                borderTopRightRadius: 14,
-                borderBottomLeftRadius: 14,
-                borderBottomRightRadius: 14,
-                border: '1px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel-solid)',
-                // Flat by operator ruling (2026-07-13) — the in-column rail is
-                // not a floating surface; a drop shadow read as a seam against
-                // the workspace. Elevation stays on true overlays only.
-              } as React.CSSProperties}
-            >
-              {leftHeader}
-              {leftContent}
-            </div>
-          )}
+          {leftHeader}
+          <SmoothCorners
+            data-chrome-surface="true"
+            corners={workspaceFrameCorners(joinedWorkspaceFrame, true, sidebarOverlay)}
+            autoEffects={false}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-sidebar-bg, var(--t-panel-solid))',
+            }}
+          >
+            {leftContent}
+          </SmoothCorners>
         </motion.div>
         </ChatListColumn>
       );
       })()}
 
       {showSidebarColumn && !sidebarOverlay ? <ChatListResizeEdge width={leftWidth}
-        glass={effectiveGlassSurface} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
+        glass={effectiveGlassSurface} joined={joinedWorkspaceFrame} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
 
       {/* ── Center + right region ──
           Wrapped in its own column so the DesktopStatusBar renders at ITS
@@ -4771,18 +4731,12 @@ function DashboardInner() {
         position: 'relative',
         minWidth: 0,
         background: 'transparent',
-        // The workspace floats inside the dashboard gradient with a small inset
-        // (workspaceInset). The Apple squircle now lives on the inner content
-        // card below (Lisse SmoothCorners — the same "list corners" the canvas
-        // uses) so the WHITE surface carries the curve on ALL four corners. A
-        // plain borderRadius here only rounded the transparent header strip's
-        // top + clipped the white bottom as a circle, never the white TOP.
-        // overflow:hidden stays to keep the header strip within these bounds.
+        // Content owns the perimeter curve; headers remain in the shared frame.
         borderRadius: 0,
-        marginTop: workspaceInset,
-        marginBottom: workspaceInset,
-        marginLeft: workspaceInset,
-        marginRight: workspaceInset,
+        marginTop: compactShell ? workspaceInset : 0,
+        marginBottom: compactShell ? workspaceInset : 0,
+        marginLeft: joinedWorkspaceFrame ? 0 : workspaceInset,
+        marginRight: !joinedWorkspaceFrame && showRightPanelColumn ? workspaceInset : 0,
       }}>
         {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
           leadingInset={!showCompactNavigationRail}
@@ -4810,10 +4764,8 @@ function DashboardInner() {
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
-        {/* The white workspace card. Lisse squircle ("list corners" from the
-            canvas) on all four corners so the TOP rounds too — not just the
-            bottom. autoEffects off = pure clip-path, no injected shadow. */}
-        <SmoothCorners corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Solid modes join adjacent panels; glass keeps each card curved. */}
+        <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, !showSidebarColumn || sidebarOverlay, !showRightPanelColumn, joinedWorkspaceFrame ? 14 : WORKSPACE_RAIL_CORNER_RADIUS)} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}
@@ -4865,6 +4817,7 @@ function DashboardInner() {
             <WorkspaceUtilityProvider value={workspaceUtilityContext}>
             <TileContainer
               layout={tileLayout}
+              joined={joinedWorkspaceFrame}
               paneLabels={workspacePaneLabels}
               keepPrimarySessionAlive
               interactionDisabled={workspacePageSwitching}
@@ -4894,7 +4847,7 @@ function DashboardInner() {
             // collapse; the inner keeps its own drag-resize width animation.
             // The chrome allowance covers the divider and outer panel inset.
             initial={false}
-            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : RIGHT_COLUMN_CHROME + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
+            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : rightColumnChrome + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -4908,6 +4861,7 @@ function DashboardInner() {
             }}
           >
             {!rightPanelMaximized ? <RightPanelResizeEdge
+              joined={joinedWorkspaceFrame}
               width={rightPanelKind === 'o8' ? o8Width : rightWidth}
               minimum={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
               maximum={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
@@ -4923,7 +4877,7 @@ function DashboardInner() {
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',
-                maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE + RIGHT_COLUMN_CHROME}px))`,
+                maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE + rightColumnChrome}px))`,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
@@ -4932,18 +4886,12 @@ function DashboardInner() {
                 // A plain rounded-rect clip here would shave the squircle's bulge
                 // at the 45° diagonal, breaking the continuity with everything else.
                 borderRadius: 0,
-                marginTop: 4,
-                marginBottom: 4,
-                marginRight: 4,
+                marginTop: compactShell ? 4 : 0,
+                marginBottom: compactShell ? 4 : 0,
+                marginRight: 0,
               }}
             >
-              {/* Lisse squircle on all four corners so the right panel's TOP
-                  edges match the center workspace + canvas "list corners". No
-                  fill: in glass the panel stays transparent so the dark window
-                  vibrancy shows through — the SAME glass as the left AgentPanel,
-                  which paints nothing. Solid mode's opaque children paint the
-                  squircle. */}
-              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Header stays outside the content clip on the shared frame. */}
               <PanelHeaderStrip
                 maximized={rightPanelMaximized}
                 onToggleMaximized={toggleRightPanelMaximized}
@@ -4960,6 +4908,7 @@ function DashboardInner() {
                 showBrowserTabs={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
                 prTabsSlot={<RightPrTabs tabs={rightPrTabs} activeId={o8ActiveTab === 'activity' && o8PrNumber ? rightPrTabId(o8PrNumber, o8PrRepo, currentO8RepoPath) : null} onSelect={handleRightPrTabSelect} onClose={handleRightPrTabClose} />}
               />
+              <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, rightPanelMaximized && (!showSidebarColumn || sidebarOverlay), true)} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {mountedRightPanels.o8 && (
                   <motion.div
                     aria-hidden={rightPanelKind !== 'o8'}
