@@ -133,6 +133,8 @@ Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now 
 
 Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) accepts an empty string to clear a field and preserves leading spaces, trailing spaces and line breaks. Controlled-field event coverage and native development checks are separate from required PR CI and released-build acceptance.
 
+Settings page history [#3853](https://github.com/hurttlocker/o8/issues/3853), a keyboard-accessible Brain conversation beside the composer [#3854](https://github.com/hurttlocker/o8/issues/3854), and chat-local sidebar review actions [#3855](https://github.com/hurttlocker/o8/issues/3855) are implemented in development. Native Settings and Brain checks and focused review-target checks passed. Required PR checks and released-build acceptance remain pending.
+
 Optional tool updates [#3862](https://github.com/hurttlocker/o8/issues/3862) follow o8 status and release notes. Each tool starts with an Update action and a compatibility notice; custom installations keep their original updater. Qoder is omitted from this update surface. Native development checks and released-build acceptance remain separate gates.
 
 ## 6. Runs where you are
