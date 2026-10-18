@@ -274,13 +274,15 @@ export function O8Panel({
   // action instead of the snapshot/click hunt that cost the orchestrator ~5 min.
   useEffect(() => {
     const handler = (event: Event) => {
-      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url;
+      const detail = (event as CustomEvent<{ url?: string | null; scopeKey?: string }>).detail;
+      if (detail?.scopeKey && detail.scopeKey !== browserStateKey) return;
+      const url = detail?.url;
       onActiveTabChange?.('browser');
       if (typeof url === 'string' && url.trim()) setPendingBrowserNavigation({ baseUrl: browserUrl, url: url.trim() });
     };
     window.addEventListener('o8:open-browser', handler);
     return () => window.removeEventListener('o8:open-browser', handler);
-  }, [browserUrl, onActiveTabChange]);
+  }, [browserStateKey, browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'device') return <DevicePanel active={active} />;
@@ -389,6 +391,8 @@ export function O8Panel({
   return (
     <div
       ref={splitContainerRef}
+      data-o8-browser-host={browserStateKey}
+      data-o8-browser-visible={paneVisible('browser') ? 'true' : 'false'}
       data-chrome-surface="true"
       style={{
         position: 'relative',
