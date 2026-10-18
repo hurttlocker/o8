@@ -102,7 +102,7 @@ export const O8_WEBVIEW_PRIMITIVE_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_open_browser',
-    description: "USE THIS to open o8's in-app Browser tab (and optionally point it at a URL such as a localhost dev server) in ONE deterministic call — instead of snapshotting/clicking to find and open it. Dispatches a window event the Browser panel handles synchronously, so it opens even if this call reports a busy-thread timeout (don't retry on timeout; take a screenshot to confirm). Omit `url` to just reveal the Browser tab with its detected localhost previews.",
+    description: "Open o8's Browser and optionally navigate to a URL. Reports opened only after visible geometry and the actual page URL are confirmed; otherwise returns pending or unavailable. Pass the returned requestId to observe that original request without opening it again. Omit url to reveal Browser without requesting navigation.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -110,6 +110,8 @@ export const O8_WEBVIEW_PRIMITIVE_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Optional URL to open (e.g. http://localhost:3000). A new tab is created if one for this URL does not already exist.',
         },
+        requestId: { type: 'string', description: 'Observe a previous request without dispatching another open. Omit for a new request.' },
+        timeoutMs: { type: 'number', description: 'Observation budget in milliseconds, from 0 to 10000; default 5000.' },
       },
     },
   },

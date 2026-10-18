@@ -106,10 +106,13 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
 
   return (
     <div aria-label="Project threads panel" style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans-system)', color: 'var(--t-text)', background: 'transparent' }}>
-      <div role="tablist" aria-label="Thread panel views" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-        {(boundSessionKey ? ['threads'] as const : ['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
+      <div role={boundSessionKey ? 'group' : 'tablist'} aria-label={boundSessionKey ? 'Thread navigation' : 'Thread panel views'} style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: 6, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+        {boundSessionKey ? <>
+          <button type="button" onClick={backToThreads} style={{ ...smallButtonStyle, flexShrink: 0 }}>Threads</button>
+          <span title={selected?.title} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 300 }}>{selected?.title}</span>
+        </> : (['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
         <span style={{ flex: 1 }} />
-        <button type="button" onClick={pool.refresh} disabled={pool.loading} style={smallButtonStyle}>Refresh</button>
+        <button type="button" onClick={pool.refresh} disabled={pool.loading} style={{ ...smallButtonStyle, flexShrink: 0 }}>Refresh</button>
         {!boundSessionKey ? <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
       </div>
       {notice ? <div role="status" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{notice}</div> : null}
@@ -118,7 +121,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
         <p role={pool.error ? 'alert' : 'status'} style={{ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, fontSize: 13, color: 'var(--t-text-muted)' }}>
           {pool.loading || projects.loading ? 'Reading this thread…' : pool.error ? 'Unable to read this session. Refresh to try again.' : 'This session is unavailable in this project. Open Threads to find the current attempt.'}
         </p>
-      ) : view === 'threads' && selected ? <ThreadDetail key={`detail:${scopeKey}:${selected.id}`} task={selected} active={active} evidenceRevision={pool.evidenceRevision} onBack={backToThreads} actions={<ThreadActions task={selected} busy={Boolean(busyKey)} onSelectSession={boundSessionKey ? undefined : context?.onSelectSession} onAction={actOnThread} />} /> : (
+      ) : view === 'threads' && selected ? <ThreadDetail key={`detail:${scopeKey}:${selected.id}`} task={selected} active={active} evidenceRevision={pool.evidenceRevision} onBack={backToThreads} showHeader={!boundSessionKey} actions={<ThreadActions task={selected} busy={Boolean(busyKey)} onSelectSession={boundSessionKey ? undefined : context?.onSelectSession} onAction={actOnThread} />} /> : (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 }}>
           {view === 'threads' ? <>
             <div style={{ fontSize: 18, fontWeight: 400, letterSpacing: '-0.2px', lineHeight: 1.25 }}>{project?.name || repoPath?.split('/').filter(Boolean).pop() || 'Your threads'}</div>
