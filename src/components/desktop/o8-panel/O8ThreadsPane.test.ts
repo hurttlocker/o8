@@ -64,6 +64,9 @@ describe('contextual thread panel navigation', () => {
     expect(container.textContent).toContain('Ready for review');
     expect(container.textContent).toContain('gpt-6.1-sol · medium');
     expect(container.textContent).not.toContain('Codex working');
+    expect([...container.querySelectorAll('button')].filter(node => node.textContent === 'Threads')).toHaveLength(1);
+    expect(container.querySelector('[aria-label="Thread panel views"]')).toBeNull();
+    expect(button('Refresh')).toBeDefined();
     expect(container.querySelector('[aria-label="Steer this thread"]')).not.toBeNull();
     expect(fetchMock.mock.calls.every((call) => !call[1]?.method || call[1].method === 'GET')).toBe(true);
     act(() => button('Threads').click());

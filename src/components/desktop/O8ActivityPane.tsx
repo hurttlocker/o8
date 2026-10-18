@@ -50,7 +50,6 @@ import { O8ActivityMissionControls } from './o8-panel/O8ActivityMissionControls'
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { O8ProblemDossiers } from './o8-panel/O8ProblemDossiers';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
-import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { PrPanel } from './pr-panel/PrPanel';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
@@ -474,13 +473,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             onSelectRepo={(path) => onSelectRepoPath?.(path)}
             style={{ flex: 1, minWidth: 0 }}
           />
-          <O8ScratchChat
-            surfaceLabel="activity"
-            repoPath={repoPath ?? null}
-            selectedFile={null}
-            surface="diff"
-            placement="review-toolbar"
-          />
+
           <O8ActivityMissionControls
             missionId={activeMissionId}
           />

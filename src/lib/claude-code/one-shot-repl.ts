@@ -48,6 +48,7 @@ export interface AskClaudeOneShotOptions {
   cwd?: string;
   /** Process timeout. Default 300_000 (5min) — matches the prior CLI ceiling. */
   timeoutMs?: number;
+  tools?: 'none';
 }
 
 /**
@@ -89,7 +90,9 @@ export async function askClaudeOneShot(
   const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' };
 
   return new Promise<string>((resolve, reject) => {
-    const launch = cliInvocation(opts.binary, buildOneShotArgs(opts.model, opts.effort));
+    const args = buildOneShotArgs(opts.model, opts.effort);
+    if (opts.tools === 'none') args.push('--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence');
+    const launch = cliInvocation(opts.binary, args);
     const child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd,

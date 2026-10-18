@@ -46,7 +46,7 @@ import { WorkspacePageHeader } from '../WorkspacePageHeader';
 import { ControlRoomTab } from '../repo-focus/tabs/ControlRoomTab';
 import { toRepoFocusRepo } from '../repo-focus/types';
 
-export function ProjectsPanel({ library = false, opening = false, initialProjectId = null, onOpenWorkspace, onBackToWorkspace }: { library?: boolean; initialProjectId?: string | null; opening?: boolean; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void>; onBackToWorkspace?: () => void }) {
+export function ProjectsPanel({ library = false, openingProjectId = null, initialProjectId = null, onOpenWorkspace, onBackToWorkspace }: { library?: boolean; initialProjectId?: string | null; openingProjectId?: string | null; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void>; onBackToWorkspace?: () => void }) {
   const data = useProjectsData();
   const {
     projects,
@@ -77,6 +77,7 @@ export function ProjectsPanel({ library = false, opening = false, initialProject
   const [tasksProjectId, setTasksProjectId] = useState<string | null>(null);
 
   const isAnythingOpen = creating || editingProjectId !== null;
+  const opening = openingProjectId !== null;
   const openedProject = projects.find((project) => project.id === requestedProjectId);
   const openedProjectId = openedProject?.id ?? null;
   const mainRepo = reposById.get(openedProject?.mainRepoId ?? openedProject?.repos[0]?.repoId ?? '');
@@ -203,13 +204,18 @@ export function ProjectsPanel({ library = false, opening = false, initialProject
           </div>
         </div> : null}
         {!openedProjectId ? <div aria-label="Saved projects">
-          {projects.filter((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())).map((project) => <div key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 20, borderBottom: '1px solid var(--t-divider-subtle)', minHeight: 84 }}>
-            <button type="button" onClick={() => setOpenedProjectId(project.id)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer', paddingTop: 20, paddingBottom: 20 }}>
-              <span style={{ display: 'block', fontSize: 15 }}>{project.name}</span>
+          {projects.filter((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())).map((project) => {
+            const workspaceRepo = reposById.get(project.mainRepoId ?? project.repos[0]?.repoId ?? '');
+            return <div key={project.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 20, rowGap: 8, borderBottom: '1px solid var(--t-divider-subtle)', minHeight: 84, paddingBottom: 12 }}>
+            <button type="button" aria-label={`View details for ${project.name}`} onClick={() => setOpenedProjectId(project.id)} style={{ flex: '1 1 180px', minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer', paddingTop: 20, paddingBottom: 8 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</span><span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Details</span></span>
               <span style={{ display: 'block', marginTop: 7, fontSize: 12, color: 'var(--t-text-muted)' }}>{project.repos.length} {project.repos.length === 1 ? 'repository' : 'repositories'}{project.description ? ` · ${project.description}` : ''}</span>
             </button>
-            <RamsButton variant="ghost" onClick={() => { setOpenedProjectId(project.id); setEditingProjectId(project.id); }}>Edit</RamsButton>
-          </div>)}
+            <div role="group" aria-label={`${project.name} actions`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <RamsButton disabled={!workspaceRepo || !onOpenWorkspace || opening || isAnythingOpen} onClick={() => { if (workspaceRepo) void onOpenWorkspace?.(project.id, workspaceRepo.id, workspaceRepo.localPath); }}>{openingProjectId === project.id ? 'Opening…' : 'Open workspace'}</RamsButton>
+              <RamsButton variant="ghost" disabled={opening} onClick={() => { setOpenedProjectId(project.id); setEditingProjectId(project.id); }}>Edit</RamsButton>
+            </div>
+          </div>; })}
           {!loading && projects.length > 0 && !projects.some((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())) ? <p style={{ color: 'var(--t-text-muted)' }}>No projects match your search.</p> : null}
         </div> : null}
       </> : null}

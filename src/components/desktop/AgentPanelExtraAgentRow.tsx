@@ -7,6 +7,7 @@ import { ScheduledTaskMark } from './ScheduledTaskMark';
 import { SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { WorkerReviewAction } from './workspace-terminal/WorkerReviewAction';
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
@@ -161,8 +162,10 @@ export function ExtraAgentRowView({
   link,
   roomy = false,
   showPreview = true,
+  onOpenReview,
 }: {
   row: ExtraAgentRow;
+  onOpenReview?: (laneId: string, repoPath: string | null) => void;
   roomy?: boolean;
   showPreview?: boolean;
   active: boolean;
@@ -180,6 +183,7 @@ export function ExtraAgentRowView({
    *  wash suppressed). null/undefined = no link active. */
   link?: 'linked' | 'dimmed' | null;
 }) {
+  const reviewReady = row.laneStatus === 'reviewing' && !row.outcome && Boolean(row.laneId);
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
   const preview = row.outcomeNote || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
@@ -201,13 +205,18 @@ export function ExtraAgentRowView({
   }, [onFocusRow, onSelectSession, row]);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
       // Stable handle for AT/automation (#2146): row.key is `lane:<id>` /
       // `agent:<sessionKey>`, so it survives a rename of row.name.
       data-o8-agent-row={row.key}
-      disabled={!canInteract}
-      onClick={handleClick}
+      aria-disabled={!canInteract}
+      tabIndex={canInteract ? 0 : -1}
+      onClick={() => { if (canInteract) handleClick(); }}
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget || !canInteract || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault(); handleClick();
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         onOpenMenu?.(event, row);
@@ -215,7 +224,7 @@ export function ExtraAgentRowView({
       aria-current={active ? 'true' : undefined}
       title={[row.name, dotLabel, row.repoPath, row.statusEvidence?.summary].filter(Boolean).join(' · ')}
       style={{
-        width: '100%',
+        width: '100%', boxSizing: 'border-box',
         minHeight: roomy ? 52 : 31,
         paddingTop: roomy ? 10 : 5,
         paddingBottom: roomy ? 10 : 5,
@@ -342,6 +351,9 @@ export function ExtraAgentRowView({
           rows above (Q ruling 2026-07-12: spawned agents carry the time
           too). Hidden while hovered so it never fights the Retry action. */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 17, flexShrink: 0, position: 'relative' }}>
+      {reviewReady && onOpenReview ? <WorkerReviewAction size={20}
+        packet={{ title: row.name, status: 'awaiting_review' }}
+        onOpenReview={() => { if (row.laneId) onOpenReview(row.laneId, row.repoPath); }} /> : null}
       {row.scheduled ? <ScheduledTaskMark /> : null}
       {row.lastActivityAt > 0 && !(canRetry && hovered) ? (
         <span
@@ -359,7 +371,7 @@ export function ExtraAgentRowView({
       ) : null}
         <AgentStatusDot state={dotState} label={dotLabel} />
       </span>
-    </button>
+    </div>
   );
 }
 
