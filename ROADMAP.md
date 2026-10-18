@@ -114,6 +114,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
+
 Terminal appearance [#3949](https://github.com/hurttlocker/o8/issues/3949) applies the active palette before canvas consumers read it. Existing workspace and contextual terminals keep their output and attachment through light, dark and All Glass changes; glass keeps the shared translucent backdrop. Development checks, native acceptance, reviewed merge and release remain separate.
 
 Right-panel terminal recovery [#3115](https://github.com/hurttlocker/o8/issues/3115) offers an explicit route to the main workspace when its local bridge is unavailable. Recovery focuses an existing matching shell before creating one, preserves other tabs, and keeps failures actionable. Development checks, reviewed merge and release remain separate.

@@ -21,11 +21,21 @@ export function AccountTab() {
   const [signingOut, setSigningOut] = useState(false);
   const [waitingForSignOut, setWaitingForSignOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [accountReadTimedOut, setAccountReadTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (auth.isLoaded) {
+      setAccountReadTimedOut(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setAccountReadTimedOut(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [auth.isLoaded]);
 
   useEffect(() => subscribeDesktopAuthError(() => setAuthError(getDesktopAuthError())), []);
   useEffect(() => {
-    if (auth.signedIn && authError) clearDesktopAuthError();
-  }, [auth.signedIn, authError]);
+    if (auth.isLoaded && auth.signedIn && authError) clearDesktopAuthError();
+  }, [auth.isLoaded, auth.signedIn, authError]);
   useEffect(() => {
     if (!signingOut) return;
     const timer = window.setTimeout(() => setWaitingForSignOut(true), 3000);
@@ -43,8 +53,10 @@ export function AccountTab() {
       setSigningOut(false);
     }
   };
-  const identity = auth.signedIn ? auth.user?.name || auth.user?.email || 'Signed in' : auth.isLoaded ? 'Local desktop profile' : 'Loading account…';
-  const serial = founder ? String(founder.operatorNumber).padStart(3, '0') : null;
+  const signedIn = auth.isLoaded && auth.signedIn;
+  const unavailable = auth.accountConnection ? auth.accountConnection === 'unavailable' : !auth.isLoaded && accountReadTimedOut;
+  const identity = signedIn ? auth.user?.name || auth.user?.email || 'Signed in' : auth.isLoaded ? 'Local desktop profile' : unavailable ? 'Account unavailable' : 'Loading account…';
+  const serial = signedIn && founder ? String(founder.operatorNumber).padStart(3, '0') : null;
 
   return (
     <div style={{ maxWidth: SETTINGS_CONTENT_MAX_WIDTH, padding: 8, fontFamily: APP_FONT_STACK }}>
@@ -55,15 +67,18 @@ export function AccountTab() {
         <SettingsRow
           icon={<AccountIcon />}
           label={identity}
-          subtitle={auth.signedIn ? auth.user?.email : 'Connect your account to sync across devices.'}
-          divider={auth.signedIn}
+          subtitle={signedIn ? auth.user?.email : 'Connect your account to sync across devices.'}
+          divider={signedIn}
           accessory={<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {serial ? <span title={`${PLAN_LABELS.founder} · No. ${serial}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--t-text-muted)', fontSize: 10.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--t-brand-orange)' }} />{serial}</span> : null}
-            {auth.signedIn ? <RamsButton onClick={auth.openManageAccount}>Manage account</RamsButton> : auth.clerkEnabled ? <RamsButton onClick={auth.signIn}>Sign in to o8</RamsButton> : <ValuePill>Local</ValuePill>}
+            {signedIn ? <RamsButton onClick={auth.openManageAccount}>Manage account</RamsButton>
+              : auth.accountConnection ? <RamsButton disabled={!unavailable} onClick={auth.retryAccountConnection}>{unavailable ? 'Retry account connection' : 'Connecting account…'}</RamsButton>
+              : auth.clerkEnabled ? <RamsButton onClick={auth.signIn}>Sign in to o8</RamsButton> : <ValuePill>Local</ValuePill>}
           </div>}
         />
-        {auth.signedIn ? <SettingsRow icon={<AccountIcon />} label="Session" subtitle="Sign out of this o8 account." accessory={<RamsButton disabled={signingOut} onClick={() => { void signOut(); }}>{signingOut ? waitingForSignOut ? 'Waiting for sign-out…' : 'Signing out…' : 'Sign out'}</RamsButton>} /> : null}
+        {signedIn ? <SettingsRow icon={<AccountIcon />} label="Session" subtitle="Sign out of this o8 account." accessory={<RamsButton disabled={signingOut} onClick={() => { void signOut(); }}>{signingOut ? waitingForSignOut ? 'Waiting for sign-out…' : 'Signing out…' : 'Sign out'}</RamsButton>} /> : null}
       </SettingsGroup>
+      {unavailable ? <div role="status" style={{ color: 'var(--t-text-secondary)', fontSize: 12, paddingTop: 8, paddingRight: 8, paddingBottom: 8, paddingLeft: 8 }}>We could not confirm your account status. Your workspace remains available; {auth.accountConnection ? 'retry the connection when ready.' : 'sign in to reconnect.'}</div> : null}
       {signOutError ? <div role="alert" style={{ color: 'var(--t-text-muted)', fontSize: 12, padding: 8 }}>{signOutError}</div> : null}
       {!auth.signedIn && authError ? <div style={{ marginTop: 16 }}><SignInErrorCard key={authError.id} authError={authError} onRetry={auth.signIn} /></div> : null}
     </div>
