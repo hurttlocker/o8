@@ -101,6 +101,24 @@ describe('global repository worktree discovery', () => {
     }));
   });
 
+  it('recovers a validated registered-repository scope even when its worktree scan never resolves', async () => {
+    const registered = repo(1);
+    mocks.fetchSWRJson.mockResolvedValue({ repos: [] });
+    mocks.ipcFetch.mockImplementation((input: string) => input === '/api/panel/repos'
+      ? Promise.resolve(Response.json({ repos: [registered] })) : new Promise<Response>(() => {}));
+    let current = undefined as unknown as HookValue;
+    mounted = mountHook((value) => { current = value; });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    let recovered = false;
+    await act(async () => {
+      const pending = current.refreshRestoredRepoState([registered.localPath]);
+      await vi.advanceTimersByTimeAsync(2_001);
+      recovered = await pending;
+    });
+    expect(recovered).toBe(true);
+    expect(current.globalRepoEntries).toEqual([registered]);
+  });
+
   afterEach(() => {
     if (mounted) act(() => mounted?.root.unmount());
     mounted = null;

@@ -16,6 +16,7 @@ import {
   computeChatRuntimeStatusUpdate,
   detectLocalhostPreviews,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { claimPreviewAnnouncement } from '@/components/desktop/workspace-terminal/preview-announcements';
 import { recordTerminalBenchEvent } from '@/components/desktop/workspace-terminal/terminal-bench-instrumentation';
 
 export interface ImperativeHandleDeps {
@@ -61,13 +62,14 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     setTerminalSourceDimensions: (sessionName, cols, rows) => {
       deps.panelRefs.current.get(sessionName)?.setSourceDimensions?.(cols, rows);
     },
-    writeToTerminal: (sessionName, data) => {
+    writeToTerminal: (sessionName, data, historical) => {
       deps.panelRefs.current.get(sessionName)?.writeData(data);
       const now = Date.now();
       deps.recordTerminalActivity(sessionName, now);
-      if (deps.urlDetectionEnabledRef.current) {
+      if (!historical && deps.urlDetectionEnabledRef.current) {
         const newPreviews = detectLocalhostPreviews(data, sessionName, deps.tabsRef.current, deps.detectedPortsRef.current);
         for (const preview of newPreviews) {
+          if (!claimPreviewAnnouncement(deps.stateScope, deps.preferredRepo?.localPath, sessionName, preview.port)) continue;
           deps.onPreviewDetected?.(preview);
           deps.setPreviews((previous) => previous.some((p) => p.port === preview.port) ? previous : [...previous, preview]);
         }
