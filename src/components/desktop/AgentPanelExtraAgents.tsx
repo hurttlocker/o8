@@ -70,6 +70,7 @@ export interface LaneSummary {
 }
 
 export interface AgentPanelExtraAgentsProps {
+  onOpenChatReview?: (laneId: string, repoPath: string | null) => void;
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
   packets?: OrchestratorPacket[];
@@ -323,6 +324,7 @@ function ClearFinishedAgentsButton({
 }
 
 function AgentPanelExtraAgentsBase({
+  onOpenChatReview,
   activeSessionKey,
   onSelectSession,
   packets = [],
@@ -664,6 +666,7 @@ function AgentPanelExtraAgentsBase({
           busy={busy}
           onSelectSession={onSelectSession}
           onFocusRow={handleFocusRow}
+          onOpenReview={onOpenChatReview}
           onRetryPacket={handleRetry}
           onOpenHoverCard={openHoverCard}
           onCloseHoverCard={scheduleHoverClose}

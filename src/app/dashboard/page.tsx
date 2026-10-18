@@ -4246,6 +4246,7 @@ function DashboardInner() {
   // One list instance survives collapse, navigation takeovers, and width changes.
   const agentPanelElement = (
     <AgentPanel
+      onOpenChatReview={(laneId, repoPath) => { leaveNavTakeover(); handleOpenO8Panel({ tab: 'review', reviewLaneId: laneId, repoPath }); }}
       navigationRail={showCompactNavigationRail}
       activeSessionKey={railActiveSessionKey}
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
