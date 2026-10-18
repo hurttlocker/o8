@@ -13,6 +13,7 @@ import {
 import { compactWorkerScrollRows, projectResponsiveAutomaticSessionTiles, sessionTileViewportBand, type SessionTileViewportBand } from '@/lib/orchestrator/session-tile-responsive';
 import { SessionTileSurface } from './SessionTileSurface';
 import { WorkerReviewAction } from './WorkerReviewAction';
+import { SubagentDemoPanel } from '@/components/desktop/workspace-terminal/SubagentDemoPanel';
 
 const WORKERS = [
   { name: 'Cosmo', task: 'Map the handoff path', status: 'Working', note: 'Tracing the request and reply.' },
@@ -130,6 +131,13 @@ export function WorkerSplitPreview({
   const [request, setRequest] = useState({ count: 0, generation: 0 });
   const [layout, setLayout] = useState<SessionTileLayout>(createDefaultSessionTileLayout);
   const [focusedSessionKey, setFocusedSessionKey] = useState<string | null>(null);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const demoLaunchRef = useRef<HTMLButtonElement>(null);
+  const demoWasOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (demoWasOpen.current && !demoOpen) demoLaunchRef.current?.focus();
+    demoWasOpen.current = demoOpen;
+  }, [demoOpen]);
   const active = request.count > 0;
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [previewBand, setPreviewBand] = useState<SessionTileViewportBand>('wide');
@@ -199,31 +207,38 @@ export function WorkerSplitPreview({
           <button type="button" onClick={() => selectCount(0)} style={buttonStyle}>Live</button>
         </div>
       ) : null}
-      <SessionTileSurface
-        {...live}
-        layout={active ? previewLayout : live.layout}
-        workerScrollRows={active ? previewScrollRows : live.workerScrollRows}
-        focusedSessionKey={active ? focusedSessionKey : live.focusedSessionKey}
-        onResizeSplit={active
-          ? (splitId, ratio) => setLayout((current) => resizeSessionSplit(current, splitId, ratio))
-          : live.onResizeSplit}
-        onCloseLeaf={active
-          ? (leafId) => setLayout((current) => closeSessionLeaf(current, leafId))
-          : live.onCloseLeaf}
-        onFocusSession={active ? setFocusedSessionKey : live.onFocusSession}
-        disableResizeHandles={active ? previewScrollRows > 0 || (previewBand === 'stacked' && previewLayout !== layout) : live.disableResizeHandles}
-        renderSessionPane={active ? renderSessionPane : live.renderSessionPane}
-      />
-      {!active ? (
+      <div inert={demoOpen} style={{ visibility: demoOpen ? 'hidden' : undefined, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
+        <SessionTileSurface
+          {...live}
+          layout={active ? previewLayout : live.layout}
+          workerScrollRows={active ? previewScrollRows : live.workerScrollRows}
+          focusedSessionKey={active ? focusedSessionKey : live.focusedSessionKey}
+          onResizeSplit={active
+            ? (splitId, ratio) => setLayout((current) => resizeSessionSplit(current, splitId, ratio))
+            : live.onResizeSplit}
+          onCloseLeaf={active
+            ? (leafId) => setLayout((current) => closeSessionLeaf(current, leafId))
+            : live.onCloseLeaf}
+          onFocusSession={active ? setFocusedSessionKey : live.onFocusSession}
+          disableResizeHandles={active ? previewScrollRows > 0 || (previewBand === 'stacked' && previewLayout !== layout) : live.disableResizeHandles}
+          renderSessionPane={active ? renderSessionPane : live.renderSessionPane}
+        />
+      </div>
+      {demoOpen ? <div style={{ position: 'absolute', inset: 0, zIndex: 40 }}>
+        <SubagentDemoPanel onClose={() => { setDemoOpen(false); onPreviewActiveChange?.(false); }} />
+      </div> : null}
+      {!active ? <div hidden={demoOpen} style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 30, display: demoOpen ? 'none' : 'flex', gap: 6 }}>
+        <button ref={demoLaunchRef} type="button" data-subagent-demo-launch
+          onClick={() => { setDemoOpen(true); onPreviewActiveChange?.(true); }} style={buttonStyle}>Subagent demo</button>
         <button
           type="button"
           data-worker-split-preview-launch="true"
           onClick={() => selectCount(4)}
-          style={{ ...buttonStyle, position: 'absolute', right: 12, bottom: 12, zIndex: 30, boxShadow: '0 4px 18px rgba(0, 0, 0, 0.16)' }}
+          style={buttonStyle}
         >
           Preview 4 / 10 workers
         </button>
-      ) : null}
+      </div> : null}
     </div>
   );
 }
