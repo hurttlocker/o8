@@ -17,8 +17,9 @@ import { ProjectRepositories } from './ProjectRepositories';
 
 const rowStyle = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 34, paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, border: 0, borderRadius: 9, color: 'var(--t-text)', background: 'transparent', cursor: 'pointer', textAlign: 'left' as const, fontFamily: 'var(--font-sans-system)', fontSize: 13, fontWeight: 300 };
 
-export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, registeredRepoByPath, onProjectSelect, onRepoSelect, onManageProjects, onAddRepo, onRepositoryConnected }: {
+export function ProjectsSwitcher({ projects, loading = false, activeProjectId, selectedRepoPath, registeredRepoByPath, onProjectSelect, onRepoSelect, onManageProjects, onAddRepo, onRepositoryConnected }: {
   projects: ProjectRecord[];
+  loading?: boolean;
   activeProjectId: string | null;
   selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
@@ -41,6 +42,7 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
   const reduceMotion = useReducedMotion();
   const repos = [...registeredRepoByPath.values()];
   const visible = visibleProjectNavigationItems(projects, repos);
+  const empty = !loading && !repos.length && !visible.some(project => project.id !== 'default' || project.repoPaths.length > 0);
   const current = visible.find((project) => project.id === activeProjectId) ?? visible[0];
   const members = current?.repoPaths.flatMap((path) => registeredRepoByPath.get(path) ? [registeredRepoByPath.get(path)!] : []) ?? [];
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -62,7 +64,10 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
   const dialogProject = dialog && dialog !== 'new' ? projects.find((project) => project.id === dialog) : undefined;
   const hover = (event: React.MouseEvent<HTMLButtonElement>, active = false) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; };
   return <>
-    <div data-project-switcher style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: 8, paddingRight: 5 }}>
+    {empty ? <div data-project-switcher style={{ paddingLeft: 8, paddingRight: 5 }}>
+      <button ref={anchor} type="button" onClick={() => openDialog('new')} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New project</span></button>
+      <button ref={addAnchor} type="button" aria-haspopup="menu" aria-expanded={adding} onClick={() => { setOpen(false); setAdding(value => !value); }} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event, adding)} style={rowStyle}><ProjectGlyph kind="folder" /><span>Add repository</span></button>
+    </div> : <div data-project-switcher style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: 8, paddingRight: 5 }}>
       <button ref={anchor} type="button" aria-label="Switch project" disabled={busy} aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) refreshProjectsFromExternalMutation(); setAdding(false); setQuery(''); setError(''); setOpen((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, open)} style={{ ...rowStyle, flex: 1, minWidth: 0, paddingLeft: 2, paddingRight: 4, minHeight: 32, background: open ? 'var(--t-hover)' : 'transparent' }}>
         <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, width: 17, height: 17, transform: 'translateX(-2px)' }}><ProjectIdentity name={current?.name ?? 'Projects'} color={current?.color} size={17} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5 }}>{current?.name ?? 'Projects'}</span>
@@ -70,7 +75,7 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
         <span style={{ color: 'var(--t-text-faint)' }}><ProjectGlyph kind="chevron" size={13} /></span>
       </button>
       <button ref={addAnchor} type="button" aria-label="Add repository" disabled={busy} title="Add repository or project" aria-haspopup="menu" aria-expanded={adding} onClick={() => { if (!adding) refreshProjectsFromExternalMutation(); setOpen(false); setAdding((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, adding)} style={{ ...rowStyle, width: 28, minHeight: 28, padding: 6, background: adding ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-muted)' }}><ProjectGlyph kind="add" size={16} /></button>
-    </div>
+    </div>}
     <ComposerPopover anchorRef={anchor} open={open} align="start" onClose={() => { if (!busy) setOpen(false); }}>
       <motion.div initial={reduceMotion ? false : { y: -4 }} animate={{ y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
         <FloatingSurface overlay style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
