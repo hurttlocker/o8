@@ -161,6 +161,8 @@ Fresh-session receipts [#3804](https://github.com/hurttlocker/o8/issues/3804) pu
 
 Native Browser reload [#3801](https://github.com/hurttlocker/o8/issues/3801) reloads the current document instead of navigating to its existing address. Attached development verifies fresh HTML and module code after a cached-module update, while the tab identity and selection remain stable. Packaged acceptance and release remain separate.
 
+Fresh-session dialog guards [#3916](https://github.com/hurttlocker/o8/issues/3916) ignore invisible cached portals at the app-owned creation boundary while visible dialogs still refuse creation. Real-root tests cover direct requests, late visibility changes and multiple dialogs without weakening identity or inventory checks.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
