@@ -28,7 +28,7 @@ export interface DesktopWsCallbacks {
   onReviewUpdate?: (data: Record<string, unknown>) => void;
   // Terminal channel
   onTerminalCreated?: (sessionName: string, requestId?: string) => void;
-  onTerminalData?: (sessionName: string, data: string) => void;
+  onTerminalData?: (sessionName: string, data: string, historical?: boolean) => void;
   onTerminalAttached?: (sessionName: string) => void;
   onTerminalDimensions?: (sessionName: string, cols: number, rows: number) => void;
   onTerminalVisibilityReady?: (sessionName: string, epoch: number) => void;
@@ -238,7 +238,7 @@ export function useDesktopWebSocket(
           if (eventType === 'created' && data) {
             cbRef.current.onTerminalCreated?.(data.sessionName as string, data.requestId as string | undefined);
           } else if (eventType === 'data' && data) {
-            cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string);
+            cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string, data.historical === true);
           } else if (eventType === 'attached' && data) {
             cbRef.current.onTerminalAttached?.(data.sessionName as string);
             if (typeof data.cols === 'number' && typeof data.rows === 'number') {
