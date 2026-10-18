@@ -8,7 +8,7 @@ import { ProjectsSwitcher } from './ProjectsSwitcher';
 
 vi.mock('framer-motion', () => ({ useReducedMotion: () => true, motion: { div: 'div' } }));
 vi.mock('../FloatingSurface', () => ({ FloatingSurface: ({ children }: HTMLAttributes<HTMLDivElement>) => createElement('div', null, children) }));
-vi.mock('./ProjectGroupDialog', () => ({ ProjectGroupDialog: () => null }));
+vi.mock('./ProjectGroupDialog', () => ({ ProjectGroupDialog: () => createElement('div', { role: 'dialog' }, 'Project form') }));
 vi.mock('./ConnectRepositoryDialog', () => ({ ConnectRepositoryDialog: () => null }));
 
 const repos: RepoRegistryEntry[] = ['web', 'api', 'mobile', 'docs', 'tools', 'worker'].map((name) => ({
@@ -49,6 +49,23 @@ function resize(width: number, nameWidth = 68) {
   act(() => [...observers].forEach(callback => callback([], {} as ResizeObserver)));
 }
 describe('adaptive project repository navigation', () => {
+  it('offers existing project and repository entry points only after an empty navigation read', () => {
+    const onAddRepo = vi.fn();
+    const onProjectSelect = vi.fn(async () => true);
+    const empty = { ...props, projects: [], activeProjectId: null, registeredRepoByPath: new Map(), onAddRepo, onProjectSelect };
+    act(() => root.render(createElement(ProjectsSwitcher, { ...empty, loading: true })));
+    expect(host.textContent).not.toContain('New project');
+    act(() => root.render(createElement(ProjectsSwitcher, empty)));
+    const find = (label: string) => [...document.querySelectorAll('button')].find(button => button.textContent === label)!;
+    expect(onAddRepo).not.toHaveBeenCalled(); expect(onProjectSelect).not.toHaveBeenCalled();
+    act(() => find('New project').click());
+    expect(document.querySelector('[role="dialog"]')?.textContent).toBe('Project form');
+    act(() => find('Add repository').click());
+    const local = [...document.querySelectorAll('button')].find(button => button.textContent?.startsWith('Local folder'))!;
+    act(() => local.click());
+    expect(onAddRepo).toHaveBeenCalledOnce();
+    expect(onProjectSelect).not.toHaveBeenCalled();
+  });
   it('keeps the selected repo visible, puts remaining repos in a keyboard menu and selects the exact repo', () => {
     render(repos[5].localPath); resize(260);
     expect(chips()).toHaveLength(3); expect(chips()[0].textContent).toContain('worker');

@@ -62,6 +62,31 @@ describe('compact sidebar view through the chat panel', () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  it('shows creation actions only after confirmed empty history and recovers an unavailable read', async () => {
+    const createOrchestrator = vi.fn(); const createTerminal = vi.fn();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(async url => String(url).includes('chat-history/list')
+      ? new Promise<Response>(resolve => { finish = resolve; }) : Response.json({ lanes: [] }));
+    await act(async () => root.render(createElement(ChatsTab, { repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
+      emptyActions: createElement(Fragment, null,
+        createElement('button', { onClick: createOrchestrator }, 'New orchestrator'),
+        createElement('button', { onClick: createTerminal }, 'New terminal')) })));
+    expect(container.textContent).toContain('Loading project chats');
+    expect(container.textContent).not.toContain('New orchestrator');
+    await act(async () => finish(Response.json({ error: 'Unavailable' }, { status: 503 })));
+    expect(container.textContent).toContain('Project chats unavailable');
+    expect(container.textContent).not.toContain('New orchestrator');
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).includes('chat-history/list') ? { conversations: [] } : { lanes: [] }));
+    const button = (label: string) => [...container.querySelectorAll('button')].find(item => item.textContent === label)!;
+    await act(async () => button('Try again').click());
+    expect(createOrchestrator).not.toHaveBeenCalled(); expect(createTerminal).not.toHaveBeenCalled();
+    await act(async () => button('New orchestrator').click());
+    await act(async () => button('New terminal').click());
+    expect(createOrchestrator).toHaveBeenCalledOnce(); expect(createTerminal).toHaveBeenCalledOnce();
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).includes('chat-history/list') ? { conversations: history } : { lanes: [] }));
+    await act(async () => window.dispatchEvent(new Event('o8:chat-history-updated')));
+    expect(container.textContent).not.toContain('New orchestrator');
+  });
   it('toggles priority from the header, shows previews and restores the normal view without opening a chat', async () => {
     await render();
     const bell = container.querySelector<HTMLButtonElement>('[aria-label="Priority chats"]')!;

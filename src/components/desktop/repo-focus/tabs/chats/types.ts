@@ -38,6 +38,8 @@ export interface ArchivedLaneRow {
 }
 
 export interface ChatsTabProps {
+  /** Existing creation actions, shown only after an empty history read finishes. */
+  emptyActions?: import('react').ReactNode;
   repos: RepoFocusRepo[];
   selectedRepo?: RepoFocusRepo | null;
   ideWorkspaceSessions?: IdeWorkspaceSession[];
