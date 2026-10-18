@@ -145,6 +145,8 @@ Source-editor recovery [#3122](https://github.com/hurttlocker/o8/issues/3122) us
 
 Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
 
+Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.

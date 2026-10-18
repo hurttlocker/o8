@@ -18,6 +18,7 @@ import {
 import { O8WebviewClient, type O8WindowOperation } from '@/lib/mcp/o8-webview-client';
 import { buildPrepareComposerTargetScript } from '@/lib/mcp/o8-webview-composer-target';
 import { O8_WEBVIEW_ASYNC_EVAL_GUARD } from '@/lib/mcp/o8-webview-async-eval-guard';
+import { requestBrowserOpen } from '@/lib/mcp/o8-browser-open';
 
 type TextContent = { type: 'text'; text: string };
 type ImageContent = { type: 'image'; data: string; mimeType: string };
@@ -600,14 +601,8 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     }),
 
     o8_view_open_browser: async (args) => withStructuredErrors(async () => {
-      const url = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : null;
-      // Dispatch the window event O8Panel listens for: switch to the Browser tab
-      // and (if a URL is given) navigate the inner iframe. Fire-and-forget inside
-      // evalJs — the handler runs synchronously, so the browser opens even if the
-      // eval transport reports a busy-thread timeout.
-      const code = `(() => { try { window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: ${JSON.stringify(url)} } })); return 'opened'; } catch (err) { return 'error: ' + String((err && err.message) || err); } })()`;
-      const result = await getClient().evalJs(code);
-      return jsonResult({ ok: true, url, raw: result.result });
+      const receipt = await requestBrowserOpen(getClient(), args);
+      return jsonResult(receipt, receipt.ok !== true);
     }),
 
     o8_view_scroll: async (args) => withStructuredErrors(async () => {

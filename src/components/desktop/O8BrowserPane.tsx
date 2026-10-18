@@ -182,7 +182,6 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   const lastNavigatedUrl = useRef<string | null>(null);
   useEffect(() => {
     if (!navigateToUrl || navigateToUrl === lastNavigatedUrl.current) return;
-    lastNavigatedUrl.current = navigateToUrl;
     const normalized = normalizeBrowserUrl(navigateToUrl);
     if (!normalized) return;
     // Check if a tab with this URL already exists
@@ -191,6 +190,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
       let cancelled = false;
       queueMicrotask(() => {
         if (cancelled) return;
+        lastNavigatedUrl.current = navigateToUrl;
         setActiveTabId(existing.id);
         setUrlInput(normalized);
       });
@@ -202,6 +202,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
+      lastNavigatedUrl.current = navigateToUrl;
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(id);
       setUrlInput(normalized);
