@@ -155,6 +155,8 @@ Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3
 
 Saved repository recovery [#3870](https://github.com/hurttlocker/o8/issues/3870) can restore a validated registered-repository path without waiting for a worktree scan. External paths still require exact authoritative membership, and stale inventory cannot overwrite a newer removal. Native recovery and automated evidence remain separate from release inclusion.
 
+Browser tab closure [#3909](https://github.com/hurttlocker/o8/issues/3909) exposes a named close action for active and hovered tabs. Rendered checks cover two- and five-tab layouts, surviving tab order and persisted selection. Attached development confirms the named empty-tab action and restored empty scope; release acceptance remains separate.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
