@@ -127,6 +127,8 @@ Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the def
 
 The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/issues/3880) now uses explicit ordered receipt timestamps. This removes an accidental dependency on wall-clock monotonicity while preserving the production stale-transition guard and its regression coverage.
 
+Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now opens newly announced apps in the existing Browser instead of adding a second terminal viewer. Retained output is marked across WebSocket transports; repeat announcements from a terminal session do not reopen a closed page. Ports exposes an immediate clickable app list. The old inline viewer is retired. Development and regression acceptance are tracked separately from CI and installed releases.
+
 Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) accepts an empty string to clear a field and preserves leading spaces, trailing spaces and line breaks. Controlled-field event coverage and native development checks are separate from required PR CI and released-build acceptance.
 
 ## 6. Runs where you are

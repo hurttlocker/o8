@@ -161,7 +161,7 @@ export type { PreviewSelectionPayload };
 export type WorkspaceChatRuntime = OrchestratorRuntime | 'chat';
 
 export interface TerminalTabHandle {
-  writeToTerminal: (sessionName: string, data: string) => void;
+  writeToTerminal: (sessionName: string, data: string, historical?: boolean) => void;
   setTerminalSourceDimensions?: (sessionName: string, cols: number, rows: number) => void;
   writeRaw: (sessionName: string, data: string) => void;
   terminalVisibilityReady?: (sessionName: string, epoch: number) => void;

@@ -302,9 +302,9 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
       <MailOpen width={14} height={14} strokeWidth={1.6} />{inboxActive ? <span>{inboxCount}</span> : null}
     </WorkspaceUtility>
     <WorkspaceUtility label="o8.md" title="o8.md preview" onClick={() => togglePip('spec')}><PageEdit width={14} height={14} strokeWidth={1.6} /></WorkspaceUtility>
-    {isOpen ? <FooterPorts placement={header ? 'above' : 'rail'} onPortPreview={(_port, url) => openSource(url)} onTriggerClick={NOOP}
+    {isOpen ? <FooterPorts placement={header ? 'above' : 'rail'} onPortPreview={(_port, url) => openSource(url)}
       renderTrigger={({ pageCount }) => <WorkspaceUtility label="Ports" title={`Ports and browser preview${pageCount ? ` · ${pageCount} local pages` : ''}`}
-        onClick={() => togglePip('browser')}><GlobeIcon /></WorkspaceUtility>} /> : null}
+        onClick={NOOP}><GlobeIcon /></WorkspaceUtility>} /> : null}
   </div>;
 
   return (
