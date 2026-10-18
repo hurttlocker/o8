@@ -3794,6 +3794,13 @@
       ]
     },
     {
+      "path": "tests/pi-transport-host-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-user-setup-real-path.test.ts",
       "reasons": [
         "executable-fixture",

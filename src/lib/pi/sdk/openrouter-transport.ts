@@ -9,7 +9,7 @@
  * after the call the reservation settles to the cost OpenRouter reported.
  */
 
-import { streamSimple, type AssistantMessageEvent, type Model } from '@earendil-works/pi-ai/compat';
+import type { AssistantMessageEvent, Model } from '@earendil-works/pi-ai/compat';
 import type { PiModelTransport } from './transport';
 
 export { isOpenRouterPiModelChoice, OPENROUTER_PI_MODEL_PREFIX } from './openrouter-model-choice';
@@ -169,6 +169,9 @@ export function createOpenRouterPiTransport(options: OpenRouterPiTransportOption
     };
 
     try {
+      // Preserve the SDK's ESM export boundary in the CommonJS dev host too.
+      const { streamSimple } = await import('@earendil-works/pi-ai/compat');
+      requestSignal.throwIfAborted();
       const stream = streamSimple(options.model, context, {
         apiKey: 'host-transport-only', fetch: guardedFetch, signal: requestSignal,
         onProviderStreamEvent: (chunk) => {
