@@ -3,6 +3,7 @@
 import { reorderTabs } from '@/lib/workspace-terminal/reorder-tabs';
 import { retargetWorkspaceTab } from './retarget-workspace-tab';
 import { useTextChatTabs } from './use-text-chat-tabs';
+import { useWorkspaceInspectorTabs } from './useWorkspaceInspectorTabs';
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
@@ -46,7 +47,6 @@ import {
   buildCommitCanvasTab,
   computeChatSessionSignature,
   computeCliChatSession,
-  computeInspectorTab,
   computeLlmChatSession,
   buildLlmInjection,
   resolveActiveChatSessionKey,
@@ -1096,22 +1096,7 @@ export function useWorkspaceTerminalController(
     return result.activeTabId;
   }, [activeTabId, setActiveTabIdFromUser]);
 
-  const openWorkspaceInspectorTab = useCallback((canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => {
-    const result = computeInspectorTab(canvasTab, tabsRef.current, options);
-    if (result.updatedTabId) {
-      setTabs((previous) => previous.map((tab) => (
-        tab.id === result.updatedTabId
-          ? { ...tab, label: canvasTab.label, canvasTab, repo: options?.repo ?? tab.repo, lastActivity: Date.now() }
-          : tab
-      )));
-    } else if (result.newTab) {
-      setTabs((previous) => [result.newTab!, ...previous]);
-    }
-    if (result.activeTabId !== null) {
-      setActiveTabIdFromUser(result.activeTabId);
-    }
-    return result.updatedTabId ?? result.newTab?.id ?? '';
-  }, [setActiveTabIdFromUser]);
+  const openWorkspaceInspectorTab = useWorkspaceInspectorTabs({ tabsRef, activeTabIdRef: effectiveActiveTabIdRef, setTabs, onSelectTab: setActiveTabIdFromUser });
 
   const handleOpenWorkspaceCommitTab = useCallback((hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => {
     const { canvasTab, repo: resolvedRepo } = buildCommitCanvasTab(hash, meta, repo);
