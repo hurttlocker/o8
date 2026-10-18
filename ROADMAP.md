@@ -143,6 +143,8 @@ Saved Preview layouts [#3119](https://github.com/hurttlocker/o8/issues/3119) now
 
 Source-editor recovery [#3122](https://github.com/hurttlocker/o8/issues/3122) uses bundled editor and language-worker assets, shows readable source while initialization is pending or unavailable, and retries with a fresh loader. Inactive file tabs inherit workspace visibility so an editor cannot paint over a chat. Source/chat switching is verified in development; installed acceptance remains separate.
 
+Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.

@@ -492,8 +492,14 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
       }
       cand = hits;
     }
-    const el = cand[0];
-    if (!el) return { clicked: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
+    const matched = cand[0];
+    if (!matched) return { clicked: false, actionDispatched: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
+    const el = matched.closest(CLICKABLE) || matched;
+    const unavailable = '[disabled]:not(fieldset),[aria-disabled="true" i],[inert]';
+    const linked = el.tagName === 'LABEL' ? el.control : null;
+    const blocker = matched.closest(unavailable) || (el.matches(':disabled') ? el : null)
+      || (linked && (linked.closest(unavailable) || (linked.matches(':disabled') ? linked : null)));
+    if (blocker) return { clicked: false, actionDispatched: false, reason: blocker.hasAttribute('inert') ? 'inert' : 'disabled', matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName };
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
     const r = el.getBoundingClientRect();
     const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
@@ -513,7 +519,7 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
       ['click', MouseEvent, Object.assign({ buttons: 0, detail: 1 }, mo)],
     ];
     for (const [type, Ctor, init] of seq) { try { el.dispatchEvent(new Ctor(type, init)); } catch (e) {} }
-    return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
+    return { clicked: true, actionDispatched: true, outcome: 'input-dispatched', matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
   })()`;
 }
 
