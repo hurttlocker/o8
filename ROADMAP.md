@@ -157,6 +157,8 @@ Saved repository recovery [#3870](https://github.com/hurttlocker/o8/issues/3870)
 
 Browser tab closure [#3909](https://github.com/hurttlocker/o8/issues/3909) exposes a named close action for active and hovered tabs. Rendered checks cover two- and five-tab layouts, surviving tab order and persisted selection. Attached development confirms the named empty-tab action and restored empty scope; release acceptance remains separate.
 
+Fresh-session receipts [#3804](https://github.com/hurttlocker/o8/issues/3804) publish completion only after exact mounted-tab and post-focus verification. Unverified creation expires to an explicit unknown result without replay, and terminal or newer receipts remain intact. Real-root creation and surface-state regressions are verified; native and packaged acceptance remain separate gates.
+
 Browser overlay detection [#3799](https://github.com/hurttlocker/o8/issues/3799) accounts for effective ancestor opacity before hiding the native child. Transparent cached portals do not count as painted covers; visible covers and explicit occlusion still hide and restore the child. Controlled development reproduction and rendered regressions are recorded separately from remaining native visual acceptance.
 
 ## 6. Runs where you are
