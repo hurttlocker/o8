@@ -19,7 +19,6 @@ import { O8BrowserPane } from './O8BrowserPane';
 import { DevicePanel } from './o8-panel/devices/DevicePanel';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
-import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ComparisonMatrix } from './comparison/ComparisonMatrix';
 import { useComparisonGroups } from './comparison/useComparisonGroups';
 import { useOrchestratorData } from './orchestrator-data-context';
@@ -275,13 +274,15 @@ export function O8Panel({
   // action instead of the snapshot/click hunt that cost the orchestrator ~5 min.
   useEffect(() => {
     const handler = (event: Event) => {
-      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url;
+      const detail = (event as CustomEvent<{ url?: string | null; scopeKey?: string }>).detail;
+      if (detail?.scopeKey && detail.scopeKey !== browserStateKey) return;
+      const url = detail?.url;
       onActiveTabChange?.('browser');
       if (typeof url === 'string' && url.trim()) setPendingBrowserNavigation({ baseUrl: browserUrl, url: url.trim() });
     };
     window.addEventListener('o8:open-browser', handler);
     return () => window.removeEventListener('o8:open-browser', handler);
-  }, [browserUrl, onActiveTabChange]);
+  }, [browserStateKey, browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'device') return <DevicePanel active={active} />;
@@ -346,7 +347,7 @@ export function O8Panel({
     if (tab === 'activity') return <O8ActivityPane active={active} repoPath={repoPath} repoSlug={prRepo ?? repoSlug} registeredRepos={registeredRepos} allRepos={allRepos} onSelectAllRepos={onSelectAllRepos} onSelectRepoPath={onRepoPathChange} onSelectCommit={onSelectCommit} onSelectIssue={onSelectIssue} onSelectPR={onSelectPR} onClosePR={onClosePR} selectedPrNumber={prNumber ?? null} selectedPrRepo={prRepo ?? null} />;
     if (tab === 'resources') return <O8ResourcesPane active={active} />;
     if (tab === 'targets') return <TargetsPanel repoPath={repoPath} active={active} />;
-    if (tab === 'spec') return <O8SpecPane repoPath={repoPath} active={active} toolbarSlot={(specRepoPath) => <O8ScratchChat repoPath={specRepoPath} selectedFile={specRepoPath === repoPath ? selectedFile ?? null : null} surface="diff" surfaceLabel="o8.md" />} />;
+    if (tab === 'spec') return <O8SpecPane repoPath={repoPath} active={active} />;
 
     if (tab === 'inbox') {
       // Incident Queue is a closeable contextual surface now (report RVKTQV):
@@ -390,6 +391,8 @@ export function O8Panel({
   return (
     <div
       ref={splitContainerRef}
+      data-o8-browser-host={browserStateKey}
+      data-o8-browser-visible={paneVisible('browser') ? 'true' : 'false'}
       data-chrome-surface="true"
       style={{
         position: 'relative',
@@ -408,29 +411,6 @@ export function O8Panel({
         // so light never showed it) — operator fix 2026-07-14.
       }}
     >
-      {/* Scratch chat — floating Ask-o8 button + dialog, sits across tabs where
-          it does not compete with local document/review controls.
-          Operator restored post-#1089 (same restore-after-rework pattern). Mounts once per panel;
-          internal Cmd+E hotkey + button click open the floating dialog. The
-          review/workspace tab owns its compact toolbar trigger inside
-          ReviewPanel; Activity/PR detail suppress it to keep local toolbars
-          clear. o8.md/spec also suppresses the floating overlay — the
-          Ask-o8 chat trigger renders inline in the spec pane's own
-          toolbar (passed via toolbarSlot below) so all three buttons
-          (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
-      {/* No Brain chat on the browser — it's a real browser now (Q ruling
-          2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' && activeTab !== 'inbox' && activeTab !== 'device' && activeTab !== 'review' ? (
-        <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
-          <O8ScratchChat
-            repoPath={repoPath}
-            selectedFile={selectedFile ?? null}
-            surface="diff"
-            surfaceLabel="panel"
-          />
-        </div>
-      ) : null}
-
       {/* Open tools retain their state when another tab is selected. */}
       {secondaryTab && onSecondaryTabChange ? (
         <O8PanelSplitDivider
