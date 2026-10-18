@@ -455,6 +455,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
               {(showLabel && (isActive || isHovered)) || (!showLabel && isHovered) ? (
                 <button
                   type="button"
+                  aria-label={`Close ${tab.title || browserTitleFromUrl(tab.url)}`}
                   onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
