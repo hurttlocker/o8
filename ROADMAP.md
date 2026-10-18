@@ -114,6 +114,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 Composer worker status [#3953](https://github.com/hurttlocker/o8/issues/3953) uses one compact count at the composer edge. The existing popup keeps worker identities, states, pane navigation and activity receipts; the transcript no longer duplicates the live group. Recorded membership determines the count, and completed work does not imply a merge. Development verification and release remain separate.
 
+Chat section disclosure [#3954](https://github.com/hurttlocker/o8/issues/3954) places chevrons after section labels and reveals them on hover or keyboard focus. The shared header keeps label geometry, toggle state and neighboring actions stable. Development verification and release remain separate.
+
 Terminal appearance [#3949](https://github.com/hurttlocker/o8/issues/3949) applies the active palette before canvas consumers read it. Existing workspace and contextual terminals keep their output and attachment through light, dark and All Glass changes; glass keeps the shared translucent backdrop. Development checks, native acceptance, reviewed merge and release remain separate.
 
 Right-panel terminal recovery [#3115](https://github.com/hurttlocker/o8/issues/3115) offers an explicit route to the main workspace when its local bridge is unavailable. Recovery focuses an existing matching shell before creating one, preserves other tabs, and keeps failures actionable. Development checks, reviewed merge and release remain separate.
