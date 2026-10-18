@@ -73,6 +73,15 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(button('Canvas mode')).toBeDefined();
     expect(button('Home').querySelector('img')?.getAttribute('src')).toBe('/logos/o8-desktop.png');
     expect(host.querySelectorAll('[data-sidebar-brand]')).toHaveLength(1);
+    const navigationButtons = [...host.querySelectorAll('[aria-label="Workspace navigation"] button')];
+    expect(navigationButtons[1]).toBe(button('Symon'));
+    const voiceToggle = vi.fn();
+    window.addEventListener('o8:symon-voice-toggle', voiceToggle);
+    try {
+      expect(voiceToggle).not.toHaveBeenCalled();
+      await act(async () => button('Symon').click());
+      expect(voiceToggle).toHaveBeenCalledOnce();
+    } finally { window.removeEventListener('o8:symon-voice-toggle', voiceToggle); }
     for (const [label, callback] of [['Home', callbacks.onHome], ['Run orchestrator', callbacks.onNewSession], ['Run terminal', callbacks.onCreateTerminal], ['PRs', callbacks.onOpenPRs]] as const) {
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
