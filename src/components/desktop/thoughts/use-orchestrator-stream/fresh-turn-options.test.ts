@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: () => undefined }));
+
 vi.mock('@/lib/runtimes/shared/auth-detect', async (importOriginal) => {
   const { getRuntimeCapability, listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
   const runtimes = listDispatchableRuntimes();
@@ -197,6 +199,7 @@ beforeEach(async () => {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith('/api/orchestrator/composer-queue')) return Response.json({ items: [] });
     if (url.startsWith('/api/runtime/inventory')) {
       return new Response(JSON.stringify({ agents: runtimeInventoryAgents }));
     }

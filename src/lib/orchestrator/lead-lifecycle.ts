@@ -529,6 +529,8 @@ export async function sendLeadThreadMessage(input: {
   backend?: string;
   model?: string;
   effort?: string;
+  /** Internal admission fence after project preparation; never supplied by the wire. */
+  beforeAdmit?: () => void;
 }) {
   const threadId = cleanLeadString(input.threadId, 'threadId', 256);
   const lead = getSqlite().prepare(
@@ -540,6 +542,7 @@ export async function sendLeadThreadMessage(input: {
     persistedProject?.projectId,
     input.projectId,
   );
+  input.beforeAdmit?.();
   const admitted = admitLeadSend({
     leadId: lead.id,
     repoPath: input.repoPath,
