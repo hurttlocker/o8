@@ -13,6 +13,9 @@ it('shows each CLI stage and completion independently, including OpenCode, witho
   try {
     await act(async () => root.render(createElement(ConnectedCliUpdateRows, { tools, busy: null, onUpdate: update })));
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Update opencode"]')!.click());
+    expect(update).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Updates may introduce breaking changes');
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Confirm update opencode"]')!.click());
     expect(update).toHaveBeenCalledExactlyOnceWith('opencode');
     for (const [stage, label] of [['checking', 'Checking installation'], ['installing', 'Updating'], ['verifying', 'Verifying version'], ['succeeded', 'Verified'], ['failed', 'Update stopped']] as const) {
       await act(async () => root.render(createElement(ConnectedCliUpdateRows, { tools, busy: stage === 'succeeded' || stage === 'failed' ? null : 'opencode', progress: { opencode: { stage, startedAt: Date.now(), updatedAt: Date.now() } }, onUpdate: update })));
@@ -32,4 +35,16 @@ it('consumes chunked progress but requires the verified terminal result', async 
   expect(stages).toEqual(['installing', 'verifying']);
   await expect(readCliUpdateResponse(new Response('event: progress\ndata: {"stage":"verifying"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }), () => {})).rejects.toThrow('before verification');
   await expect(readCliUpdateResponse(new Response('event: error\ndata: {"error":"Wait for active sessions"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }), () => {})).rejects.toThrow('Wait for active sessions');
+});
+
+it('offers an Update entry for externally managed tools without pretending an installer ran', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); const update = vi.fn();
+  try {
+    await act(async () => root.render(createElement(ConnectedCliUpdateRows, { tools: [{ runtimeId: 'hermes', label: 'Hermes', selectedPath: '/fixture/hermes', installedVersion: null, latestVersion: null, status: 'unknown', updateUrl: '', updateSupported: false }], busy: null, onUpdate: update })));
+    expect(host.textContent).not.toContain('Instructions');
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Update Hermes"]')!.click());
+    expect(host.textContent).toContain('original updater'); expect(update).not.toHaveBeenCalled();
+    expect(host.querySelector('[aria-label="Open updater for Hermes"]')).not.toBeNull();
+  } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); }
 });
