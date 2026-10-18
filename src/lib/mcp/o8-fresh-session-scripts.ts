@@ -2,7 +2,7 @@ import { FRESH_ORCHESTRATOR_EVENT, FRESH_ACTION_ATTRIBUTE, FRESH_RECEIPT_ATTRIBU
 
 // Fixed own-document scripts. All embedded arguments are identities/data,
 // never caller code, URLs or operation selectors.
-export function freshSessionScript(phase: 'inspect' | 'dispatch' | 'observe' | 'focus', request?: FreshOrchestratorRequest): string {
+export function freshSessionScript(phase: 'inspect' | 'dispatch' | 'observe' | 'focus' | 'timeout', request?: FreshOrchestratorRequest): string {
   return `(() => { let dispatchAttempted = false; try {
     const phase = ${JSON.stringify(phase)};
     const request = ${JSON.stringify(request ?? null)};
@@ -39,11 +39,20 @@ export function freshSessionScript(phase: 'inspect' | 'dispatch' | 'observe' | '
       dispatchAttempted = true;
       root.dispatchEvent(new CustomEvent(${JSON.stringify(FRESH_ORCHESTRATOR_EVENT)}, { detail: request }));
     }
-    const receipt = JSON.parse(root.getAttribute(${JSON.stringify(FRESH_RECEIPT_ATTRIBUTE)}) || 'null');
+    const receiptText = root.getAttribute(${JSON.stringify(FRESH_RECEIPT_ATTRIBUTE)});
+    const receipt = JSON.parse(receiptText || 'null');
     if (!receipt || receipt.requestId !== request.requestId) return JSON.stringify({ ok: false, code: 'unknown_request', requestId: request.requestId, mutationOutcome: 'unknown', automaticReplay: false });
     if (phase === 'dispatch' || receipt.status === 'error') return JSON.stringify({ ...receipt, ok: receipt.status === 'pending' });
     if (receipt.workspaceId !== workspaceId || receipt.repoPath !== repoPath || JSON.stringify(receipt.tabIds) !== JSON.stringify(request.tabIds)
-      || !receipt.tabId || request.tabIds.includes(receipt.tabId) || tabIds.length !== request.tabIds.length + 1
+      || !receipt.tabId || request.tabIds.includes(receipt.tabId)) return fail('receipt_identity_mismatch');
+    if (receipt.status !== 'pending') return JSON.stringify({ ...receipt, ok: receipt.status === 'completed' });
+    const publish = value => {
+      if (root.getAttribute(${JSON.stringify(FRESH_RECEIPT_ATTRIBUTE)}) !== receiptText) return fail('receipt_changed');
+      root.setAttribute(${JSON.stringify(FRESH_RECEIPT_ATTRIBUTE)}, JSON.stringify(value));
+      return JSON.stringify({ ...value, ok: value.status === 'completed' });
+    };
+    if (phase === 'timeout') return publish({ ...receipt, status: 'unknown', code: 'verification_timeout', automaticReplay: false });
+    if (tabIds.length !== request.tabIds.length + 1
       || tabIds.at(-1) !== receipt.tabId || JSON.stringify(tabIds.slice(0, -1)) !== JSON.stringify(request.tabIds)
       || activeTabId !== receipt.tabId || root.getAttribute('data-o8-active-tab-kind') !== 'orchestrator') {
       return JSON.stringify({ ok: false, status: 'pending', code: 'fresh_render_not_observed', requestId: request.requestId, actionDispatched: true });
@@ -51,7 +60,23 @@ export function freshSessionScript(phase: 'inspect' | 'dispatch' | 'observe' | '
     const composers = Array.from(root.querySelectorAll('[data-o8-active-composer="true"]')).filter(visible);
     const composer = composers.length === 1 ? composers[0] : null;
     if (!composer || composer.disabled || composer.readOnly) return JSON.stringify({ ok: false, status: 'pending', code: 'enabled_composer_not_observed', requestId: request.requestId, actionDispatched: true });
-    if (phase === 'focus') composer.focus({ preventScroll: true });
+    if (phase === 'focus') {
+      composer.focus({ preventScroll: true });
+      // focus can synchronously run handlers. Re-read identities after it;
+      // never let an old acknowledgement overwrite a newer request or tab.
+      const currentRoots = Array.from(document.querySelectorAll('[data-o8-workspace-root][data-o8-workspace-active="true"]')).filter(visible);
+      const currentComposers = Array.from(root.querySelectorAll('[data-o8-active-composer="true"]')).filter(visible);
+      if (!visible(root) || currentRoots.length !== 1 || currentRoots[0] !== root
+        || root.getAttribute('data-o8-workspace-id') !== workspaceId || root.getAttribute('data-o8-active-repo-path') !== repoPath
+        || root.getAttribute('data-o8-active-tab-id') !== receipt.tabId || root.getAttribute('data-o8-active-tab-kind') !== 'orchestrator'
+        || root.getAttribute('data-o8-tab-inventory') !== JSON.stringify(tabIds)
+        || root.getAttribute('aria-disabled') === 'true' || Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]')).some(visible)
+        || currentComposers.length !== 1 || currentComposers[0] !== composer || composer.disabled || composer.readOnly
+        || root.getAttribute(${JSON.stringify(FRESH_RECEIPT_ATTRIBUTE)}) !== receiptText) return fail('focus_target_changed');
+      if (document.activeElement !== composer) return publish({ ...receipt, status: 'unknown', code: 'composer_focus_not_observed', automaticReplay: false });
+      const published = JSON.parse(publish({ ...receipt, status: 'completed', automaticReplay: false }));
+      if (!published.ok) return JSON.stringify(published);
+    }
     return JSON.stringify({ ok: phase !== 'focus' || document.activeElement === composer, status: 'completed', requestId: request.requestId, actionDispatched: true, tabId: receipt.tabId, state: {
       activeWorkspaceId: workspaceId, activeWorkspaceRepo: repoLabel, activeWorkspaceRepoPath: repoPath,
       activeTabId, activeTabKind: 'orchestrator', composerFocused: document.activeElement === composer, tabInventory: tabIds,

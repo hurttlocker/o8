@@ -1,6 +1,6 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+import { SourceEditor } from './SourceEditor';
 import {
   useCallback,
   useEffect,
@@ -41,24 +41,6 @@ import {
   richMarkdownSlashMenuPlugin,
 } from './rich-markdown-slash-menu';
 import { useRichMarkdownImageInput } from './use-rich-markdown-image-input';
-
-const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
-  import('@monaco-editor/react').then((mod) => mod.default)
-), {
-  ssr: false,
-  loading: () => (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      fontSize: 13,
-      color: 'var(--t-text-muted)',
-    }}>
-      Loading editor…
-    </div>
-  ),
-});
 
 export type MarkdownEditorMode = 'rich' | 'source';
 
@@ -727,7 +709,9 @@ export function MarkdownEditorMount({
             </div>
           ) : null}
           <div style={{ flex: 1, minHeight: 0 }}>
-            <MonacoEditor
+            <SourceEditor
+              key={filePath}
+              sourceLabel={filePath}
               height="100%"
               language={language}
               value={value}

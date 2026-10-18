@@ -1887,7 +1887,7 @@ function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachm
   sendRaw(client, JSON.stringify({
     channel: 'terminal',
     event: 'data',
-    data: { sessionName: attachment.sessionName, data: encoded },
+    data: { sessionName: attachment.sessionName, data: encoded, historical: true },
   }));
   ensureTerminalClientView(attachment, client.id).lastGoodOffset = attachment.streamEndOffset;
 }

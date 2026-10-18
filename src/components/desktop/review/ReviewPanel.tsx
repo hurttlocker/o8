@@ -6,7 +6,6 @@ import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { useLaneReviewChanges } from './useLaneReviewChanges';
 import { useLaneReviewSummary } from './useLaneReviewSummary';
 import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
-import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
 import { useArtifacts } from '../artifacts/useArtifacts';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -345,13 +344,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             </span>
           ) : null}
           <div style={{ flex: 1, minWidth: 8 }} />
-          <O8ScratchChat
-            surfaceLabel="review"
-            repoPath={repoPath}
-            selectedFile={selectedFile ?? null}
-            surface="diff"
-            placement="review-toolbar"
-          />
+
           <ToolbarButton
             title={filesDrawerOpen ? 'Hide files' : 'Show files'}
             active={filesDrawerOpen}

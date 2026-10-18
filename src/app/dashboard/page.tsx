@@ -168,6 +168,7 @@ import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useRightPanelPersistence } from './hooks/useRightPanelPersistence';
+import { useBrowserOpenRequests } from './hooks/useBrowserOpenRequests';
 import {
   MAX_O8_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
@@ -1558,11 +1559,9 @@ function DashboardInner() {
     closeCanvasTab,
     ensureTileKind,
     getPreferredContextualPanelHandle,
-    handleClosePreviewTileItem,
     handleCloseTile,
     handlePreviewDetected,
     handleResizeSplit,
-    handleSelectPreviewTile,
     handleSplitTile,
     openCanvasTab,
     registerContextualPanelHandle,
@@ -2768,15 +2767,14 @@ function DashboardInner() {
     openRightPanelFromUser();
   }, [chatVisible, closeRightPanelFromUser, openRightPanelFromUser, rightPanelKind]);
 
-  // Browser button on the TitleBar — opens (or focuses) the wide O8 panel
-  // and selects its Browser tab. The Browser tab itself is no longer in the
-  // O8 panel's tab strip; it lives in the title bar so we can hover-extend
-  // it with a quick port menu.
-  const handleOpenBrowser = useCallback(() => {
+  // Reveal Browser and carry the requested URL into its repository scope.
+  const handleOpenBrowser = useCallback((url?: string) => {
+    if (typeof url === 'string' && url) setO8BrowserUrl(url);
     setRightPanelKind('o8');
     openRightPanelFromUser();
     setO8ActiveTab('browser');
   }, [openRightPanelFromUser]);
+  useBrowserOpenRequests(handleOpenBrowser, o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
@@ -3829,8 +3827,8 @@ function DashboardInner() {
     focusOrchestrationPacketLane,
     globalRepoEntries,
     handleAgentPanelChatInjection,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleOpenCI,
@@ -3838,7 +3836,6 @@ function DashboardInner() {
     handlePreviewDetected,
     handlePreviewSelection,
     handleSelectCommit,
-    handleSelectPreviewTile,
     handleSelectRegisteredRepo,
     handleSplitTile,
     handleThoughtsMissionStateChange,
@@ -3882,8 +3879,8 @@ function DashboardInner() {
     globalRepoEntries,
     workspaceTerminalPreferredRepo,
     workspaceTerminalHandlesRef,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleSplitTile,
     handleAgentPanelChatInjection,
     ensureWorkspaceTerminalTile,
@@ -3893,7 +3890,6 @@ function DashboardInner() {
     handleLaunchWorkspaceAgent,
     handleSelectCommit,
     handleSelectRegisteredRepo,
-    handleSelectPreviewTile,
     handleOpenCI,
     handleOpenGitLog,
     handleThoughtsMissionStateChange,
@@ -4243,6 +4239,7 @@ function DashboardInner() {
   // One list instance survives collapse, navigation takeovers, and width changes.
   const agentPanelElement = (
     <AgentPanel
+      onOpenChatReview={(laneId, repoPath) => { leaveNavTakeover(); handleOpenO8Panel({ tab: 'review', reviewLaneId: laneId, repoPath }); }}
       navigationRail={showCompactNavigationRail}
       activeSessionKey={railActiveSessionKey}
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}

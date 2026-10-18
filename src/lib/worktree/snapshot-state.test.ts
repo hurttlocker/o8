@@ -483,6 +483,8 @@ describe('workspace snapshot persistence', () => {
       expectedState: 'hibernating',
       expectedVersion: 3,
       toState: 'parked',
+      transitionStartedAt: 5000,
+      recordedAt: 5001,
       receipt: { checkoutMaterialized: false },
     });
     expect(parked.status).toBe('applied');
@@ -493,6 +495,8 @@ describe('workspace snapshot persistence', () => {
       expectedState: 'parked',
       expectedVersion: 4,
       toState: 'restoring',
+      transitionStartedAt: 6000,
+      recordedAt: 6001,
     });
     expect(restoring.status).toBe('applied');
 
@@ -514,10 +518,14 @@ describe('workspace snapshot persistence', () => {
       expectedState: 'restoring',
       expectedVersion: 5,
       toState: 'materialized',
+      transitionStartedAt: 7000,
+      recordedAt: 7001,
       receipt: { restoredTreeMatches: true },
     });
     expect(materialized.status).toBe('applied');
     expect(materialized.record).toMatchObject({ state: 'materialized', version: 6 });
+    expect(listWorkspaceSnapshotTransitions(input.repositoryUuid, input.packetId).slice(-3)
+      .map(transition => transition.recordedAt)).toEqual([5001, 6001, 7001]);
   });
 
   it('records failure truth without guessing a transitional operation outcome', () => {
