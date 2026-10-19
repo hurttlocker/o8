@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState, type DragEvent, type RefObject } from 'react';
-import { useFileDrop, MAX_COMPOSER_IMAGES } from '@/lib/hooks/use-file-drop';
+import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent, type RefObject } from 'react';
+import { useComposerDraftValue } from './composer-draft-store';
+import { useFileDrop, MAX_COMPOSER_IMAGES, type FileUploadHandler } from '@/lib/hooks/use-file-drop';
 
 export interface ThoughtsAttachedImage {
   name: string;
@@ -20,11 +21,12 @@ export interface ThoughtsComposerDragHandlers {
 export interface UseThoughtsComposerAttachmentsOptions {
   /** Optional ref to hit-test Tauri drag-drop events against (see #1136). */
   hostRef?: RefObject<HTMLElement | null>;
+  draftKey?: string | null;
 }
 
 export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAttachmentsOptions) {
-  const [attachedImages, setAttachedImages] = useState<ThoughtsAttachedImage[]>([]);
-  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const { value: attachedImages, setValue: setAttachedImages, warning } = useComposerDraftValue(options?.draftKey ?? null, 'images', []);
+  const { value: attachedFiles, setValue: setAttachedFiles } = useComposerDraftValue(options?.draftKey ?? null, 'files', []);
   const {
     pendingFiles,
     setPendingFiles,
@@ -33,6 +35,24 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     clearPendingFiles,
     dragHandlers,
   } = useFileDrop({ enablePaste: false, hostRef: options?.hostRef });
+
+  const draftKey = options?.draftKey;
+  const owner = useRef<{ key: typeof draftKey; controller: AbortController } | null>(null);
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    owner.current = { key: draftKey, controller };
+    return () => controller.abort();
+  }, [draftKey]);
+  const processOwnedFiles = useCallback<FileUploadHandler>((files, upload) => {
+    const signal = owner.current?.controller.signal;
+    return processFiles(files, { ...upload,
+      isCurrent: () => signal?.aborted === false && (!upload?.isCurrent || upload.isCurrent()),
+    });
+  }, [processFiles]);
+  const onDrop = useCallback((event: DragEvent) => {
+    dragHandlers.onDragLeave(event);
+    if (event.dataTransfer.files.length) void processOwnedFiles(event.dataTransfer.files);
+  }, [dragHandlers, processOwnedFiles]);
 
   useEffect(() => {
     if (pendingFiles.length === 0) return;
@@ -76,45 +96,46 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     let cancelled = false;
     const frame = window.requestAnimationFrame(() => { if (!cancelled) promote(paced); });
     return () => { cancelled = true; window.cancelAnimationFrame(frame); };
-  }, [pendingFiles, setPendingFiles]);
+  }, [pendingFiles, setAttachedFiles, setAttachedImages, setPendingFiles]);
 
   const removeAttachedImage = useCallback((index: number) => {
     setAttachedImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
-  }, []);
+  }, [setAttachedImages]);
 
   // Swap one attachment in place (e.g. after screenshot annotation) — keeps the
   // array position so the thumbnail updates without a remount, and the send path
   // (which reads live state) picks up the annotated dataUri on the next send.
   const replaceAttachedImage = useCallback((index: number, image: ThoughtsAttachedImage) => {
     setAttachedImages((current) => current.map((im, i) => (i === index ? image : im)));
-  }, []);
+  }, [setAttachedImages]);
 
   // Programmatic add (e.g. "Add to chat" from an o8.md inline image). Respects
   // the same image cap as the drop/paste bridge above.
   const addAttachedImage = useCallback((image: ThoughtsAttachedImage) => {
     setAttachedImages((current) => (current.length >= MAX_COMPOSER_IMAGES ? current : [...current, image]));
-  }, []);
+  }, [setAttachedImages]);
 
   const removeAttachedFile = useCallback((fileName: string) => {
     setAttachedFiles((current) => current.filter((name) => name !== fileName));
-  }, []);
+  }, [setAttachedFiles]);
 
   const clearAttachments = useCallback(() => {
     setAttachedImages([]);
     setAttachedFiles([]);
     clearPendingFiles();
-  }, [clearPendingFiles]);
+  }, [clearPendingFiles, setAttachedFiles, setAttachedImages]);
 
   const consumeAttachedImages = useCallback((images: ThoughtsAttachedImage[]) => {
     setAttachedImages(current => current.filter(image => !images.includes(image)));
-  }, []);
+  }, [setAttachedImages]);
 
   return {
     attachedImages,
     attachedFiles,
+    retentionWarning: warning,
     dragOver,
-    dragHandlers,
-    processFiles,
+    dragHandlers: { ...dragHandlers, onDrop },
+    processFiles: processOwnedFiles,
     addAttachedImage,
     removeAttachedImage,
     replaceAttachedImage,

@@ -49,6 +49,7 @@ interface ComposerAreaProps {
   literalInput?: boolean;
   footerOverride?: React.ReactNode;
   input: string;
+  draftWarning?: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
   isChatMode?: boolean;
@@ -121,6 +122,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   inputLabel,
   placeholder,
   literalInput = false,
+  draftWarning,
   footerOverride,
   input,
   onInputChange,
@@ -352,6 +354,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       {activityContent}
       {sendBufferStatus}
+      {draftWarning ? <div role="status" style={{ fontSize: 11, color: 'var(--t-text-secondary)', paddingBottom: 8 }}>{draftWarning}</div> : null}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
         {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
           key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}

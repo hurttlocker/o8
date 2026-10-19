@@ -38,6 +38,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Ordinary workspace composers retain unsent text, completed image attachments and queued file context across a normal restart, scoped to the selected repository and conversation. Explicit clearing removes saved drafts; storage failure keeps the current input visible and prevents an unsafe conversation transfer. Private native candidate acceptance and release remain separate gates. [#3994](https://github.com/hurttlocker/o8/issues/3994)
+
 Inbox view labels and count badges are centered within their existing hit areas across selected, hover and keyboard states. Native candidate acceptance and release are recorded separately. [#3995](https://github.com/hurttlocker/o8/issues/3995)
 
 Known terminal sessions retain their identity when a saved workspace returns after the process has stopped. Restore offers an ended view and an explicit new-shell action; unavailable session status cannot authorize a replacement process. Source regressions cover stop, reload, reconnect and preserved output, including a newer interactive reply when tmux restores stale startup history before its exit marker. Native candidate acceptance and release are recorded separately. [#3992](https://github.com/hurttlocker/o8/issues/3992)
