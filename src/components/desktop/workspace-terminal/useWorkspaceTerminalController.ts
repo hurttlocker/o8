@@ -37,7 +37,7 @@ import {
   WORKSPACE_THREAD_ID_EVENT,
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
-import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
+import { buildTerminalTabHandle, snapshotTerminalExit } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
 import { createTerminalActivityTracker } from '@/components/desktop/workspace-terminal/terminal-activity';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
@@ -72,6 +72,7 @@ import { useTerminalTabLaunchers } from '@/components/desktop/workspace-terminal
 import { usePendingCliCommands } from '@/components/desktop/workspace-terminal/use-pending-cli-commands';
 import type { WorkspaceAttachedTerminalSession } from '@/components/desktop/workspace-terminal/terminal-mode';
 import { useWorkspaceTabLabelUpdater } from '@/components/desktop/workspace-terminal/use-workspace-tab-label-updater';
+import { logTerminalBench } from './terminal-bench-instrumentation';
 import { recordSpawnEvent, registerIntrospectionContributor } from '@/lib/feedback/workspace-introspect';
 
 type ControllerProps = WorkspaceTerminalProps;
@@ -88,15 +89,6 @@ type TerminalRequestCaller =
   | 'fallback-shell'
   | 'new-tab'
   | 'run-command';
-
-function logTerminalBench(event: string, detail: Record<string, unknown>): void {
-  if (typeof window === 'undefined' || window.__o8TerminalBenchEnabled !== true) return;
-  console.warn('[workspace-terminal:bench]', JSON.stringify({
-    at: performance.now(),
-    event,
-    ...detail,
-  }));
-}
 
 function ownerTabIdFromRequest(requestId: string | undefined): string | null {
   if (!requestId) return null;
@@ -751,6 +743,11 @@ export function useWorkspaceTerminalController(
       landTerminalTabs('restore-validated', reconciledTabs);
       setTabs(reconciledTabs);
       setActiveTabIdFromRestore(validated.activeTabId, capturedNavVersion);
+      for (const tab of reconciledTabs) {
+        if (tab.kind !== 'terminal' || !tab.tmuxSession || !tab.terminalExit || currentById.get(tab.id)?.terminalExit) continue;
+        snapshotTerminalExit({ tabsRef, panelRefs, setTabs, persistTabsNow, activeTabId: introspectRef.current.effectiveActiveTabId }, tab.tmuxSession, tab.terminalExit.exitCode,
+          () => cancelled?.() || restoreGeneration !== restoreGenerationRef.current);
+      }
       if (!termWsConnectedRef.current) return;
       for (const deadTab of validated.deadTerminalTabs) {
         const currentTab = tabsRef.current.find((tab) => tab.id === deadTab.id);
@@ -760,7 +757,7 @@ export function useWorkspaceTerminalController(
       }
     });
     return result.restoredAny;
-  }, [createDefaultChatTab, createInitialChatTabs, defaultTab, landTerminalTabs, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
+  }, [createDefaultChatTab, createInitialChatTabs, defaultTab, landTerminalTabs, persistTabsNow, requestTerminalForTab, sendTerminalAttach, setActiveTabIdFromRestore]);
 
   useEffect(() => {
     if (restoredRef.current) return;
