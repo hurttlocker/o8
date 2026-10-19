@@ -191,6 +191,17 @@ reply. Only fragments covered by the delegation offset were linked; later speech
 remained visible. These are synthetic transport and persistence receipts, not
 human acoustic acceptance.
 
+A later operator microphone test produced recognized human input and provider
+reply transcripts, with confirmed final usage on closure. Its conversational
+questions did not produce a client delegation or a new CLI turn; spoken claims
+about connection are not backend acceptance evidence. The test exposed a context
+bug: recent voice captions could replace all CLI messages in the supplied excerpt.
+Voice context now reserves separate bounded sections for the existing CLI
+discussion and recent speech, retaining correlated outcome qualifiers. A component
+entry-point regression covers caption-heavy transcripts, subsequent ordinary chat
+updates and the transport context limit. Audible playback and a fresh human-spoken
+task through the CLI still require separate acceptance.
+
 ## Confirmed-loss reconnect verification
 
 Transport fixtures exercise a one-attempt retry, unchanged chat binding, pending CLI work and delivery of its late result through the current voice subscription. They also exercise cancellation before admission and during microphone permission, manual Stop winning over a connection-loss reason, RTC failure waiting for final usage, and no retry after unknown or invalid final usage, expiry or content closure. An old voice activation cannot dispatch into a later activation of the same chat. These source checks do not simulate a provider guarantee or establish human acoustic acceptance.

@@ -34,6 +34,40 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('retains the existing CLI discussion when live captions fill the recent transcript', async () => {
+  const props: ComponentProps<typeof VoiceButton> = {
+    binding: 'existing-chat', busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn(),
+    messages: [
+      { id: 'task', role: 'user', text: 'Check the repository version without changing files.' },
+      { id: 'answer', role: 'assistant', text: 'The repository version is 1.2.3.' },
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `speech-${i}`, role: 'user' as const, text: `Can you hear me ${i}?`,
+        voice: { sessionId: 'voice-one', direction: 'input' as const, revision: 1, startMs: i * 100, endMs: (i + 1) * 100 },
+      })),
+    ],
+  };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend!.context()).toContain('Check the repository version without changing files.');
+  expect(fixture.backend!.context()).toContain('The repository version is 1.2.3.');
+  expect(fixture.backend!.context()).toContain('Recent voice exchange');
+  expect(props.send).not.toHaveBeenCalled();
+
+  await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [
+    ...props.messages, { id: 'next-task', role: 'user', text: 'Now check the package name.' },
+  ] })));
+  expect(fixture.backend!.context()).toContain('Now check the package name.');
+  expect(fixture.backend!.context()).toContain('The repository version is 1.2.3.');
+  await act(async () => root.render(createElement(ManagedLiveButton, { ...props,
+    messages: props.messages.map(message => ({ ...message, text: message.text.repeat(1000) })),
+    terminals: { task: { outcome: 'unconfirmed', text: 'Partial output'.repeat(1000) } },
+  })));
+  const bounded = fixture.backend!.context();
+  expect(bounded.length).toBeLessThanOrEqual(2400);
+  expect(bounded).toContain('unconfirmed');
+  expect(bounded).toContain('Recent CLI discussion:');
+  expect(bounded).toContain('Recent voice exchange');
+});
 it('projects captions only into their bound chat and links accepted sends without treating voice output as completion', async () => {
   const transcript = vi.fn(); const submitted = vi.fn();
   const props = { key: 'a', binding: 'a', messages: [], busy: false, terminals: {}, transcript, send: vi.fn(() => ({ userMessageId: 'orch-user-a' })), interrupt: vi.fn() };
