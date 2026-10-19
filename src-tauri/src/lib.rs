@@ -6,6 +6,14 @@ mod agent_partials_window;
 mod spatial_ink_window;
 #[cfg(target_os = "macos")]
 mod visual_capture;
+#[cfg(target_os = "macos")]
+mod visual_capture_session;
+#[cfg(target_os = "macos")]
+mod visual_capture_input;
+#[cfg(target_os = "macos")]
+mod visual_capture_media;
+#[cfg(any(target_os = "macos", test))]
+mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -8088,6 +8096,12 @@ pub fn run() {
             visual_capture::o8_visual_capture_begin,
             #[cfg(target_os = "macos")]
             visual_capture::o8_visual_capture_ready,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_widget,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_undo,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_transcribe_audio,
             #[cfg(target_os = "macos")]
             visual_capture::o8_visual_capture_finish,
             #[cfg(target_os = "macos")]

@@ -68,7 +68,7 @@ mod imp {
         /// A capture subprocess is in flight (started on first stroke).
         capturing: bool,
         first_stroke_seen: bool,
-        raw_strokes: serde_json::Value,
+        instruction: String,
         generation: u64,
         visual_id: Option<String>,
         monitor: Option<tauri::Monitor>,
@@ -81,7 +81,7 @@ mod imp {
                 capture: None,
                 capturing: false,
                 first_stroke_seen: false,
-                raw_strokes: serde_json::Value::Null,
+                instruction: String::new(),
                 generation: 0,
                 visual_id: None,
                 monitor: None,
@@ -116,8 +116,12 @@ mod imp {
     struct StrokesPayload {
         #[serde(default, rename = "visualCaptureId")]
         visual_id: Option<String>,
+        #[serde(default, rename = "visualCaptureGeneration")]
+        visual_generation: Option<u64>,
         #[serde(default)]
         strokes: Vec<InkStroke>,
+        #[serde(default)]
+        instruction: String,
     }
 
     impl StrokesPayload {
@@ -365,6 +369,7 @@ mod imp {
             return false;
         }
         let was_armed = ARMED.swap(false, Ordering::SeqCst);
+        lock_stash().visual_id = None;
         if let Some(win) = app.get_webview_window(SPATIAL_INK_LABEL) {
             // RESTORE click-through — clicks pass through again.
             let _ = win.set_ignore_cursor_events(true);
@@ -381,115 +386,44 @@ mod imp {
         true
     }
 
-    /// Queue the visual UI begin before any later native owner can replace it.
-    pub fn begin_visual_controls(
-        app: &tauri::AppHandle,
-        expected: u64,
-        id: &str,
-    ) -> Result<(), String> {
-        use base64::Engine;
-        use tauri::Emitter;
-        let _change = OVERLAY_CHANGE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if generation() != expected || !is_armed() {
-            return Err("The capture owner changed before drawing became ready.".into());
-        }
-        let background = {
-            let stash = lock_stash();
-            let capture = stash
-                .capture
-                .as_ref()
-                .ok_or("The captured image is no longer available.")?;
-            format!(
-                "data:image/png;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(&capture.png_bytes)
-            )
-        };
-        app.emit_to(
-            SPATIAL_INK_LABEL,
-            "o8:visual-capture-begin",
-            serde_json::json!({ "id": id, "background": background }),
-        )
-        .map_err(|error| error.to_string())
-    }
-
     pub fn is_armed() -> bool {
         ARMED.load(Ordering::SeqCst)
     }
 
+    pub fn set_visual_interaction(app: &tauri::AppHandle, expected: u64, interactive: bool) {
+        use tauri::Manager;
+        let _change = OVERLAY_CHANGE
+            .lock()
+            .unwrap_or_else(|value| value.into_inner());
+        if generation() != expected || !is_armed() {
+            return;
+        }
+        if let Some(window) = app.get_webview_window(SPATIAL_INK_LABEL) {
+            let _ = window.set_ignore_cursor_events(!interactive);
+        }
+    }
+
+    pub fn take_visual_instruction(expected: u64, id: &str) -> Result<String, String> {
+        let deadline = Instant::now() + Duration::from_millis(1500);
+        loop {
+            let stash = lock_stash();
+            if stash.generation != expected || stash.visual_id.as_deref() != Some(id) || !is_armed()
+            {
+                return Err("The drawing owner changed before the instruction was saved.".into());
+            }
+            if stash.strokes.is_some() {
+                return Ok(stash.instruction.clone());
+            }
+            drop(stash);
+            if Instant::now() >= deadline {
+                return Err("The drawing surface did not confirm its instruction.".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     pub fn generation() -> u64 {
         ARM_GEN.load(Ordering::SeqCst)
-    }
-
-    pub fn capture_ready(expected: u64) -> bool {
-        let stash = lock_stash();
-        stash.generation == expected && !stash.capturing && stash.capture.is_some()
-    }
-
-    /// Pin the shared stash before starting the image subprocess.
-    pub fn prime_capture(app: &tauri::AppHandle, expected: u64) {
-        on_first_stroke(app, Some(expected));
-    }
-
-    /// A correlated drain never consumes a later system dictation's stash.
-    pub fn take_visual_frame(expected: u64, id: &str) -> Result<serde_json::Value, String> {
-        use base64::Engine;
-        let deadline = Instant::now() + Duration::from_millis(1500);
-        let (capture, strokes, raw_strokes) = loop {
-            {
-                let mut stash = lock_stash();
-                if stash.generation != expected
-                    || stash.visual_id.as_deref() != Some(id)
-                    || !is_armed()
-                {
-                    return Err(
-                        "The drawing owner changed. Capture this frame again in its original chat."
-                            .into(),
-                    );
-                }
-                if !stash.capturing && stash.strokes.is_some() {
-                    break (
-                        stash.capture.take(),
-                        stash.strokes.take(),
-                        stash.raw_strokes.take(),
-                    );
-                }
-            }
-            if Instant::now() >= deadline {
-                return Err(
-                    "The drawing surface did not confirm its marks. The frame was not added."
-                        .into(),
-                );
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let capture =
-            capture.ok_or("The original screen image is unavailable. Capture this frame again.")?;
-        let strokes = strokes.unwrap_or_default();
-        let (png, width, height) = if strokes.is_empty() {
-            let image =
-                image::load_from_memory(&capture.png_bytes).map_err(|error| error.to_string())?;
-            (
-                base64::engine::general_purpose::STANDARD.encode(&capture.png_bytes),
-                image.width(),
-                image.height(),
-            )
-        } else {
-            let context = screen::composite_strokes(&capture, &strokes)
-                .ok_or("Could not render the marks. The frame was not added.")?;
-            (
-                context.screen.png_base64,
-                context.screen.img_w,
-                context.screen.img_h,
-            )
-        };
-        if png.len() + 22 > 5_000_000 {
-            return Err("This screen image exceeds the chat image limit. Keep the draft and use a smaller image.".into());
-        }
-        Ok(
-            serde_json::json!({ "dataUri": format!("data:image/png;base64,{png}"), "width": width, "height": height, "strokes": raw_strokes }),
-        )
     }
 
     // ── JS → Rust event handlers ──
@@ -526,7 +460,10 @@ mod imp {
 
     fn stash_strokes(payload: StrokesPayload) {
         let mut s = lock_stash();
-        if !is_armed() || s.visual_id != payload.visual_id {
+        if !is_armed()
+            || s.visual_id != payload.visual_id
+            || (s.visual_id.is_some() && payload.visual_generation != Some(s.generation))
+        {
             return;
         }
         let count: usize = payload
@@ -534,7 +471,8 @@ mod imp {
             .iter()
             .map(|stroke| stroke.points.len())
             .sum();
-        if payload.strokes.len() > 128
+        if payload.instruction.chars().count() > 16_000
+            || payload.strokes.len() > 128
             || count > 8192
             || payload.strokes.iter().any(|stroke| {
                 stroke.points.iter().any(|point| {
@@ -549,17 +487,7 @@ mod imp {
         {
             return;
         }
-        s.raw_strokes = serde_json::Value::Array(
-            payload
-                .strokes
-                .iter()
-                .map(|stroke| {
-                    serde_json::json!({"points": stroke.points.iter().map(|point| {
-                serde_json::json!({"x": point.x, "y": point.y, "tMs": point.t})
-            }).collect::<Vec<_>>()})
-                })
-                .collect(),
-        );
+        s.instruction = payload.instruction.clone();
         s.strokes = Some(payload.into_points());
     }
 
@@ -640,55 +568,33 @@ mod imp {
     #[cfg(test)]
     mod visual_tests {
         use super::*;
-        use base64::Engine;
         #[test]
-        fn visual_drain_fences_the_owner_and_preserves_marked_pixels() {
-            let mut png = std::io::Cursor::new(Vec::new());
-            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-                80,
-                60,
-                image::Rgba([255, 255, 255, 255]),
-            ))
-            .write_to(&mut png, image::ImageFormat::Png)
-            .unwrap();
+        fn notes_handoff_rejects_a_reused_identity_from_an_older_generation() {
             let old_stash = std::mem::replace(
                 &mut *lock_stash(),
                 Stash {
                     generation: 42,
-                    monitor: None,
                     visual_id: Some("frame-owned".into()),
-                    capturing: false,
-                    first_stroke_seen: true,
-                    capture: Some(screen::RawCapture {
-                        trace_id: 1,
-                        png_bytes: png.into_inner(),
-                        mon_x: 0.0,
-                        mon_y: 0.0,
-                        mon_w: 80.0,
-                        mon_h: 60.0,
-                        ax_catalog: Vec::new(),
-                    }),
-                    strokes: Some(vec![vec![(0.125, 0.5), (0.875, 0.5)]]),
-                    raw_strokes: serde_json::json!([{ "points": [{"x":0.125,"y":0.5,"tMs":0},{"x":0.875,"y":0.5,"tMs":150}] }]),
+                    ..Stash::new()
                 },
             );
             let old_armed = ARMED.swap(true, Ordering::SeqCst);
-            assert!(take_visual_frame(41, "frame-owned").is_err());
-            assert!(take_visual_frame(42, "another-frame").is_err());
-            assert!(
-                lock_stash().capture.is_some(),
-                "a stale drain must not consume current pixels"
+            let payload = |generation, instruction| StrokesPayload {
+                visual_id: Some("frame-owned".into()),
+                visual_generation: Some(generation),
+                strokes: Vec::new(),
+                instruction,
+            };
+            stash_strokes(payload(41, "stale words".into()));
+            assert!(lock_stash().strokes.is_none());
+            assert!(take_visual_instruction(41, "frame-owned").is_err());
+            assert!(take_visual_instruction(42, "another-frame").is_err());
+            stash_strokes(payload(42, "Keep these exact words.".into()));
+            assert_eq!(
+                take_visual_instruction(42, "frame-owned").unwrap(),
+                "Keep these exact words."
             );
-            let value = take_visual_frame(42, "frame-owned").unwrap();
-            let uri = value["dataUri"].as_str().unwrap();
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(uri.split(',').nth(1).unwrap())
-                .unwrap();
-            let image = image::load_from_memory(&bytes).unwrap().to_rgba8();
-            assert_eq!((image.width(), image.height()), (80, 60));
-            assert_eq!(image.get_pixel(40, 30).0, [0xFF, 0x5A, 0x1F, 0xFF]);
-            assert_eq!(value["strokes"][0]["points"][1]["tMs"], 150);
-            assert!(!uri.is_empty());
+            assert_eq!(lock_stash().visual_id.as_deref(), Some("frame-owned"));
             *lock_stash() = old_stash;
             ARMED.store(old_armed, Ordering::SeqCst);
         }
@@ -697,9 +603,8 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 pub use imp::{
-    arm, arm_visual, begin_visual_controls, capture_ready, create, cursor_monitor, disarm,
-    disarm_visual, generation, is_armed, prime_capture, register_listeners, take_spatial_context,
-    take_visual_frame,
+    arm, arm_visual, create, cursor_monitor, disarm, disarm_visual, generation, is_armed,
+    register_listeners, set_visual_interaction, take_spatial_context, take_visual_instruction,
 };
 
 // ── Non-macOS no-ops ──

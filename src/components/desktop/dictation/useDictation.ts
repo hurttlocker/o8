@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DictationSnapshot, DictationStartOptions, DictationState } from './types';
+import { transcribeVisualAudio } from './transcribeVisualAudio';
 
 const SUCCESS_FLASH_MS = 600;
 const ERROR_FLASH_MS = 2500;
@@ -217,6 +218,7 @@ export function useDictation() {
       if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
     };
     recorder.start();
+    options.onRecordingStart?.(Date.now());
 
     startTimeRef.current = Date.now();
     setState('recording', { audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
@@ -306,21 +308,26 @@ export function useDictation() {
     setState('transcribing');
 
     try {
-      const fd = new FormData();
-      fd.append('audio', blob, 'dictation.webm');
-      const transcribeResp = await fetch('/api/dictation/transcribe', { method: 'POST', body: fd });
-      if (!transcribeResp.ok) {
-        // Surface the server's friendly error (e.g. missing OPENROUTER_API_KEY).
-        let detail = `HTTP ${transcribeResp.status}`;
-        try {
-          const errJson = (await transcribeResp.json()) as { error?: string };
-          if (errJson.error) detail = errJson.error;
-        } catch { /* ignore */ }
-        throw new Error(detail);
-      }
-      const transcribeJson = (await transcribeResp.json()) as { text?: string };
+      const timed = options.preserveTranscript && options.timedCaptureId ? await transcribeVisualAudio(options.timedCaptureId, blob) : null;
       if (recordingId !== recordingIdRef.current) return;
-      const rawTranscript = (transcribeJson.text ?? '').trim();
+      let rawTranscript = timed?.text ?? '';
+      if (!timed) {
+        const fd = new FormData();
+        fd.append('audio', blob, 'dictation.webm');
+        const transcribeResp = await fetch('/api/dictation/transcribe', { method: 'POST', body: fd });
+        if (!transcribeResp.ok) {
+          // Surface the server's friendly error (e.g. missing OPENROUTER_API_KEY).
+          let detail = `HTTP ${transcribeResp.status}`;
+          try {
+            const errJson = (await transcribeResp.json()) as { error?: string };
+            if (errJson.error) detail = errJson.error;
+          } catch { /* ignore */ }
+          throw new Error(detail);
+        }
+        const transcribeJson = (await transcribeResp.json()) as { text?: string };
+        if (recordingId !== recordingIdRef.current) return;
+        rawTranscript = (transcribeJson.text ?? '').trim();
+      }
       if (!rawTranscript) {
         cleanup();
         setSnapshot({ state: 'idle', audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
@@ -335,7 +342,8 @@ export function useDictation() {
         if (options.preserveTranscript) {
           cleanup();
           setState('success', { audioLevel: 0 });
-          options.onComplete(rawTranscript);
+          if (timed) options.onComplete(rawTranscript, timed.words);
+          else options.onComplete(rawTranscript);
           returnToIdleAfter(SUCCESS_FLASH_MS);
           return;
         }

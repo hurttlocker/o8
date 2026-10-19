@@ -56,8 +56,7 @@ import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
-import { ComposerArea } from './chat-panel/ComposerArea';
-import { VisualInstructionComposer } from '@/components/desktop/visual-instructions/VisualInstructionComposer';
+import { VisualComposerArea } from '@/components/desktop/visual-instructions/VisualComposerArea';
 import { useOrchestratorModelState } from './composer-selector/useOrchestratorModelState';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
@@ -2112,10 +2111,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      <VisualInstructionComposer key={`${resolvedRepoPath}:${threadId}`} active={open && isOrchestratorMode && !contextualConversation}
-        target={threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null}
-        label={`${composerRepoLabel} · ${threadId?.slice(-6) ?? 'new chat'}`} anchor={inputRef} capture={captureQueuedSend} />
-      <ComposerArea
+      <VisualComposerArea visual={{ active: open && isOrchestratorMode && !contextualConversation,
+        target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
+        label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
         ref={inputRef} activeComposer={open}
         inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
         placeholder={contextualConversation?.placeholder}

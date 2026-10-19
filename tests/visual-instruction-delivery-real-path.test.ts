@@ -70,11 +70,16 @@ const routeTransport: typeof fetch = async (_url, init) => POST(new NextRequest(
 }));
 it('persists four marked frames from the real visual submit entry and delivers once to the captured chat after reconnect', async () => {
   const draft = await visualDraft();
+  draft.request.frames[0].sequence = { durationMs: 2_000, timing: 'audio', sourceDirectory: join(root, 'private-capture'),
+    moments: [{ n: 1, atMs: 800, kind: 'mark', rect: [0, 0, 1, 1], transcript: 'Measured words for this moment.' }] };
   const item = await submitVisualInstruction(draft, routeTransport);
   expect(item).toMatchObject({ id: 'visual-visual-real-1', threadId, status: 'queued' });
   closeDb();
-  expect(queue.readComposerSend(item.id)?.payload).toMatchObject({ text: draft.request.utterance,
+  const persisted = queue.readComposerSend(item.id)?.payload;
+  expect(persisted).toMatchObject({ text: draft.request.utterance,
     images: draft.request.frames.map(frame => frame.image), routing: base.routing });
+  expect(persisted?.wireMessage).toContain('Measured words for this moment.');
+  expect(JSON.parse(persisted!.wireMessage.match(/```json\n([\s\S]+?)\n```/)![1]).frames[0].sequence).toEqual(draft.request.frames[0].sequence);
   busy = true; const heartbeat = createChatContinuationHeartbeat(hooks); heartbeat();
   await new Promise(resolve => setTimeout(resolve, 30)); expect(mocks.send).not.toHaveBeenCalled();
   busy = false; heartbeat();
@@ -82,6 +87,7 @@ it('persists four marked frames from the real visual submit entry and delivers o
   const [_repo, wire, _emit, options] = mocks.send.mock.calls[0];
   expect(_repo).toBe(repo); expect(wire).toContain(draft.request.utterance);
   expect(wire).toContain('Frame 4 original words.'); expect(wire).toContain('intent.target');
+  expect(JSON.parse(wire.match(/```json\n([\s\S]+?)\n```/)![1]).frames[0].sequence).toEqual(draft.request.frames[0].sequence);
   expect(options).toMatchObject({ threadId, permissionMode: 'plan', model: 'selected-model', attachments: draft.request.frames.map(frame => frame.image) });
   const delivered = options.attachments![0];
   const pixels = await sharp(Buffer.from(delivered.dataUri.split(',')[1], 'base64')).raw().toBuffer({ resolveWithObject: true });

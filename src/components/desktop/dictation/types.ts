@@ -8,6 +8,9 @@ export type DictationState =
   | 'error';
 
 export interface DictationStartOptions {
+  /** A visual capture can request measured on-device word ranges without changing ordinary dictation. */
+  timedCaptureId?: string;
+  onRecordingStart?: (startedAtMs: number) => void;
   /** Visual evidence keeps the recognized words instead of rewriting their meaning. */
   preserveTranscript?: boolean;
   /** Hint surface — used by the polish prompt for context. */
@@ -15,10 +18,12 @@ export interface DictationStartOptions {
   /** Optional context to pass to polish — e.g. open file paths. */
   context?: { openFiles?: string[]; activeRepoPath?: string | null };
   /** Fired with the final polished text when complete. */
-  onComplete: (polishedText: string) => void;
+  onComplete: (polishedText: string, words?: TimedDictationWord[]) => void;
   /** Fired if cancelled or if anything fails. Receives error message or null on cancel. */
   onAbort?: (reason: string | null) => void;
 }
+
+export interface TimedDictationWord { t0: number; t1: number; text: string }
 
 export interface DictationSnapshot {
   state: DictationState;

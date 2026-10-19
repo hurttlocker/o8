@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { RamsButton } from '@/components/desktop/settings/RamsButton';
+import { HeaderIconPill } from '@/components/desktop/shell/HeaderIconPill';
+import { ComposerPopover } from '@/components/desktop/thoughts/chat-panel/ComposerPopover';
+import { FloatingSurface } from '@/components/desktop/FloatingSurface';
 import { requestRippleResolution } from '@/lib/mobile/ripple-client';
 import type { RippleChoiceResolution } from '@/lib/mobile/ripple-contract';
 import { readVisualDraft, saveVisualDraft, type VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
@@ -16,11 +19,13 @@ function ClarificationState({ draft, disabled }: Props) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [choice, setChoice] = useState<RippleChoiceResolution | null>(null);
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement | null>(null);
   const run = useRef(0);
   useEffect(() => () => { run.current += 1; }, []);
   const resolve = async () => {
     const ticket = ++run.current;
-    setBusy(true); setNotice('');
+    setBusy(true); setNotice(''); setOpen(true);
     const resolution = await requestRippleResolution({ utterance: draft.request.utterance, repoName: draft.request.target.repoPath.split('/').pop() });
     if (ticket !== run.current || readVisualDraft(draft.principal, draft.request.target) !== draft) return;
     setBusy(false);
@@ -32,15 +37,22 @@ function ClarificationState({ draft, disabled }: Props) {
     if (!choice || current !== draft || current.status !== 'draft') { setChoice(null); return; }
     void saveVisualDraft({ ...draft, request: { ...draft.request, clarification: { path: choice.aodlPath, value, question: choice.question } } })
       .catch(error => setNotice(String(error)));
-    setChoice(null);
+    setChoice(null); setOpen(false);
   };
-  return <div style={{ marginTop: 8, fontSize: 12, color: 'var(--t-text-muted)' }}>
-    <RamsButton variant="ghost" disabled={disabled || busy || !draft.request.utterance.trim() || draft.request.utterance.length > 4000} busy={busy} onClick={() => { void resolve(); }}>Clarify intent (optional)</RamsButton>
-    {choice ? <div><p>{choice.question}</p><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+  return <div ref={anchor} style={{ display: 'flex', fontSize: 12, color: 'var(--t-text-muted)' }}>
+    <HeaderIconPill label={draft.request.clarification ? 'Review confirmed intent' : 'Clarify intent'} title="Clarify intent · optional" expanded={open} popup="dialog" yNudge={0}
+      disabled={disabled || busy || !draft.request.utterance.trim() || draft.request.utterance.length > 4000}
+      icon={<svg aria-hidden width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z" /></svg>}
+      onClick={() => { if (draft.request.clarification || choice || notice) setOpen(value => !value); else void resolve(); }} />
+    <ComposerPopover anchorRef={anchor} open={open} onClose={() => setOpen(false)} align="start"><FloatingSurface overlay role="dialog" aria-label="Clarify visual intent" style={{ width: 280, maxWidth: 'calc(100vw - 24px)', borderRadius: 12 }} contentStyle={{ padding: 16, fontSize: 12, fontWeight: 300, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10, color: 'var(--t-text-muted)', marginBottom: 8 }}>Clarify intent · optional</div>
+      {busy ? <p role="status" style={{ margin: 0 }}>Reading your instruction…</p> : null}
+      {choice ? <div><p style={{ marginTop: 0, marginBottom: 12 }}>{choice.question}</p><div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       {choice.options.map(option => <RamsButton key={option.value} variant="ghost" disabled={disabled} onClick={() => confirm(option.value)}>{option.label}</RamsButton>)}
-      <RamsButton variant="ghost" onClick={() => setChoice(null)}>Skip</RamsButton>
+      <RamsButton variant="ghost" onClick={() => { setChoice(null); setOpen(false); }}>Skip</RamsButton>
     </div></div> : null}
-    {draft.request.clarification ? <p>Confirmed: {draft.request.clarification.value}. Send when ready.</p> : null}
-    {notice ? <p role="status">{notice}</p> : null}
+    {draft.request.clarification ? <p style={{ margin: 0 }}>Confirmed: {draft.request.clarification.value}</p> : null}
+    {notice ? <p role="status" style={{ margin: 0 }}>{notice}</p> : null}
+    </FloatingSurface></ComposerPopover>
   </div>;
 }

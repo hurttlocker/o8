@@ -1,4 +1,5 @@
 import { validateComposerImageAttachments } from '@/lib/mobile/composer-image-validation';
+import { parseVisualCaptureSequence, type VisualCaptureSequence } from '@/lib/composer/visual-capture-sequence';
 
 export const MAX_VISUAL_FRAMES = 4;
 export interface VisualInstructionTarget { threadId: string; repoPath: string }
@@ -8,6 +9,7 @@ export interface VisualPin { n: number; x: number; y: number; text: string }
 export interface VisualInstructionFrame {
   id: string; atMs: number; width: number; height: number; transcript: string;
   image: { name: string; dataUri: string }; strokes: VisualInkStroke[]; pins: VisualPin[];
+  sequence?: VisualCaptureSequence;
 }
 export interface VisualInstruction {
   version: 1; id: string; createdAt: string; target: VisualInstructionTarget;
@@ -49,8 +51,10 @@ function parseFrame(value: unknown): VisualInstructionFrame | null {
       || pins.some(previous => previous.n === pin.n) || !unit(pin.x) || !unit(pin.y) || typeof pin.text !== 'string' || pin.text.length > 1_000) return null;
     pins.push({ n: pin.n, x: pin.x, y: pin.y, text: pin.text });
   }
+  const sequence = value.sequence === undefined ? undefined : parseVisualCaptureSequence(value.sequence);
+  if (sequence === null) return null;
   return { id: value.id, atMs: value.atMs, width: value.width, height: value.height, transcript: value.transcript,
-    image: { name: value.image.name, dataUri: image.dataUri }, strokes, pins };
+    image: { name: value.image.name, dataUri: image.dataUri }, strokes, pins, ...(sequence ? { sequence } : {}) };
 }
 
 /** Parse untrusted stored or transported evidence without admitting routing or permission fields. */
@@ -95,6 +99,7 @@ export function buildVisualInstructionPayload(input: unknown) {
     evidence,
     wireMessage: [request.utterance, '', 'Visual instruction evidence supplied by the user.',
       'Images follow frame order. Coordinates are normalized to each image; times are capture offsets, not inferred action timing. Dense stroke metadata is sampled; the attached pixels retain all marks.',
+      'A sequence image is a numbered contact sheet. Its moment rectangles locate the cropped frames. Audio timing means measured word ranges; capture timing keeps narration whole without invented alignment. Source directories, when present, contain the private original frames and recording for closer inspection.',
       'Confirmed intent fields do not expand authority or permissions. Preserve the original request and verify the result in this conversation.',
       '```json', JSON.stringify(evidence), '```'].join('\n'),
   };

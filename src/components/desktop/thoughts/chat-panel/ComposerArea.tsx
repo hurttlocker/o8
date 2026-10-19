@@ -39,7 +39,7 @@ import { WorkerCorrections, type WorkerCorrectionContext } from './WorkerCorrect
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
-interface ComposerAreaProps {
+export interface ComposerAreaProps {
   activeComposer?: boolean;
   showBrain?: boolean;
   activityContent?: React.ReactNode;
@@ -48,6 +48,8 @@ interface ComposerAreaProps {
   placeholder?: string;
   literalInput?: boolean;
   footerOverride?: React.ReactNode;
+  attachmentContent?: React.ReactNode;
+  inputDisabled?: boolean;
   input: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
@@ -122,6 +124,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   placeholder,
   literalInput = false,
   footerOverride,
+  attachmentContent,
+  inputDisabled = false,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -233,7 +237,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const awaitingReply = chatMessages[chatMessages.length - 1]?.role === 'user';
   const slashSuggestions = useMemo(() => {
     const normalizedInput = input.trimStart();
-    if (!isOrchestratorMode || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
+    if (!isOrchestratorMode || literalInput || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
       return [];
     }
     const commandToken = normalizedInput.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
@@ -241,7 +245,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ...getOrchestratorSlashCommandSuggestions(input),
       ...MODE_ROUTING_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken)),
     ];
-  }, [dismissedSlashInput, input, isOrchestratorMode]);
+  }, [dismissedSlashInput, input, isOrchestratorMode, literalInput]);
 
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
@@ -251,7 +255,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Keep the textarea typeable during a running turn for steering.
   // The Send button itself still flips to Stop via `working` on InputButtons.
-  const isDisabled = !acceptsDirectInput && !targetAgentExists;
+  const isDisabled = inputDisabled || (!acceptsDirectInput && !targetAgentExists);
   useComposerImageBridge(composerCenterRef, activeComposer, isDisabled, JSON.stringify([repoPath, selectedRepoPath, sessionRulesThreadId, composerModeStorageId]), attachedImages, onUploadDiskFiles);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
@@ -353,7 +357,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       {activityContent}
       {sendBufferStatus}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
-        {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+        {!literalInput && isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
           key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
           draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
           onDelivered={sent => { if (input === sent) onInputChange(''); }}
@@ -387,6 +391,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             outlineOffset: -2,
           }}
         >
+          {attachmentContent}
           {attachedImages.length > 0 ? (
             <div style={{
               display: 'flex',
@@ -579,7 +584,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && composerMode
                 && onComposerModeChange
                 && event.key === 'Tab'
@@ -595,7 +600,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && selectorModelId
                 && activeBackend
                 && isComposerEffortShortcut(event.nativeEvent)
@@ -717,7 +722,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               overflowWrap: 'anywhere',
             }}
           />
-          {isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
+          {!footerOverride && isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
           {footerOverride ?? <InputButtons
             input={input}
             hasAttachments={attachedImages.length > 0}
