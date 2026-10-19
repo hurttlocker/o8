@@ -50,6 +50,9 @@ mod imp {
         if crate::presentation::overlay_show_blocked() {
             return Err("Screen drawing is unavailable during quiet presentation mode.".into());
         }
+        // Monitor queries may wait on AppKit. Resolve before holding an owner lock.
+        let monitor = crate::spatial_ink_window::cursor_monitor(&app)
+            .ok_or("No display is available for visual capture.")?;
         {
             let mut owner = lock_owner();
             if owner.is_some()
@@ -67,7 +70,8 @@ mod imp {
                 generation: 0,
                 ready: false,
             });
-            let Some(generation) = crate::spatial_ink_window::arm_visual(&app, id.clone()) else {
+            let Some(generation) = crate::spatial_ink_window::arm_visual(&app, id.clone(), monitor)
+            else {
                 *owner = None;
                 return Err("Another capture took the screen before this request started.".into());
             };

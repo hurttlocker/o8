@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { act } from 'react';
+import React, { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useDictation } from './useDictation';
@@ -12,7 +12,7 @@ class Recorder extends EventTarget {
 }
 let root: Root; let node: HTMLDivElement; let engine: ReturnType<typeof useDictation>;
 const fetcher = vi.fn<typeof fetch>(); const stopTrack = vi.fn();
-function Host() { engine = useDictation(); return null; }
+function Host() { const current = useDictation(); useLayoutEffect(() => { engine = current; }); return null; }
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); vi.stubGlobal('MediaRecorder', Recorder); vi.stubGlobal('fetch', fetcher);

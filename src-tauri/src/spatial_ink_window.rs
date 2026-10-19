@@ -71,6 +71,7 @@ mod imp {
         raw_strokes: serde_json::Value,
         generation: u64,
         visual_id: Option<String>,
+        monitor: Option<tauri::Monitor>,
     }
 
     impl Stash {
@@ -83,6 +84,7 @@ mod imp {
                 raw_strokes: serde_json::Value::Null,
                 generation: 0,
                 visual_id: None,
+                monitor: None,
             }
         }
     }
@@ -234,33 +236,31 @@ mod imp {
         });
     }
 
-    /// Size + position the window to fully cover the monitor under the cursor.
-    /// Logical coordinates; runs on the main thread (NSScreen reads touch AppKit).
-    fn reposition_to_cursor(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    /// Freeze the target once; window positioning and pixels share this monitor.
+    pub fn cursor_monitor(app: &tauri::AppHandle) -> Option<tauri::Monitor> {
+        let cursor = app.cursor_position().ok();
+        let monitors = app.available_monitors().unwrap_or_default();
+        cursor
+            .and_then(|c| {
+                monitors
+                    .iter()
+                    .find(|m| {
+                        let p = m.position();
+                        let size = m.size();
+                        c.x >= p.x as f64
+                            && c.x < (p.x + size.width as i32) as f64
+                            && c.y >= p.y as f64
+                            && c.y < (p.y + size.height as i32) as f64
+                    })
+                    .cloned()
+            })
+            .or_else(|| app.primary_monitor().ok().flatten())
+            .or_else(|| monitors.first().cloned())
+    }
+
+    fn reposition_to_monitor(window: &tauri::WebviewWindow, monitor: tauri::Monitor) {
         let win = window.clone();
-        let app = app.clone();
         let _ = window.run_on_main_thread(move || {
-            let cursor = app.cursor_position().ok();
-            let monitors = app.available_monitors().unwrap_or_default();
-            let monitor = cursor
-                .and_then(|c| {
-                    monitors
-                        .iter()
-                        .find(|m| {
-                            let p = m.position();
-                            let s = m.size();
-                            c.x >= p.x as f64
-                                && c.x < (p.x + s.width as i32) as f64
-                                && c.y >= p.y as f64
-                                && c.y < (p.y + s.height as i32) as f64
-                        })
-                        .cloned()
-                })
-                .or_else(|| app.primary_monitor().ok().flatten())
-                .or_else(|| monitors.first().cloned());
-            let Some(monitor) = monitor else {
-                return;
-            };
             let scale = monitor.scale_factor();
             let mon_x = monitor.position().x as f64 / scale;
             let mon_y = monitor.position().y as f64 / scale;
@@ -276,14 +276,19 @@ mod imp {
     /// Begin an agent hold: reset the stash, cover the cursor's monitor, CAPTURE
     /// the mouse, order front nonactivating, and arm the 90s safety auto-disarm.
     pub fn arm(app: &tauri::AppHandle) {
-        let _ = arm_owned(app, None);
+        let monitor = cursor_monitor(app);
+        let _ = arm_owned(app, None, monitor);
     }
 
-    pub fn arm_visual(app: &tauri::AppHandle, id: String) -> Option<u64> {
-        arm_owned(app, Some(id))
+    pub fn arm_visual(app: &tauri::AppHandle, id: String, monitor: tauri::Monitor) -> Option<u64> {
+        arm_owned(app, Some(id), Some(monitor))
     }
 
-    fn arm_owned(app: &tauri::AppHandle, visual_id: Option<String>) -> Option<u64> {
+    fn arm_owned(
+        app: &tauri::AppHandle,
+        visual_id: Option<String>,
+        monitor: Option<tauri::Monitor>,
+    ) -> Option<u64> {
         use tauri::{Emitter, Manager};
         let _change = OVERLAY_CHANGE
             .lock()
@@ -303,6 +308,7 @@ mod imp {
             *stash = Stash {
                 generation,
                 visual_id,
+                monitor: monitor.clone(),
                 ..Stash::new()
             };
             ARMED.store(true, Ordering::SeqCst);
@@ -315,7 +321,9 @@ mod imp {
         }
 
         if let Some(win) = app.get_webview_window(SPATIAL_INK_LABEL) {
-            reposition_to_cursor(app, &win);
+            if let Some(monitor) = monitor {
+                reposition_to_monitor(&win, monitor);
+            }
             apply_macos_recipe(&win);
             // CAPTURE the mouse — pointer events now reach the ink page.
             let _ = win.set_ignore_cursor_events(false);
@@ -496,20 +504,16 @@ mod imp {
             {
                 s.first_stroke_seen = true;
                 s.capturing = true;
-                capture_generation = Some(s.generation);
+                capture_generation = Some((s.generation, s.monitor.clone()));
             }
         }
-        let Some(generation) = capture_generation else {
+        let Some((generation, monitor)) = capture_generation else {
             return;
         };
         // Capture the marked monitor NOW (before ink renders), off the main
         // thread — the ~300-600ms screencapture subprocess overlaps the operator
         // still drawing + talking, so finalize pays no extra latency.
         let app2 = app.clone();
-        use tauri::Manager;
-        let monitor = app
-            .get_webview_window(SPATIAL_INK_LABEL)
-            .and_then(|window| window.current_monitor().ok().flatten());
         std::thread::spawn(move || {
             let cap = screen::capture_full(&app2, monitor);
             let mut s = lock_stash();
@@ -651,6 +655,7 @@ mod imp {
                 &mut *lock_stash(),
                 Stash {
                     generation: 42,
+                    monitor: None,
                     visual_id: Some("frame-owned".into()),
                     capturing: false,
                     first_stroke_seen: true,
@@ -692,8 +697,8 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 pub use imp::{
-    arm, arm_visual, begin_visual_controls, capture_ready, create, disarm, disarm_visual,
-    generation, is_armed, prime_capture, register_listeners, take_spatial_context,
+    arm, arm_visual, begin_visual_controls, capture_ready, create, cursor_monitor, disarm,
+    disarm_visual, generation, is_armed, prime_capture, register_listeners, take_spatial_context,
     take_visual_frame,
 };
 
