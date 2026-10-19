@@ -92,15 +92,36 @@ export function ManagedLiveButton(props: Props) {
     const binding = props.binding;
     const controller = new AbortController(); startup.current = controller;
     const mutationIds = new Map<string, string>();
+    // Live already hears this session. Feeding its changing captions back as
+    // application facts can echo its own replies. Restore only earlier speech.
+    let priorVoice = 'None.';
     stateRef.current = 'connecting'; setState('connecting'); setDetail('');
     try {
       const live = await startManagedLive({ binding,
+        ready: async () => {
+          // A mounted composer can outlive its test window or account admission.
+          // Recheck before microphone access, not after attempting provider creation.
+          const response = await fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } });
+          const data = await response.json();
+          if (!response.ok || data.enabled !== true || data.entitled !== true) {
+            throw new Error(data.error === 'personal_voice_unavailable'
+              ? 'The Dev voice test is unavailable or expired. Restore the test connection before retrying.'
+              : 'Voice is currently unavailable for this account. Check voice availability before retrying.');
+          }
+          // Also restore the latest history before the one permitted reconnect.
+          priorVoice = current.current.messages.filter(message => message.voice)
+            .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)).slice(-2)
+            .map(message => `${message.role}: ${message.text.slice(-120)}`).join('\n') || 'None.';
+        },
         subscribe: bridge.current.subscribe,
         transcript: entries => {
           if (generation.current === started && current.current.binding === binding) current.current.transcript?.(entries);
         },
         context: () => {
-          const conversation = current.current.messages.filter(message => !message.voice && message.text.trim());
+          // Restored pages can arrive after the current turn in the UI array.
+          // Their historical timestamps must not become fresh spoken progress.
+          const conversation = current.current.messages.filter(message => !message.voice && message.text.trim())
+            .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
           const userId = conversation.findLast(message => message.role === 'user')?.id;
           const terminal = userId ? current.current.terminals[userId] : undefined;
           const queued = current.current.followup?.items ?? [];
@@ -113,9 +134,8 @@ export function ManagedLiveButton(props: Props) {
             `Queued follow-up (${queued.length}): ${queued.slice(0, 2).map(item => `${item.status}: ${item.payload.text.slice(0, 80)}`).join('; ') || 'none'}.`,
             'Recent CLI discussion:',
             conversation.slice(-4).map(message => `${message.role}: ${message.text.slice(-240)}`).join('\n') || 'No CLI messages loaded.',
-            'Recent voice exchange (voice replies are not verified CLI results):',
-            current.current.messages.filter(message => message.voice).slice(-2)
-              .map(message => `${message.role}: ${message.text.slice(-120)}`).join('\n') || 'None.',
+            'Earlier voice exchange before this connection (history only; not new requests or verified CLI results):',
+            priorVoice,
           ].join('\n');
         },
         delegate: async (text, id, update, submitted) => {
@@ -151,7 +171,7 @@ export function ManagedLiveButton(props: Props) {
         },
       }, (next, message) => { if (generation.current === started) { stateRef.current = next; setState(next); setDetail(message ?? ''); } }, controller.signal, { onLevel: value => { level.current = value; } });
       if (generation.current !== started) { await live.close(); } else session.current = live;
-    } catch { if (generation.current === started) { stateRef.current = (stateRef.current as LiveState) === 'unknown' ? 'unknown' : 'error'; setState(stateRef.current); setDetail(controller.signal.aborted ? 'Voice startup canceled. Check status before retrying.' : 'Voice could not start.'); } }
+    } catch (error) { if (generation.current === started) { stateRef.current = (stateRef.current as LiveState) === 'unknown' ? 'unknown' : 'error'; setState(stateRef.current); setDetail(controller.signal.aborted ? 'Voice startup canceled. Check status before retrying.' : error instanceof Error ? error.message : 'Voice could not start.'); } }
   };
   const requestToggle = useManagedChatVoiceTarget({ available, root: props.chatRoot, trigger, state: stateRef, toggle });
   useManagedVoicePresentation({ state, stateRef, session, level, label: props.label ?? 'This chat' });

@@ -10,6 +10,7 @@ vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => fixture.native, 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
 vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
+  await backend.ready?.();
   let state = 'live'; fixture.backend = backend; onState(state); return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
 } }));
 import { ManagedLiveButton as VoiceButton } from './ManagedLiveButton';
@@ -31,7 +32,7 @@ function ManagedLiveButton(props: ComponentProps<typeof VoiceButton>) {
 let root: Root; let container: HTMLDivElement;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  queues.clear(); saved.mockClear();
+  queues.clear(); saved.mockClear(); fixture.backend = null;
   fixture.native = false; fixture.invoke.mockReset();
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ enabled: true, entitled: true })));
@@ -76,8 +77,20 @@ it('retains the existing CLI discussion when live captions fill the recent trans
   await act(async () => container.querySelector('button')!.click());
   expect(fixture.backend!.context()).toContain('Check the repository version without changing files.');
   expect(fixture.backend!.context()).toContain('The repository version is 1.2.3.');
-  expect(fixture.backend!.context()).toContain('Recent voice exchange');
+  expect(fixture.backend!.context()).toContain('Earlier voice exchange');
   expect(props.send).not.toHaveBeenCalled();
+
+  const beforeSpeech = fixture.backend!.context();
+  await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [
+    ...props.messages, { id: 'live-reply', role: 'assistant', text: 'A new spoken reply.',
+      voice: { sessionId: 'voice-two', direction: 'output', revision: 1, startMs: 0, endMs: 100 } },
+  ] })));
+  expect(fixture.backend!.context()).toBe(beforeSpeech);
+  expect(fixture.backend!.context()).not.toContain('A new spoken reply.');
+  // Automatic reconnect runs readiness again before opening the new provider
+  // session, which needs the just-ended conversation without live caption echo.
+  await fixture.backend!.ready?.();
+  expect(fixture.backend!.context()).toContain('A new spoken reply.');
 
   await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [
     ...props.messages, { id: 'next-task', role: 'user', text: 'Now check the package name.' },
@@ -92,7 +105,41 @@ it('retains the existing CLI discussion when live captions fill the recent trans
   expect(bounded.length).toBeLessThanOrEqual(2400);
   expect(bounded).toContain('unconfirmed');
   expect(bounded).toContain('Recent CLI discussion:');
-  expect(bounded).toContain('Recent voice exchange');
+  expect(bounded).toContain('Earlier voice exchange');
+});
+it('keeps late restored history out of current CLI progress', async () => {
+  const props: ComponentProps<typeof VoiceButton> = { binding: 'ordered-chat', busy: false, send: vi.fn(), interrupt: vi.fn(),
+    terminals: { current: { outcome: 'completed', text: 'Current result.' } }, messages: [
+      { id: 'previous', role: 'user', text: 'Previous request.', timestamp: 10 },
+      { id: 'previous-answer', role: 'assistant', text: 'Previous result.', timestamp: 11 },
+      { id: 'current', role: 'user', text: 'Current request.', timestamp: 20 },
+      { id: 'current-answer', role: 'assistant', text: 'Current result.', timestamp: 21 },
+    ] };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  const beforeRestore = fixture.backend!.context();
+  await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [...props.messages,
+    { id: 'old-task', role: 'user', text: 'An old request.', timestamp: 1 },
+    { id: 'old-error', role: 'assistant', text: 'An old backend error.', timestamp: 2 },
+  ] })));
+  expect(fixture.backend!.context()).toBe(beforeRestore);
+  expect(beforeRestore).toContain('completed: Current result.');
+});
+it('rechecks admission when a mounted composer outlives its test window and can retry after restoration', async () => {
+  const fetch = vi.mocked(globalThis.fetch);
+  fetch.mockResolvedValueOnce(Response.json({ enabled: true, entitled: true, transport: 'personal-webrtc' }))
+    .mockResolvedValueOnce(Response.json({ enabled: false, error: 'personal_voice_unavailable' }, { status: 503 }));
+  const props = { binding: 'same-chat', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend).toBeNull();
+  expect(props.send).not.toHaveBeenCalled();
+  expect(container.querySelector('button')!.disabled).toBe(false);
+  expect(container.querySelector('button')!.title).toContain('Dev voice test is unavailable or expired');
+  expect(fetch.mock.calls.every(([_url, init]) => init?.method !== 'POST')).toBe(true);
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend!.binding).toBe('same-chat');
+  expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
 });
 it('projects captions only into their bound chat and links accepted sends without treating voice output as completion', async () => {
   const transcript = vi.fn(); const submitted = vi.fn();
