@@ -14,6 +14,7 @@ export function VoiceShortcutsSection({ externalFnActive }: { externalFnActive: 
     ['Hold Control + Z in o8', 'Dictate into the chat composer. Release to submit.'],
     ['Double-tap Right Command', 'Start or stop a realtime voice conversation. Requires voice setup.'],
     ['Escape', 'Cancel hands-free recording, stop spoken playback, or cancel active Symon tasks.'],
+    ['⌘⌥,', 'Open Voice Settings from any app, including when the top pill is off.'],
   ];
 
   return (

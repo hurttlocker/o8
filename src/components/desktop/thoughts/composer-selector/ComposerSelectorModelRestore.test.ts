@@ -13,6 +13,8 @@ import { readComposerEffortMaps, writeComposerModelEffort, type ComposerSelector
 import { useComposerSelectorState } from './useComposerSelectorState';
 import { useOrchestratorModelState } from './useOrchestratorModelState';
 
+vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: vi.fn() }));
+
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
 

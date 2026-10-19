@@ -36,3 +36,15 @@ export function resolveReleaseConfig(root, env = process.env) {
   }
   return config;
 }
+
+/** Match the web producer's public-client environment without mutating the caller. */
+export function resolveReleaseBuildEnvironment(root, env = process.env) {
+  const buildEnv = { ...env };
+  const config = resolveReleaseConfig(root, env);
+  // Preserve explicit environment bytes: recipe compatibility hashes the value
+  // actually passed to the compiler, not the trimmed release-config projection.
+  if (!buildEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && config.clerkPublishableKey) {
+    buildEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = config.clerkPublishableKey;
+  }
+  return buildEnv;
+}

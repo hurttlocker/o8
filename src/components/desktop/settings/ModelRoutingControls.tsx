@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { WorkerPoolSettings } from './WorkerPoolSettings';
 import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
 import { LocalAcpSection } from './LocalAcpSection';
@@ -165,7 +166,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
       </SettingsGroup>
     </section>
     <section style={{ marginTop: 28 }}>
-      <SettingsGroup header="Workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is available under Connected tools.">
+      <SettingsGroup header="Workers" footnote="Choose the tools your orchestrator may use. Describe the task in chat, or name a worker and model there. The preferred worker is used when no task choice is supplied. Model and effort defaults remain under Connected tools.">
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
@@ -191,7 +192,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             accessory={
               <PickerMenu<DispatchRuntime>
                 value={values.defaultDispatchRuntime}
-                options={DEFAULT_WORKER_RUNTIME_OPTIONS.filter((option) => option.value === values.defaultDispatchRuntime || tools.inventory?.some((item) => item.id === option.value && item.available))}
+                options={DEFAULT_WORKER_RUNTIME_OPTIONS.filter((option) => option.value === values.defaultDispatchRuntime || (sources.workerRuntimes !== 'file' || values.workerRuntimes.includes(option.value)) && tools.inventory?.some((item) => item.id === option.value && item.available))}
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
                 disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
@@ -202,6 +203,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
             divider
           />
+          <WorkerPoolSettings data={data} inventory={tools.inventory} busy={busyField === 'workerRuntimes'} onChange={pool => updateField('workerRuntimes', pool)} />
           {piSetup?.detected ? <SettingsRow
             label="Your Pi setup"
             subtitle={<span style={{ overflowWrap: 'anywhere' }}>{`${piSetup.binaryPath ?? 'CLI not found'}${piSetup.version ? ` (v${piSetup.version})` : ''}. ${piSetup.provider ?? 'Provider not set'} / ${piSetup.model ?? 'Model not set'}. ${piSetup.extensions} extensions, ${piSetup.skills} skills, ${piSetup.sessions} sessions${piSetup.countsTruncated ? ' (scan limit reached)' : ''}. Credentials ${piSetup.credentialsPresent ? 'present' : 'not found'}. Choose Pi in Default worker to use this setup.`}</span>}

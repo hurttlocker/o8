@@ -19,6 +19,7 @@ import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { useUltraEffortPreference } from './UltraEffortPreference';
 import {
   readComposerEffortMaps,
+  defaultComposerMode,
   resolveComposerLeadCatalogueLabel,
   resolveComposerSelectorState,
   resolveSupportedEffortChange,
@@ -117,7 +118,7 @@ export function useComposerSelectorState(input: {
     };
   });
   const [threadMode, setThreadMode] = useState<ComposerSelectorMode>(() => (
-    modeStorageId ? readStoredComposerMode(modeStorageId) : mode ?? 'solo'
+    modeStorageId ? readStoredComposerMode(modeStorageId, mode ?? (isolated ? 'solo' : defaultComposerMode(backend))) : mode ?? (isolated ? 'solo' : defaultComposerMode(backend))
   ));
   const [inSessionMode, setInSessionMode] = useState<ComposerSelectorMode | undefined>();
   const [operatorWorkerDefaults, setOperatorWorkerDefaults] = useState<ComposerWorkerDefaults>(
@@ -189,9 +190,9 @@ export function useComposerSelectorState(input: {
     if (modeStorageIdRef.current !== modeStorageId) {
       modeStorageIdRef.current = modeStorageId;
       setInSessionMode(undefined);
-      setThreadMode(modeStorageId ? readStoredComposerMode(modeStorageId) : mode ?? 'solo');
+      setThreadMode(modeStorageId ? readStoredComposerMode(modeStorageId, mode ?? (isolated ? 'solo' : defaultComposerMode(backend))) : mode ?? (isolated ? 'solo' : defaultComposerMode(backend)));
     }
-  }, [mode, modeStorageId]);
+  }, [backend, isolated, mode, modeStorageId]);
 
   useEffect(() => {
     if (!mode || parentModeRef.current === mode) return;
@@ -242,7 +243,7 @@ export function useComposerSelectorState(input: {
     : modelLabel;
   const workerModel = workerModelForDisplay(workerDefaults.defaultDispatchRuntime, workerDefaults);
   const resolved = useMemo(() => resolveComposerSelectorState({
-    mode: mode ?? 'solo',
+    mode: mode ?? (isolated ? 'solo' : defaultComposerMode(backend)),
     leadModelId: modelId ?? '',
     leadModelLabel: backend === 'acp' && !modelId ? 'Local ACP' : resolvedModelLabel,
     leadBackend: backend ?? 'codex',
@@ -292,6 +293,7 @@ export function useComposerSelectorState(input: {
     resolvedModelLabel,
     storedEfforts,
     inSessionMode,
+    isolated,
     threadMode,
     ultraEnabled,
     workerOverrides,

@@ -23,7 +23,10 @@ function registeredToolNames(files: URL[]): Set<string> {
   return names;
 }
 
-const CORTEX_TOOLS = registeredToolNames([new URL('cortex-mcp-server.ts', MCP_DIR)]);
+const CORTEX_TOOLS = registeredToolNames([
+  new URL('cortex-mcp-server.ts', MCP_DIR),
+  new URL('cortex-worker-tools.ts', MCP_DIR),
+]);
 const OPERATOR_TOOLS = registeredToolNames(
   readdirSync(new URL('operator-handlers/', MCP_DIR))
     .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
@@ -61,7 +64,9 @@ describe('orchestrator prompt tool scope (#2898)', () => {
     expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
   });
   it('finds the registered tool catalogs it guards', () => {
+    expect(readFileSync(new URL('cortex-mcp-server.ts', MCP_DIR), 'utf8')).toContain('...CORTEX_WORKER_TOOLS');
     expect(CORTEX_TOOLS).toContain('cortex_launch_agent');
+    expect(CORTEX_TOOLS).toContain('cortex_worker_catalog');
     expect(OPERATOR_TOOLS).toContain('create_mission');
     expect(OPERATOR_TOOLS).toContain('o8_render');
     for (const name of CORTEX_READONLY_TOOLS) expect(CORTEX_TOOLS, name).toContain(name);

@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
-import { SwarmStatusCard, focusSwarmPacket } from '../thoughts/chat-panel/SwarmStatusCard';
+import { SwarmStatusCard, focusSwarmPacket, visibleSwarmPackets } from '../thoughts/chat-panel/SwarmStatusCard';
 import { ChatActionCard } from '../thoughts/chat-panel/ChatActionCard';
 import { FloatingSurface } from '../FloatingSurface';
 import { transcriptTurnFiles } from './turns';
@@ -21,7 +21,7 @@ export function TranscriptActivity({ entries, packets, busy, repoPath, onFocusPa
   const files = transcriptTurnFiles(turn);
   const scouts = transcriptScouts(turn, busy);
   const plan = transcriptPlan(turn);
-  const visiblePackets = packets.filter(packet => packet.status !== 'draft' && packet.status !== 'idle');
+  const visiblePackets = visibleSwarmPackets(packets);
   if (!visiblePackets.length && !scouts.length && !plan.length && !(busy && files.length)) return null;
   const agentCount = visiblePackets.length + scouts.length;
   const chips = [
@@ -38,7 +38,7 @@ export function TranscriptActivity({ entries, packets, busy, repoPath, onFocusPa
     <ComposerPopover anchorRef={anchor} open={open !== null && chips.some(chip => chip.key === open)} onClose={() => setOpen(null)}>
       <FloatingSurface overlay role="dialog" aria-label={open === 'agents' ? 'Agents in this conversation' : open === 'plan' ? 'Task plan' : 'Current changes'}
         style={{ width: 'min(420px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 14, maxHeight: 'min(420px, 65vh)', overflowY: 'auto' }}>
-        {open === 'agents' ? <SwarmStatusCard packets={visiblePackets} scouts={scouts} onFocusPacket={packet => { setOpen(null); focusSwarmPacket(packet, onFocusPacket); }} /> : null}
+        {open === 'agents' ? <SwarmStatusCard defaultExpanded packets={visiblePackets} scouts={scouts} onFocusPacket={packet => { setOpen(null); focusSwarmPacket(packet, onFocusPacket); }} /> : null}
         {open === 'changes' ? <ChatActionCard filesEditedCount={files.length} files={files} filePaths={files.map(file => file.path)} repoPath={repoPath ?? null} allowUndo={false} /> : null}
         {open === 'plan' ? <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <strong style={{ fontSize: 12 }}>Task plan</strong>

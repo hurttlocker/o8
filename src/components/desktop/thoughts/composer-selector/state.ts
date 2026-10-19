@@ -121,23 +121,23 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
     long: 'Solo',
     short: 'Solo',
     sublabel: 'Works alone, nothing is dispatched',
-    placeholder: 'Build solo, no dispatches · / for commands',
+    placeholder: 'Ask anything · delegation is off',
     directive: COMPOSER_MODE_DIRECTIVES.solo,
   },
   {
     id: 'multitask',
-    long: 'Multitask',
-    short: 'Multitask',
-    sublabel: 'Parallel packets in isolated worktrees',
-    placeholder: 'Parallel packets in isolated worktrees…',
+    long: 'Worktrees',
+    short: 'Worktrees',
+    sublabel: 'Give delegated workers separate checkouts',
+    placeholder: 'Ask anything · workers use isolated worktrees',
     directive: COMPOSER_MODE_DIRECTIVES.multitask,
   },
   {
     id: 'fast',
     long: 'Shared',
     short: 'Shared',
-    sublabel: 'Workers edit one checkout; orchestrator reviews and commits',
-    placeholder: 'Parallel workers in this checkout…',
+    sublabel: 'Work here; delegate to suitable workers when useful',
+    placeholder: 'Ask anything · delegate when useful',
     directive: COMPOSER_MODE_DIRECTIVES.fast,
   },
   {
@@ -159,7 +159,7 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
 ];
 
 /** Visible choices; the advanced execution modes remain available internally. */
-export const VISIBLE_COMPOSER_SELECTOR_MODES = ['solo', 'fast', 'multitask'] as const;
+export const VISIBLE_COMPOSER_SELECTOR_MODES = ['fast', 'multitask'] as const;
 
 const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_RANK: Record<ThinkingEffort, number> = {
@@ -284,7 +284,14 @@ export function composerSelectorModeSpec(mode: ComposerSelectorMode): ComposerSe
 }
 
 export function composerSupportsFastMode(backend: OrchestratorBackendSetting): boolean {
-  return backend === 'codex' || backend === 'claude' || backend === 'fable';
+  // Both bundled lead IDs receive the thread-bound cortex delegation surface.
+  // ACP-only leads do not yet carry that surface, so do not infer support from installation.
+  return backend === 'codex' || backend === 'claude' || backend === 'fable'
+    || backend === 'pi' || backend === 'o8';
+}
+
+export function defaultComposerMode(backend: OrchestratorBackendSetting = 'codex'): ComposerSelectorMode {
+  return composerSupportsFastMode(backend) ? 'fast' : 'solo';
 }
 
 export function cycleComposerSelectorMode(
@@ -293,7 +300,7 @@ export function cycleComposerSelectorMode(
   backend?: OrchestratorBackendSetting,
 ): ComposerSelectorMode {
   const index = VISIBLE_COMPOSER_SELECTOR_MODES.findIndex(entry => entry === mode);
-  if (index < 0) return 'solo';
+  if (index < 0) return !backend || composerSupportsFastMode(backend) ? 'fast' : 'multitask';
   for (let step = 1; step <= VISIBLE_COMPOSER_SELECTOR_MODES.length; step += 1) {
     const candidate = VISIBLE_COMPOSER_SELECTOR_MODES[
       (index + direction * step + VISIBLE_COMPOSER_SELECTOR_MODES.length * step) % VISIBLE_COMPOSER_SELECTOR_MODES.length
@@ -392,7 +399,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     workerStartMode: resolveSelectorSetting('workerStartMode', ...settingSources) ?? null,
   };
   const mode = composerSelectorModeSpec(resolvedSettings.mode === 'fast' && !composerSupportsFastMode(input.leadBackend)
-    ? 'multitask' : resolvedSettings.mode);
+    ? 'solo' : resolvedSettings.mode);
   const workerRuntimeLabel = resolvedSettings.workerRuntime
     ? composerRuntimeLabel(resolvedSettings.workerRuntime)
     : input.workerRuntimeLabel?.trim() || '';

@@ -30,6 +30,48 @@ pub fn fixed_logical_size(width: f64, height: f64) -> Option<(f64, f64)> {
     Some((width, height))
 }
 
+/// Place caret feedback in the AX/AppKit logical desktop coordinate space.
+/// Backing scale affects rasterization, never global point origins. If AX has
+/// no usable anchor, follow the pointer's screen rather than o8's main window.
+pub fn caret_local_frame(
+    screens: &[LogicalScreen],
+    anchor: Option<LogicalWindowFrame>,
+    pointer: (f64, f64),
+    size: (f64, f64),
+    gap: f64,
+) -> Option<LogicalWindowFrame> {
+    let (width, height) = fixed_logical_size(size.0, size.1)?;
+    let contains = |screen: &&LogicalScreen, point: (f64, f64)| {
+        point.0 >= screen.x && point.0 < screen.x + screen.width
+            && point.1 >= screen.y && point.1 < screen.y + screen.height
+    };
+    let anchor = anchor.filter(|a| {
+        a.x.is_finite() && a.y.is_finite() && a.width.is_finite()
+            && a.height.is_finite() && a.width >= 0.0 && a.height > 0.0
+    });
+    let anchored = anchor.and_then(|a| {
+        screens.iter().find(|screen| contains(screen, (a.x, a.y))).map(|screen| (screen, a))
+    });
+    let screen = anchored.map(|(screen, _)| screen)
+        .or_else(|| screens.iter().find(|screen| contains(screen, pointer)))
+        .or_else(|| screens.iter().find(|screen| screen.is_primary))
+        .or_else(|| screens.first())?;
+    if screen.width <= 0.0 || screen.height <= 0.0 {
+        return None;
+    }
+    let max_x = (screen.x + screen.width - width).max(screen.x);
+    let max_y = (screen.y + screen.height - height).max(screen.y);
+    let (x, y) = if let Some((_, a)) = anchored {
+        let below = a.y + a.height + gap;
+        let y = if below + height <= screen.y + screen.height { below } else { a.y - height - gap };
+        ((a.x + a.width + gap).clamp(screen.x, max_x), y.clamp(screen.y, max_y))
+    } else {
+        ((screen.x + (screen.width - width) / 2.0).clamp(screen.x, max_x),
+            (screen.y + screen.height - height - 48.0).clamp(screen.y, max_y))
+    };
+    Some(LogicalWindowFrame { x, y, width, height })
+}
+
 /// Return a fixed-size top-center frame on the primary monitor.
 ///
 /// Inputs and outputs are desktop logical points with a top-left origin. The
@@ -106,7 +148,7 @@ pub fn set_frame_points(
 
 #[cfg(test)]
 mod tests {
-    use super::{fixed_logical_size, primary_top_center, LogicalScreen, LogicalWindowFrame};
+    use super::{caret_local_frame, fixed_logical_size, primary_top_center, LogicalScreen, LogicalWindowFrame};
 
     const DOCK_WIDTH: f64 = 520.0;
     const DOCK_HEIGHT: f64 = 120.0;
@@ -205,6 +247,34 @@ mod tests {
             for _ in 0..10 {
                 assert_eq!(fixed_logical_size(expected.0, expected.1), Some(expected));
             }
+        }
+    }
+
+    #[test]
+    fn caret_placement_follows_left_display_in_mixed_scale_desktop() {
+        let screens = [primary(), LogicalScreen {
+            x: -2560.0, y: -188.0, width: 2560.0, height: 1440.0,
+            scale_factor: 1.0, is_primary: false,
+        }];
+        let anchor = LogicalWindowFrame { x: -1600.0, y: 900.0, width: 1.0, height: 20.0 };
+        let frame = caret_local_frame(&screens, Some(anchor), (1000.0, 900.0), (460.0, 138.0), 8.0).unwrap();
+        assert_eq!(frame, LogicalWindowFrame { x: -1591.0, y: 928.0, width: 460.0, height: 138.0 });
+        let main_caret = LogicalWindowFrame { x: 1800.0, y: 1200.0, ..anchor };
+        let frame = caret_local_frame(&screens, Some(main_caret), (-1600.0, 900.0), (460.0, 138.0), 8.0).unwrap();
+        assert_eq!((frame.x, frame.y), (1809.0, 1228.0));
+    }
+
+    #[test]
+    fn missing_caret_follows_pointer_screen_and_clamps_without_scale_conversion() {
+        let above = LogicalScreen { x: 0.0, y: -1440.0, width: 2560.0, height: 1440.0, scale_factor: 1.0, is_primary: false };
+        let screens = [primary(), above];
+        let frame = caret_local_frame(&screens, None, (1000.0, -500.0), (460.0, 138.0), 8.0).unwrap();
+        assert_eq!((frame.x, frame.y), (1050.0, -186.0));
+        let edge = LogicalWindowFrame { x: 2555.0, y: -30.0, width: 1.0, height: 20.0 };
+        let frame = caret_local_frame(&screens, Some(edge), (0.0, 0.0), (460.0, 138.0), 8.0).unwrap();
+        assert_eq!((frame.x, frame.y), (2100.0, -176.0));
+        for _ in 0..10 {
+            assert_eq!(caret_local_frame(&screens, Some(edge), (0.0, 0.0), (460.0, 138.0), 8.0).unwrap(), frame);
         }
     }
 }

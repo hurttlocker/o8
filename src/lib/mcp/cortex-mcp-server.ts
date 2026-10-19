@@ -48,7 +48,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { packetStatusWriteRejection } from '@/lib/orchestrator/packet-patch-policy';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
-import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { CORTEX_WORKER_TOOLS } from './cortex-worker-tools';
+import { createWorkerObservationHandlers } from './worker-observation';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -107,7 +108,8 @@ const PARENT_THREAD_ID = process.env.CORTEX_THREAD_ID || '';
 const FAST_CAPABILITY = process.env.CORTEX_FAST_CAPABILITY || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
-const { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam } = createCortexDelegationHandlers({
+const { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleReconcileSharedTeam, handleCorrectWorkers, handleInterruptAgent } = createCortexDelegationHandlers({
+  apiFetch,
   apiBase: API_BASE,
   repoPath: REPO_PATH,
   parentThreadId: PARENT_THREAD_ID,
@@ -132,8 +134,8 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_fleet_status',
     description:
-      'List all active AI agent sessions (Claude Code and Codex). ' +
-      'Returns agent names, status, workspace, branch, runtime, and last activity.',
+      'List registered runtime sessions with exact handles, observed ownership and capabilities. ' +
+      'relatedWorkers lists persisted workers for this parent conversation, including archived shared teams. Discovery grants no mutation authority.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -305,54 +307,7 @@ const TOOLS: McpTool[] = [
     },
   },
   // ── Delegation tools ──
-  {
-    name: 'cortex_launch_agent',
-    description:
-      'Launch a worker session for a new task. To start an existing prepared mission, call the operator dispatch_mission tool with its missionId; do not launch a worker to dispatch it. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
-      'When runtime/model are omitted, the operator\'s saved dispatch defaults are used. Returns the selected routing receipt ' +
-      'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        prompt: { type: 'string', description: 'The task for the agent to complete. Be specific and actionable.' },
-        repoPath: { type: 'string', description: 'Absolute repo path. Defaults to the current repo.' },
-        taskName: { type: 'string', description: 'Short task name shown in the UI.' },
-        isolate: { type: 'boolean', description: 'Legacy isolation flag. False is accepted only with checkoutMode: "shared" from an o8 orchestrator chat.' },
-        checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Fast mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
-        assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Fast mode: exact non-overlapping relative files or directories this worker owns.' },
-        runtime: {
-          type: 'string',
-          enum: listDispatchableRuntimes(),
-          description: 'Optional worker runtime id; omit it to use the operator\'s saved dispatch default. '
-            + '"pi-builtin" is the built-in Pi worker that ships with o8. "pi" is the operator\'s own Pi CLI and runs only when it is installed.',
-        },
-        model: { type: 'string', description: 'Optional runtime-specific model id.' },
-        workerIntent: { type: 'string', enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'], description: 'Optional routing intent.' },
-        readOnly: {
-          type: 'boolean',
-          description: 'Set true for inspect, investigate, verify, or report tasks that must not change files. A clean zero-diff exit then completes as evidence.',
-        },
-      },
-      required: ['prompt'],
-    },
-  },
-  {
-    name: 'cortex_shared_team_status',
-    description: 'Inspect this orchestrator chat’s Fast team: shared checkout, members, initial dirty paths, changed and committed paths, and edits outside assigned scopes. Read this before a group commit.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'cortex_finish_shared_team',
-    description: 'After all Fast workers settle, review and commit their combined scoped changes, run verification, then archive the team receipt and release checkout ownership. Refuses live workers, uncommitted team edits, and changes outside scopes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        reviewSummary: { type: 'string', description: 'Concise summary of the combined diff and review findings.' },
-        verification: { type: 'string', description: 'Commands and outcomes used to verify the combined result.' },
-      },
-      required: ['reviewSummary', 'verification'],
-    },
-  },
+  ...CORTEX_WORKER_TOOLS,
   {
     name: 'cortex_steer_agent',
     description:
@@ -375,7 +330,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_read_transcript',
     description:
-      'Read the recent transcript of a Codex agent session. Shows what the agent has been doing — messages, tool calls, and outputs.',
+      'Read a runtime transcript with stable entry IDs. Pass nextCursor as sinceId to read newer entries. Text previews disclose truncation and use a bounded response budget.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -385,8 +340,10 @@ const TOOLS: McpTool[] = [
         },
         limit: {
           type: 'number',
-          description: 'Number of transcript entries to return. Default 20.',
+          description: 'Number of transcript entries to return, 1 to 100. Default 20.',
         },
+        sinceId: { type: 'string', description: 'Existing transcript entry ID; return entries after it.' },
+        maxTextChars: { type: 'integer', minimum: 100, maximum: 12000, description: 'Maximum characters per text preview. Default 4000; total text is bounded to 24000 characters.' },
       },
       required: ['sessionKey'],
     },
@@ -655,28 +612,9 @@ function jsonResult(data: unknown, isError = false): McpToolResult {
   return textResult(JSON.stringify(data), isError);
 }
 
-async function handleFleetStatus(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const fresh = args.fresh ? '1' : '';
-    const data = await apiFetch(`/api/runtime/inventory?fresh=${fresh}`) as Record<string, unknown>;
-    const allAgents = (data.agents ?? []) as Array<Record<string, unknown>>;
-    // Filter to the supported local coding runtimes only.
-    const agents = allAgents.filter((a) => a.runtime === 'claude-code' || a.runtime === 'codex');
-    // Return a concise summary
-    const summary = agents.map((a) => ({
-      name: a.name,
-      runtime: a.runtime,
-      status: a.status,
-      workspace: a.workspace,
-      branch: a.branch,
-      task: a.currentTask,
-      lastActive: a.lastEventAt,
-    }));
-    return jsonResult({ agentCount: agents.length, agents: summary });
-  } catch (err) {
-    return textResult(`Failed to fetch fleet status: ${safeErrorText(err)}`, true);
-  }
-}
+const { handleFleetStatus, handleReadTranscript, handleWaitWorkers } = createWorkerObservationHandlers({
+  repoPath: REPO_PATH, parentThreadId: PARENT_THREAD_ID,
+}, apiFetch);
 
 async function handleListIssues(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
@@ -918,52 +856,6 @@ async function handleSteerAgent(args: Record<string, unknown>): Promise<McpToolR
     return textResult(`Steer failed: ${safeErrorText(result)}`, true);
   } catch (err) {
     return textResult(`Failed to steer agent: ${safeErrorText(err)}`, true);
-  }
-}
-
-async function handleReadTranscript(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const sessionKey = args.sessionKey as string;
-    if (!sessionKey) return textResult('sessionKey is required', true);
-
-    const limit = (args.limit as number) || 20;
-    const qs = `?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`;
-    const data = await apiFetch(`/api/runtime/transcript${qs}`) as Record<string, unknown>;
-    const transcript = (data.transcript ?? []) as Array<Record<string, unknown>>;
-
-    const entries = transcript.map((e) => ({
-      role: e.role,
-      text: typeof e.text === 'string' && e.text.length > 500 ? e.text.slice(0, 500) + '...' : e.text,
-      tool: e.toolName ?? null,
-      file: e.filePath ?? null,
-      time: e.timestampLabel,
-    }));
-
-    return jsonResult({ entryCount: entries.length, transcript: entries });
-  } catch (err) {
-    return textResult(`Failed to read transcript: ${safeErrorText(err)}`, true);
-  }
-}
-
-async function handleInterruptAgent(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const surfaceId = args.surfaceId as string;
-    if (!surfaceId) return textResult('surfaceId is required', true);
-
-    const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
-      url: `${API_BASE}/api/runtime/action`,
-      authorization: `Bearer ${WS_TOKEN}`,
-      body: { action: 'interrupt', surfaceId },
-      parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
-      correlationField: 'clientMutationId',
-    });
-
-    if (result.ok) {
-      return jsonResult({ ok: true, note: result.note });
-    }
-    return textResult(`Interrupt failed: ${safeErrorText(result)}`, true);
-  } catch (err) {
-    return textResult(`Failed to interrupt agent: ${safeErrorText(err)}`, true);
   }
 }
 
@@ -1360,10 +1252,14 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_resolve_approval: handleResolveApproval,
   cortex_propose_spec: handleProposeSpec,
   lane_touches: handleLaneTouches,
+  cortex_worker_catalog: handleWorkerCatalog,
+  cortex_wait_workers: handleWaitWorkers,
   cortex_launch_agent: handleLaunchAgent,
   cortex_shared_team_status: handleSharedTeamStatus,
   cortex_finish_shared_team: handleFinishSharedTeam,
+  cortex_reconcile_shared_team: handleReconcileSharedTeam,
   cortex_steer_agent: handleSteerAgent,
+  cortex_correct_workers: handleCorrectWorkers,
   cortex_read_transcript: handleReadTranscript,
   cortex_interrupt_agent: handleInterruptAgent,
   register_mcp: handleRegisterMcp,

@@ -313,6 +313,13 @@ export async function startCodexSubscriptionProxyLogin(): Promise<CodexSubscript
   return getCodexSubscriptionProxyStatus();
 }
 
+/** Read only: discovery must not start a proxy or an authentication flow. */
+export async function readCodexSubscriptionProxyModels(): Promise<string[] | null> {
+  const clientToken = (await readFile(tokenPath(), 'utf8').catch(() => '')).trim();
+  if (!/^[a-f0-9]{64}$/i.test(clientToken)) return null;
+  return (await probe(clientToken))?.models ?? null;
+}
+
 export async function getCodexSubscriptionProxyStatus(): Promise<CodexSubscriptionProxyStatus> {
   const installed = Boolean(await resolveProxyBinary());
   const authenticated = await hasCodexAuth();

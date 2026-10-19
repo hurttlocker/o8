@@ -775,23 +775,7 @@ fn begin_system_dictation(smart_compose: bool) {
                 // always lands — the broadcast `app.emit` can miss the second
                 // (dock) webview. `emit_to(DOCK_LABEL, …)` is the reliable path.
                 log::info!("[fn-hotkey] morph dock → recording (system-start → dock)");
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    payload.clone(),
-                );
-                // Direct delivery to the partials HUD too (same reliability reason
-                // as the dock) — only when the HUD is enabled for Fn dictation.
-                if partials_surface != crate::live_dictation::PartialsSurface::Off {
-                    let _ = app.emit_to(
-                        crate::agent_partials_window::PARTIALS_LABEL,
-                        "o8:stt-event",
-                        payload.clone(),
-                    );
-                }
-                // Keep the broadcast too for any other listeners (no-op for the
-                // in-window pill, which ignores system-origin events).
-                let _ = app.emit("o8:stt-event", payload);
+                crate::stt_engine::emit_system_stt(&app, payload);
             }
         });
     }
@@ -884,12 +868,7 @@ fn surface_dictation_start_error(raw: &str) {
                     "origin": "system",
                     "text": message,
                 });
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    payload.clone(),
-                );
-                let _ = app.emit("o8:stt-event", payload);
+                crate::stt_engine::emit_system_stt(&app, payload);
             }
         });
     }
@@ -927,12 +906,7 @@ fn morph_dock_idle_for_lane(agent_lane: bool) {
                 if agent_lane {
                     crate::stt_engine::emit_agent_stt(&app, payload);
                 } else {
-                    let _ = app.emit_to(
-                        crate::dock_window::DOCK_LABEL,
-                        "o8:stt-event",
-                        payload.clone(),
-                    );
-                    let _ = app.emit("o8:stt-event", payload);
+                    crate::stt_engine::emit_system_stt(&app, payload);
                 }
             }
         });
@@ -1037,19 +1011,7 @@ fn begin_long_form_dictation() {
                     })
                 };
                 log::info!("[fn-hotkey] morph dock → recording (long-form start)");
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    payload.clone(),
-                );
-                if partials_surface != crate::live_dictation::PartialsSurface::Off {
-                    let _ = app.emit_to(
-                        crate::agent_partials_window::PARTIALS_LABEL,
-                        "o8:stt-event",
-                        payload.clone(),
-                    );
-                }
-                let _ = app.emit("o8:stt-event", payload);
+                crate::stt_engine::emit_system_stt(&app, payload);
             }
         });
     }
@@ -1172,12 +1134,7 @@ fn begin_ask_dictation() {
                 crate::dock_window::show(&app);
                 let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
                 log::info!("[fn-hotkey] morph dock → recording (ask start)");
-                let _ = app.emit_to(
-                    crate::dock_window::DOCK_LABEL,
-                    "o8:stt-event",
-                    payload.clone(),
-                );
-                let _ = app.emit("o8:stt-event", payload);
+                crate::stt_engine::emit_system_stt(&app, payload);
                 // Tell the dock's Ask answer panel to open (grow + show listening).
                 // The panel itself calls dock_set_expanded to resize; this event is
                 // the trigger. Dock-only — the in-window surface ignores it.
@@ -1597,6 +1554,10 @@ pub fn start(app: tauri::AppHandle) {
                     }
 
                     let flags = event.get_flags().bits();
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::managed_voice_window::caps_lock_changed(app,
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE), flags);
+                    }
                     let fn_is_down = (flags & FN_FLAG) != 0;
                     let smart_compose = (flags & CONTROL_FLAG) != 0;
 

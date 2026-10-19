@@ -1,21 +1,39 @@
 /** @vitest-environment jsdom */
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps } from 'react';
+import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import type { LiveBackend } from '@/lib/voice/managed-live/session';
 const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
 vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
-  fixture.backend = backend; onState('live'); return { state: 'live', close: async () => { onState('closed'); }, activity() {} };
+  let state = 'live'; fixture.backend = backend; onState(state); return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
 } }));
-import { ManagedLiveButton } from './ManagedLiveButton';
+import { ManagedLiveButton as VoiceButton } from './ManagedLiveButton';
+const queues = new Map<string, QueuedComposerSendRecord[]>();
+const saved = vi.fn();
+function ManagedLiveButton(props: ComponentProps<typeof VoiceButton>) {
+  return createElement(VoiceButton, { ...props, followup: {
+    ready: true, items: queues.get(props.binding) ?? [],
+    enqueue: async (id, text, afterTaskId) => {
+      saved(id, text, afterTaskId, props.binding);
+      queues.set(props.binding, [{ id, sequence: 1, threadId: props.binding, repoPath: '/repo', intent: 'send-next',
+        status: 'queued', reason: null, createdAt: 1, updatedAt: 1, admittedAt: null,
+        payload: { text, wireMessage: text, afterTaskId, images: [], routing: { backend: 'codex', model: 'model',
+          effort: 'high', permissionMode: 'plan', mode: 'fleet', pickedMode: 'multitask', collide: false, pinBackend: true } } }]);
+    },
+    cancel: async () => { queues.delete(props.binding); return 'Queued voice follow-up canceled before submission. The running task is unchanged.'; },
+  } });
+}
 let root: Root; let container: HTMLDivElement;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  queues.clear(); saved.mockClear();
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ enabled: true, entitled: true })));
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it('serializes same-poll delegations and waits for correlated terminal even if append acknowledgement is delayed or rejected', async () => {
   const send = vi.fn(() => ({ userMessageId: 'user-1' }));
   const props = { binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() };
@@ -69,7 +87,7 @@ it('offers explicit resume after closure without reconnecting itself', async () 
   expect(fixture.backend!.binding).toBe(props.binding);
 });
 
-it('queues only explicit follow-up consent, waits for exact terminal, and delivers after voice resume', async () => {
+it('persists explicit follow-up consent through the shared queue and never drains it from the voice component', async () => {
   const send = vi.fn().mockReturnValueOnce({userMessageId:'user-one'}).mockReturnValueOnce({userMessageId:'user-two'});
   const props = {binding:'same-thread',messages:[],busy:false,terminals:{},send,interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
@@ -88,10 +106,11 @@ it('queues only explicit follow-up consent, waits for exact terminal, and delive
   const resumed = vi.fn(async()=>{}); fixture.backend!.subscribe!(resumed);
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'completed',text:'Verified original result'}}})));
   await first;
-  expect(send).toHaveBeenNthCalledWith(2,'check the tests');
+  expect(saved).toHaveBeenCalledWith(expect.stringMatching(/^voice-/), 'check the tests', 'user-one', 'same-thread');
+  expect(send).toHaveBeenCalledTimes(1);
   expect(resumed).toHaveBeenCalledWith('Verified original result',true);
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'completed',text:'Verified original result'}}})));
-  expect(send).toHaveBeenCalledTimes(2); expect(props.interrupt).not.toHaveBeenCalled();
+  expect(send).toHaveBeenCalledTimes(1); expect(props.interrupt).not.toHaveBeenCalled();
 });
 
 it('cancels deliberate queue without interrupting the doer', async () => {
@@ -114,7 +133,7 @@ it('does not auto-submit a follow-up after the same utterance withdraws queue co
   expect(props.send).not.toHaveBeenCalled();
 });
 
-it('drops queued consent across the real keyed conversation remount', async () => {
+it('leaves the persisted queue with its originating chat across a keyed remount', async () => {
   const props={key:'a',binding:'a',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
   await act(async()=>container.querySelector('button')!.click());
@@ -123,6 +142,7 @@ it('drops queued consent across the real keyed conversation remount', async () =
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,key:'b',binding:'b',busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
   await act(async()=>container.querySelector('button')!.click());
   expect(fixture.backend!.binding).toBe('b'); expect(props.send).not.toHaveBeenCalled();
+  expect(queues.get('a')?.[0].payload.afterTaskId).toBe('running'); expect(queues.get('b')).toBeUndefined();
 });
 
 it('does not drain a follow-up when a different user turn owns current conversation', async () => {
@@ -133,4 +153,26 @@ it('does not drain a follow-up when a different user turn owns current conversat
   const messages=[...props.messages,{id:'external',role:'user' as const,text:'Other work'}];
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
   expect(props.send).not.toHaveBeenCalled();
+});
+
+
+it('Caps Lock uses the focused composer and a second tap closes voice without stopping backend work', async () => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  const interrupt = vi.fn();
+  const props = { messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt };
+  await act(async () => root.render(createElement('div', null,
+    ...['first-chat', 'second-chat'].map(binding => createElement('section', { key: binding, 'data-voice-chat-root': true },
+      createElement('div', null, 'Transcript'), createElement(ManagedLiveButton, { ...props, binding }), createElement('textarea'))))));
+  const buttons = container.querySelectorAll('button');
+  await act(async () => container.querySelectorAll('textarea')[1].focus());
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'CapsLock' })));
+  expect(fixture.backend!.binding).toBe('second-chat');
+  expect(buttons[0].getAttribute('aria-pressed')).toBe('false');
+  expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+  await act(async () => buttons[0].focus());
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'CapsLock', repeat: true })));
+  expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'CapsLock' })));
+  expect(buttons[1].getAttribute('aria-pressed')).toBe('false');
+  expect(interrupt).not.toHaveBeenCalled();
 });

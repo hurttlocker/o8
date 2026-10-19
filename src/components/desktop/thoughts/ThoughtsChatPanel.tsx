@@ -1,7 +1,7 @@
 'use client';
 
 import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
-import { ManagedLiveButton } from './chat-panel/ManagedLiveButton';
+import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
@@ -54,7 +54,10 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { useTaskArtifacts } from './chat-panel/useTaskArtifacts';
 import type { TaskArtifactDeliverInput } from './chat-panel/TaskArtifactCard';
-import { packetsForOrchestratorThread, SwarmStatusCard } from './chat-panel/SwarmStatusCard';
+import { WorkerDisclosureProvider } from './chat-panel/WorkerDisclosure';
+import { useThreadWorkers } from './chat-panel/ThreadWorkerCard';
+import { projectThreadWorkerGroups } from './chat-panel/thread-worker-groups';
+import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
@@ -63,6 +66,7 @@ import { useOrchestratorModelState } from './composer-selector/useOrchestratorMo
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
+import { useBufferedOrchestratorSend } from './chat-panel/useBufferedOrchestratorSend';
 import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
@@ -86,7 +90,6 @@ import { useClearCommand } from './chat-panel/useClearCommand';
 import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadNotice';
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { TranscriptActivity } from '../transcript/TranscriptActivity';
-import { transcriptScouts } from '../transcript/activity';
 import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
@@ -200,7 +203,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
-  onLaunchPacket?: (packet: OrchestratorPacket) => void;
+  onFocusPacket?: (packet: OrchestratorPacket) => void;
+  onFocusSession?: (sessionKey: string) => void;
   onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
   // Called with the latest user message text in chat mode so the parent
   // can stash it on the tab record and the tab strip can show a 3-word
@@ -256,7 +260,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onModePersist,
   onSpawnSingleTab,
   onSpawnChatTab,
-  onLaunchPacket,
+  onFocusPacket, onFocusSession,
   onChromeChange,
   onChatSummary,
   suppressAutoRestore = false, suppressRuntimePrewarm = false,
@@ -266,7 +270,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
   useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
   // The mode ref keeps sends in sync with the selected composer mode.
-  const [composerMode, setComposerMode] = useState<ComposerMode>('solo');
+  const [composerMode, setComposerMode] = useState<ComposerMode>(contextualConversation || lockedMode === 'single' || initialMode === 'single' ? 'solo' : 'fast');
   const composerModeRef = useRef<ComposerMode>(composerMode);
   composerModeRef.current = composerMode;
   // MoA IS the Collide backend — keep the chip and the model-picker's Mode
@@ -737,7 +741,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     openRef.current = open;
   }, [open]);
 
-  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, setInput, setPreEnhanceInput, inputRef });
+  const showDraftClearedToast = useComposerDraftLifecycle({ open, input, draftInjection, contextualConversation, ownerTabId: scopeTabId, setInput, setPreEnhanceInput, inputRef });
 
   // Right-click "Add to chat" on an inline o8.md image relays here (via the
   // dashboard, so only the VISIBLE tab consumes it). Apply once per id (ref
@@ -1935,24 +1939,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return true;
   }, [collideEnabled, isOrchestratorMode, orchStream.status, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
 
-  const dispatchBufferedOrchestratorSend = useCallback((text: string, images: Array<{ name: string; dataUri: string }>) => {
-    if (!isOrchestratorMode) return null;
-    const { displayMessage, wireMessage, orchestrationMode: turnOrchestrationMode } = composeComposerTurnMessage(text, composerModeRef.current, soloOrchestrator);
-    track('orchestrator.message');
-    return sendOrchestrator(displayMessage, {
-      permissionMode,
-      backend: composerBackendTurnOverride(orchestratorBackend),
-      thinkingEffort,
-      model: orchestratorModel,
-      wireMessage,
-      displayMessage,
-      orchestrationMode: turnOrchestrationMode,
-      collide: collideEnabled,
-      ...(images.length > 0 ? { attachments: images } : {}),
-    });
-  }, [collideEnabled, isOrchestratorMode, orchestratorBackend, orchestratorModel, permissionMode, sendOrchestrator, soloOrchestrator, thinkingEffort]);
+  const { dispatch: dispatchBufferedOrchestratorSend, capture: captureQueuedSend } = useBufferedOrchestratorSend({
+    active: isOrchestratorMode, backend: orchestratorBackend, model: orchestratorModel, effort: thinkingEffort,
+    permissionMode, mode: composerModeRef.current, solo: soloOrchestrator, collide: collideEnabled,
+    projectId: threadProjectId, context: contextualConversation?.requestContext, send: sendOrchestrator,
+  });
 
-  const { sendBuffer, handleSend: handleComposerSend, attachmentError } = useDefaultComposerSendBuffer({
+  const { sendBuffer, durable, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
     active: isOrchestratorMode, backend: orchestratorBackend,
     busy: displayWaiting,
     threadId,
@@ -1963,7 +1956,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput,
     addAttachedImage,
     clearAttachments,
-    dispatch: dispatchBufferedOrchestratorSend,
+    dispatch: dispatchBufferedOrchestratorSend, captureQueuedSend,
     interrupt: orchStream.interrupt,
     undoSend: orchStream.undoSend,
     shouldBypass: (text) => Boolean(parseOrchestratorSlashCommand(text) || parseModeRoutingPrefix(text)),
@@ -2084,20 +2077,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     handleCopyMarkdownRef.current = handleCopyMarkdown;
   }, [handleCopyMarkdown]);
 
-  // Native Claude scouts (Task-tool sub-agents) fanned out this turn. They
-  // aren't packets, so we surface them in the live crew card by reading the
-  // active assistant turn's Task tool calls. Status is tied to the turn
-  // (busy → running) rather than per-tool completion: parallel scouts fire
-  // together and the serial tool-done heuristic can't track them individually.
-  // Worker packets this thread dispatched. One list, two consumers: the crew
-  // card's rows and the composer status bar's worker count — so the number
-  // under the composer is the number of rows on screen (#2148).
+  // Keep recorded turn origins; expose live worker status once at the composer.
   const threadWorkerPackets = packetsForOrchestratorThread(missionState?.packets ?? [], threadId);
 
-  const orchestratorScouts = isOrchestratorMode ? transcriptScouts(displayMessages, displayWaiting) : [];
+  const threadWorkers = useThreadWorkers({ threadId: isOrchestratorMode ? threadId : null, repoPath: resolvedRepoPath, busy: displayWaiting, agents });
+  const workerGroups = projectThreadWorkerGroups({ entries: isOrchestratorMode ? displayMessages : [], packets: isOrchestratorMode ? threadWorkerPackets : [], sessions: threadWorkers, busy: displayWaiting });
+  const workerScouts = [...workerGroups.groups.values(), workerGroups.unattributed].flatMap(group => group.scouts);
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
-  return (
+  return (<WorkerDisclosureProvider key={`${resolvedRepoPath}:${threadId}`}>
     <div
+      data-voice-chat-root
       style={{
         containerType: 'size',
         display: 'flex',
@@ -2155,13 +2144,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             emptyStateFallback={fallbackEmptyState}
             composeFirst={composeFirst}
             topContent={transcriptTopContent}
-            bottomContent={isOrchestratorMode && displayMessages.length > 0 ? (
-              <SwarmStatusCard
-                packets={threadWorkerPackets}
-                scouts={orchestratorScouts}
-                onFocusPacket={onLaunchPacket ? (packet) => { void onLaunchPacket(packet); } : undefined}
-              />
-            ) : null}
             isOrchestratorMode={isOrchestratorMode}
             suggestedReplyMessageId={suggestedReplyMessageId}
             suggestedReplies={chipsForLastAssistant}
@@ -2222,17 +2204,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayWaiting={displayWaiting}
         chatMessages={displayMessages}
         workerPackets={threadWorkerPackets}
+        workerContext={{ packets: threadWorkerPackets, sessions: threadWorkers, scouts: workerScouts, onFocusPacket, onFocusSession }}
         activityContent={isOrchestratorMode ? <TranscriptActivity entries={displayMessages} packets={threadWorkerPackets}
-          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onLaunchPacket ? packet => { void onLaunchPacket(packet); } : undefined} /> : undefined}
+          busy={displayWaiting} repoPath={resolvedRepoPath} onFocusPacket={onFocusPacket} /> : undefined}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
-        // Feed the EFFECTIVE transcript (orchestrator streams live into
-        // orchStream.messages, not the raw chatMessages state). The status bar's
-        // awaitingReply / runningTools / latestUserMessageId derive from this —
-        // with raw chatMessages the streamed reply never lands here, so
-        // awaitingReply stays true forever and the Working latch never releases
-        // (#stuck-working-indicator, 2026-06-19). displayMessagesCount below
-        // already used displayMessages; this aligns the list with it.
+        // Use the effective streamed transcript so Working clears when the reply lands.
         thoughtsBodyBackground={thoughtsBodyBackground}
         enhancing={enhancing}
         preEnhanceInput={preEnhanceInput}
@@ -2240,7 +2217,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onUndoEnhance={handleUndoEnhance}
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
-        onSteer={handleComposerSend}
+        onSteer={handleSteer} queueSaving={queueSaving}
         sendBufferStatus={isOrchestratorMode || attachmentError ? (
           <ComposerSendBufferStatus
             attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}
@@ -2270,14 +2247,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
-        composerLeadingExtras={<>{composerLeadingExtras}{isOrchestratorMode && threadId && resolvedRepoPath ? <ManagedLiveButton
-          key={`${resolvedRepoPath}:${threadId}:${orchestratorBackend}:${orchestratorModel}`}
-          binding={JSON.stringify([resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel])}
+        composerLeadingExtras={composerLeadingExtras}
+        voiceControl={isOrchestratorMode && !isChatMode && threadId && resolvedRepoPath ? <ManagedChatVoiceEntry chatRoot={composerDropHostRef} label={`${composerRepoLabel} · ${activeTargetLabel}`}
+          identity={[resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel, thinkingEffort, permissionMode, composerMode, threadProjectId, collideEnabled]}
           messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
+          queue={durable} capture={text => captureQueuedSend(text, [])}
           send={(text) => sendOrchestrator(text, { pinBackend: true, permissionMode, backend: composerBackendTurnOverride(orchestratorBackend),
             resolveTurnOptions: async () => ({ backend: composerBackendTurnOverride(orchestratorBackend), model: orchestratorModel }),
             thinkingEffort, model: orchestratorModel, orchestrationMode: composeComposerTurnMessage(text, composerModeRef.current, soloOrchestrator).orchestrationMode })}
-        /> : null}</>}
+        /> : null}
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}
@@ -2316,5 +2294,5 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       })() : null}
       </div>
     </div>
-  );
+  </WorkerDisclosureProvider>);
 });

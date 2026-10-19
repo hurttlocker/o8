@@ -15,9 +15,9 @@ import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { refreshProjectsFromExternalMutation, useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
-import { SymonSidebarRow } from './agent-panel/SymonSidebarRow';
+import { MessageSquare, Play, Plus, Terminal } from './lucide-shims';
 import { MiniAgentPanelAction } from './MiniAgentPanelAction';
+import { MiniSessionMenu } from './agent-panel/MiniSessionMenu';
 import { MiniAgentPanelNavigation } from './agent-panel/MiniAgentPanelNavigation';
 import { ProjectIcon as FolderIcon } from './agent-panel/SidebarActionIcons';
 import { repoSlugFromRemote } from './canvas-utils';
@@ -36,7 +36,6 @@ import {
 
 const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
 const MINI_FLAT_BUTTON_BG = 'transparent';
-const MINI_FLAT_HOVER_BG = 'var(--t-hover)';
 const MINI_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--t-divider-subtle) 62%, transparent)';
 
 export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) {
@@ -299,6 +298,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onCreateTerminal={handleCreateTerminal}
           onSearch={onOpenCommandPalette}
           projects={projects.ledger?.projects ?? []}
+          projectsLoading={projects.loading || Boolean(projects.error)}
           activeProjectId={projects.ledger?.activeProjectId ?? null}
           selectedRepoPath={selectedRepoLocalPath ?? null}
           registeredRepoByPath={registeredRepoByPath}
@@ -423,7 +423,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             </div>
           ) : null}
 
-          <AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession}
+          <AgentPanelExtraAgents onOpenChatReview={props.onOpenChatReview} activeSessionKey={activeSessionKey} onSelectSession={onSelectSession}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             renderContent={(agentEntries, agentViewActions) => <ChatsTab
             repos={railReposForChats}
@@ -439,6 +439,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             groupMode="flat"
             showKindInMeta
             onCreateOrchestratorForRepo={handleCreateOrchestratorForRepo}
+            emptyActions={navigationRail && !projects.loading && !projects.error ? <>
+              <MiniAgentPanelAction icon={Play} label="New orchestrator" onClick={handleCreateOrchestrator} />
+              <MiniAgentPanelAction icon={Terminal} label="New terminal" onClick={handleCreateTerminal} />
+            </> : undefined}
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
             agentEntries={agentEntries}
             agentViewActions={agentViewActions}
@@ -472,6 +476,7 @@ function MiniAgentPanelHeader({
   onCreateTerminal,
   onSearch,
   projects,
+  projectsLoading,
   activeProjectId,
   selectedRepoPath,
   registeredRepoByPath,
@@ -490,6 +495,7 @@ function MiniAgentPanelHeader({
   navigationRail: boolean;
   onSearch?: () => void;
   projects: ProjectRecord[];
+  projectsLoading: boolean;
   activeProjectId: string | null;
   selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
@@ -521,7 +527,6 @@ function MiniAgentPanelHeader({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {navigationRail ? <SymonSidebarRow /> : null}
         {!navigationRail ? <MiniAgentPanelAction
           icon={Play}
           label="New session"
@@ -539,7 +544,7 @@ function MiniAgentPanelHeader({
           />
         ) : null}
         {!navigationRail ? <MiniAgentPanelNavigation onCreateTerminal={onCreateTerminal} onSearch={onSearch} onBeforeNavigate={() => setSessionMenuOpen(false)} /> : null}
-        {navigationRail ? <ProjectsSwitcher projects={projects} activeProjectId={activeProjectId} selectedRepoPath={selectedRepoPath} registeredRepoByPath={registeredRepoByPath} onProjectSelect={onProjectSelect} onRepoSelect={onRepoSelect} onManageProjects={onManageProjects} onAddRepo={onAddRepo} onRepositoryConnected={onRepositoryConnected} /> : <div style={{ display: 'flex', alignItems: 'center' }}>
+        {navigationRail ? <ProjectsSwitcher loading={projectsLoading} projects={projects} activeProjectId={activeProjectId} selectedRepoPath={selectedRepoPath} registeredRepoByPath={registeredRepoByPath} onProjectSelect={onProjectSelect} onRepoSelect={onRepoSelect} onManageProjects={onManageProjects} onAddRepo={onAddRepo} onRepositoryConnected={onRepositoryConnected} /> : <div style={{ display: 'flex', alignItems: 'center' }}>
           <MiniAgentPanelAction icon={FolderIcon} label="Projects" onClick={onManageProjects} />
           <button type="button" aria-label="Add repository" onClick={(event) => { event.currentTarget.focus(); onAddRepo(); }} onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onAddRepo(); }
@@ -550,147 +555,6 @@ function MiniAgentPanelHeader({
     </div>
   );
 }
-
-function MiniSessionMenu({
-  onCreateOrchestrator,
-  onCreateTerminal,
-}: {
-  onCreateOrchestrator: () => void;
-  onCreateTerminal: () => void;
-}) {
-  return (
-    <div
-      style={{
-        marginTop: 0,
-        marginRight: 0,
-        marginBottom: 2,
-        marginLeft: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 0,
-        borderRadius: 0,
-        border: 0,
-        background: 'transparent',
-        overflow: 'visible',
-      }}
-    >
-      {/* "Chat" retired (Q 2026-07-14): the o8 model lives in the
-          Orchestrator chat — one conversation surface, no redundancy. */}
-      <MiniSessionMenuItem
-        icon={Sparkles}
-        title="Orchestrator"
-        subtitle="Fleet by default"
-        onClick={onCreateOrchestrator}
-      />
-      <MiniSessionMenuItem
-        icon={Terminal}
-        title="Terminal"
-        subtitle="Plain shell"
-        onClick={onCreateTerminal}
-        last
-      />
-    </div>
-  );
-}
-
-function MiniSessionMenuItem({
-  icon: Icon,
-  title,
-  subtitle,
-  last = false,
-  onClick,
-}: {
-  icon: LucideIcon;
-  title: string;
-  subtitle: string;
-  last?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: 'calc(100% - 16px)',
-        marginLeft: 8,
-        marginRight: 8,
-        borderWidth: 0,
-        borderBottom: 0,
-        borderRadius: 8,
-        background: 'transparent',
-        color: 'var(--t-text)',
-        cursor: 'pointer',
-        outline: 'none',
-        display: 'grid',
-        gridTemplateColumns: '21px minmax(0, 1fr)',
-        gap: 10,
-        alignItems: 'center',
-        paddingTop: 7,
-        paddingRight: 10,
-        paddingBottom: 7,
-        paddingLeft: 10,
-        textAlign: 'left',
-        fontFamily: 'var(--font-sans-system)',
-        // Instant flat hover — matches the terminal toggle pattern.
-        // No row divider or fade transition (operator pass 2026-05-27).
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.background = 'transparent';
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 21,
-          height: 21,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--t-accent)',
-        }}
-      >
-        <Icon size={14} strokeWidth={1.9} />
-      </span>
-      <span style={{ minWidth: 0 }}>
-        <span
-          style={{
-            display: 'block',
-            fontSize: 13.5,
-            lineHeight: 1.25,
-            fontWeight: 300,
-            letterSpacing: '-0.1px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {title}
-        </span>
-        <span
-          style={{
-            display: 'block',
-            marginTop: 4,
-            fontSize: 9.5,
-            lineHeight: 1.25,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-            color: 'var(--t-text-muted)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {subtitle}
-        </span>
-      </span>
-    </button>
-  );
-}
-
-
 
 function StaleStatusDot() {
   return (

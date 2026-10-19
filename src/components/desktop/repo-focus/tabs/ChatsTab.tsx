@@ -80,6 +80,7 @@ export function ChatsTab({
   agentEntries = EMPTY_SIDEBAR_AGENTS,
   agentViewActions = EMPTY_CHAT_VIEW_ACTIONS,
   onCreateOrchestratorForRepo,
+  emptyActions,
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
@@ -124,6 +125,7 @@ export function ChatsTab({
     });
   }, []);
   const [loading, setLoading] = useState(true);
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
   // Rail recency = the last time the conversation SPOKE (Q ruling
   // 2026-07-16). The previous ChatGPT-style click-bump (an optimistic
@@ -147,17 +149,17 @@ export function ChatsTab({
     setLoading(true);
     try {
       const response = await fetch('/api/v2/chat-history/list?include=orchestrator&archived=include', { cache: 'no-store' });
-      const payload = response.ok
-        ? await response.json() as { conversations?: ChatHistoryItem[] }
-        : { conversations: [] };
+      if (!response.ok) throw new Error('Chat history unavailable');
+      const payload = await response.json() as { conversations?: ChatHistoryItem[] };
+      if (!Array.isArray(payload.conversations)) throw new Error('Chat history unavailable');
       if (cancelled?.()) return;
       const conversations = payload.conversations ?? [];
       setHistoryItems(conversations.filter((item) => !item.archivedAt));
       setArchivedHistoryItems(conversations.filter((item) => Boolean(item.archivedAt)));
+      setHistoryUnavailable(false);
     } catch {
       if (cancelled?.()) return;
-      setHistoryItems([]);
-      setArchivedHistoryItems([]);
+      setHistoryUnavailable(true);
     } finally {
       if (!cancelled?.()) setLoading(false);
     }
@@ -709,7 +711,8 @@ export function ChatsTab({
         </div>
       ) : null}
 
-      {!hasContent ? (
+      {!hasContent && !demoFixtures.length ? (
+        !loading && !historyUnavailable && emptyActions ? <div style={{ paddingTop: 8, paddingBottom: 8 }}>{emptyActions}</div> :
         <div
           style={{
             paddingTop: 42,
@@ -721,10 +724,10 @@ export function ChatsTab({
           }}
         >
           <div style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, color: 'var(--t-text-muted)' }}>
-            {loading ? 'Loading project chats…' : 'No project chats yet'}
+            {loading ? 'Loading project chats…' : historyUnavailable ? 'Project chats unavailable' : 'No project chats yet'}
           </div>
           <div style={{ marginTop: 4, fontSize: 12, lineHeight: '16px' }}>
-            {loading ? 'Saved conversations will appear here.' : 'New and saved chats for this project will collect here.'}
+            {loading ? 'Saved conversations will appear here.' : historyUnavailable ? <button type="button" onClick={() => void fetchHistory()} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', font: 'inherit' }}>Try again</button> : 'New and saved chats for this project will collect here.'}
           </div>
         </div>
       ) : null}
@@ -747,6 +750,7 @@ export function ChatsTab({
       ) : null}
       {threadHover ? (
         <OrchestratorHoverCard
+          threadId={threadHover.item.tabId}
           title={threadHover.item.title}
           repoLabel={repoSuffix(threadHover.item)}
           branchLabel={threadHover.item.repoBranch}

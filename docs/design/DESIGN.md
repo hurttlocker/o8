@@ -78,6 +78,25 @@ Chrome bleeds. Content doesn't.
 
 ## 01 — Palette
 
+### Desktop workspace frame
+
+The desktop navigation column is 60 px wide. The header band is 40 px
+high across the chat list, workspace and right panel. These controls
+sit on one continuous outer frame, without header or rail separator borders.
+The reading surfaces begin below that band, with a 4 px outer rim. Light and
+dark modes join adjacent panels with straight, one-pixel seams and Lisse curves
+only on the exposed workspace perimeter. Resize targets remain generous; the
+straight seam glows on hover, focus and drag. Compact-shell behavior is preserved.
+
+Dark mode matches the sidebar (`--t-sidebar-bg`) to the almost-black
+reading surface shared by chats and tools inside a translucent black glass frame on macOS. Its even tint and native
+diffusion material soften bright wallpaper within the rounded window mask.
+Browser and non-macOS shells keep the opaque neutral frame (`--t-shell-frame-bg`).
+All Glass keeps its existing single window material, separated cards, and curved
+middle workspace. Theme consumers use the displayed surface while the saved
+solid/glass preference remains available when All Glass is turned off.
+Spacing comes from the shared shell geometry, not per-column optical offsets.
+
 ### Content surfaces (solid)
 
 These are the reading surfaces — workspace canvas, chat panels, terminal output. They NEVER pass vibrancy through.

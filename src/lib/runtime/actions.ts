@@ -34,6 +34,7 @@ import {
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
 import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
+import { holdPendingOwnedCorrections } from '@/lib/runtimes/shared/owned-session/action-admission';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
@@ -537,6 +538,8 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
     return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
 
+  if (payload.action === 'stop' || payload.action === 'interrupt') holdPendingOwnedCorrections(surfaceId);
+
   // Try cached snapshot first to avoid expensive full re-discovery on every action.
   // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
   const cached = await getRuntimeInventorySnapshot();
@@ -627,9 +630,8 @@ async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise
         if (!message) {
           return unavailable(agent, payload.action, 'message is required to resume an owned Codex session', payload.clientMutationId);
         }
-        if (!runtimeSurface.capabilities.sendInput) {
-          return ownedCodexSurfaceNotReady(agent, payload.action, payload.clientMutationId);
-        }
+        // Inventory can lag a confirmed Stop. The owned store rechecks the
+        // durable run and process under its lock; cached capabilities are not admission.
         let result: Awaited<ReturnType<typeof continueOwnedCodexSession>>;
         try {
           result = await continueOwnedCodexSession(runtimeSurface.id, message);

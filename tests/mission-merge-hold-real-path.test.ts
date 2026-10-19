@@ -55,6 +55,7 @@ const setupRoute = await import('@/app/api/setup/agent/route');
 const missionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const mcpRoute = await import('@/app/api/mcp/route');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const correctionsRoute = await import('@/app/api/orchestrator/worker-corrections/route');
 const approvalsRoute = await import('@/app/api/panel/approvals/route');
 const { panelGateMiddleware } = await import('@/middleware');
 const { closeDb } = await import('@/lib/db');
@@ -78,6 +79,8 @@ const server = createServer(async (req, res) => {
       : req.url === '/api/setup/agent' ? await setupRoute.POST(request)
       : req.url === '/api/orchestrator/create-mission' ? await missionRoute.POST(request)
       : req.url === '/api/orchestrator/merge' ? await mergeRoute.POST(request)
+      : req.url === '/api/orchestrator/worker-corrections' ? req.method === 'GET' ? await correctionsRoute.GET(request) : await correctionsRoute.POST(request)
+      : req.url?.startsWith('/api/orchestrator/worker-corrections?') ? await correctionsRoute.GET(request)
       : req.url === '/api/panel/approvals' ? await approvalsRoute.POST(request)
       : new Response('Unknown fixture route', { status: 404 });
     res.writeHead(response.status, { 'Content-Type': 'application/json' }); res.end(await response.text());
@@ -100,9 +103,9 @@ async function call(name: string, args: Record<string, unknown>) {
 }
 
 /** create_mission through the operator MCP, then a real worktree, commit and approved review for its packet. */
-async function reviewedPacket(label: string, holdMerges?: boolean) {
+async function reviewedPacket(label: string, holdMerges?: boolean, orchestratorThreadId?: string) {
   const created = await call('create_mission', {
-    repoPath, runtime: 'codex', dispatch: false, taskContract: 'off',
+    repoPath, runtime: 'codex', dispatch: false, taskContract: 'off', ...(orchestratorThreadId ? { orchestratorThreadId } : {}),
     issues_inline: [{ title: `Change file ${label}`, body: 'Owned fixture.' }],
     ...(holdMerges === undefined ? {} : { holdMerges }),
   });
@@ -206,4 +209,35 @@ it('keeps the usual merge after an approved review when the mission does not hol
   const merged = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
   expect(merged.ok, merged.note).toBe(true);
   expect(git(repoPath, 'rev-parse', 'main')).toBe(reviewedHeadSha);
+}, 120_000);
+
+
+it('rejects an old operator approval after a typed correction through the real cortex tool', async () => {
+  const threadId = 'thoughts-restricted-merge';
+  mkdirSync(join(dataDir, 'chat-history'), { recursive: true });
+  writeFileSync(join(dataDir, 'chat-history', `${threadId}.json`), JSON.stringify({ repoPath, messages: [] }));
+  const { packet, lane } = await reviewedPacket('late-restriction', true, threadId);
+  expect(packet.orchestratorThreadId).toBe(threadId);
+  const held = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+  expect(held.approvalId).toBeTruthy();
+  const localBefore = git(repoPath, 'rev-parse', 'main');
+  const remoteBefore = git(origin, 'rev-parse', 'main');
+  const servers = await openO8Servers(repoPath, { profile: 'full', threadId });
+  try {
+    const cortex = servers.servers.find(server => server.name === 'cortex')!;
+    const restriction = await cortex.request('tools/call', { name: 'cortex_correct_workers', arguments: {
+      idempotencyKey: 'late-merge-restriction', message: 'Do not merge. Keep this for review.', mode: 'send', holdMerges: true, targets: [],
+    } }, new AbortController().signal) as McpToolResult;
+    expect(restriction.isError, JSON.stringify(restriction)).not.toBe(true);
+    expect(JSON.stringify(restriction)).toContain('ruleId');
+  } finally { await servers.close(); }
+  const response = await approvalsRoute.POST(new NextRequest(`http://127.0.0.1:${port}/api/panel/approvals`, {
+    method: 'POST', headers: { host: `127.0.0.1:${port}`, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'approve', id: held.approvalId }),
+  }));
+  expect(await response.text()).toContain('Merge blocked by an operator session rule');
+  const replay = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'user' });
+  expect(replay.ok).toBe(false); expect(replay.note).toContain('Merge blocked');
+  expect(git(repoPath, 'rev-parse', 'main')).toBe(localBefore);
+  expect(git(origin, 'rev-parse', 'main')).toBe(remoteBefore);
 }, 120_000);

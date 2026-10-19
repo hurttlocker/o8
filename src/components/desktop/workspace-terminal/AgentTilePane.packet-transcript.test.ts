@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -18,6 +18,7 @@ const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost:3001/dashboard',
 });
+dom.window.fetch = (...args) => globalThis.fetch(...args);
 vi.stubGlobal('window', dom.window);
 vi.stubGlobal('document', dom.window.document);
 vi.stubGlobal('navigator', dom.window.navigator);
@@ -50,13 +51,6 @@ vi.mock('@/lib/transcripts/useTranscript', () => ({
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(),
   requestRealtimeRefresh: vi.fn(),
-}));
-
-vi.mock('framer-motion', () => ({
-  AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: {
-    form: ({ children, ...props }: { children?: ReactNode }) => createElement('form', props, children),
-  },
 }));
 
 vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));

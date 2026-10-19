@@ -20,7 +20,7 @@ The [focus plan through October 27](./docs/operations/focus-through-2026-10-27.m
 
 ## Now
 
-First-run acceptance is the immediate engineering priority. Published stable is 0.1.796. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
+First-run acceptance is the immediate engineering priority. Published stable is 0.1.797. A fresh stall-free first-run repeat and physical Apple Silicon execution remain unverified. A candidate run is not a public download-to-merge benchmark. Preserve the Solo tools, sent-image, and comparison stop/requeue checks. [#2211](https://github.com/hurttlocker/o8/issues/2211)
 
 Shared screen layout rules, explicit agent readiness, independent project discovery, optional voice and iPhone setup, and sensory feedback are implemented in [#3345](https://github.com/hurttlocker/o8/pull/3345). Full-window setup follows native glass while preserving opaque browser and solid surfaces. Built-in agent runtime roles are registered; installed-app acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246). These are source and development checks; installed first-run acceptance remains open.
 
@@ -98,6 +98,8 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
+
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.
 
 Mobile voice intent resolution is implemented in [#3146](https://github.com/hurttlocker/o8/pull/3146). Entry-point tests cover paired-device access, confirmed choices scoped to a submitted chat and repository, and offline replay. Paired-phone and provider acceptance remain open.
@@ -112,7 +114,43 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 
 ## 5. Smooth for people and for agents
 
+Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
+
+Settings shell [#3958](https://github.com/hurttlocker/o8/issues/3958) keeps its shared header transparent while the content body retains its active palette. Development verification and release remain separate.
+
+Composer worker status [#3953](https://github.com/hurttlocker/o8/issues/3953) uses one compact count at the composer edge. The existing popup keeps worker identities, states, pane navigation and activity receipts; the transcript no longer duplicates the live group. Recorded membership determines the count, and completed work does not imply a merge. Development verification and release remain separate.
+
+Project-led navigation [#3957](https://github.com/hurttlocker/o8/issues/3957) places the existing assistant action under Home and starts the chat rail with projects. Empty project and conversation views expose the existing creation actions after loading. Viewing the rail does not launch work. Development verification and release remain separate.
+
+Chat section disclosure [#3954](https://github.com/hurttlocker/o8/issues/3954) places chevrons after section labels and reveals them on hover or keyboard focus. The shared header keeps label geometry, toggle state and neighboring actions stable. Development verification and release remain separate.
+
+Terminal appearance [#3949](https://github.com/hurttlocker/o8/issues/3949) applies the active palette before canvas consumers read it. Existing workspace and contextual terminals keep their output and attachment through light, dark and All Glass changes; glass keeps the shared translucent backdrop. Development checks, native acceptance, reviewed merge and release remain separate.
+
+Right-panel terminal recovery [#3115](https://github.com/hurttlocker/o8/issues/3115) offers an explicit route to the main workspace when its local bridge is unavailable. Recovery focuses an existing matching shell before creating one, preserves other tabs, and keeps failures actionable. Development checks, reviewed merge and release remain separate.
+
+Ended terminal output [#3128](https://github.com/hurttlocker/o8/issues/3128) remains readable with an explicit new-shell action and bounded saved text. Tmux teardown preserves the last useful screen; a transport client status is never presented as the shell's exit code. Process-level exit evidence, native development checks, reviewed merge and release remain separate.
+
+Bottom-terminal continuity [#3129](https://github.com/hurttlocker/o8/issues/3129) treats X and the panel shortcut as visibility changes. The existing tile, shell, output and split ratio remain in place across hide/show, with the main workspace preserved. Development checks, reviewed merge and release remain separate.
+
+Worker corrections [#3930](https://github.com/hurttlocker/o8/issues/3930) reuse the regular composer and real worker cards. A compact control appears when workers or a recoverable request exist; activity receipts and session merge restrictions stay behind explicit disclosure. The dock and transcript coordinate their expanded card, while All Glass uses the shared floating material outside clipped workspace panels. Focused checks and native development verification cover disclosure, drafts, activity and glass; publication remains a separate release gate.
+
+Caret-local dictation feedback [#3927](https://github.com/hurttlocker/o8/issues/3927) keeps listening, measured waveform, processing and the delivered text in the existing text modal. Plain Fn does not duplicate those phases in the top dock. Voice windows initialize for attached development shells as well as bundled launches. The shared Symon mark has standalone color fallbacks; measured waveform sensitivity matches the dock without resetting on text partials, and the polishing stroke moves until delivery. The resting top pill defaults off, with a saved Voice setting and a global Command-Option-Comma shortcut to Voice Settings. Session fencing prevents duplicate completion and older events from reopening the modal. Focused route verification, native acceptance, review, merge and release remain separate gates.
+
+Caret-local dictation placement [#3931](https://github.com/hurttlocker/o8/issues/3931) keeps feedback with the focused input across displays, using native desktop logical points without scaling global monitor origins. A missing caret falls back to the focused application window, then the pointer display. The separately selected legacy HUD keeps its existing placement. Geometry regressions, native multi-display acceptance, review, merge and release remain separate gates.
+
+Per-task worker selection [#3889](https://github.com/hurttlocker/o8/issues/3889) lets the orchestrator discover the configured worker pool and choose a runtime, model and effort for each task. Explicit choices are validated before launch and retained in shared or isolated worker receipts. The composer keeps lead controls, while worker eligibility stays in Settings. Native execution confirmed both an explicit choice and an automatic choice against provider records, with unchanged settings and same-session card reopening. Mixed-runtime routing is covered at the API/MCP boundary; native acceptance used the enabled pool. Review, merge, installed acceptance and release remain separate.
+
+Live worker chat navigation [#3881](https://github.com/hurttlocker/o8/issues/3881) opens an existing delegated worker beside its parent using the shared session surface and independent shared composers. Card clicks only navigate; stale or unrelated parent membership cannot launch work. Native follow-up, same-session hide/reopen, reload, and matching composer geometry passed. Successful sends add no receipt row. TypeScript, 39 focused checks and the frozen combined-checkout hermetic gate (7,065 passed, 4 skipped) passed; PR review, merge, installed acceptance and release remain separate.
+
+Shared-team reconciliation [#3896](https://github.com/hurttlocker/o8/issues/3896) lets the owning lead review an exact checkout state before releasing a settled team. Independent edits and original baseline receipts are preserved. Active workers, stale review, omitted paths, uncommitted worker edits and unsupported nested repositories remain blocked. Public lifecycle tests cover persisted review, reconnect and unchanged source; source review, merge and release remain separate.
+
 Two lanes, one pillar. The people lane covers the surfaces a person works in. The agents lane covers whether another program can drive o8 through a real interface instead of imitating a mouse.
+
+The compact transcript subagent card and explicit default-worker picker [#3869](https://github.com/hurttlocker/o8/issues/3869) reuse existing participant identities, workspace navigation and runtime dispatch. Focused component and dispatch-entry tests and light/dark development previews passed. Required PR checks and released-build acceptance remain separate gates; no new automatic runtime-selection policy is introduced.
+
+Current workspace polish is verified in development and awaiting integration: Ports layering [#3842](https://github.com/hurttlocker/o8/issues/3842), empty-header window dragging [#3843](https://github.com/hurttlocker/o8/issues/3843), adaptive project repository navigation [#3844](https://github.com/hurttlocker/o8/issues/3844), stable usage hover [#3845](https://github.com/hurttlocker/o8/issues/3845), and worker-local review controls [#3846](https://github.com/hurttlocker/o8/issues/3846). Native window and webview checks passed; required PR checks and released-build acceptance remain separate gates.
+
+The development workspace rehearsal [#3876](https://github.com/hurttlocker/o8/issues/3876) demonstrates exact subagent navigation, default versus task-specific worker selection, and review state using local fixtures. Native wide and compact interaction checks passed; the demo launches no workers and preserves the live chat when closed. Follow-up [#3878](https://github.com/hurttlocker/o8/issues/3878) places the rehearsal in the shared chat renderer with registry-backed worker examples and the sidebar status indicator; a merge label requires a recorded merge receipt.
 
 Shared GitHub quota and durable PR watching are implemented in [#3606](https://github.com/hurttlocker/o8/pull/3606), and commit-pinned review guides in [#3607](https://github.com/hurttlocker/o8/pull/3607). Paused queue restoration, acknowledged delivery, draft recovery, repository-scoped attachments and narrow-layout corrections are tracked in [#3598](https://github.com/hurttlocker/o8/issues/3598). Browser and route fixtures cover reload, dismissal, repeat actions and uncertain receipts. Queued intent never replays automatically after reload; released-build acceptance remains open.
 
@@ -124,6 +162,44 @@ Shared GitHub quota and durable PR watching are implemented in [#3606](https://g
 | Agent-facing API manifest | agents | One manifest lists every operator verb and its surfaces, and CI fails when a verb exists on one surface and not another. | open | No manifest exists; parity between the CLI, MCP, and the webview socket is checked by hand. | [#2212](https://github.com/hurttlocker/o8/issues/2212) |
 
 Tool updates [#3859](https://github.com/hurttlocker/o8/issues/3859) keep the default action specific to o8, place explicit CLI actions under Tools, and report per-tool progress and verified results. OpenCode checks preserve complete channel versions and the selected package family. Unrecognized installations keep their original updater. Source verification, required PR checks, and released-build acceptance remain separate gates.
+
+The snapshot restart-cycle fixture [#3880](https://github.com/hurttlocker/o8/issues/3880) now uses explicit ordered receipt timestamps. This removes an accidental dependency on wall-clock monotonicity while preserving the production stale-transition guard and its regression coverage.
+
+Local-server routing [#3125](https://github.com/hurttlocker/o8/issues/3125) now opens newly announced apps in the existing Browser instead of adding a second terminal viewer. Retained output is marked across WebSocket transports; repeat announcements from a terminal session do not reopen a closed page. Ports exposes an immediate clickable app list. The old inline viewer is retired. Development and regression acceptance are tracked separately from CI and installed releases.
+
+Browser field typing [#3805](https://github.com/hurttlocker/o8/issues/3805) accepts an empty string to clear a field and preserves leading spaces, trailing spaces and line breaks. Controlled-field event coverage and native development checks are separate from required PR CI and released-build acceptance.
+
+Settings page history [#3853](https://github.com/hurttlocker/o8/issues/3853), a keyboard-accessible Brain conversation beside the composer [#3854](https://github.com/hurttlocker/o8/issues/3854), and chat-local sidebar review actions [#3855](https://github.com/hurttlocker/o8/issues/3855) are implemented in development. Native Settings and Brain checks and focused review-target checks passed. Required PR checks and released-build acceptance remain pending.
+
+Optional tool updates [#3862](https://github.com/hurttlocker/o8/issues/3862) follow o8 status and release notes. Each tool starts with an Update action and a compatibility notice; custom installations keep their original updater. Qoder is omitted from this update surface. Native development checks and released-build acceptance remain separate gates.
+
+Composer Brain routing [#3863](https://github.com/hurttlocker/o8/issues/3863) prefers an authenticated native Codex or Claude connection and uses the Terra or Sonnet answer tier. Explicit Codex Brain model choices remain effective. Managed Brain is the fallback when neither supported native connection is ready; other runtime inference adapters remain separate work. Connected conversation retrieval is lexical and does not start paid semantic embedding calls. Native Codex acceptance, fixture coverage and released-build acceptance remain separate gates.
+
+Saved Preview layouts [#3119](https://github.com/hurttlocker/o8/issues/3119) now offer visible Close preview and Open in Browser actions, preserving the surviving terminal and reclaiming its workspace space. A saved obsolete tile no longer mounts another browser iframe. Development acceptance does not imply publication.
+
+Source-editor recovery [#3122](https://github.com/hurttlocker/o8/issues/3122) uses bundled editor and language-worker assets, shows readable source while initialization is pending or unavailable, and retries with a fresh loader. Inactive file tabs inherit workspace visibility so an editor cannot paint over a chat. Source/chat switching is verified in development; installed acceptance remains separate.
+
+Semantic control clicks [#3802](https://github.com/hurttlocker/o8/issues/3802) refuse disabled and inert targets before dispatching input, including nested labels and model rows. Successful receipts identify the actionable ancestor and describe input dispatch rather than claiming a selection changed.
+
+Browser opening [#3803](https://github.com/hurttlocker/o8/issues/3803) confirms its repository-scoped visible host, requested page URL and native window geometry before reporting opened. Pending requests can be observed by identifier without replay. Initial navigation survives development effect remounts; source and native development evidence do not imply release.
+
+Project library navigation [#3116](https://github.com/hurttlocker/o8/issues/3116) exposes Open workspace directly beside each project and labels details separately from editing. Development checks cover repeated opening and failure recovery. Required PR checks and released-build acceptance remain separate gates.
+
+Workspace utility navigation [#3133](https://github.com/hurttlocker/o8/issues/3133) retains the originating tab and tab order, including a fresh unsent conversation. A workspace composer keeps its draft while hidden. Persistence and native development checks remain distinct from released-build acceptance.
+
+Bound cloud thread navigation [#3108](https://github.com/hurttlocker/o8/issues/3108) uses one Threads control beside the task identity and Refresh. Ordinary project list and detail navigation remain available. Native development acceptance uses simulated task data; it does not establish remote execution acceptance.
+
+Saved repository recovery [#3870](https://github.com/hurttlocker/o8/issues/3870) can restore a validated registered-repository path without waiting for a worktree scan. External paths still require exact authoritative membership, and stale inventory cannot overwrite a newer removal. Native recovery and automated evidence remain separate from release inclusion.
+
+Browser tab closure [#3909](https://github.com/hurttlocker/o8/issues/3909) exposes a named close action for active and hovered tabs. Rendered checks cover two- and five-tab layouts, surviving tab order and persisted selection. Attached development confirms the named empty-tab action and restored empty scope; release acceptance remains separate.
+
+Fresh-session receipts [#3804](https://github.com/hurttlocker/o8/issues/3804) publish completion only after exact mounted-tab and post-focus verification. Unverified creation expires to an explicit unknown result without replay, and terminal or newer receipts remain intact. Real-root creation and surface-state regressions are verified; native and packaged acceptance remain separate gates.
+
+Native Browser reload [#3801](https://github.com/hurttlocker/o8/issues/3801) reloads the current document instead of navigating to its existing address. Attached development verifies fresh HTML and module code after a cached-module update, while the tab identity and selection remain stable. Packaged acceptance and release remain separate.
+
+Browser overlay detection [#3799](https://github.com/hurttlocker/o8/issues/3799) accounts for effective ancestor opacity before hiding the native child. Transparent cached portals do not count as painted covers; visible covers and explicit occlusion still hide and restore the child. Controlled development reproduction and rendered regressions are recorded separately from remaining native visual acceptance.
+
+Fresh-session dialog guards [#3916](https://github.com/hurttlocker/o8/issues/3916) ignore invisible cached portals at the app-owned creation boundary while visible dialogs still refuse creation. Real-root tests cover direct requests, late visibility changes and multiple dialogs without weakening identity or inventory checks.
 
 ## 6. Runs where you are
 
@@ -175,3 +251,7 @@ Start from a tracking issue above, open its checklist, and pick an unchecked chi
 ## Not on this map
 
 Bug fixes, chores, security advisories, and dependency work are tracked as plain issues, not as roadmap arcs.
+
+Composer controls [#3961](https://github.com/hurttlocker/o8/issues/3961) use compact named access and checkout icons. Compatible new chats default to Shared; workers are delegated when requested or useful, with Worktrees available explicitly. Saved no-delegation choices and forced-single surfaces stay restricted. Permissions, capability checks and historical wire parsing remain authoritative. Development verification and release remain separate.
+
+Conversation worker hover [#3967](https://github.com/hurttlocker/o8/issues/3967) reuses the existing chat preview for recorded shared and worktree workers. Identity and status remain scoped to the hovered parent; development verification and release remain separate.

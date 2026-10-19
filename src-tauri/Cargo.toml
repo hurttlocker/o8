@@ -1,6 +1,6 @@
 [package]
 name = "o8"
-version = "0.1.796"
+version = "0.1.797"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
@@ -243,3 +243,6 @@ block2 = "0.6"
 [patch.crates-io]
 tauri-plugin-clerk = { path = "vendor/tauri-plugin-clerk-0.1.1" }
 clerk-fapi-rs = { path = "vendor/clerk-fapi-rs-0.2.0" }
+
+[dev-dependencies]
+tauri = { version = "2.10.3", features = ["test"] }

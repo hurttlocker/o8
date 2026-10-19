@@ -157,4 +157,18 @@ describe('ThemeProvider on a non-macOS shell', () => {
     expect(document.documentElement.dataset.surface).toBe('solid');
     expect(localStorage.getItem('cortex-workspace-glass')).toBeNull();
   });
+  it('reports the displayed All Glass surface while preserving the saved solid preference', () => {
+    stampHostPlatform('macos');
+    localStorage.setItem('cortex-reduce-transparency', 'on');
+    const snapshots: ThemeSnapshot[] = [];
+    act(() => root.render(createElement(ThemeProvider, null,
+      createElement(Harness, { onTheme: value => { snapshots.push(value); } }))));
+    expect(snapshots.at(-1)?.surface).toBe('glass');
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(localStorage.getItem('cortex-reduce-transparency')).toBe('on');
+    act(() => snapshots.at(-1)?.setWorkspaceGlass(false));
+    expect(snapshots.at(-1)?.surface).toBe('solid');
+    expect(document.documentElement.dataset.surface).toBe('solid');
+  });
+
 });

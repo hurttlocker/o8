@@ -39,18 +39,18 @@ export function useContextualTabClose({ tabsRef, activeTabId, setTabs, setActive
 
   const closeTab = useCallback((id: string) => {
     const tab = tabsRef.current.find((entry) => entry.id === id);
-    if (!tab || tab.kind !== 'terminal' || tab.readOnly) { closeNow(id); return; }
+    if (!tab || tab.kind !== 'terminal' || tab.readOnly || tab.terminalExit) { closeNow(id); return; }
     void confirmTerminalClose({ ...tab, kind: 'terminal', cliAgent: tab.agentId }).then((confirmed) => {
       if (alive.current && confirmed && tabsRef.current.find((entry) => entry.id === id)?.tmuxSession === tab.tmuxSession) closeNow(id);
     });
   }, [closeNow, tabsRef]);
 
   const confirmPanelClose = useCallback(async () => {
-    const terminals = tabsRef.current.filter((tab) => tab.kind === 'terminal' && !tab.readOnly);
+    const terminals = tabsRef.current.filter((tab) => tab.kind === 'terminal' && !tab.readOnly && !tab.terminalExit);
     if (!terminals.length) return true;
     const first = terminals[0];
     const confirmed = await confirmTerminalClose({ ...first, kind: 'terminal', cliAgent: first.agentId, label: terminals.length > 1 ? `${terminals.length} terminals` : first.label }, terminals.length);
-    const current = tabsRef.current.filter((tab) => tab.kind === 'terminal' && !tab.readOnly);
+    const current = tabsRef.current.filter((tab) => tab.kind === 'terminal' && !tab.readOnly && !tab.terminalExit);
     return alive.current && confirmed && terminals.length === current.length && terminals.every((tab) => current.some((entry) => entry.id === tab.id && entry.tmuxSession === tab.tmuxSession));
   }, [tabsRef]);
   return { closeTab, confirmPanelClose };

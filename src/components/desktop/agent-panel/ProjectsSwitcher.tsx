@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
@@ -13,12 +13,13 @@ import { ProjectGroupDialog } from './ProjectGroupDialog';
 import { ConnectRepositoryDialog } from './ConnectRepositoryDialog';
 import type { RepositorySource } from './repository-source-actions';
 import { GitHubIcon } from '../settings/shared';
-import { scrollTabStripFromWheel } from '../shell/tab-scroll';
+import { ProjectRepositories } from './ProjectRepositories';
 
 const rowStyle = { display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 34, paddingTop: 5, paddingRight: 9, paddingBottom: 5, paddingLeft: 9, border: 0, borderRadius: 9, color: 'var(--t-text)', background: 'transparent', cursor: 'pointer', textAlign: 'left' as const, fontFamily: 'var(--font-sans-system)', fontSize: 13, fontWeight: 300 };
 
-export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, registeredRepoByPath, onProjectSelect, onRepoSelect, onManageProjects, onAddRepo, onRepositoryConnected }: {
+export function ProjectsSwitcher({ projects, loading = false, activeProjectId, selectedRepoPath, registeredRepoByPath, onProjectSelect, onRepoSelect, onManageProjects, onAddRepo, onRepositoryConnected }: {
   projects: ProjectRecord[];
+  loading?: boolean;
   activeProjectId: string | null;
   selectedRepoPath: string | null;
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
@@ -30,7 +31,6 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const addAnchor = useRef<HTMLButtonElement>(null);
-  const repositoryStrip = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
@@ -42,15 +42,9 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
   const reduceMotion = useReducedMotion();
   const repos = [...registeredRepoByPath.values()];
   const visible = visibleProjectNavigationItems(projects, repos);
+  const empty = !loading && !repos.length && !visible.some(project => project.id !== 'default' || project.repoPaths.length > 0);
   const current = visible.find((project) => project.id === activeProjectId) ?? visible[0];
   const members = current?.repoPaths.flatMap((path) => registeredRepoByPath.get(path) ? [registeredRepoByPath.get(path)!] : []) ?? [];
-  useEffect(() => {
-    const scroller = repositoryStrip.current;
-    if (!scroller) return;
-    const onWheel = (event: WheelEvent) => { scrollTabStripFromWheel(scroller, event); };
-    scroller.addEventListener('wheel', onWheel, { passive: false });
-    return () => scroller.removeEventListener('wheel', onWheel);
-  }, [current?.id, members.length]);
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = visible.filter((project) => {
     const text = `${project.name} ${project.repoPaths.map((path) => registeredRepoByPath.get(path)?.name ?? path).join(' ')}`.toLowerCase();
@@ -70,7 +64,10 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
   const dialogProject = dialog && dialog !== 'new' ? projects.find((project) => project.id === dialog) : undefined;
   const hover = (event: React.MouseEvent<HTMLButtonElement>, active = false) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; };
   return <>
-    <div data-project-switcher style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: 8, paddingRight: 5 }}>
+    {empty ? <div data-project-switcher style={{ paddingLeft: 8, paddingRight: 5 }}>
+      <button ref={anchor} type="button" onClick={() => openDialog('new')} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event)} style={rowStyle}><ProjectGlyph kind="add" /><span>New project</span></button>
+      <button ref={addAnchor} type="button" aria-haspopup="menu" aria-expanded={adding} onClick={() => { setOpen(false); setAdding(value => !value); }} onMouseEnter={event => hover(event, true)} onMouseLeave={event => hover(event, adding)} style={rowStyle}><ProjectGlyph kind="folder" /><span>Add repository</span></button>
+    </div> : <div data-project-switcher style={{ display: 'flex', alignItems: 'center', gap: 2, paddingLeft: 8, paddingRight: 5 }}>
       <button ref={anchor} type="button" aria-label="Switch project" disabled={busy} aria-haspopup="menu" aria-expanded={open} onClick={() => { if (!open) refreshProjectsFromExternalMutation(); setAdding(false); setQuery(''); setError(''); setOpen((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, open)} style={{ ...rowStyle, flex: 1, minWidth: 0, paddingLeft: 2, paddingRight: 4, minHeight: 32, background: open ? 'var(--t-hover)' : 'transparent' }}>
         <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, width: 17, height: 17, transform: 'translateX(-2px)' }}><ProjectIdentity name={current?.name ?? 'Projects'} color={current?.color} size={17} /></span>
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5 }}>{current?.name ?? 'Projects'}</span>
@@ -78,7 +75,7 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
         <span style={{ color: 'var(--t-text-faint)' }}><ProjectGlyph kind="chevron" size={13} /></span>
       </button>
       <button ref={addAnchor} type="button" aria-label="Add repository" disabled={busy} title="Add repository or project" aria-haspopup="menu" aria-expanded={adding} onClick={() => { if (!adding) refreshProjectsFromExternalMutation(); setOpen(false); setAdding((value) => !value); }} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, adding)} style={{ ...rowStyle, width: 28, minHeight: 28, padding: 6, background: adding ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-muted)' }}><ProjectGlyph kind="add" size={16} /></button>
-    </div>
+    </div>}
     <ComposerPopover anchorRef={anchor} open={open} align="start" onClose={() => { if (!busy) setOpen(false); }}>
       <motion.div initial={reduceMotion ? false : { y: -4 }} animate={{ y: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}>
         <FloatingSurface overlay style={{ width: 'min(300px, calc(100vw - 24px))', borderRadius: 16 }} contentStyle={{ padding: 6 }}>
@@ -123,7 +120,8 @@ export function ProjectsSwitcher({ projects, activeProjectId, selectedRepoPath, 
         </div>
       </FloatingSurface>
     </ComposerPopover>
-    {members.length > 1 && current ? <div ref={repositoryStrip} aria-label="Project repositories" style={{ display: 'flex', gap: 3, paddingLeft: 37, paddingRight: 6, paddingBottom: 5, overflowX: 'auto', scrollbarWidth: 'none' }}>{members.map((repo) => <button key={repo.id} type="button" aria-label={`Open ${repo.name} repository`} aria-pressed={repo.localPath === selectedRepoPath} onClick={() => onRepoSelect(current, repo.localPath)} title={repo.name} onMouseEnter={(event) => hover(event, true)} onMouseLeave={(event) => hover(event, repo.localPath === selectedRepoPath)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, minHeight: 24, paddingTop: 3, paddingRight: 7, paddingBottom: 3, paddingLeft: 4, border: 0, borderRadius: 7, background: repo.localPath === selectedRepoPath ? 'var(--t-hover)' : 'transparent', color: 'var(--t-text-secondary)', fontFamily: 'inherit', fontSize: 10.5, fontWeight: 300, cursor: 'pointer' }}><ProjectIdentity name={repo.name} size={14} />{repo.name}</button>)}</div> : null}
+    {members.length > 1 && current ? <ProjectRepositories repos={members} selectedRepoPath={selectedRepoPath}
+      onSelect={path => onRepoSelect(current, path)} /> : null}
     {dialog ? <ProjectGroupDialog key={dialog} repos={repos} project={dialogProject} projectId={dialog === 'new' ? undefined : dialog} onClose={() => { setDialog(null); anchor.current?.focus(); }} onAddRepo={() => { addAnchor.current?.focus(); setAdding(true); }} onSaved={async (saved) => {
       const record = { id: saved.id, name: saved.name, repoPaths: saved.repos.flatMap((link) => repos.find((repo) => repo.id === link.repoId)?.localPath ?? []), createdAt: String(saved.createdAt) };
       if (!await onProjectSelect(record)) throw new Error('Project saved. Could not open it; try again.');

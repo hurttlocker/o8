@@ -73,6 +73,15 @@ it('keeps navigation usable with the chat list open or closed and reads fresh us
     expect(button('Canvas mode')).toBeDefined();
     expect(button('Home').querySelector('img')?.getAttribute('src')).toBe('/logos/o8-desktop.png');
     expect(host.querySelectorAll('[data-sidebar-brand]')).toHaveLength(1);
+    const navigationButtons = [...host.querySelectorAll('[aria-label="Workspace navigation"] button')];
+    expect(navigationButtons[1]).toBe(button('Symon'));
+    const voiceToggle = vi.fn();
+    window.addEventListener('o8:symon-voice-toggle', voiceToggle);
+    try {
+      expect(voiceToggle).not.toHaveBeenCalled();
+      await act(async () => button('Symon').click());
+      expect(voiceToggle).toHaveBeenCalledOnce();
+    } finally { window.removeEventListener('o8:symon-voice-toggle', voiceToggle); }
     for (const [label, callback] of [['Home', callbacks.onHome], ['Run orchestrator', callbacks.onNewSession], ['Run terminal', callbacks.onCreateTerminal], ['PRs', callbacks.onOpenPRs]] as const) {
       await act(async () => button(label).click());
       expect(callback).toHaveBeenCalledOnce();
@@ -224,6 +233,8 @@ it('keeps o8 primary and requires expanding Tools before any explicit CLI update
     expect(popup.textContent).not.toContain('codex');
     const tools = popup.querySelector<HTMLButtonElement>('[aria-label="Tools updates"]')!;
     expect(tools).not.toBeNull(); expect(tools.getAttribute('aria-expanded')).toBe('false');
+    const notesHeading = [...popup.querySelectorAll('div')].find(element => element.textContent === 'What’s changed')!;
+    expect(notesHeading.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => tools.click());
     expect(popup.textContent).toContain('codex');
     expect(popup.textContent).not.toMatch(/claude-code|grok|gemini|Fetch is aborted/);

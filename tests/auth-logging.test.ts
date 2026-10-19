@@ -117,7 +117,7 @@ describe('auth diagnostics through the provider and native error latch', () => {
   it('emits only a fixed initialization diagnostic to console and native capture', async () => {
     fixture(true);
     await mount();
-    expect(logs).toContainEqual(['[auth] native Clerk init failed; using cookie mode']);
+    expect(logs).toContainEqual(['[auth] native Clerk init failed; retry in Account settings']);
     expect(JSON.stringify(records)).toContain('native Clerk init failed');
     expect(JSON.stringify(logs)).not.toContain(marker);
     expect(JSON.stringify(records)).not.toContain(marker);

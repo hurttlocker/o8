@@ -119,8 +119,11 @@ export async function beginCacheStaging(cacheRoot, projectRoot, phase, source, o
       try {
         await save('populating', outputName ? { output: identity(join(path, outputName), 'file') } : {});
         const invocation = guardedWorkspaceInvocation('tar', args, record.staging);
+        const env = { ...process.env };
+        // Cache archives are uncompressed. Updater gzip options must stay with the caller.
+        delete env.TAR_WRITER_OPTIONS;
         const child = spawnSync(invocation.command, invocation.args, { cwd: path,
-          encoding: 'utf8', stdio: ['ignore', output ?? 'pipe', 'pipe'], timeout: 20 * 60_000, maxBuffer: 1024 * 1024 });
+          env, encoding: 'utf8', stdio: ['ignore', output ?? 'pipe', 'pipe'], timeout: 20 * 60_000, maxBuffer: 1024 * 1024 });
         if (child.error || child.status !== 0 || child.signal) {
           throw new Error(`Cache staging tar failed: ${child.error?.message || child.stderr || child.signal || child.status}`);
         }

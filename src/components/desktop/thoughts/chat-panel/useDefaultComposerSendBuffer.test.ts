@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorSendHandle } from '../useOrchestratorStream';
 import { useDefaultComposerSendBuffer } from './useDefaultComposerSendBuffer';
 
+vi.mock('./useDurableComposerQueue', () => ({ useDurableComposerQueue: () => ({ items: [], removing: new Set(), ready: true, error: null, enqueue: vi.fn(), cancel: vi.fn() }) }));
+
 const dispatch = vi.fn(() => ({} as OrchestratorSendHandle));
 let container: HTMLDivElement;
 let root: Root;
@@ -28,6 +30,7 @@ function Harness({ backend, dataUri, active = true, initialInput = 'Inspect this
     addAttachedImage: (image) => setImages((current) => [...current, image]),
     clearAttachments: () => setImages([]),
     dispatch,
+    captureQueuedSend: () => { throw new Error('No queued send in this idle test.'); },
     interrupt: () => undefined,
     undoSend: () => undefined,
     shouldBypass: () => false,

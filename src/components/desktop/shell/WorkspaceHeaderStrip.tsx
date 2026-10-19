@@ -64,7 +64,7 @@ export function WorkspaceHeaderStrip({
       // columns' hairlines lined up into one faint line across the whole
       // app. The side strips keep theirs.
       bottomHairline={false}
-      style={!sidebarVisible && !leadingInset ? { paddingLeft: 3.5 } : undefined}
+      style={!sidebarVisible && !leadingInset ? { paddingLeft: 10 } : undefined}
       left={
         <>
           {/* When this strip is leftmost (sidebar collapsed) it carries the
@@ -84,7 +84,7 @@ export function WorkspaceHeaderStrip({
         </>
       }
       center={usePillStrip || headerLabel || paneCount ? (
-        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
           {usePillStrip ? (
             <HeaderPillStrip
               tabs={tabs}

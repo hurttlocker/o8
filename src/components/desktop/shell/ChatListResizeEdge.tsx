@@ -6,9 +6,10 @@ import { ResizeEdge } from './ResizeEdge';
 import { COLUMN_HANDLE_WIDTH } from '../hooks/useColumnResize';
 
 /** Glow the straight edge without repainting or changing the panel's corners. */
-export function ChatListResizeEdge({ width, glass, onStartDrag, setWidth }: {
+export function ChatListResizeEdge({ width, glass, joined = false, onStartDrag, setWidth }: {
   width: number;
   glass: boolean;
+  joined?: boolean;
   onStartDrag: PointerEventHandler<HTMLDivElement>;
   setWidth: Dispatch<SetStateAction<number>>;
 }) {
@@ -24,11 +25,11 @@ export function ChatListResizeEdge({ width, glass, onStartDrag, setWidth }: {
         setWidth(Math.max(160, Math.min(500, (measured ? measured / readAppliedUiZoom() : width) + delta)));
       }}
       onPointerDown={onStartDrag}
-      style={{ width: COLUMN_HANDLE_WIDTH }}
-      linePosition={-0.5}
+      style={{ width: joined ? 1 : COLUMN_HANDLE_WIDTH }}
+      linePosition={joined ? 0.5 : -0.5}
       hitSlop={8}
-      // Glass puts its 34px header above the curved card. Solid encloses it.
-      glowStyle={{ top: glass ? 53 : 18, bottom: glass ? 0 : 18 }}
+      // Joined panels expose a straight seam from the shared header to the bottom.
+      glowStyle={joined ? { top: 'var(--o8-shell-header-height, 40px)', bottom: 0 } : { top: `calc(var(--o8-shell-header-height, ${glass ? 35 : 0}px) + 18px)`, bottom: glass ? 0 : 18 }}
     />
   );
 }

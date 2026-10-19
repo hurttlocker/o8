@@ -55,11 +55,10 @@ import { ResponsiveSessionSurface } from './ResponsiveSessionSurface';
 import type { ThreadDropAction } from './ThreadDropLayer';
 import { findThreadLeafByThreadId } from '@/lib/orchestrator/session-tiles';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
+import { useWorkerCardFocus } from './use-worker-card-focus';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
 import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
-// Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
-// row. The old layout component is no longer imported here.
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -563,6 +562,7 @@ function OrchestratorTabInner({
     .filter((key): key is string => typeof key === 'string' && !retiredSessionKeys.has(key)), [agents, retiredSessionKeys]);
   const meshParticipants = useMemo(() => projectLiveSessionMeshParticipants(agents, data?.missionState?.packets ?? []), [agents, data?.missionState?.packets]);
   const sessionTiles = useSessionTiles({ tabId, repoPath: homeAwareRepoPath, workspaceId, threadId: chatChromeState.threadId, liveSessionKeys, retiredSessionKeys, participants: meshParticipants, active });
+  const focusWorkerPacket = useWorkerCardFocus({ packets: data?.missionState?.packets ?? [], threadId: chatChromeState.threadId, openSession: sessionTiles.splitSessionFromMenu });
   useEffect(() => {
     const activeGroupIds = comparisonGroups.map((group) => group.groupId);
     if (
@@ -1056,7 +1056,7 @@ function OrchestratorTabInner({
       )}
       composerLeadingExtras={composerLeadingExtras}
       onMissionStateChange={data.onMissionStateChange}
-      onLaunchPacket={data.onLaunchPacket}
+      onFocusPacket={focusWorkerPacket} onFocusSession={sessionKey => sessionTiles.splitSessionFromMenu(sessionKey, 'vertical')}
       onChromeChange={handleChromeChange}
     />
   );

@@ -40,6 +40,8 @@ export interface TileContentDefinition<TContent extends TileContent = TileConten
 export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>;
 
 interface TileContainerProps {
+  /** Solid workspace surfaces share straight seams; glass keeps separate cards. */
+  joined?: boolean;
   activeTileId: string | null;
   paneLabels?: ReadonlyMap<string, string>;
   keepPrimarySessionAlive?: boolean;
@@ -73,6 +75,7 @@ const LEAF_RADIUS = 14;
  * panel no longer remounts the workspace terminal above it.
  */
 export function TileContainer({
+  joined = false,
   activeTileId,
   paneLabels,
   keepPrimarySessionAlive = false,
@@ -84,6 +87,8 @@ export function TileContainer({
   onResizeSplit,
   onSplitTile,
 }: TileContainerProps) {
+  const leafGap = joined ? 1 : LEAF_GAP;
+  const leafRadius = joined ? 0 : LEAF_RADIUS;
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
   const [paneDragging, setPaneDragging] = useState(false);
@@ -110,21 +115,22 @@ export function TileContainer({
     return { leaves, leafRects, splitFrames };
   }, [layout.root]);
 
-  const totalLeaves = leaves.length;
+  const visibleLeaves = leaves.filter((leaf) => leaf.content.kind !== 'contextual-panel' || leaf.content.hidden !== true);
+  const totalLeaves = visibleLeaves.length;
   const leafSignature = leaves.map((leaf) => leaf.id).join('|');
   const focusedPaneId = paneFocus?.leaves === leafSignature && leaves.some((leaf) => leaf.id === paneFocus.tileId)
     ? paneFocus.tileId : null;
-  const allTerminalPanes = leaves.every((leaf) => leaf.content.kind === 'terminal');
+  const allTerminalPanes = visibleLeaves.every((leaf) => leaf.content.kind === 'terminal');
   const showPaneHeader = allTerminalPanes && totalLeaves > 1;
   const primaryLeaf = leaves.find((leaf) => leaf.id === 'tile-root' && leaf.content.kind === 'terminal');
   const primaryRect = focusedPaneId && focusedPaneId !== 'tile-root'
     ? null : focusedPaneId === 'tile-root'
       ? { left: 0, top: 0, width: 1, height: 1 }
       : leafRects.get('tile-root');
-  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? LEAF_GAP / 2 : 0;
-  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
+  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? leafGap / 2 : 0;
+  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? leafGap / 2 : 0;
+  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? leafGap / 2 : 0;
+  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? leafGap / 2 : 0;
 
   useEffect(() => {
     const update = (drag: WorkspacePaneDrag) => {
@@ -209,29 +215,30 @@ export function TileContainer({
       }}
     >
       {leaves.map((leaf, index) => {
+        const hiddenPanel = leaf.content.kind === 'contextual-panel' && leaf.content.hidden === true;
         const hiddenByFocus = Boolean(focusedPaneId && focusedPaneId !== leaf.id);
         const rect = focusedPaneId === leaf.id
           ? { left: 0, top: 0, width: 1, height: 1 }
           : leafRects.get(leaf.id);
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
-        const isActive = !hiddenByFocus && leaf.id === activeTileId;
+        const isActive = !hiddenPanel && !hiddenByFocus && leaf.id === activeTileId;
         // Per-edge: half the gap on edges facing siblings; zero on edges
         // flush with the workspace boundary. Adjacent leaves contribute
         // half + half = LEAF_GAP visible in the middle, fully transparent
         // so the chrome shows through.
         const epsilon = 0.001;
-        const halfGap = LEAF_GAP / 2;
+        const halfGap = leafGap / 2;
         const padLeft = rect.left > epsilon ? halfGap : 0;
         const padRight = rect.left + rect.width < 1 - epsilon ? halfGap : 0;
         const padTop = rect.top > epsilon ? halfGap : 0;
         const padBottom = rect.top + rect.height < 1 - epsilon ? halfGap : 0;
         // Round only corners adjacent to a gap so the leaves keep the
         // workspace boundary crisp.
-        const radiusTL = (padTop || padLeft) ? LEAF_RADIUS : 0;
-        const radiusTR = (padTop || padRight) ? LEAF_RADIUS : 0;
-        const radiusBL = (padBottom || padLeft) ? LEAF_RADIUS : 0;
-        const radiusBR = (padBottom || padRight) ? LEAF_RADIUS : 0;
+        const radiusTL = (padTop || padLeft) ? leafRadius : 0;
+        const radiusTR = (padTop || padRight) ? leafRadius : 0;
+        const radiusBL = (padBottom || padLeft) ? leafRadius : 0;
+        const radiusBR = (padBottom || padRight) ? leafRadius : 0;
         return (
           <div
             key={leaf.id}
@@ -239,12 +246,15 @@ export function TileContainer({
             data-tile-id={leaf.id}
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
+            aria-hidden={hiddenPanel || hiddenByFocus}
+            inert={hiddenPanel || hiddenByFocus}
             onMouseDown={() => onActivateTile(leaf.id)}
             onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
               position: 'absolute',
+              display: hiddenPanel ? 'none' : undefined,
               left: `${rect.left * 100}%`,
               top: `${rect.top * 100}%`,
               width: `${rect.width * 100}%`,

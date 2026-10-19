@@ -41,7 +41,7 @@ export class LiveTranscript {
   }
 }
 
-export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: { idleTimeoutMs?: number }): Promise<LiveSession> {
+export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: { idleTimeoutMs?: number; onLevel?: (level: number) => void }): Promise<LiveSession> {
   let state: LiveState = 'connecting';
   let cleaned = false;
   let pollingStarted = false;
@@ -89,6 +89,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     cleaned = true; unsubscribe?.(); rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
     clearTimeout(startupTimer); clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
     stream?.getTracks().forEach(track => track.stop()); peer.close(); audio.pause(); audio.srcObject = null;
+    options?.onLevel?.(0);
     void audioContext?.close(); resolveClose?.();
   };
   const close = (): Promise<void> => {
@@ -192,11 +193,14 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
       unsubscribe = backend.subscribe?.((text, spoken) => update(null, text, spoken)); }
     idleTimer = setInterval(() => {
       let inputEnergy = false; let outputAudible = false;
+      let measuredLevel = 0;
       for (const { analyser, output } of analysers) {
         const values = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(values);
         const energy = values.some(value => Math.abs(value - 128) > 5);
+        measuredLevel = Math.max(measuredLevel, Math.sqrt(values.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / values.length));
         if (output) outputAudible ||= energy && !audio.paused; else inputEnergy ||= energy;
       }
+      options?.onLevel?.(state === 'live' ? Math.min(1, measuredLevel * 4) : 0);
       if (state === 'live' && activityPolicy.shouldClose(Date.now(), inputEnergy, outputAudible)) { idleClosed = true; void close(); }
     }, 200);
     startPolling();

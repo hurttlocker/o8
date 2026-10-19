@@ -21,8 +21,9 @@ describe('resolveWorkerRouting — effort parity (unset)', () => {
     expect(r.modelDisposition).toBe('runtime-default');
   });
 
-  it("'adaptive' is treated as no explicit effort (runtime default) ⇒ null", () => {
+  it("'adaptive' retains the reset while the concrete selected effort stays null", () => {
     const r = resolveWorkerRouting({ requestedRuntime: 'codex', requestedEffort: 'adaptive' });
+    expect(r.requestedEffort).toBe('adaptive');
     expect(r.selectedEffort).toBeNull();
   });
 

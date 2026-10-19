@@ -176,7 +176,6 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
           lockedMode={mode === 'chat' ? 'chat' : undefined}
           initialMode={mode === 'chat' ? 'chat' : 'fleet'}
           onMissionStateChange={data.onMissionStateChange}
-          onLaunchPacket={data.onLaunchPacket}
           onChromeChange={handleChromeChange}
         />
       </div>

@@ -14,6 +14,7 @@ import { O8ActivityPane } from './O8ActivityPane';
 import { O8ThreadTools } from './o8-panel/O8ThreadTools';
 import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
+import { TerminalUnavailableState } from './o8-panel/TerminalUnavailableState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { DevicePanel } from './o8-panel/devices/DevicePanel';
@@ -32,7 +33,7 @@ import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps 
 import { canonicalPanelTab, isRightUtilityTab, type O8Tab } from './o8-panel/types';
 import { usePersistedUtilityTabs } from './o8-panel/use-persisted-utility-tabs';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
-import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
+import { ChatIcon, ReviewIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
@@ -83,6 +84,7 @@ interface O8PanelProps {
   sendTerminalDetach?: ContextualPanelProps['sendTerminalDetach'];
   sendAgentKill?: ContextualPanelProps['sendAgentKill'];
   termWsConnected?: boolean;
+  onOpenMainTerminal?: (repoPath: string | null) => Promise<void>;
 }
 
 // ── Main Component ──
@@ -125,6 +127,7 @@ export function O8Panel({
   sendTerminalDetach,
   sendAgentKill,
   termWsConnected = false,
+  onOpenMainTerminal,
 }: O8PanelProps) {
   const activeTab = canonicalPanelTab(externalTab ?? 'activity');
   const requestedSecondary = externalSecondaryTab ? canonicalPanelTab(externalSecondaryTab) : null;
@@ -274,13 +277,15 @@ export function O8Panel({
   // action instead of the snapshot/click hunt that cost the orchestrator ~5 min.
   useEffect(() => {
     const handler = (event: Event) => {
-      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url;
+      const detail = (event as CustomEvent<{ url?: string | null; scopeKey?: string }>).detail;
+      if (detail?.scopeKey && detail.scopeKey !== browserStateKey) return;
+      const url = detail?.url;
       onActiveTabChange?.('browser');
       if (typeof url === 'string' && url.trim()) setPendingBrowserNavigation({ baseUrl: browserUrl, url: url.trim() });
     };
     window.addEventListener('o8:open-browser', handler);
     return () => window.removeEventListener('o8:open-browser', handler);
-  }, [browserUrl, onActiveTabChange]);
+  }, [browserStateKey, browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'device') return <DevicePanel active={active} />;
@@ -378,17 +383,15 @@ export function O8Panel({
     }
 
     return (
-      <SurfaceEmptyState
-        icon={<TerminalIcon size={18} />}
-        title="Terminal unavailable"
-        detail="The terminal bridge is not connected for this right panel."
-      />
+      <TerminalUnavailableState onOpenMainTerminal={onOpenMainTerminal ? () => onOpenMainTerminal(repoPath ?? null) : undefined} />
     );
   };
 
   return (
     <div
       ref={splitContainerRef}
+      data-o8-browser-host={browserStateKey}
+      data-o8-browser-visible={paneVisible('browser') ? 'true' : 'false'}
       data-chrome-surface="true"
       style={{
         position: 'relative',

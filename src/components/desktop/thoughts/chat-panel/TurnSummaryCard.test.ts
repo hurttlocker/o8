@@ -2,9 +2,20 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
+import { resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import { buildTurnSummaryStats, TurnSummaryCard } from './TurnSummaryCard';
 
 describe('TurnSummaryCard', () => {
+  it('keeps Shared in the persisted receipt instead of reporting a fleet-engine mode change', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'shared-return', role: 'assistant', text: 'Worker returned.',
+      receipt: { leadModel: 'o8-free', effort: 'low', pickedMode: 'fast',
+        mode: resolveTurnReceiptMode('o8', 'fleet', 'fast') },
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+    expect(html).toContain('o8 · Shared');
+    expect(html).not.toContain('ran as');
+  });
   it('shows billable cost separately from parent context tokens', () => {
     const summary = {
         assistantMessageId: 'assistant-one',

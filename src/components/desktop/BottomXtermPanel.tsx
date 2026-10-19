@@ -10,9 +10,14 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
+import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
+import { TerminalExitNotice } from '@/components/desktop/workspace-terminal/TerminalExitNotice';
+import { retainTerminalExitBuffer } from '@/components/desktop/workspace-terminal/terminal-exit-buffer';
 
 interface InlineImage {
   id: string;
@@ -24,7 +29,7 @@ export interface XtermPanelHandle {
   writeData: (data: string) => void;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
-  setExited: () => void;
+  setExited: (exitCode?: number | null) => void;
 }
 
 export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
@@ -36,26 +41,30 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   visible: boolean;
   /** Watch-only: render live output but never forward keystrokes to the PTY. */
   readOnly?: boolean;
+  onNewShell?: () => void;
+  onClose?: () => void;
 }>(function BottomXtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, readOnly = false },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, readOnly = false, onNewShell, onClose },
   ref,
 ) {
-  const { themeId, surface } = useTheme();
+  const { themeId, surface, workspaceGlass } = useTheme();
   // Glass surface: the bottom terminal reads as part of the chrome, so it
   // bleeds the vibrancy like every other glass panel instead of painting a
   // solid near-black slab (Q ruling 2026-07-14). Solid surface keeps the
   // opaque paper terminal. Kept in a ref so the init effect sees the current
   // value without re-initializing the terminal.
-  const glass = surface === 'glass';
+  const glass = surface === 'glass' || (workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell());
   const glassRef = useRef(glass);
   glassRef.current = glass;
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const termRef = useRef<any>(null);
+  const exitBufferRef = useRef<ReturnType<typeof retainTerminalExitBuffer> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [exited, setExited] = useState(false);
+  const exitedRef = useRef(false);
+  const [exited, setExited] = useState<TerminalExitState | null>(null);
   const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
   const imageCountRef = useRef(0);
 
@@ -78,8 +87,18 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       ]));
       if (termRef.current) termRef.current.write('\r\n\r\n');
     },
-    setError: (err: string) => setError(err),
-    setExited: () => setExited(true),
+    setError: (err: string) => { if (!exitedRef.current) setError(err); },
+    setExited: (exitCode) => {
+      exitedRef.current = true;
+      if (termRef.current) termRef.current.options.disableStdin = true;
+      const term = termRef.current;
+      const finish = () => {
+        const state = terminalExitState(exitCode, exitBufferRef.current?.read() ?? '');
+        if (term && state.transcript) { term.reset(); term.options.disableStdin = true; term.write(state.transcript.replace(/\n/g, '\r\n')); }
+        setExited(state);
+      };
+      if (term) term.write('', finish); else finish();
+    },
   }), []);
 
   useEffect(() => {
@@ -87,7 +106,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
     const timer = setTimeout(() => {
       try {
         fitAddonRef.current?.fit();
-        sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
+        if (!exitedRef.current) sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
         // Pin to the latest output. While the panel is hidden (display:none)
         // the buffer keeps growing but the viewport doesn't track the bottom,
         // so on re-show it lands mid-scroll. A second deferred call catches
@@ -162,6 +181,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         if (!containerRef.current || disposed) { term.dispose(); return; }
 
         term.open(containerRef.current);
+        exitBufferRef.current = retainTerminalExitBuffer(term);
         fitAddon.fit();
         termRef.current = term;
         fitAddonRef.current = fitAddon;
@@ -169,7 +189,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         sendTerminalAttach(tmuxSession, term.cols, term.rows);
         // Read-only (agent-run) views watch without typing into the agent's PTY.
         if (!readOnly) {
-          term.onData((data) => { sendTerminalInput(tmuxSession, data); });
+          term.onData((data) => { if (!exitedRef.current) sendTerminalInput(tmuxSession, data); });
         }
         // Snapshot selections for the speak-selection reader (busy TUIs can
         // wipe the live selection before the chord lands).
@@ -181,7 +201,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           if (disposed || !fitAddonRef.current) return;
           try {
             fitAddonRef.current.fit();
-            sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
+            if (!exitedRef.current) sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
           } catch { /* ignore */ }
         });
         if (containerRef.current) observer.observe(containerRef.current);
@@ -205,6 +225,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       unregisterSelection();
       sendTerminalDetach(tmuxSession);
       cleanupPromise?.then(cleanup => cleanup?.());
+      exitBufferRef.current?.dispose(); exitBufferRef.current = null;
       if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
       fitAddonRef.current = null;
     };
@@ -233,19 +254,8 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
     );
   }
 
-  if (exited) {
-    return (
-      <div style={{
-        flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#64748b', fontSize: 13, fontFamily: 'ui-monospace, monospace',
-      }}>
-        Session ended
-      </div>
-    );
-  }
-
   return (
-    <div style={{
+    <div data-o8-term-panel={tmuxSession} style={{
       flex: 1,
       width: '100%',
       display: visible ? 'flex' : 'none',
@@ -253,6 +263,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       background: glass ? 'transparent' : 'var(--t-terminal-bg, #16191e)',
       overflow: 'hidden',
     }}>
+      {exited ? <TerminalExitNotice state={exited} onNewShell={onNewShell} onClose={onClose} /> : null}
       {inlineImages.map((img) => (
         <div key={img.id} style={{
           paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,

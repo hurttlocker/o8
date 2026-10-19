@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { ownedRoots } from '../owned-session-index';
+import { ownedRoots, readOwnedSessionRecord } from '../owned-session-index';
 import { createOwnedSessionIo, type OwnedSessionIo } from './session-io';
 import type { OwnedSessionRecord } from './types';
 import { refuseOwnedSingleAttemptResume } from './execution-policy';
@@ -24,14 +24,17 @@ export function recoveryInterrupted(session: OwnedSessionRecord): boolean {
 }
 
 /** Read durable current-generation evidence, without refreshing or retrying it. */
-export async function readOwnedRecoveryState(surfaceId: string) {
+export async function readOwnedRecoveryState(surfaceId: string, options?: { includeArchived?: boolean }) {
   const root = ownedRoots().find(entry => surfaceId.startsWith(entry.marker));
   if (!root) return { owned: false as const };
   const store = stores.get(root.marker);
   const io = store?.io ?? createOwnedSessionIo({ root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {} });
-  const session = await io.findSession(surfaceId).catch(() => null);
+  const live = await io.findSession(surfaceId).catch(() => null);
+  const session = live ?? (options?.includeArchived ? await readOwnedSessionRecord(surfaceId) : null);
   return { owned: true as const, runId: session ? currentRecoveryRun(session)?.id : undefined,
-    automaticRecoveryAllowed: Boolean(session && session.executionPolicy === undefined),
+    startedAt: session ? currentRecoveryRun(session)?.startedAt : undefined,
+    finishedAt: session ? currentRecoveryRun(session)?.finishedAt : undefined,
+    automaticRecoveryAllowed: Boolean(live && live.executionPolicy === undefined),
     outcome: session ? currentRecoveryRun(session)?.outcome : undefined,
     interrupted: session ? recoveryInterrupted(session) : false };
 }

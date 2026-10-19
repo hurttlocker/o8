@@ -185,6 +185,29 @@ describe('XtermPanel terminal workload instrumentation', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([0, 7, undefined])('keeps final output and truthful exit status %s without accepting more input', async (exitCode) => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = panelProps(true);
+    const onNewShell = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => root.render(createElement(XtermPanel, { ...props, ref: panelRef, onNewShell, onClose })));
+    await act(async () => panelRef.current?.writeData(btoa('FINAL-OUTPUT-MARKER\r\n')));
+    const output = container.querySelector('[data-terminal-output]');
+    await act(async () => panelRef.current?.setExited(exitCode));
+    expect(container.querySelector('[data-terminal-output]')).toBe(output);
+    expect(output?.textContent).toContain('FINAL-OUTPUT-MARKER');
+    expect(container.querySelector('[data-terminal-exit]')?.textContent).toContain(exitCode === undefined ? 'Exit status unknown' : `Exited with code ${exitCode}`);
+    xtermMock.onData?.('must-not-send');
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    await act(async () => root.render(createElement(XtermPanel, { ...props, visible: false, ref: panelRef, onNewShell, onClose })));
+    await act(async () => root.render(createElement(XtermPanel, { ...props, ref: panelRef, onNewShell, onClose })));
+    expect(container.querySelector('[data-terminal-output]')?.textContent).toContain('FINAL-OUTPUT-MARKER');
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'New shell')!.click());
+    expect(onNewShell).toHaveBeenCalledOnce();
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Close')!.click());
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('does not allocate counters when the bench flag is unset', async () => {
     const panelRef = createRef<XtermPanelHandle>();
     await act(async () => {

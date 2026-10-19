@@ -41,15 +41,9 @@ export function ColumnHeaderStrip({
   // Window drag — Tauri v2 startDragging. Skip when the click lands on an
   // interactive child so buttons / inputs still work. Mirrors TitleBar.tsx.
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
+    if (e.button !== 0 || e.defaultPrevented) return;
     const target = e.target as HTMLElement;
-    if (
-      target.closest('button') ||
-      target.closest('input') ||
-      target.closest('kbd') ||
-      target.closest('[data-no-drag]')
-    ) {
-      return;
-    }
+    if (target.closest('button,input,textarea,select,a,kbd,[role="tab"],[role="button"],[contenteditable="true"],[data-no-drag]')) return;
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       await getCurrentWindow().startDragging();
@@ -65,15 +59,15 @@ export function ColumnHeaderStrip({
       data-tauri-drag-region={drag ? '' : undefined}
       onMouseDown={drag ? handleMouseDown : undefined}
       style={{
-        height,
+        height: `var(--o8-shell-header-height, ${height}px)`,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: 4,
         paddingLeft: 8,
         paddingRight: 8,
-        background: 'var(--t-chrome, transparent)',
-        borderBottom: bottomHairline ? '0.5px solid var(--t-divider-subtle)' : 'none',
+        background: 'var(--o8-shell-header-bg, var(--t-chrome, transparent))',
+        borderBottom: bottomHairline ? 'var(--o8-shell-header-border, 0.5px solid var(--t-divider-subtle))' : 'none',
         color: 'var(--t-text)',
         position: 'relative',
         boxSizing: 'border-box',

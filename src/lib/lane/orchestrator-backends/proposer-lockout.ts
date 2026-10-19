@@ -23,6 +23,7 @@
  */
 
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
+import { CORTEX_READONLY_TOOLS } from '@/lib/mcp/cortex-readonly-tools';
 
 /** Native write/execute tool names — Claude Code + Codex. */
 const WRITE_EXECUTE_TOOLS = new Set([
@@ -48,21 +49,8 @@ const DISPATCH_TOOL_PATTERN =
  * dispatches a worker). This is the ONLY set of cortex tools a read-only
  * proposer may call. ALLOWLIST, not denylist: anything else on the cortex server
  * — every mutator, and any cortex tool added later — classifies as dispatch and
- * fails closed. Mirrors `CORTEX_READONLY_TOOLS` in cortex-mcp-server.ts (the
- * structural read-only profile); keep the two in sync.
+ * fails closed. Uses the same allowlist as the structural read-only profile.
  */
-const CORTEX_READONLY_TOOLS = new Set<string>([
-  'cortex_ask',
-  'cortex_read_packets',
-  'cortex_read_transcript',
-  'cortex_fleet_status',
-  'cortex_list_approvals',
-  'cortex_list_issues',
-  'cortex_list_prs',
-  'cortex_list_projects',
-  'cortex_ci_status',
-  'cortex_shared_team_status',
-]);
 
 /**
  * If `name` is a cortex-server tool, return its bare tool name; else null.

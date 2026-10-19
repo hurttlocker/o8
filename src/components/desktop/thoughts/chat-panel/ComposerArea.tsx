@@ -34,12 +34,17 @@ import { useComposerSelectorState } from '../composer-selector/useComposerSelect
 import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
+import { ComposerQueueActions } from './ComposerQueueActions';
+import { WorkerCorrections, type WorkerCorrectionContext } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
 interface ComposerAreaProps {
   activeComposer?: boolean;
+  showBrain?: boolean;
   activityContent?: React.ReactNode;
+  voiceControl?: React.ReactNode;
+  workerContext?: WorkerCorrectionContext;
   inputLabel?: string;
   placeholder?: string;
   literalInput?: boolean;
@@ -102,7 +107,8 @@ interface ComposerAreaProps {
   onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
   contextLocationSlot?: React.ReactNode;
   composerLeadingExtras?: React.ReactNode;
-  /** ⌘⏎ or Return while busy routes through the host send buffer. */
+  /** ⌘⏎ requests steering; Return while busy queues the next turn. */
+  queueSaving?: boolean;
   onSteer?: () => void;
   sendBufferStatus?: React.ReactNode;
   promptStash?: PromptStashContext & { onRestore: (text: string) => void };
@@ -112,6 +118,7 @@ interface ComposerAreaProps {
 
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
+  showBrain = true,
   inputLabel,
   placeholder,
   literalInput = false,
@@ -125,6 +132,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   chatMessages,
   workerPackets,
   activityContent,
+  voiceControl,
+  workerContext,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -171,6 +180,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   contextLocationSlot,
   composerLeadingExtras,
   onSteer,
+  queueSaving = false,
   sendBufferStatus,
   promptStash,
   voiceModeEnabled,
@@ -344,8 +354,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       {activityContent}
       {sendBufferStatus}
+      {voiceControl}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
-        <BrainPipButton active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} />
+        {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+          key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
+          draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
+          onDelivered={sent => { if (input === sent) onInputChange(''); }}
+        /> : null}
+        {showBrain ? <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} /> : null}
         <SlashCommandPicker
           suggestions={slashSuggestions}
           activeIndex={activeSlashIndex}
@@ -620,7 +636,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
-              // ⌘⏎ / Ctrl+Enter — steer. Routes through the parent's enqueue path.
+              // Steering requires an actual live-runtime acknowledgement.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
@@ -633,8 +649,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 if (isWorkingLocked) {
-                  if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
-                  onSteer();
+                  if ((!input.trim() && attachedImages.length === 0) || queueSaving) return;
+                  onSubmit();
                   if (event.currentTarget) {
                     event.currentTarget.style.height = 'auto';
                   }
@@ -704,6 +720,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               overflowWrap: 'anywhere',
             }}
           />
+          {isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
           {footerOverride ?? <InputButtons
             input={input}
             hasAttachments={attachedImages.length > 0}

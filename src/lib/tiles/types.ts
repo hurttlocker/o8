@@ -31,6 +31,8 @@ export interface CanvasTileContent {
 
 export interface BottomTerminalTileContent {
   kind: 'contextual-panel';
+  /** Visibility only; the retained tile and its sessions keep their identity. */
+  hidden?: boolean;
 }
 
 export type TileContent =

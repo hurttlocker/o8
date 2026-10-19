@@ -13,10 +13,12 @@ import { useRuntimeUsage } from '@/components/desktop/analytics/use-runtime-usag
 import type { RuntimeCapacityControlSnapshot } from '@/lib/runtime/capacity-service';
 import type { NavSection } from '@/app/dashboard/types';
 import { TrafficLightsOrSpacer } from './TrafficLights';
+import { NAVIGATION_RAIL_WIDTH, SHELL_EDGE_INSET, SHELL_HEADER_HEIGHT } from './shell-geometry';
 import { RailMoreMenu } from './RailMoreMenu';
 import { RailActionButton } from './RailActionButton';
 import { RailUpdateControl } from './RailUpdateControl';
 import { SidebarBrand } from './SidebarBrand';
+import { SymonIcon } from '../agent-panel/SidebarActionIcons';
 import type { WorkspaceUtilityKind } from '../canvas/workspace-utility-navigation';
 import { openCustomizeTab, useCustomizeTab } from '../customize/navigation';
 import type { WorkspaceTabDragKind } from '@/lib/tiles/workspace-tab-drag';
@@ -147,8 +149,8 @@ export function CompactNavigationRail({
 
   return (
     <>
-    <div data-mcp-scope="navigation-window-controls" style={{ position: 'fixed', top: 0, left: 0, width: 68, height: 36, display: 'flex', alignItems: 'center', paddingLeft: 8, WebkitAppRegion: 'drag', zIndex: 190 } as CSSProperties}>
-      <TrafficLightsOrSpacer leadInPx={6} yNudge={3.3} />
+    <div data-mcp-scope="navigation-window-controls" style={{ position: 'fixed', top: 0, left: 0, width: NAVIGATION_RAIL_WIDTH, height: SHELL_HEADER_HEIGHT, display: 'flex', alignItems: 'center', paddingLeft: 8, WebkitAppRegion: 'drag', zIndex: 190 } as CSSProperties}>
+      <TrafficLightsOrSpacer leadInPx={6} yNudge={0} />
     </div>
     <nav
       data-mcp-scope="compact-navigation-rail"
@@ -157,24 +159,25 @@ export function CompactNavigationRail({
       aria-label="Workspace navigation"
       style={{
         position: 'fixed',
-        top: 34.5,
-        bottom: 8,
-        left: 8,
-        width: 56,
+        top: SHELL_HEADER_HEIGHT,
+        bottom: SHELL_EDGE_INSET,
+        left: 6,
+        width: NAVIGATION_RAIL_WIDTH - 12,
         zIndex: 190,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         paddingTop: 8,
         paddingBottom: 8,
-        border: isGlass ? '1px solid transparent' : '1px solid var(--t-divider-subtle)',
-        borderRadius: 16,
-        background: isGlass ? 'transparent' : 'var(--t-panel-solid)',
+        border: 0,
+        borderRadius: 0,
+        background: 'transparent',
         boxShadow: 'none',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
       <RailActionButton type="button" aria-label="Home" tooltipLabel="o8 — Home" aria-current={activeDestination === 'agents' && !workspacePage ? 'page' : undefined} onClick={onHome} style={railButton}><SidebarBrand /></RailActionButton>
+      <RailActionButton type="button" aria-label="Symon" onClick={() => window.dispatchEvent(new Event('o8:symon-voice-toggle'))} style={railButton}><SymonIcon size={20} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run orchestrator" onPointerDown={event => startPaneDrag(event, 'orchestrator')} onClick={event => clickPaneAction(event, onNewSession)} style={{ ...railButton, cursor: 'grab', touchAction: 'none' }}><Play size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Run terminal" onPointerDown={event => startPaneDrag(event, 'terminal')} onClick={event => clickPaneAction(event, onCreateTerminal)} style={{ ...railButton, cursor: 'grab', touchAction: 'none' }}><Terminal size={19} strokeWidth={1.8} /></RailActionButton>
       <RailActionButton type="button" aria-label="Canvas mode" onClick={() => window.location.assign('/preview/canvas-glass')} style={railButton}>

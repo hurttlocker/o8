@@ -69,3 +69,15 @@ export function refuseOwnedSingleAttemptResume(session: OwnedSessionRecord | nul
     throw new Error('Single-attempt workers cannot resume or retry. Review the result and prepare a new task.');
   }
 }
+
+/** Re-read policy after asynchronous setup before admitting a process spawn. */
+export function assertDurableOwnedSpawn(session: OwnedSessionRecord | null, expected: OwnedSessionRecord, runtime: string, mode: OwnedRunMode): asserts session is OwnedSessionRecord {
+  if (!session) throw new Error('Owned session disappeared before its run could start.');
+  if (JSON.stringify(session.executionPolicy) !== JSON.stringify(expected.executionPolicy)) {
+    throw new Error('Single-attempt worker policy changed before spawn.');
+  }
+  if (JSON.stringify(session.controlledTask) !== JSON.stringify(expected.controlledTask)) {
+    throw new Error('Controlled task binding changed before spawn.');
+  }
+  assertOwnedSingleAttemptSpawn(session, runtime, mode);
+}

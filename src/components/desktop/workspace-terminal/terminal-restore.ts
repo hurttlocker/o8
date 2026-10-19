@@ -19,6 +19,7 @@ import {
   runtimeFromOwnedSessionKey,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { parseTerminalExitState } from '@/lib/terminal/exit-state';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
@@ -454,6 +455,14 @@ export async function computeRestoredTabs(
     }
 
     const tabId = claimWorkspaceTabId('terminal', seenTabIds, savedTab.id);
+    const terminalExit = parseTerminalExitState(savedTab.terminalExit);
+    if (terminalExit) {
+      restoredTabs.push({ id: tabId, label: savedTab.label, kind: 'terminal', tmuxSession: savedTab.tmuxSession ?? `ended:${tabId}`, terminalExit,
+        readOnly: savedTab.readOnly, remoteMachine: savedTab.remoteMachine, cliAgent: savedTab.cliAgent,
+        repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : undefined, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
     if (savedTab.tmuxSession && alive.has(savedTab.tmuxSession) && !seenTerminalSessions.has(savedTab.tmuxSession)) {
       seenTerminalSessions.add(savedTab.tmuxSession);
       restoredTabs.push({
@@ -591,6 +600,8 @@ export function reconcileValidatedTabs(
   const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
   return validatedTabs.map((validatedTab) => {
     if (validatedTab.kind !== 'terminal') return validatedTab;
+    const current = currentById.get(validatedTab.id);
+    if (current?.terminalExit) return { ...validatedTab, tmuxSession: current.tmuxSession, terminalExit: current.terminalExit };
     const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
     return currentSession && acknowledgedDuringRestore.has(validatedTab.id)
       ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
