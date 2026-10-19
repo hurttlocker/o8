@@ -1,6 +1,6 @@
 # Offline harness improvement foundation
 
-This tooling admits supplied proposals for optional context notes and analyzes supplied probe receipts. It does not generate proposals, run probes, install prompts, change component lifecycle, or establish real-work benefit. Reports are advisory data. A valid report is not approval, and a supplied digest is an identity check, not proof that a trusted verifier ran.
+This tooling admits supplied proposals for optional context notes, analyzes supplied probe receipts and can deterministically combine explicitly chosen proposals into an untested successor. It does not generate proposals with a model, run probes, install prompts, change component lifecycle, or establish real-work benefit. Reports are advisory data. A valid report is not approval, and a supplied digest is an identity check, not proof that a trusted verifier ran.
 
 Tracking: [offline foundation milestone](https://github.com/hurttlocker/o8/issues/3985), [proposal admission](https://github.com/hurttlocker/o8/issues/3986). The milestone has a fixed 100-point acceptance denominator. Completion of that milestone does not complete broader adaptation, release acceptance or live benefit validation.
 
@@ -53,7 +53,7 @@ Rejected upstream defaults include unrestricted executor network, disabled Codex
 
 ## Remaining broader adaptation
 
-Supplied receipt comparison and scoped lesson filtering are part of this offline slice. Candidate generation, isolated bounded probe execution, application through existing operator-controlled seams, real held-out evaluation, installed acceptance and promotion remain separately scoped and held. None is implied by 100% offline fixture acceptance. Real-work benefit requires independent outcomes and complete costs, including failed attempts, proposal, probe, composition, selection, review, reflection and operator effort where applicable. Unknown cost cannot become zero or a savings claim.
+Supplied receipt comparison and scoped lesson filtering are part of this offline slice. Model-driven candidate generation, isolated bounded probe execution, application through existing operator-controlled seams, real held-out evaluation, installed acceptance and promotion remain separately scoped and held. None is implied by 100% offline fixture acceptance. Real-work benefit requires independent outcomes and complete costs, including failed attempts, proposal, probe, composition, selection, review, reflection and operator effort where applicable. Unknown cost cannot become zero or a savings claim.
 
 ## Supplied receipt schema and decision rule
 
@@ -74,9 +74,23 @@ The real-entry fixtures in `tests/harness-improvement-real-path.test.ts` constru
 Reading [the paper's full text](https://arxiv.org/html/2610.14224v1) alongside the source:
 
 - Section 2.2.1 holds model, environment and improvement harness fixed during a task. The manifest preserves explicit baseline/model/runtime/verifier/permission identities; it does not authenticate those supplied identities.
-- Sections 2.2.1–2.2.2 generate, execute and compose successor harnesses. This milestone only admits supplied proposals and analyzes supplied receipts. **Selecting one tested candidate is not the paper's composition operation**: Section 4's no-composition ablation makes that distinction. Executing and verifying a newly combined successor remains held.
+- Sections 2.2.1–2.2.2 generate, execute and compose successor harnesses. The initial foundation only admits supplied proposals and analyzes supplied receipts; the additional composition scaffolding is described below. **Selecting one tested candidate is not the paper's composition operation**: Section 4's no-composition ablation makes that distinction. Executing a newly combined successor remains separately gated; supplied fresh receipts can be validated offline.
 - Section 2.3 carries earlier experience into subsequent tasks. Our narrower lesson filter checks source order, scope, expiry and revocation without building or installing a persistent improvement library.
 - Section 4 counts execution and improvement compute. Our ledger requires every stage and exposes unknown accounting rather than treating missing costs as zero.
 - Appendix F cautions that extra refinement costs compute and behavioral/model feedback guarantees neither correctness nor transfer. We retain independent verification requirements, baseline fallback and an explicit unproven-live-benefit result.
 
 Held-out comparison and operator approval are o8 constraints added to this offline adaptation, not claims that the paper's online method requires labeled ground truth.
+
+## Deterministic composition scaffolding
+
+The additional source-only milestone [#3989](https://github.com/hurttlocker/o8/issues/3989) extends the same offline entrypoint with `--compose request.json`, mutually exclusive with `--evidence`. It combines explicitly selected admitted proposals, without running a model, reading evaluation reports or choosing parents by held-out scores. This does not authenticate how an operator chose the parent IDs; operator-side leakage is outside this artifact check.
+
+The strict request has exactly `schema: "o8/harness-composition-request/v1"`, `parentIds` (2–20 unique admitted IDs), `maxChanges` (1–20) and `maxTextBytes` (1–160000). These are artifact-size limits, not a claim that runtime, dollar or attempt costs were measured. UTF-8 note bytes are counted across all selected changes. Existing manifest execution budgets remain unchanged and are enforced when fresh receipts are analyzed. Composition and subsequent evaluation costs must be included in that later all-in ledger; this command invents no zero-cost receipt.
+
+Any repeated component is rejected, even if its text is identical. The deterministic union preserves exact note text, sorts component IDs and discovery references, and binds the successor ID to the manifest digest, exact parent digests, resulting changes and references. Collision with any admitted proposal is rejected. The command revalidates the output through the same admission function before exclusive report creation.
+
+The composition report contains the compatible proposal under `proposal`, its `proposalDigest`, exact parent `lineage`, limits and byte count. The proposal can be placed in a new proposal array for the existing admission/evidence command. The report always says `KEEP_BASE`, `status: "untested"`, `verificationRequired: true` and `authority: "advisory_only"`. No parent score, approval, lifecycle or lesson eligibility transfers. Parent receipts fail the successor's digest/variant checks. Fresh, complete paired evidence is still required before any advisory selection, and a positive selection still grants no installation or promotion authority.
+
+This implements a conservative structural composition operation, not the paper's model-driven composer. At the pinned upstream revision, `harness2/core/recursion.py:run_parallel` passes candidate rollout evidence into `prompts.aggregate`, calls `_run_stage` for distinct aggregate successors, then runs those successors separately with `_roll_many`. The fresh-successor/fresh-verification distinction is borrowed; the model calls, rollout execution, concurrency and editable filesystem trees are deliberately absent. The existing source inventory and no-vendored-code licensing disposition apply. Paper Section 4's selection-only ablation remains the reason not to call the original winner selection composition.
+
+The initial offline foundation's 100/100 receipt applies to its recorded commit. This addition has its own acceptance denominator and requires final-tree review, aggregate checks and CI again. Neither milestone completes the broader adaptation or establishes live benefit.

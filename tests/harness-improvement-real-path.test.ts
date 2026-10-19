@@ -248,3 +248,137 @@ describe('adversarial independent-review regressions', () => {
     expect(report.costs.complete).toBe(false);
   });
 });
+
+function setupComposition(edit?: (request: Record<string, unknown>) => void) {
+  const prepared = setup((input) => {
+    input.manifest.budget.maxAttempts = 20;
+    input.manifest.components.push('second-note');
+    input.proposals.push({ ...structuredClone(input.proposals[0]), id: 'parent-2', changes: [{ componentKey: 'second-note', kind: 'context_note', text: 'Check the contract before edits.' }] });
+  });
+  const request: Record<string, unknown> = { schema: 'o8/harness-composition-request/v1', parentIds: ['candidate-1', 'parent-2'], maxChanges: 2, maxTextBytes: 1024 };
+  edit?.(request);
+  const requestPath = join(prepared.root, 'composition.json');
+  writeFileSync(requestPath, JSON.stringify(request));
+  prepared.args.push('--compose', requestPath);
+  return { ...prepared, request, requestPath };
+}
+
+describe('deterministic successor composition through the real command', () => {
+  it('creates a new untested candidate with explicit lineage and no inherited approval', () => {
+    const { args, output, input } = setupComposition();
+    execFileSync(process.execPath, args);
+    const report = JSON.parse(readFileSync(output, 'utf8'));
+    expect(report.decision).toBe('KEEP_BASE');
+    expect(report.status).toBe('untested');
+    expect(report.verificationRequired).toBe(true);
+    expect(report.authority).toBe('advisory_only');
+    expect(report.liveBenefitProven).toBe(false);
+    expect(report.proposal.changes).toHaveLength(2);
+    expect(report.proposal.evidenceRefs).toEqual(['task-1']);
+    expect(report.lineage.map((parent: { id: string }) => parent.id)).toEqual(['candidate-1', 'parent-2']);
+    expect(report.proposalDigest).toBe(digest(report.proposal));
+    expect(input.proposals.map((p: { id: string }) => p.id)).not.toContain(report.proposal.id);
+    expect(report).not.toHaveProperty('score');
+    expect(report).not.toHaveProperty('selectedCandidate');
+  });
+  for (const [name, edit] of [
+    ['unknown parent', (r: Record<string, unknown>) => { r.parentIds = ['candidate-1', 'missing']; }],
+    ['duplicate parent', (r: Record<string, unknown>) => { r.parentIds = ['candidate-1', 'candidate-1']; }],
+    ['single parent', (r: Record<string, unknown>) => { r.parentIds = ['candidate-1']; }],
+    ['held-out feedback', (r: Record<string, unknown>) => { r.scores = { 'task-2': 1 }; }],
+    ['change bound', (r: Record<string, unknown>) => { r.maxChanges = 1; }],
+    ['byte bound', (r: Record<string, unknown>) => { r.maxTextBytes = 1; }],
+    ['invalid bound', (r: Record<string, unknown>) => { r.maxChanges = 21; }],
+    ['fractional bound', (r: Record<string, unknown>) => { r.maxTextBytes = 1.5; }],
+  ] as const) {
+    it(`refuses ${name} without output`, () => {
+      const { args, output } = setupComposition(edit);
+      expect(spawnSync(process.execPath, args).status).toBe(1);
+      expect(existsSync(output)).toBe(false);
+    });
+  }
+  it('rejects conflicting edits even when their text is identical', () => {
+    const { args, output, root, input } = setupComposition();
+    input.proposals[1].changes = input.proposals[0].changes;
+    writeFileSync(join(root, 'proposals.json'), JSON.stringify(input.proposals));
+    expect(spawnSync(process.execPath, args).status).toBe(1);
+    expect(existsSync(output)).toBe(false);
+  });
+  it('refuses composition combined with evaluation input', () => {
+    const { args, output } = setupComposition();
+    args.push('--evidence', 'not-read.json');
+    expect(spawnSync(process.execPath, args).status).toBe(1);
+    expect(existsSync(output)).toBe(false);
+  });
+  it('is deterministic across parent order and preserves inputs', () => {
+    const { args, output, request, requestPath, root } = setupComposition();
+    const before = readFileSync(join(root, 'proposals.json'), 'utf8');
+    execFileSync(process.execPath, args);
+    const first = readFileSync(output, 'utf8');
+    request.parentIds = ['parent-2', 'candidate-1'];
+    writeFileSync(requestPath, JSON.stringify(request));
+    args[10] = join(root, 'second-report.json');
+    execFileSync(process.execPath, args);
+    expect(readFileSync(args[10], 'utf8')).toBe(first);
+    expect(readFileSync(join(root, 'proposals.json'), 'utf8')).toBe(before);
+  });
+  it('admits the successor but rejects receipts bearing a parent digest', () => {
+    const { args, output, root } = setupComposition();
+    execFileSync(process.execPath, args);
+    const report = JSON.parse(readFileSync(output, 'utf8'));
+    writeFileSync(join(root, 'proposals.json'), JSON.stringify([report.proposal]));
+    args.splice(-2);
+    args[10] = join(root, 'admitted.json');
+    execFileSync(process.execPath, args);
+    expect(JSON.parse(readFileSync(args[10], 'utf8')).decision).toBe('KEEP_BASE');
+    const prior = setupEvidence();
+    const evidence = JSON.parse(readFileSync(join(prior.root, 'evidence.json'), 'utf8'));
+    evidence.manifestDigest = report.manifestDigest;
+    for (const cost of evidence.costs) if (cost.variantId === 'candidate-1') cost.variantId = report.proposal.id;
+    for (const run of evidence.runs) if (run.variantId === 'candidate-1') run.variantId = report.proposal.id;
+    evidence.runs[1].proposalDigest = report.lineage[0].digest;
+    const evidencePath = join(root, 'parent-evidence.json');
+    writeFileSync(evidencePath, JSON.stringify(evidence));
+    args[10] = join(root, 'refused.json');
+    args.push('--evidence', evidencePath);
+    const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('run proposal digest mismatch');
+    expect(existsSync(args[10])).toBe(false);
+  });
+
+  it('uses UTF-8 bytes for aggregate note bounds', () => {
+    const { args, output, input, root, request, requestPath } = setupComposition();
+    for (const proposal of input.proposals) proposal.changes[0].text = 'éé';
+    writeFileSync(join(root, 'proposals.json'), JSON.stringify(input.proposals));
+    request.maxTextBytes = 4; // Four JS characters, but eight UTF-8 bytes.
+    writeFileSync(requestPath, JSON.stringify(request));
+    expect(spawnSync(process.execPath, args).status).toBe(1);
+    expect(existsSync(output)).toBe(false);
+  });
+  it('rejects identity collision with an unselected admitted proposal', () => {
+    const { args, output, input, root } = setupComposition();
+    execFileSync(process.execPath, args);
+    const report = JSON.parse(readFileSync(output, 'utf8'));
+    input.proposals.push(report.proposal);
+    writeFileSync(join(root, 'proposals.json'), JSON.stringify(input.proposals));
+    args[10] = join(root, 'collision.json');
+    const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('identity collision');
+    expect(existsSync(args[10])).toBe(false);
+  });
+  it('changes successor identity when parent content changes', () => {
+    const { args, output, input, root } = setupComposition();
+    execFileSync(process.execPath, args);
+    const first = JSON.parse(readFileSync(output, 'utf8'));
+    input.proposals[0].changes[0].text = 'Different inert note.';
+    writeFileSync(join(root, 'proposals.json'), JSON.stringify(input.proposals));
+    args[10] = join(root, 'changed.json');
+    execFileSync(process.execPath, args);
+    const changed = JSON.parse(readFileSync(args[10], 'utf8'));
+    expect(changed.proposal.id).not.toBe(first.proposal.id);
+    expect(changed.proposalDigest).not.toBe(first.proposalDigest);
+  });
+
+});
