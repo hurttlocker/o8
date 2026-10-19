@@ -18,6 +18,8 @@ import {
   type PersistedOrchestratorPendingSend,
 } from './pending-send-store';
 import { formatTimestampLabel } from './shared';
+import { optimisticUserEntry } from './optimistic-user-entry';
+import { pendingSendImages } from './pending-image';
 
 interface DurablePendingSendOptions {
   repoPath: string | null;
@@ -38,17 +40,17 @@ interface OrchestratorActivity {
 }
 
 function pendingUserEntry(record: PersistedOrchestratorPendingSend): MobileTranscriptEntry {
-  return {
+  return optimisticUserEntry({
     id: `orch-user-${record.clientMessageId}`,
-    role: 'user',
     text: record.displayMessage,
     timestamp: record.sentAtMs,
     timestampLabel: formatTimestampLabel(record.sentAtMs),
-  };
+    attachments: pendingSendImages(record) ?? [],
+  });
 }
 
 export function pendingSendWirePayload(record: PersistedOrchestratorPendingSend, repoPath: string): string | null {
-  if (record.wirePayload) return record.wirePayload;
+  if (record.wirePayload) return pendingSendImages(record) === null ? null : record.wirePayload;
   if (record.attachmentsRequired) return null;
   return JSON.stringify({
     type: 'orchestrator-send',
@@ -88,8 +90,12 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const ensureUserBubble = useCallback((record: PersistedOrchestratorPendingSend) => {
     setMessages((prev) => {
-      if (prev.some((entry) => entry.id === `orch-user-${record.clientMessageId}`)) return prev;
-      const next = [...prev, pendingUserEntry(record)];
+      const recovered = pendingUserEntry(record);
+      const existing = prev.find((entry) => entry.id === recovered.id);
+      if (existing && (existing.media?.length || !recovered.media?.length)) return prev;
+      const next = existing
+        ? prev.map((entry) => entry.id === recovered.id ? { ...entry, media: recovered.media } : entry)
+        : [...prev, recovered];
       messagesRef.current = next;
       return next;
     });
@@ -180,7 +186,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     appendOrchestratorDeliveryFailureEntry(setMessages, messagesRef, {
       id: `orch-delivery-error-${record.clientMessageId}`,
       originalText: record.displayMessage,
-      reason: record.attachmentsRequired && !record.wirePayload
+      reason: record.attachmentsRequired && pendingSendImages(record) === null
         ? 'The image could not be saved for Retry. Reattach it and send again.'
         : undefined,
     });
@@ -241,7 +247,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     if (!record) return;
     ensureUserBubble(record);
     removeFailureEntry(clientMessageId);
-    if (record.attachmentsRequired && !record.wirePayload) {
+    if (record.attachmentsRequired && pendingSendImages(record) === null) {
       failPending(record);
       return;
     }
@@ -270,7 +276,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     for (const record of records) { ensureUserBubble(record); rememberIdentity(record); }
 
     activeRecordRef.current = newest;
-    if (newest.attachmentsRequired && !newest.wirePayload) {
+    if (newest.attachmentsRequired && pendingSendImages(newest) === null) {
       failPending(newest);
       return;
     }
