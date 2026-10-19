@@ -12,13 +12,24 @@ const mocks = vi.hoisted(() => ({
   clerk: {} as Record<string, unknown>,
   signIn: {} as Record<string, unknown>,
   purge: vi.fn(async () => {}),
+  userRevision: 0,
+  userListeners: new Set<() => void>(),
 }));
-vi.mock('@clerk/nextjs', () => ({
-  ClerkProvider: ({ children }: { children: unknown }) => children,
-  useUser: () => ({ isLoaded: true, isSignedIn: mocks.signedIn, user: mocks.user }),
-  useClerk: () => mocks.clerk,
-  useSignIn: () => ({ signIn: mocks.signIn }),
-}));
+vi.mock('@clerk/nextjs', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    ClerkProvider: ({ children }: { children: unknown }) => children,
+    useUser: () => {
+      useSyncExternalStore(listener => {
+        mocks.userListeners.add(listener);
+        return () => { mocks.userListeners.delete(listener); };
+      }, () => mocks.userRevision);
+      return { isLoaded: true, isSignedIn: mocks.signedIn, user: mocks.user };
+    },
+    useClerk: () => mocks.clerk,
+    useSignIn: () => ({ signIn: mocks.signIn }),
+  };
+});
 vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}), noopLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }) }));
 vi.mock('@/components/auth/DesktopAuthCallbackHandler', () => ({ DesktopAuthCallbackHandler: () => null }));
 vi.mock('@/lib/auth/clerk-fetch-guard', () => ({ installTauriClerkFetchGuard: () => {} }));
@@ -30,7 +41,12 @@ vi.mock('@/lib/auth/tauri-clerk-store', async (original) => ({
 const owner = 'user_device';
 let root: Root;
 let authState: O8AuthState;
-let render: () => void;
+// Model the SDK's own context notifications rather than relying on an app-root
+// re-render to make mutated mock state visible inside the account sidecar.
+function publishSdkState() {
+  mocks.userRevision += 1;
+  mocks.userListeners.forEach(listener => listener());
+}
 let fetchMock: ReturnType<typeof vi.fn<(input: string, init?: RequestInit) => Promise<Response>>>;
 let events: string[];
 let present: boolean;
@@ -54,8 +70,7 @@ async function mount(nativeMode = true, label: string | null = 'main') {
     useEffect(() => { authState = state; }, [state]);
     return null;
   };
-  render = () => root.render(createElement(O8AuthProvider, null, createElement(Probe)));
-  await act(async () => { render(); });
+  await act(async () => { root.render(createElement(O8AuthProvider, null, createElement(Probe))); });
 }
 
 beforeEach(() => {
@@ -67,6 +82,8 @@ beforeEach(() => {
   root = createRoot(document.createElement('div'));
   mocks.signedIn = false;
   mocks.user = null;
+  mocks.userRevision = 0;
+  mocks.userListeners.clear();
   mocks.purge.mockClear();
   events = [];
   present = true;
@@ -80,14 +97,14 @@ beforeEach(() => {
       mocks.signedIn = true;
       mocks.user = { id: owner, reload: async () => {} };
       mocks.clerk.user = mocks.user;
-      render();
+      publishSdkState();
     }),
     signOut: vi.fn(async () => {
       events.push('end-session');
       mocks.signedIn = false;
       mocks.user = null;
       mocks.clerk.user = null;
-      render();
+      publishSdkState();
     }),
   };
   mocks.signIn = {
@@ -166,11 +183,11 @@ describe('mounted native Clerk bridge', () => {
     mocks.user = { id: owner, reload: async () => {} };
     mocks.clerk.user = mocks.user;
     present = false;
-    await act(async () => { render(); });
+    await act(async () => { publishSdkState(); });
     mocks.signedIn = false;
     mocks.user = null;
     mocks.clerk.user = null;
-    await act(async () => { render(); });
+    await act(async () => { publishSdkState(); });
     await focus();
     expect(fetchMock.mock.calls.map(([url]) => url).filter((url) => url.includes('/device/'))).toEqual([]);
     expect(events).not.toContain('activate');
@@ -184,7 +201,7 @@ describe('mounted native Clerk bridge', () => {
     mocks.signedIn = false;
     mocks.user = null;
     mocks.clerk.user = null;
-    await act(async () => { render(); });
+    await act(async () => { publishSdkState(); });
     expect(events.filter((event) => event === 'renew')).toHaveLength(1);
     expect(authState.signedIn).toBe(true);
   });
@@ -340,12 +357,12 @@ describe('mounted native Clerk bridge', () => {
       mocks.signedIn = true;
       mocks.user = { id: 'user_other', reload: async () => {} };
       mocks.clerk.user = mocks.user;
-      render();
+      publishSdkState();
     });
     mocks.signedIn = false;
     mocks.user = null;
     mocks.clerk.user = null;
-    await act(async () => { render(); });
+    await act(async () => { publishSdkState(); });
     expect(events).toContain('revoke');
     expect(authState.signedIn).toBe(false);
     await act(async () => {
@@ -353,7 +370,7 @@ describe('mounted native Clerk bridge', () => {
       mocks.signedIn = true;
       mocks.user = { id: owner, reload: async () => {} };
       mocks.clerk.user = mocks.user;
-      render();
+      publishSdkState();
     });
     expect(events.filter((event) => event === 'enroll')).toHaveLength(2);
   });
