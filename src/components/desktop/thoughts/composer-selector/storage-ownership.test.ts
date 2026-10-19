@@ -9,6 +9,7 @@ const directPersistencePattern = /\blocalStorage\.(?:getItem|setItem|removeItem)
 const directPersistenceSeams: Record<string, string> = {
   'AcpModelPicker.tsx': 'Owns the recent-model list for each searchable backend picker.',
   'ThoughtsChatPanel.tsx': 'Owns the one-shot suppression flag for automatic thread restoration.',
+  'chat-panel/composer-queue-recovery.ts': 'Owns versioned uncertain Send next identities and exact payloads per conversation and attempt; recovery never automatically sends work.',
   'chat-panel/composer-draft-store.ts': 'Owns versioned unsent text, completed images and file context per repository and conversation; saving never sends a turn.',
   'chat-panel/TaskArtifactCard.tsx': 'Owns unsent task-artifact drafts keyed by artifact id.',
   'chat-panel/WorkerCorrections.tsx': 'Owns pending correction identity and exact payload per repository and conversation, preventing duplicate delivery after reload.',
