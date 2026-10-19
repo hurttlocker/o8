@@ -2,9 +2,9 @@
 
 ## Delivery boundary
 
-This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. No provider calls, native device tests, deployment, pricing changes, or release have been performed.
+This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. No provider calls, deployment, pricing changes, or release have been performed. Local microphone preview checks are separate from provider and physical-shortcut acceptance.
 
-Desktop entry uses an experimental control above the active orchestrator composer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. Native device acceptance remains unverified. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
+Desktop entry uses an experimental control above the active orchestrator composer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. Provider-connected audio, speaker and physical-shortcut acceptance remain unverified. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
 
 ## Ownership and protocol
 
@@ -28,7 +28,7 @@ Authenticate with the existing operator/device Bearer token; worker/spectator/an
 - Append: `{ action: "event", id, binding, event: {type,event_id,delegation_id,content} }`.
 - Close: `{ action: "close", id, binding }` -> closure requested, **not closure confirmed**.
 
-Use unique stable event IDs for retry; a conflicting reuse returns 409. An unknown/replayed foreign binding cannot attach. Poll/close remain available for owned sessions after the start feature gate is disabled. App relay ownership is currently process-local; restart/multiple replicas require durable routing before production activation.
+Use unique stable event IDs for retry; a conflicting reuse returns 409. An unknown/replayed foreign binding cannot attach. Poll/close remain available for owned sessions after the start feature gate is disabled. Acknowledged app sessions retain private immutable ownership and pinned-gateway records across restart. Healthy-owner gateway event routing across replicas and the crash gap before provider identity publication remain unresolved; see Application relay restart ownership below.
 
 The transport uses `gpt-live-1` via server session creation plus sideband attachment. The only valid delegation contract is `session.delegation.created` with a client target; there is no task-text property. Input transcript fragments concatenate verbatim. Unusable transcript capture asks for repetition rather than inventing a request. Appended text acknowledgement is not spoken-audio completion.
 
@@ -56,7 +56,7 @@ Prepare context before connecting and keep backend work independent so silent wa
 - A provider-enforced upper bound known **before WebRTC creation**, covering all billable initialization, connected and finalization time even when the app, gateway or sideband dies. A local close timer, post-creation expiry value or SIP-only limit is insufficient. Derive a reservation from that bound within unchanged remaining allowance.
 - An authoritative way to resolve an uncertain creation outcome, including a lost HTTP response or a crash before the provider ID is durably journaled. Define request correlation/idempotency or retrieval semantics and which, if any, failures prove that no billable session existed. Until then, ambiguous HTTP errors retain the reservation.
 - Authoritative terminal status and cumulative billed duration keyed to the provider identity, recoverable after disconnect/restart. Document retention, replay/retrieval, duplicate ordering and closure semantics. A sideband attach or close acknowledgement alone does not recover a missed terminal event; missing final usage remains unknown.
-- After approval, provider receipts for the crash/recovery matrix above, including loss before identity persistence and before terminal persistence. Offline tests of closure-only recovery and durable settlement are separate evidence. Healthy-owner event routing, relay restart ownership and native device acceptance remain application work.
+- After approval, provider receipts for the crash/recovery matrix above, including loss before identity persistence and before terminal persistence. Offline tests of closure-only recovery and durable settlement are separate evidence. Healthy-owner gateway event routing and provider/device acceptance remain separate work. Acknowledged app-relay restart ownership is implemented below; it does not resolve uncertain provider creation.
 
 The companion gateway handoff owns its detailed safety checklist. Its admission regression uses the production defaults with the obsolete flag absent, `0` and `1`, verifies no provider HTTP/socket calls, and checks that the real disposable ledger and session journal stay empty. This application regression checks the returned hold through `/api/voice/live`. Neither fixture enables paid voice or changes the shared durable composer queue.
 
@@ -132,3 +132,7 @@ relay attempts closure at that pinned gateway and still reports an unknown
 outcome. An uncertain create before publication remains a recovery blocker;
 these records do not close the provider identity crash gap or supply healthy
 cross-replica conversation routing. Production lifetime admission remains held.
+
+## Native development preview receipt
+
+The local preview exercised real microphone capture and measured levels reaching the native presentation, explicit disconnect, resume and idle closure. The native shortcut event path started and stopped the pinned chat; this was an injected native event, not a physical Caps Lock test. Captured audio tracks ended on close and the other four composer dictation buttons stayed idle. Native display bounds placed the presentation across the owning display’s bottom edge. No audio was stored and no provider was contacted. Screenshot capture was unavailable because the private development wrapper lacked Screen Recording permission; visual polish remains an operator check.
