@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { stopRunningTools } from '@/components/desktop/transcript/activity';
-import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -19,6 +19,7 @@ import {
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
+import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
@@ -50,6 +51,7 @@ import {
 } from './use-orchestrator-stream/socket';
 import { prepareOrchestratorTurn, useTurnOptionResolution } from './use-orchestrator-stream/turn-option-resolution';
 import type {
+  ActiveTurnState,
   OrchestratorSendHandle,
   OrchestratorSendOptions,
   OrchestratorStreamOptions,
@@ -69,14 +71,6 @@ export type {
 // Mission ids whose completed-thread rotation already ran this app session.
 // Module scope prevents remounts from re-rotating on boot-time state oscillation.
 const rotatedMissionIds = new Set<string>();
-
-interface ActiveTurnState {
-  startedAt: number;
-  toolCallsStarted: number;
-  toolCallsCompleted: number;
-  latestToolLabel: string | null;
-  launches: MobileTranscriptToolLaunchLink[];
-}
 
 /**
  * Hook that connects to the orchestrator WebSocket channel for real-time
@@ -853,6 +847,7 @@ export function useOrchestratorStream(
     }
   }, [connected, syncMessages, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
+    if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
     const clientMessageId = createOrchestratorClientMessageId();
     const sentAtMs = Date.now();

@@ -1,11 +1,19 @@
 import type { TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import type { OrchestratorPermissionMode, OrchestratorStreamStatus } from './shared';
+
+export interface ActiveTurnState {
+  startedAt: number;
+  toolCallsStarted: number;
+  toolCallsCompleted: number;
+  latestToolLabel: string | null;
+  launches: MobileTranscriptToolLaunchLink[];
+}
 
 export interface OrchestratorSendHandle {
   clientMessageId: string;

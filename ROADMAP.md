@@ -42,6 +42,8 @@ Matching late acknowledgements retire only their own delivery warning, including
 
 Unaccepted image submissions recover their original preview from the saved send payload after restart. Explicit retry preserves that payload; missing or invalid required images request reattachment instead of sending text alone. Actual provider image receipt and installed release acceptance remain separate. [#2637](https://github.com/hurttlocker/o8/issues/2637)
 
+Direct chat sends refuse before consuming the composer when saved session context cannot be read. The visible draft and attachments remain available for an explicit retry after storage access returns. Native candidate acceptance and release remain separate gates. [#4004](https://github.com/hurttlocker/o8/issues/4004)
+
 Send next preserves its original request identity, destination, attachments and routing through an uncertain response, renderer restart and an explicit retry. Queue transport waits are bounded; stale composer completions cannot retire a replacement composer's recovery. Source, private native acceptance and release are tracked separately. [#4002](https://github.com/hurttlocker/o8/issues/4002)
 
 Ordinary workspace composers retain unsent text, completed image attachments and queued file context across a normal restart, scoped to the selected repository and conversation. Explicit clearing removes saved drafts; storage failure keeps the current input visible and prevents an unsafe conversation transfer. Private native candidate acceptance and release remain separate gates. [#3994](https://github.com/hurttlocker/o8/issues/3994)
