@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { accountIdentity } from '@/lib/auth/account-identity';
@@ -86,7 +86,7 @@ export function useO8Auth(): O8AuthState {
  * Bridges Clerk's hooks into O8AuthContext. Only mounted when Clerk is enabled
  * (i.e. inside <ClerkProvider>), so the Clerk hooks always have their provider.
  */
-function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode; nativeMode?: boolean }) {
+function ClerkAuthBridge({ onAuthChange, nativeMode = false }: { onAuthChange: (auth: O8AuthState) => void; nativeMode?: boolean }) {
   const deviceMode = nativeMode && canUseTauriEvents();
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
@@ -453,12 +453,13 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
     [isLoaded, isSignedIn, user, clerk, nativeMode, fullSignOut],
   );
 
+  useLayoutEffect(() => { onAuthChange(value); }, [onAuthChange, value]);
+
   return (
-    <O8AuthContext.Provider value={value}>
+    <>
       <DesktopAuthCallbackHandler />
-      {children}
       {signInPrompt && !isSignedIn ? <DesktopSignInDialog onClose={() => setSignInPrompt(false)} /> : null}
-    </O8AuthContext.Provider>
+    </>
   );
 }
 
@@ -478,6 +479,19 @@ export function O8AuthProvider({ children }: { children: ReactNode }) {
 // static build never evaluates the plugin's Tauri APIs (no Tauri at build time).
 type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['initClerk']>>;
 
+// Publishing account state must not re-render the publishing SDK subtree. Clerk's
+// own context updates still reach the bridge independently of workspace updates.
+const ClerkAccountSession = memo(function ClerkAccountSession({ engine, onAuthChange }: {
+  engine: NativeClerk | 'web';
+  onAuthChange: (auth: O8AuthState) => void;
+}) {
+  return (
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine === 'web' ? undefined : engine} appearance={clerkAppearance}>
+      <ClerkAuthBridge nativeMode={engine !== 'web'} onAuthChange={onAuthChange} />
+    </ClerkProvider>
+  );
+});
+
 /**
  * Picks the Clerk session engine per surface:
  *  - Tauri desktop → NATIVE mode via tauri-plugin-clerk: clerk-js runs with
@@ -493,6 +507,7 @@ type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['ini
  */
 function ClerkSessionHost({ children }: { children: ReactNode }) {
   const [engine, setEngine] = useState<NativeClerk | 'web' | 'local' | null>(null);
+  const [accountAuth, setAccountAuth] = useState<O8AuthState>(DISABLED_STATE);
   const [connectionUnavailable, setConnectionUnavailable] = useState(false);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const pendingNativeEngine = useRef<Promise<NativeClerk> | null>(null);
@@ -547,29 +562,20 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
     };
   }, [connectionAttempt]);
 
-  if (engine === null) {
-    return <O8AuthContext.Provider value={{
-      ...DISABLED_STATE, clerkEnabled: true, isLoaded: false,
-      accountConnection: connectionUnavailable ? 'unavailable' : 'initializing',
-      retryAccountConnection,
-    }}>{children}</O8AuthContext.Provider>;
-  }
+  const value: O8AuthState = engine === null ? {
+    ...DISABLED_STATE, clerkEnabled: true, isLoaded: false,
+    accountConnection: connectionUnavailable ? 'unavailable' : 'initializing',
+    retryAccountConnection,
+  } : engine === 'local' ? { ...DISABLED_STATE, localWorkspaceOnly: true } : accountAuth;
 
-  if (engine === 'local') {
-    return <O8AuthContext.Provider value={{ ...DISABLED_STATE, localWorkspaceOnly: true }}>{children}</O8AuthContext.Provider>;
-  }
-
-  if (engine === 'web') {
-    return (
-      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} appearance={clerkAppearance}>
-        <ClerkAuthBridge>{children}</ClerkAuthBridge>
-      </ClerkProvider>
-    );
-  }
-
+  // Account startup may settle after the workspace is already in use. Keep its
+  // provider ancestry and child position stable so recovery preserves local UI state.
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine} appearance={clerkAppearance}>
-      <ClerkAuthBridge nativeMode>{children}</ClerkAuthBridge>
-    </ClerkProvider>
+    <O8AuthContext.Provider value={value}>
+      {engine === null || engine === 'local' ? null : (
+        <ClerkAccountSession engine={engine} onAuthChange={setAccountAuth} />
+      )}
+      {children}
+    </O8AuthContext.Provider>
   );
 }
