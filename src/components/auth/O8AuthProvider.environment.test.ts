@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, StrictMode } from 'react';
+import { act, createElement, StrictMode, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -9,16 +9,24 @@ const mocks = vi.hoisted(() => ({
   engine: {},
   nativeInit: vi.fn(async () => ({})),
   clerk: { session: null, openSignIn: vi.fn(), openUserProfile: vi.fn() },
+  userState: { isLoaded: false, isSignedIn: false, user: null as Record<string, unknown> | null },
+  userListeners: new Set<() => void>(),
 }));
-vi.mock('@clerk/nextjs', () => ({
-  ClerkProvider: ({ children, ...props }: { children: unknown; Clerk?: unknown }) => {
-    mocks.providers.push(props);
-    return children;
-  },
-  useUser: () => ({ isLoaded: false, isSignedIn: false, user: null }),
-  useClerk: () => mocks.clerk,
-  useSignIn: () => ({ signIn: null }),
-}));
+vi.mock('@clerk/nextjs', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    ClerkProvider: ({ children, ...props }: { children: unknown; Clerk?: unknown }) => {
+      mocks.providers.push(props);
+      return children;
+    },
+    useUser: () => useSyncExternalStore(listener => {
+      mocks.userListeners.add(listener);
+      return () => { mocks.userListeners.delete(listener); };
+    }, () => mocks.userState),
+    useClerk: () => ({ ...mocks.clerk }),
+    useSignIn: () => ({ signIn: null }),
+  };
+});
 vi.mock('tauri-plugin-clerk', () => ({
   initClerk: mocks.nativeInit,
   noopLogger: () => ({}),
@@ -37,6 +45,8 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_fixture');
   mocks.providers.length = 0;
   mocks.nativeInit.mockReset().mockResolvedValue(mocks.engine);
+  mocks.userState = { isLoaded: false, isSignedIn: false, user: null };
+  mocks.userListeners.clear();
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -167,4 +177,92 @@ it('keeps ordinary API traffic on the original fetch after recovering native ini
   expect(pluginFetch).not.toHaveBeenCalled();
   await globalThis.fetch('https://clerk.o8.run/v1/client');
   expect(pluginFetch).toHaveBeenCalledWith('https://clerk.o8.run/v1/client', undefined);
+});
+
+it.each(['pending', 'rejected'] as const)(
+  'preserves a workspace draft and Account view when %s native initialization recovers', async initial => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    let resolve!: (value: object) => void;
+    const pending = new Promise<object>(settle => { resolve = settle; });
+    if (initial === 'rejected') mocks.nativeInit.mockRejectedValueOnce(new Error('unavailable'));
+    mocks.nativeInit.mockReturnValue(pending);
+    const { O8AuthProvider } = await import('./O8AuthProvider');
+    const { AccountTab } = await import('@/components/desktop/settings/AccountTab');
+    let mounts = 0;
+    function Workspace() {
+      const [draft, setDraft] = useState('');
+      const [accountOpen, setAccountOpen] = useState(false);
+      useEffect(() => { mounts += 1; }, []);
+      return createElement('main', null,
+        createElement('textarea', {
+          'aria-label': 'Unsent workspace draft', value: draft,
+          onChange: (event: { currentTarget: HTMLTextAreaElement }) => setDraft(event.currentTarget.value),
+        }),
+        createElement('button', { onClick: () => setAccountOpen(true) }, 'Open Account'),
+        accountOpen ? createElement(AccountTab) : null);
+    }
+    await act(async () => root.render(createElement(StrictMode, null,
+      createElement(O8AuthProvider, null, createElement(Workspace)))));
+    const textarea = container.querySelector('textarea')!;
+    const draft = 'Account recovery — keep this draft unsent.';
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, draft);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      container.querySelector('button')!.click();
+    });
+    if (initial === 'pending') await act(async () => vi.advanceTimersByTimeAsync(8000));
+    expect(container.textContent).toContain('Account unavailable');
+    const mountBaseline = mounts;
+    if (initial === 'rejected') {
+      const retry = [...container.querySelectorAll('button')].find(button => button.textContent === 'Retry account connection')!;
+      await act(async () => retry.click());
+    }
+    await act(async () => resolve(mocks.engine));
+    expect(mocks.nativeInit).toHaveBeenCalledTimes(initial === 'pending' ? 1 : 2);
+    expect(container.querySelector('textarea')).toBe(textarea);
+    expect(textarea.value).toBe(draft);
+    expect(mounts).toBe(mountBaseline);
+    expect(container.textContent).toContain('Your o8 profile and sign-in.');
+    expect(container.textContent).not.toContain('Account unavailable');
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  },
+);
+
+it('publishes signed-in and signed-out state without remounting the workspace or repeating sync work', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  mocks.userState = { isLoaded: true, isSignedIn: false, user: null };
+  const { O8AuthProvider, useO8Auth } = await import('./O8AuthProvider');
+  let mounts = 0;
+  function Workspace() {
+    const auth = useO8Auth();
+    useEffect(() => { mounts += 1; }, []);
+    return createElement('output', null, auth.signedIn ? auth.user?.name : 'Signed out');
+  }
+  const render = async () => act(async () => root.render(createElement(O8AuthProvider, null, createElement(Workspace))));
+  await render();
+  const output = container.querySelector('output');
+  const baseline = mounts;
+  expect(output?.textContent).toBe('Signed out');
+  mocks.userState = {
+    isLoaded: true, isSignedIn: true,
+    user: { id: 'user_fixture', fullName: 'Fixture account', emailAddresses: [], imageUrl: null },
+  };
+  await act(async () => { mocks.userListeners.forEach(listener => listener()); });
+  expect(output?.textContent).toBe('Fixture account');
+  const callsAfterSignIn = vi.mocked(fetch).mock.calls.length;
+  await render();
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(callsAfterSignIn);
+  mocks.userState = {
+    isLoaded: true, isSignedIn: true,
+    user: { id: 'user_second_fixture', fullName: 'Second fixture account', emailAddresses: [], imageUrl: null },
+  };
+  await act(async () => { mocks.userListeners.forEach(listener => listener()); });
+  expect(output?.textContent).toBe('Second fixture account');
+  mocks.userState = { isLoaded: true, isSignedIn: false, user: null };
+  await act(async () => { mocks.userListeners.forEach(listener => listener()); });
+  expect(output?.textContent).toBe('Signed out');
+  expect(container.querySelector('output')).toBe(output);
+  expect(mounts).toBe(baseline);
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => /device\/revoke|handoff/.test(String(url)))).toBe(false);
 });
