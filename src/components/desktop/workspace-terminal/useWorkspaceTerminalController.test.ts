@@ -4,12 +4,15 @@ import { act, createElement, forwardRef, type ForwardedRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from './types';
+import type { XtermPanelHandle } from './XtermPanel';
 import { subscribeTerminalCloseConfirm, type TerminalCloseRequest } from './terminal-close-confirm';
 
 const restoreHarness = vi.hoisted(() => ({
   resolveValidated: null as null | ((value: unknown) => void),
   validatedPromise: null as Promise<unknown> | null,
   savedSession: null as string | null,
+  useActualRestore: false,
+  panel: null as XtermPanelHandle | null,
 }));
 
 vi.mock('./terminal-restore', async (importOriginal) => {
@@ -39,9 +42,9 @@ vi.mock('./terminal-restore', async (importOriginal) => {
       savedAt: new Date(0).toISOString(),
       tabs: [],
     })),
-    computeRestoredTabs: vi.fn(async (_saved, _options, _cancelled, mode) => (
-      mode === 'optimistic' ? result() : restoreHarness.validatedPromise
-    )),
+    computeRestoredTabs: vi.fn(async (saved, options, cancelled, mode) => restoreHarness.useActualRestore
+      ? actual.computeRestoredTabs(saved, options, cancelled, mode)
+      : mode === 'optimistic' ? result() : restoreHarness.validatedPromise),
   };
 });
 
@@ -61,6 +64,7 @@ function ControllerHarness({
   props: WorkspaceTerminalProps;
 }) {
   const controller = useWorkspaceTerminalController(props, controllerRef);
+  if (restoreHarness.panel && restoreHarness.savedSession) controller.panelRefs.current.set(restoreHarness.savedSession, restoreHarness.panel);
   return createElement('div', {
     'data-tabs': JSON.stringify(controller.tabs),
     'data-active-tab': controller.effectiveActiveTabId,
@@ -82,6 +86,8 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     experimental.chat = false;
     restoreHarness.savedSession = null;
+    restoreHarness.useActualRestore = false;
+    restoreHarness.panel = null;
     restoreHarness.validatedPromise = new Promise((resolve) => {
       restoreHarness.resolveValidated = resolve;
     });
@@ -198,7 +204,64 @@ describe('useWorkspaceTerminalController restore acknowledgements', () => {
     expect(sendTerminalCreate).toHaveBeenCalledTimes(2);
   });
 
-  it('replaces a saved session positively found dead instead of reviving its stale ID', async () => {
+  it.each([false, true])('keeps a stopped saved process inert through restore and socket connection: %s', async (connected) => {
+    restoreHarness.useActualRestore = true;
+    vi.mocked(loadInitialTabState).mockResolvedValueOnce({
+      version: 1, activeTabId: 'stopped-view', savedAt: new Date().toISOString(),
+      tabs: [{ id: 'stopped-view', kind: 'terminal', label: 'Console / console', cliAgent: 'shell', tmuxSession: 'cortex-dash-stopped', repoPath: '/selected' }],
+    });
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ sessions: [] })));
+    const controllerRef = { current: null as TerminalTabHandle | null };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'stopped-saved-terminal', defaultTab: 'terminal', autoCreateDefaultTab: false,
+      termWsConnected: connected, sendTerminalCreate: vi.fn(), sendTerminalDetach: vi.fn(),
+      sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(), sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props })));
+    const tabs = () => JSON.parse(container.firstElementChild!.getAttribute('data-tabs')!);
+    for (let attempt = 0; attempt < 50 && !tabs()[0]?.terminalExit; attempt++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    expect(tabs()).toEqual([expect.objectContaining({ id: 'stopped-view', tmuxSession: 'cortex-dash-stopped', terminalExit: { exitCode: null, transcript: '' } })]);
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { ref: controllerRef, props: { ...props, termWsConnected: true } })));
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
+    await act(async () => { controllerRef.current!.openTerminalTab({ name: 'Selected', localPath: '/selected' }); });
+    expect(props.sendTerminalCreate).toHaveBeenCalledOnce();
+    expect(tabs().find((entry: { id: string }) => entry.id === 'stopped-view').tmuxSession).toBe('cortex-dash-stopped');
+    expect(tabs()).toHaveLength(2);
+  });
+
+  it('saves retained output when late validation ends a mounted terminal, then restores that snapshot', async () => {
+    restoreHarness.savedSession = 'cortex-dash-late-stop';
+    const snapshot = { exitCode: null, transcript: 'KEPT-THROUGH-RELOAD' };
+    restoreHarness.panel = {
+      fit: vi.fn(), focus: vi.fn(), writeData: vi.fn(), writeRaw: vi.fn(), readText: () => snapshot.transcript,
+      showImage: vi.fn(), setError: vi.fn(), setExited: vi.fn((_code, save) => save?.(snapshot)),
+    };
+    const props: WorkspaceTerminalProps = {
+      stateScope: 'late-exit-output', defaultTab: 'terminal', autoCreateDefaultTab: false,
+      termWsConnected: false, sendTerminalCreate: vi.fn(), sendTerminalDetach: vi.fn(),
+      sendTerminalAttach: vi.fn(), sendTerminalInput: vi.fn(), sendTerminalResize: vi.fn(), sendTerminalVisibility: vi.fn(),
+    };
+    await act(async () => root.render(createElement(ForwardedControllerHarness, { props })));
+    await act(async () => {
+      restoreHarness.resolveValidated?.({
+        tabs: [{ id: 'terminal-a', label: 'Console', kind: 'terminal', cliAgent: 'shell', tmuxSession: restoreHarness.savedSession, terminalExit: { exitCode: null, transcript: '' }, createdAt: 1, lastActivity: 1 }],
+        activeTabId: 'terminal-a', sessionsToAttach: [], deadTerminalTabs: [], restoredAny: true,
+      });
+      await restoreHarness.validatedPromise;
+    });
+    const writes = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).startsWith('/api/panel/terminal-state') && init?.method === 'POST');
+    const saved = writes.map(([, init]) => JSON.parse(String(init?.body))).find(state => state.tabs.some((tab: { terminalExit?: { transcript: string } }) => tab.terminalExit?.transcript === snapshot.transcript));
+    expect(saved).toBeDefined();
+    const { computeRestoredTabs } = await vi.importActual<typeof import('./terminal-restore')>('./terminal-restore');
+    const restored = await computeRestoredTabs(saved, { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => { throw new Error('unexpected new tab'); } });
+    expect(restored?.tabs[0]).toMatchObject({ tmuxSession: restoreHarness.savedSession, terminalExit: snapshot });
+    expect(restored?.sessionsToAttach).toEqual([]);
+    expect(props.sendTerminalCreate).not.toHaveBeenCalled();
+  });
+
+  it('creates a shell only when validation explicitly returns a fresh unbound tab', async () => {
     restoreHarness.savedSession = 'cortex-dash-expired';
     const sendTerminalCreate = vi.fn<WorkspaceTerminalProps['sendTerminalCreate']>();
     const sendTerminalDetach = vi.fn<WorkspaceTerminalProps['sendTerminalDetach']>();

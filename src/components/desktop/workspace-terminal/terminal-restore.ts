@@ -19,7 +19,7 @@ import {
   runtimeFromOwnedSessionKey,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
-import { parseTerminalExitState } from '@/lib/terminal/exit-state';
+import { parseTerminalExitState, terminalExitState } from '@/lib/terminal/exit-state';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
@@ -455,7 +455,12 @@ export async function computeRestoredTabs(
     }
 
     const tabId = claimWorkspaceTabId('terminal', seenTabIds, savedTab.id);
-    const terminalExit = parseTerminalExitState(savedTab.terminalExit);
+    // A missing known process is an ended session, never permission to run a
+    // different program under its label. Only tabs without a prior session may
+    // bootstrap a shell; the ended view offers an explicit New shell action.
+    const terminalExit = parseTerminalExitState(savedTab.terminalExit)
+      ?? (savedTab.tmuxSession && !savedTab.remoteMachine && !alive.has(savedTab.tmuxSession)
+        ? terminalExitState(null) : undefined);
     if (terminalExit) {
       restoredTabs.push({ id: tabId, label: savedTab.label, kind: 'terminal', tmuxSession: savedTab.tmuxSession ?? `ended:${tabId}`, terminalExit,
         readOnly: savedTab.readOnly, remoteMachine: savedTab.remoteMachine, cliAgent: savedTab.cliAgent,
