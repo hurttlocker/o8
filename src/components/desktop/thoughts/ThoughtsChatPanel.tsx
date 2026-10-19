@@ -94,6 +94,7 @@ import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import { useComposerRepoTarget } from './chat-panel/useComposerRepoTarget';
+import { useTranscriptAutoScroll } from './chat-panel/useTranscriptAutoScroll';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
 import {
   fetchOlderThreadPage,
@@ -756,43 +757,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     onImageInjectionConsumed?.();
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
 
-  useEffect(() => {
-    if (suppressNextTranscriptAutoScrollRef.current) {
-      suppressNextTranscriptAutoScrollRef.current = false;
-      return;
-    }
-    requestAnimationFrame(() => {
-      // Smooth when idle (a fresh user turn jumps into view); instant while
-      // streaming so it doesn't fight the per-frame pin below.
-      // Container-scoped on purpose (body-scroll trigger hunt, 2026-07-16):
-      // scrollIntoView scrolls EVERY scrollable ancestor up to the document —
-      // on the zoomed root that displaces the whole app shell (the class the
-      // dashboard shell-guard exists to snap back). Scroll only the transcript.
-      const end = chatEndRef.current;
-      const container = end?.closest('.thoughts-scroll') as HTMLElement | null;
-      if (!container) return;
-      container.scrollTo({ top: container.scrollHeight, behavior: orchStream.status === 'busy' ? 'auto' : 'smooth' });
-    });
-  }, [chatMessages, orchStream.messages, orchStream.status]);
-
-  // Smooth stick-to-bottom while the orchestrator streams. The per-frame
-  // smooth-text reveal grows the content BETWEEN message-array updates, so the
-  // message-change effect above alone leaves the reveal scrolling below the
-  // fold. Pin to the bottom each frame (instant scrollTop — reads as smooth as
-  // the text grows) UNLESS the operator has scrolled up to read history.
-  useEffect(() => {
-    if (orchStream.status !== 'busy') return;
-    const container = chatEndRef.current?.closest('.thoughts-scroll') as HTMLElement | null;
-    if (!container) return;
-    let raf = 0;
-    const pin = () => {
-      const fromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (fromBottom < 120) container.scrollTop = container.scrollHeight;
-      raf = requestAnimationFrame(pin);
-    };
-    raf = requestAnimationFrame(pin);
-    return () => cancelAnimationFrame(raf);
-  }, [orchStream.status]);
+  useTranscriptAutoScroll({ endRef: chatEndRef, suppressRef: suppressNextTranscriptAutoScrollRef,
+    scope: isOrchestratorMode ? threadId : targetSessionKey });
 
   useEffect(() => {
     return () => {

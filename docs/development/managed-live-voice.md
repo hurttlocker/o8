@@ -227,3 +227,32 @@ The desktop satellite dismisses when capture becomes Unknown or its owning chat
 unmounts, including while closure is pending. Dismissal is presentation only and
 does not assert provider closure or release uncertain accounting. The native
 owner and epoch checks also prevent an old chat from hiding a newer display.
+
+## Transcript continuity polish
+
+Caption updates previously scheduled an unconditional smooth scroll to the bottom,
+including after a reader scrolled into history. The transcript now follows content
+only while attached to the bottom. Upward scrolling cancels pending follow work;
+returning to the bottom resumes it. Bubble and viewport resize observation covers
+text reveal and content growth even when the inner flex box stays viewport-sized.
+History backfill retains its existing compensation, and changing the chat resets
+following. Bubble styling, caption identity, execution routing and voice policy are
+unchanged by this correction.
+
+A bounded native generated-speech capture observed a 650-pixel forced scroll with
+unchanged content height, one client delegation, one ordinary CLI request and a
+correlated completed result matching the spoken answer. It closed with final usage.
+A deterministic replay of its 55 caption events through the native bubble renderer
+measured 931 pixels of reading-anchor displacement before the correction and zero
+afterward, including 281 pixels of content growth. Returning to the bottom resumed
+following. Caption nodes retained identity and repeated events added no duplicate
+rows. This is DOM trace evidence, not a screen recording or human acoustic test.
+
+The capture did not sample the exact instant of CLI terminal completion, so it
+cannot establish completion-to-speech latency. Historical work folding also changed
+layout during the real delegation; the caption replay does not establish stable
+anchors through every folded-history transition. Natural first-person phrasing
+still needs listening: the captured reply used third-person handoff language in
+response to a prompt explicitly asking it to contact the coding agent. Successful
+result correlation does not by itself prove conversational quality. Production
+activation holds and uncertain-usage accounting remain unchanged.
