@@ -26,7 +26,7 @@ export function VisualCaptureInput(props: {
   const voiceLabel = props.voice === 'recording' ? 'Microphone recording' : props.voice === 'starting' ? 'Starting microphone' : props.voice === 'transcribing' ? 'Transcribing' : props.voice === 'complete' ? 'Voice added' : 'Microphone unavailable';
   return <div data-visual-capture-controls="true" role="group" aria-label="Instruction for marked area" style={{ position: 'fixed', ...position,
     boxSizing: 'border-box', paddingTop: 10, paddingRight: 10, paddingBottom: 6, paddingLeft: 14, borderRadius: 16,
-    background: 'color-mix(in srgb, var(--t-popover-bg, #242424) 82%, transparent)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+    background: 'color-mix(in srgb, var(--t-panel) 90%, transparent)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     border: '1px solid var(--t-divider-subtle)', boxShadow: '0 8px 28px rgba(0,0,0,0.18)', color: 'var(--t-text)',
     fontFamily: 'var(--font-sans-system)', cursor: 'default' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

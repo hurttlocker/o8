@@ -29,6 +29,7 @@ import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { VisualCaptureInput, type VisualCaptureBounds, type VisualCaptureVoice } from '@/components/desktop/visual-instructions/VisualCaptureInput';
 import { VisualCaptureControls } from '@/components/desktop/visual-instructions/VisualCaptureControls';
+import { getPalette, resolveTheme } from '@/lib/theme/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,9 @@ export const dynamic = 'force-dynamic';
 // vocabulary so the operator's marks and Symon's point-backs are one language.
 const ORANGE = '#FF5A1F';
 const CORE_HOT = '#FFE2CF'; // warm-white hot core over the glow
+// This satellite has no ThemeProvider. A dark floating material stays legible
+// over arbitrary apps, using the same palette tokens as the other o8 surfaces.
+const CAPTURE_THEME = resolveTheme(getPalette('dark'), 'solid').cssVars;
 
 // Terminal STT types that always tear the ink down, regardless of lane.
 const TERMINAL = new Set(['system-idle', 'error', 'system-pasted']);
@@ -566,6 +570,8 @@ export default function SpatialInkPage() {
   return (
     <div
       style={{
+        ...CAPTURE_THEME,
+        colorScheme: 'dark',
         position: 'fixed',
         inset: 0,
         margin: 0,
