@@ -2,6 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -9,6 +10,10 @@ import { WebSocket } from 'ws';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { computeRestoredTabs } from '@/components/desktop/workspace-terminal/terminal-restore';
 import type { PersistedTabState } from '@/lib/terminal/tab-state';
+import type { Terminal } from '@xterm/xterm';
+import { retainTerminalExitBuffer } from '@/components/desktop/workspace-terminal/terminal-exit-buffer';
+
+const { Terminal: HeadlessTerminal } = createRequire(import.meta.url)('@xterm/headless') as { Terminal: new (options: Record<string, unknown>) => Terminal };
 
 async function until(check: () => boolean | Promise<boolean>, description: string, timeout = 15_000) {
   const deadline = Date.now() + timeout;
@@ -115,7 +120,34 @@ describe.skipIf(process.platform === 'win32')('built plugin CLI and persistent h
           writeFileSync(stateFile, JSON.stringify({ version: 1, activeTabId: 'plugin-view', savedAt: new Date().toISOString(), tabs: [
             { id: 'plugin-view', kind: 'terminal', label: 'Interactive console', cliAgent: 'shell', tmuxSession: sessionName },
           ] }));
-          expect((await cli(port, ['plugin', 'terminal', 'stop', id])).code).toBe(0);
+          // Mirror the mounted view's snapshot + live byte path through the
+          // actual tmux host. Startup history must not replace a newer reply.
+          const term = new HeadlessTerminal({ cols: 100, rows: 24, allowProposedApi: true });
+          const retained = retainTerminalExitBuffer(term);
+          const frames: Array<{ channel: string; event: string; data?: { sessionName?: string; data?: string } }> = [];
+          try {
+            socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${token}`);
+            socket.on('message', (raw) => {
+              const frame = JSON.parse(String(raw)); frames.push(frame);
+              if (frame.channel !== 'terminal' || frame.data?.sessionName !== sessionName) return;
+              if (frame.event === 'resync') term.reset();
+              if (frame.event === 'data' || frame.event === 'resync') term.write(Buffer.from(frame.data.data, 'base64'));
+            });
+            await once(socket, 'open');
+            await until(() => frames.some((frame) => frame.event === 'connected'), 'mounted exit observer');
+            socket.send(JSON.stringify({ type: 'terminal-attach', sessionName, cols: 100, rows: 24 }));
+            await until(() => frames.some((frame) => frame.event === 'attached'), 'mounted exit attachment');
+            socket.send(JSON.stringify({ type: 'terminal-visibility', sessionName, visible: true, epoch: 1, needsResync: true }));
+            await until(() => frames.some((frame) => frame.event === 'resync'), 'mounted exit snapshot');
+            socket.send(JSON.stringify({ type: 'terminal-input', sessionName, data: 'FINAL\n' }));
+            await until(() => retained.read().includes('You typed: FINAL'), 'reply visible before stop');
+            expect((await cli(port, ['plugin', 'terminal', 'stop', id])).code).toBe(0);
+            await until(() => frames.some((frame) => frame.event === 'exited'), 'mounted exit frame');
+            await new Promise<void>((resolve) => term.write('', resolve));
+            expect(retained.read()).toContain('You typed: FINAL');
+          } finally {
+            socket?.close(); socket = undefined; retained.dispose(); term.dispose();
+          }
           const networkFetch = globalThis.fetch;
           vi.stubGlobal('fetch', (url: string) => {
             expect(url).toBe('/api/panel/terminal-sessions');
