@@ -3,8 +3,11 @@ import { act, createElement, type ComponentProps } from 'react';
 import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import type { LiveBackend } from '@/lib/voice/managed-live/session';
-const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null }));
+import type { LiveBackend, LiveState } from '@/lib/voice/managed-live/session';
+import { useManagedVoicePresentation } from './useManagedVoicePresentation';
+const fixture = vi.hoisted(() => ({ backend: null as LiveBackend | null, native: false, invoke: vi.fn() }));
+vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => fixture.native, isTauri: () => fixture.native }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'fixture' }));
 vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (backend: LiveBackend, onState: (state: string) => void) => {
   let state = 'live'; fixture.backend = backend; onState(state); return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
@@ -29,11 +32,34 @@ let root: Root; let container: HTMLDivElement;
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   queues.clear(); saved.mockClear();
+  fixture.native = false; fixture.invoke.mockReset();
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ enabled: true, entitled: true })));
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+it('dismisses the desktop presentation on unknown state or chat unmount without claiming provider closure', async () => {
+  vi.useFakeTimers(); fixture.native = true; fixture.invoke.mockResolvedValue(3);
+  const stateRef = { current: 'live' as LiveState };
+  function Presentation() {
+    useManagedVoicePresentation({ state: stateRef.current, stateRef, session: { current: null }, level: { current: 0.5 }, label: 'Fixture chat' });
+    return null;
+  }
+  await act(async () => root.render(createElement(Presentation)));
+  expect(fixture.invoke).toHaveBeenLastCalledWith('managed_voice_overlay_update', { presentation: expect.objectContaining({ phase: 'live', dismissed: false }) });
+  stateRef.current = 'unknown';
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  expect(fixture.invoke).toHaveBeenLastCalledWith('managed_voice_overlay_update', { presentation: expect.objectContaining({ phase: 'unknown' }) });
+  const count = fixture.invoke.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(fixture.invoke).toHaveBeenCalledTimes(count);
+  stateRef.current = 'live';
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+  await act(async () => root.render(null));
+  expect(fixture.invoke).toHaveBeenLastCalledWith('managed_voice_overlay_update', { presentation: expect.objectContaining({ phase: 'live', dismissed: true }) });
+  expect(stateRef.current).toBe('live');
+  expect(vi.getTimerCount()).toBe(0);
+});
 it('retains the existing CLI discussion when live captions fill the recent transcript', async () => {
   const props: ComponentProps<typeof VoiceButton> = {
     binding: 'existing-chat', busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn(),

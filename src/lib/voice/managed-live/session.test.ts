@@ -154,7 +154,7 @@ describe('managed Live transport', () => {
     finishAnswer(); await starting; await flush();
     expect(closedPromptly).toBe(true);
   });
-  it('does not install fresh timers after failure cleanup during delayed answer installation', async () => {
+  it('bounds closure recovery without reinstalling live timers after delayed answer failure', async () => {
     let finishAnswer!: () => void;
     let failPeer!: () => void;
     let answerStarted!: () => void;
@@ -174,6 +174,7 @@ describe('managed Live transport', () => {
     }));
     const starting = startManagedLive({ binding: 'a', context: () => '', delegate: vi.fn() }, () => {});
     await atAnswer; failPeer(); await flush();
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(vi.getTimerCount()).toBe(0);
     finishAnswer(); const live = await starting; await flush();
     expect(live.state).toBe('unknown');
@@ -411,7 +412,62 @@ describe('managed Live transport', () => {
     }));
     const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
     lost = true; await vi.advanceTimersByTimeAsync(1000);
+    expect(starts).toBe(1); expect(live.state).toBe('unknown');
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(starts).toBe(1); expect(live.state).toBe('unknown'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([true, false])('recovers only a final close receipt after a transient poll failure (valid usage: %s)', async valid => {
+    const stop = vi.fn(); const mic = vi.fn(async () => ({ getTracks: () => [{ stop }] }));
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: mic } });
+    const requests: Record<string, unknown>[] = []; let lost = false; let failed = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') return Response.json({ id: 'owned-session', sdp: 'answer' });
+      if (body.action === 'close') return Response.json({ state: 'closing' });
+      if (!lost) return Response.json({ events: [] });
+      if (!failed) { failed = true; throw new Error('temporary disconnect'); }
+      return Response.json({ events: [
+        { cursor: 1, event: { type: 'session.input_transcript.delta', event_id: 'late-input', delta: 'do work', start_ms: 0, end_ms: 10 } },
+        { cursor: 2, event: { type: 'session.delegation.created', event_id: 'late-delegation', delegation: { id: 'task', target: 'client' } } },
+        { cursor: 3, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: valid ? 15 : -1 } } },
+      ] });
+    }));
+    const delegate = vi.fn(); const transcript = vi.fn(); const states: string[] = [];
+    const live = await startManagedLive({ binding: 'pinned-chat', context: () => '', delegate, transcript }, state => states.push(state));
+    lost = true; await vi.advanceTimersByTimeAsync(500);
+    expect(stop).toHaveBeenCalledOnce(); expect(states).toContain('unknown');
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(live.state).toBe(valid ? 'closed' : 'unknown'); expect(live.usage.providerUsageFinal).toBe(valid);
+    expect(mic).toHaveBeenCalledOnce(); expect(delegate).not.toHaveBeenCalled(); expect(transcript).not.toHaveBeenCalled();
+    expect(requests.filter(request => request.action === 'start')).toHaveLength(1);
+    expect(requests.filter(request => request.action !== 'start').every(request => request.id === 'owned-session' && request.binding === 'pinned-chat')).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([401, 403, 404])('stops closure recovery when current authority refuses with %s', async status => {
+    let polls = 0; let closes = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: 'old', sdp: 'answer' });
+      if (body.action === 'close') { closes++; return Response.json({ error: 'refused' }, { status }); }
+      if (++polls === 1) throw new Error('temporary disconnect');
+      return Response.json({ events: [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(live.state).toBe('unknown'); expect(polls).toBe(1); expect(closes).toBe(1); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('aborts a hung closure recovery at its deadline and never opens another session', async () => {
+    let starts = 0; let closeSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') { starts++; return Response.json({ id: 'owned', sdp: 'answer' }); }
+      if (body.action === 'poll') throw new Error('temporary disconnect');
+      closeSignal = init.signal;
+      return new Promise((_resolve, reject) => closeSignal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(closeSignal?.aborted).toBe(true); expect(live.state).toBe('unknown'); expect(starts).toBe(1); expect(vi.getTimerCount()).toBe(0);
   });
   it.each(['expired', 'content', 'remote_hangup', 'close_requested', undefined])('does not resume for terminal reason %s', async reason => {
     let starts = 0; let ended = false;

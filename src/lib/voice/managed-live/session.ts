@@ -45,6 +45,10 @@ export class LiveTranscript {
 }
 
 type LiveOptions = { idleTimeoutMs?: number; onLevel?: (level: number) => void };
+class LiveRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+const accessRefused = (error: unknown) => error instanceof LiveRequestError && [401, 403, 404].includes(error.status);
 /** One automatic continuation, only after the previous provider session confirms terminal usage. */
 export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
   const controller = new AbortController();
@@ -138,16 +142,17 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconciling = false;
   const transition = (next: LiveState, detail?: string, canResume = false) => {
     if (state === 'closed' || (cleaned && next !== 'closed')) return;
     state = next; onState(next, detail, canResume);
   };
   const activity = () => {}; // UI interactions are not evidence of speech.
-  const request = async (body: Record<string, unknown>) => {
+  const request = async (body: Record<string, unknown>, requestSignal?: AbortSignal) => {
     const response = await fetch('/api/voice/live', { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: `Bearer ${getMobileWsToken()}` },
-      body: JSON.stringify({ ...body, binding: backend.binding, ...(id ? { id } : {}) }) });
+      body: JSON.stringify({ ...body, binding: backend.binding, ...(id ? { id } : {}) }), signal: requestSignal });
     const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Voice request failed');
+    if (!response.ok) throw new LiveRequestError(typeof data.error === 'string' ? data.error : 'Voice request failed', response.status);
     return data;
   };
   const cleanup = () => {
@@ -158,14 +163,53 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     options?.onLevel?.(0);
     void audioContext?.close(); resolveClose?.();
   };
+  const uncertain = (detail: string, error?: unknown) => {
+    if (cleaned) return;
+    transition('unknown', detail); cleanup();
+    if (id && !accessRefused(error)) void reconcileClosure();
+  };
+  async function reconcileClosure() {
+    if (reconciling) return;
+    reconciling = true;
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), 15_000);
+    const pause = () => new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve(); };
+      const timer = setTimeout(finish, 1000);
+      controller.signal.addEventListener('abort', finish, { once: true });
+      if (controller.signal.aborted) finish();
+    });
+    try {
+      // Only recover closure for the already-owned session. Capture and task dispatch stay stopped.
+      await request({ action: 'close' }, controller.signal).catch(error => { if (accessRefused(error)) throw error; });
+      for (let attempt = 0; attempt < 8 && !controller.signal.aborted && state === 'unknown'; attempt++) {
+        try {
+          const data = await request({ action: 'poll', after: cursor }, controller.signal);
+          if (controller.signal.aborted) return;
+          for (const entry of data.events as Array<{ cursor: number; event: LiveEvent }>) {
+            if (entry.cursor <= cursor) continue;
+            cursor = entry.cursor;
+            if (!['session.usage.updated', 'session.closed'].includes(String(entry.event.type))) continue;
+            activityPolicy.observe(entry.event, Date.now());
+            if (entry.event.type === 'session.closed' && activityPolicy.usage.providerUsageFinal) {
+              transition('closed', 'Voice is closed. Resume when ready; backend work continues.');
+              return; // An uncertain attempt never automatically resumes, even after recovery.
+            }
+          }
+        } catch (error) { if (accessRefused(error)) return; }
+        await pause();
+      }
+    } catch { /* Keep unknown ownership and usage when current authority cannot confirm closure. */ }
+    finally { clearTimeout(deadline); controller.abort(); }
+  }
   const close = (): Promise<void> => {
     if (closePromise) return closePromise;
     if (state === 'closed' || state === 'unknown' || state === 'error') return Promise.resolve();
     transition('closing');
     closePromise = new Promise(resolve => { resolveClose = resolve; });
     // Keep the peer and poll alive until the provider confirms terminal usage.
-    closeTimer = setTimeout(() => { transition('unknown', 'Voice closure is unconfirmed. Backend work continues.'); cleanup(); }, 15_000);
-    void request({ action: 'close' }).catch(() => { if (state !== 'closed') { transition('unknown', 'Voice closure is unconfirmed.'); cleanup(); } });
+    closeTimer = setTimeout(() => uncertain('Voice closure is unconfirmed. Backend work continues.'), 15_000);
+    void request({ action: 'close' }).catch(error => uncertain('Voice closure is unconfirmed.', error));
     startPolling();
     return closePromise;
   };
@@ -185,6 +229,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   async function poll() {
     try {
       const data = await request({ action: 'poll', after: cursor });
+      if (cleaned) return;
       for (const entry of data.events as Array<{ cursor: number; event: LiveEvent }>) {
         if (entry.cursor <= cursor) continue;
         cursor = entry.cursor;
@@ -198,7 +243,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
           transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined, canResume);
           return;
         }
-        if (entry.event.type === 'o8.transport.unknown') { transition('unknown', 'Voice disconnected; backend work is unchanged.'); cleanup(); return; }
+        if (entry.event.type === 'o8.transport.unknown') { uncertain('Voice disconnected; backend work is unchanged.'); return; }
         const task = transcript.observe(entry.event);
         if (task && state === 'live') {
           if (!task.text.trim()) { void update(task.id, 'I could not reliably capture that request. Please repeat it.').catch(() => {}); continue; }
@@ -216,7 +261,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
         }
       }
       if (state === 'live' || state === 'closing') pollTimer = setTimeout(() => { void poll(); }, 250);
-    } catch { if (state !== 'closed') { transition('unknown', 'Voice connection lost. Backend work may still be running.'); cleanup(); } }
+    } catch (error) { uncertain('Voice connection lost. Backend work may still be running.', error); }
   }
   try {
     transition('connecting');

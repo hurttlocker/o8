@@ -19,6 +19,8 @@ pub struct VoicePresentation {
     owner: String,
     epoch: u64,
     phase: String,
+    #[serde(default)]
+    dismissed: bool,
     label: String,
     level: f32,
     connected_seconds: Option<f64>,
@@ -122,7 +124,10 @@ fn update_on_main<R: tauri::Runtime>(
     let mut owner = OWNER
         .lock()
         .map_err(|_| "Voice presentation owner unavailable.")?;
-    let ending = presentation.phase == "closed" || presentation.phase == "error";
+    // Capture has stopped in unknown state. Preserve that fact in the chat, not
+    // as an always-on-top satellite; dismissal never claims provider closure.
+    let ending = presentation.dismissed
+        || ["unknown", "closed", "error"].contains(&presentation.phase.as_str());
     if owner
         .as_ref()
         .is_some_and(|current| current != &presentation.owner)
@@ -388,6 +393,29 @@ mod tests {
         )
         .unwrap();
         assert!(is_active());
+        invoke(
+            &main,
+            "managed_voice_overlay_update",
+            payload("second", "unknown", &next),
+        )
+        .unwrap();
+        assert!(!is_active());
+        invoke(
+            &main,
+            "managed_voice_overlay_update",
+            payload("second", "live", &next),
+        )
+        .unwrap();
+        let mut dismissed = payload("second", "closing", &next);
+        dismissed["presentation"]["dismissed"] = json!(true);
+        invoke(&main, "managed_voice_overlay_update", dismissed).unwrap();
+        assert!(!is_active());
+        invoke(
+            &main,
+            "managed_voice_overlay_update",
+            payload("second", "live", &next),
+        )
+        .unwrap();
         invoke(
             &main,
             "managed_voice_overlay_update",

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export interface VoiceRelayRecord {
-  version: 1;
+  version: 1 | 2;
   id: string;
   owner: string;
   binding: string;
@@ -36,7 +36,7 @@ function directory(): string {
 }
 function validate(value: unknown): VoiceRelayRecord {
   const record = value as VoiceRelayRecord;
-  if (!record || record.version !== 1 || !UUID.test(record.id) || !HASH.test(record.owner)
+  if (!record || ![1, 2].includes(record.version) || !UUID.test(record.id) || !HASH.test(record.owner)
     || !HASH.test(record.binding) || !Number.isSafeInteger(record.createdAt) || record.createdAt < 0
     || typeof record.gateway !== 'string' || voiceGatewayUrl(record.gateway) !== record.gateway) {
     throw new Error('Invalid voice relay ownership');

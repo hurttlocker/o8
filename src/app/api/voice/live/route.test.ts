@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const config = vi.hoisted(() => ({ gateway: 'https://gateway.fixture', generation: 'account-one', root: '', ready: true, signedOut: false, token: 'signed-plan-fixture', syncFailure: 0, syncs: 0 }));
+const config = vi.hoisted(() => ({ gateway: 'https://gateway.fixture', generation: 'account-one', accountId: 'subject-one', epoch: 'sign-in-one', root: '', ready: true, signedOut: false, token: 'signed-plan-fixture', syncFailure: 0, syncs: 0 }));
 vi.mock('node:fs', async importOriginal => {
   const fs = await importOriginal<typeof import('node:fs')>();
   return { ...fs, fsyncSync: (fd: number) => { if (++config.syncs === config.syncFailure) throw new Error('fixture fsync failure'); fs.fsyncSync(fd); } };
@@ -13,8 +13,8 @@ vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => config.root }));
 vi.mock('@/lib/mobile/device-registry', () => ({ resolveDeviceByToken: () => null }));
 vi.mock('@/lib/mobile/symon-text-session-store', () => ({ loadSymonTextSession: () => null }));
 vi.mock('@/lib/auth/account-state', () => ({
-  readAccountState: () => ({ generation: config.generation, signedOut: config.signedOut, status: config.ready ? 'ready' : 'blocked', licenseDigest: createHash('sha256').update('signed-plan-fixture').digest('hex') }),
-  accountStateMatches: () => config.ready && !config.signedOut,
+  readAccountState: () => ({ generation: config.generation, accountId: config.accountId, epoch: config.epoch, signedOut: config.signedOut, status: config.ready ? 'ready' : 'blocked', licenseDigest: createHash('sha256').update('signed-plan-fixture').digest('hex') }),
+  accountStateMatches: (state: { accountId: string; epoch: string }) => config.ready && !config.signedOut && state.accountId === config.accountId && state.epoch === config.epoch,
   withAccountStateAdmission: (action: () => Promise<unknown>) => action(),
 }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: (request: Request) => request.headers.get('x-role') ?? 'operator' }));
@@ -26,7 +26,7 @@ const poll = { action: 'poll', binding: start.binding, id: ID, after: 0 };
 const request = (body: unknown, token = 'operator-fixture', role = 'operator') => new Request('http://localhost/api/voice/live', {
   method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-role': role }, body: JSON.stringify(body),
 });
-beforeEach(() => { config.root = mkdtempSync(join(tmpdir(), 'voice-relay-')); config.generation = 'account-one'; config.gateway = 'https://gateway.fixture'; config.ready = true; config.signedOut = false; config.token = 'signed-plan-fixture'; config.syncFailure = 0; config.syncs = 0; });
+beforeEach(() => { config.root = mkdtempSync(join(tmpdir(), 'voice-relay-')); config.generation = 'account-one'; config.accountId = 'subject-one'; config.epoch = 'sign-in-one'; config.gateway = 'https://gateway.fixture'; config.ready = true; config.signedOut = false; config.token = 'signed-plan-fixture'; config.syncFailure = 0; config.syncs = 0; });
 afterEach(() => { rmSync(config.root, { recursive: true, force: true }); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 describe('managed voice application relay', () => {
   it('rejects null and array bodies without throwing', async () => {
@@ -78,8 +78,27 @@ describe('managed voice application relay', () => {
     const stored = readFileSync(join(config.root, 'managed-voice-relay', `${ID}.json`), 'utf8');
     for (const secret of ['signed-plan-fixture', 'operator-fixture', start.binding, start.context, start.sdp]) expect(stored).not.toContain(secret);
     config.generation = 'replacement-account';
+    config.accountId = 'replacement-subject';
     expect((await reloaded.POST(request(poll))).status).toBe(404);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it('keeps persisted controls across housekeeping generations but rejects fresh sign-in and legacy ownership', async () => {
+    vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
+    const fetch = vi.fn(async () => Response.json({ id: ID, sdp: 'v=0\nanswer' })); vi.stubGlobal('fetch', fetch);
+    expect((await POST(request(start))).status).toBe(200);
+    const file = join(config.root, 'managed-voice-relay', `${ID}.json`);
+    const record = JSON.parse(readFileSync(file, 'utf8'));
+    expect(record.version).toBe(2);
+    config.generation = 'housekeeping-refresh';
+    vi.resetModules(); const reloaded = await import('./route');
+    expect((await reloaded.POST(request(poll))).status).toBe(200);
+    expect((await reloaded.POST(request({ ...poll, action: 'close' }))).status).toBe(200);
+    config.epoch = 'fresh-sign-in';
+    expect((await reloaded.POST(request(poll))).status).toBe(404);
+    config.epoch = 'sign-in-one';
+    writeFileSync(file, JSON.stringify({ ...record, version: 1 }));
+    expect((await reloaded.POST(request(poll))).status).toBe(404);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
   it('pins the gateway before create resolves and refuses duplicate ids without overwriting or closing', async () => {
     vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
@@ -145,10 +164,25 @@ describe('managed voice application relay', () => {
     config.signedOut = false; config.token = 'another-account-token'; expect((await POST(request(start))).status).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
   });
-  it.each(['generation', 'sign-out'])('does not return success after out-of-band account %s changes during creation', async change => {
+  it('applies current account and license checks to existing session controls', async () => {
+    vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
+    const fetch = vi.fn(async () => Response.json({ id: ID, sdp: 'answer' })); vi.stubGlobal('fetch', fetch);
+    expect((await POST(request(start))).status).toBe(200);
+    for (const action of ['poll', 'close']) {
+      config.ready = false; expect((await POST(request({ ...poll, action }))).status).toBe(503);
+      config.ready = true; config.signedOut = true; expect((await POST(request({ ...poll, action }))).status).toBe(503);
+      config.signedOut = false; config.token = 'wrong-license'; expect((await POST(request({ ...poll, action }))).status).toBe(503);
+      config.token = 'signed-plan-fixture';
+    }
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it.each(['generation', 'sign-out', 'account', 'epoch'])('does not return success after out-of-band account %s changes during creation', async change => {
     vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
     vi.stubGlobal('fetch', vi.fn(async () => {
-      if (change === 'generation') config.generation = 'account-two'; else config.signedOut = true;
+      if (change === 'generation') config.generation = 'account-two';
+      else if (change === 'account') config.accountId = 'other-subject';
+      else if (change === 'epoch') config.epoch = 'other-sign-in';
+      else config.signedOut = true;
       return Response.json({ id: ID, sdp: 'v=0\nanswer' });
     }));
     expect((await POST(request(start))).status).toBe(503);

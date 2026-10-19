@@ -5,6 +5,7 @@ import type { LiveSession, LiveState } from '@/lib/voice/managed-live/session';
 
 export interface ManagedVoicePresentation {
   owner: string; epoch: number; phase: LiveState; label: string; level: number; connectedSeconds: number | null;
+  dismissed: boolean;
 }
 
 /** The satellite paints facts only; the main chat retains audio and all execution authority. */
@@ -27,22 +28,21 @@ export function useManagedVoicePresentation(input: {
       publishing = true;
       const value = current.current;
       const phase = value.stateRef.current;
-      const ending = phase === 'idle' || phase === 'closed' || phase === 'error';
+      const ending = disposed || ['idle', 'unknown', 'closed', 'error'].includes(phase);
       try {
         if (!ending || presented) {
           const { invoke } = await import('@tauri-apps/api/core');
           epoch ??= await invoke<number>('managed_voice_presentation_epoch');
           const presentation: ManagedVoicePresentation = { owner, epoch, phase: phase === 'idle' ? 'closed' : phase,
-            label: value.label, level: value.level.current, connectedSeconds: value.session.current?.usage?.providerConnectedSeconds ?? null };
+            dismissed: disposed, label: value.label, level: value.level.current,
+            connectedSeconds: value.session.current?.usage?.providerConnectedSeconds ?? null };
           await invoke('managed_voice_overlay_update', { presentation });
           presented = !ending;
         }
       } catch (error) { console.warn('[managed-voice] Native presentation unavailable:', error); }
-      // Finish closing the pinned session even if its composer unmounts.
+      // Audio/session cleanup belongs to the chat. An unmounted chat has no desktop presentation.
       publishing = false;
-      const next = current.current.stateRef.current;
-      if (!disposed || ['connecting', 'live', 'closing'].includes(next)
-        || (presented && ['idle', 'closed', 'error'].includes(next))) timer = setTimeout(() => { void publish(); }, 250);
+      if (!disposed || presented) timer = setTimeout(() => { void publish(); }, 250);
     };
     void publish();
     return () => { disposed = true; clearTimeout(timer); void publish(); };

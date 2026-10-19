@@ -119,12 +119,19 @@ behavior is verified separately through its existing persisted-state tests.
 ## Application relay restart ownership
 
 Acknowledged managed sessions retain immutable private ownership records in the
-profile's `managed-voice-relay` directory. The record contains hashed principal
-and account generation, hashed conversation binding, session id and the exact
+profile's `managed-voice-relay` directory. Version 2 records contain a hashed
+principal, verified account and sign-in epoch scope, hashed conversation binding, session id and the exact
 server-configured gateway. Controls survive an application-server restart and
 never follow a later gateway configuration change or an HTTP redirect. Account
 admission fences token capture and publication; blocked or changed account state
-cannot admit a new session. Records contain no bearer token, SDP or transcript.
+cannot admit a new session. Routine same-account license and managed credential
+refreshes may rotate the account journal generation without revoking an owned
+session. Each request still verifies the current license, account readiness and
+in-flight generation. Sign-out, a fresh sign-in, a different account or principal
+cannot acquire old controls. Version 1 records remain retained but are not
+migrated or admitted as version 2 ownership. Records contain no bearer token,
+SDP or transcript. A regression through the entitlement sync route, real account
+journal, principal resolution and cold-reloaded voice route covers this boundary.
 
 Conflicting or corrupt records fail closed and are retained. If publication
 definitively created a new record but its durability cannot be confirmed, the
@@ -205,3 +212,16 @@ task through the CLI still require separate acceptance.
 ## Confirmed-loss reconnect verification
 
 Transport fixtures exercise a one-attempt retry, unchanged chat binding, pending CLI work and delivery of its late result through the current voice subscription. They also exercise cancellation before admission and during microphone permission, manual Stop winning over a connection-loss reason, RTC failure waiting for final usage, and no retry after unknown or invalid final usage, expiry or content closure. An old voice activation cannot dispatch into a later activation of the same chat. These source checks do not simulate a provider guarantee or establish human acoustic acceptance.
+
+After a transient poll or close failure, local capture stops immediately. For a
+known owned session the client makes a bounded closure-only recovery attempt:
+one close request and at most eight polls within fifteen seconds. It uses the
+original conversation binding and current account authority; authorization
+refusals stop recovery. Only valid final cumulative usage can reconcile Unknown
+to Closed. Recovery cannot emit captions, dispatch tasks, reacquire audio or
+automatically reconnect. Missing receipts remain unknown in the chat.
+
+The desktop satellite dismisses when capture becomes Unknown or its owning chat
+unmounts, including while closure is pending. Dismissal is presentation only and
+does not assert provider closure or release uncertain accounting. The native
+owner and epoch checks also prevent an old chat from hiding a newer display.
