@@ -44,10 +44,16 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
     || !['single', 'fleet', 'fusion'].includes(routing.mode) || !isComposerWireMode(routing.pickedMode)
     || typeof routing.collide !== 'boolean' || (routing.projectId !== undefined && (typeof routing.projectId !== 'string' || routing.projectId.length > 256))) throw new Error('The queued message needs a complete routing snapshot.');
   const images = validateComposerImageAttachments(payload.images);
+  if ((payload.afterTaskId !== undefined && (typeof payload.afterTaskId !== 'string'
+    || !/^[A-Za-z0-9_-]{1,160}$/.test(payload.afterTaskId) || routing.pinBackend !== true))
+    || (routing.pinBackend !== undefined && routing.pinBackend !== true)
+    || (routing.pinBackend && routing.collide)) throw new Error('A bound follow-up requires an exact task and runtime.');
   if (images.length && !composerBackendSupportsImages(routing.backend)) throw new Error('The selected runtime cannot receive these images.');
   return { text: payload.text, wireMessage: payload.wireMessage,
+    ...(payload.afterTaskId ? { afterTaskId: payload.afterTaskId } : {}),
     images: images.map(image => ({ name: image.name ?? 'Image', dataUri: image.dataUri })),
     routing: { backend: routing.backend, model: routing.model, effort: routing.effort,
+      ...(routing.pinBackend ? { pinBackend: true as const } : {}),
       permissionMode: routing.permissionMode, mode: routing.mode, pickedMode: routing.pickedMode,
       collide: routing.collide, ...(routing.serviceTier ? { serviceTier: routing.serviceTier } : {}), ...(routing.projectId ? { projectId: routing.projectId } : {}) } };
 }
@@ -77,6 +83,9 @@ export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; i
     if (existing) {
       if (existing.repoPath !== target.repoPath || existing.threadId !== target.threadId || JSON.stringify(existing.payload) !== serialized) throw new Error('This queue identity already belongs to another message.');
       return existing;
+    }
+    if (payload.afterTaskId && listQueuedComposerSends(target).some(item => item.payload.afterTaskId)) {
+      throw new Error('A voice follow-up is already queued. Remove it before replacing it.');
     }
     if (listQueuedComposerSends(target).length >= 20) throw new Error('This chat already has 20 queued messages. Remove one before adding another.');
     const now = Date.now();

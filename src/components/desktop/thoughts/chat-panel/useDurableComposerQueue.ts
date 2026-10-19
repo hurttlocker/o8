@@ -24,6 +24,13 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     return () => { ownerRef.current = null; };
   }, [scopeKey]);
   const revisionRef = useRef(0);
+  const mutations = useRef(new Map<string, Promise<unknown>>());
+  const serialize = useCallback(<T,>(key: string, action: () => Promise<T>): Promise<T> => {
+    const pending = (mutations.current.get(key) ?? Promise.resolve()).catch(() => {}).then(action);
+    mutations.current.set(key, pending);
+    void pending.finally(() => { if (mutations.current.get(key) === pending) mutations.current.delete(key); }).catch(() => {});
+    return pending;
+  }, []);
   const refresh = useCallback(async () => {
     const snapshot = targetRef.current;
     if (!snapshot) return;
@@ -78,10 +85,25 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     // The still-current composer retires recovery immediately before consuming its draft.
     return () => { if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id); };
   }, [refresh]);
+  const enqueuePinned = useCallback(async (payload: ComposerQueuePayload, id: string) => {
+    const snapshot = targetRef.current;
+    if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
+    return serialize(JSON.stringify(snapshot), async () => {
+      const body = await composerQueueRequest<{ item: QueuedComposerSendRecord }>('/api/orchestrator/composer-queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...snapshot, id, intent: 'send-next', payload }),
+      }, 'Submission is not confirmed. Reconcile this request before retrying.');
+      if (body.item?.id !== id || body.item.threadId !== snapshot.threadId || !composerQueuePayloadMatches(body.item.payload, payload)) {
+        throw new Error('The queued receipt did not match the original request.');
+      }
+      if (scopeRef.current === JSON.stringify(snapshot)) { setError(null); await refresh(); }
+      return body.item;
+    });
+  }, [refresh, serialize]);
   const items = saved?.key === scopeKey ? saved.items : EMPTY_QUEUE;
-  const cancel = useCallback(async (sequence: number) => {
-    const item = items.find(row => row.sequence === sequence);
-    if (!item || removingRef.current.has(sequence)) return;
+  const cancelRecord = useCallback(async (item: QueuedComposerSendRecord) => {
+    const sequence = item.sequence;
+    if (removingRef.current.has(sequence)) return false;
     const key = JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId });
     removingRef.current.add(sequence); setRemoving(new Set(removingRef.current));
     try {
@@ -89,11 +111,34 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
         body: JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId, id: item.id }) },
       'Removal was not confirmed. Inspect the chat, then retry if the message is still queued.');
       if (scopeRef.current === JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId })) { setError(null); await refresh(); }
+      return true;
     } catch (cause) {
       if (scopeRef.current === key) setError(cause instanceof Error ? cause.message : 'Unable to remove the queued message.');
+      return false;
     } finally { removingRef.current.delete(sequence); setRemoving(new Set(removingRef.current)); }
-  }, [items, refresh]);
+  }, [refresh]);
+  const cancel = useCallback(async (sequence: number) => {
+    const item = items.find(row => row.sequence === sequence);
+    return item ? cancelRecord(item) : false;
+  }, [items, cancelRecord]);
+  const cancelVoiceFollowups = useCallback(async () => {
+    const snapshot = targetRef.current;
+    if (!snapshot) return 'The shared follow-up queue is unavailable; cancellation is not confirmed.';
+    return serialize(JSON.stringify(snapshot), async () => {
+      try {
+        // Read after prior saves settle, including saves whose response was lost.
+        const response = await fetch(`/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`, { cache: 'no-store' });
+        const body = await response.json();
+        if (!response.ok) throw new Error('Unable to confirm queued messages.');
+        const voiceItems = (body.items as QueuedComposerSendRecord[]).filter(item => item.payload.afterTaskId);
+        if (!voiceItems.length) return 'No pending voice follow-up was found. Already submitted work is unchanged.';
+        const removed = await Promise.all(voiceItems.map(cancelRecord));
+        return removed.every(Boolean) ? 'Queued voice follow-up canceled before submission. The running task is unchanged.'
+          : 'Cancellation is not confirmed for every follow-up. Inspect the conversation; work may already have been submitted.';
+      } catch { return 'Unable to confirm cancellation. Inspect the queued messages in this conversation.'; }
+    });
+  }, [cancelRecord, serialize]);
   const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
     Boolean(target && findPendingComposerSend(target, { text, images }));
-  return { items, hasPending, enqueue, cancel, error, removing, ready: !target || saved?.key === scopeKey };
+  return { items, hasPending, enqueue, enqueuePinned, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
 }

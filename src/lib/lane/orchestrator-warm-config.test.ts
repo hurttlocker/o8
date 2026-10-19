@@ -117,6 +117,24 @@ describe('warm orchestrator MCP config reuse', () => {
     carrierState.token = 'local-orchestrator-token';
   });
 
+  it.each(['success', 'error', 'abort'] as const)('reports typed voice evidence for %s without guessing from local settlement', async kind => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'o8-voice-terminal-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
+    const proc = new FakeClaudeProc(); spawnMock.mockReturnValue(proc as unknown as ChildProcess);
+    const session = ensureOrchestratorSession(repoPath, `voice-${kind}-${Date.now()}`);
+    const controller = new AbortController(); const events: OrchestratorEvent[] = [];
+    const turn = sendToOrchestrator(session, 'check', event => events.push(event), { signal: controller.signal });
+    await vi.waitFor(() => expect(proc.stdin.write).toHaveBeenCalled());
+    if (kind === 'abort') controller.abort();
+    else if (kind === 'error') { proc.exitCode = 1; proc.emit('close', 1); }
+    else proc.stdout.emit('data', Buffer.from('{"type":"result","session_id":"voice-result"}\n'));
+    await turn;
+    const done = events.filter((event): event is Extract<OrchestratorEvent, { type: 'done' }> => event.type === 'done');
+    expect(done.at(-1)?.terminalOutcome).toBe(kind === 'success' ? 'completed' : kind === 'error' ? 'failed' : 'unconfirmed');
+    if (kind !== 'success') expect(done.some(event => event.terminalOutcome === 'completed')).toBe(false);
+    proc.exitCode = 0; proc.emit('close', 0);
+  });
+
   it('reuses the resident process across semantically identical back-to-back turns', async () => {
     const repoPath = mkdtempSync(join(tmpdir(), 'o8-warm-config-repo-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repoPath });
