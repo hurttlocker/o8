@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
+
+import { composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
+import { composerQueueRequest, ComposerQueueRequestError } from './composer-queue-request';
 
 const EMPTY_QUEUE: QueuedComposerSendRecord[] = [];
 
@@ -15,17 +18,22 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
   const scopeKey = target ? JSON.stringify(target) : '';
   const scopeRef = useRef(scopeKey); scopeRef.current = scopeKey;
   const targetRef = useRef(target); targetRef.current = target;
+  const ownerRef = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    ownerRef.current = {};
+    return () => { ownerRef.current = null; };
+  }, [scopeKey]);
   const revisionRef = useRef(0);
-  const enqueueRef = useRef<{ fingerprint: string; id: string } | null>(null);
   const refresh = useCallback(async () => {
     const snapshot = targetRef.current;
     if (!snapshot) return;
     const key = JSON.stringify(snapshot);
     const revision = ++revisionRef.current;
     try {
-      const response = await fetch(`/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`, { cache: 'no-store' });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'Unable to load queued messages.');
+      const body = await composerQueueRequest<{ items: QueuedComposerSendRecord[] }>(
+        `/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`,
+        { cache: 'no-store' }, 'Queued messages could not be loaded. Reopen this chat to retry.');
+      if (!Array.isArray(body.items)) throw new Error('Unable to load queued messages.');
       if (scopeRef.current === key && revision === revisionRef.current) { setSaved({ key, items: body.items }); setError(null); }
     } catch (cause) {
       if (scopeRef.current === key && revision === revisionRef.current) setError(cause instanceof Error ? cause.message : 'Unable to load queued messages.');
@@ -41,17 +49,34 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     window.addEventListener('o8:lifecycle-reconcile', refresh);
     return () => { window.removeEventListener('o8:lifecycle-reconcile', refresh); };
   }, [scopeKey, busy, refresh]);
-  const enqueue = useCallback(async (payload: ComposerQueuePayload) => {
+  const enqueue = useCallback(async (draft: Pick<ComposerQueuePayload, 'text' | 'images'>, capture: () => ComposerQueuePayload) => {
     const snapshot = targetRef.current;
     if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
-    const fingerprint = JSON.stringify({ ...snapshot, payload });
-    if (enqueueRef.current?.fingerprint !== fingerprint) enqueueRef.current = { fingerprint, id: `queue-${crypto.randomUUID()}` };
-    const response = await fetch('/api/orchestrator/composer-queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...snapshot, id: enqueueRef.current.id, intent: 'send-next', payload }) });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || 'Unable to save the queued message.');
-    enqueueRef.current = null;
-    if (scopeRef.current === JSON.stringify(snapshot)) { setError(null); await refresh(); }
+    const owner = ownerRef.current;
+    const payload = findPendingComposerSend(snapshot, draft)?.payload ?? capture();
+    const { attempt, fresh } = prepareComposerSend(snapshot, payload);
+    let item: QueuedComposerSendRecord;
+    try {
+      const body = await composerQueueRequest<{ item: QueuedComposerSendRecord }>('/api/orchestrator/composer-queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...snapshot, id: attempt.id, intent: 'send-next', payload: attempt.payload }),
+      }, 'Send next was not confirmed. Your draft is unchanged. Retry to check the same send with its original routing.');
+      item = body.item;
+      if (item?.id !== attempt.id || item.threadId !== snapshot.threadId
+        || !composerQueuePayloadMatches(item.payload, attempt.payload)) throw new Error('The Send next receipt did not match. Keep this draft and inspect the chat before retrying.');
+    } catch (cause) {
+      // A first, explicit client rejection did not accept the new submission.
+      // A retry rejection cannot disprove delivery of the earlier uncertain request.
+      if (ownerRef.current === owner && fresh && cause instanceof ComposerQueueRequestError && cause.status >= 400 && cause.status < 500) confirmComposerSend(snapshot, attempt.id);
+      throw cause;
+    }
+    if (item.status === 'cancelled') {
+      if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id);
+      throw new Error('The previous send was cancelled. No new message was sent. Send again only if you want a new turn.');
+    }
+    if (ownerRef.current === owner) { setError(null); await refresh(); }
+    // The still-current composer retires recovery immediately before consuming its draft.
+    return () => { if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id); };
   }, [refresh]);
   const items = saved?.key === scopeKey ? saved.items : EMPTY_QUEUE;
   const cancel = useCallback(async (sequence: number) => {
@@ -60,14 +85,15 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     const key = JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId });
     removingRef.current.add(sequence); setRemoving(new Set(removingRef.current));
     try {
-      const response = await fetch('/api/orchestrator/composer-queue', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId, id: item.id }) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'Unable to remove the queued message.');
+      await composerQueueRequest('/api/orchestrator/composer-queue', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId, id: item.id }) },
+      'Removal was not confirmed. Inspect the chat, then retry if the message is still queued.');
       if (scopeRef.current === JSON.stringify({ repoPath: item.repoPath, threadId: item.threadId })) { setError(null); await refresh(); }
     } catch (cause) {
       if (scopeRef.current === key) setError(cause instanceof Error ? cause.message : 'Unable to remove the queued message.');
     } finally { removingRef.current.delete(sequence); setRemoving(new Set(removingRef.current)); }
   }, [items, refresh]);
-  return { items, enqueue, cancel, error, removing, ready: !target || saved?.key === scopeKey };
+  const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
+    Boolean(target && findPendingComposerSend(target, { text, images }));
+  return { items, hasPending, enqueue, cancel, error, removing, ready: !target || saved?.key === scopeKey };
 }

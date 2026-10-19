@@ -20,6 +20,8 @@ export interface ThoughtsChatPanelProps {
   repoPath?: string | null;
   /** Identity for the outer Project picker, including isolated panels. */
   scopeTabId?: string;
+  /** Own the composer before its bound history finishes loading. */
+  draftConversationId?: string | null;
   /** Workspace tab that owns this composer, when rendered in the main workspace. */
   ownerTabId?: string;
   projectId?: string | null;

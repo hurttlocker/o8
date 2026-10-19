@@ -38,6 +38,14 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Send next preserves its original request identity, destination, attachments and routing through an uncertain response, renderer restart and an explicit retry. Queue transport waits are bounded; stale composer completions cannot retire a replacement composer's recovery. Source, private native acceptance and release are tracked separately. [#4002](https://github.com/hurttlocker/o8/issues/4002)
+
+Ordinary workspace composers retain unsent text, completed image attachments and queued file context across a normal restart, scoped to the selected repository and conversation. Explicit clearing removes saved drafts; storage failure keeps the current input visible and prevents an unsafe conversation transfer. Private native candidate acceptance and release remain separate gates. [#3994](https://github.com/hurttlocker/o8/issues/3994)
+
+Inbox view labels and count badges are centered within their existing hit areas across selected, hover and keyboard states. Native candidate acceptance and release are recorded separately. [#3995](https://github.com/hurttlocker/o8/issues/3995)
+
+Known terminal sessions retain their identity when a saved workspace returns after the process has stopped. Restore offers an ended view and an explicit new-shell action; unavailable session status cannot authorize a replacement process. Source regressions cover stop, reload, reconnect and preserved output, including a newer interactive reply when tmux restores stale startup history before its exit marker. Native candidate acceptance and release are recorded separately. [#3992](https://github.com/hurttlocker/o8/issues/3992)
+
 Managed development environment cleanup source work has closed in [#3337](https://github.com/hurttlocker/o8/issues/3337). First-run installed acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246) and [#2211](https://github.com/hurttlocker/o8/issues/2211).
 
 Workspace polish source work has closed in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Its checks cover quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation source work has also closed: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance. The restoration and reconnect changes are integrated in [#3716](https://github.com/hurttlocker/o8/pull/3716).
