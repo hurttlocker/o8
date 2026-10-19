@@ -101,7 +101,8 @@ import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
 import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
-import { useComposerDraftLifecycle } from './chat-panel/useComposerDraftLifecycle';
+import { useComposerDraftLifecycle, useDraftStartFresh } from './chat-panel/useComposerDraftLifecycle';
+import { composerDraftKey, useComposerDraftValue } from './chat-panel/composer-draft-store';
 import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
@@ -148,6 +149,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   repoPath?: string | null;
   /** Identity for the outer Project picker, including isolated panels. */
   scopeTabId?: string;
+  /** Own the composer before its bound history finishes loading. */
+  draftConversationId?: string | null;
   /** Workspace tab that owns this composer, when rendered in the main workspace. */
   ownerTabId?: string;
   projectId?: string | null;
@@ -232,6 +235,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   workspaceTargets,
   repoPath: repoPathProp,
   scopeTabId,
+  draftConversationId,
   ownerTabId,
   projectId: projectIdProp,
   thoughtsBodyBackground,
@@ -264,7 +268,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   suppressAutoRestore = false, suppressRuntimePrewarm = false,
   expectsThreadLoad = false,
 }, ref) {
-  const [input, setInput] = useState(() => contextualConversation?.initialDraft ?? '');
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const draftKey = !contextualConversation ? composerDraftKey(repoPathProp, scopeTabId, threadId ?? draftConversationId ?? null) : null;
+  const { value: input, setValue: setInput, captureOwner: captureDraftOwner, warning: draftWarning } = useComposerDraftValue(draftKey, 'input', contextualConversation?.initialDraft ?? '');
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(initialPermissionMode);
   useEffect(() => setPermissionMode(initialPermissionMode), [initialPermissionMode]);
   // The mode ref keeps sends in sync with the selected composer mode.
@@ -287,6 +293,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [collideEnabled, composerMode]);
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
+  const enhancementOwner = useRef<(() => boolean) | null>(null);
   // Orchestration mode + runtime + chat-model selection. Per-tab when
   // the parent provides initial values + onModePersist (the orchestrator
   // tab path); otherwise falls back to the legacy per-workspace
@@ -333,7 +340,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setInput(body);
       latestInputRef.current = body;
     }
-  }, [initialSingleRuntime, lockedMode]);
+  }, [initialSingleRuntime, lockedMode, setInput]);
   const orchestrationSettingsLoaded = orchestrationSettingsKey === workspaceModeKey;
   const selectedChatModel = useMemo(() => getChatModelOption(chatModelId), [chatModelId]);
   useEffect(() => {
@@ -417,7 +424,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
-  const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const [activeThreadBackend, setActiveThreadBackend] = useState<OrchestratorBackendId | null>(null);
   const latestAssistantBackendRef = useRef<OrchestratorBackendId | null>(null);
@@ -486,7 +492,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     replaceAttachedImage,
     removeAttachedFile,
     clearAttachments,
-  } = useThoughtsComposerAttachments({ hostRef: composerDropHostRef });
+  } = useThoughtsComposerAttachments({ hostRef: composerDropHostRef, draftKey });
   // Index of the attachment currently open in the screenshot annotator (or null).
   const [annotatingIndex, setAnnotatingIndex] = useState<number | null>(null);
   const settledAssistantRefetchRef = useRef<() => void>(() => {});
@@ -1001,8 +1007,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [resolvedRepoPath]);
 
-  const handleReset = useCallback(() => {
-    setInput('');
+  const handleReset = useCallback((retainedDraftThreadId?: string) => {
+    if (!retainedDraftThreadId) setInput('');
     backendSwitch.reset();
     setPreEnhanceInput(null);
     setChatMessages([]);
@@ -1030,7 +1036,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // open, mission rotation, /clear) wrote a junk thoughts-*.json. The id
     // still mints here; the FILE is written by the persist effect on the
     // first real message.
-    const placeholderId = isOrchestratorMode ? `thoughts-${Date.now()}` : `chat-${Date.now()}`;
+    const placeholderId = retainedDraftThreadId ?? (isOrchestratorMode ? `thoughts-${Date.now()}` : `chat-${Date.now()}`);
     threadIdRef.current = placeholderId;
     setThreadId(placeholderId);
     autoRestoreAttemptedRef.current = true;
@@ -1041,10 +1047,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [backendSwitch, cancelPendingPersist, clearPolling, orchStream, isOrchestratorMode, operatorDefaults, orchestratorBackend, projectIdProp, resetThreadHistoryWindow]);
+    return placeholderId;
+  }, [setInput, backendSwitch, resetThreadHistoryWindow, clearPolling, orchStream, orchestratorBackend, projectIdProp, isOrchestratorMode, cancelPendingPersist, operatorDefaults]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
+    const ownsDraft = captureDraftOwner();
+    enhancementOwner.current = ownsDraft;
     setEnhancing(true);
     setPreEnhanceInput(input);
     try {
@@ -1055,21 +1064,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.enhanced) setInput(data.enhanced);
+        if (typeof data.enhanced === 'string' && data.enhanced && ownsDraft()) setInput(current => current === input ? data.enhanced : current);
       }
     } catch {
       // silently fail
     } finally {
       setEnhancing(false);
     }
-  }, [input, enhancing]);
+  }, [input, enhancing, setInput, captureDraftOwner]);
 
   const handleUndoEnhance = useCallback(() => {
-    if (preEnhanceInput !== null) {
+    if (preEnhanceInput !== null && enhancementOwner.current?.()) {
       setInput(preEnhanceInput);
       setPreEnhanceInput(null);
     }
-  }, [preEnhanceInput]);
+  }, [preEnhanceInput, setInput]);
 
   // ── Thread persistence ──
 
@@ -1126,8 +1135,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // "sent and nothing happened" total silence.
   const transcriptTouchedRef = useRef(false);
   useEffect(() => {
-    transcriptTouchedRef.current = orchStream.messages.length > 0 || chatMessages.length > 0;
-  }, [orchStream.messages, chatMessages]);
+    transcriptTouchedRef.current = orchStream.messages.length > 0 || chatMessages.length > 0 || Boolean(input || attachedImages.length || attachedFiles.length);
+  }, [orchStream.messages, chatMessages, input, attachedImages.length, attachedFiles.length]);
   useEffect(() => {
     if (suppressAutoRestore) return;
     if (!isOrchestratorMode || isChatMode) return;
@@ -1535,7 +1544,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setModel: setOrchestratorModel, setOperatorDefaults,
       }, signal, options),
     });
-  }, [addAttachedImage, backendSwitch, ensureSelectedRepoPersisted, orchStream, orchestratorBackend, orchestratorModel, resolvedRepoPath, setOrchestratorModel, contextualConversation]);
+  }, [backendSwitch, orchStream, contextualConversation, ensureSelectedRepoPersisted, setInput, addAttachedImage, resolvedRepoPath, orchestratorBackend, orchestratorModel, setOrchestratorModel]);
 
   const slashAttachments = useMemo(() => attachedImages.length
     ? attachedImages.map(image => ({ dataUri: image.dataUri, name: image.name })) : undefined, [attachedImages]);
@@ -1870,7 +1879,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       if (!receiptUnsettled) setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, sendOrchestrator, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, soloOrchestrator, collideEnabled, waitingForReply]);
+  }, [input, soloOrchestrator, lockedMode, isChatMode, waitingForReply, isOrchestratorMode, orchStream.status, isSingleMode, runLocalOrchestratorSlash, setInput, clearAttachments, targetSessionKey, onSpawnSingleTab, onSpawnChatTab, attachedImages, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, selectedChatModel, chatStreamRequest, chatMessages, resolvedRepoPath, chatOpenrouterModel, ensureSingleRuntimeSession, captureServerSnapshot, startPollingForSession, singleRuntime, startPolling, targetAgent]);
 
   const sendNow = useCallback((text?: string, options?: ThoughtsSendNowOptions) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1919,7 +1928,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
     return true;
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, sendOrchestrator, thinkingEffort, soloOrchestrator, collideEnabled, waitingForReply]);
+  }, [isChatMode, isOrchestratorMode, setInput, waitingForReply, handleTaskSend, orchStream.status, runLocalOrchestratorSlash, attachedImages, soloOrchestrator, sendOrchestrator, permissionMode, orchestratorBackend, thinkingEffort, orchestratorModel, collideEnabled, clearAttachments]);
 
   // #1699 — interactive task artifacts attached to this thread. Their accepted
   // actions return through the same send path as a typed message, stamped so
@@ -1985,7 +1994,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return `${prev}${needsSpace ? ' ' : ''}${text}`;
     });
     setTimeout(() => inputRef.current?.focus(), 0);
-  }, []);
+  }, [setInput]);
 
   useAgentVoiceMode({
     active: open,
@@ -2025,23 +2034,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         setTimeout(() => inputRef.current?.focus(), 50);
       }}
     />
-  ), [
-    activeTargetColor,
-    activeTargetLabel,
-    isOrchestratorMode,
-    suggestions,
-    targetAgent,
-    thoughtsElevatedBorder,
-    thoughtsElevatedShadow,
-    thoughtsElevatedSurface,
-  ]);
+  ), [activeTargetColor, activeTargetLabel, isOrchestratorMode, setInput, suggestions, targetAgent, thoughtsElevatedBorder, thoughtsElevatedShadow, thoughtsElevatedSurface]);
 
   const handleSlashCommand = useCallback((cmd: string) => {
     setInput(cmd);
     latestInputRef.current = cmd;
     void handleTaskSend(cmd);
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, [handleTaskSend]);
+  }, [handleTaskSend, setInput]);
 
   const handleEffortChange = useCallback((next: ThinkingEffort) => {
     thinkingPreferenceTouchedRef.current = true;
@@ -2050,15 +2050,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!contextualConversation) writeStoredOrchestratorThinkingOverride(nextOverride);
   }, [contextualConversation, setThinkingOverride]);
 
-  const handleBackendStartFresh = useCallback(() => {
-    if (!backendSwitch.pending) return;
-    const draft = latestInputRef.current;
-    const target = backendSwitch.pending;
-    handleReset();
-    setInput(draft);
-    latestInputRef.current = draft;
-    backendSwitch.apply(target.backend, target.model);
-  }, [backendSwitch, handleReset]);
+  const handleBackendStartFresh = useDraftStartFresh({
+    backendSwitch, latestInputRef, handleReset, setInput, draftKey, repoPath: repoPathProp, tabId: scopeTabId, isOrchestratorMode,
+  });
 
   const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
     if (displayMessages.length === 0) return false;
@@ -2206,6 +2200,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         placeholder={contextualConversation?.placeholder}
         input={input}
         onInputChange={setInput}
+        draftWarning={draftWarning}
         isOrchestratorMode={isOrchestratorMode}
         isChatMode={isChatMode}
         isSingleMode={isSingleMode}

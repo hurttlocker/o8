@@ -2,7 +2,7 @@
 
 import { act, createElement, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_QUEUED_CONTEXT_CARDS_PER_DRAFT,
   MAX_WORKSPACE_CHAT_DRAFTS,
@@ -12,7 +12,8 @@ import {
   writeWorkspaceChatDraftState,
 } from './workspace-chat-drafts';
 
-afterEach(() => { vi.restoreAllMocks(); resetWorkspaceChatDraftStatesForTests(); });
+beforeEach(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true));
+afterEach(() => { vi.restoreAllMocks(); resetWorkspaceChatDraftStatesForTests(); vi.unstubAllGlobals(); });
 
 describe('workspace chat draft retention', () => {
   it('keeps a full memory draft and reports unavailable browser storage', async () => {
@@ -111,4 +112,19 @@ describe('workspace chat draft retention', () => {
     writeWorkspaceChatDraftState('chat-1', { draft: '', queuedContextCards: [] });
     expect(readWorkspaceChatDraftState('chat-1')).toEqual({ draft: '', queuedContextCards: [] });
   });
+});
+
+
+it('retains the direct runtime draft and context when the window session ends', () => {
+  writeWorkspaceChatDraftState('window-restart', { draft: 'Keep direct runtime input', queuedContextCards: [{ id: 'issue', title: 'Selected issue', text: 'Keep context', meta: [] }] });
+  sessionStorage.clear();
+  resetWorkspaceChatDraftStatesForTests(false);
+  expect(readWorkspaceChatDraftState('window-restart')).toEqual({ draft: 'Keep direct runtime input', queuedContextCards: [{ id: 'issue', title: 'Selected issue', text: 'Keep context', meta: [] }] });
+});
+
+it('migrates a validated session draft before a normal restart even without a new edit', () => {
+  sessionStorage.setItem('o8:workspace-drafts:v1', JSON.stringify([['legacy', { draft: 'Existing unsent input', queuedContextCards: [] }]]));
+  expect(readWorkspaceChatDraftState('legacy').draft).toBe('Existing unsent input');
+  sessionStorage.clear(); resetWorkspaceChatDraftStatesForTests(false);
+  expect(readWorkspaceChatDraftState('legacy').draft).toBe('Existing unsent input');
 });

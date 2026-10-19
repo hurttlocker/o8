@@ -20,7 +20,8 @@ function loadDrafts() {
   if (loaded || typeof window === 'undefined') return;
   loaded = true;
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const raw = saved ?? sessionStorage.getItem(STORAGE_KEY);
     if (!raw || raw.length > 2_000_000) return;
     const rows: unknown = JSON.parse(raw);
     if (!Array.isArray(rows)) return;
@@ -32,18 +33,20 @@ function loadDrafts() {
         && typeof card.title === 'string' && Array.isArray(card.meta) && card.meta.every(part => typeof part === 'string'))) continue;
       draftStates.set(entry[0], cloneDraftState(value));
     }
+    if (saved === null) persistDrafts(false);
   } catch { /* Private browser storage may be unavailable; keep the memory draft. */ }
 }
 
-function persistDrafts() {
+function persistDrafts(notify = true) {
   let failed = false;
   try {
     const raw = JSON.stringify([...draftStates]);
     if (raw.length > 2_000_000) throw new Error('Draft storage limit');
-    sessionStorage.setItem(STORAGE_KEY, raw);
-  } catch { failed = true; try { sessionStorage.removeItem(STORAGE_KEY); } catch {} }
-  for (const [key, value] of draftStates) draftStates.set(key, { ...value, retentionWarning: failed ? 'Browser storage is unavailable. Keep this tab open to retain your draft.' : undefined });
-  listeners.forEach(listener => listener());
+    localStorage.setItem(STORAGE_KEY, raw);
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch { failed = true; }
+  for (const [key, value] of draftStates) draftStates.set(key, { ...value, retentionWarning: failed ? 'Browser storage is unavailable. Keep this tab open to retain your latest draft changes.' : undefined });
+  if (notify) listeners.forEach(listener => listener());
 }
 
 function cloneDraftState(state: WorkspaceChatDraftState): WorkspaceChatDraftState {
@@ -106,5 +109,5 @@ function subscribe(listener: () => void) { listeners.add(listener); return () =>
 export function resetWorkspaceChatDraftStatesForTests(clearStorage = true): void {
   draftStates.clear();
   loaded = false;
-  if (clearStorage) { try { sessionStorage.removeItem(STORAGE_KEY); } catch {} }
+  if (clearStorage) { try { localStorage.removeItem(STORAGE_KEY); sessionStorage.removeItem(STORAGE_KEY); } catch {} }
 }

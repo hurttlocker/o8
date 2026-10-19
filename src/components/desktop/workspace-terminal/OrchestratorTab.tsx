@@ -59,6 +59,7 @@ import { useWorkerCardFocus } from './use-worker-card-focus';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
 import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
+import { readStoredCollide, persistCollide } from './orchestrator-collide-preference';
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -122,28 +123,6 @@ const tabIdsMountedThisLoad = new Set<string>();
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
 // at tab-creation time (pre-set tab.label) without re-implementing.
-
-function collideStorageKey(tabId: string): string {
-  return `cortex-ide:orchestrator-collide:tab:${tabId}`;
-}
-
-function readStoredCollide(tabId: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(collideStorageKey(tabId)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function persistCollide(tabId: string, enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(collideStorageKey(tabId), enabled ? '1' : '0');
-  } catch {
-    // ignore
-  }
-}
 
 export function OrchestratorTab(props: OrchestratorTabProps) {
   return (
@@ -1003,6 +982,7 @@ function OrchestratorTabInner({
       suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)} suppressRuntimePrewarm={suppressRuntimePrewarm || meshParticipants.some((participant) => participant.launchContext?.presentation === 'split' && participant.launchContext.source !== 'desktop')}
       // Until a thread-bound tab's history lands, show '…', never the default backend.
       expectsThreadLoad={Boolean(initialThreadId)}
+      draftConversationId={initialThreadId}
       draftInjection={effectiveDraftInjection}
       imageInjection={data?.imageInjection ?? null}
       onImageInjectionConsumed={data?.onImageInjectionConsumed}
