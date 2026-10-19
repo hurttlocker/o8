@@ -26,6 +26,46 @@ describe('managed Live transport', () => {
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: vi.fn() }] }) } });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('stays connecting until RTC connects, then streams captions without creating a CLI task', async () => {
+    const peers: Peer[] = [];
+    class ConnectingPeer extends Peer { connectionState = 'connecting'; constructor() { super(); peers.push(this); } }
+    vi.stubGlobal('RTCPeerConnection', ConnectingPeer);
+    let closed = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: 'connecting', sdp: 'answer' });
+      if (body.action === 'close') closed = true;
+      return Response.json({ events: closed ? [{ cursor: 3, event: { type: 'session.closed' } }] : [
+        { cursor: 1, event: { type: 'session.input_transcript.delta', event_id: 'input', delta: 'hello', start_ms: 0, end_ms: 10 } },
+        { cursor: 2, event: { type: 'session.output_transcript.delta', event_id: 'output', delta: 'Hi', start_ms: 20, end_ms: 30 } },
+      ] });
+    }));
+    const states: string[] = []; const transcript = vi.fn(); const delegate = vi.fn();
+    const starting = startManagedLive({ binding: 'chat', context: () => '', transcript, delegate }, state => states.push(state));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(states).toEqual(['connecting']); expect(transcript).not.toHaveBeenCalled();
+    const peer = peers[0]; peer.connectionState = 'connected'; (peer.onconnectionstatechange as unknown as (() => void))?.();
+    const live = await starting; await flush();
+    expect(live.state).toBe('live'); expect(transcript).toHaveBeenCalledTimes(2); expect(delegate).not.toHaveBeenCalled();
+    const end = live.close(); await vi.advanceTimersByTimeAsync(250); await end;
+  });
+  it('reconciles final usage after RTC setup times out instead of reporting live or losing the close receipt', async () => {
+    class NeverConnectedPeer extends Peer { connectionState = 'connecting'; }
+    vi.stubGlobal('RTCPeerConnection', NeverConnectedPeer);
+    let closed = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: 'timeout', sdp: 'answer' });
+      if (body.action === 'close') closed = true;
+      return Response.json({ events: closed ? [{ cursor: 1, event: { type: 'session.closed', usage: { seconds: 45 } } }] : [] });
+    }));
+    const states: string[] = [];
+    const starting = startManagedLive({ binding: 'chat', context: () => '', delegate: vi.fn() }, state => states.push(state));
+    await vi.advanceTimersByTimeAsync(45_000);
+    const live = await starting;
+    expect(states).toEqual(['connecting', 'closing', 'closed']);
+    expect(live.usage.providerConnectedSeconds).toBe(45); expect(vi.getTimerCount()).toBe(0);
+  });
   it('uses real local capture lifecycle in development preview without a remote peer or delegation', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     const remote = vi.fn(); const peerClose = vi.fn(); const stopped = vi.fn();
@@ -309,7 +349,7 @@ describe('managed Live transport', () => {
     t.observe({ type: 'session.input_transcript.delta', event_id: '1', delta: 'Check ', start_ms: 0, end_ms: 10 });
     t.observe({ type: 'session.input_transcript.delta', event_id: '2', delta: 'the task', start_ms: 10, end_ms: 20 });
     const event = { type: 'session.delegation.created', event_id: '3', offset_ms: 30, delegation: { id: 'd1', target: 'client' } };
-    expect(t.observe(event)).toEqual({ id: 'd1', text: 'Check the task' });
+    expect(t.observe(event)).toEqual({ id: 'd1', text: 'Check the task', fragments: ['1', '2'] });
     expect(t.observe(event)).toBeNull();
     expect(t.observe({ ...event, event_id: '4' })).toBeNull();
   });

@@ -6,7 +6,7 @@ export type VoiceTerminals = Record<string, { outcome: 'completed' | 'failed' | 
 export function voiceTerminalContext(messages: MobileTranscriptEntry[], live: VoiceTerminals): VoiceTerminals {
   const result: VoiceTerminals = {};
   for (const message of messages) {
-    const terminal = message.role === 'assistant' ? message.receipt?.terminal : undefined;
+    const terminal = message.role === 'assistant' && !message.voice ? message.receipt?.terminal : undefined;
     if (!terminal) continue;
     if (!result[terminal.userMessageId] || result[terminal.userMessageId].outcome === 'unconfirmed') {
       result[terminal.userMessageId] = { outcome: terminal.outcome, text: message.text };

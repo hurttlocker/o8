@@ -355,6 +355,8 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  /** Spoken captions are display evidence, never a runtime completion receipt. */
+  voice?: import('@/lib/transcripts/voice-captions').VoiceCaption;
   /** Matching send acknowledgement or live turn activity; not turn completion. */
   deliveryConfirmed?: boolean;
   id: string;

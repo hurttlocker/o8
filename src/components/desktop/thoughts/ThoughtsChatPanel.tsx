@@ -83,7 +83,7 @@ import {
   mergeToolResultIntoEntry,
   sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
-import { resolveDisplayMessages } from './chat-panel/resolve-display-messages';
+import { resolveDisplayMessages, resolveVisibleChatMessages } from './chat-panel/resolve-display-messages';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -507,7 +507,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     projectId: threadProjectId,
     seededPlanText: planText,
-    hasHistory: chatMessages.length > 0,
+    hasHistory: chatMessages.some(message => !message.voice),
     threadId,
     onThreadIdMint: useCallback((id: string) => {
       if (threadIdRef.current === id) return;
@@ -1358,22 +1358,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
     [agents, sessionTargets],
   );
-  const displayMessages = useMemo(() => {
-    if (!isOrchestratorMode || isChatMode) return chatMessages;
-    // Loaded history + the live stream overlap after a mid-conversation reload;
-    // the same user turn can survive in both the restored (persisted id) and
-    // the live-minted (optimistic id) form. resolveDisplayMessages concatenates
-    // all three sources and lets dedupeDisplayMessages collapse the overlap --
-    // it used to pick the stream OR the history, which dropped a whole restored
-    // thread the moment one live event arrived (#1839).
-    return resolveDisplayMessages({
-      historyEntries: threadHistoryEntries,
-      chatMessages,
-      streamMessages: orchStream.messages,
-    });
-  }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
+  const displayMessages = useMemo(() => resolveVisibleChatMessages({
+    isOrchestratorMode, isChatMode, historyEntries: threadHistoryEntries, chatMessages, streamMessages: orchStream.messages,
+  }), [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
+  const backendMessages = useMemo(() => displayMessages.filter(message => !message.voice), [displayMessages]);
   useEffect(() => {
-    const latestAssistant = [...displayMessages].reverse().find((message) => message.role === 'assistant');
+    const latestAssistant = [...displayMessages].reverse().find((message) => message.role === 'assistant' && !message.voice);
     latestAssistantBackendRef.current = latestAssistant?.backend ?? null;
     backendSwitch.observeLatestBackend(latestAssistant?.backend ?? null);
   }, [backendSwitch, displayMessages]);
@@ -1472,7 +1462,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [chatMessages, displayMessages, isChatMode, isOrchestratorMode, onChatSummary]);
 
   const turnSummary = useTurnSummaryReceipt({
-    displayMessages,
+    displayMessages: backendMessages,
     isChatMode,
     isOrchestratorMode,
     missionState,
@@ -1494,7 +1484,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     let activeAssistantId: string | null = null;
     if (orchStream.status === 'busy') {
       for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
-        if (displayMessages[index]?.role === 'assistant') {
+        if (displayMessages[index]?.role === 'assistant' && !displayMessages[index]?.voice) {
           activeAssistantId = displayMessages[index].id;
           break;
         }
@@ -2251,6 +2241,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         voiceControl={isOrchestratorMode && !isChatMode && threadId && resolvedRepoPath ? <ManagedChatVoiceEntry chatRoot={composerDropHostRef} label={`${composerRepoLabel} · ${activeTargetLabel}`}
           identity={[resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel, thinkingEffort, permissionMode, composerMode, threadProjectId, collideEnabled]}
           messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
+          transcript={orchStream.appendLocalEntries}
           queue={durable} capture={text => captureQueuedSend(text, [])}
           send={(text) => sendOrchestrator(text, { pinBackend: true, permissionMode, backend: composerBackendTurnOverride(orchestratorBackend),
             resolveTurnOptions: async () => ({ backend: composerBackendTurnOverride(orchestratorBackend), model: orchestratorModel }),

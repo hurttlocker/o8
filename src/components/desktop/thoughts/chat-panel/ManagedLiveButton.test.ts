@@ -34,6 +34,20 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('projects captions only into their bound chat and links accepted sends without treating voice output as completion', async () => {
+  const transcript = vi.fn(); const submitted = vi.fn();
+  const props = { key: 'a', binding: 'a', messages: [], busy: false, terminals: {}, transcript, send: vi.fn(() => ({ userMessageId: 'orch-user-a' })), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  const old = fixture.backend!;
+  old.transcript!([{ id: 'spoken', role: 'user', text: 'Check this' }]);
+  expect(transcript).toHaveBeenCalledOnce();
+  void old.delegate('Check this', 'd', vi.fn(async () => {}), submitted);
+  expect(submitted).toHaveBeenCalledWith('orch-user-a');
+  await act(async () => root.render(createElement(ManagedLiveButton, { ...props, key: 'b', binding: 'b' })));
+  old.transcript!([{ id: 'late', role: 'assistant', text: 'Old voice' }]);
+  expect(transcript).toHaveBeenCalledOnce();
+});
 it('serializes same-poll delegations and waits for correlated terminal even if append acknowledgement is delayed or rejected', async () => {
   const send = vi.fn(() => ({ userMessageId: 'user-1' }));
   const props = { binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() };

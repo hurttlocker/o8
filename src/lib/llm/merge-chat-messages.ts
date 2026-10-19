@@ -30,8 +30,10 @@
 import { areDistinctOrchestratorSends, preserveDeliveryConfirmation, removeConfirmedDeliveryWarnings } from '@/lib/transcripts/delivery-confirmation';
 import type { MobileTurnReceipt } from '@/lib/mobile/types';
 import { mergeMobileTurnReceipts } from '@/lib/mobile/turn-receipt';
+import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
 
 export interface ChatMessageLike {
+  voice?: unknown;
   id?: unknown;
   timestamp?: unknown;
   backend?: unknown;
@@ -46,6 +48,7 @@ export interface ChatMessageLike {
 const SERVER_METADATA_FIELDS = ['backend', 'model', 'receipt', 'persistedVersion', 'type', 'handoff', 'media'] as const;
 
 function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inbound: T): T {
+  inbound = preserveVoiceCaption(existing, inbound);
   const existingRecord = existing as Record<string, unknown>;
   const inboundRecord = inbound as Record<string, unknown>;
   let next: Record<string, unknown> | null = null;
@@ -72,6 +75,7 @@ function preserveStoredAuthorship<T extends ChatMessageLike>(existing: T, inboun
 }
 
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
+  if (left.voice || right.voice) return false;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   if (areDistinctOrchestratorSends(leftRecord, rightRecord)) return false;

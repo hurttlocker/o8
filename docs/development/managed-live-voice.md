@@ -172,5 +172,21 @@ input transcript, client delegation, the existing selected CLI chat, its persist
 audio energy. The provider confirmed 53 final seconds on close. This fixture
 was synthetic; human microphone, subjective speaker quality and physical
 Caps Lock acceptance are still separate checks. Delegated speech appears as the
-regular chat request and result; general voice captions are not yet projected
-into the durable workspace transcript.
+regular chat request and result. Continuous input and output captions now use
+the existing chat bubbles and history store. Spoken replies are labeled Voice
+reply and do not supply CLI completion receipts. An exact send link suppresses
+the delegated caption only once its ordinary CLI request exists; stored speech
+evidence remains available. Caption revisions survive stale history writes and
+same-thread refreshes. Pauses group display text only and never trigger work.
+
+The browser remains Connecting until the WebRTC peer actually connects. Failed
+setup with a known session still polls for final closure and usage; missing
+confirmation remains Unknown. Neither change relaxes production admission.
+
+A subsequent native generated-speech check observed captions growing from their
+first fragment, persisted both speakers through the normal history endpoint, and
+restored them after reload. A fresh client delegation produced exactly one
+ordinary CLI request, a correlated completed CLI reply, and a separate spoken
+reply. Only fragments covered by the delegation offset were linked; later speech
+remained visible. These are synthetic transport and persistence receipts, not
+human acoustic acceptance.

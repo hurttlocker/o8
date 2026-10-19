@@ -1,6 +1,8 @@
 import type { LiveUpdate } from './conversation-bridge';
 import { LiveActivity, type LiveActivityUsage } from './activity';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { LiveCaptions } from './captions';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 /** Browser transport. The backend owns reasoning, approvals, tools and history. */
 export type LiveState = 'idle' | 'connecting' | 'live' | 'closing' | 'closed' | 'unknown' | 'error';
 export type LiveEvent = Record<string, unknown>;
@@ -10,8 +12,9 @@ export interface LiveBackend {
   ready?: () => Promise<void>;
   context: () => string;
   subscribe?: (listener: LiveUpdate) => () => void;
+  transcript?: (entries: MobileTranscriptEntry[]) => void;
   /** Must use the existing conversation entry point; must not spawn a new worker. */
-  delegate: (text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>) => Promise<void>;
+  delegate: (text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>, submitted?: (userMessageId: string) => void) => Promise<void>;
 }
 export interface LiveSession {
   close: () => Promise<void>;
@@ -20,15 +23,15 @@ export interface LiveSession {
   readonly usage: LiveActivityUsage;
 }
 export class LiveTranscript {
-  private fragments: Array<{ text: string; start: number; end: number }> = [];
+  private fragments: Array<{ id: string; text: string; start: number; end: number }> = [];
   private seen = new Set<string>();
   private delegated = new Set<string>();
-  observe(event: LiveEvent): { id: string; text: string } | null {
+  observe(event: LiveEvent): { id: string; text: string; fragments: string[] } | null {
     if (typeof event.event_id !== 'string' || this.seen.has(event.event_id)) return null;
     this.seen.add(event.event_id);
     if (event.type === 'session.input_transcript.delta' && typeof event.delta === 'string'
       && typeof event.start_ms === 'number' && typeof event.end_ms === 'number') {
-      this.fragments.push({ text: event.delta, start: event.start_ms, end: event.end_ms });
+      this.fragments.push({ id: event.event_id, text: event.delta, start: event.start_ms, end: event.end_ms });
     }
     if (event.type !== 'session.delegation.created') return null;
     const d = event.delegation as { id?: string; target?: string } | undefined;
@@ -37,7 +40,7 @@ export class LiveTranscript {
     const offset = typeof event.offset_ms === 'number' ? event.offset_ms : Infinity;
     const ready = this.fragments.filter(f => f.end <= offset);
     this.fragments = this.fragments.filter(f => f.end > offset);
-    return { id: d.id, text: ready.map(f => f.text).join('') };
+    return { id: d.id, text: ready.map(f => f.text).join(''), fragments: ready.map(f => f.id) };
   }
 }
 
@@ -69,6 +72,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   const peer = new RTCPeerConnection();
   const audio = new Audio();
   const transcript = new LiveTranscript();
+  let captions: LiveCaptions | undefined;
+  let resolveConnected: (() => void) | undefined;
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -123,13 +128,14 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
         if (entry.cursor <= cursor) continue;
         cursor = entry.cursor;
         activityPolicy.observe(entry.event, Date.now());
+        captions?.observe(entry.event);
         if (entry.event.type === 'session.closed') { transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined); cleanup(); return; }
         if (entry.event.type === 'o8.transport.unknown') { transition('unknown', 'Voice disconnected; backend work is unchanged.'); cleanup(); return; }
         const task = transcript.observe(entry.event);
         if (task && state === 'live') {
           if (!task.text.trim()) { void update(task.id, 'I could not reliably capture that request. Please repeat it.').catch(() => {}); continue; }
           // Never await the worker in the transport loop: speech/close/steering keep flowing.
-          void backend.delegate(task.text, task.id, (text, spoken) => update(task.id, text, spoken))
+          void backend.delegate(task.text, task.id, (text, spoken) => update(task.id, text, spoken), userId => captions?.submitted(task.fragments, userId))
             .catch(() => update(task.id, 'The backend did not confirm completion. Check the conversation before retrying.')).catch(() => {});
         }
       }
@@ -166,7 +172,10 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     };
     watch(capturedStream);
     peer.ontrack = event => { if (cleaned) return; const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote, true); void audio.play().catch(() => { void close(); }); } };
-    peer.onconnectionstatechange = () => { if (peer.connectionState === 'failed') void close(); };
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'connected') resolveConnected?.();
+      if (peer.connectionState === 'failed') void close();
+    };
     peer.createDataChannel('oai-events'); // Provider channel is restricted; controls use the sideband.
     await startupStep(peer.setLocalDescription(await startupStep(peer.createOffer())));
     signal?.throwIfAborted();
@@ -179,6 +188,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
       return created;
     }));
     id = result.id;
+    captions = new LiveCaptions(id, entries => backend.transcript?.(entries));
     if (cleaned || closePromise) {
       if (!cleaned) void request({ action: 'close' }).catch(() => {});
       startPolling();
@@ -188,7 +198,13 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     if (signal?.aborted) void close();
     const localPreview = process.env.NODE_ENV === 'development' && result.transport === 'local-preview';
     if (localPreview) peer.close(); // Microphone stays local; no SDP or audio leaves this process.
-    else await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
+    else {
+      await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
+      // An SDP answer is not evidence that ICE/audio connected.
+      if (!cleaned && !closePromise && peer.connectionState !== 'connected') {
+        await startupStep(new Promise<void>(resolve => { resolveConnected = resolve; }));
+      }
+    }
     clearTimeout(startupTimer);
     if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
     if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live', localPreview ? 'Local microphone preview. No transcription, provider connection or backend instructions.' : undefined);
@@ -210,7 +226,10 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
   } catch (error) {
     if (cleaned && startRequested) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
-    if (id) { void request({ action: 'close' }).catch(() => {}); }
+    if (id) {
+      await close(); // A failed setup can still have a confirmed final usage receipt.
+      return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    }
     transition(id || startRequested ? 'unknown' : 'error', error instanceof Error ? error.message : 'Could not connect voice');
     cleanup(); throw error;
   }

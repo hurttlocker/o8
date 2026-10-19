@@ -978,7 +978,7 @@ export function useOrchestratorStream(
       currentAssistantRef.current = null;
       captureFirstTurnPlanRef.current = !planTextRef.current
         && !hasHistoryRef.current
-        && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
+        && !planCaptureSource.some((entry) => !entry.voice && (entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool'));
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
       const outboundMessage = withSessionPrelude(

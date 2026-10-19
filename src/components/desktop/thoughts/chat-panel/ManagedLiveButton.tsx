@@ -16,6 +16,7 @@ interface Props {
   terminals: Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>;
   busy: boolean;
   send: (text: string) => { userMessageId: string } | null;
+  transcript?: (entries: MobileTranscriptEntry[]) => void;
   interrupt: () => void;
   followup?: ManagedVoiceFollowup;
   chatRoot?: RefObject<HTMLDivElement | null>;
@@ -39,9 +40,10 @@ export function ManagedLiveButton(props: Props) {
   const bridge = useRef(new LiveConversationBridge());
   const pending = useRef(new Map<string, { userId: string; update: (text: string, spoken?: boolean) => Promise<void>; resolve: () => void; notified?: boolean }>());
   useEffect(() => { current.current = { ...props, terminals }; }, [props, terminals]);
-  const submit = useCallback((text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>) => {
+  const submit = useCallback((text: string, id: string, update: (text: string, spoken?: boolean) => Promise<void>, submitted?: (userMessageId: string) => void) => {
     const receipt = current.current.send(text);
     if (!receipt) { void update('The conversation did not accept the request.'); return Promise.resolve(); }
+    submitted?.(receipt.userMessageId);
     const completion = new Promise<void>(resolve => { pending.current.set(id, { userId: receipt.userMessageId, update, resolve }); });
     void update('Request submitted to the existing conversation. Acceptance and completion are not yet confirmed.', false).catch(() => {});
     return completion;
@@ -94,12 +96,15 @@ export function ManagedLiveButton(props: Props) {
     try {
       const live = await startManagedLive({ binding,
         subscribe: bridge.current.subscribe,
+        transcript: entries => {
+          if (generation.current === started && current.current.binding === binding) current.current.transcript?.(entries);
+        },
         context: () => {
-          const userId = current.current.messages.findLast(message => message.role === 'user')?.id;
+          const userId = current.current.messages.findLast(message => message.role === 'user' && !message.voice)?.id;
           const terminal = userId ? current.current.terminals[userId] : undefined;
           return `Backend status: ${current.current.busy ? 'working; completion not confirmed' : 'not currently reporting busy'}. Last correlated task outcome: ${terminal ? `${terminal.outcome}: ${terminal.text.slice(-600)}` : 'unknown; do not infer completion from partial text'}. Queued follow-up: ${current.current.followup?.items.map(item => `${item.status}: ${item.payload.text.slice(0, 200)}`).join('; ') || 'none'}.\n${current.current.messages.slice(-3).map(m => `${m.role}: ${m.text.slice(-400)}`).join('\n')}`;
         },
-        delegate: async (text, id, update) => {
+        delegate: async (text, id, update, submitted) => {
           if (current.current.binding !== binding) return;
           const reply = (message: string, spoken = true) => bridge.current.publish(message, spoken, update);
           const intent = voiceFollowupIntent(text);
@@ -115,7 +120,7 @@ export function ManagedLiveButton(props: Props) {
           }
           if (current.current.busy || pending.current.size > 0 || current.current.followup?.items.length) {
             const taskId = pending.current.values().next().value?.userId
-              ?? current.current.messages.findLast(message => message.role === 'user')?.id;
+              ?? current.current.messages.findLast(message => message.role === 'user' && !message.voice)?.id;
             if (intent.kind === 'queue' && taskId) {
               try {
                 if (!current.current.followup) throw new Error('The shared follow-up queue is unavailable.');
@@ -128,7 +133,7 @@ export function ManagedLiveButton(props: Props) {
             }
             return;
           }
-          await submit(intent.kind === 'queue' ? intent.text : text, id, reply);
+          await submit(intent.kind === 'queue' ? intent.text : text, id, reply, submitted);
         },
       }, (next, message) => { stateRef.current = next; if (generation.current === started) { setState(next); setDetail(message ?? ''); } }, controller.signal, { onLevel: value => { level.current = value; } });
       if (generation.current !== started) { await live.close(); setState(live.state); } else session.current = live;
