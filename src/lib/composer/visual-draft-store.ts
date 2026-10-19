@@ -1,0 +1,81 @@
+import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
+import { parseVisualInstruction, visualInstructionScope, type VisualInstruction } from './visual-instruction';
+
+export interface VisualInstructionDraft {
+  principal: string;
+  request: Omit<VisualInstruction, 'utterance'> & { utterance: string };
+  template: ComposerQueuePayload;
+  status: 'draft' | 'saving' | 'saved' | 'unknown';
+  error?: string;
+}
+const drafts = new Map<string, VisualInstructionDraft>();
+const listeners = new Set<() => void>();
+const keyFor = (principal: string, target: VisualInstruction['target']) => JSON.stringify([principal, visualInstructionScope(target)]);
+export const subscribeVisualDrafts = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+const publish = () => listeners.forEach(listener => listener());
+export const readVisualDraft = (principal: string, target: VisualInstruction['target']) => drafts.get(keyFor(principal, target)) ?? null;
+
+let database: Promise<IDBDatabase> | null = null;
+function openDatabase(): Promise<IDBDatabase> {
+  database ??= new Promise<IDBDatabase>((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('Visual draft storage is unavailable. Keep this window open.')); return; }
+    const opening = indexedDB.open('o8.visual-instructions.v1', 1);
+    opening.onupgradeneeded = () => opening.result.createObjectStore('drafts');
+    opening.onsuccess = () => resolve(opening.result);
+    opening.onerror = () => reject(opening.error ?? new Error('Unable to open visual draft storage.'));
+  }).catch(error => { database = null; throw error; });
+  return database;
+}
+async function persist(key: string, draft: VisualInstructionDraft | null): Promise<void> {
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction('drafts', 'readwrite');
+    const store = transaction.objectStore('drafts');
+    if (draft) store.put(draft, key); else store.delete(key);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error('Unable to save the visual draft.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('Visual draft saving was interrupted.'));
+  });
+}
+
+/** Publish immediately, retain on storage error, and serialize writes for each destination. */
+const writes = new Map<string, Promise<void>>();
+const revisions = new Map<string, number>();
+export function saveVisualDraft(draft: VisualInstructionDraft): Promise<void> {
+  const key = keyFor(draft.principal, draft.request.target);
+  revisions.set(key, (revisions.get(key) ?? 0) + 1);
+  drafts.set(key, draft); publish();
+  const write = (writes.get(key) ?? Promise.resolve()).catch(() => {}).then(() => drafts.get(key) === draft ? persist(key, draft) : undefined);
+  writes.set(key, write);
+  return write.catch(error => {
+    if (drafts.get(key) === draft) { drafts.set(key, { ...draft, error: error instanceof Error ? error.message : 'Visual draft saving failed.' }); publish(); }
+    throw error;
+  });
+}
+
+export async function restoreVisualDraft(principal: string, target: VisualInstruction['target']): Promise<void> {
+  const key = keyFor(principal, target);
+  if (drafts.has(key)) return;
+  const revision = revisions.get(key) ?? 0;
+  const db = await openDatabase();
+  const stored = await new Promise<unknown>((resolve, reject) => {
+    const read = db.transaction('drafts', 'readonly').objectStore('drafts').get(key);
+    read.onsuccess = () => resolve(read.result); read.onerror = () => reject(read.error);
+  });
+  if (!stored || drafts.has(key) || (revisions.get(key) ?? 0) !== revision) return;
+  const value = stored as VisualInstructionDraft;
+  const request = parseVisualInstruction(value.request, true);
+  if (!request || value.principal !== principal || visualInstructionScope(request.target) !== visualInstructionScope(target)
+    || !['draft', 'saving', 'saved', 'unknown'].includes(value.status)
+    || !value.template?.routing || typeof value.template.wireMessage !== 'string') return;
+  drafts.set(key, { ...value, request, status: value.status === 'saving' ? 'unknown' : value.status }); publish();
+}
+
+export async function removeVisualDraft(principal: string, target: VisualInstruction['target'], id: string): Promise<void> {
+  const key = keyFor(principal, target);
+  if (drafts.get(key)?.request.id !== id) return;
+  revisions.set(key, (revisions.get(key) ?? 0) + 1);
+  const write = (writes.get(key) ?? Promise.resolve()).catch(() => {}).then(() => persist(key, null));
+  writes.set(key, write); await write;
+  if (drafts.get(key)?.request.id === id) { drafts.delete(key); publish(); }
+}

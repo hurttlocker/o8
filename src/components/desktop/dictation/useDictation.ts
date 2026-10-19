@@ -155,7 +155,7 @@ export function useDictation() {
   }, []);
 
   const start = useCallback(async (options: DictationStartOptions) => {
-    if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
+    if (stateRef.current !== 'idle' && stateRef.current !== 'error') { options.onAbort?.('Another dictation is active.'); return; }
     if (flashTimerRef.current) {
       clearTimeout(flashTimerRef.current);
       flashTimerRef.current = null;
@@ -171,6 +171,7 @@ export function useDictation() {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch (err) {
+      if (recordingId !== recordingIdRef.current) return;
       const name = err instanceof Error ? err.name : '';
       const friendly = name === 'NotAllowedError'
         ? 'Mic permission denied. Allow microphone access in browser settings.'
@@ -318,6 +319,7 @@ export function useDictation() {
         throw new Error(detail);
       }
       const transcribeJson = (await transcribeResp.json()) as { text?: string };
+      if (recordingId !== recordingIdRef.current) return;
       const rawTranscript = (transcribeJson.text ?? '').trim();
       if (!rawTranscript) {
         cleanup();
@@ -330,6 +332,13 @@ export function useDictation() {
       setState('polishing');
       let polishedText = rawTranscript;
       try {
+        if (options.preserveTranscript) {
+          cleanup();
+          setState('success', { audioLevel: 0 });
+          options.onComplete(rawTranscript);
+          returnToIdleAfter(SUCCESS_FLASH_MS);
+          return;
+        }
         const polishResp = await fetch('/api/dictation/polish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -347,11 +356,13 @@ export function useDictation() {
         polishedText = rawTranscript;
       }
 
+      if (recordingId !== recordingIdRef.current) return;
       cleanup();
       setState('success', { audioLevel: 0 });
       options.onComplete(polishedText);
       returnToIdleAfter(SUCCESS_FLASH_MS);
     } catch (err) {
+      if (recordingId !== recordingIdRef.current) return;
       const msg = err instanceof Error ? err.message : 'Dictation failed';
       goError(msg);
     }
@@ -369,6 +380,7 @@ export function useDictation() {
   useEffect(() => {
     return () => {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      recordingIdRef.current += 1;
       cleanup();
     };
   }, [cleanup]);

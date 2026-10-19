@@ -4,6 +4,8 @@ mod agent;
 mod ai;
 mod agent_partials_window;
 mod spatial_ink_window;
+#[cfg(target_os = "macos")]
+mod visual_capture;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -8083,6 +8085,14 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             o8_stt_start,
             #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_begin,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_ready,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_finish,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_cancel,
+            #[cfg(target_os = "macos")]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_system_dictation_finish,
@@ -8465,6 +8475,7 @@ pub fn run() {
                 // even when the main window is hidden.
                 log::info!("[boot] pre-hotkeys at {}ms", boot_ms());
                 fn_hotkey::start(app.handle().clone());
+                visual_capture::register_shortcut(app.handle());
                 log::info!("[boot] fn_hotkey CGEventTap at {}ms", boot_ms());
 
                 // Drive the Microphone permission prompt deterministically at

@@ -8,6 +8,8 @@ export type DictationState =
   | 'error';
 
 export interface DictationStartOptions {
+  /** Visual evidence keeps the recognized words instead of rewriting their meaning. */
+  preserveTranscript?: boolean;
   /** Hint surface — used by the polish prompt for context. */
   surface?: 'orchestrator' | 'chat' | 'terminal' | 'general';
   /** Optional context to pass to polish — e.g. open file paths. */
