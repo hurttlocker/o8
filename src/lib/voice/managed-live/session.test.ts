@@ -25,7 +25,28 @@ describe('managed Live transport', () => {
     vi.stubGlobal('window', new EventTarget());
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: vi.fn() }] }) } });
   });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('uses real local capture lifecycle in development preview without a remote peer or delegation', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const remote = vi.fn(); const peerClose = vi.fn(); const stopped = vi.fn();
+    class PreviewPeer extends Peer { setRemoteDescription = remote; close = peerClose; }
+    vi.stubGlobal('RTCPeerConnection', PreviewPeer);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: stopped }] }) } });
+    let terminal = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: 'preview', transport: 'local-preview' });
+      if (body.action === 'close') terminal = true;
+      return Response.json({ events: terminal ? [{ cursor: 1, event: { type: 'session.closed' } }] : [] });
+    }));
+    const delegate = vi.fn(); const changed = vi.fn();
+    const live = await startManagedLive({ binding: 'chat-a', context: () => '', delegate }, changed);
+    expect(live.state).toBe('live');
+    expect(changed).toHaveBeenCalledWith('live', expect.stringContaining('Local microphone preview'));
+    expect(peerClose).toHaveBeenCalledOnce(); expect(remote).not.toHaveBeenCalled(); expect(stopped).not.toHaveBeenCalled();
+    const closing = live.close(); await vi.advanceTimersByTimeAsync(250); await closing;
+    expect(live.state).toBe('closed'); expect(stopped).toHaveBeenCalledOnce(); expect(delegate).not.toHaveBeenCalled();
+  });
   it('does not create a paid session when startup is canceled during microphone permission', async () => {
     let resolveMic!: (value: unknown) => void;
     const stopped = vi.fn();

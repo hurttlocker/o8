@@ -25,6 +25,7 @@ interface Props {
 export function ManagedLiveButton(props: Props) {
   const terminals = useMemo(() => voiceTerminalContext(props.messages, props.terminals), [props.messages, props.terminals]);
   const [available, setAvailable] = useState(false);
+  const [localPreview, setLocalPreview] = useState(false);
   const [state, setState] = useState<LiveState>('idle');
   const stateRef = useRef<LiveState>('idle');
   const trigger = useRef<HTMLButtonElement>(null);
@@ -47,7 +48,7 @@ export function ManagedLiveButton(props: Props) {
   useEffect(() => {
     let alive = true;
     void fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } })
-      .then(r => r.json()).then(data => { if (alive) setAvailable(data.enabled === true && data.entitled === true); }).catch(() => {});
+      .then(r => r.json()).then(data => { if (alive) { setAvailable(data.enabled === true && data.entitled === true); setLocalPreview(data.transport === 'local-preview'); } }).catch(() => {});
     return () => { alive = false; };
   }, []);
   useEffect(() => {
@@ -138,9 +139,9 @@ export function ManagedLiveButton(props: Props) {
   return <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 8 }}>
     <button ref={trigger} type="button" onClick={() => { void requestToggle().then(accepted => { if (!accepted) setDetail('Voice belongs to another chat or its closure is not confirmed.'); }); }} disabled={state === 'closing' || state === 'unknown'}
       aria-label={active ? 'Disconnect managed voice' : state === 'closed' ? 'Resume managed voice for this conversation' : 'Start managed voice for this conversation'}
-      aria-pressed={active} title={detail || 'Experimental · Caps Lock starts voice in this chat. Managed voice uses its own allowance; your selected CLI stays in charge.'}
+      aria-pressed={active} title={detail || (localPreview ? 'Local microphone preview · Caps Lock starts and stops this chat’s preview. No provider connection or transcription.' : 'Experimental · Caps Lock starts voice in this chat. Managed voice uses its own allowance; your selected CLI stays in charge.')}
       style={{ background: 'transparent', color: 'var(--t-text-muted)', border: '1px solid var(--t-border)', borderRadius: 6, fontSize: 11, fontWeight: 300, paddingTop: 3, paddingBottom: 3, paddingLeft: 6, paddingRight: 6 }}>
-      {state === 'connecting' ? 'Connecting voice…' : state === 'closing' ? 'Closing voice…' : active ? 'Disconnect voice' : state === 'closed' ? 'Resume voice' : 'Voice · Experimental'}
+      {state === 'connecting' ? 'Connecting voice…' : state === 'closing' ? 'Closing voice…' : active ? 'Disconnect voice' : state === 'closed' ? 'Resume voice' : localPreview ? 'Voice · Local preview' : 'Voice · Experimental'}
     </button>
     {detail ? <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>{detail}</span> : null}
   </span>;

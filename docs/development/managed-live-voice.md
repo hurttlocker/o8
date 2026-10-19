@@ -95,3 +95,40 @@ Official contract: [client delegation and progress](https://developers.openai.co
 The current integration incorporates the shared worker disclosure and parent queue. It adds persisted terminal receipts, active-chat shortcut ownership shared with standalone managed voice, and a presentation-only native satellite. The satellite has event-listening capabilities only; it cannot acquire audio, dispatch tasks or invoke application controls. Main-window navigation invalidates its publisher epoch. Quiet mode cannot restore a completed voice presentation.
 
 Source fixtures cover delayed queue cancellation, lost save responses, navigation, exact persistent-lead task aliases and stale-task rejection. Native IPC fixtures cover caller rejection, quiet restoration and reload fencing using the mock runtime. These are separate from macOS window geometry, microphone/speaker acceptance and provider lifecycle proof. Keep activation disabled until the gateway holds above and a bounded, explicitly authorized live test are resolved.
+
+
+## Local development microphone preview
+
+A development profile may opt into an expiring local microphone preview by placing
+`managed-voice-preview.json` in its existing data directory, with file mode `0600`:
+`{"version":1,"expiresAt":<Unix milliseconds, at most 24 hours ahead>}`. This is
+recognized only by a development server. An invalid or expired marker refuses
+voice requests instead of falling through to the managed provider. Remove the
+marker to end the preview; this does not enable managed voice. Keep the normal
+managed-voice activation flag off.
+
+The existing chat button and Caps Lock target the selected chat. The preview
+captures local microphone levels and exercises the existing presentation,
+ownership, inactivity and close paths. It does not connect to a provider,
+transcribe, synthesize speech, submit backend work, reserve allowance or spend.
+The button and live status identify it as a local preview. These checks do not
+establish microphone permission, physical hotkey, native geometry or provider
+acceptance until each is actually observed on the target device. Shared queue
+behavior is verified separately through its existing persisted-state tests.
+
+## Application relay restart ownership
+
+Acknowledged managed sessions retain immutable private ownership records in the
+profile's `managed-voice-relay` directory. The record contains hashed principal
+and account generation, hashed conversation binding, session id and the exact
+server-configured gateway. Controls survive an application-server restart and
+never follow a later gateway configuration change or an HTTP redirect. Account
+admission fences token capture and publication; blocked or changed account state
+cannot admit a new session. Records contain no bearer token, SDP or transcript.
+
+Conflicting or corrupt records fail closed and are retained. If publication
+definitively created a new record but its durability cannot be confirmed, the
+relay attempts closure at that pinned gateway and still reports an unknown
+outcome. An uncertain create before publication remains a recovery blocker;
+these records do not close the provider identity crash gap or supply healthy
+cross-replica conversation routing. Production lifetime admission remains held.

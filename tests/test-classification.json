@@ -175,6 +175,12 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/worktrees/batch/route.test.ts",
       "reasons": [
         "worktree-api"

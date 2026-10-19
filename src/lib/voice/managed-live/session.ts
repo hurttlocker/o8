@@ -186,10 +186,12 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     }
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) void close();
-    await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
+    const localPreview = process.env.NODE_ENV === 'development' && result.transport === 'local-preview';
+    if (localPreview) peer.close(); // Microphone stays local; no SDP or audio leaves this process.
+    else await startupStep(peer.setRemoteDescription({ type: 'answer', sdp: result.sdp }));
     clearTimeout(startupTimer);
     if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
-    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live');
+    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live', localPreview ? 'Local microphone preview. No transcription, provider connection or backend instructions.' : undefined);
       unsubscribe = backend.subscribe?.((text, spoken) => update(null, text, spoken)); }
     idleTimer = setInterval(() => {
       let inputEnergy = false; let outputAudible = false;
