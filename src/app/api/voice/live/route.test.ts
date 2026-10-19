@@ -20,6 +20,18 @@ describe('managed voice application relay', () => {
     expect((await GET(request({}))).status).toBe(200);
     expect((await POST(request({ action: 'start' }))).status).toBe(503);
   });
+  it('preserves the gateway lifetime refusal without retrying or registering a session', async () => {
+    vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
+    vi.stubEnv('O8_LIVE_EXPIRY_ACCEPTED', '1');
+    const fetch = vi.fn(async () => Response.json({ error: 'voice_lifetime_unverified', id: 'refused-session' }, { status: 503 }));
+    vi.stubGlobal('fetch', fetch);
+    const response = await POST(request({ action: 'start', binding: 'held-chat', context: '', sdp: 'v=0\noffer' }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'voice_lifetime_unverified' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await POST(request({ action: 'poll', id: 'refused-session', binding: 'held-chat', after: 0 }))).status).toBe(404);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('keeps plan token server-side and controls bound to exact principal and conversation', async () => {
     vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
     const fetch = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ id: 'owned-session', sdp: 'v=0\nanswer' })); vi.stubGlobal('fetch', fetch);
