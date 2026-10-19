@@ -1,0 +1,24 @@
+{
+  "bundle": {
+    "schema": "o8/harness-bundle/v1",
+    "sourceRepoPath": "/fixture/repo",
+    "contracts": [{"id":"contract-1","status":"accepted","acceptedBy":"fixture-operator","acceptedAt":1,"generatorTerms":"Context notes only","evaluatorTerms":"Frozen deterministic checks","acceptanceCriteria":["No runtime changes"]}],
+    "features": [], "groundings": [], "components": [], "measurements": []
+  },
+  "manifest": {
+    "schema":"o8/harness-improvement-manifest/v1",
+    "experimentId":"fixture-1", "repository":"/fixture/repo", "contractId":"contract-1",
+    "baselineRevision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "modelId":"fixture-model", "runtimeId":"fixture-runtime",
+    "verifierDigest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "permissionsDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "contractDigest":"PLACEHOLDER", "budget":{"maxUsd":1,"maxAttempts":4},
+    "discoveryTasks":["task-1"], "heldOutTasks":["task-2"], "components":["context-note"]
+  },
+  "proposals":[{
+    "id":"candidate-1", "baselineRevision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "modelId":"fixture-model", "runtimeId":"fixture-runtime",
+    "verifierDigest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "permissionsDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "changes":[{"componentKey":"context-note","kind":"context_note","text":"Inspect the existing source before proposing changes."}],
+    "evidenceRefs":["task-1"]
+  }]
+}

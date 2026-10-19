@@ -2645,6 +2645,13 @@
       ]
     },
     {
+      "path": "tests/harness-improvement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/harness-real-path.test.ts",
       "reasons": [
         "child-process",
