@@ -26,4 +26,23 @@ describe('terminal exit buffer through the real xterm parser', () => {
       expect(retained.read()).not.toContain('EDITOR-SCREEN');
     } finally { retained.dispose(); term.dispose(); }
   });
+
+  it('retains the interactive reply when tmux restores startup history before its exit marker', async () => {
+    const term = new HeadlessTerminal({ cols: 80, rows: 12, allowProposedApi: true });
+    const retained = retainTerminalExitBuffer(term);
+    try {
+      await new Promise<void>((resolve) => term.write('STARTUP\r\n\x1b[?1049hSTARTUP\r\nYou typed: FINAL\r\n\x1b[?1049l[exited]', resolve));
+      expect(retained.read()).toContain('You typed: FINAL');
+    } finally { retained.dispose(); term.dispose(); }
+  });
+
+  it('keeps new normal-screen output even when it ends with the exit marker', async () => {
+    const term = new HeadlessTerminal({ cols: 80, rows: 12, allowProposedApi: true });
+    const retained = retainTerminalExitBuffer(term);
+    try {
+      await new Promise<void>((resolve) => term.write('STARTUP\r\n\x1b[?1049hOLD-EDITOR\x1b[?1049lFINAL-NORMAL-OUTPUT\r\n[exited]', resolve));
+      expect(retained.read()).toContain('FINAL-NORMAL-OUTPUT');
+      expect(retained.read()).not.toContain('OLD-EDITOR');
+    } finally { retained.dispose(); term.dispose(); }
+  });
 });
