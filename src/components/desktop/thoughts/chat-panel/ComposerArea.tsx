@@ -354,7 +354,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       {activityContent}
       {sendBufferStatus}
-      {voiceControl}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
         {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
           key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
@@ -752,6 +751,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
+            managedVoiceControl={voiceControl}
             permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
               ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
                 // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.

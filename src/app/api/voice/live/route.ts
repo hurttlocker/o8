@@ -7,6 +7,7 @@ import { planToken, proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { accountStateMatches, readAccountState, withAccountStateAdmission } from '@/lib/auth/account-state';
 import { loadVoiceRelay, saveVoiceRelay, voiceGatewayUrl, VoiceRelayPersistenceError } from '@/lib/voice/managed-live/relay-store';
 import { localVoicePreview, previewVoiceRequest } from '@/lib/voice/managed-live/local-preview';
+import { personalVoiceGateway } from '@/lib/voice/managed-live/personal-dev';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,9 @@ export async function GET(request: Request) {
     const ready = Boolean(session && session.subject === role && (role === 'operator' || session.deviceId === device?.id));
     return NextResponse.json({ ready, ...(ready && session ? { session: { sessionId: session.sessionId, engine: session.engine, model: session.model, transcript: session.transcript } } : {}) }, { status: ready ? 200 : 409 });
   }
+  try {
+    if (personalVoiceGateway()) return NextResponse.json({ enabled: resolveRequestPrincipal(request) === 'operator', entitled: Boolean(planToken()), transport: 'personal-webrtc' }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch { return NextResponse.json({ error: 'personal_voice_unavailable', enabled: false }, { status: 503 }); }
   const preview = localVoicePreview();
   if (preview !== 'disabled') return NextResponse.json({ enabled: preview === 'enabled', entitled: preview === 'enabled', transport: 'local-preview' }, { headers: { 'Cache-Control': 'no-store' } });
   return NextResponse.json({ enabled: process.env.O8_MANAGED_LIVE_ENABLED === '1', entitled: Boolean(planToken()) });
@@ -39,14 +43,20 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: 'invalid_body' }, { status: 400 }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
-  if (localVoicePreview() !== 'disabled') {
-    if (resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });
-    return previewVoiceRequest(body, principal);
-  }
-  try { return await withAccountStateAdmission(() => relay(body, principal)); }
+  let personal: string | null;
+  try { personal = personalVoiceGateway(); }
+  catch { if (body.action === 'start') return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 }); personal = null; }
+  if (personal && resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'personal_voice_operator_only' }, { status: 403 });
+  try {
+    if (!personal && localVoicePreview() !== 'disabled' && (body.action === 'start' || !loadVoiceRelay(typeof body.id === 'string' ? body.id : ''))) {
+      if (resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });
+      return previewVoiceRequest(body, principal);
+    }
+  } catch { return NextResponse.json({ error: 'voice_ownership_unavailable' }, { status: 503 }); }
+  try { return await withAccountStateAdmission(() => relay(body, principal, personal)); }
   catch { return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 }); }
 }
-async function relay(body: Record<string, unknown>, principal: string) {
+async function relay(body: Record<string, unknown>, principal: string, personal: string | null) {
   const account = readAccountState();
   if (!account || !accountStateMatches(account)) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
   const token = planToken();
@@ -59,12 +69,12 @@ async function relay(body: Record<string, unknown>, principal: string) {
   let payload: unknown;
   try {
   if (body.action === 'start') {
-    if (process.env.O8_MANAGED_LIVE_ENABLED !== '1') return NextResponse.json({ error: 'managed_voice_disabled' }, { status: 503 });
+    if (!personal && process.env.O8_MANAGED_LIVE_ENABLED !== '1') return NextResponse.json({ error: 'managed_voice_disabled' }, { status: 503 });
     if (typeof body.binding !== 'string' || !body.binding || body.binding.length > 2000
       || typeof body.context !== 'string' || body.context.length > 8000 || typeof body.sdp !== 'string') {
       return NextResponse.json({ error: 'invalid_binding' }, { status: 400 });
     }
-    gateway = voiceGatewayUrl(proxyBaseUrl());
+    gateway = personal ?? voiceGatewayUrl(proxyBaseUrl());
     payload = { binding: hash(body.binding), context: body.context, sdp: body.sdp };
   } else {
     const id = typeof body.id === 'string' ? body.id : '';

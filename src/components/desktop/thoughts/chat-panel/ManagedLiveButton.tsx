@@ -26,6 +26,7 @@ export function ManagedLiveButton(props: Props) {
   const terminals = useMemo(() => voiceTerminalContext(props.messages, props.terminals), [props.messages, props.terminals]);
   const [available, setAvailable] = useState(false);
   const [localPreview, setLocalPreview] = useState(false);
+  const [personalTest, setPersonalTest] = useState(false);
   const [state, setState] = useState<LiveState>('idle');
   const stateRef = useRef<LiveState>('idle');
   const trigger = useRef<HTMLButtonElement>(null);
@@ -48,7 +49,7 @@ export function ManagedLiveButton(props: Props) {
   useEffect(() => {
     let alive = true;
     void fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } })
-      .then(r => r.json()).then(data => { if (alive) { setAvailable(data.enabled === true && data.entitled === true); setLocalPreview(data.transport === 'local-preview'); } }).catch(() => {});
+      .then(r => r.json()).then(data => { if (alive) { setAvailable(data.enabled === true && data.entitled === true); setLocalPreview(data.transport === 'local-preview'); setPersonalTest(data.transport === 'personal-webrtc'); } }).catch(() => {});
     return () => { alive = false; };
   }, []);
   useEffect(() => {
@@ -136,13 +137,15 @@ export function ManagedLiveButton(props: Props) {
   const requestToggle = useManagedChatVoiceTarget({ available, root: props.chatRoot, trigger, state: stateRef, toggle });
   useManagedVoicePresentation({ state, stateRef, session, level, label: props.label ?? 'This chat' });
   if (!available) return null;
-  return <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingBottom: 8 }}>
+  return <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
     <button ref={trigger} type="button" onClick={() => { void requestToggle().then(accepted => { if (!accepted) setDetail('Voice belongs to another chat or its closure is not confirmed.'); }); }} disabled={state === 'closing' || state === 'unknown'}
       aria-label={active ? 'Disconnect managed voice' : state === 'closed' ? 'Resume managed voice for this conversation' : 'Start managed voice for this conversation'}
-      aria-pressed={active} title={detail || (localPreview ? 'Local microphone preview · Caps Lock starts and stops this chat’s preview. No provider connection or transcription.' : 'Experimental · Caps Lock starts voice in this chat. Managed voice uses its own allowance; your selected CLI stays in charge.')}
-      style={{ background: 'transparent', color: 'var(--t-text-muted)', border: '1px solid var(--t-border)', borderRadius: 6, fontSize: 11, fontWeight: 300, paddingTop: 3, paddingBottom: 3, paddingLeft: 6, paddingRight: 6 }}>
-      {state === 'connecting' ? 'Connecting voice…' : state === 'closing' ? 'Closing voice…' : active ? 'Disconnect voice' : state === 'closed' ? 'Resume voice' : localPreview ? 'Voice · Local preview' : 'Voice · Experimental'}
+      aria-pressed={active} title={detail || (localPreview ? 'Local microphone preview · Caps Lock starts and stops this chat’s preview. No provider connection or transcription.' : personalTest ? 'Personal API test · Caps Lock starts and stops GPT-Live in this chat. Your selected CLI stays in charge.' : 'Experimental · Caps Lock starts voice in this chat. Managed voice uses its own allowance; your selected CLI stays in charge.')}
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0, background: 'transparent', color: active ? 'var(--t-accent)' : 'var(--t-text-muted)', border: 0, borderRadius: 6, cursor: state === 'closing' || state === 'unknown' ? 'default' : 'pointer' }}>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+        <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
+      </svg>
     </button>
-    {detail ? <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>{detail}</span> : null}
+    {detail ? <span role="status" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clipPath: 'inset(50%)' }}>{detail}</span> : null}
   </span>;
 }

@@ -80,10 +80,10 @@ it('offers explicit resume after closure without reconnecting itself', async () 
   await act(async () => container.querySelector('button')!.click());
   const previous = fixture.backend;
   await act(async () => container.querySelector('button')!.click());
-  expect(container.querySelector('button')!.textContent).toBe('Resume voice');
+  expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Resume managed voice for this conversation');
   expect(fixture.backend).toBe(previous);
   await act(async () => container.querySelector('button')!.click());
-  expect(container.querySelector('button')!.textContent).toBe('Disconnect voice');
+  expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Disconnect managed voice');
   expect(fixture.backend!.binding).toBe(props.binding);
 });
 

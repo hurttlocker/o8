@@ -2,9 +2,9 @@
 
 ## Delivery boundary
 
-This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. No provider calls, deployment, pricing changes, or release have been performed. Local microphone preview checks are separate from provider and physical-shortcut acceptance.
+This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal development experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.
 
-Desktop entry uses an experimental control above the active orchestrator composer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. Provider-connected audio, speaker and physical-shortcut acceptance remain unverified. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
+Desktop entry uses a compact experimental waveform control in the active orchestrator composer footer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. A personal development check established native microphone capture, bidirectional WebRTC packets and provider-confirmed closure. Human speech, audible response and physical-shortcut acceptance remain separate checks. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
 
 ## Ownership and protocol
 
@@ -136,3 +136,41 @@ cross-replica conversation routing. Production lifetime admission remains held.
 ## Native development preview receipt
 
 The local preview exercised real microphone capture and measured levels reaching the native presentation, explicit disconnect, resume and idle closure. The native shortcut event path started and stopped the pinned chat; this was an injected native event, not a physical Caps Lock test. Captured audio tracks ended on close and the other four composer dictation buttons stayed idle. Native display bounds placed the presentation across the owning display’s bottom edge. No audio was stored and no provider was contacted. Screenshot capture was unavailable because the private development wrapper lacked Screen Recording permission; visual polish remains an operator check.
+
+
+## Personal development provider experiment
+
+A development server may read a private regular `managed-voice-personal.json` file
+in its existing profile, mode `0600`, containing
+`{"version":1,"gateway":"http://127.0.0.1:<local-relay-port>","expiresAt":<Unix milliseconds>}`.
+The expiry must be in the future and within 24 hours. Only the loopback HTTP
+origin is accepted; credentials, non-root paths, query strings, symlinks and
+world-readable files are rejected. Production ignores this marker entirely.
+This path is operator-only and does not enable mobile or worker admission.
+
+The operator-provided local relay must authenticate the current signed account
+credential, retain the existing session identity and binding contract, and own
+its provider lifecycle. The browser still receives only SDP and an opaque handle.
+The application retains immutable principal/account ownership and the pinned
+relay origin; known sessions can close after the marker expires. A test marker
+does not grant unlimited API use, establish a provider lifetime ceiling, or
+release an unresolved managed reservation. Paid testing requires operator scope.
+
+The private experiment uses one session at a time, a best-effort local close
+request, durable lifecycle receipts and no automatic reconnect. An uncertain
+close blocks another experiment until reconciled. A local timer is not a
+provider-enforced lifetime guarantee. The managed gateway’s production
+`voice_lifetime_unverified` hold remains unchanged.
+
+On 2026-10-19 UTC, the personal native check opened a real WebRTC connection,
+observed outgoing microphone RTP and incoming audio RTP, then received
+`session.closed` with `close_requested` and 16 final seconds. This establishes
+the connection and close path, not recognized human speech or audible playback.
+A separate generated-speech fixture passed the complete native path: provider
+input transcript, client delegation, the existing selected CLI chat, its persisted
+`gpt-6.1-sol` assistant reply, then provider output transcript and nonzero remote
+audio energy. The provider confirmed 53 final seconds on close. This fixture
+was synthetic; human microphone, subjective speaker quality and physical
+Caps Lock acceptance are still separate checks. Delegated speech appears as the
+regular chat request and result; general voice captions are not yet projected
+into the durable workspace transcript.

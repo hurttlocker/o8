@@ -172,3 +172,46 @@ describe('managed voice application relay', () => {
     expect((await POST(request(start))).status).toBe(503); expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('personal development relay isolation', () => {
+  const configure = (gateway = 'http://127.0.0.1:45678', expiresAt = Date.now() + 60_000) => {
+    writeFileSync(join(config.root, 'managed-voice-personal.json'), JSON.stringify({ version: 1, gateway, expiresAt }), { mode: 0o600 });
+  };
+  it('uses an explicit loopback test while leaving ordinary inference routing and production admission unchanged', async () => {
+    vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '0'); configure();
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ id: ID, sdp: 'v=0\nanswer' })); vi.stubGlobal('fetch', fetch);
+    expect(await (await GET(request({}))).json()).toMatchObject({ transport: 'personal-webrtc', enabled: true });
+    expect((await POST(request(start))).status).toBe(200);
+    expect(fetch.mock.calls[0][0]).toBe('http://127.0.0.1:45678/v1/live/sessions');
+    expect(config.gateway).toBe('https://gateway.fixture');
+    expect((await POST(request(start, 'device', 'device'))).status).toBe(403);
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(await (await GET(request({}))).json()).toMatchObject({ enabled: false });
+    expect((await POST(request(start))).status).toBe(503);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('refuses invalid, expired, symlinked and non-loopback configuration without falling through to a provider', async () => {
+    vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '1');
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    for (const gateway of ['https://example.com', 'http://localhost:45678', 'http://127.0.0.1:45678/path', 'http://user@127.0.0.1:45678']) {
+      configure(gateway); expect((await POST(request(start))).status).toBe(503);
+    }
+    configure('http://127.0.0.1:45678', Date.now() - 1); expect((await POST(request(start))).status).toBe(503);
+    rmSync(join(config.root, 'managed-voice-personal.json'));
+    writeFileSync(join(config.root, 'other.json'), JSON.stringify({ version: 1, gateway: 'http://127.0.0.1:45678', expiresAt: Date.now() + 60_000 }), { mode: 0o600 });
+    symlinkSync(join(config.root, 'other.json'), join(config.root, 'managed-voice-personal.json'));
+    expect((await POST(request(start))).status).toBe(503); expect(fetch).not.toHaveBeenCalled();
+  });
+  it('still closes the acknowledged session through its pinned relay after the test expires, even with preview configured', async () => {
+    vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('O8_MANAGED_LIVE_ENABLED', '0'); configure();
+    writeFileSync(join(config.root, 'managed-voice-preview.json'), JSON.stringify({ version: 1, expiresAt: Date.now() + 60_000 }), { mode: 0o600 });
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ id: ID, state: 'closed' })); vi.stubGlobal('fetch', fetch);
+    expect((await POST(request(start))).status).toBe(200);
+    configure('http://127.0.0.1:45678', Date.now() - 1);
+    expect((await POST(request(start))).status).toBe(503);
+    expect((await POST(request({ ...poll, action: 'close' }))).status).toBe(200);
+    expect(fetch.mock.calls[1][0]).toBe(`http://127.0.0.1:45678/v1/live/sessions/${ID}`);
+    expect((await POST(request({ ...poll, action: 'close' }, 'other-operator'))).status).toBe(404);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
