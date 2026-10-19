@@ -14,12 +14,15 @@ export async function GET() {
       cache: 'no-store',
     });
     if (!response.ok) {
-      return NextResponse.json({ sessions: [] });
+      return NextResponse.json({ error: 'Terminal status is unavailable.' }, { status: 503 });
     }
     const data = await response.json() as { sessions?: string[] };
-    const sessions = (data.sessions ?? []).filter((session) => session.startsWith('cortex-dash-'));
+    if (!Array.isArray(data.sessions) || data.sessions.some((session) => typeof session !== 'string')) {
+      return NextResponse.json({ error: 'Terminal status is unavailable.' }, { status: 503 });
+    }
+    const sessions = data.sessions.filter((session) => session.startsWith('cortex-dash-'));
     return NextResponse.json({ sessions });
   } catch {
-    return NextResponse.json({ sessions: [] });
+    return NextResponse.json({ error: 'Terminal status is unavailable.' }, { status: 503 });
   }
 }

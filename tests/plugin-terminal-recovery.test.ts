@@ -2,11 +2,13 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { WebSocket } from 'ws';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { computeRestoredTabs } from '@/components/desktop/workspace-terminal/terminal-restore';
+import type { PersistedTabState } from '@/lib/terminal/tab-state';
 
 async function until(check: () => boolean | Promise<boolean>, description: string, timeout = 15_000) {
   const deadline = Date.now() + timeout;
@@ -84,10 +86,13 @@ describe.skipIf(process.platform === 'win32')('built plugin CLI and persistent h
         expect(tmux('list-sessions', '-F', '#{session_name}').trim().split('\n')).toEqual([sessionName]);
         if (fault === 'after-spawn') {
           const wsPort = await freePort();
-          let errors = '';
-          ws = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'src/ws-server.ts'], { env: { ...env, O8_API_PORT: String(port), O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${port}` }, stdio: ['ignore', 'pipe', 'pipe'] });
-          ws.stderr!.on('data', (chunk: Buffer) => { errors += chunk; }); ws.stdout!.on('data', () => {});
-          await until(async () => { if (ws!.exitCode !== null) throw new Error(errors); try { return (await fetch(`http://127.0.0.1:${wsPort}/health`)).ok; } catch { return false; } }, 'actual WS terminal host', 30_000);
+          const startWs = async () => {
+            let errors = '';
+            ws = spawn(process.execPath, ['--import', './scripts/register-server-only-stub.mjs', '--import', 'tsx', 'src/ws-server.ts'], { env: { ...env, O8_API_PORT: String(port), O8_WS_PORT: String(wsPort), NEXT_ORIGIN: `http://127.0.0.1:${port}` }, stdio: ['ignore', 'pipe', 'pipe'] });
+            ws.stderr!.on('data', (chunk: Buffer) => { errors += chunk; }); ws.stdout!.on('data', () => {});
+            await until(async () => { if (ws!.exitCode !== null) throw new Error(errors); try { return (await fetch(`http://127.0.0.1:${wsPort}/health`)).ok; } catch { return false; } }, 'actual WS terminal host', 30_000);
+          };
+          await startWs();
           for (const marker of ['FIRST', 'RECONNECTED']) {
             const frames: Array<{ channel: string; event: string; data?: { data?: string } }> = [];
             socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${token}`);
@@ -103,12 +108,36 @@ describe.skipIf(process.platform === 'win32')('built plugin CLI and persistent h
           expect(tmux('capture-pane', '-p', '-S', '-', '-t', sessionName)).toContain('You typed: RECONNECTED');
           await stop(ws); ws = undefined;
           expect(tmux('has-session', '-t', sessionName)).toBe('');
+          await startWs();
+          // The view was absent during Stop: no exit frame updated its disk
+          // snapshot. Restore must retain this program identity without spawn.
+          const stateFile = path.join(data, 'closed-plugin-view.json');
+          writeFileSync(stateFile, JSON.stringify({ version: 1, activeTabId: 'plugin-view', savedAt: new Date().toISOString(), tabs: [
+            { id: 'plugin-view', kind: 'terminal', label: 'Interactive console', cliAgent: 'shell', tmuxSession: sessionName },
+          ] }));
+          expect((await cli(port, ['plugin', 'terminal', 'stop', id])).code).toBe(0);
+          const networkFetch = globalThis.fetch;
+          vi.stubGlobal('fetch', (url: string) => {
+            expect(url).toBe('/api/panel/terminal-sessions');
+            return networkFetch(`http://127.0.0.1:${wsPort}/terminal-sessions`, { headers: { Authorization: `Bearer ${token}` } });
+          });
+          const restored = await computeRestoredTabs(JSON.parse(readFileSync(stateFile, 'utf8')) as PersistedTabState, {
+            preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => { throw new Error('Unexpected chat'); },
+          });
+          expect(restored?.tabs[0]).toMatchObject({ tmuxSession: sessionName, terminalExit: { exitCode: null, transcript: '' } });
+          expect(restored?.deadTerminalTabs).toEqual([]);
+          expect(restored?.sessionsToAttach).toEqual([]);
+          expect(JSON.parse((await cli(port, args)).out).terminal.status).toBe('stopped');
+          expect(() => tmux('list-sessions')).toThrow();
+          vi.unstubAllGlobals();
+          await stop(ws); ws = undefined;
         }
       }
       expect((await cli(port, ['plugin', 'terminal', 'stop', id])).code).toBe(0);
       expect(JSON.parse((await cli(port, args)).out).terminal.status).toBe('stopped');
       expect(() => tmux('has-session', '-t', sessionName)).toThrow();
     } finally {
+      vi.unstubAllGlobals();
       socket?.terminate(); await stop(ws); await stop(host);
       try { tmux('kill-server'); } catch { /* owned server may already be gone */ }
       rmSync(root, { recursive: true, force: true });

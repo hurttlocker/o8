@@ -38,6 +38,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Known terminal sessions retain their identity when a saved workspace returns after the process has stopped. Restore offers an ended view and an explicit new-shell action; unavailable session status cannot authorize a replacement process. Source regressions cover stop, reload, reconnect and preserved output. Native candidate acceptance and release are recorded separately. [#3992](https://github.com/hurttlocker/o8/issues/3992)
+
 Managed development environment cleanup source work has closed in [#3337](https://github.com/hurttlocker/o8/issues/3337). First-run installed acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246) and [#2211](https://github.com/hurttlocker/o8/issues/2211).
 
 Workspace polish source work has closed in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Its checks cover quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation source work has also closed: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance. The restoration and reconnect changes are integrated in [#3716](https://github.com/hurttlocker/o8/pull/3716).

@@ -11,7 +11,7 @@ import { ClientTerminalHiddenBuffer } from '@/components/desktop/workspace-termi
 import { recordTerminalDiagnostic } from '@/components/desktop/workspace-terminal/terminal-diagnostics';
 import { decodeTerminalBase64 } from './terminal-base64';
 import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
-import { TerminalExitNotice } from './TerminalExitNotice';
+import { TerminalErrorNotice, TerminalExitNotice } from './TerminalExitNotice';
 import { retainTerminalExitBuffer } from './terminal-exit-buffer';
 import type { InlineImage, XtermPanelHandle, XtermPanelProps } from './xterm-panel-types';
 export type { InlineImage, XtermPanelHandle, XtermPanelProps } from './xterm-panel-types';
@@ -104,12 +104,12 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   /** Real output is about to paint — kill the reveal, clean slate.
    *  Ref nulls BEFORE invoking so re-entrant calls (the cancel fires the
    *  reveal's hold-point, whose handler may cancel again) are no-ops. */
-  const cancelReveal = (resetTerm: boolean) => {
+  const cancelReveal = useCallback((resetTerm: boolean) => {
     const cancel = revealCancelRef.current;
     if (!cancel) return;
     revealCancelRef.current = null;
     cancel(resetTerm);
-  };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const exitRef = useRef<TerminalExitState | undefined>(exitState);
   const [exited, setExited] = useState<TerminalExitState | undefined>(exitState);
@@ -185,6 +185,33 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       finishRevealAfterPaint(epoch);
     });
   }, [finishRevealAfterPaint]);
+
+  const finishExit = useCallback((exitCode?: number | null, onSnapshot?: (state: TerminalExitState) => void) => {
+    if (exitRef.current) return;
+    exitRef.current = terminalExitState(exitCode);
+    queuedInputRef.current = [];
+    cancelReveal(false);
+    revealHoldRef.current = false;
+    const term = termRef.current;
+    if (term) term.options.disableStdin = true;
+    for (const chunk of pendingChunksRef.current.splice(0)) term?.write(decodeTerminalBase64(chunk));
+    const bytes = hiddenBufferRef.current.drain();
+    if (bytes.byteLength) term?.write(bytes);
+    const finish = () => {
+      const current = readTerminalText(term, TERMINAL_SCROLLBACK_LINES);
+      const state = terminalExitState(exitCode, exitBufferRef.current?.read() ?? current);
+      if (term && state.transcript !== current) { term.reset(); term.options.disableStdin = true; term.write(state.transcript.replace(/\n/g, '\r\n')); }
+      exitRef.current = state;
+      setError(null);
+      setExited(state);
+      onSnapshot?.(state);
+    };
+    if (term) term.write('', finish); else finish();
+  }, [cancelReveal]);
+
+  useEffect(() => {
+    if (exitState) finishExit(exitState.exitCode);
+  }, [exitState, finishExit]);
 
   useImperativeHandle(ref, () => ({
     fit: fitTerminal,
@@ -360,28 +387,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       });
     },
     setError: (nextError: string) => { if (!exitRef.current) setError(nextError); },
-    setExited: (exitCode, onSnapshot) => {
-      if (exitRef.current) return;
-      exitRef.current = terminalExitState(exitCode);
-      queuedInputRef.current = [];
-      cancelReveal(false);
-      revealHoldRef.current = false;
-      const term = termRef.current;
-      if (term) term.options.disableStdin = true;
-      for (const chunk of pendingChunksRef.current.splice(0)) term?.write(decodeTerminalBase64(chunk));
-      const bytes = hiddenBufferRef.current.drain();
-      if (bytes.byteLength) term?.write(bytes);
-      const finish = () => {
-        const current = readTerminalText(term, TERMINAL_SCROLLBACK_LINES);
-        const state = terminalExitState(exitCode, exitBufferRef.current?.read() ?? current);
-        if (term && state.transcript !== current) { term.reset(); term.options.disableStdin = true; term.write(state.transcript.replace(/\n/g, '\r\n')); }
-        exitRef.current = state;
-        setExited(state);
-        onSnapshot?.(state);
-      };
-      if (term) term.write('', finish); else finish();
-    },
-  }), [fitTerminal, flushHiddenBytes, queueHiddenBytes, readOnly, tmuxSession]);
+    setExited: finishExit,
+  }), [finishExit, fitTerminal, flushHiddenBytes, queueHiddenBytes, readOnly, tmuxSession]);
 
   useEffect(() => (
     registerTerminalBenchPanel(
@@ -707,24 +714,6 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     }
   }, [themeId, transparent, themeOverridesKey]);
 
-  if (error) {
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#ef4444',
-          fontSize: 13,
-          fontFamily: 'ui-monospace, monospace',
-        }}
-      >
-        Terminal error: {error}
-      </div>
-    );
-  }
-
   return (
     <div
       data-o8-term-panel={tmuxSession}
@@ -738,6 +727,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         overflow: 'hidden',
       }}
     >
+      {error && !exited ? <TerminalErrorNotice error={error} /> : null}
       {exited ? <TerminalExitNotice state={exited} onNewShell={onNewShell} onClose={onClose} /> : null}
       {inlineImages.map((image) => (
         <div
