@@ -388,7 +388,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     },
     setError: (nextError: string) => { if (!exitRef.current) setError(nextError); },
     setExited: finishExit,
-  }), [finishExit, fitTerminal, flushHiddenBytes, queueHiddenBytes, readOnly, tmuxSession]);
+  }), [cancelReveal, finishExit, fitTerminal, flushHiddenBytes, queueHiddenBytes, readOnly, tmuxSession]);
 
   useEffect(() => (
     registerTerminalBenchPanel(
@@ -696,7 +696,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       // disposed mid-update; the next mount attaches fresh
     }
 
-  }, [connectionEpoch, readOnly, tmuxSession, sendTerminalAttach, sendTerminalVisibility]);
+  }, [cancelReveal, connectionEpoch, readOnly, tmuxSession, sendTerminalAttach, sendTerminalVisibility]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.
   // The canvas repaints next frame with the new palette, PTY state is preserved.
