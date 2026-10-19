@@ -344,6 +344,121 @@ describe('managed Live transport', () => {
     const end = second.close(); await vi.advanceTimersByTimeAsync(250); await end;
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('resumes once after confirmed connection loss in the same chat without replaying delegated work', async () => {
+    const bus = new LiveConversationBridge(); const requests: Record<string, unknown>[] = [];
+    let starts = 0; const ended = new Set<string>();
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') return Response.json({ id: `retry-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') ended.add(body.id);
+      if (body.action === 'event') return Response.json({});
+      return Response.json({ events: ended.has(body.id) ? [{ cursor: 3, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: 10 } } }]
+        : body.id === 'retry-1' ? [
+          { cursor: 1, event: { type: 'session.input_transcript.delta', event_id: 'speech', delta: 'Do this once', start_ms: 0, end_ms: 1 } },
+          { cursor: 2, event: { type: 'session.delegation.created', event_id: 'd', delegation: { id: 'task', target: 'client' } } },
+        ] : [] });
+    }));
+    const delegate = vi.fn(() => new Promise<void>(() => {})); const states: string[] = [];
+    const live = await startManagedLive({ binding: 'same-chat-runtime', context: () => 'Task is still running; do not resubmit', subscribe: bus.subscribe, delegate }, state => states.push(state));
+    await flush(); ended.add('retry-1');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(starts).toBe(2); expect(live.state).toBe('live'); expect(states).toEqual(['connecting', 'live', 'connecting', 'live']);
+    expect(delegate).toHaveBeenCalledOnce(); expect(requests.every(r => r.binding === 'same-chat-runtime')).toBe(true);
+    await bus.publish('Backend confirmed completion');
+    expect(requests.at(-1)).toMatchObject({ id: 'retry-2', event: { delegation_id: null, content: 'Backend confirmed completion' } });
+    ended.add('retry-2'); await vi.advanceTimersByTimeAsync(300);
+    expect(live.state).toBe('closed'); expect(starts).toBe(2); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('waits for the final receipt after RTC fails before resuming', async () => {
+    const peers: Peer[] = []; let starts = 0; let confirm = false; let requested = false;
+    class FailingLivePeer extends Peer { constructor() { super(); peers.push(this); } }
+    vi.stubGlobal('RTCPeerConnection', FailingLivePeer);
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') requested = true;
+      return Response.json({ events: confirm ? [{ cursor: 1, event: { type: 'session.closed', reason: 'close_requested', usage: { seconds: 5 } } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    peers[0].connectionState = 'failed'; (peers[0].onconnectionstatechange as unknown as (() => void))?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(requested).toBe(true); expect(starts).toBe(1); expect(live.state).toBe('closing');
+    confirm = true; await vi.advanceTimersByTimeAsync(500);
+    expect(starts).toBe(2); expect(live.state).toBe('closed'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cancels a reconnect while microphone permission is pending without funding another session', async () => {
+    let starts = 0; let ended = false; let grant!: (stream: unknown) => void; const stop = vi.fn();
+    const mic = vi.fn().mockResolvedValueOnce({ getTracks: () => [{ stop }] })
+      .mockImplementationOnce(() => new Promise(resolve => { grant = resolve; }));
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: mic } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      return Response.json({ events: ended ? [{ cursor: 1, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 } } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    ended = true; await vi.advanceTimersByTimeAsync(300); expect(mic).toHaveBeenCalledTimes(2);
+    const closing = live.close(); grant({ getTracks: () => [{ stop }] }); await closing; await flush();
+    expect(starts).toBe(1); expect(live.state).toBe('error'); expect(stop).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('does not retry when the event connection is lost without a terminal receipt', async () => {
+    let starts = 0; let lost = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      if (lost) throw new Error('network lost');
+      return Response.json({ events: [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    lost = true; await vi.advanceTimersByTimeAsync(1000);
+    expect(starts).toBe(1); expect(live.state).toBe('unknown'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(['expired', 'content', 'remote_hangup', 'close_requested', undefined])('does not resume for terminal reason %s', async reason => {
+    let starts = 0; let ended = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      return Response.json({ events: ended ? [{ cursor: 1, event: { type: 'session.closed', reason, usage: { seconds: 1 } } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    ended = true; await vi.advanceTimersByTimeAsync(500);
+    expect(starts).toBe(1); expect(live.state).toBe('closed'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([undefined, -1, '10'])('does not resume without valid final usage: %s', async seconds => {
+    let starts = 0; let ended = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      return Response.json({ events: ended ? [{ cursor: 1, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds } } }] : [] });
+    }));
+    await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    ended = true; await vi.advanceTimersByTimeAsync(500); expect(starts).toBe(1); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('Stop cancels an automatic resume before a new provider session is created', async () => {
+    let starts = 0; let ended = false; const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      return Response.json({ events: ended ? [{ cursor: 1, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 } } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, (state, detail) => {
+      if (state === 'connecting' && detail?.includes('Reconnecting')) controller.abort();
+    }, controller.signal);
+    ended = true; await vi.advanceTimersByTimeAsync(500);
+    expect(starts).toBe(1); expect(live.state).toBe('closed'); expect(vi.getTimerCount()).toBe(0);
+  });
+  it('manual Stop wins even when the provider reports connection_lost', async () => {
+    let starts = 0; let ended = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `voice-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') ended = true;
+      return Response.json({ events: ended ? [{ cursor: 1, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 } } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same', context: () => '', delegate: vi.fn() }, () => {});
+    const closing = live.close(); await vi.advanceTimersByTimeAsync(500); await closing;
+    expect(starts).toBe(1); expect(live.state).toBe('closed'); expect(vi.getTimerCount()).toBe(0);
+  });
   it('preserves exact transcript fragments and deduplicates delegation events', () => {
     const t = new LiveTranscript();
     t.observe({ type: 'session.input_transcript.delta', event_id: '1', delta: 'Check ', start_ms: 0, end_ms: 10 });

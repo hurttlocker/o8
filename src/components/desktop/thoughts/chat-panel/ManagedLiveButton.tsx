@@ -105,7 +105,7 @@ export function ManagedLiveButton(props: Props) {
           return `Backend status: ${current.current.busy ? 'working; completion not confirmed' : 'not currently reporting busy'}. Last correlated task outcome: ${terminal ? `${terminal.outcome}: ${terminal.text.slice(-600)}` : 'unknown; do not infer completion from partial text'}. Queued follow-up: ${current.current.followup?.items.map(item => `${item.status}: ${item.payload.text.slice(0, 200)}`).join('; ') || 'none'}.\n${current.current.messages.slice(-3).map(m => `${m.role}: ${m.text.slice(-400)}`).join('\n')}`;
         },
         delegate: async (text, id, update, submitted) => {
-          if (current.current.binding !== binding) return;
+          if (generation.current !== started || current.current.binding !== binding) return;
           const reply = (message: string, spoken = true) => bridge.current.publish(message, spoken, update);
           const intent = voiceFollowupIntent(text);
       if (intent.kind === 'clarify') { await reply('That queue request includes a condition, example or withdrawal, so nothing was queued or submitted. Please give one clear follow-up request if you want it queued.'); return; }
@@ -135,8 +135,8 @@ export function ManagedLiveButton(props: Props) {
           }
           await submit(intent.kind === 'queue' ? intent.text : text, id, reply, submitted);
         },
-      }, (next, message) => { stateRef.current = next; if (generation.current === started) { setState(next); setDetail(message ?? ''); } }, controller.signal, { onLevel: value => { level.current = value; } });
-      if (generation.current !== started) { await live.close(); setState(live.state); } else session.current = live;
+      }, (next, message) => { if (generation.current === started) { stateRef.current = next; setState(next); setDetail(message ?? ''); } }, controller.signal, { onLevel: value => { level.current = value; } });
+      if (generation.current !== started) { await live.close(); } else session.current = live;
     } catch { if (generation.current === started) { stateRef.current = (stateRef.current as LiveState) === 'unknown' ? 'unknown' : 'error'; setState(stateRef.current); setDetail(controller.signal.aborted ? 'Voice startup canceled. Check status before retrying.' : 'Voice could not start.'); } }
   };
   const requestToggle = useManagedChatVoiceTarget({ available, root: props.chatRoot, trigger, state: stateRef, toggle });

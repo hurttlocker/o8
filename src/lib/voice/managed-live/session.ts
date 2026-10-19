@@ -44,7 +44,66 @@ export class LiveTranscript {
   }
 }
 
-export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: { idleTimeoutMs?: number; onLevel?: (level: number) => void }): Promise<LiveSession> {
+type LiveOptions = { idleTimeoutMs?: number; onLevel?: (level: number) => void };
+/** One automatic continuation, only after the previous provider session confirms terminal usage. */
+export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
+  const controller = new AbortController();
+  let current: LiveSession | undefined;
+  let state: LiveState = 'connecting';
+  let stopped = false;
+  let retried = false;
+  let resuming = false;
+  let epoch = 0;
+  let resumeTimer: ReturnType<typeof setTimeout> | undefined;
+  let attempt: Promise<LiveSession>;
+  let closePromise: Promise<void> | undefined;
+  const emptyUsage = new LiveActivity(Date.now()).usage;
+  const publish = (next: LiveState, detail?: string) => { state = next; onState(next, detail); };
+  const detach = () => signal?.removeEventListener('abort', abort);
+  const close = (): Promise<void> => {
+    if (closePromise) return closePromise;
+    stopped = true; clearTimeout(resumeTimer); controller.abort(); detach();
+    if (resuming) { resuming = false; publish('closed', 'Voice paused. Backend work continues.'); }
+    closePromise = (async () => { try { await (await attempt).close(); } catch { /* Startup already reported its outcome. */ } })();
+    return closePromise;
+  };
+  const abort = () => { void close(); };
+  const launch = () => {
+    const started = ++epoch;
+    const pending = startLiveAttempt(backend, (next, detail, canResume) => {
+      if (started !== epoch) return;
+      if (next === 'closed' && canResume && !stopped && !retried && !signal?.aborted) {
+        retried = true; resuming = true;
+        // Keep audio ownership with this chat throughout the handoff. Stop can cancel this gap.
+        publish('connecting', 'Voice connection ended. Reconnecting once to this chat.');
+        if (!stopped) resumeTimer = setTimeout(() => {
+          resumeTimer = undefined;
+          void pending.then(() => {
+            if (stopped) return;
+            resuming = false; current = undefined; attempt = launch();
+            void attempt.catch(() => {});
+          });
+        }, 0);
+        return;
+      }
+      if (next === 'closed' || next === 'unknown' || next === 'error') detach();
+      if (next === 'connecting' && retried && state === 'connecting') return;
+      publish(next, detail ?? (retried && next === 'closed' ? 'Voice paused after reconnecting once. Backend work continues.' : undefined));
+    }, controller.signal, options);
+    void pending.then(live => { if (started === epoch) current = live; }, () => {
+      detach();
+      if (started === epoch && state === 'connecting') publish('error', 'Voice could not reconnect. Backend work continues.');
+    });
+    return pending;
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  attempt = launch();
+  await attempt;
+  return { close, activity: () => current?.activity(), get state() { return state; }, get usage() { return current?.usage ?? emptyUsage; } };
+}
+
+async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState, detail?: string, canResume?: boolean) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
   let state: LiveState = 'connecting';
   let cleaned = false;
   let pollingStarted = false;
@@ -61,6 +120,8 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   let cursor = 0;
   let activityPolicy = new LiveActivity(Date.now(), options?.idleTimeoutMs);
   let idleClosed = false;
+  let wasLive = false;
+  let connectionFailed = false;
   let unsubscribe: (() => void) | undefined;
   let lastContext = '';
   let contextAt = 0;
@@ -77,9 +138,9 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
-  const transition = (next: LiveState, detail?: string) => {
+  const transition = (next: LiveState, detail?: string, canResume = false) => {
     if (state === 'closed' || (cleaned && next !== 'closed')) return;
-    state = next; onState(next, detail);
+    state = next; onState(next, detail, canResume);
   };
   const activity = () => {}; // UI interactions are not evidence of speech.
   const request = async (body: Record<string, unknown>) => {
@@ -129,7 +190,14 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
         cursor = entry.cursor;
         activityPolicy.observe(entry.event, Date.now());
         captions?.observe(entry.event);
-        if (entry.event.type === 'session.closed') { transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined); cleanup(); return; }
+        if (entry.event.type === 'session.closed') {
+          const canResume = wasLive && !idleClosed && !signal?.aborted && activityPolicy.usage.providerUsageFinal
+            && (entry.event.reason === 'connection_lost' || (connectionFailed && entry.event.reason === 'close_requested'));
+          // Stop capture and detach the old result subscriber before a replacement can start.
+          cleanup();
+          transition('closed', idleClosed ? 'Voice paused after inactivity. Resume when ready; backend work continues. Delayed speech detection can also cause a pause.' : undefined, canResume);
+          return;
+        }
         if (entry.event.type === 'o8.transport.unknown') { transition('unknown', 'Voice disconnected; backend work is unchanged.'); cleanup(); return; }
         const task = transcript.observe(entry.event);
         if (task && state === 'live') {
@@ -174,7 +242,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     peer.ontrack = event => { if (cleaned) return; const remote = event.streams[0]; if (remote) { audio.srcObject = remote; watch(remote, true); void audio.play().catch(() => { void close(); }); } };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === 'connected') resolveConnected?.();
-      if (peer.connectionState === 'failed') void close();
+      if (peer.connectionState === 'failed') { connectionFailed = true; void close(); }
     };
     peer.createDataChannel('oai-events'); // Provider channel is restricted; controls use the sideband.
     await startupStep(peer.setLocalDescription(await startupStep(peer.createOffer())));
@@ -207,7 +275,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
     }
     clearTimeout(startupTimer);
     if (cleaned) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
-    if (!closePromise && !signal?.aborted) { activityPolicy.markReady(Date.now()); transition('live', localPreview ? 'Local microphone preview. No transcription, provider connection or backend instructions.' : undefined);
+    if (!closePromise && !signal?.aborted) { wasLive = true; activityPolicy.markReady(Date.now()); transition('live', localPreview ? 'Local microphone preview. No transcription, provider connection or backend instructions.' : undefined);
       unsubscribe = backend.subscribe?.((text, spoken) => update(null, text, spoken)); }
     idleTimer = setInterval(() => {
       let inputEnergy = false; let outputAudible = false;

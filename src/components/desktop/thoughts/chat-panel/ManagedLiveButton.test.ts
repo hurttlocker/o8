@@ -190,3 +190,16 @@ it('Caps Lock uses the focused composer and a second tap closes voice without st
   expect(buttons[1].getAttribute('aria-pressed')).toBe('false');
   expect(interrupt).not.toHaveBeenCalled();
 });
+
+it('does not accept a stale delegation after the same chat starts a new voice activation', async () => {
+  const send = vi.fn(() => ({ userMessageId: 'new' }));
+  const props = { binding: 'same', messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  const old = fixture.backend!;
+  await act(async () => container.querySelector('button')!.click());
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend).not.toBe(old);
+  await old.delegate('Late old request', 'old', vi.fn(async () => {}));
+  expect(send).not.toHaveBeenCalled();
+});
