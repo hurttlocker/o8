@@ -43,6 +43,7 @@ interface ComposerAreaProps {
   activeComposer?: boolean;
   showBrain?: boolean;
   activityContent?: React.ReactNode;
+  voiceControl?: React.ReactNode;
   workerContext?: WorkerCorrectionContext;
   inputLabel?: string;
   placeholder?: string;
@@ -133,6 +134,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   chatMessages,
   workerPackets,
   activityContent,
+  voiceControl,
   workerContext,
   activeTargetLabel,
   targetAgentExists,
@@ -752,6 +754,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
+            managedVoiceControl={voiceControl}
             permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
               ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
                 // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.

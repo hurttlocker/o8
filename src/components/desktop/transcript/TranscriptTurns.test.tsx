@@ -49,6 +49,21 @@ describe('completed activity through the shared renderer', () => {
     act(() => { details.open = true; details.dispatchEvent(new Event('toggle')); });
     render(false); expect(host.textContent).toContain('Inspecting');
   });
+  it('keeps conversational captions separate from the CLI final answer and work disclosure', () => {
+    const voice = { sessionId: 'live', direction: 'output' as const, revision: 1, startMs: 0, endMs: 100 };
+    const mixed: MobileTranscriptEntry[] = [entries[0],
+      { id: 'spoken-input', role: 'user', text: 'Another spoken thought', voice: { ...voice, direction: 'input' } },
+      { id: 'ack', role: 'assistant', text: 'Spoken acknowledgment', voice },
+      ...entries.slice(1), { id: 'spoken-answer', role: 'assistant', text: 'Spoken answer', voice }];
+    act(() => root.render(<TranscriptTurns entries={mixed} busy={false} repoPath="/repo"
+      nodes={mixed.map(entry => <div key={entry.id} data-o8-message-id={entry.id}>{entry.text}</div>)} />));
+    expect(host.textContent).toContain('Final answer');
+    expect(host.textContent).toContain('Spoken answer');
+    expect(host.textContent).toContain('Spoken acknowledgment');
+    expect(host.textContent).toContain('Another spoken thought');
+    expect(host.textContent).not.toContain('Inspecting');
+    expect(host.textContent).toContain('Edited 1 file');
+  });
 });
 
 describe('prompt navigation', () => {

@@ -337,6 +337,8 @@ export interface MobileTranscriptCommand {
 }
 
 export interface MobileTurnReceipt {
+  /** Server-correlated outcome; idle state and assistant text are not completion. */
+  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' };
   permissionMode?: 'full' | 'plan';
   leadModel: string;
   effort: ThinkingEffort;
@@ -353,6 +355,8 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  /** Spoken captions are display evidence, never a runtime completion receipt. */
+  voice?: import('@/lib/transcripts/voice-captions').VoiceCaption;
   /** Matching send acknowledgement or live turn activity; not turn completion. */
   deliveryConfirmed?: boolean;
   id: string;

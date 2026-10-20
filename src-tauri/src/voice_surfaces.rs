@@ -3,6 +3,7 @@
 use tauri::{AppHandle, Emitter};
 
 pub(crate) fn create(app: &AppHandle, api_port: u16) {
+    crate::managed_voice_window::init(api_port);
     // Window creation must run on the main thread.
     let app_main = app.clone();
     let _ = app.run_on_main_thread(move || {
