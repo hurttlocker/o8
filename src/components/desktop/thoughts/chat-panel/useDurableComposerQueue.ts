@@ -7,6 +7,7 @@ import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecor
 
 import { composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
 import { composerQueueRequest, ComposerQueueRequestError } from './composer-queue-request';
+import { voiceFollowupRemovalReceipt } from './managed-voice-followup';
 
 const EMPTY_QUEUE: QueuedComposerSendRecord[] = [];
 
@@ -137,7 +138,7 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
         const voiceItems = (body.items as QueuedComposerSendRecord[]).filter(item => item.payload.afterTaskId);
         if (!voiceItems.length) return 'No pending voice follow-up was found. Already submitted work is unchanged.';
         const removed = await Promise.all(voiceItems.map(cancelRecord));
-        return removed.every(Boolean) ? 'Queued voice follow-up canceled before submission. The running task is unchanged.'
+        return removed.every(Boolean) ? voiceFollowupRemovalReceipt()
           : 'Cancellation is not confirmed for every follow-up. Inspect the conversation; work may already have been submitted.';
       } catch { return 'Unable to confirm cancellation. Inspect the queued messages in this conversation.'; }
     });

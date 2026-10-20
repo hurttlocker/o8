@@ -159,8 +159,7 @@ export function ManagedLiveButton(props: Props) {
               try {
                 if (!current.current.followup) throw new Error('The shared follow-up queue is unavailable.');
                 if (!mutationIds.has(id)) mutationIds.set(id, `voice-${crypto.randomUUID()}`);
-                await current.current.followup.enqueue(mutationIds.get(id)!, intent.text, taskId);
-                await reply('Follow-up saved in this conversation for the exact task to finish. It has not been submitted or applied. Say cancel queued to remove it.');
+                await reply(await current.current.followup.enqueue(mutationIds.get(id)!, intent.text, taskId));
               } catch (error) { await reply(`Follow-up submission is not confirmed. ${error instanceof Error ? error.message : 'Inspect the conversation before retrying.'}`); }
             } else {
               await reply('We can keep talking while the backend works. This runtime cannot apply an immediate correction without interrupting it, so I have not changed the task. To request a later continuation, say queue followed by the request.');
