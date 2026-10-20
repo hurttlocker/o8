@@ -607,7 +607,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             style={{ flexShrink: 0, background: 'transparent' }}
           >
             <div inert={!canSteer || sending || steerReceipt === 'unknown'}>
-              <ComposerArea
+              <ComposerArea key={sessionKey}
                 ref={textareaRef}
                 activeComposer={focused && canSteer && !sending && steerReceipt !== 'unknown'}
                 showBrain={false}

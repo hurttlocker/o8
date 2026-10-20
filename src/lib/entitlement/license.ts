@@ -96,7 +96,7 @@ export interface VerifyLicenseOptions {
  * For dev/testing, override via the O8_LICENSE_PUBKEY env var (PEM SPKI), which
  * takes precedence over this constant.
  */
-const LICENSE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+export const LICENSE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAbKznVejaYq8fRULz2v1DMPOwDDw6kPVMG+Q8s5/m5q8=
 -----END PUBLIC KEY-----`;
 

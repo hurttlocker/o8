@@ -74,6 +74,23 @@ const sentence = "I'll read index.html first, then answer in one sentence with n
 const markdownChunks = ['**Techn', 'ical change:', '** Persist ', 'the list in `local', 'Storage`.'];
 
 describe('ACP chunks through the thread hook and Markdown renderer (#2117)', () => {
+  it('captures the first CLI plan after a spoken greeting in the same transcript', async () => {
+    await act(async () => {
+      transport.socket!.onopen?.(new Event('open'));
+      stream.appendLocalEntries([{ id: 'voice-greeting', role: 'assistant', text: 'Hi there.', voice: {
+        sessionId: 'voice', direction: 'output', revision: 1, startMs: 0, endMs: 100,
+      } }]);
+    });
+    await act(async () => { stream.send('Plan the change', { backend: 'codex' }); });
+    const plan = 'I will make the change.\n\n1. Inspect the source\n2. Update the behavior\n3. Verify the result';
+    await act(async () => {
+      receive('status', { backend: 'codex', status: 'busy' });
+      receive('output', { backend: 'codex', text: plan });
+      receive('status', { backend: 'codex', status: 'ready' });
+    });
+    expect(stream.planText).toBe(plan);
+    expect(stream.messages.find(message => message.id === 'voice-greeting')?.text).toBe('Hi there.');
+  });
   it.each(['acp', 'hermes', 'opencode'] as const)('%s keeps arbitrary chunks intact while streaming and on completion', async (backend) => {
     // Single-character chunks include whitespace-only events and split every word.
     const chunks = Array.from(sentence);

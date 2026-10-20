@@ -6,11 +6,15 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 
 export type ComposerQueueStatus = 'queued' | 'dispatching' | 'applied' | 'held' | 'cancelled';
 export interface ComposerQueuePayload {
+  /** A deliberate follow-up may run only after this exact task settles. */
+  afterTaskId?: string;
   text: string;
   wireMessage: string;
   images: Array<{ name: string; dataUri: string }>;
   routing: {
     backend: OrchestratorBackendId;
+    /** Refuse route normalization or fallback for a bound voice request. */
+    pinBackend?: true;
     model: string;
     effort: ThinkingEffort;
     serviceTier?: OrchestratorServiceTier;

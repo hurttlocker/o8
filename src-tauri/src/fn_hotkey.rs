@@ -1554,6 +1554,10 @@ pub fn start(app: tauri::AppHandle) {
                     }
 
                     let flags = event.get_flags().bits();
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::managed_voice_window::caps_lock_changed(app,
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE), flags);
+                    }
                     let fn_is_down = (flags & FN_FLAG) != 0;
                     let smart_compose = (flags & CONTROL_FLAG) != 0;
 

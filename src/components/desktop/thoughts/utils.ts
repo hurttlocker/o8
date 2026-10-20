@@ -1,6 +1,7 @@
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
+import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
 import type {
   OrchestratorPacket,
   OrchestratorRuntime,
@@ -247,7 +248,7 @@ export function mergeSameThreadHistoryLoad(
     // when revisions tie (including the legacy undefined/undefined case).
     const liveVersion = liveEntry.persistedVersion ?? 0;
     const fetchedVersion = fetchedEntry.persistedVersion ?? 0;
-    if (liveVersion <= fetchedVersion) return fetchedEntry;
+    if (liveVersion <= fetchedVersion && preserveVoiceCaption(liveEntry, fetchedEntry) === fetchedEntry) return fetchedEntry;
     preservedLiveEntries = true;
     return liveEntry;
   });

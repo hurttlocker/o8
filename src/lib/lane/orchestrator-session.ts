@@ -639,7 +639,7 @@ function settleOrchestratorTurn(
   session: OrchestratorSession,
   w: WarmState,
   error: Error | null,
-  successfulResult = false,
+  successfulResult = false, terminalOutcome: 'completed' | 'failed' | 'unconfirmed' = 'unconfirmed',
 ): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
@@ -692,7 +692,7 @@ function settleOrchestratorTurn(
   // to the retry driver, which replays it only if the LAST attempt also fails
   // (so the client latch still releases) and drops it for a discarded attempt.
   const done: Extract<OrchestratorEvent, { type: 'done' }> = {
-    type: 'done', sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
+    type: 'done', terminalOutcome: turn.abortSignal?.aborted ? 'unconfirmed' : successfulResult ? 'completed' : terminalOutcome, sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
   };
   if (!falseDispatch && !w.resumeUnavailable) turn.onEvent(done);
   if (error && !w.resumeUnavailable) turn.onEvent({ type: 'error', error: error.message });
@@ -730,7 +730,7 @@ function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: 
     turn.usage = parseOrchestratorTurnUsage(raw);
     const successfulResult = raw.is_error !== true && !(typeof raw.subtype === 'string' && raw.subtype.startsWith('error_'));
     // Only a successful result drives false-dispatch checks and prompt delivery.
-    settleOrchestratorTurn(session, w, null, successfulResult);
+    settleOrchestratorTurn(session, w, null, successfulResult, successfulResult ? 'completed' : 'failed');
     return false;
   }
   return true;
@@ -798,7 +798,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
       }
       w.stdoutLineBuffer = '';
       const stderr = w.stderrBuffer.trim();
-      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`));
+      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
     }
     session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
   });

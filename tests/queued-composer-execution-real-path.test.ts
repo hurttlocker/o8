@@ -1,17 +1,19 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import type { OrchestratorBackend, OrchestratorTurnOptions } from '@/lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
+import { voiceFollowupReceipt, voiceFollowupRemovalReceipt } from '@/components/desktop/thoughts/chat-panel/managed-voice-followup';
 
 const mocks = vi.hoisted(() => ({ beforeProject: null as (() => Promise<void>) | null,
   send: vi.fn(async (_repo: string, _message: string, emit: (event: OrchestratorEvent) => void, options: OrchestratorTurnOptions) => {
     emit({ type: 'turn_receipt', leadModel: options.model!, effort: options.thinkingEffort! });
     emit({ type: 'text', text: 'Queued answer.' });
-    emit({ type: 'done', sessionId: 'queue-provider-session', cost: null });
+    emit({ type: 'done', sessionId: 'queue-provider-session', cost: null, terminalOutcome: 'completed' });
   }) }));
 vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({ getOrchestratorBackend: (id: OrchestratorBackend['id']) => ({
   id, label: id, ensureSession: () => ({ sessionName: 'queued-session', status: 'ready' }),
@@ -31,7 +33,7 @@ const threadId = 'thoughts-queued-execution'; const target = { repoPath: repo, t
 const historyPath = join(root, 'chat-history', `${threadId}.json`);
 const { getSqlite, closeDb } = await import('@/lib/db');
 const queue = await import('@/lib/orchestrator/composer-queue');
-const { POST } = await import('@/app/api/orchestrator/composer-queue/route');
+const { POST, DELETE } = await import('@/app/api/orchestrator/composer-queue/route');
 const { createChatContinuationHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
 const { withImmediateComposerSend, orchestratorContinuationAbortKey } = await import('@/lib/ws-server/composer-send-admission');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
@@ -161,4 +163,133 @@ it('routes Stop from a symlink-backed chat to the admitted queued provider contr
   queue.holdComposerSends({ ...target, repoPath: alias }); controller!.abort();
   await vi.waitFor(() => expect(controllers.size).toBe(0));
   expect(queue.readComposerSend('queue-alias-stop')?.status).toBe('held');
+});
+
+const boundFollowup = (): ComposerQueuePayload => ({ ...base, afterTaskId: 'orch-user-original',
+  routing: { ...base.routing, pinBackend: true } });
+function originalTask(outcome?: 'completed' | 'failed' | 'unconfirmed', userId = 'orch-user-original', model = base.routing.model) {
+  writeFileSync(historyPath, JSON.stringify({ repoPath: repo, backend: 'codex', model, messages: [
+    { id: userId, role: 'user', content: 'Original request', timestamp: 1 },
+    { id: 'original-assistant', role: 'assistant', content: 'Partial or final answer', timestamp: 2, backend: 'codex', model,
+      receipt: { leadModel: model, effort: 'low', mode: 'solo', permissionMode: 'plan',
+        ...(outcome ? { terminal: { userMessageId: userId, outcome } } : {}) } },
+  ] }));
+}
+it('persists the exact-task voice precondition through the route and reload, then drains once with a correlated receipt', async () => {
+  originalTask('completed'); await enqueue('voice-original', boundFollowup()); closeDb();
+  expect(queue.readComposerSend('voice-original')?.payload).toMatchObject({ afterTaskId: 'orch-user-original', routing: { pinBackend: true } });
+  createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-original')?.status).toBe('applied'));
+  const receipt = readPersistedLlmChat(threadId)!.history.messages.at(-1)?.receipt;
+  expect(receipt?.terminal).toEqual({ userMessageId: 'review-user-assistant-queued-voice-original', outcome: 'completed' });
+  closeDb(); createChatContinuationHeartbeat(hooks)();
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+});
+it.each([undefined, 'unconfirmed'] as const)('holds a voice follow-up with %s completion even when the UI reports idle', async outcome => {
+  originalTask(outcome); await enqueue('voice-unknown', boundFollowup()); createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-unknown')?.status).toBe('held'));
+  expect(mocks.send).not.toHaveBeenCalled();
+  originalTask('completed'); createChatContinuationHeartbeat(hooks)();
+  expect(mocks.send).not.toHaveBeenCalled(); // Held intent requires explicit recovery, not a late automatic replay.
+});
+it('does not borrow a newer task result or silently follow a changed model', async () => {
+  originalTask('completed', 'orch-user-newer'); await enqueue('voice-stale-task', boundFollowup()); createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-stale-task')?.status).toBe('held'));
+  queue.cancelComposerSend(target, 'voice-stale-task');
+  originalTask('completed', 'orch-user-original', 'another-model'); await enqueue('voice-stale-model', boundFollowup()); createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-stale-model')?.status).toBe('held'));
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+it('rechecks the original task after asynchronous preparation, before provider admission', async () => {
+  originalTask('completed'); mocks.beforeProject = async () => { originalTask('completed', 'orch-user-replacement'); };
+  await enqueue('voice-replaced', boundFollowup()); createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-replaced')?.status).toBe('held'));
+  expect(queue.readComposerSend('voice-replaced')?.admittedAt).toBeNull();
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+it('rejects an unfenced task binding and refuses implicit managed-model normalization', async () => {
+  const response = await POST(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ ...target, id: 'voice-unpinned', intent: 'send-next',
+      payload: { ...base, afterTaskId: 'orch-user-original' } }),
+  }));
+  expect(response.status).toBe(400); expect(queue.readComposerSend('voice-unpinned')).toBeNull();
+  originalTask('completed'); await enqueue('voice-normalized', { ...boundFollowup(), images: [], routing: { ...base.routing, backend: 'o8', pinBackend: true } });
+  createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend('voice-normalized')?.status).toBe('held'));
+  expect(mocks.send).not.toHaveBeenCalled();
+});
+
+it.each(['canonical', 'optimistic', 'replaced'])('binds a persisted lead follow-up to the exact task through admission: %s', async form => {
+  execFileSync('git', ['init', '-q', repo]);
+  const leadRoute = await import('@/app/api/orchestrator/lead/route');
+  const leads = await import('@/lib/orchestrator/lead-lifecycle');
+  const report = async (body: Record<string, unknown>) => leadRoute.POST(new NextRequest('http://localhost/api/orchestrator/lead', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify(body),
+  }));
+  mocks.send.mockImplementation(async (_repo, _message, emit, options) => {
+    const lead = leads.findLeadThreadBinding(options.threadId!)!;
+    const status = leads.getLeadStatus(lead.id);
+    const result = await report({ action: 'report', leadId: lead.id, turnId: status.latestTurn!.id,
+      repoPath: repo, threadId: lead.thread_id, kind: 'completed', summary: 'Fixture completed', evidence: ['Deterministic fixture receipt'] });
+    expect(result.status).toBe(200);
+    emit({ type: 'text', text: 'Finished fixture' });
+    emit({ type: 'done', sessionId: 'lead-fixture', cost: null, terminalOutcome: 'completed' });
+  });
+  const started = await report({ action: 'start', repoPath: repo, backend: 'codex', model: 'gpt-6.1-sol', effort: 'high',
+    idempotencyKey: `voice-lead-${form}`, brief: { objective: 'Exercise the shared lead queue', scope: ['Fixture only'],
+      doneTests: ['Persist a terminal receipt'], nonGoals: ['External calls'], budgets: ['No provider calls'], escalationCriteria: ['Unexpected routing'] } });
+  expect(started.status, await started.clone().text()).toBe(202);
+  const initial = await started.json(); const leadId = initial.lead.id; const leadThread = initial.lead.threadId;
+  await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe('completed'));
+  const sent = await leads.sendLeadThreadMessage({ threadId: leadThread, repoPath: repo, message: 'First chat task',
+    backend: 'codex', model: 'gpt-6.1-sol', effort: 'high', idempotencyKey: 'ws:voice-parent' });
+  await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe('completed'));
+  const afterTaskId = form === 'canonical' ? `lead-user-${sent!.admittedTurnId}` : 'orch-user-voice-parent';
+  const response = await POST(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ repoPath: repo, threadId: leadThread,
+      id: `voice-lead-queue-${form}`, intent: 'send-next', payload: { ...base, images: [], afterTaskId,
+        routing: { ...base.routing, model: 'gpt-6.1-sol', effort: 'high', pinBackend: true } } }),
+  }));
+  expect(response.status, await response.clone().text()).toBe(200);
+  if (form === 'replaced') {
+    await leads.sendLeadThreadMessage({ threadId: leadThread, repoPath: repo, message: 'Newer task',
+      backend: 'codex', model: 'gpt-6.1-sol', effort: 'high', idempotencyKey: 'ws:newer-parent' });
+    await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe('completed'));
+  }
+  const before = mocks.send.mock.calls.length;
+  closeDb(); createChatContinuationHeartbeat(hooks)();
+  await vi.waitFor(() => expect(queue.readComposerSend(`voice-lead-queue-${form}`)?.status).toBe(form === 'replaced' ? 'held' : 'applied'));
+  if (form === 'replaced') expect(mocks.send).toHaveBeenCalledTimes(before);
+  else {
+    await vi.waitFor(() => expect(leads.getLeadStatus(leadId).latestTurn?.status).toBe('completed'));
+    expect(mocks.send).toHaveBeenCalledTimes(before + 1);
+    const terminal = readPersistedLlmChat(leadThread)!.history.messages.at(-1)?.receipt?.terminal;
+    expect(terminal).toMatchObject({ outcome: 'completed' });
+  }
+});
+
+it.each(['held', 'applied'] as const)('keeps voice status truthful when an uncertain save retries after backend admission: %s', async status => {
+  const id = 'voice-receipt-retry'; const payload: ComposerQueuePayload = { ...base, afterTaskId: 'original-task', routing: { ...base.routing, pinBackend: true } };
+  await enqueue(id, payload);
+  expect(queue.claimNextComposerSend(target)?.id).toBe(id);
+  expect(queue.admitComposerSend(id)).toBe(true);
+  expect(queue.settleComposerSend(id, { status, reason: status === 'held' ? 'Uncertain delivery' : undefined })).toBe(true);
+  const response = await POST(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
+    method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ ...target, id, intent: 'send-next', payload }),
+  }));
+  const receipt = (await response.json()).item;
+  expect(receipt).toMatchObject({ id, status, admittedAt: expect.any(Number) });
+  const spoken = voiceFollowupReceipt(receipt);
+  expect(spoken).toContain('did not submit');
+  expect(spoken).not.toMatch(/has not been submitted|canceled before submission/);
+  if (status === 'held') {
+    expect(spoken).toContain('may already have reached');
+    const removed = await DELETE(new NextRequest('http://localhost/api/orchestrator/composer-queue', {
+      method: 'DELETE', headers: { host: 'localhost' }, body: JSON.stringify({ ...target, id }),
+    }));
+    expect(removed.status).toBe(200);
+    expect(queue.readComposerSend(id)).toMatchObject({ status: 'cancelled', admittedAt: expect.any(Number) });
+    expect(voiceFollowupRemovalReceipt()).toContain('does not stop or undo work already submitted');
+  } else expect(spoken).toContain('already accepted');
+  expect(mocks.send).not.toHaveBeenCalled();
 });

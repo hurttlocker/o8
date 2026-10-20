@@ -45,7 +45,7 @@ import { checkAliveSessions } from '@/lib/terminal/tab-state';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, symonSpeakStatus, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
-import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { ComposerDictationContext, useComposerDictation } from '@/components/desktop/dictation/ComposerDictation';
 import { MicButton } from '@/components/desktop/thoughts/MicButton';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
@@ -362,15 +362,10 @@ export default function CanvasGlassPreviewPage() {
   // Push-to-talk for the primary stage composer — speak instead of type, same
   // engine as the default IDE. Speech lands via a functional setState so it
   // appends to whatever is already drafted (no stale snapshot).
-  const dictationHost = useDictationHostOptional();
-  const registerComposerDictation = useCallback(() => {
-    const node = composerInputRef.current;
-    if (!node || !dictationHost) return;
-    dictationHost.setActiveComposer({
-      node,
-      fill: (text: string) => setComposerValue((current) => (current.trim() ? `${current.trim()} ${text}` : text)),
-    });
-  }, [dictationHost]);
+  const dictationId = useComposerDictation({
+    nodeRef: composerInputRef, active: false, scopeKey: activeRepoPath ?? 'canvas-main',
+    onText: text => setComposerValue(current => current.trim() ? `${current.trim()} ${text}` : text),
+  });
   const reduceMotion = useReducedMotion() ?? false;
   // Right-Option agent dictation morphs the composer in place — its controls
   // fade out and the live partial words stream where you'd type, growing the
@@ -3306,7 +3301,7 @@ export default function CanvasGlassPreviewPage() {
           }}
           placeholder={`Message the orchestrator · ${activeRepoName ?? '…'}`}
           aria-label="Orchestrator composer"
-          onFocus={() => { setComposerFocused(true); registerComposerDictation(); }}
+          onFocus={() => { setComposerFocused(true); }}
           onBlur={() => setComposerFocused(false)}
           rows={1}
           style={{
@@ -3342,7 +3337,7 @@ export default function CanvasGlassPreviewPage() {
         />
         {/* Push-to-talk — speak the prompt. Canvas-tinted to sit flush with the
             send arrow; hides itself when no dictation host is mounted. */}
-        <MicButton idleColor="var(--cnv-ink-muted)" />
+        <ComposerDictationContext.Provider value={dictationId}><MicButton idleColor="var(--cnv-ink-muted)" /></ComposerDictationContext.Provider>
         <button
           type="button"
           aria-label={orchBusy ? (mainUndoArmed ? 'Stop and undo the send' : 'Interrupt the orchestrator') : 'Send'}

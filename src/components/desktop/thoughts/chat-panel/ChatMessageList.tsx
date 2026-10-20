@@ -203,7 +203,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   // map below renders the chip row right after that bubble.
   let lastAssistantIndex = -1;
   for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
-    if (displayMessages[i]?.role === 'assistant') {
+    if (displayMessages[i]?.role === 'assistant' && !displayMessages[i]?.voice) {
       lastAssistantIndex = i;
       break;
     }

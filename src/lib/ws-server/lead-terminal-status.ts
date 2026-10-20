@@ -3,6 +3,7 @@ import { waitForLead } from '@/lib/orchestrator/lead-lifecycle';
 /** Bridge an admitted persistent lead turn to the existing chat event stream. */
 export async function sendLeadTerminalStatus(
   send: (message: Record<string, unknown>) => void, leadId: string, turnId: string, afterCursor: number,
+  userMessageId = `lead-user-${turnId}`,
 ): Promise<void> {
   const deadline = Date.now() + 10 * 60_000;
   let cursor = afterCursor;
@@ -45,6 +46,8 @@ export async function sendLeadTerminalStatus(
         backend: receipt.lead.routing.backend,
         lead: receipt.lead,
         admittedTurnId: turnId,
+        voiceTerminal: { userMessageId, text: assistantText,
+          outcome: status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'unconfirmed' },
       },
     });
     return;

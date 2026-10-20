@@ -442,6 +442,7 @@ export function InputButtons({
   onSelectRepoPath,
   inlineLeadingExtras,
   permissionControl,
+  managedVoiceControl,
   inlineMeterSlot,
   onBrowsePrompts,
   onSavePrompt,
@@ -493,6 +494,7 @@ export function InputButtons({
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
   permissionControl?: ReactNode;
+  managedVoiceControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
@@ -585,6 +587,7 @@ export function InputButtons({
           )}
           meterControl={inlineMeterSlot}
           micControl={<MicButton />}
+          voiceControl={managedVoiceControl}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -665,6 +668,7 @@ export function InputButtons({
         onSavePrompt={onSavePrompt}
       />
       <MicButton />
+      {managedVoiceControl}
 
       </div>
 

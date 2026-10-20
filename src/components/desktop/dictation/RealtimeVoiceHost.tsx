@@ -12,6 +12,8 @@
  * webview). Inline styles only; themed via var(--t-*). Self-contained — no props.
  */
 
+import { ManagedSymonVoiceHost } from './ManagedSymonVoiceHost';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
@@ -175,6 +177,19 @@ export function RealtimeVoiceHost() {
   const respondingRef = useRef(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [status, setStatus] = useState<RealtimeStatus>('idle');
+  const managedOwner = useRef(false);
+  const selectingVoice = useRef(false);
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const state = (event as CustomEvent<string>).detail;
+      managedOwner.current = !['idle', 'closed', 'error'].includes(state);
+      const mapped: RealtimeStatus = state === 'closing' ? 'stopping' : state === 'closed' ? 'idle' : state === 'unknown' ? 'error' : state as RealtimeStatus;
+      (window as unknown as { __o8RealtimeStatus?: RealtimeStatus }).__o8RealtimeStatus = mapped;
+      window.dispatchEvent(new Event('o8:symon-voice-status'));
+    };
+    window.addEventListener('o8:managed-symon-status', changed);
+    return () => window.removeEventListener('o8:managed-symon-status', changed);
+  }, []);
   // Why the session failed (e.g. a model the realtime endpoint refuses). The
   // pill shows this instead of the generic "Voice unavailable" when we have it.
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
@@ -268,12 +283,27 @@ export function RealtimeVoiceHost() {
   }, [armIdle, clearIdle, clearHeartbeat]);
 
   const toggle = useCallback(() => {
+    if (managedOwner.current) { window.dispatchEvent(new Event('o8:managed-symon-toggle')); return; }
+    if (sessionRef.current) { stop(); return; }
+    if (selectingVoice.current) return;
+    selectingVoice.current = true;
+    void fetch('/api/voice/live', { headers: { authorization: `Bearer ${getMobileWsToken()}` } })
+      .then(response => response.json()).then(capability => {
+        if (capability.enabled === true) {
+          clearHandoff(); managedOwner.current = true;
+          window.dispatchEvent(new Event('o8:managed-symon-toggle'));
+          return;
+        }
+        toggleLegacy();
+      }).catch(() => { setStatus('error'); setStatusDetail('Could not determine voice availability.'); }).finally(() => { selectingVoice.current = false; });
+    function toggleLegacy() {
     if (sessionRef.current) {
       console.log(`${LOG} toggle → off`);
       stop();
     } else {
       console.log(`${LOG} toggle → on`);
       start();
+    }
     }
   }, [start, stop]);
 
@@ -317,6 +347,7 @@ export function RealtimeVoiceHost() {
   }, [toggle]);
 
   useEffect(() => {
+    if (managedOwner.current) return;
     (window as unknown as { __o8RealtimeStatus?: RealtimeStatus }).__o8RealtimeStatus = status;
     window.dispatchEvent(new Event('o8:symon-voice-status'));
   }, [status]);
@@ -501,12 +532,13 @@ export function RealtimeVoiceHost() {
     if (!raw) return;
     const ts = Number(raw);
     if (Number.isFinite(ts) && Date.now() - ts < HANDOFF_TTL_MS) {
-      console.log(`${LOG} resuming voice after canvas-nav handoff`);
-      start();
+      clearHandoff();
+      // Use the same owner selection as explicit controls, never start legacy in parallel.
+      toggle();
     } else {
       clearHandoff(); // stale marker (old session / crash) — drop it
     }
-  }, [start]);
+  }, [toggle]);
 
   // Auto-clear the transient error pill after a few seconds.
   useEffect(() => {
@@ -534,6 +566,7 @@ export function RealtimeVoiceHost() {
   // own framer transform (y/scale) never fights a translateX centering hack.
   return (
     <>
+      <ManagedSymonVoiceHost />
       <div
       style={{
         position: 'fixed',

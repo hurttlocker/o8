@@ -174,7 +174,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       if (lineState.threadId) session!.threadId = lineState.threadId;
       session!.status = 'ready';
       emit({
-        type: 'done',
+        type: 'done', terminalOutcome: lineState.terminalOutcome ?? 'unconfirmed',
         sessionId: lineState.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
@@ -690,7 +690,7 @@ async function sendToCodexOrchestratorAttempt(
       session.status = status;
       if (error) onEvent({ type: 'error', error });
       onEvent({
-        type: 'done',
+        type: 'done', terminalOutcome: options.signal?.aborted ? 'unconfirmed' : lineState.terminalOutcome ?? 'unconfirmed',
         sessionId: lineState.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),

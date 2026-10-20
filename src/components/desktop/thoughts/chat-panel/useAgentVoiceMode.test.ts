@@ -12,12 +12,13 @@ const mocks = vi.hoisted(() => ({
   fillInput: vi.fn(),
   play: vi.fn(async () => undefined),
   sendNow: vi.fn(() => true),
-  setActiveComposer: vi.fn(),
+  registerComposer: vi.fn((_target: { fill: (text: string) => void }) => () => undefined),
+  activateComposer: vi.fn(),
   stop: vi.fn(),
 }));
 
 vi.mock('@/components/desktop/dictation/DictationHost', () => ({
-  useDictationHostOptional: () => ({ setActiveComposer: mocks.setActiveComposer }),
+  useDictationHostOptional: () => ({ registerComposer: mocks.registerComposer, activateComposer: mocks.activateComposer }),
 }));
 
 vi.mock('@/lib/tts/engine', () => ({
@@ -63,7 +64,7 @@ function Harness({
 }
 
 function activeDelivery(): (text: string) => void {
-  const claim = [...mocks.setActiveComposer.mock.calls]
+  const claim = [...mocks.registerComposer.mock.calls]
     .reverse()
     .find(([composer]) => composer !== null)?.[0] as { fill: (text: string) => void } | undefined;
   if (!claim) throw new Error('composer was not registered');
