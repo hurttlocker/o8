@@ -38,6 +38,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Matching late acknowledgements retire only their own delivery warning, including quota-failed attempts and optimistic rows evicted from retained history. Confirmation persists across saved-history reloads and stale writes. Source, native candidate acceptance and release remain separate gates. [#3638](https://github.com/hurttlocker/o8/issues/3638)
+
 Send next preserves its original request identity, destination, attachments and routing through an uncertain response, renderer restart and an explicit retry. Queue transport waits are bounded; stale composer completions cannot retire a replacement composer's recovery. Source, private native acceptance and release are tracked separately. [#4002](https://github.com/hurttlocker/o8/issues/4002)
 
 Ordinary workspace composers retain unsent text, completed image attachments and queued file context across a normal restart, scoped to the selected repository and conversation. Explicit clearing removes saved drafts; storage failure keeps the current input visible and prevents an unsafe conversation transfer. Private native candidate acceptance and release remain separate gates. [#3994](https://github.com/hurttlocker/o8/issues/3994)

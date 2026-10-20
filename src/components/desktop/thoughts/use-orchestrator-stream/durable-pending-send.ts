@@ -11,6 +11,7 @@ import {
 import {
   listPersistedOrchestratorPendingSends,
   ORCHESTRATOR_PENDING_SEND_STALE_MS,
+  ORCHESTRATOR_PENDING_SEND_MAX_AGE_MS,
   persistOrchestratorPendingSend,
   readPersistedOrchestratorPendingSend,
   settlePersistedOrchestratorPendingSend,
@@ -65,6 +66,25 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     getWebSocket, connect, setStatusBusy, setStatusReady,
   } = options;
   const activeRecordRef = useRef<PersistedOrchestratorPendingSend | null>(null);
+  const unsettledRecordsRef = useRef(new Map<string, { repoPath: string | null; record: PersistedOrchestratorPendingSend }>());
+  const rememberIdentity = useCallback((record: PersistedOrchestratorPendingSend) => {
+    const records = unsettledRecordsRef.current;
+    for (const [id, item] of records) {
+      if (Date.now() - item.record.sentAtMs > ORCHESTRATOR_PENDING_SEND_MAX_AGE_MS) records.delete(id);
+    }
+    // Keep only confirmation metadata for older live attempts, never their
+    // potentially large wire/attachment payloads. Retry still needs its full record.
+    records.set(record.clientMessageId, { repoPath, record: {
+      clientMessageId: record.clientMessageId, threadId: record.threadId,
+      displayMessage: record.displayMessage, text: record.displayMessage, sentAtMs: record.sentAtMs,
+    } });
+  }, [repoPath]);
+  useEffect(() => {
+    for (const [id, item] of unsettledRecordsRef.current) {
+      if (item.repoPath !== repoPath || item.record.threadId !== threadId) unsettledRecordsRef.current.delete(id);
+    }
+  }, [repoPath, threadId]);
+  useEffect(() => () => { unsettledRecordsRef.current.clear(); }, []);
 
   const ensureUserBubble = useCallback((record: PersistedOrchestratorPendingSend) => {
     setMessages((prev) => {
@@ -86,12 +106,23 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const settleRecord = useCallback((record: PersistedOrchestratorPendingSend) => {
     settlePersistedOrchestratorPendingSend(record.threadId, record.clientMessageId);
+    unsettledRecordsRef.current.delete(record.clientMessageId);
     setMessages((prev) => {
+      const userId = `orch-user-${record.clientMessageId}`;
+      const warningId = `orch-delivery-error-${record.clientMessageId}`;
       const next = prev
-        .filter((entry) => entry.id !== `orch-delivery-error-${record.clientMessageId}`)
-        .map((entry) => entry.role === 'user' && entry.id === `orch-user-${record.clientMessageId}`
+        .filter((entry) => entry.id !== warningId)
+        .map((entry) => entry.role === 'user' && entry.id === userId
           ? { ...entry, deliveryConfirmed: true }
           : entry);
+      // Retained history can evict the optimistic row before its acknowledgement.
+      // Carry the real send's confirmation through the existing history merge so
+      // an older saved warning cannot reappear after reload or a stale write.
+      if (!next.some((entry) => entry.role === 'user' && entry.id === userId)) {
+        const entry = { ...pendingUserEntry(record), deliveryConfirmed: true };
+        const index = next.findIndex((message) => typeof message.timestamp === 'number' && message.timestamp > record.sentAtMs);
+        next.splice(index < 0 ? next.length : index, 0, entry);
+      }
       messagesRef.current = next;
       return next;
     });
@@ -125,8 +156,9 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
 
   const recordPending = useCallback((record: PersistedOrchestratorPendingSend) => {
     activeRecordRef.current = record;
+    rememberIdentity(record);
     persistOrchestratorPendingSend(record);
-  }, []);
+  }, [rememberIdentity]);
 
   const cancelPending = useCallback((clientMessageId: string) => {
     const activeRecord = activeRecordRef.current;
@@ -134,6 +166,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
       ? activeRecord
       : threadId ? readPersistedOrchestratorPendingSend(threadId, clientMessageId) : null;
     if (record) settlePersistedOrchestratorPendingSend(record.threadId, record.clientMessageId);
+    unsettledRecordsRef.current.delete(clientMessageId);
     if (pendingRef.current?.clientMessageId === clientMessageId) {
       clearTimeout(pendingRef.current.timeoutId);
       pendingRef.current = null;
@@ -160,8 +193,27 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
       ? event.data.clientMessageId
       : null;
     if (ackClientMessageId && threadId) {
-      const ackRecord = readPersistedOrchestratorPendingSend(threadId, ackClientMessageId);
-      if (ackRecord) settleRecord(ackRecord);
+      const remembered = unsettledRecordsRef.current.get(ackClientMessageId);
+      const liveIdentity = remembered?.repoPath === repoPath
+        && remembered.record.threadId === threadId
+        && Date.now() - remembered.record.sentAtMs <= ORCHESTRATOR_PENDING_SEND_MAX_AGE_MS
+        ? remembered.record : null;
+      const ackRecord = record?.threadId === threadId && record.clientMessageId === ackClientMessageId
+        ? record
+        : readPersistedOrchestratorPendingSend(threadId, ackClientMessageId) ?? liveIdentity;
+      if (ackRecord) {
+        settleRecord(ackRecord);
+      } else {
+        // Quota failure can leave an earlier live send without a stored record.
+        // A matching user identity still lets its acknowledgement retire only
+        // that send's warning, while preserving every other pending attempt.
+        const user = messagesRef.current.find((entry) => entry.role === 'user'
+          && entry.id === `orch-user-${ackClientMessageId}`);
+        if (user && typeof user.timestamp === 'number') settleRecord({
+          threadId, clientMessageId: ackClientMessageId,
+          text: user.text, displayMessage: user.text, sentAtMs: user.timestamp,
+        });
+      }
       return;
     }
     if (record && isOrchestratorSendSettlementEvent({
@@ -178,7 +230,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     ) {
       void deliverRecord(record);
     }
-  }, [deliverRecord, pendingRef, settleRecord, threadId]);
+  }, [deliverRecord, messagesRef, pendingRef, repoPath, settleRecord, threadId]);
 
   const retryPending = useCallback(async (clientMessageId: string) => {
     if (!threadId) return;
@@ -215,7 +267,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     }
     const newest = records[records.length - 1];
     if (activeRecordRef.current?.clientMessageId === newest.clientMessageId) return;
-    for (const record of records) ensureUserBubble(record);
+    for (const record of records) { ensureUserBubble(record); rememberIdentity(record); }
 
     activeRecordRef.current = newest;
     if (newest.attachmentsRequired && !newest.wirePayload) {
@@ -228,7 +280,7 @@ export function useDurablePendingSend(options: DurablePendingSendOptions) {
     }
     setStatusBusy();
     armRecord(newest, newest.sentAtMs);
-  }, [armRecord, ensureUserBubble, failPending, pendingRef, setStatusBusy, threadId]);
+  }, [armRecord, ensureUserBubble, failPending, pendingRef, rememberIdentity, setStatusBusy, threadId]);
 
   return { armRecord, cancelPending, failPending, observeActivity, recordPending, retryPending };
 }
