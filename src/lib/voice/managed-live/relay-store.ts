@@ -10,6 +10,7 @@ export interface VoiceRelayRecord {
   binding: string;
   gateway: string;
   createdAt: number;
+  personal?: { pilotId: string | null };
 }
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -38,7 +39,8 @@ function validate(value: unknown): VoiceRelayRecord {
   const record = value as VoiceRelayRecord;
   if (!record || ![1, 2].includes(record.version) || !UUID.test(record.id) || !HASH.test(record.owner)
     || !HASH.test(record.binding) || !Number.isSafeInteger(record.createdAt) || record.createdAt < 0
-    || typeof record.gateway !== 'string' || voiceGatewayUrl(record.gateway) !== record.gateway) {
+    || typeof record.gateway !== 'string' || voiceGatewayUrl(record.gateway) !== record.gateway
+    || (record.personal !== undefined && (!record.personal || (record.personal.pilotId !== null && !UUID.test(record.personal.pilotId))))) {
     throw new Error('Invalid voice relay ownership');
   }
   return record;

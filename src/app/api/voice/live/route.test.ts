@@ -19,6 +19,8 @@ vi.mock('@/lib/auth/account-state', () => ({
 }));
 vi.mock('@/lib/auth/principal', () => ({ resolveRequestPrincipal: (request: Request) => request.headers.get('x-role') ?? 'operator' }));
 vi.mock('@/lib/cortex/qa/llm/inference-route', () => ({ planToken: () => config.token, proxyBaseUrl: () => config.gateway }));
+vi.mock('@/lib/entitlement/license', () => ({ LICENSE_PUBLIC_KEY_PEM: 'fixture',
+  verifyLicense: async () => ({ valid: true, subject: config.accountId, plan: 'pro' }) }));
 import { GET, POST } from './route';
 const ID = '11111111-1111-4111-8111-111111111111';
 const start = { action: 'start', binding: 'repo:thread:claude', context: 'history', sdp: 'v=0\noffer' };

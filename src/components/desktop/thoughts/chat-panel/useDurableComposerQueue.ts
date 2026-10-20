@@ -7,6 +7,7 @@ import type { ComposerQueuePayload, ComposerQueueTarget, QueuedComposerSendRecor
 
 import { composerQueuePayloadMatches, confirmComposerSend, findPendingComposerSend, prepareComposerSend } from './composer-queue-recovery';
 import { composerQueueRequest, ComposerQueueRequestError } from './composer-queue-request';
+import { voiceFollowupRemovalReceipt } from './managed-voice-followup';
 
 const EMPTY_QUEUE: QueuedComposerSendRecord[] = [];
 
@@ -85,19 +86,23 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     // The still-current composer retires recovery immediately before consuming its draft.
     return () => { if (ownerRef.current === owner) confirmComposerSend(snapshot, attempt.id); };
   }, [refresh]);
-  const enqueuePinned = useCallback(async (payload: ComposerQueuePayload, id: string) => {
+  // Voice supplies its durable delegation id; ordinary composer retries retain
+  // the separate draft-recovery contract above. Both write the same server queue.
+  const enqueueVoice = useCallback(async (payload: ComposerQueuePayload, id: string) => {
     const snapshot = targetRef.current;
     if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
+    const owner = ownerRef.current;
     return serialize(JSON.stringify(snapshot), async () => {
       const body = await composerQueueRequest<{ item: QueuedComposerSendRecord }>('/api/orchestrator/composer-queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...snapshot, id, intent: 'send-next', payload }),
-      }, 'Submission is not confirmed. Reconcile this request before retrying.');
-      if (body.item?.id !== id || body.item.threadId !== snapshot.threadId || !composerQueuePayloadMatches(body.item.payload, payload)) {
-        throw new Error('The queued receipt did not match the original request.');
-      }
-      if (scopeRef.current === JSON.stringify(snapshot)) { setError(null); await refresh(); }
-      return body.item;
+      }, 'The voice follow-up was not confirmed. Inspect the shared queue before retrying.');
+      const item = body.item;
+      if (item?.id !== id || item.threadId !== snapshot.threadId || item.repoPath !== snapshot.repoPath
+        || !composerQueuePayloadMatches(item.payload, payload)) throw new Error('The voice follow-up receipt did not match. Inspect the chat before retrying.');
+      if (item.status === 'cancelled') throw new Error('The voice follow-up was cancelled. No new message was sent.');
+      if (ownerRef.current === owner) { setError(null); await refresh(); }
+      return item;
     });
   }, [refresh, serialize]);
   const items = saved?.key === scopeKey ? saved.items : EMPTY_QUEUE;
@@ -127,18 +132,18 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     return serialize(JSON.stringify(snapshot), async () => {
       try {
         // Read after prior saves settle, including saves whose response was lost.
-        const response = await fetch(`/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`, { cache: 'no-store' });
-        const body = await response.json();
-        if (!response.ok) throw new Error('Unable to confirm queued messages.');
+        const body = await composerQueueRequest<{ items: QueuedComposerSendRecord[] }>(
+          `/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`,
+          { cache: 'no-store' }, 'Unable to confirm queued messages.');
         const voiceItems = (body.items as QueuedComposerSendRecord[]).filter(item => item.payload.afterTaskId);
         if (!voiceItems.length) return 'No pending voice follow-up was found. Already submitted work is unchanged.';
         const removed = await Promise.all(voiceItems.map(cancelRecord));
-        return removed.every(Boolean) ? 'Queued voice follow-up canceled before submission. The running task is unchanged.'
+        return removed.every(Boolean) ? voiceFollowupRemovalReceipt()
           : 'Cancellation is not confirmed for every follow-up. Inspect the conversation; work may already have been submitted.';
       } catch { return 'Unable to confirm cancellation. Inspect the queued messages in this conversation.'; }
     });
   }, [cancelRecord, serialize]);
   const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
     Boolean(target && findPendingComposerSend(target, { text, images }));
-  return { items, hasPending, enqueue, enqueuePinned, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
+  return { items, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
 }

@@ -22,7 +22,7 @@ vi.mock('@/lib/analytics/track', () => ({ track: vi.fn() }));
 
 const send = vi.fn(() => null);
 const image = { name: 'proof.png', dataUri: 'data:image/png;base64,YQ==', mimeType: 'image/png' };
-type Controller = { setDraft: (text: string) => void; enqueueVoice: () => Promise<void>; cancelVoice: () => Promise<string> };
+type Controller = { setDraft: (text: string) => void; enqueueVoice: () => Promise<string>; cancelVoice: () => Promise<string> };
 const control = createRef<Controller>();
 const Harness = forwardRef<Controller, { threadId: string; model?: string; mode?: ComposerMode; busy?: boolean; backend?: 'codex' | 'pi' }>(function Harness({ threadId, model = 'original-model', mode = 'solo', busy = true, backend = 'codex' }, ref) {
   const [input, setInput] = useState('Queue this message');
@@ -281,7 +281,7 @@ it.each([false, true])('withdraws an in-flight voice save durably even when its 
   let release!: () => void;
   delayPost = () => new Promise<void>(resolve => { release = resolve; });
   failAfterPersist = lostResponse;
-  let saving!: Promise<void>; let canceling!: Promise<string>;
+  let saving!: Promise<string>; let canceling!: Promise<string>;
   await act(async () => { saving = control.current!.enqueueVoice(); void saving.catch(() => {}); });
   expect(posts).toHaveLength(1);
   await act(async () => { canceling = control.current!.cancelVoice(); });
@@ -289,8 +289,20 @@ it.each([false, true])('withdraws an in-flight voice save durably even when its 
   await render('thoughts-two');
   let outcome = '';
   await act(async () => { release(); await saving.catch(() => {}); outcome = await canceling; });
-  expect(outcome).toContain('canceled before submission');
+  expect(outcome).toContain('removed the saved voice follow-up');
+  expect(outcome).toContain('does not stop or undo work already submitted');
   expect(rows).toEqual([]);
   await render('thoughts-one');
   expect(host.querySelector('[role="list"]')).toBeNull();
+});
+
+it('reuses a voice delegation id after an uncertain save without claiming a changed-routing receipt succeeded', async () => {
+  await render(); failAfterPersist = true;
+  await act(async () => { await expect(control.current!.enqueueVoice()).rejects.toThrow('Response lost'); });
+  await render('thoughts-one', 'changed-model');
+  await act(async () => { await expect(control.current!.enqueueVoice()).rejects.toThrow('receipt did not match'); });
+  expect(rows).toHaveLength(1); expect(posts.map(post => post.id)).toEqual(['voice-test', 'voice-test']);
+  expect(rows[0].payload.routing.model).toBe('original-model'); expect(send).not.toHaveBeenCalled();
+  await render(); await act(async () => control.current!.enqueueVoice());
+  expect(rows).toHaveLength(1);
 });

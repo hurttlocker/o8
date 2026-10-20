@@ -14,6 +14,7 @@ vi.mock('@/lib/voice/managed-live/session', () => ({ startManagedLive: async (ba
   let state = 'live'; fixture.backend = backend; onState(state); return { get state() { return state; }, close: async () => { state = 'closed'; onState(state); }, activity() {} };
 } }));
 import { ManagedLiveButton as VoiceButton } from './ManagedLiveButton';
+import { voiceFollowupReceipt } from './managed-voice-followup';
 const queues = new Map<string, QueuedComposerSendRecord[]>();
 const saved = vi.fn();
 function ManagedLiveButton(props: ComponentProps<typeof VoiceButton>) {
@@ -25,6 +26,7 @@ function ManagedLiveButton(props: ComponentProps<typeof VoiceButton>) {
         status: 'queued', reason: null, createdAt: 1, updatedAt: 1, admittedAt: null,
         payload: { text, wireMessage: text, afterTaskId, images: [], routing: { backend: 'codex', model: 'model',
           effort: 'high', permissionMode: 'plan', mode: 'fleet', pickedMode: 'multitask', collide: false, pinBackend: true } } }]);
+      return voiceFollowupReceipt(queues.get(props.binding)![0]);
     },
     cancel: async () => { queues.delete(props.binding); return 'Queued voice follow-up canceled before submission. The running task is unchanged.'; },
   } });
@@ -218,7 +220,7 @@ it('persists explicit follow-up consent through the shared queue and never drain
   await fixture.backend!.delegate('Actually change it','correction',update);
   expect(send).toHaveBeenCalledTimes(1);
   await fixture.backend!.delegate('queue check the tests','follow-up',update);
-  expect(update).toHaveBeenLastCalledWith(expect.stringContaining('not been submitted or applied'));
+  expect(update).toHaveBeenLastCalledWith(expect.stringContaining('Saving it does not confirm backend acceptance or completion'));
   const messages = [{id:'user-one',role:'user' as const,text:'Start task'}];
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'unconfirmed',text:''}}})));
   expect(send).toHaveBeenCalledTimes(1);
