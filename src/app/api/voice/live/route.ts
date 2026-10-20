@@ -8,10 +8,20 @@ import { accountStateMatches, readAccountState, withAccountStateAdmission } from
 import { loadVoiceRelay, saveVoiceRelay, voiceGatewayUrl, VoiceRelayPersistenceError } from '@/lib/voice/managed-live/relay-store';
 import { localVoicePreview, previewVoiceRequest } from '@/lib/voice/managed-live/local-preview';
 import { personalVoiceGateway } from '@/lib/voice/managed-live/personal-dev';
+import { personalVoicePilot, verifyPersonalVoiceAccount, type PilotAccount } from '@/lib/voice/managed-live/personal-pilot';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+type PersonalRoute = { gateway: string; pilotId?: string };
+async function personalRoute(token: string, account: PilotAccount): Promise<PersonalRoute | null> {
+  const pilot = await personalVoicePilot(token, account);
+  if (pilot) return { gateway: pilot.gateway, pilotId: pilot.id };
+  const gateway = personalVoiceGateway();
+  if (!gateway) return null;
+  await verifyPersonalVoiceAccount(token, account);
+  return { gateway };
+}
 function owner(request: Request): string | null {
   const principal = resolveRequestPrincipal(request);
   if (principal !== 'operator' && principal !== 'device') return null;
@@ -29,7 +39,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ ready, ...(ready && session ? { session: { sessionId: session.sessionId, engine: session.engine, model: session.model, transcript: session.transcript } } : {}) }, { status: ready ? 200 : 409 });
   }
   try {
-    if (personalVoiceGateway()) return NextResponse.json({ enabled: resolveRequestPrincipal(request) === 'operator', entitled: Boolean(planToken()), transport: 'personal-webrtc' }, { headers: { 'Cache-Control': 'no-store' } });
+    const readiness = await withAccountStateAdmission(async () => {
+      const account = readAccountState(); const token = planToken();
+      const personal = await personalRoute(token ?? '', account ?? { accountId: null, epoch: null });
+      if (!personal) return null;
+      if (!account || !accountStateMatches(account) || readAccountState()?.generation !== account.generation
+        || !token || hash(token) !== account.licenseDigest) throw new Error('Account unavailable');
+      const enabled = resolveRequestPrincipal(request) === 'operator';
+      return NextResponse.json({ enabled, entitled: enabled, transport: 'personal-webrtc' }, { headers: { 'Cache-Control': 'no-store' } });
+    });
+    if (readiness) return readiness;
   } catch { return NextResponse.json({ error: 'personal_voice_unavailable', enabled: false }, { status: 503 }); }
   const preview = localVoicePreview();
   if (preview !== 'disabled') return NextResponse.json({ enabled: preview === 'enabled', entitled: preview === 'enabled', transport: 'local-preview' }, { headers: { 'Cache-Control': 'no-store' } });
@@ -43,26 +62,29 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: 'invalid_body' }, { status: 400 }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
-  let personal: string | null;
-  try { personal = personalVoiceGateway(); }
-  catch { if (body.action === 'start') return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 }); personal = null; }
-  if (personal && resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'personal_voice_operator_only' }, { status: 403 });
   try {
-    if (!personal && localVoicePreview() !== 'disabled' && (body.action === 'start' || !loadVoiceRelay(typeof body.id === 'string' ? body.id : ''))) {
+    if (!personalVoiceGateway() && localVoicePreview() !== 'disabled' && (body.action === 'start' || !loadVoiceRelay(typeof body.id === 'string' ? body.id : ''))) {
       if (resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });
       return previewVoiceRequest(body, principal);
     }
-  } catch { return NextResponse.json({ error: 'voice_ownership_unavailable' }, { status: 503 }); }
-  try { return await withAccountStateAdmission(() => relay(body, principal, personal)); }
+  } catch { /* An expired personal marker must not prevent authenticated close. */ }
+  try { return await withAccountStateAdmission(() => relay(body, principal, resolveRequestPrincipal(request) === 'operator')); }
   catch { return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 }); }
 }
-async function relay(body: Record<string, unknown>, principal: string, personal: string | null) {
+async function relay(body: Record<string, unknown>, principal: string, operator: boolean) {
   const account = readAccountState();
   if (!account || !accountStateMatches(account)) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
   const token = planToken();
   if (!token) return NextResponse.json({ error: 'managed_voice_not_entitled' }, { status: 403 });
   if (hash(token) !== account.licenseDigest) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
   if (!account.accountId || !account.epoch) return NextResponse.json({ error: 'voice_account_unavailable' }, { status: 503 });
+  let personal: PersonalRoute | null = null;
+  if (body.action === 'start' || body.action === 'event') {
+    try { personal = await personalRoute(token, account); }
+    catch { return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 }); }
+    if (personal && !operator) return NextResponse.json({ error: 'personal_voice_operator_only' }, { status: 403 });
+    if (!accountStateMatches(account) || readAccountState()?.generation !== account.generation) return NextResponse.json({ error: 'voice_account_changed' }, { status: 503 });
+  }
   // Routine credential housekeeping rotates generation. Controls belong to the
   // verified signed-in account; generation still fences each in-flight request.
   const accountOwner = hash(JSON.stringify(['voice-owner-v2', principal, account.accountId, account.epoch]));
@@ -77,12 +99,14 @@ async function relay(body: Record<string, unknown>, principal: string, personal:
       || typeof body.context !== 'string' || body.context.length > 8000 || typeof body.sdp !== 'string') {
       return NextResponse.json({ error: 'invalid_binding' }, { status: 400 });
     }
-    gateway = personal ?? voiceGatewayUrl(proxyBaseUrl());
+    gateway = personal?.gateway ?? voiceGatewayUrl(proxyBaseUrl());
     payload = { binding: hash(body.binding), context: body.context, sdp: body.sdp };
   } else {
     const id = typeof body.id === 'string' ? body.id : '';
     const record = loadVoiceRelay(id);
     if (!record || record.version !== 2 || record.owner !== accountOwner || typeof body.binding !== 'string' || record.binding !== hash(body.binding)) return NextResponse.json({ error: 'session_not_found' }, { status: 404 });
+    if (record.personal && body.action === 'event' && (!personal || !operator || personal.gateway !== record.gateway
+      || (personal.pilotId ?? null) !== record.personal.pilotId)) return NextResponse.json({ error: 'personal_voice_unavailable' }, { status: 503 });
     gateway = record.gateway;
     path += `/${encodeURIComponent(id)}`;
     if (body.action === 'poll' && Number.isSafeInteger(body.after) && Number(body.after) >= 0) {
@@ -96,7 +120,8 @@ async function relay(body: Record<string, unknown>, principal: string, personal:
       ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(35_000) });
     const data = await response.json() as Record<string, unknown>;
     if (response.ok && body.action === 'start' && typeof data.id === 'string') {
-      try { saveVoiceRelay({ version: 2, id: data.id, owner: accountOwner, binding: hash(body.binding as string), gateway, createdAt: Date.now() }); }
+      try { saveVoiceRelay({ version: 2, id: data.id, owner: accountOwner, binding: hash(body.binding as string), gateway, createdAt: Date.now(),
+        ...(personal ? { personal: { pilotId: personal.pilotId ?? null } } : {}) }); }
       catch (error) {
         if (error instanceof VoiceRelayPersistenceError && error.published) {
           // Publication proved this id was newly ours. Keep its record and an

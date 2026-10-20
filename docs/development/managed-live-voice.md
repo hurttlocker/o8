@@ -2,7 +2,7 @@
 
 ## Delivery boundary
 
-This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal development experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.
+This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Development uses a private marker; an installed desktop requires an independently signed account-and-installation-bound pilot grant. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.
 
 Desktop entry uses a compact experimental waveform control in the active orchestrator composer footer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. A personal development check established native microphone capture, bidirectional WebRTC packets and provider-confirmed closure. Human speech, audible response and physical-shortcut acceptance remain separate checks. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
 
@@ -146,6 +146,45 @@ cross-replica conversation routing. Production lifetime admission remains held.
 
 The local preview exercised real microphone capture and measured levels reaching the native presentation, explicit disconnect, resume and idle closure. The native shortcut event path started and stopped the pinned chat; this was an injected native event, not a physical Caps Lock test. Captured audio tracks ended on close and the other four composer dictation buttons stayed idle. Native display bounds placed the presentation across the owning display’s bottom edge. No audio was stored and no provider was contacted. Screenshot capture was unavailable because the private development wrapper lacked Screen Recording permission; visual polish remains an operator check.
 
+
+## Installed personal pilot admission
+
+Installed desktop builds remain unavailable without a private `managed-voice-pilot.jwt`
+in the application profile. The application verifies this grant against a dedicated
+pinned public key; the signer is never bundled or accepted from an environment
+override. Grants identify one verified license subject, the exact loopback relay
+origin, the real profile path and sign-in epoch, and an explicit experiment purpose,
+issuer and audience. Their lifetime cannot exceed 24 hours. No subscription tier,
+operator number, unsigned configuration or development license key override grants
+installed pilot access. Missing grants leave managed service disabled; invalid grants
+refuse admission and never fall back to it.
+
+Readiness and start share the same strict license and grant checks. Only the local
+operator can start. The existing account journal, generation fence and immutable
+chat binding remain authoritative. Fresh sign-in, account change or another profile
+requires a newly issued grant. Ordinary same-account credential rotation retains
+owned controls. Work-producing events require the same current grant and relay;
+authenticated polling and closure use the original persisted ownership after grant
+expiry or removal. A new grant does not take ownership of an earlier session.
+
+The private relay independently verifies the production license signature and
+expiry and repeats account/grant validation after reading the request body. It
+admits one session and refuses further admission while any terminal outcome is
+unresolved. An exclusive local relay lock must cover receipt reconciliation and
+startup; never launch a Dev and installed relay concurrently. The old Dev relay must
+be stopped and its receipts checked before switching profiles. The pilot retains
+the existing best-effort close request, private terminal receipts and bounded retry.
+It does not establish a provider lifetime ceiling, silently renew, change budgets,
+or relax the managed gateway's `voice_lifetime_unverified` hold.
+
+The installed admission tests call actual GET/POST handlers with persisted account
+and ownership state and an HTTP relay fixture. Cryptographic fixture keys replace
+only the trust roots. Rejections cover other accounts/principals, forged or expired
+licenses and grants, a development key override, wrong origin/profile/epoch, sign-out,
+and ownership changes during a response. Private relay HTTP checks additionally cover
+slow request bodies, concurrent starts, unknown provider creation, lock exclusivity,
+and restart with an unresolved receipt. These checks make no paid provider calls and
+do not establish installed microphone or conversational acceptance.
 
 ## Personal development provider experiment
 
