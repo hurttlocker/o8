@@ -19,6 +19,7 @@ import {
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
+import { trackComposerSubmission } from './use-orchestrator-stream/track-submission';
 import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
@@ -84,6 +85,7 @@ export function useOrchestratorStream(
   options?: OrchestratorStreamOptions,
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useReducer(retainedTranscriptReducer, []);
+  const [voiceTerminals, setVoiceTerminals] = useState<Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>>({});
   const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
   const [busyState, setBusyState] = useState(() => createIdleBusyState());
@@ -594,6 +596,7 @@ export function useOrchestratorStream(
       lastSeqRef,
       lastEventAtRef,
       messagesRef,
+      onVoiceTerminal: (receipt) => setVoiceTerminals(previous => Object.fromEntries([...Object.entries(previous).slice(-63), [receipt.userMessageId, receipt]])),
       onOrchestratorActivity: settlePendingSend,
       onSnapshotTurnTerminal: reconcileSnapshotTerminalTurn,
       onSettledAssistantMissing: (turn) => {
@@ -872,7 +875,7 @@ export function useOrchestratorStream(
     lastEventAtRef.current = sentAtMs;
     setPendingStatusBusy();
 
-    void (async () => {
+    void trackComposerSubmission(sendHandle.userMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt })), async (markDispatch) => {
       const turnOptions = await turnOptionResolution.resolve(clientMessageId, options);
       if (turnOptions === null || repoPathRef.current !== repoPathAtSend || threadIdRef.current !== sendHandle.threadId) {
         activeTurnBackendRef.current = null;
@@ -976,7 +979,7 @@ export function useOrchestratorStream(
       currentAssistantRef.current = null;
       captureFirstTurnPlanRef.current = !planTextRef.current
         && !hasHistoryRef.current
-        && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
+        && !planCaptureSource.some((entry) => !entry.voice && (entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool'));
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
       const outboundMessage = withSessionPrelude(
@@ -986,7 +989,7 @@ export function useOrchestratorStream(
       );
       turnTranscriptEventCountRef.current = 0;
       const payload = buildOrchestratorSendPayload({
-        repoPath: activeRepoPath,
+        pinBackend: turnOptions?.pinBackend, repoPath: activeRepoPath,
         projectId: projectIdRef.current,
         threadId: sendHandle.threadId,
         clientMessageId,
@@ -1013,7 +1016,7 @@ export function useOrchestratorStream(
         sentAtMs,
         wirePayload: payload, attachmentsRequired: Boolean(turnOptions?.attachments?.length),
       };
-      durablePendingSend.recordPending(pendingRecord);
+      markDispatch(); durablePendingSend.recordPending(pendingRecord);
       const delivered = await deliverOrchestratorPayload({
         payload,
         getWebSocket: () => wsRef.current,
@@ -1031,7 +1034,7 @@ export function useOrchestratorStream(
       lastEventAtRef.current = deliveredAt;
       durablePendingSend.armRecord(pendingRecord, deliveredAt);
       setPendingStatusBusy();
-    })();
+    });
     return sendHandle;
   }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
 
@@ -1068,6 +1071,7 @@ export function useOrchestratorStream(
   }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
 
   return {
+    voiceTerminals,
     messages,
     planText,
     status,

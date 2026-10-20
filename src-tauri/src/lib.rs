@@ -19,6 +19,7 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
+mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
 #[cfg(target_os = "macos")]
@@ -8034,6 +8035,7 @@ pub fn run() {
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            managed_voice_window::reset_on_main_navigation(webview.app_handle());
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
@@ -8082,6 +8084,8 @@ pub fn run() {
             master_key_ensure,
             #[cfg(target_os = "macos")]
             o8_stt_start,
+            managed_voice_window::managed_voice_overlay_update,
+            managed_voice_window::managed_voice_presentation_epoch,
             #[cfg(target_os = "macos")]
             o8_stt_stop,
             #[cfg(target_os = "macos")]

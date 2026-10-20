@@ -309,7 +309,7 @@ export const ChatGlassCard = memo(function ChatGlassCard({
                   {cardBuffer.undoArmed ? <UndoSendPill key="undo" onUndo={cardBuffer.stopOrUndo} graceMs={SEND_UNDO_GRACE_MS} /> : null}
                 </AnimatePresence>
               </div>
-              <CardComposer
+              <CardComposer scopeKey={JSON.stringify([card.repoPath, card.threadId])}
                 value={draft}
                 onChange={setDraft}
                 busy={false}

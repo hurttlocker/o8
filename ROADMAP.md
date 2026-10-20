@@ -56,6 +56,8 @@ Managed development environment cleanup source work has closed in [#3337](https:
 
 Workspace polish source work has closed in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Its checks cover quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation source work has also closed: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance. The restoration and reconnect changes are integrated in [#3716](https://github.com/hurttlocker/o8/pull/3716).
 
+Verification support: sidebar date-fold fixtures and the rendered view share a fixed local clock, with an explicit midnight-boundary case. Existing fold and attention assertions remain intact; production date grouping is unchanged. [#3544](https://github.com/hurttlocker/o8/issues/3544)
+
 ## What we need to prove
 
 Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.

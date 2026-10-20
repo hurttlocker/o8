@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
-import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { useComposerDictation } from '@/components/desktop/dictation/ComposerDictation';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { ttsEngine } from '@/lib/tts/engine';
 import {
@@ -53,6 +53,7 @@ interface UseAgentVoiceModeOptions {
   messages: MobileTranscriptEntry[];
   sendNow: (text: string) => boolean;
   surfaceKey: string;
+  composerScopeKey?: string;
 }
 
 export function useAgentVoiceMode({
@@ -64,8 +65,10 @@ export function useAgentVoiceMode({
   messages,
   sendNow,
   surfaceKey,
+  composerScopeKey = surfaceKey,
 }: UseAgentVoiceModeOptions): {
   enabled: boolean;
+  dictationId: string;
   setEnabled: (enabled: boolean) => void;
 } {
   const storageKey = `${STORAGE_PREFIX}${surfaceKey}`;
@@ -106,25 +109,14 @@ export function useAgentVoiceMode({
     }
   }, [storageKey, surfaceKey, dictationOnly]);
 
-  const dictationHost = useDictationHostOptional();
-  const setActiveComposer = dictationHost?.setActiveComposer;
-  useEffect(() => {
-    if (!active || !setActiveComposer) return;
-    const node = composerNodeRef.current;
-    if (!node) return;
-    const deliver = (text: string) => {
+  const dictationId = useComposerDictation({
+    active, nodeRef: composerNodeRef, scopeKey: `${surfaceKey}:${composerScopeKey}`,
+    onText: text => {
       if (!text) return;
       if (enabledRef.current && sendNowRef.current(text)) return;
       fillInputRef.current(text);
-    };
-    const claim = () => setActiveComposer({ node, fill: deliver });
-    claim();
-    node.addEventListener('focus', claim);
-    return () => {
-      node.removeEventListener('focus', claim);
-      setActiveComposer(null);
-    };
-  }, [active, composerNodeRef, setActiveComposer]);
+    },
+  });
 
   useEffect(() => {
     if (turnSurfaceRef.current !== surfaceKey) {
@@ -146,5 +138,5 @@ export function useAgentVoiceMode({
     }
   }, [active, busy, enabled, messages, surfaceKey]);
 
-  return { enabled, setEnabled };
+  return { enabled, setEnabled, dictationId };
 }

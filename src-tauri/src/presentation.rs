@@ -1,9 +1,9 @@
 //! Presentation (quiet) mode — the native half of the "nothing appears over a
 //! screen share" contract.
 //!
-//! o8 paints on more than one window. Besides `main` there are four
+//! o8 paints on more than one window. Besides `main` there are five
 //! always-on-top satellite overlays (`dock`, `agent-partials`, `point-overlay`,
-//! `spatial-ink`) and a native notification path (`notify_review_ready`). None
+//! `spatial-ink`, `managed-chat-voice`) and a native notification path (`notify_review_ready`). None
 //! of them is reachable from the main window's document, so a surface checking
 //! the app's own state cannot tell whether something is currently on screen in
 //! front of an audience.
@@ -26,10 +26,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-/// The four label-disciplined satellite webviews. Same list as
+/// The five label-disciplined satellite webviews. Same list as
 /// `capabilities/overlay-windows.json`; `main` is deliberately absent — quiet
 /// mode never hides the app the operator is presenting.
-pub const OVERLAY_LABELS: [&str; 4] = ["dock", "agent-partials", "point-overlay", "spatial-ink"];
+pub const OVERLAY_LABELS: [&str; 5] = ["dock", "agent-partials", "point-overlay", "spatial-ink", "managed-chat-voice"];
 
 /// Where a `MovedOffscreen` overlay parks. Far enough negative that no attached
 /// display can contain it, close enough that a bad restore is still obvious in
@@ -252,11 +252,11 @@ pub fn suppressed_overlay_labels() -> Vec<String> {
 // ── Tauri-backed implementation ──────────────────────────────────────────────
 
 /// The real window set. Thin on purpose: every decision above is already made.
-pub struct TauriOverlays<'a> {
-    pub app: &'a tauri::AppHandle,
+pub struct TauriOverlays<'a, R: tauri::Runtime = tauri::Wry> {
+    pub app: &'a tauri::AppHandle<R>,
 }
 
-impl OverlayControl for TauriOverlays<'_> {
+impl<R: tauri::Runtime> OverlayControl for TauriOverlays<'_, R> {
     fn snapshot(&self) -> Vec<OverlayState> {
         use tauri::Manager;
         let mut states = Vec::new();
@@ -291,6 +291,7 @@ impl OverlayControl for TauriOverlays<'_> {
 
     fn show(&mut self, label: &str) {
         use tauri::Manager;
+        if label == crate::managed_voice_window::LABEL && !crate::managed_voice_window::is_active() { return; }
         if let Some(window) = self.app.get_webview_window(label) {
             let _ = window.show();
         }

@@ -1,5 +1,7 @@
 'use client';
 
+import { sendBoundComposerTurn } from './use-orchestrator-stream/bound-composer-turn';
+import { ManagedChatVoiceEntry } from './chat-panel/ManagedChatVoiceEntry';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from 'react';
 import { CollapsiblePlanCard } from '@/components/desktop/CollapsiblePlanCard';
 import { composeComposerTurnMessage, resolveComposerExecutionMode, type ComposerMode } from './composer-mode';
@@ -81,7 +83,7 @@ import {
   mergeToolResultIntoEntry,
   sendScratchChatMessage,
 } from '@/components/desktop/orchestrator/send-chat-message';
-import { resolveDisplayMessages } from './chat-panel/resolve-display-messages';
+import { resolveDisplayMessages, resolveVisibleChatMessages } from './chat-panel/resolve-display-messages';
 import { EmptyStateCard } from './chat-panel/EmptyStateCard';
 import { ThreadExportButton } from './chat-panel/ThreadExportButton';
 import { useClearCommand } from './chat-panel/useClearCommand';
@@ -92,6 +94,7 @@ import { useTurnSummaryReceipt } from './chat-panel/useTurnSummaryReceipt';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
 import { useComposerRepoTarget } from './chat-panel/useComposerRepoTarget';
+import { useTranscriptAutoScroll } from './chat-panel/useTranscriptAutoScroll';
 import { useThreadHistoryBackfill } from './chat-panel/useThreadHistoryBackfill';
 import {
   fetchOlderThreadPage,
@@ -100,7 +103,7 @@ import {
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
-import { contextualOperatorDefaults, contextualTurnMessage, type ContextualConversation } from './chat-panel/contextual-turn';
+import { contextualOperatorDefaults, type ContextualConversation } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle, useDraftStartFresh } from './chat-panel/useComposerDraftLifecycle';
 import { composerDraftKey, useComposerDraftValue } from './chat-panel/composer-draft-store';
 import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
@@ -511,7 +514,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     projectId: threadProjectId,
     seededPlanText: planText,
-    hasHistory: chatMessages.length > 0,
+    hasHistory: chatMessages.some(message => !message.voice),
     threadId,
     onThreadIdMint: useCallback((id: string) => {
       if (threadIdRef.current === id) return;
@@ -760,43 +763,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     onImageInjectionConsumed?.();
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
 
-  useEffect(() => {
-    if (suppressNextTranscriptAutoScrollRef.current) {
-      suppressNextTranscriptAutoScrollRef.current = false;
-      return;
-    }
-    requestAnimationFrame(() => {
-      // Smooth when idle (a fresh user turn jumps into view); instant while
-      // streaming so it doesn't fight the per-frame pin below.
-      // Container-scoped on purpose (body-scroll trigger hunt, 2026-07-16):
-      // scrollIntoView scrolls EVERY scrollable ancestor up to the document —
-      // on the zoomed root that displaces the whole app shell (the class the
-      // dashboard shell-guard exists to snap back). Scroll only the transcript.
-      const end = chatEndRef.current;
-      const container = end?.closest('.thoughts-scroll') as HTMLElement | null;
-      if (!container) return;
-      container.scrollTo({ top: container.scrollHeight, behavior: orchStream.status === 'busy' ? 'auto' : 'smooth' });
-    });
-  }, [chatMessages, orchStream.messages, orchStream.status]);
-
-  // Smooth stick-to-bottom while the orchestrator streams. The per-frame
-  // smooth-text reveal grows the content BETWEEN message-array updates, so the
-  // message-change effect above alone leaves the reveal scrolling below the
-  // fold. Pin to the bottom each frame (instant scrollTop — reads as smooth as
-  // the text grows) UNLESS the operator has scrolled up to read history.
-  useEffect(() => {
-    if (orchStream.status !== 'busy') return;
-    const container = chatEndRef.current?.closest('.thoughts-scroll') as HTMLElement | null;
-    if (!container) return;
-    let raf = 0;
-    const pin = () => {
-      const fromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-      if (fromBottom < 120) container.scrollTop = container.scrollHeight;
-      raf = requestAnimationFrame(pin);
-    };
-    raf = requestAnimationFrame(pin);
-    return () => cancelAnimationFrame(raf);
-  }, [orchStream.status]);
+  useTranscriptAutoScroll({ endRef: chatEndRef, suppressRef: suppressNextTranscriptAutoScrollRef,
+    scope: isOrchestratorMode ? threadId : targetSessionKey });
 
   useEffect(() => {
     return () => {
@@ -1365,22 +1333,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),
     [agents, sessionTargets],
   );
-  const displayMessages = useMemo(() => {
-    if (!isOrchestratorMode || isChatMode) return chatMessages;
-    // Loaded history + the live stream overlap after a mid-conversation reload;
-    // the same user turn can survive in both the restored (persisted id) and
-    // the live-minted (optimistic id) form. resolveDisplayMessages concatenates
-    // all three sources and lets dedupeDisplayMessages collapse the overlap --
-    // it used to pick the stream OR the history, which dropped a whole restored
-    // thread the moment one live event arrived (#1839).
-    return resolveDisplayMessages({
-      historyEntries: threadHistoryEntries,
-      chatMessages,
-      streamMessages: orchStream.messages,
-    });
-  }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
+  const displayMessages = useMemo(() => resolveVisibleChatMessages({
+    isOrchestratorMode, isChatMode, historyEntries: threadHistoryEntries, chatMessages, streamMessages: orchStream.messages,
+  }), [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages, threadHistoryEntries]);
+  const backendMessages = useMemo(() => displayMessages.filter(message => !message.voice), [displayMessages]);
   useEffect(() => {
-    const latestAssistant = [...displayMessages].reverse().find((message) => message.role === 'assistant');
+    const latestAssistant = [...displayMessages].reverse().find((message) => message.role === 'assistant' && !message.voice);
     latestAssistantBackendRef.current = latestAssistant?.backend ?? null;
     backendSwitch.observeLatestBackend(latestAssistant?.backend ?? null);
   }, [backendSwitch, displayMessages]);
@@ -1479,7 +1437,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [chatMessages, displayMessages, isChatMode, isOrchestratorMode, onChatSummary]);
 
   const turnSummary = useTurnSummaryReceipt({
-    displayMessages,
+    displayMessages: backendMessages,
     isChatMode,
     isOrchestratorMode,
     missionState,
@@ -1501,7 +1459,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     let activeAssistantId: string | null = null;
     if (orchStream.status === 'busy') {
       for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
-        if (displayMessages[index]?.role === 'assistant') {
+        if (displayMessages[index]?.role === 'assistant' && !displayMessages[index]?.voice) {
           activeAssistantId = displayMessages[index].id;
           break;
         }
@@ -1519,30 +1477,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useEffect(() => { latestInputRef.current = input; }, [input]);
 
   const sendOrchestrator = useCallback((message: string, options: OrchestratorSendOptions) => {
-    const handoffMode = backendSwitch.currentHandoffMode();
     const sendingThreadId = threadIdRef.current;
-    return orchStream.send(message, {
-      ...options, pickedMode: composerModeRef.current,
-      wireMessage: contextualTurnMessage(options.wireMessage ?? message, contextualConversation?.requestContext),
-      ...(handoffMode ? { handoffMode } : {}),
-      beforeSend: async (signal) => {
-        const ready = await ensureSelectedRepoPersisted(signal);
-        if (!ready && !signal.aborted && threadIdRef.current === sendingThreadId) {
-          setInput((draft) => draft ? `${message}\n\n${draft}` : message);
-          for (const image of options.attachments ?? []) {
-            addAttachedImage({ name: image.name ?? 'Image', dataUri: image.dataUri,
-              mimeType: image.dataUri.match(/^data:([^;]+);/)?.[1] ?? 'image/png' });
-          }
-        }
-        return ready;
+    return sendBoundComposerTurn(orchStream.send, message, options, {
+      pickedMode: composerModeRef.current, requestContext: contextualConversation?.requestContext,
+      handoffMode: backendSwitch.currentHandoffMode(), ensureSelectedRepoPersisted,
+      restoreDraft: () => {
+        if (threadIdRef.current !== sendingThreadId) return;
+        setInput((draft) => draft ? `${message}\n\n${draft}` : message);
+        for (const image of options.attachments ?? []) addAttachedImage({ name: image.name ?? 'Image', dataUri: image.dataUri,
+          mimeType: image.dataUri.match(/^data:([^;]+);/)?.[1] ?? 'image/png' });
       },
-      resolveTurnOptions: (signal) => resolveFreshComposerTurnOptions({
-        repoPath: resolvedRepoPath,
-        backend: orchestratorBackend,
-        localModel: contextualConversation ? orchestratorModel : undefined,
-        backendSourceRef, setBackend: setOrchestratorBackend,
-        setModel: setOrchestratorModel, setOperatorDefaults,
-      }, signal, options),
+      resolveOptions: (signal) => resolveFreshComposerTurnOptions({ repoPath: resolvedRepoPath, backend: orchestratorBackend,
+        localModel: contextualConversation ? orchestratorModel : undefined, backendSourceRef, setBackend: setOrchestratorBackend,
+        setModel: setOrchestratorModel, setOperatorDefaults }, signal, options),
     });
   }, [backendSwitch, orchStream, contextualConversation, ensureSelectedRepoPersisted, setInput, addAttachedImage, resolvedRepoPath, orchestratorBackend, orchestratorModel, setOrchestratorModel]);
 
@@ -1963,7 +1910,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     projectId: threadProjectId, context: contextualConversation?.requestContext, send: sendOrchestrator,
   });
 
-  const { sendBuffer, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
+  const { sendBuffer, durable, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
     active: isOrchestratorMode, backend: orchestratorBackend,
     busy: displayWaiting,
     threadId,
@@ -1996,7 +1943,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [setInput]);
 
-  useAgentVoiceMode({
+  const { dictationId } = useAgentVoiceMode({
     active: open,
     dictationOnly: true,
     busy: isChatMode ? waitingForReply : displayWaiting,
@@ -2004,7 +1951,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     fillInput,
     messages: displayMessages,
     sendNow,
-    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`,
+    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`, composerScopeKey: threadId ?? 'draft',
   });
 
   useImperativeHandle(ref, () => ({
@@ -2089,6 +2036,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const composeFirst = !contextualConversation && displayMessages.length === 0 && !displayWaiting;
   return (<WorkerDisclosureProvider key={`${resolvedRepoPath}:${threadId}`}>
     <div
+      data-voice-chat-root
       style={{
         containerType: 'size',
         display: 'flex',
@@ -2194,7 +2142,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      <ComposerArea
+      <ComposerArea dictationId={dictationId}
         ref={inputRef} activeComposer={open}
         inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
         placeholder={contextualConversation?.placeholder}
@@ -2251,6 +2199,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         hasAssistantActivity={hasAssistantActivity}
         footerMeterSlot={footerMeterSlot}
         composerLeadingExtras={composerLeadingExtras}
+        voiceControl={isOrchestratorMode && !isChatMode && threadId && resolvedRepoPath ? <ManagedChatVoiceEntry chatRoot={composerDropHostRef} label={`${composerRepoLabel} · ${activeTargetLabel}`}
+          identity={[resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel, thinkingEffort, permissionMode, composerMode, threadProjectId, collideEnabled]}
+          messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
+          transcript={orchStream.appendLocalEntries}
+          queue={durable} capture={text => captureQueuedSend(text, [])}
+          send={(text) => sendOrchestrator(text, { pinBackend: true, permissionMode, backend: composerBackendTurnOverride(orchestratorBackend),
+            resolveTurnOptions: async () => ({ backend: composerBackendTurnOverride(orchestratorBackend), model: orchestratorModel }),
+            thinkingEffort, model: orchestratorModel, orchestrationMode: composeComposerTurnMessage(text, composerModeRef.current, soloOrchestrator).orchestrationMode })}
+        /> : null}
         attachedImages={attachedImages}
         attachedFiles={attachedFiles}
         dragOver={attachmentDragOver}

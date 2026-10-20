@@ -13,6 +13,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { useComposerDictationId } from '@/components/desktop/dictation/ComposerDictation';
 import {
   DEFAULT_DICTATION_INPUT_MODE,
   readDictationInputMode,
@@ -35,64 +36,63 @@ export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: s
   void idleColor;
   const host = useDictationHostOptional();
   const inputMode = useInputMode();
+  const composerId = useComposerDictationId();
+  const ownsRecording = Boolean(composerId && host?.ownerId === composerId);
+  const unavailable = !composerId || Boolean(host?.active && !ownsRecording);
 
   // Toggle mode — single click drives the state machine.
   const handleClick = useCallback(() => {
-    if (!host) return;
+    if (!host || unavailable || !composerId) return;
     if (inputMode !== 'toggle') return;
     if (host.snapshotState === 'idle') {
       void host.start({
         surface: 'orchestrator',
-        onComplete: () => { /* host wrapper routes to active composer */ },
-      });
+        onComplete: () => { /* host pins this composer for the recording */ },
+      }, composerId);
     } else if (host.snapshotState === 'recording') {
-      host.stopAndSubmit();
+      host.stopAndSubmit(composerId);
     } else if (host.snapshotState === 'requesting-mic') {
-      host.cancel();
+      host.cancel(composerId);
     }
     // While transcribing/polishing/success/error, the button is a no-op
     // so the in-flight pipeline finishes uninterrupted. Use the pill ×
     // to abort if needed.
-  }, [host, inputMode]);
+  }, [composerId, host, inputMode, unavailable]);
 
   // Hold mode — pointer-down starts, pointer-up submits, leave cancels.
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!host) return;
+    if (!host || unavailable || !composerId) return;
     if (inputMode !== 'hold') return;
     if (host.snapshotState !== 'idle') return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     void host.start({
       surface: 'orchestrator',
-      onComplete: () => { /* host wrapper routes to active composer */ },
-    });
-  }, [host, inputMode]);
+      onComplete: () => { /* host pins this composer for the recording */ },
+    }, composerId);
+  }, [composerId, host, inputMode, unavailable]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!host) return;
+    if (!host || unavailable || !composerId) return;
     if (inputMode !== 'hold') return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (host.snapshotState === 'recording') {
-      host.stopAndSubmit();
-    } else if (host.snapshotState === 'requesting-mic') {
-      host.cancel();
-    }
-  }, [host, inputMode]);
+    host.stopAndSubmit(composerId);
+  }, [composerId, host, inputMode, unavailable]);
 
   const handlePointerLeave = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (!host) return;
+    if (!host || unavailable || !composerId) return;
     if (inputMode !== 'hold') return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    if (host.snapshotState === 'recording') host.cancel();
-  }, [host, inputMode]);
+    if (host.snapshotState === 'recording') host.cancel(composerId);
+  }, [composerId, host, inputMode, unavailable]);
 
   if (!host) return null;
 
-  const recording = host.snapshotState === 'recording';
-  const busy = host.snapshotState === 'transcribing' || host.snapshotState === 'polishing';
-  const errored = host.snapshotState === 'error';
+  const recording = ownsRecording && host.snapshotState === 'recording';
+  const busy = ownsRecording && (host.snapshotState === 'transcribing' || host.snapshotState === 'polishing');
+  const errored = ownsRecording && host.snapshotState === 'error';
 
   const color = errored
     ? '#ef4444'
@@ -110,12 +110,14 @@ export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: s
   return (
     <button
       type="button"
+      disabled={unavailable}
+      aria-pressed={recording}
       onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerUp}
-      title={recording ? recordingHint : busy ? 'Transcribing…' : idleHint}
+      title={unavailable ? (composerId ? 'Dictation is active in another composer' : 'Dictation is unavailable in this composer') : recording ? recordingHint : busy ? 'Transcribing…' : idleHint}
       style={{
         display: 'inline-flex',
         alignItems: 'center',

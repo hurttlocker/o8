@@ -7,6 +7,7 @@ import type { OrchestratorPermissionMode } from './shared';
 import type { OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 
 export function buildOrchestratorSendPayload(input: {
+  pinBackend?: boolean;
   repoPath: string;
   projectId?: string | null;
   threadId: string;
@@ -27,6 +28,7 @@ export function buildOrchestratorSendPayload(input: {
 }): string {
   return JSON.stringify({
     type: 'orchestrator-send',
+    ...(input.pinBackend ? { pinBackend: true } : {}),
     repoPath: input.repoPath,
     ...(input.projectId ? { projectId: input.projectId } : {}),
     threadId: input.threadId,
