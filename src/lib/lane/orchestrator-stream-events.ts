@@ -11,7 +11,7 @@ export type OrchestratorEvent =
   // Claude TodoWrite/update_plan tool calls. ws-server maps it to the mobile
   // `plan-update` orchestrator event. Step ids are stable within a turn.
   | { type: 'plan'; explanation: string | null; steps: OrchestratorPlanStep[] }
-  | { type: 'done'; sessionId: string | null; cost: number | null; usage?: OrchestratorTurnUsage }
+  | { type: 'done'; terminalOutcome?: 'completed' | 'failed' | 'unconfirmed'; sessionId: string | null; cost: number | null; usage?: OrchestratorTurnUsage }
   | { type: 'error'; error: string; code?: string; status?: number }
   // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
   //    text is buffered, not streamed, so it never pollutes the visible answer

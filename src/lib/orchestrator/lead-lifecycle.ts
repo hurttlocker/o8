@@ -321,6 +321,9 @@ async function executeTurn(lead: LeadRow, turn: TurnRow): Promise<void> {
       content: text || classification.detail,
       backend: lead.backend,
       model: lead.model,
+      receipt: { leadModel: lead.model, effort: lead.effort, mode: 'multitask', permissionMode: turn.permission_mode,
+        terminal: { userMessageId: `lead-user-${turn.root_turn_id ?? turn.id}`,
+          outcome: classification.status === 'completed' ? 'completed' : 'unconfirmed' } },
       sessionId,
     });
   } catch (error) {

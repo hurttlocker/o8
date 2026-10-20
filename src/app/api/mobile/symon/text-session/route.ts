@@ -150,6 +150,7 @@ export async function POST(request: NextRequest) {
   })));
   try {
     const session = createSymonTextSession({
+      reattachable: process.env.O8_MANAGED_LIVE_ENABLED === '1' && new URL(request.url).searchParams.get('managedVoice') === '1',
       subject: principal,
       deviceId: device?.id ?? null,
       engine: info.engine,

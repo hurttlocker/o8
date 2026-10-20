@@ -13,6 +13,7 @@ import { createSharedWorkerHeartbeat, type SharedWorkerHeartbeatHooks } from './
 import { immediateComposerSendPending } from './composer-send-admission';
 import { sendLeadTerminalStatus } from './lead-terminal-status';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
+import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -31,6 +32,7 @@ function originFor(item: QueuedComposerSendRecord): ReviewChatOrigin {
 function checkQueueBinding(item: QueuedComposerSendRecord): void {
   assertComposerSendClaim(item.id);
   validateComposerQueueTarget(item);
+  checkComposerQueuePrecondition(item);
   const history = readPersistedLlmChat(item.threadId)?.history as { archivedAt?: unknown; projectId?: string;
     messages?: Array<{ role: string; timestamp: number; receipt?: { permissionMode?: string } }> } | undefined;
   if (history?.archivedAt) throw new Error('This chat was archived.');

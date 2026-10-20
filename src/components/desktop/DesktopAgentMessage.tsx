@@ -382,11 +382,11 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         paddingRight: align === 'flex-end' ? 4 : 0,
       }}>
         <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
-          {entry.timestampLabel}
+          {entry.voice ? `${entry.voice.direction === 'output' ? 'Voice reply' : 'Voice'} · ` : ''}{entry.timestampLabel}
         </span>
       </div>
     );
-  }, [entry.timestampLabel]);
+  }, [entry.timestampLabel, entry.voice]);
 
   if (isCompaction) {
     return (

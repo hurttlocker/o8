@@ -1,6 +1,6 @@
 import type { TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
-import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
@@ -16,6 +16,8 @@ export interface OrchestratorSendHandle {
 }
 
 export interface OrchestratorSendOptions {
+  /** Explicit voice attachment must not change the orchestrator on quota failure. */
+  pinBackend?: boolean;
   /** Interactive task artifact action riding this turn (#1699); the realtime server marks it delivered. */
   taskArtifactAction?: TaskArtifactActionStamp;
   permissionMode?: OrchestratorPermissionMode;
@@ -64,6 +66,7 @@ export interface OrchestratorStreamOptions {
 }
 
 export interface OrchestratorStreamResult {
+  voiceTerminals: Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>;
   messages: MobileTranscriptEntry[];
   planText: string | null;
   status: OrchestratorStreamStatus;
@@ -90,4 +93,12 @@ export interface OrchestratorStreamResult {
   reset: () => void;
   retryPendingSend: (clientMessageId: string) => void;
   connected: boolean;
+}
+
+export interface ActiveTurnState {
+  startedAt: number;
+  toolCallsStarted: number;
+  toolCallsCompleted: number;
+  latestToolLabel: string | null;
+  launches: MobileTranscriptToolLaunchLink[];
 }

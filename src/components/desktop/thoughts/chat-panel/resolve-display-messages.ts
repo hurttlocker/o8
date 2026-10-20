@@ -1,5 +1,14 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { dedupeDisplayMessages } from './dedupe-display-messages';
+import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
+
+export function resolveVisibleChatMessages(sources: Parameters<typeof resolveDisplayMessages>[0] & {
+  isOrchestratorMode: boolean;
+  isChatMode: boolean;
+}): MobileTranscriptEntry[] {
+  return sources.isOrchestratorMode && !sources.isChatMode
+    ? visibleVoiceTranscript(resolveDisplayMessages(sources)) : sources.chatMessages;
+}
 
 /**
  * Compose the orchestrator transcript that actually renders.
