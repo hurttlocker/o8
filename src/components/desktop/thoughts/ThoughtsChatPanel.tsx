@@ -100,7 +100,7 @@ import {
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
-import { contextualOperatorDefaults, contextualTurnMessage } from './chat-panel/contextual-turn';
+import { contextualOperatorDefaults } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle, useDraftStartFresh } from './chat-panel/useComposerDraftLifecycle';
 import { composerDraftKey, useComposerDraftValue } from './chat-panel/composer-draft-store';
 import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
@@ -2111,6 +2111,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         footerMeterSlot={footerMeterSlot}
         composerLeadingExtras={composerLeadingExtras}
         voiceControl={isOrchestratorMode && !isChatMode && threadId && resolvedRepoPath ? <ManagedChatVoiceEntry chatRoot={composerDropHostRef} label={`${composerRepoLabel} · ${activeTargetLabel}`}
+          visualTarget={{ repoPath: resolvedRepoPath, threadId }}
           identity={[resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel, thinkingEffort, permissionMode, composerMode, threadProjectId, collideEnabled]}
           messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
           transcript={orchStream.appendLocalEntries}

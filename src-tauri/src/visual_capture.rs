@@ -282,11 +282,10 @@ pub fn o8_visual_capture_undo(
         })
         .ok_or("This visual capture is no longer active.")?;
     if let Some(shared) = &current.shared {
-        shared
-            .marks
-            .lock()
-            .unwrap_or_else(|value| value.into_inner())
-            .pop();
+        let removed = shared.marks.lock().unwrap_or_else(|value| value.into_inner()).pop();
+        let revision = shared.snapshots.next_revision();
+        let _ = app.emit_to("main", "o8:visual-capture-mark", serde_json::json!({"captureId":id,"generation":generation,
+            "revision":revision,"phase":"undo","removedAtMs":removed.and_then(|mark| mark.points.last().map(|point| point.t))}));
     }
     let _ = app.emit_to(
         "spatial-ink",

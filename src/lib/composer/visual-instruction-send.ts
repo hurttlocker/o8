@@ -1,3 +1,6 @@
+import { visualQuestionEvidence } from './visual-clarification';
+import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
+import { composerQueuePayloadMatches } from './queue-payload-match';
 import { composerBackendSupportsImages } from '@/lib/mobile/composer-image-validation';
 import { buildVisualInstructionPayload } from './visual-instruction';
 import type { VisualInstructionDraft } from './visual-draft-store';
@@ -15,14 +18,18 @@ export async function submitVisualInstruction(draft: VisualInstructionDraft, tra
   if (!composerBackendSupportsImages(draft.template.routing.backend)) throw new VisualInstructionDeliveryError('The selected runtime cannot receive these images. The visual draft is retained.');
   const template = draft.template.wireMessage;
   if (template.split(VISUAL_REQUEST_MARKER).length !== 2) throw new VisualInstructionDeliveryError('The captured send route is incomplete. Keep the draft and select its conversation.');
-  const payload = { ...draft.template, text: result.text, wireMessage: template.replace(VISUAL_REQUEST_MARKER, () => result.wireMessage), images: result.images };
+  const question = visualQuestionEvidence(draft);
+  const pending = question ? `\nAn optional clarification was shown for these pixels and left unanswered: ${JSON.stringify(question)}. Inspect the evidence; if this ambiguity still matters, continue this same question in the existing chat.` : '';
+  const payload = { ...draft.template, text: result.text, wireMessage: template.replace(VISUAL_REQUEST_MARKER, () => result.wireMessage + pending), images: result.images };
   if (payload.wireMessage.length > 250_000) throw new VisualInstructionDeliveryError('This visual request exceeds the chat limit. Shorten the instruction or use fewer frames.');
   const response = await transport('/api/orchestrator/composer-queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...draft.request.target, id: `visual-${draft.request.id}`, intent: 'send-next', payload }) });
-  const body = await response.json().catch(() => null) as { item?: { id: string; threadId: string; repoPath: string; status: string }; error?: string } | null;
-  if (!response.ok) throw new VisualInstructionDeliveryError(body?.error || 'The visual request was not accepted. Its draft is retained.');
-  if (body?.item?.id !== `visual-${draft.request.id}` || body.item.threadId !== draft.request.target.threadId) {
+  const body = await response.json().catch(() => null) as { item?: QueuedComposerSendRecord; error?: string } | null;
+  if (!response.ok) throw new VisualInstructionDeliveryError(body?.error || 'The visual request was not accepted. Its draft is retained.', draft.status === 'unknown' || response.status >= 500);
+  if (body?.item?.id !== `visual-${draft.request.id}` || body.item.threadId !== draft.request.target.threadId
+    || body.item.repoPath !== draft.request.target.repoPath || !composerQueuePayloadMatches(body.item.payload, payload)) {
     throw new VisualInstructionDeliveryError('Delivery was not confirmed for this conversation. Reconcile before retrying.', true);
   }
+  if (body.item.status === 'cancelled') throw new VisualInstructionDeliveryError('This visual request was cancelled. Review the chat before creating another request.', true);
   return body.item;
 }

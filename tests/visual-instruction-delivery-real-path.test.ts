@@ -34,7 +34,7 @@ const threadId = 'thoughts-queued-execution'; const target = { repoPath: repo, t
 const historyPath = join(root, 'chat-history', `${threadId}.json`);
 const { getSqlite, closeDb } = await import('@/lib/db');
 const queue = await import('@/lib/orchestrator/composer-queue');
-const { POST } = await import('@/app/api/orchestrator/composer-queue/route');
+const { POST, GET } = await import('@/app/api/orchestrator/composer-queue/route');
 const { createChatContinuationHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
 const active = new Map<string, AbortController>(); let busy = false;
@@ -115,4 +115,33 @@ it('retains editable evidence for a known rejection and refuses mismatched saved
   const send = vi.fn(routeTransport);
   await expect(submitVisualInstruction(original, send)).rejects.toBeInstanceOf(VisualInstructionDeliveryError);
   expect(send).not.toHaveBeenCalled(); expect(original.request.frames).toHaveLength(4);
+});
+
+
+it('reads only the exact captured chat receipt before and after persisted admission', async () => {
+  const draft = await visualDraft(); const item = await submitVisualInstruction(draft, routeTransport);
+  const receiptRequest = (thread = threadId, origin = 'http://localhost') => new NextRequest(`${origin}/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(repo)}&threadId=${thread}&id=${item.id}`, { headers: { host: new URL(origin).host } });
+  expect((await (await GET(receiptRequest())).json()).userMessageId).toBeNull();
+  const heartbeat = createChatContinuationHeartbeat(hooks); heartbeat();
+  await vi.waitFor(() => expect(queue.readComposerSend(item.id)?.status).toBe('applied'));
+  closeDb();
+  const restored = await (await GET(receiptRequest())).json();
+  expect(restored.item.id).toBe(item.id);
+  expect(restored.userMessageId).toBe(`review-user-assistant-queued-${item.id}`);
+  expect((await GET(receiptRequest('thoughts-other'))).status).toBe(404);
+  expect((await GET(receiptRequest(threadId, 'https://untrusted.example'))).status).toBe(401);
+});
+
+it('reads the persisted lead turn identity rather than guessing the ordinary chat user ID', async () => {
+  const draft = await visualDraft(); const item = await submitVisualInstruction(draft, routeTransport);
+  const db = getSqlite();
+  db.prepare(`INSERT INTO orchestrator_leads (id,start_key,request_digest,thread_id,repo_path,backend,model,effort,status,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run('fixture-lead','fixture-lead-start','fixture-digest',threadId,repo,'codex','selected-model','low','running',1,1);
+  db.prepare(`INSERT INTO orchestrator_lead_turns (id,lead_id,idempotency_key,ordinal,kind,message,status,created_at)
+    VALUES (?,?,?,?,?,?,?,?)`).run('actual-admitted-turn','fixture-lead',`composer-queue:${item.id}`,1,'user','Raw original instruction','running',2);
+  expect(queue.claimNextComposerSend(target)?.id).toBe(item.id); expect(queue.admitComposerSend(item.id)).toBe(true);
+  closeDb();
+  const response = await GET(new NextRequest(`http://localhost/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(repo)}&threadId=${threadId}&id=${item.id}`, { headers: { host: 'localhost' } }));
+  expect((await response.json()).userMessageId).toBe('lead-user-actual-admitted-turn');
+  getSqlite().prepare('DELETE FROM orchestrator_leads WHERE id = ?').run('fixture-lead');
 });

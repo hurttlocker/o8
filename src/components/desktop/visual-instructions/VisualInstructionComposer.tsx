@@ -7,7 +7,9 @@ import { ownsVisualDraft, subscribeVisualCapture } from '@/lib/composer/visual-c
 import { visualCaptureTargets, type VisualCaptureTarget } from '@/lib/composer/visual-capture-targets';
 import { readVisualDraft, removeVisualDraft, restoreVisualDraft, saveVisualDraft, subscribeVisualDrafts, type VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { MAX_VISUAL_FRAMES, visualInstructionScope, type VisualInstructionTarget } from '@/lib/composer/visual-instruction';
-import { VisualInstructionDeliveryError, submitVisualInstruction, VISUAL_REQUEST_MARKER } from '@/lib/composer/visual-instruction-send';
+import { VISUAL_REQUEST_MARKER } from '@/lib/composer/visual-instruction-send';
+import { commitVisualInstruction } from '@/lib/composer/visual-instruction-commit';
+import { inspectVisualDraft, invalidateVisualInspection } from '@/lib/composer/visual-inspection-client';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
 import type { ComposerSendImage } from '@/lib/hooks/use-composer-send-buffer';
 
@@ -68,6 +70,14 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
     return () => { unregister(); textarea?.removeEventListener('focus', focus); textarea?.removeEventListener('pointerdown', focus); registration.current = null; };
   }, [auth.isLoaded, principal, props.active, props.anchor, props.label, scope]);
 
+  useEffect(() => {
+    const frame = draft?.request.frames.at(-1);
+    if (!draft || draft.status !== 'draft' || !frame?.observation || !draft.request.utterance.trim()) return;
+    inspectVisualDraft({ principal, requestId: draft.request.id, observation: frame.observation,
+      utterance: draft.request.utterance, candidates: frame.candidates ?? [] }, draft.request.target, fetch, draft.inspectionReadyAt);
+    return () => invalidateVisualInspection(principal, draft.request.id);
+  }, [draft, principal]);
+
   const createDraft = (): VisualInstructionDraft | null => props.target && auth.isLoaded ? {
     principal, status: 'draft', template: props.capture(VISUAL_REQUEST_MARKER, []),
     request: { version: 1, id: crypto.randomUUID(), createdAt: new Date().toISOString(), target: { ...props.target }, utterance: '', frames: [] },
@@ -103,14 +113,10 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
     if (!draft || busy || capturing || draft.status === 'saved' || !draft.request.utterance.trim() || !draft.request.frames.length) return;
     setBusy(true); setError(null);
     try {
-      await saveVisualDraft({ ...draft, status: 'saving', error: undefined });
-      if (!alive.current || !current.current.loaded || current.current.principal !== draft.principal) throw new VisualInstructionDeliveryError('The account changed before dispatch. The original draft is retained.');
-      const item = await submitVisualInstruction(draft);
-      await saveVisualDraft({ ...draft, status: 'saved', error: item.status === 'queued' ? 'Visual instruction queued in this chat.' : 'Visual instruction saved in this chat.' });
+      await commitVisualInstruction(draft, () => alive.current && current.current.loaded && current.current.principal === draft.principal);
       setExpanded(false);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      await saveVisualDraft({ ...draft, status: cause instanceof VisualInstructionDeliveryError && !cause.uncertain ? 'draft' : 'unknown', error: message }).catch(() => {});
       setError(message);
     } finally { setBusy(false); }
   };
@@ -123,7 +129,7 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
       canSend: Boolean(draft && draft.status !== 'saved' && draft.status !== 'saving' && !busy && !capturing && draft.request.utterance.trim() && draft.request.frames.length),
       open, close: () => { setExpanded(false); setDismissed(draftKey); setConfirmClear(false); props.anchor.current?.focus(); },
       captureScreen, pickImages: () => input.current?.click(), upload: files => { void addFiles(Array.from(files)); },
-      setWords: words => { if (draft && !locked) save({ ...draft, request: { ...draft.request, utterance: words.slice(0, 16_000), clarification: undefined } }); },
+      setWords: words => { if (draft && !locked) save({ ...draft, inspectionReadyAt: Date.now(), request: { ...draft.request, utterance: words.slice(0, 16_000), clarification: undefined } }); },
       annotate: id => { if (!locked) setEditing(id); },
       removeFrame: id => { if (draft && !locked) save({ ...draft, request: { ...draft.request, clarification: undefined, frames: draft.request.frames.filter(frame => frame.id !== id) } }); },
       send: () => { void send(); }, toggleClear: () => setConfirmClear(value => !value),
@@ -133,7 +139,7 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
     {props.active && draft && editFrame ? <ScreenshotAnnotator image={{ ...editFrame.image, mimeType: 'image/png' }}
       instruction={{ value: draft.request.utterance, onChange: words => { if (!locked) save({ ...draft, request: { ...draft.request, utterance: words, clarification: undefined } }); } }}
       onCancel={() => setEditing(null)} onDone={dataUri => {
-      save({ ...draft, request: { ...draft.request, clarification: undefined, frames: draft.request.frames.map(frame => frame.id === editFrame.id ? { ...frame, id: `frame-${crypto.randomUUID()}`, image: { name: frame.image.name, dataUri }, strokes: [], pins: [] } : frame) } });
+      save({ ...draft, request: { ...draft.request, clarification: undefined, frames: draft.request.frames.map(frame => frame.id === editFrame.id ? { ...frame, id: `frame-${crypto.randomUUID()}`, image: { name: frame.image.name, dataUri }, observation: undefined, candidates: undefined, strokes: [], pins: [] } : frame) } });
       setEditing(null); props.anchor.current?.focus();
     }} /> : null}
   </>;

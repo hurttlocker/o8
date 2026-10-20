@@ -1,3 +1,4 @@
+import { parseRippleResolutionResult, type RippleChoiceResolution } from '@/lib/mobile/ripple-contract';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
 import { parseVisualInstruction, visualInstructionScope, type VisualInstruction } from './visual-instruction';
 
@@ -7,6 +8,8 @@ export interface VisualInstructionDraft {
   template: ComposerQueuePayload;
   status: 'draft' | 'saving' | 'saved' | 'unknown';
   error?: string;
+  inspectionReadyAt?: number;
+  visualQuestion?: { key: string; resolution: RippleChoiceResolution };
 }
 const drafts = new Map<string, VisualInstructionDraft>();
 const listeners = new Set<() => void>();
@@ -68,7 +71,11 @@ export async function restoreVisualDraft(principal: string, target: VisualInstru
   if (!request || value.principal !== principal || visualInstructionScope(request.target) !== visualInstructionScope(target)
     || !['draft', 'saving', 'saved', 'unknown'].includes(value.status)
     || !value.template?.routing || typeof value.template.wireMessage !== 'string') return;
-  drafts.set(key, { ...value, request, status: value.status === 'saving' ? 'unknown' : value.status }); publish();
+  const storedQuestion = value.visualQuestion;
+  const resolution = storedQuestion && parseRippleResolutionResult(storedQuestion.resolution);
+  const visualQuestion = storedQuestion && typeof storedQuestion.key === 'string' && storedQuestion.key.length <= 32_000 && resolution?.kind === 'choice'
+    ? { key: storedQuestion.key, resolution } : undefined;
+  drafts.set(key, { ...value, visualQuestion, request, status: value.status === 'saving' ? 'unknown' : value.status }); publish();
 }
 
 export async function removeVisualDraft(principal: string, target: VisualInstruction['target'], id: string): Promise<void> {

@@ -65,6 +65,10 @@ it('retains an ambiguous dispatch and only retries its original identity', async
   expect(test.rows.get('a')?.status).toBe('unknown'); expect(node.textContent).toContain('Check delivery');
   expect(node.querySelector<HTMLTextAreaElement>('textarea[aria-label="Visual instruction"]')?.disabled).toBe(true);
   expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).id).toBe('visual-request-a');
+  fetcher.mockResolvedValueOnce(Response.json({ error: 'Runtime became unavailable.' }, { status: 400 }));
+  await act(async () => send().click());
+  expect(test.rows.get('a')?.status).toBe('unknown');
+  expect(fetcher.mock.calls[1][1]?.body).toBe(fetcher.mock.calls[0][1]?.body);
 });
 it('cannot send or clear a draft while its next frame is still recording or transcribing', async () => {
   await act(async () => claimVisualCapture('capture', 'a', target, 'request-a'));
@@ -84,11 +88,25 @@ it('uses one actual composer, preserves the ordinary draft on close, and resumes
   expect(ordinarySend).not.toHaveBeenCalled();
 });
 it('sends through the shared composer Enter path and returns to the preserved ordinary input only after acknowledgement', async () => {
-  fetcher.mockResolvedValueOnce(Response.json({ item: { id: 'visual-request-a', threadId: target.threadId, repoPath: target.repoPath, status: 'queued' } }));
+  fetcher.mockImplementationOnce(async (_url, init) => { const body = JSON.parse(String(init?.body)); return Response.json({ item: { ...body, status: 'queued' } }); });
   await act(async () => node.querySelector('textarea')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(fetcher).toHaveBeenCalledTimes(1); expect(ordinarySend).not.toHaveBeenCalled();
   expect(node.querySelectorAll('textarea')).toHaveLength(1);
   expect(node.querySelector('textarea')?.value).toBe('Unsent ordinary message');
   expect(test.rows.get('a')?.status).toBe('saved');
   expect(node.textContent).toContain('queued in this chat');
+});
+
+it('coalesces Send and deliberate voice delegation into the same frozen queue request', async () => {
+  const { commitVisualInstruction } = await import('@/lib/composer/visual-instruction-commit');
+  let release!: (response: Response) => void;
+  fetcher.mockImplementationOnce(() => new Promise(done => { release = done; }));
+  const draft = test.rows.get('a')!;
+  await act(async () => send().click());
+  const voice = commitVisualInstruction(draft);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const accepted = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+  await act(async () => { release(Response.json({ item: { ...accepted, status: 'queued' } })); await voice; });
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(test.rows.get('a')?.status).toBe('saved');
+  expect(accepted.payload.images).toEqual(draft.request.frames.map(frame => frame.image));
 });

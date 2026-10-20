@@ -5127,6 +5127,12 @@
       ]
     },
     {
+      "path": "tests/visual-inspection-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/visual-instruction-delivery-real-path.test.ts",
       "reasons": [
         "real-path"

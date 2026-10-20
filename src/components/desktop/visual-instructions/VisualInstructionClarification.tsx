@@ -7,13 +7,14 @@ import { ComposerPopover } from '@/components/desktop/thoughts/chat-panel/Compos
 import { FloatingSurface } from '@/components/desktop/FloatingSurface';
 import { requestRippleResolution } from '@/lib/mobile/ripple-client';
 import type { RippleChoiceResolution } from '@/lib/mobile/ripple-contract';
+import { openVisualQuestion, confirmVisualQuestion } from '@/lib/composer/visual-clarification';
 import { readVisualDraft, saveVisualDraft, type VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 
 /** Clarification is optional and belongs to the exact words and frames the user reviewed. */
 type Props = { draft: VisualInstructionDraft; disabled: boolean };
 export function VisualInstructionClarification(props: Props) {
   const { request } = props.draft;
-  return <ClarificationState key={JSON.stringify([props.draft.principal, request.id, request.utterance, request.frames.map(frame => frame.id)])} {...props} />;
+  return <ClarificationState key={JSON.stringify([props.draft.principal, request.id, request.utterance, request.frames.map(frame => [frame.id, frame.observation?.id, frame.observation?.revision]), request.clarification ?? null])} {...props} />;
 }
 function ClarificationState({ draft, disabled }: Props) {
   const [busy, setBusy] = useState(false);
@@ -26,6 +27,13 @@ function ClarificationState({ draft, disabled }: Props) {
   const resolve = async () => {
     const ticket = ++run.current;
     setBusy(true); setNotice(''); setOpen(true);
+    const frame = draft.request.frames.at(-1);
+    if (frame?.observation) {
+      const question = openVisualQuestion(draft);
+      setBusy(false); setChoice(question);
+      if (!question) setNotice('Your agent will inspect the picture before changing the component.');
+      return;
+    }
     const resolution = await requestRippleResolution({ utterance: draft.request.utterance, repoName: draft.request.target.repoPath.split('/').pop() });
     if (ticket !== run.current || readVisualDraft(draft.principal, draft.request.target) !== draft) return;
     setBusy(false);
@@ -35,7 +43,8 @@ function ClarificationState({ draft, disabled }: Props) {
   const confirm = (value: string) => {
     const current = readVisualDraft(draft.principal, draft.request.target);
     if (!choice || current !== draft || current.status !== 'draft') { setChoice(null); return; }
-    void saveVisualDraft({ ...draft, request: { ...draft.request, clarification: { path: choice.aodlPath, value, question: choice.question } } })
+    if (draft.request.frames.at(-1)?.observation) { void confirmVisualQuestion(draft, value).catch(error => setNotice(String(error))); setChoice(null); setOpen(false); return; }
+    void saveVisualDraft({ ...draft, request: { ...draft.request, clarification: { id: choice.id, path: choice.aodlPath, value, question: choice.question } } })
       .catch(error => setNotice(String(error)));
     setChoice(null); setOpen(false);
   };

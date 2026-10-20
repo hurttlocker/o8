@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readVisualQueueReceipt } from '@/lib/composer/visual-queue-receipt';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { cancelComposerSend, enqueueComposerSend, listQueuedComposerSends, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
@@ -16,6 +17,11 @@ export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request); if (denied) return denied;
   try {
     const target = validateComposerQueueTarget({ repoPath: request.nextUrl.searchParams.get('repoPath'), threadId: request.nextUrl.searchParams.get('threadId') }, false);
+    const id = request.nextUrl.searchParams.get('id');
+    if (id !== null) {
+      const receipt = readVisualQueueReceipt(target, id);
+      return receipt ? NextResponse.json(receipt, { headers: { 'Cache-Control': 'no-store' } }) : NextResponse.json({ error: 'This visual request was not found in this chat.' }, { status: 404 });
+    }
     return NextResponse.json({ items: listQueuedComposerSends(target) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }

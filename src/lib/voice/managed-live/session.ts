@@ -44,7 +44,7 @@ export class LiveTranscript {
   }
 }
 
-type LiveOptions = { idleTimeoutMs?: number; onLevel?: (level: number) => void };
+type LiveOptions = { idleTimeoutMs?: number; onLevel?: (level: number) => void; onInputEvent?: (event: LiveEvent, sessionId: string) => void };
 class LiveRequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
@@ -235,6 +235,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
         cursor = entry.cursor;
         activityPolicy.observe(entry.event, Date.now());
         captions?.observe(entry.event);
+        options?.onInputEvent?.(entry.event, id);
         if (entry.event.type === 'session.closed') {
           const canResume = wasLive && !idleClosed && !signal?.aborted && activityPolicy.usage.providerUsageFinal
             && (entry.event.reason === 'connection_lost' || (connectionFailed && entry.event.reason === 'close_requested'));

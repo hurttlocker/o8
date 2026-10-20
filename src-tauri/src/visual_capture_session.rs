@@ -40,6 +40,7 @@ pub struct Shared {
     pub widget: Mutex<Option<Widget>>,
     pub bounds: [f64; 4],
     pub started: Instant,
+    pub snapshots: Arc<crate::visual_capture_snapshot::SnapshotPipeline>,
 }
 
 pub struct Session {
@@ -108,6 +109,8 @@ impl Session {
         if cancelled.load(Ordering::Acquire) {
             return Err("Visual capture was cancelled.".into());
         }
+        let started = Instant::now();
+        let snapshots = crate::visual_capture_snapshot::SnapshotPipeline::start(app.clone(), id.clone(), generation, directory.clone(), [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height], cancelled.clone(), started);
         let shared = Arc::new(Shared {
             stopping: AtomicBool::new(false),
             cancelled,
@@ -120,7 +123,8 @@ impl Session {
                 rect.size.width,
                 rect.size.height,
             ],
-            started: Instant::now(),
+            started,
+            snapshots,
         });
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let thread_shared = shared.clone();
@@ -138,7 +142,9 @@ impl Session {
                 .with_output_url(&thread_directory.join("recording.mp4")).map_err(|_| "Could not prepare recording output.")?
                 .with_video_codec(SCRecordingOutputCodec::H264).with_output_file_type(SCRecordingOutputFileType::MP4);
             let output = SCRecordingOutput::new(&recording).ok_or("Could not prepare recording output.")?;
-            let stream = SCStream::new(&filter, &config).map_err(|_| "Could not prepare the recording stream.")?;
+            let mut stream = SCStream::new(&filter, &config).map_err(|_| "Could not prepare the recording stream.")?;
+            let snapshot_stream = thread_shared.snapshots.clone();
+            stream.add_output_handler(move |sample, kind| snapshot_stream.observe(sample, kind), SCStreamOutputType::Screen).map_err(|_| "Could not observe screen frames.")?;
             stream.add_recording_output(&output).map_err(|_| "Could not attach recording output.")?;
             let before = thread_shared.started.elapsed();
             stream.start_capture().map_err(|_| "Screen recording could not start.")?;
@@ -205,6 +211,7 @@ impl Session {
     }
 
     pub fn finish(mut self, instruction: String) -> Result<serde_json::Value, String> {
+        self.shared.snapshots.stop();
         let duration = self.shared.started.elapsed().as_millis().min(90_000) as u64;
         self.shared.stopping.store(true, Ordering::Release);
         if let Some(input) = self.input_worker.take() {

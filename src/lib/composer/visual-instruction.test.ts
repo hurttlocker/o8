@@ -75,3 +75,14 @@ it('bounds dense wire metadata while retaining every original point and actual i
   expect(original.frames[0].strokes[0].points).toHaveLength(8192);
   expect(result.images[0]).toEqual(image);
 });
+
+it('refuses a mismatched attachment while preserving a paired observation without embedding clean pixels in wire text', async () => {
+  const { sampleObservation } = await import('./visual-inspection.test-fixture');
+  const observation = sampleObservation(); const value = request();
+  const frame = { ...value.frames[0], width: observation.width, height: observation.height, image: observation.image, observation };
+  expect(parseVisualInstruction({ ...value, frames: [frame] })).not.toBeNull();
+  expect(parseVisualInstruction({ ...value, frames: [{ ...frame, image: { ...frame.image, dataUri: 'data:image/png;base64,YQ==' } }] })).toBeNull();
+  const result = buildVisualInstructionPayload({ ...value, frames: [frame] });
+  expect(result.images[0].dataUri).toBe(observation.image.dataUri);
+  expect(result.wireMessage).not.toContain('data:image');
+});

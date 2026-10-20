@@ -5,7 +5,7 @@ use crate::visual_capture_session::Shared;
 use std::ffi::c_void;
 use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[repr(C)]
 struct Location {
@@ -34,8 +34,41 @@ pub fn cursor() -> Option<[f64; 2]> {
     }
 }
 
+// Restrict local DOM evidence to the focused main webview on the primary display.
+// Other displays and applications retain pixels without guessed element identities.
+fn main_webview_rect(app: &tauri::AppHandle, screen: [f64; 4]) -> Option<[f64; 4]> {
+    if screen[0].abs() > 1.0 || screen[1].abs() > 1.0 {
+        return None;
+    }
+    let front = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    if front.processIdentifier() != std::process::id() as i32 {
+        return None;
+    }
+    let window = app.get_webview_window("main")?;
+    if !window.is_focused().ok()? {
+        return None;
+    }
+    let scale = window.scale_factor().ok()?;
+    let position = window.inner_position().ok()?;
+    let size = window.inner_size().ok()?;
+    let rect = [
+        position.x as f64 / scale,
+        position.y as f64 / scale,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    ];
+    (rect[0] >= 0.0
+        && rect[1] >= 0.0
+        && rect[0] + rect[2] <= screen[2]
+        && rect[1] + rect[3] <= screen[3])
+        .then_some(rect)
+}
+
 pub fn run(app: tauri::AppHandle, id: String, generation: u64, shared: Arc<Shared>) {
     let mut stroke: Vec<Point> = Vec::new();
+    let mut frozen = None;
+    let mut revision = 0;
+    let mut webview_rect = None;
     let mut was_down = false;
     let mut interactive = true;
     let mut last_emit = Instant::now() - Duration::from_secs(1);
@@ -102,6 +135,12 @@ pub fn run(app: tauri::AppHandle, id: String, generation: u64, shared: Arc<Share
                 .is_none_or(|previous| (previous.x - x).abs() + (previous.y - y).abs() > 0.0005);
             if moved && last_emit.elapsed() >= Duration::from_millis(16) {
                 let point = Point { x, y, t: at_ms };
+                if stroke.is_empty() {
+                    revision = shared.snapshots.next_revision();
+                    webview_rect = main_webview_rect(&app, shared.bounds);
+                    let _ = app.emit_to("main", "o8:visual-capture-mark", serde_json::json!({"captureId":id,"generation":generation,"revision":revision,"phase":"start"}));
+                }
+                frozen = shared.snapshots.freeze(at_ms);
                 publish(if stroke.is_empty() { "start" } else { "move" }, &point);
                 stroke.push(point);
                 point_count += 1;
@@ -111,13 +150,23 @@ pub fn run(app: tauri::AppHandle, id: String, generation: u64, shared: Arc<Share
             if let Some(point) = stroke.last() {
                 publish("end", point);
             }
+            let mark = Mark {
+                points: std::mem::take(&mut stroke),
+            };
             shared
                 .marks
                 .lock()
                 .unwrap_or_else(|value| value.into_inner())
-                .push(Mark {
-                    points: std::mem::take(&mut stroke),
-                });
+                .push(mark.clone());
+            let _ = app.emit_to("main", "o8:visual-capture-mark", serde_json::json!({"captureId":id,"generation":generation,"revision":revision,"phase":"end"}));
+            let current_rect = main_webview_rect(&app, shared.bounds);
+            let local_rect = webview_rect.filter(|rect| Some(*rect) == current_rect);
+            if !shared
+                .snapshots
+                .enqueue(mark, frozen.take(), revision, local_rect)
+            {
+                let _ = app.emit_to("main", "o8:visual-capture-observation-error", serde_json::json!({"captureId":id,"generation":generation,"revision":revision,"error":"Screen inspection is busy. The original recording is retained."}));
+            }
         }
         let down = unsafe { CGEventSourceButtonState(1, 0) };
         if down && !was_down && !draw && !over_widget && !typing && inside {

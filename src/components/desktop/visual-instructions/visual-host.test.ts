@@ -51,7 +51,7 @@ it('freezes route settings before restoring a draft and locks that captured chat
   const id = captureId(); await action(id, 'finish');
   expect(ownsVisualDraft('a', a.target)).toBe(true); expect(test.save).not.toHaveBeenCalled();
   await act(async () => test.start.mock.calls[0][0].onComplete('Keep these exact words.'));
-  expect(test.save).toHaveBeenCalledWith(expect.objectContaining({ template: snapshot, request: expect.objectContaining({ target: a.target, utterance: 'Keep these exact words.' }) }));
+  expect(test.save).toHaveBeenCalledWith(expect.objectContaining({ template: { ...snapshot, routing: { ...snapshot.routing, pinBackend: true } }, request: expect.objectContaining({ target: a.target, utterance: 'Keep these exact words.' }) }));
   expect(ownsVisualDraft('a', a.target)).toBe(false);
 });
 it('a cancelled startup cannot cancel the next capture or stop its recorder', async () => {
@@ -137,4 +137,74 @@ it('saves a continuous capture as one composer frame with raw words and measured
     ] } });
     expect(test.invoke).toHaveBeenCalledWith('o8_visual_capture_cancel', { id, discard: false });
   } finally { getContext.mockRestore(); toDataURL.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('publishes ready marked pixels immediately but retains native ownership until finish and transcription both settle', async () => {
+  const { sampleObservation } = await import('@/lib/composer/visual-inspection.test-fixture');
+  const finishing = deferred<unknown>();
+  test.save.mockImplementation(async draft => { test.read.mockReturnValue(draft); });
+  test.invoke.mockImplementation(async (command: string) => command === 'o8_visual_capture_begin' ? { generation: 42 }
+    : command === 'o8_visual_capture_finish' ? finishing.promise : undefined);
+  const a = target('chat-fast'); await request(a); const id = captureId();
+  const mark = { captureId: id, generation: 42, revision: 1 };
+  await act(async () => { test.events.get('o8:visual-capture-mark')?.({ payload: { ...mark, phase: 'start' } }); });
+  await act(async () => { test.events.get('o8:visual-capture-mark')?.({ payload: { ...mark, phase: 'end' } });
+    test.events.get('o8:visual-capture-words')?.({ payload: { id, generation: 42, text: 'Keep the label.' } });
+    test.events.get('o8:visual-capture-observation')?.({ payload: { ...sampleObservation(), captureId: id, generation: 42 } }); });
+  expect(test.read()?.request.frames[0].image).toEqual(sampleObservation().image);
+  expect(ownsVisualDraft('a', a.target)).toBe(true);
+  await action(id, 'finish');
+  expect(ownsVisualDraft('a', a.target)).toBe(false);
+  expect(test.read()?.request.utterance).toBe('Keep the label.');
+  expect(test.invoke.mock.calls.filter(call => call[0] === 'o8_visual_capture_cancel')).toHaveLength(0);
+  await act(async () => finishing.resolve({ frames: [], instruction: '', directory: '', durationMs: 200 }));
+  expect(test.invoke.mock.calls.filter(call => call[0] === 'o8_visual_capture_cancel')).toHaveLength(0);
+  await act(async () => test.start.mock.calls[0][0].onComplete('Make it smaller.'));
+  expect(test.read()?.request.utterance).toBe('Keep the label.\nMake it smaller.');
+  expect(test.invoke).toHaveBeenCalledWith('o8_visual_capture_cancel', { id, discard: false });
+});
+
+it('rechecks Live ownership after a deferred restore and never starts a second microphone', async () => {
+  const { registerVisualLive } = await import('@/lib/composer/visual-live-context');
+  const restoring = deferred<void>(); test.restore.mockReturnValueOnce(restoring.promise);
+  const a = target('chat-live-restore'); await request(a);
+  const live = registerVisualLive({ principal: a.principal, target: a.target, routing: payload('').routing }, 'live-during-restore'); live.state('live');
+  await act(async () => restoring.resolve());
+  expect(test.start).not.toHaveBeenCalled(); expect(node.textContent).toContain('Live voice is connected');
+  await act(async () => live.state('closed')); expect(node.textContent).toContain('Live voice paused');
+  await action(captureId(), 'cancel');
+});
+
+it('ignores an observation from an earlier mark after a later stroke starts', async () => {
+  const { sampleObservation } = await import('@/lib/composer/visual-inspection.test-fixture');
+  test.invoke.mockImplementation(async (command: string) => command === 'o8_visual_capture_begin' ? { generation: 42 } : undefined);
+  const a = target('chat-stale'); await request(a); const id = captureId();
+  await act(async () => {
+    test.events.get('o8:visual-capture-mark')?.({ payload: { captureId: id, generation: 42, revision: 2, phase: 'start' } });
+    test.events.get('o8:visual-capture-observation')?.({ payload: { ...sampleObservation(), captureId: id, generation: 42, revision: 1 } });
+  });
+  expect(test.save).not.toHaveBeenCalled();
+});
+
+it('joins a Finish already saving so concurrent voice delegation receives the latest exact words', async () => {
+  const { registerVisualLive, prepareLiveVisual } = await import('@/lib/composer/visual-live-context');
+  const { sampleObservation } = await import('@/lib/composer/visual-inspection.test-fixture');
+  const a = target('chat-concurrent-finish'); const scope = { principal: a.principal, target: a.target, routing: payload('').routing };
+  const live = registerVisualLive(scope, 'live-finish'); live.state('live');
+  const saving = deferred<void>(); let saves = 0;
+  test.save.mockImplementation(async draft => { test.read.mockReturnValue(draft); if (++saves === 2) await saving.promise; });
+  test.invoke.mockImplementation(async (command: string) => command === 'o8_visual_capture_begin' ? { generation: 42 } : {});
+  await request(a); const id = captureId();
+  await act(async () => {
+    test.events.get('o8:visual-capture-mark')?.({ payload: { captureId: id, generation: 42, revision: 1, phase: 'start' } });
+    test.events.get('o8:visual-capture-observation')?.({ payload: { ...sampleObservation(), captureId: id, generation: 42 } });
+  });
+  await action(id, 'finish');
+  const preparing = prepareLiveVisual(scope, 'Make this smaller, keep its label.')!;
+  let ready = false; void preparing.then(() => { ready = true; });
+  await Promise.resolve(); expect(ready).toBe(false);
+  await act(async () => saving.resolve());
+  expect((await preparing).request.utterance).toBe('Make this smaller, keep its label.');
+  expect(test.read()?.request.frames).toHaveLength(1);
+  live.state('closed');
 });

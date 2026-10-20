@@ -312,3 +312,21 @@ it('does not accept a stale delegation after the same chat starts a new voice ac
   await old.delegate('Late old request', 'old', vi.fn(async () => {}));
   expect(send).not.toHaveBeenCalled();
 });
+
+it('invalidates the actual visual pre-dispatch guard when Live closes during a pending save', async () => {
+  let release!: () => void; const saving = new Promise<void>(done => { release = done; });
+  const dispatched = vi.fn();
+  const sendVisual: NonNullable<ComponentProps<typeof VoiceButton>['sendVisual']> = async (_text, _after, sessionCurrent) => {
+    await saving;
+    if (!sessionCurrent()) throw new Error('Voice closed before dispatch.');
+    dispatched(); return null;
+  };
+  await act(async () => root.render(createElement(ManagedLiveButton, { binding: 'close-during-save', messages: [], terminals: {}, busy: false,
+    send: vi.fn(), sendVisual, interrupt: vi.fn() })));
+  await act(async () => container.querySelector('button')!.click());
+  const request = fixture.backend!.delegate('Adjust the marked button.', 'visual-request', vi.fn(async () => {})); void request.catch(() => {});
+  await act(async () => container.querySelector('button')!.click());
+  release();
+  await expect(request).rejects.toThrow('Voice closed before dispatch');
+  expect(dispatched).not.toHaveBeenCalled();
+});

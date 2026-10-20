@@ -1,27 +1,23 @@
 'use client';
 
+import type { ComposerAreaProps } from './composer-area-types';
 import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
-import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
-import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import { InputButtons } from '../InputButtons';
 import { BrainPipButton } from '../../brain/BrainPipButton';
-import { composerModeSpec, type ComposerMode } from '../composer-mode';
-import type { OrchestratorBackendSetting } from '../operator-defaults';
+import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
-import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
-import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
-import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 import { registerComposerCenter } from '../../composer-center-registry';
 import { PromptStashRow } from '../PromptStashRow';
-import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
+import { stashPrompt } from '@/lib/orchestrator/prompt-stash';
 import { OPEN_PROMPT_LIBRARY_EVENT, SAVE_PROMPT_LIBRARY_EVENT } from '@/lib/prompt-library/client';
 import {
   cycleComposerSelectorMode,
@@ -35,90 +31,10 @@ import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { ComposerQueueActions } from './ComposerQueueActions';
-import { WorkerCorrections, type WorkerCorrectionContext } from './WorkerCorrections';
+import { WorkerCorrections } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
-import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
-export interface ComposerAreaProps {
-  activeComposer?: boolean;
-  showBrain?: boolean;
-  activityContent?: React.ReactNode;
-  voiceControl?: React.ReactNode;
-  workerContext?: WorkerCorrectionContext;
-  inputLabel?: string;
-  placeholder?: string;
-  literalInput?: boolean;
-  footerOverride?: React.ReactNode;
-  attachmentContent?: React.ReactNode;
-  inputDisabled?: boolean;
-  input: string;
-  draftWarning?: string;
-  onInputChange: (next: string) => void;
-  isOrchestratorMode: boolean;
-  isChatMode?: boolean;
-  isSingleMode?: boolean;
-  displayWaiting: boolean;
-  chatMessages: MobileTranscriptEntry[];
-  /** Packets this thread dispatched — the status bar counts the live ones. */
-  workerPackets?: readonly ComposerActivityPacket[];
-  activeTargetLabel: string;
-  targetAgentExists: boolean;
-  thoughtsBodyBackground: string;
-  enhancing: boolean;
-  preEnhanceInput: string | null;
-  onEnhance: () => void;
-  onUndoEnhance: () => void;
-  onSubmit: () => void;
-  onStop?: () => void;
-  onSlashCommand: (cmd: string) => void;
-  modelLabel: string;
-  /** Raw orchestrator model id — only meaningful in orchestrator mode. */
-  modelId?: string;
-  /** Restore persisted model state without applying user-pick side effects. */
-  isolatedModelSelection?: boolean;
-  onModelRestore?: (model: string) => void;
-  /** Orchestrator-mode model switching from the composer chip. */
-  onModelChange?: (model: string) => void;
-  activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
-  effort: ThinkingEffort;
-  operatorDefaultEffort?: ThinkingEffort;
-  codexDefaultDispatchModel?: string;
-  onEffortChange: (next: ThinkingEffort) => void;
-  adaptiveEnabled: boolean;
-  sessionRulesThreadId?: string | null;
-  repoLabel?: string | null;
-  displayMessagesCount: number;
-  hasAssistantActivity: boolean;
-  footerMeterSlot?: React.ReactNode;
-  attachedImages?: ThoughtsAttachedImage[];
-  attachedFiles?: string[];
-  dragOver?: boolean;
-  dragHandlers?: ThoughtsComposerDragHandlers;
-  onAttachedImageRemove?: (index: number) => void;
-  onAttachedImageAnnotate?: (index: number) => void;
-  onAttachedFileRemove?: (fileName: string) => void;
-  onUploadDiskFiles?: FileUploadHandler;
-  composerMode?: ComposerMode;
-  onComposerModeChange?: (mode: ComposerMode) => void;
-  composerModeStorageId?: string;
-  repoPath?: string | null;
-  workspaceTargets?: OrchestratorWorkspaceTarget[];
-  selectedRepoPath?: string | null;
-  onSelectRepoPath?: (next: string) => void;
-  permissionMode?: ThoughtsChatPermissionMode;
-  onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
-  contextLocationSlot?: React.ReactNode;
-  composerLeadingExtras?: React.ReactNode;
-  /** ⌘⏎ requests steering; Return while busy queues the next turn. */
-  queueSaving?: boolean;
-  onSteer?: () => void;
-  sendBufferStatus?: React.ReactNode;
-  promptStash?: PromptStashContext & { onRestore: (text: string) => void };
-  voiceModeEnabled?: boolean;
-  onVoiceModeChange?: (enabled: boolean) => void;
-}
-
+export type { ComposerAreaProps } from './composer-area-types';
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false,
   showBrain = true,

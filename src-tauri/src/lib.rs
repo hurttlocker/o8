@@ -9,6 +9,8 @@ mod visual_capture;
 #[cfg(target_os = "macos")]
 mod visual_capture_session;
 #[cfg(target_os = "macos")]
+mod visual_capture_snapshot;
+#[cfg(target_os = "macos")]
 mod visual_capture_input;
 #[cfg(target_os = "macos")]
 mod visual_capture_media;

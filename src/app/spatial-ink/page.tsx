@@ -594,7 +594,7 @@ export default function SpatialInkPage() {
         }}
       />
       {visualCaptureId && visualBounds ? <VisualCaptureInput bounds={visualBounds} viewport={viewport} value={visualWords} voice={visualVoice} voiceText={visualVoiceText} busy={visualBusy}
-        onChange={value => { visualWordsRef.current = value; setVisualWords(value); }} onFinish={() => visualActionRef.current('finish')}
+        onChange={value => { visualWordsRef.current = value; setVisualWords(value); emitRef.current?.('o8:visual-capture-words', { id: visualIdRef.current, generation: visualGenerationRef.current, text: value }); }} onFinish={() => visualActionRef.current('finish')}
         onCancel={() => visualActionRef.current('cancel')} /> : null}
       {visualCaptureId ? <VisualCaptureControls elapsedMs={visualElapsed} busy={visualBusy} onUndo={() => visualActionRef.current('undo')} onCancel={() => visualActionRef.current('cancel')} onFinish={() => visualActionRef.current('finish')} /> : null}
     </div>
