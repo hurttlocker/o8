@@ -175,7 +175,7 @@ describe('Codex orchestrator process lifecycle', () => {
 
     expect(events.at(-1)).toMatchObject({
       type: 'done',
-      sessionId: 'usage-thread',
+      terminalOutcome: 'completed', sessionId: 'usage-thread',
       usage: {
         inputTokens: 203,
         outputTokens: 11,
@@ -361,7 +361,7 @@ describe('Codex orchestrator process lifecycle', () => {
       type: 'error',
       error: 'Codex produced no output for 45s — the turn was aborted; re-send to retry',
     });
-    expect(events.at(-1)?.type).toBe('done');
+    expect(events.at(-1)).toMatchObject({ type: 'done', terminalOutcome: 'unconfirmed' });
     expect(session.proc).toBeNull();
     expect(session.status).toBe('dead');
   });
@@ -418,7 +418,7 @@ describe('Codex orchestrator process lifecycle', () => {
     await turn;
 
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(events.at(-1)?.type).toBe('done');
+    expect(events.at(-1)).toMatchObject({ type: 'done', terminalOutcome: 'unconfirmed' });
     expect(session.proc).toBeNull();
   });
 

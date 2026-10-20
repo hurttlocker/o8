@@ -38,6 +38,14 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Send next preserves its original request identity, destination, attachments and routing through an uncertain response, renderer restart and an explicit retry. Queue transport waits are bounded; stale composer completions cannot retire a replacement composer's recovery. Source, private native acceptance and release are tracked separately. [#4002](https://github.com/hurttlocker/o8/issues/4002)
+
+Ordinary workspace composers retain unsent text, completed image attachments and queued file context across a normal restart, scoped to the selected repository and conversation. Explicit clearing removes saved drafts; storage failure keeps the current input visible and prevents an unsafe conversation transfer. Private native candidate acceptance and release remain separate gates. [#3994](https://github.com/hurttlocker/o8/issues/3994)
+
+Inbox view labels and count badges are centered within their existing hit areas across selected, hover and keyboard states. Native candidate acceptance and release are recorded separately. [#3995](https://github.com/hurttlocker/o8/issues/3995)
+
+Known terminal sessions retain their identity when a saved workspace returns after the process has stopped. Restore offers an ended view and an explicit new-shell action; unavailable session status cannot authorize a replacement process. Source regressions cover stop, reload, reconnect and preserved output, including a newer interactive reply when tmux restores stale startup history before its exit marker. Native candidate acceptance and release are recorded separately. [#3992](https://github.com/hurttlocker/o8/issues/3992)
+
 Managed development environment cleanup source work has closed in [#3337](https://github.com/hurttlocker/o8/issues/3337). First-run installed acceptance remains open in [#3246](https://github.com/hurttlocker/o8/issues/3246) and [#2211](https://github.com/hurttlocker/o8/issues/2211).
 
 Workspace polish source work has closed in [#3670](https://github.com/hurttlocker/o8/issues/3670), [#3672](https://github.com/hurttlocker/o8/issues/3672), [#3673](https://github.com/hurttlocker/o8/issues/3673), and [#3675](https://github.com/hurttlocker/o8/issues/3675). Its checks cover quieter conversation groups, visible working agents, reliable pane dragging, terminal reconnect, and reopening a hidden worker without stopping it. Right-panel restoration, search failure recovery, and Markdown image presentation source work has also closed: [#3480](https://github.com/hurttlocker/o8/issues/3480), [#3490](https://github.com/hurttlocker/o8/issues/3490), and [#3491](https://github.com/hurttlocker/o8/issues/3491). Development evidence does not establish installed release acceptance. The restoration and reconnect changes are integrated in [#3716](https://github.com/hurttlocker/o8/pull/3716).
@@ -98,6 +106,10 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Runtime connection evidence [#2214](https://github.com/hurttlocker/o8/issues/2214) carries observed providers, source kinds and actual check times into Providers, dispatch and CLI/MCP status. Empty probes stay indeterminate; configured carriers remain distinct from verified provider access. Account identity and external tools remain explicitly unreported when the runtime exposes no evidence.
+
+Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
+
 Desktop, mobile, CLI, MCP, headless, and voice reach the same governed control plane. Each caller gets its own authority; none of them gets the operator's by default.
 
 Mobile voice intent resolution is implemented in [#3146](https://github.com/hurttlocker/o8/pull/3146). Entry-point tests cover paired-device access, confirmed choices scoped to a submitted chat and repository, and offline replay. Paired-phone and provider acceptance remain open.
@@ -111,6 +123,10 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 | Symon correctness and reliability | Existing desktop and phone flows have a recorded correctness and reliability review. Confirmed failures become bounded issues; resulting fixes are verified through their real entry points and shipped. | open | The review is queued after the repair batch. | [#2534](https://github.com/hurttlocker/o8/issues/2534) |
 
 ## 5. Smooth for people and for agents
+
+Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
+
+Account recovery [#3990](https://github.com/hurttlocker/o8/issues/3990) keeps the workspace mounted when initialization settles, preserving the open view and unsent input. Native timeout and recovery acceptance remains separate from source checks and release.
 
 Settings shell [#3958](https://github.com/hurttlocker/o8/issues/3958) keeps its shared header transparent while the content body retains its active palette. Development verification and release remain separate.
 

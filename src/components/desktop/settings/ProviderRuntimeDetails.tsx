@@ -1,5 +1,7 @@
 'use client';
 
+import { RuntimeConnectionSummary } from '../onboarding/RuntimeConnectionSummary';
+import { connectionLabel, type RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { SettingsToggleButton } from './shared';
@@ -17,10 +19,12 @@ export interface ProviderTool {
   authHint?: string;
   version?: string;
   path?: string;
+  connection?: RuntimeConnectionEvidence;
 }
 
 export function providerToolStatus(tool?: ProviderTool): string {
   if (!tool) return 'Not checked';
+  if (tool.connection?.state === 'indeterminate') return connectionLabel(tool.connection);
   if (!tool.detected) return 'Not installed';
   return tool.ready === true ? 'Ready' : tool.ready === false ? 'Sign in required' : 'Installed';
 }
@@ -33,6 +37,8 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
   settings: ReturnType<typeof useModelSettings>;
 }) {
   const runtime = ORCHESTRATOR_RUNTIMES[runtimeId];
+  const readiness = settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId);
+  const connection = readiness?.connection;
   const { data, loading, notice, busyField, updateField } = settings;
   const effortField = runtimeId === 'codex' ? 'codexWorkerEffort' : runtimeId === 'claude-code' ? 'claudeWorkerEffort' : null;
   const locked = effortField ? data?.sources[effortField] === 'env' : false;
@@ -50,10 +56,11 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
 
   return <div style={{ display: 'grid', gap: 24 }}>
     <SettingsGroup header={`${runtime.label} runtime`}>
-      <SettingsRow label="Account status" subtitle={tool?.authHint ?? 'Sign in through the provider’s own CLI.'} value={checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(tool)} divider />
+      <SettingsRow label="Account status" subtitle={tool?.authHint ?? 'Sign in through the provider’s own CLI.'} value={checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(connection ? { ...tool, id: runtimeId, detected: connection.state !== 'not_installed', ready: readiness?.available, connection } : tool)} divider />
       <SettingsRow label="Version" value={tool?.version ?? 'Not reported'} divider />
       <SettingsRow label="Binary path" subtitle={tool?.path ?? runtime.binaryName} />
     </SettingsGroup>
+    <SettingsGroup header="Connection evidence"><SettingsRow label="Observed connection" accessory={<RuntimeConnectionSummary connection={connection} />} /></SettingsGroup>
     {notice ? <p role="alert" style={{ margin: 0, color: 'var(--t-text)' }}>{notice}</p> : null}
     <ProviderCapabilitiesSection runtimeId={runtimeId} />
     {runtimeId === 'muse' ? <MuseConnectionSection /> : null}

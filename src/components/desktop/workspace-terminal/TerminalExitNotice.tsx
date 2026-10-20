@@ -7,6 +7,12 @@ const actionStyle: CSSProperties = {
   paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, cursor: 'pointer',
 };
 
+export function TerminalErrorNotice({ error }: { error: string }) {
+  return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444', fontSize: 13, fontFamily: 'ui-monospace, monospace' }}>
+    Terminal error: {error}
+  </div>;
+}
+
 export function TerminalExitNotice({ state, onNewShell, onClose }: {
   state: TerminalExitState;
   onNewShell?: () => void;

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk, useSignIn } from '@clerk/nextjs';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { accountIdentity } from '@/lib/auth/account-identity';
@@ -12,6 +12,7 @@ import { desktopAuthTicketExchangeInProgress, invalidateDesktopAuthHandoffs, sub
 import { completeDesktopSignIn, DEVICE_RETRY_MS, deviceSessionDecision, renewDesktopSession, type DeviceSessionTrigger } from '@/lib/auth/device-session-client';
 import { canUseTauriEvents } from '@/lib/tauri/bridge';
 import { registerPlanAccountToken } from '@/lib/chatgpt-plan/client';
+import { isLoopbackHostname } from '@/lib/auth/loopback-request';
 import { DesktopSignInDialog } from './DesktopSignInDialog';
 import { clerkAppearance } from './clerk-appearance';
 
@@ -39,6 +40,11 @@ export interface O8AuthState {
   isLoaded: boolean;
   signedIn: boolean;
   user: O8AuthUser | null;
+  /** Deliberate account-less mode for a local web development workspace. */
+  localWorkspaceOnly?: boolean;
+  /** Native account engine startup is distinct from confirmed sign-out. */
+  accountConnection?: 'initializing' | 'unavailable';
+  retryAccountConnection?: () => void;
   /** Open sign-in: native handoff dialog, or Clerk's browser modal. */
   signIn: () => void;
   /** Open Clerk's account-management modal ("Manage account"). */
@@ -80,7 +86,7 @@ export function useO8Auth(): O8AuthState {
  * Bridges Clerk's hooks into O8AuthContext. Only mounted when Clerk is enabled
  * (i.e. inside <ClerkProvider>), so the Clerk hooks always have their provider.
  */
-function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode; nativeMode?: boolean }) {
+function ClerkAuthBridge({ onAuthChange, nativeMode = false }: { onAuthChange: (auth: O8AuthState) => void; nativeMode?: boolean }) {
   const deviceMode = nativeMode && canUseTauriEvents();
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
@@ -447,12 +453,13 @@ function ClerkAuthBridge({ children, nativeMode = false }: { children: ReactNode
     [isLoaded, isSignedIn, user, clerk, nativeMode, fullSignOut],
   );
 
+  useLayoutEffect(() => { onAuthChange(value); }, [onAuthChange, value]);
+
   return (
-    <O8AuthContext.Provider value={value}>
+    <>
       <DesktopAuthCallbackHandler />
-      {children}
       {signInPrompt && !isSignedIn ? <DesktopSignInDialog onClose={() => setSignInPrompt(false)} /> : null}
-    </O8AuthContext.Provider>
+    </>
   );
 }
 
@@ -472,6 +479,19 @@ export function O8AuthProvider({ children }: { children: ReactNode }) {
 // static build never evaluates the plugin's Tauri APIs (no Tauri at build time).
 type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['initClerk']>>;
 
+// Publishing account state must not re-render the publishing SDK subtree. Clerk's
+// own context updates still reach the bridge independently of workspace updates.
+const ClerkAccountSession = memo(function ClerkAccountSession({ engine, onAuthChange }: {
+  engine: NativeClerk | 'web';
+  onAuthChange: (auth: O8AuthState) => void;
+}) {
+  return (
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine === 'web' ? undefined : engine} appearance={clerkAppearance}>
+      <ClerkAuthBridge nativeMode={engine !== 'web'} onAuthChange={onAuthChange} />
+    </ClerkProvider>
+  );
+});
+
 /**
  * Picks the Clerk session engine per surface:
  *  - Tauri desktop → NATIVE mode via tauri-plugin-clerk: clerk-js runs with
@@ -482,54 +502,80 @@ type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['ini
  *    flashes the session in then drops it. (Root-fixed 2026-07-05; see
  *    the desktop sign-in flow.)
  *  - Web / mobile → standard cookie mode (same-origin with the real o8.run domain).
- * Until the native engine resolves, the app boots account-less (DISABLED_STATE),
- * never blocking startup.
+ * While the native engine starts, workspace children remain available and the
+ * account stays unresolved. Failed initialization has an explicit retry.
  */
 function ClerkSessionHost({ children }: { children: ReactNode }) {
-  const [engine, setEngine] = useState<NativeClerk | 'web' | null>(null);
+  const [engine, setEngine] = useState<NativeClerk | 'web' | 'local' | null>(null);
+  const [accountAuth, setAccountAuth] = useState<O8AuthState>(DISABLED_STATE);
+  const [connectionUnavailable, setConnectionUnavailable] = useState(false);
+  const [connectionAttempt, setConnectionAttempt] = useState(0);
+  const pendingNativeEngine = useRef<Promise<NativeClerk> | null>(null);
+  const originalNativeFetch = useRef<typeof fetch | null>(null);
+  const retryAccountConnection = useCallback(() => {
+    setConnectionUnavailable(false);
+    setConnectionAttempt(attempt => attempt + 1);
+  }, []);
 
   useEffect(() => {
     const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!isTauri) {
+      if (process.env.NODE_ENV === 'development'
+        && CLERK_PUBLISHABLE_KEY?.startsWith('pk_live_')
+        && isLoopbackHostname(globalThis.location?.hostname)) {
+        setEngine('local');
+        return;
+      }
       setEngine('web');
       return;
     }
     let active = true;
-    const nativeFetch = globalThis.fetch;
+    const nativeFetch = originalNativeFetch.current ?? globalThis.fetch;
+    originalNativeFetch.current = nativeFetch;
+    const timer = window.setTimeout(() => {
+      if (active) setConnectionUnavailable(true);
+    }, 8000);
     // Client-only dynamic import — the plugin touches Tauri globals, so it must
     // never load during Next's SSR/static export.
-    import('tauri-plugin-clerk')
-      .then((m) => m.initClerk(undefined, m.noopLogger()))
+    // A retry observes an unresolved initialization instead of starting it twice.
+    const attempt = pendingNativeEngine.current ?? import('tauri-plugin-clerk')
+      .then(m => m.initClerk(undefined, m.noopLogger()));
+    pendingNativeEngine.current = attempt;
+    attempt
       .then((clerk) => {
+        if (!active) return;
+        window.clearTimeout(timer);
         installTauriClerkFetchGuard(nativeFetch);
-        if (active) setEngine(clerk);
+        setEngine(clerk);
       })
       .catch(() => {
-        // Fail-soft: if the native engine can't init, fall back to cookie mode so
-        // the app still boots (sign-in just won't persist on desktop).
-        console.error('[auth] native Clerk init failed; using cookie mode');
-        if (active) setEngine('web');
+        if (pendingNativeEngine.current === attempt) pendingNativeEngine.current = null;
+        if (!active) return;
+        window.clearTimeout(timer);
+        // Keep native diagnostics useful without logging SDK errors or credentials.
+        console.error('[auth] native Clerk init failed; retry in Account settings');
+        setConnectionUnavailable(true);
       });
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, []);
+  }, [connectionAttempt]);
 
-  if (engine === null) {
-    return <O8AuthContext.Provider value={DISABLED_STATE}>{children}</O8AuthContext.Provider>;
-  }
+  const value: O8AuthState = engine === null ? {
+    ...DISABLED_STATE, clerkEnabled: true, isLoaded: false,
+    accountConnection: connectionUnavailable ? 'unavailable' : 'initializing',
+    retryAccountConnection,
+  } : engine === 'local' ? { ...DISABLED_STATE, localWorkspaceOnly: true } : accountAuth;
 
-  if (engine === 'web') {
-    return (
-      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} appearance={clerkAppearance}>
-        <ClerkAuthBridge>{children}</ClerkAuthBridge>
-      </ClerkProvider>
-    );
-  }
-
+  // Account startup may settle after the workspace is already in use. Keep its
+  // provider ancestry and child position stable so recovery preserves local UI state.
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine} appearance={clerkAppearance}>
-      <ClerkAuthBridge nativeMode>{children}</ClerkAuthBridge>
-    </ClerkProvider>
+    <O8AuthContext.Provider value={value}>
+      {engine === null || engine === 'local' ? null : (
+        <ClerkAccountSession engine={engine} onAuthChange={setAccountAuth} />
+      )}
+      {children}
+    </O8AuthContext.Provider>
   );
 }

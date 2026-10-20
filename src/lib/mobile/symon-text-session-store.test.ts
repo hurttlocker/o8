@@ -9,6 +9,7 @@ import {
   createSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
+  touchSymonTextAttachment,
 } from './symon-text-session-store';
 
 let dataDir = '';
@@ -49,6 +50,17 @@ describe('Symon text session store', () => {
     expect(updated?.transcript[0]?.text).toBe('message-6');
     expect(formatSymonTextPlannerPrompt(updated!, 'next question')).toContain('Symon: message-29');
     expect(formatSymonTextPlannerPrompt(updated!, 'next question')).toContain('User: next question');
+  });
+
+  it('keeps an attached identity alive, preserves turn uncertainty and expires after detach grace', () => {
+    const session = create(1000);
+    touchSymonTextAttachment(session.sessionId, 'pending', false, 2000);
+    expect(loadSymonTextSession(session.sessionId, 2000)?.pendingTurnIds).toEqual(['pending']);
+    touchSymonTextAttachment(session.sessionId, undefined, false, 500000);
+    expect(loadSymonTextSession(session.sessionId, 700000)?.sessionId).toBe(session.sessionId);
+    touchSymonTextAttachment(session.sessionId, 'pending', true, 700000, { status: 'done', text: 'answer' });
+    expect(loadSymonTextSession(session.sessionId, 700000)?.completedTurns).toEqual([{ turnId: 'pending', status: 'done', text: 'answer' }]);
+    expect(loadSymonTextSession(session.sessionId, 700001 + SYMON_TEXT_SESSION_STALE_MS)).toBeNull();
   });
 
   it('drops a session after ten minutes without a turn', () => {

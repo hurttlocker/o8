@@ -15,7 +15,12 @@ function readBuffer(term: BufferReader): string {
 /** tmux leaves its alternate screen before replacing it with its exit marker. */
 export function retainTerminalExitBuffer(term: BufferReader) {
   let alternate = '';
+  let normalBeforeAlternate = '';
   const remember = () => { const text = readBuffer(term); if (text.trim()) alternate = text; };
+  const enterListener = term.parser?.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+    if (term.buffer.active.type === 'normal' && params.some((mode) => mode === 47 || mode === 1047 || mode === 1049)) normalBeforeAlternate = readBuffer(term);
+    return false;
+  });
   const clearListener = term.parser?.registerCsiHandler({ final: 'J' }, () => {
     if (term.buffer.active.type === 'alternate') remember();
     return false;
@@ -27,8 +32,11 @@ export function retainTerminalExitBuffer(term: BufferReader) {
   return {
     read: () => {
       const current = readBuffer(term);
-      return current.trim() === '[exited]' && alternate ? alternate : current;
+      // A history snapshot may precede tmux's alternate screen. Its restored
+      // normal buffer plus only the exit marker is still stale history.
+      const restoredNormal = current.replace(/\[exited\]\s*$/u, '').trimEnd();
+      return current.endsWith('[exited]') && restoredNormal === normalBeforeAlternate && alternate ? alternate : current;
     },
-    dispose: () => { listener?.dispose(); clearListener?.dispose(); },
+    dispose: () => { listener?.dispose(); clearListener?.dispose(); enterListener?.dispose(); },
   };
 }

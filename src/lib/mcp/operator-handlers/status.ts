@@ -9,6 +9,7 @@ import {
   textResult,
 } from './shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { runtimeConnectionRows } from '@/lib/runtimes/shared/connection-evidence';
 
 const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
 const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
@@ -56,7 +57,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -548,6 +549,7 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
     const sessionKey = args.sessionKey as string | undefined;
     const qs = sessionKey ? `?sessionKey=${encodeURIComponent(sessionKey)}` : '';
     const data = await apiFetch(`/api/operator/status${qs}`) as Record<string, unknown>;
+    const connections = await Promise.resolve(apiFetch('/api/panel/operator-defaults')).catch(() => null);
 
     const agents = (data.agents ?? []) as Array<Record<string, unknown>>;
     const rawApprovals = data.approvals as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
@@ -576,6 +578,7 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
     return jsonResult({
       summary,
       data: {
+        runtimeConnections: runtimeConnectionRows(connections),
         agents,
         approvals: approvalItems,
         approvalCount,

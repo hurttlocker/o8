@@ -17,7 +17,7 @@ vi.mock('../InputButtons', async () => {
 vi.mock('./SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('./ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
 vi.mock('../../composer-center-registry', () => ({ registerComposerCenter: () => () => undefined }));
-vi.mock('./useDurableComposerQueue', () => ({ useDurableComposerQueue: () => ({ items: [], removing: new Set(), ready: true, error: null, enqueue: vi.fn(), cancel: vi.fn() }) }));
+vi.mock('./useDurableComposerQueue', () => ({ useDurableComposerQueue: () => ({ items: [], removing: new Set(), ready: true, error: null, hasPending: () => false, enqueue: vi.fn(), cancel: vi.fn() }) }));
 
 // Genuine synthetic 1x1 RGBA PNG (IHDR/IDAT/IEND with valid CRCs), no file reads.
 const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';

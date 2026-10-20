@@ -44,12 +44,14 @@ interface ComposerAreaProps {
   activeComposer?: boolean; dictationId?: string;
   showBrain?: boolean;
   activityContent?: React.ReactNode;
+  voiceControl?: React.ReactNode;
   workerContext?: WorkerCorrectionContext;
   inputLabel?: string;
   placeholder?: string;
   literalInput?: boolean;
   footerOverride?: React.ReactNode;
   input: string;
+  draftWarning?: string;
   onInputChange: (next: string) => void;
   isOrchestratorMode: boolean;
   isChatMode?: boolean;
@@ -122,6 +124,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   inputLabel,
   placeholder,
   literalInput = false,
+  draftWarning,
   footerOverride,
   input,
   onInputChange,
@@ -132,6 +135,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   chatMessages,
   workerPackets,
   activityContent,
+  voiceControl,
   workerContext,
   activeTargetLabel,
   targetAgentExists,
@@ -361,6 +365,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
       {activityContent}
       {sendBufferStatus}
+      {draftWarning ? <div role="status" style={{ fontSize: 11, color: 'var(--t-text-secondary)', paddingBottom: 8 }}>{draftWarning}</div> : null}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
         {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
           key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
@@ -758,6 +763,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
             inlineLeadingExtras={composerLeadingExtras}
+            managedVoiceControl={voiceControl}
             permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
               ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
                 // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.

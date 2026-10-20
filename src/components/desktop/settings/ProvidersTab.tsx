@@ -103,7 +103,9 @@ export function ProvidersTab({ initialTab = 'models', section, navigationId, onN
   const allItems = useMemo<ProviderItem[]>(() => [
     ...Object.entries(ORCHESTRATOR_RUNTIMES).filter(([, runtime]) => runtime.dispatchable).map(([runtimeId, runtime]) => ({
       id: `runtime:${runtimeId}`, runtimeId: runtimeId as keyof typeof ORCHESTRATOR_RUNTIMES, label: runtime.label, group: 'Connections',
-      status: runtimeId === 'pi-builtin' ? (settings.loading ? 'Checking…' : settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.available ? 'Ready · managed' : 'Check setup') : checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(tools[runtimeId]),
+      status: runtimeId === 'pi-builtin' ? (settings.loading ? 'Checking…' : settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.available ? 'Ready · managed' : 'Check setup') : checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.connection
+        ? { ...tools[runtimeId], id: runtimeId, detected: tools[runtimeId]?.detected ?? true, ready: settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.available, connection: settings.data?.dispatchableRuntimes?.find(item => item.id === runtimeId)?.connection }
+        : tools[runtimeId]),
     })),
     { id: 'chatgpt', label: 'ChatGPT plan', group: 'Connections', status: 'Subscription connection' },
     ...[...keys].sort((a, b) => Number(b.id === 'openrouter') - Number(a.id === 'openrouter')).map(key => ({ id: `key:${key.id}`, keyId: key.id, label: key.label, group: 'API providers', status: 'API key' })),
