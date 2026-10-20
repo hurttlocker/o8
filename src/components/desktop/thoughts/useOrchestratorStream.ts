@@ -74,11 +74,8 @@ export type {
 const rotatedMissionIds = new Set<string>();
 
 /**
- * Hook that connects to the orchestrator WebSocket channel for real-time
- * Claude Code streaming. Replaces the poll-based orchestrator flow.
- *
- * Connects to ws-server on port 3002, subscribes to the orchestrator channel,
- * and accumulates output into renderable MobileTranscriptEntry messages.
+ * Subscribes to the selected orchestrator backend and accumulates output into
+ * renderable transcript entries. Connection details use the runtime resolver.
  */
 export function useOrchestratorStream(
   repoPath: string | null,
