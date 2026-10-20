@@ -35,16 +35,6 @@ export interface UpdateProgress {
   totalBytes: number | null;
 }
 
-async function releaseCloudJobLeasesForRestart(): Promise<void> {
-  await fetch('/api/panel/cloud-jobs/drain', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ finalize: true }),
-  }).catch((error) => {
-    console.warn('[app-update] cloud job drain unavailable; lease expiry remains the recovery boundary', error);
-  });
-}
-
 /**
  * Ask the (loopback-gated) server whether `version` is pulled. FAIL-OPEN: any
  * error resolves to not-pulled so the update proceeds. The server does the
@@ -77,15 +67,19 @@ export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}
   const { waitForConnectedCliUpdates } = await import('./update-hub-client');
   await waitForConnectedCliUpdates();
   if (options.beforeRestart && !(await options.beforeRestart())) return false;
-  await releaseCloudJobLeasesForRestart();
+  const { invoke } = await import('@tauri-apps/api/core');
+  let reservationId: string;
+  try { reservationId = await invoke<string>('prepare_app_restart'); }
+  catch (error) { if (String(error).includes('cli_operation_blocked:')) return false; throw error; }
+  if (typeof reservationId !== 'string' || !reservationId.trim()) throw new Error('Native restart reservation was not recorded.');
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('restart_app');
-  } catch {
-    const { relaunch } = await import('@tauri-apps/plugin-process');
-    await relaunch();
+    await invoke('restart_app', { reservationId });
+    return true;
+  } catch (error) {
+    await invoke('cancel_app_restart', { reservationId }).catch(() => { /* Preserve an uncertain native owner. */ });
+    if (String(error).includes('cli_operation_blocked:')) return false;
+    throw error;
   }
-  return true;
 }
 
 export async function installUpdateAndRestart(
