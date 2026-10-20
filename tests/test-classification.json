@@ -1325,6 +1325,14 @@
       ]
     },
     {
+      "path": "tests/activity-folder-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/activity-local-commits.test.ts",
       "reasons": [
         "child-process",
