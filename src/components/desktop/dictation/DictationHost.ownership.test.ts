@@ -28,18 +28,18 @@ let root: Root;
 let container: HTMLDivElement;
 const fillA = vi.fn();
 const fillB = vi.fn();
-function Composer({ id, fill }: { id: string; fill: (text: string) => void }) {
+function Composer({ id, fill, active = true }: { id: string; fill: (text: string) => void; active?: boolean }) {
   const node = useRef<HTMLTextAreaElement>(null);
-  const { dictationId } = useAgentVoiceMode({ active: true, dictationOnly: true, busy: false, composerNodeRef: node, fillInput: fill,
+  const { dictationId } = useAgentVoiceMode({ active, dictationOnly: true, busy: false, composerNodeRef: node, fillInput: fill,
     messages: [], sendNow: () => false, surfaceKey: id });
   return createElement(ComposerDictationContext.Provider, { value: dictationId },
-    createElement('div', { 'data-o8-composer-root': '', 'data-id': id },
+    createElement('div', { 'data-o8-composer-root': '', 'data-id': id, style: { display: active ? 'block' : 'none' } },
       createElement('textarea', { ref: node }), createElement(MicButton)));
 }
-function render(showA = true, scopeA = 'a') {
+function render(showA = true, scopeA = 'a', active = true) {
   act(() => root.render(createElement(DictationHost, null,
-    showA ? createElement(Composer, { key: 'a', id: scopeA, fill: fillA }) : null,
-    createElement(Composer, { key: 'b', id: 'b', fill: fillB }))));
+    showA ? createElement(Composer, { key: 'a', id: scopeA, fill: fillA, active }) : null,
+    createElement(Composer, { key: 'b', id: 'b', fill: fillB, active }))));
 }
 const button = (id: string) => container.querySelector(`[data-id="${id}"] button`) as HTMLButtonElement;
 const field = (id: string) => container.querySelector(`[data-id="${id}"] textarea`) as HTMLTextAreaElement;
@@ -51,6 +51,24 @@ describe('composer dictation ownership', () => {
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); });
+
+  it('does not start a keyboard recording in a mounted but inactive chat', () => {
+    render(); act(() => field('a').focus());
+    render(true, 'a', false);
+    expect(field('a').isConnected).toBe(true);
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })));
+    expect(engine.start).not.toHaveBeenCalled();
+    expect(fillA).not.toHaveBeenCalled(); expect(fillB).not.toHaveBeenCalled();
+  });
+
+  it('keeps an existing recording pinned when its chat becomes inactive', async () => {
+    render(); await act(async () => { button('a').click(); });
+    render(true, 'a', false);
+    act(() => engine.options?.onComplete('original recording'));
+    expect(fillA).toHaveBeenCalledWith('original recording');
+    expect(fillB).not.toHaveBeenCalled(); expect(engine.cancel).not.toHaveBeenCalled();
+  });
+
   it('marks only the composer that started recording', () => {
     render(); act(() => field('a').focus()); act(() => button('a').click()); render();
     expect(button('a').title).toBe('Click to send');

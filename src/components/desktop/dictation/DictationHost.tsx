@@ -44,6 +44,7 @@ interface DictationHostContextValue {
   ownerId: string | null;
   registerComposer: (composer: ComposerTarget) => () => void;
   activateComposer: (id: string) => void;
+  deactivateComposer: (id: string) => void;
 }
 
 const DictationHostContext = createContext<DictationHostContextValue | null>(null);
@@ -238,19 +239,22 @@ export function DictationHost({ children }: DictationHostProps) {
     fillRef.current = target.fill;
     setAnchorVersion(value => value + 1);
   }, []);
+  const deactivateComposer = useCallback((id: string) => {
+    if (activeId.current !== id) return;
+    activeId.current = null;
+    anchorRef.current = null;
+    fillRef.current = null;
+    setAnchorVersion(value => value + 1);
+  }, []);
   const registerComposer = useCallback((target: ComposerTarget) => {
     composers.current.set(target.id, target);
     return () => {
       if (composers.current.get(target.id) !== target) return;
       composers.current.delete(target.id);
       if (recordingTarget.current === target) cancel(target.id);
-      if (activeId.current === target.id) {
-        activeId.current = null;
-        anchorRef.current = null;
-        fillRef.current = null;
-      }
+      deactivateComposer(target.id);
     };
-  }, [cancel]);
+  }, [cancel, deactivateComposer]);
   useEffect(() => {
     if (snapshot.state === 'idle' && !starting.current) {
       recordingTarget.current = null;
@@ -349,7 +353,8 @@ export function DictationHost({ children }: DictationHostProps) {
     ownerId,
     registerComposer,
     activateComposer,
-  }), [activateComposer, cancel, ownerId, registerComposer, snapshot.state, start, startPending, stopAndSubmit]);
+    deactivateComposer,
+  }), [activateComposer, cancel, deactivateComposer, ownerId, registerComposer, snapshot.state, start, startPending, stopAndSubmit]);
 
   // Wrap anchorRef into a refobject the pill expects.
   const pillAnchorRef = useMemo(() => {

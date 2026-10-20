@@ -1,11 +1,11 @@
 'use client';
 
-import { ComposerDictationContext, useComposerDictation } from '../../dictation/ComposerDictation';
+import { ComposerDictationContext, useComposerDictation, useComposerTextareaRef } from '../../dictation/ComposerDictation';
 import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
 import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { BrainPipButton } from '../../brain/BrainPipButton';
@@ -117,7 +117,6 @@ interface ComposerAreaProps {
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
 }
-
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
   activeComposer = false, dictationId,
   showBrain = true,
@@ -190,12 +189,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const setTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
-    textareaRef.current = node;
-    if (typeof inputRef === 'function') inputRef(node);
-    else if (inputRef) inputRef.current = node;
-  }, [inputRef]);
+  const [textareaRef, setTextareaRef] = useComposerTextareaRef(inputRef);
   const localDictationId = useComposerDictation({
     active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
     scopeKey: JSON.stringify([repoPath, sessionRulesThreadId, inputLabel]),
