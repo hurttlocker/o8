@@ -56,7 +56,7 @@ export interface XtermPanelHandle {
   fit: () => void;
   setSourceDimensions?: (cols: number, rows: number) => void;
   focus: () => void;
-  writeData: (data: string) => void;
+  writeData: (data: string, historical?: boolean) => void;
   writeRaw: (data: string) => void;
   readText: (lines?: number) => string;
   visibilityReady?: (epoch: number) => void;
