@@ -146,6 +146,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
   composerBackendSupportsImages,
   validateComposerImageAttachments,
@@ -158,7 +159,7 @@ import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
-import { normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
+import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
@@ -167,7 +168,7 @@ import {
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { composeComposerWireMessage, isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -5336,13 +5337,14 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
 
 async function handleOrchestratorSendMsgOnce(
   client: ClientState,
-  msg: Record<string, unknown>,
+  incoming: Record<string, unknown>,
   correlationId: string | undefined,
   attachments: ComposerImageAttachment[] | undefined,
 ) {
-  const repoPath = resolveOrchestratorMessageRepoPath(msg);
-  const message = typeof msg.message === 'string' ? msg.message : null;
+  const repoPath = resolveOrchestratorMessageRepoPath(incoming);
+  const message = typeof incoming.message === 'string' ? incoming.message : null;
   if (!repoPath || !message) return;
+  const msg = resolveMobileTurnSelection(incoming, repoPath, resolveMsgThreadId(incoming), resolveMsgBackendId(incoming));
   // The transcript persists the operator's OWN words. `message` may carry
   // model-facing scaffolding the client prepends (mode directives, compaction
   // resume prelude) — persisting it verbatim rendered those directives
@@ -5558,7 +5560,10 @@ async function handleOrchestratorSendMsgOnce(
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
     const executionMode = resolveOrchestratorExecutionMode(msg.orchestrationMode);
-    const operatorMessage = modelFacingComposerMessage(message, executionMode);
+    const mobileMessage = msg.surface === 'mobile' && isComposerWireMode(msg.pickedMode)
+      ? composeComposerWireMessage(message, msg.pickedMode).wireMessage
+      : message;
+    const operatorMessage = modelFacingComposerMessage(mobileMessage, executionMode);
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${operatorMessage}`
       : operatorMessage;
@@ -5708,7 +5713,7 @@ async function handleOrchestratorSendMsgOnce(
       overrideMessage?: string,
       leadingEvents: readonly OrchestratorEvent[] = [],
     ) => {
-      const effectiveTurnModel = resolveTurnModel(turnBackend, overrideModel) ?? null;
+      let effectiveTurnModel = resolveTurnModel(turnBackend, overrideModel) ?? null;
       activeAssistantModel = effectiveTurnModel;
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
@@ -5741,6 +5746,8 @@ async function handleOrchestratorSendMsgOnce(
 
         switch (event.type) {
           case 'turn_receipt': {
+            effectiveTurnModel = normalizeObservedOrchestratorTurnModel(turnBackend.id, event.leadModel) ?? effectiveTurnModel;
+            activeAssistantModel = effectiveTurnModel;
             const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
             const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode, pickedMode);
             activeAssistantReceipt = {
