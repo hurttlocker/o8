@@ -7,6 +7,14 @@ import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
 import type { OrchestratorPermissionMode, OrchestratorStreamStatus } from './shared';
 
+export interface ActiveTurnState {
+  startedAt: number;
+  toolCallsStarted: number;
+  toolCallsCompleted: number;
+  latestToolLabel: string | null;
+  launches: MobileTranscriptToolLaunchLink[];
+}
+
 export interface OrchestratorSendHandle {
   clientMessageId: string;
   userMessageId: string;

@@ -83,7 +83,10 @@ describe('orchestrator pending-send store', () => {
     const imagePending = {
       ...pending,
       attachmentsRequired: true,
-      wirePayload: JSON.stringify({ type: 'orchestrator-send', attachments: [{ dataUri: 'data:image/png;base64,aW1hZ2U=' }] }),
+      wirePayload: JSON.stringify({
+        type: 'orchestrator-send', threadId: pending.threadId, clientMessageId: pending.clientMessageId,
+        attachments: [{ dataUri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==' }],
+      }),
     };
     persistOrchestratorPendingSend(imagePending, storage);
 
@@ -92,5 +95,9 @@ describe('orchestrator pending-send store', () => {
     expect(restored).not.toHaveProperty('wirePayload');
     expect(pendingSendWirePayload(restored, '/repo')).toBeNull();
     expect(pendingSendWirePayload(imagePending, '/repo')).toBe(imagePending.wirePayload);
+    const payload = JSON.parse(imagePending.wirePayload);
+    for (const identity of [{ threadId: 'thoughts-other' }, { clientMessageId: 'send-other' }]) {
+      expect(pendingSendWirePayload({ ...imagePending, wirePayload: JSON.stringify({ ...payload, ...identity }) }, '/repo')).toBeNull();
+    }
   });
 });

@@ -2077,6 +2077,12 @@
       ]
     },
     {
+      "path": "tests/composer-session-storage-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/confirmed-kill.test.ts",
       "reasons": [
         "child-process",
@@ -3550,6 +3556,12 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-pending-image-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
