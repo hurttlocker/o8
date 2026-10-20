@@ -1,21 +1,6 @@
-/**
- * Codex orchestrator session — sibling to orchestrator-session.ts that spawns
- * `codex exec --json` instead of `claude -p`. Used as the default after the
- * Anthropic SDK pricing change (June 15 2026) so the default install doesn't
- * burn the operator's Agent SDK credit pool.
- *
- * Uses a per-repo sandbox CODEX_HOME with a merged config.toml so Codex can
- * call the same operator + cortex MCP tools as the Claude orchestrator path.
- *
- * COLD by design (unlike the WARMED Claude orchestrator-session.ts, which keeps
- * a resident `claude` process across turns). `codex exec` is a BATCH command —
- * it reads its prompt from argv, ignores stdin, and exits when the turn ends, so
- * there is no resident-process path to warm short of Codex's server/proto mode.
- * Conversation continuity is `codex exec resume <threadId>` — the exec-resume
- * floor. Warming the Codex path is a separate, larger follow-up (wire the Codex
- * app-server / proto interface); NOT built here. In Collide this means the Codex
- * PROPOSER stays cold while the Claude proposer + aggregator warm.
- */
+/** Native Codex orchestrator. Ordinary turns preserve existing defaults/retries;
+ * bounded refinement is opt-in, one attempt, exact pins, and a fresh exec session.
+ * The caller must separately prove operator approval and carrier confinement. */
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -42,6 +27,7 @@ import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-pr
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { handleCodexJsonLine, type CodexLineHandlerState } from './codex-orchestrator-events';
+import { assertBoundedRefinementTurn, boundedRefinementFlags } from './codex-bounded-refinement';
 import { codexOrchestrationModeFlags } from './orchestrator-backends/orchestration-mode';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
@@ -90,6 +76,7 @@ export interface CodexOrchestratorSession {
 // Mirror of OrchestratorPermissionMode from orchestrator-session.ts.
 export type CodexOrchestratorPermissionMode = 'full' | 'plan';
 export interface SendToCodexOrchestratorOptions {
+  boundedRefinement?: true;
   permissionMode?: CodexOrchestratorPermissionMode;
   orchestrationMode?: OrchestratorExecutionMode;
   /**
@@ -311,6 +298,8 @@ export async function sendToCodexOrchestrator(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
 ): Promise<void> {
+  assertBoundedRefinementTurn(session, options);
+  if (options.boundedRefinement) return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
   const requestedModel = resolveOrchestratorModelSync(options.model);
   const resumed = Boolean(session.threadId);
   if (!resumed && requestedModel !== MODEL_IDS.raw.openAiGpt61Sol) {
@@ -371,37 +360,28 @@ async function sendToCodexOrchestratorAttempt(
   };
   if (settleBeforeSpawnIfAborted()) return;
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
-  let model = resolveOrchestratorModelSync(options.model);
+  let model = options.boundedRefinement ? options.model! : resolveOrchestratorModelSync(options.model);
 
-  // Steer-Now / queue preempt: the ws-server aborts the prior turn's
-  // controller before calling sendTurn, so a still-'busy' session here is a
-  // just-interrupted subprocess mid-teardown. Wait for it to close rather than
-  // dropping the steered message. See orchestrator-session.ts for the full why.
+  // A preempted turn can still be tearing down; wait before claiming its session.
   if (session.status === 'busy') {
     await waitForSessionIdle(session, PREEMPT_SETTLE_MS);
   }
   if (settleBeforeSpawnIfAborted()) return;
 
-  // A SIGTERM'd turn exits non-zero → 'dead', so the settle wait above commonly
-  // lands here; auto-recover into a fresh turn.
+  // Recover a terminated ordinary turn into a fresh session.
   if (session.status === 'dead') {
     console.log(`[codex-orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
     session.status = 'ready';
     session.threadId = null;
     session.proc = null;
   }
-  // Still busy after the settle window — genuinely concurrent / hung. Reject.
-  // The synchronous `session.status = 'busy'` claim below means a second waiter
-  // that lost the race re-enters here and rejects instead of double-spawning.
+  // The synchronous busy claim rejects a concurrent waiter instead of double-spawning.
   if (session.status === 'busy') {
     throw new Error('Codex orchestrator session is busy');
   }
 
   session.status = 'busy';
-  // #1551 — preflight the repo path before ANY spawn work. The default
-  // backend had no preflight at all: a missing folder surfaced as
-  // "spawn codex ENOENT" (naming the healthy binary), and a non-git folder
-  // let codex boot and fail into a confusing tool-side error mid-turn.
+  // #1551: reject missing/non-git repositories before any spawn work.
   try {
     assertOrchestratorRepoPath(session.repoPath);
   } catch (err) {
@@ -443,9 +423,7 @@ async function sendToCodexOrchestratorAttempt(
       extraEnvOverrides: ['CODEX_HOME'],
     });
     codexBin = resolved.path;
-    // The model-gated clamp (flagship models may use max/ultra) is not enough — the
-    // INSTALLED CLI must also understand the tier. An older codex refuses to
-    // load config mentioning `max` and exits 1 before the first token.
+    // Installed CLI support is separate from model effort support.
     if ((reasoningEffort === 'max' || reasoningEffort === 'ultra') && !codexCliSupportsUltraEfforts(resolved.version)) {
       console.warn(`[codex-orchestrator] installed codex ${resolved.version ?? '(unknown version)'} predates '${reasoningEffort}' — clamping to xhigh`);
       reasoningEffort = 'xhigh';
@@ -473,8 +451,16 @@ async function sendToCodexOrchestratorAttempt(
   }
 
   onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
+  if (options.boundedRefinement && (model !== options.model || reasoningEffort !== options.thinkingEffort)) {
+    session.status = 'ready';
+    onEvent({ type: 'error', error: 'Bounded refinement effective pins differ; no model turn was launched.' });
+    onEvent({ type: 'done', sessionId: null, cost: null });
+    return;
+  }
+  if (settleBeforeSpawnIfAborted()) return;
 
-  const serviceTier = serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
+  const serviceTier = options.boundedRefinement ? 'default'
+    : serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
   if (serviceTier && serviceTier !== 'default') {
     try {
       const catalogue = await getCodexSpeedCatalogue(codexHome);
@@ -488,10 +474,8 @@ async function sendToCodexOrchestratorAttempt(
     if (settleBeforeSpawnIfAborted()) return;
   }
   const serviceTierArgs = serviceTier ? ['-c', `service_tier="${serviceTier}"`] : [];
-  // #3573: with "Show chats in the Codex app" on, the turn runs through the
-  // app-server bridge in the operator's own Codex home, so the Codex app lists
-  // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
-  const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
+  // #3573: ordinary app-visible turns use the shared home; bounded stages never do.
+  const codexApp = !options.boundedRefinement && options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
 
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
@@ -503,10 +487,10 @@ async function sendToCodexOrchestratorAttempt(
         '--json',
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
+        ...boundedRefinementFlags(options.boundedRefinement),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
         ...serviceTierArgs,
-        // Disable the hosted image_generation tool (defaults to nonexistent
-        // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
+        // Disable unsupported hosted image generation.
         '-c',
         'tools.image_generation=false',
         ...imagePaths.flatMap((path) => ['--image', path]),
@@ -518,6 +502,7 @@ async function sendToCodexOrchestratorAttempt(
         '--json',
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
+        ...boundedRefinementFlags(options.boundedRefinement),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
         ...serviceTierArgs,
         '-c',

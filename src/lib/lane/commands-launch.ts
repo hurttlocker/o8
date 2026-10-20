@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { emitProductEvent } from '@/lib/analytics/server';
+import { assertImprovementPacketLaunch } from '@/lib/harness/improvement/launch-guard';
 import { getLanePolicy } from '@/lib/lane/policy';
 import { appendEvent, attachSession, getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import {
@@ -55,6 +56,23 @@ export async function launchSession(
 ): Promise<LaneCommandResult> {
   const lane = getLane(command.laneId);
   if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+  const assertRefinementLaunch = (boundary: 'lane-recovery' | 'lane-spawn') => {
+    assertImprovementPacketLaunch({
+      laneId: lane.id,
+      packetId: (getLane(lane.id) ?? lane).packetId,
+      repository: lane.repoPath,
+      sourcePath: lane.worktreePath ?? lane.repoPath,
+      runtime: lane.runtime,
+      model: resolvedLaunchModel(command, lane.runtime),
+      effort: command.effort,
+      executionCarrier: command.executionCarrier,
+      claudeCodeCarrier: command.claudeCodeCarrier,
+      boundary,
+    });
+  };
+  try { assertRefinementLaunch('lane-recovery'); } catch (error) {
+    return { ok: false, laneId: lane.id, note: error instanceof Error ? error.message : 'Refinement launch held.' };
+  }
   if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime) && !(lane.runtime === 'cloud' && lane.packetId)) {
     return {
       ok: false,
@@ -104,6 +122,10 @@ export async function launchSession(
   if (command.clientMutationId) {
     const recovered = await findOwnedLaunchByMutationId(command.clientMutationId);
     if (recovered) {
+      // Ownership can change while the durable recovery lookup is awaiting I/O.
+      try { assertRefinementLaunch('lane-recovery'); } catch (error) {
+        return { ok: false, laneId: lane.id, note: error instanceof Error ? error.message : 'Refinement recovery held.' };
+      }
       if (recovered.outcome === 'failed') {
         const reason = 'Recovered a failed owned launch from its durable session record.';
         recordLaunchFailure(lane, 'idle', 'launch_failed', reason);
@@ -223,6 +245,8 @@ export async function launchSession(
 
   try {
     const { launchRuntimeSurface } = await import('@/lib/runtime/actions');
+    // Re-read durable ownership and assert the post-rebase SHA immediately before spawn.
+    assertRefinementLaunch('lane-spawn');
     const result = await launchRuntimeSurface({
       runtime: lane.runtime,
       prompt: command.prompt,

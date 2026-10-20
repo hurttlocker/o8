@@ -18,6 +18,7 @@ import type { OrchestratorBackend } from './types';
 export const codexBackend: OrchestratorBackend = {
   id: 'codex',
   label: 'Codex',
+  boundedRefinement: { version: 1, singleAttempt: true, noAuxiliaryModelCalls: true },
   peekSession(repoPath, _agent, threadId) {
     const session = getCodexOrchestratorSession(repoPath, threadId);
     return session ? { sessionName: session.sessionName, status: session.status } : null;
@@ -27,11 +28,13 @@ export const codexBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
-    void prewarmHaiku().catch(() => {});
-    void prewarmSonnetCli().catch(() => {});
+    if (!options?.boundedRefinement) {
+      void prewarmHaiku().catch(() => {});
+      void prewarmSonnetCli().catch(() => {});
+    }
     return sendToCodexOrchestrator(
       ensureCodexOrchestratorSession(repoPath, options?.threadId),
-      buildCodexOrchestratorPrompt(repoPath, message, {
+      options?.boundedRefinement ? message : buildCodexOrchestratorPrompt(repoPath, message, {
         toolProfile: options?.toolProfile,
         orchestrationMode: options?.orchestrationMode,
       }),

@@ -1,5 +1,6 @@
 import { resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import 'server-only';
+import { assertImprovementPacketLaunch, bindImprovementPacketLane } from '@/lib/harness/improvement/launch-guard';
 
 import { resolveClaudeCodeWorkerSelection, selectedClaudeCodeWorkerModelSync } from '@/lib/claude-code/worker-profile';
 import { EffortPinRejectionError, isHonoredEffortPin, resolveAdapterEffort, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
@@ -205,6 +206,18 @@ export async function launchPacketWithStorageAdmission(input: {
 }): Promise<LaunchPacketResult> {
   const { packet, allPackets, storageAdmission } = input;
   const workerRouting = resolveLaunchWorkerRouting(input.workerRouting);
+  // The registry, not optional packet metadata, owns experiment membership. Check
+  // resolved pins before provider work, storage admission, or committed recovery.
+  assertImprovementPacketLaunch({
+    packetId: packet.id,
+    repository: packet.workspaceTargetPath,
+    runtime: workerRouting.selectedRuntime,
+    model: packet.claudeCodeModel?.trim() || workerRouting.selectedModel,
+    effort: workerRouting.requestedEffort === 'adaptive' ? 'adaptive' : workerRouting.selectedEffort,
+    executionCarrier: packet.executionCarrier,
+    claudeCodeCarrier: packet.claudeCodeCarrier,
+    boundary: 'dispatch',
+  });
   // A concrete persisted pin that was actually honored at creation must still be
   // honored at the launch boundary. If a runtime change since creation
   // (recovery, a re-routed lane) would drop or coerce it, fail clearly BEFORE any
@@ -353,6 +366,7 @@ export async function launchPacketWithStorageAdmission(input: {
       }, { packetCreationBase: creationBase });
       if (!laneResult.ok || !laneResult.laneId) throw new Error(laneResult.note || 'Unable to open lane.');
       openedLaneId = laneResult.laneId;
+      bindImprovementPacketLane(packet.id, openedLaneId);
       const launchingLane = setLaneStatus(
         laneResult.laneId,
         'launching',

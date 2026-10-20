@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +50,7 @@ import {
   CODEX_FIRST_EVENT_TIMEOUT_MS,
   ensureCodexOrchestratorSession,
   sendToCodexOrchestrator,
+  type SendToCodexOrchestratorOptions,
 } from './codex-orchestrator-session';
 import { writeOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
@@ -129,6 +131,70 @@ describe('Codex orchestrator process lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     delete process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
+  });
+
+  const boundedOptions = (): SendToCodexOrchestratorOptions => ({ boundedRefinement: true,
+    model: 'gpt-6.1-sol', thinkingEffort: 'high', permissionMode: 'plan', toolProfile: 'propose',
+    orchestrationMode: 'fleet', serviceTier: 'default', signal: new AbortController().signal });
+
+  it('uses one bounded CLI attempt, never the unsupported-model fallback or shared app home', async () => {
+    const defaults = await import('@/lib/operator/defaults');
+    const appMode = vi.spyOn(defaults, 'resolveCodexAppThreadsSync').mockReturnValue(true);
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-harness-${randomUUID()}`);
+    const proc = useFakeProc(); const events: OrchestratorEvent[] = [];
+    try {
+      const turn = sendToCodexOrchestrator(session, 'protocol only', (event) => events.push(event), boundedOptions());
+      await waitForSpawn();
+      const args = spawnMock.mock.calls[0][1] as string[];
+      expect(args.slice(0, 2)).toEqual(['exec', '--json']);
+      expect(args).toEqual(expect.arrayContaining(['sandbox_mode=read-only', '--ignore-user-config',
+        'mcp_servers={}', 'features.multi_agent=false', 'features.enable_fanout=false', 'web_search="disabled"']));
+      expect(appMode).not.toHaveBeenCalled();
+      proc.stderr.emit('data', Buffer.from('The \"gpt-6.1-sol\" model is not supported when using Codex with a ChatGPT account.'));
+      proc.exitCode = 1; proc.emit('close', 1); await turn;
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      expect(events.some((event) => event.type === 'turn_retry')).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'done', cost: null });
+    } finally { appMode.mockRestore(); }
+  });
+
+  it.each([
+    { permissionMode: 'full' }, { toolProfile: 'full' }, { orchestrationMode: 'single' },
+    { thinkingEffort: 'adaptive' }, { model: undefined }, { signal: undefined },
+    { attachments: [{ dataUri: 'data:image/png;base64,eA==' }] },
+  ] as Partial<SendToCodexOrchestratorOptions>[])('rejects an unbounded native option before preparation: %s', async (change) => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-harness-${randomUUID()}`);
+    await expect(sendToCodexOrchestrator(session, 'protocol only', () => {}, { ...boundedOptions(), ...change }))
+      .rejects.toThrow('Bounded refinement requires');
+    expect(resolveCliMock).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses resumed context rather than entering the native missing-rollout retry path', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-harness-${randomUUID()}`);
+    session.threadId = 'existing-context';
+    await expect(sendToCodexOrchestrator(session, 'protocol only', () => {}, boundedOptions()))
+      .rejects.toThrow('Bounded refinement requires');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('reports but never launches silently clamped effective effort', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-harness-${randomUUID()}`);
+    const events: OrchestratorEvent[] = [];
+    await sendToCodexOrchestrator(session, 'protocol only', (event) => events.push(event), {
+      ...boundedOptions(), model: 'gpt-6.1-sol', thinkingEffort: 'ultra',
+    });
+    expect(events).toContainEqual({ type: 'turn_receipt', leadModel: 'gpt-6.1-sol', effort: 'xhigh' });
+    expect(events).toContainEqual({ type: 'error', error: expect.stringContaining('effective pins differ') });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('checks callback cancellation after the effective receipt and before spawn', async () => {
+    const session = ensureCodexOrchestratorSession(process.cwd(), `thoughts-harness-${randomUUID()}`);
+    const controller = new AbortController();
+    await sendToCodexOrchestrator(session, 'protocol only', (event) => {
+      if (event.type === 'turn_receipt') controller.abort();
+    }, { ...boundedOptions(), signal: controller.signal });
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('starts a fresh codex exec when the thread only has a Claude backend session id', async () => {

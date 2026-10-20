@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { handleImprovementAction } from './improvement/service';
 import { buildSessionBoot } from './boot';
 import { exportHarnessBundle, importHarnessBundle } from './bundle';
 import { getHarnessCapabilities } from './capabilities';
@@ -140,6 +141,7 @@ export async function handleHarnessAction(
   }
 
   const canonical = repoPath(body, context);
+  if (action.startsWith('refinement_')) return handleImprovementAction(body, context, canonical);
   if (action === 'feature_list') {
     const status = optionalString(body, 'status');
     return {
