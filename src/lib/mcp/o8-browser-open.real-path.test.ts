@@ -55,14 +55,32 @@ async function mount(initial: 'collapsed' | 'hidden' | 'open' = 'collapsed') {
   await act(async () => root!.render(createElement(Host, { initial })));
 }
 
+async function finishRequest(pending: ReturnType<typeof handler>, timeoutMs: number) {
+  let result: Awaited<ReturnType<typeof handler>> | undefined;
+  let rejected = false;
+  let failure: unknown;
+  void pending.then(value => { result = value; }, error => { rejected = true; failure = error; });
+  const end = Date.now() + Math.max(0, timeoutMs) + 1;
+  // Flush React work between polling ticks; host scheduling must not consume the
+  // simulated request budget before the mounted pane can commit its effects.
+  while (!result && !rejected && Date.now() < end) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(Math.min(100, end - Date.now())); });
+  }
+  if (rejected) throw failure;
+  expect(result, 'Browser request must settle within its original deadline').toBeDefined();
+  return JSON.parse((result!.content[0] as { text: string }).text);
+}
+
 async function request(args: Record<string, unknown>) {
   let pending: ReturnType<typeof handler>;
   await act(async () => { pending = handler(args); });
-  const result = await pending!;
-  return JSON.parse((result.content[0] as { text: string }).text);
+  const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : 5000;
+  return finishRequest(pending!, timeoutMs);
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
+  vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
   scope = `browser-open-fixture-${++scopeCounter}`;
   Object.assign(fixture, { url: '', autoNavigate: true, nativeEnabled: true, nativeVisible: true, width: 500, height: 300, loseAck: false, replayDispatch: false, hostFails: false, opens: 0 });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -76,9 +94,12 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  if (root) await act(async () => root!.unmount());
-  root = null; delete window.__o8BrowserOpenRequests;
-  document.body.replaceChildren(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  try { if (root) await act(async () => root!.unmount()); }
+  finally {
+    root = null; delete window.__o8BrowserOpenRequests;
+    document.body.replaceChildren(); localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });
 
 describe('Browser-open completion through the actual MCP entry point', () => {
@@ -103,6 +124,37 @@ describe('Browser-open completion through the actual MCP entry point', () => {
     expect(fixture.opens).toBe(1);
     expect(getBrowserPaneTabs(scope).map(tab => tab.url)).toContain(url);
     if (initial === 'open') expect(getBrowserPaneTabs(scope).map(tab => tab.url)).toContain('http://localhost:48234/existing');
+  });
+
+  it('waits for actual native navigation inside the unchanged request deadline', async () => {
+    fixture.autoNavigate = false; await mount();
+    const startedAt = Date.now();
+    setTimeout(() => { fixture.url = url; }, 600);
+    const result = await request({ url, timeoutMs: 700 });
+    expect(result).toMatchObject({ ok: true, status: 'opened', url, surface: 'native', automaticReplay: false });
+    expect(Date.now() - startedAt).toBe(600); expect(fixture.opens).toBe(1);
+    expect(getBrowserPaneTabs(scope).map(tab => tab.url)).toEqual([url]);
+  });
+
+  it('keeps a late navigation pending at the deadline and observes it later without replay', async () => {
+    fixture.autoNavigate = false; await mount();
+    const startedAt = Date.now();
+    setTimeout(() => { fixture.url = url; }, 800);
+    const first = await request({ url, timeoutMs: 700 });
+    expect(first).toMatchObject({ ok: false, status: 'pending', reason: 'navigation-not-confirmed', automaticReplay: false });
+    expect(Date.now() - startedAt).toBe(700); expect(fixture.url).toBe('');
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    const observed = await request({ requestId: first.requestId, timeoutMs: 0 });
+    expect(observed).toMatchObject({ ok: true, status: 'opened', requestId: first.requestId, url, surface: 'native', automaticReplay: false });
+    expect(fixture.opens).toBe(1); expect(getBrowserPaneTabs(scope).map(tab => tab.url)).toEqual([url]);
+  });
+
+  it('does not turn an unacknowledged host into success while advancing the full deadline', async () => {
+    const startedAt = Date.now();
+    const result = await request({ url, timeoutMs: 700 });
+    expect(result).toMatchObject({ ok: false, status: 'pending', reason: 'host-not-acknowledged', automaticReplay: false });
+    expect(Date.now() - startedAt).toBe(700); expect(fixture.opens).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('observes a lost acknowledgement without dispatching a second open or page tab', async () => {
@@ -144,8 +196,7 @@ describe('Browser-open completion through the actual MCP entry point', () => {
     const page = frame.contentDocument!;
     page.open(); page.write('<!doctype html><body><p>The local server could not be reached.</p></body>'); page.close();
     Object.defineProperty(page, 'readyState', { value: 'complete', configurable: true });
-    const result = await pending!;
-    const receipt = JSON.parse((result.content[0] as { text: string }).text);
+    const receipt = await finishRequest(pending!, 700);
     expect(receipt).toMatchObject({ ok: false, status: 'unavailable', reason: 'proxy-navigation-unverified', automaticReplay: false });
     expect(receipt.url).toBeUndefined(); expect(fixture.opens).toBe(1);
   });
@@ -211,14 +262,11 @@ describe('Browser-open completion through the actual MCP entry point', () => {
   });
 
   it('bounds a missing transport acknowledgement and leaves no observation timers', async () => {
-    vi.useFakeTimers();
-    try {
-      const blocked = { evalJs: async () => new Promise(() => {}), listWindows: async () => ({ windows: [] }) } as unknown as O8WebviewClient;
-      const running = createO8WebviewToolHandlers(() => blocked).o8_view_open_browser({ url, timeoutMs: 20 });
-      await vi.advanceTimersByTimeAsync(22);
-      const result = JSON.parse(((await running).content[0] as { text: string }).text);
-      expect(result).toMatchObject({ ok: false, status: 'pending', automaticReplay: false });
-      expect(result.requestId).toBeTypeOf('string'); expect(vi.getTimerCount()).toBe(0);
-    } finally { vi.useRealTimers(); }
+    const blocked = { evalJs: async () => new Promise(() => {}), listWindows: async () => ({ windows: [] }) } as unknown as O8WebviewClient;
+    const running = createO8WebviewToolHandlers(() => blocked).o8_view_open_browser({ url, timeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(22);
+    const result = JSON.parse(((await running).content[0] as { text: string }).text);
+    expect(result).toMatchObject({ ok: false, status: 'pending', automaticReplay: false });
+    expect(result.requestId).toBeTypeOf('string'); expect(vi.getTimerCount()).toBe(0);
   });
 });
