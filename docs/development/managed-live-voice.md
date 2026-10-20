@@ -1,8 +1,8 @@
-# Managed Live voice: draft integration and frontend handoff
+# Managed Live voice: integration and installed-pilot handoff
 
 ## Delivery boundary
 
-This draft implements the application relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. It requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Development uses a private marker; an installed desktop requires an independently signed account-and-installation-bound pilot grant. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.
+The merged application implements the relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. General managed admission requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Development uses a private marker; an installed desktop requires an independently signed account-and-installation-bound pilot grant. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.
 
 Desktop entry uses a compact experimental waveform control in the active orchestrator composer footer and a Caps Lock tap toggle. A passive desktop overlay displays the owning chat, connection state, measured audio level and provider-reported usage. Closing voice leaves backend work running. Changing focus never retargets a connected session. A personal development check established native microphone capture, bidirectional WebRTC packets and provider-confirmed closure. Human speech, audible response and physical-shortcut acceptance remain separate checks. **Native o8-mobile integration remains frontend work**: use the existing `src/features/symon/use-symon-agent.ts` / `webrtc.ts` and `src/o8/symon-text.ts` seams, replace only transport, and retain their permission UI. Do not route phone voice into a new backend/worker. This draft does not claim a completed two-device feature.
 
@@ -295,3 +295,43 @@ still needs listening: the captured reply used third-person handoff language in
 response to a prompt explicitly asking it to contact the coding agent. Successful
 result correlation does not by itself prove conversational quality. Production
 activation holds and uncertain-usage accounting remain unchanged.
+
+
+## Restricted installed-pilot release checkpoint
+
+The application source in #3887 is merged. General managed voice admission remains
+held; the installed experiment requires the separately signed, expiring grant
+specified above. Publishing an installer does not activate voice for other accounts
+or complete conversational acceptance. The companion gateway draft and its provider
+lifetime/recovery requirements remain separate.
+
+The combined release candidate passed TypeScript, test classification and the full
+hermetic suite (7,395 passed, four existing skips), with unchanged source hashes.
+One hundred focused cases covered the combined voice, dictation, queued-send and
+message-recovery paths. The Browser fixture's 29 controlled cases also passed.
+Those checks prove source behavior, not microphone, speaker or installed-device
+acceptance. Keep the original failed fixture runs alongside their corrections.
+
+After installing the signed release, record the exact version and source commit,
+then finish this bounded conversation checklist:
+
+- [ ] Physical Caps Lock and the composer control start and stop voice in the
+  intended chat; unrelated composers remain idle.
+- [ ] Partial and final speech retain stable bubble identity and ordering. Reading
+  older messages holds scroll position; returning to the bottom resumes following.
+- [ ] One bounded spoken task produces one correlated CLI request and completion.
+  Capture the completion timestamp and the subsequent spoken result.
+- [ ] Spoken progress uses first person and reports only receipt-backed facts across
+  pending, working, completed, failed and cancelled states.
+- [ ] Closing the chat or voice releases the microphone and desktop overlay without
+  cancelling authorized CLI work or retargeting another chat.
+- [ ] One retry follows confirmed closure only. Startup cancellation, uncertain
+  closure and expiry do not create duplicate work or admit another session.
+- [ ] Restart preserves transcript identity and account ownership. A missing,
+  invalid, expired or different-account pilot grant refuses admission.
+- [ ] Provider closure and final usage reconcile; unknown outcomes remain held.
+
+The existing [installed acceptance checklist](https://github.com/hurttlocker/o8/issues/4005#issuecomment-6280546703)
+retains the handoff. Keep installed observations, generated-speech traces and human
+conversation judgments distinct. Actual provider image interpretation remains
+outside this voice checkpoint and open in #2637.
