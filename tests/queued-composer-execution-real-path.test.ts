@@ -269,7 +269,7 @@ it.each(['canonical', 'optimistic', 'replaced'])('binds a persisted lead follow-
 });
 
 it.each(['held', 'applied'] as const)('keeps voice status truthful when an uncertain save retries after backend admission: %s', async status => {
-  const id = 'voice-receipt-retry'; const payload = { ...base, afterTaskId: 'original-task', routing: { ...base.routing, pinBackend: true } };
+  const id = 'voice-receipt-retry'; const payload: ComposerQueuePayload = { ...base, afterTaskId: 'original-task', routing: { ...base.routing, pinBackend: true } };
   await enqueue(id, payload);
   expect(queue.claimNextComposerSend(target)?.id).toBe(id);
   expect(queue.admitComposerSend(id)).toBe(true);
