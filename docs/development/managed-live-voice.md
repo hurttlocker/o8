@@ -335,3 +335,9 @@ The existing [installed acceptance checklist](https://github.com/hurttlocker/o8/
 retains the handoff. Keep installed observations, generated-speech traces and human
 conversation judgments distinct. Actual provider image interpretation remains
 outside this voice checkpoint and open in #2637.
+
+### Published 0.1.798 receipt
+
+[0.1.798](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.798) was published from source `f54829254dc85b1b45e2459b7b21b9da9895eda2`. Downloaded public assets matched their published hashes; the universal app and DMG matched, the updater signature verified, Gatekeeper accepted the app, and both notarization tickets validated. The installed bundle version and signature were checked without launching the app.
+
+This is artifact and installation verification. The real conversation checklist above remains open, and general managed voice admission remains disabled. Release-note format validation before the native build is tracked separately in [#4016](https://github.com/hurttlocker/o8/issues/4016); metadata recovery does not replace the published installer bytes.
