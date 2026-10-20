@@ -1,10 +1,11 @@
 'use client';
 
 import type { ComposerAreaProps } from './composer-area-types';
+import { ComposerDictationContext, useComposerDictation, useComposerTextareaRef } from '../../dictation/ComposerDictation';
 import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons } from '../InputButtons';
 import { BrainPipButton } from '../../brain/BrainPipButton';
@@ -36,7 +37,7 @@ import { addComposerFileReference, readComposerFileReferences, writeComposerFile
 const subscribeToComposerSelectorFlag = () => () => undefined;
 export type { ComposerAreaProps } from './composer-area-types';
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
-  activeComposer = false,
+  activeComposer = false, dictationId, dictationScopeKey,
   showBrain = true,
   inputLabel,
   placeholder,
@@ -109,12 +110,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const setTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
-    textareaRef.current = node;
-    if (typeof inputRef === 'function') inputRef(node);
-    else if (inputRef) inputRef.current = node;
-  }, [inputRef]);
+  const [textareaRef, setTextareaRef] = useComposerTextareaRef(inputRef);
+  const localDictationId = useComposerDictation({
+    active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
+    scopeKey: JSON.stringify([dictationScopeKey, repoPath, sessionRulesThreadId, inputLabel]),
+    onText: text => {
+      if (text) onInputChange(`${input}${input && !/\s$/.test(input) ? ' ' : ''}${text}`);
+    },
+  });
   const now = useComposerClock(activeComposer && isOrchestratorMode);
   const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
   useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
@@ -252,6 +255,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
+    <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
       paddingTop: 24,
       paddingRight: 12,
@@ -713,5 +717,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       ) : null}
     </div>
+    </ComposerDictationContext.Provider>
   );
 });

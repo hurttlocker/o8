@@ -1292,6 +1292,12 @@
       ]
     },
     {
+      "path": "tests/acp-ended-after-tools-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/acp-model-identity-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2072,6 +2078,12 @@
     },
     {
       "path": "tests/composer-queue-retry-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-session-storage-real-path.test.ts",
       "reasons": [
         "real-path"
       ]
@@ -3550,6 +3562,12 @@
         "git-cli",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-pending-image-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -5240,6 +5258,14 @@
         "process-signal",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/workspace-github-polling-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {

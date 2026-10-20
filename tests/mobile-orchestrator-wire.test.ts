@@ -50,7 +50,7 @@ describe('mobile orchestrator wire routing', () => {
       backend: 'codex',
       agent: 'operator',
       message: 'Ship it',
-      permissionMode: 'full',
+      surface: 'mobile',
       clientMutationId: 'mutation-1',
     });
   });

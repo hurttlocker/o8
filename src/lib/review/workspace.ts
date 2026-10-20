@@ -12,6 +12,7 @@ import type {
 } from '@/lib/fleet/types';
 import { parseRecentCommits } from '@/lib/git/recent-commits';
 import { parseWorktrees } from './worktrees';
+import { createWorkspaceReviewCommands } from './workspace-commands';
 import { assertReviewWorkspace, requireReviewGit } from './workspace-status';
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
@@ -56,6 +57,7 @@ const _reviewSnapshotCache = new Map<string, { snapshot: WorkflowReviewSnapshot;
 const _reviewSnapshotInflight = new Map<string, Promise<WorkflowReviewSnapshot>>();
 
 export interface WorkspaceReviewSnapshotOptions {
+  /** Refresh local Git state; remote metadata keeps its independent quota-safe TTL. */
   fresh?: boolean;
   workspacePath?: string | null;
   repoSlug?: string | null;
@@ -615,21 +617,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const startedAt = Date.now();
   const warnings: string[] = [];
 
-  const runInContext = async (command: string, args: string[]) => {
-    const { stdout } = await execFileAsync(command, args, { windowsHide: true,
-      cwd: repoRoot,
-      env: { ...process.env, LC_ALL: 'C' },
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return stdout.trim();
-  };
-  const tryRunInContext = async (command: string, args: string[]) => {
-    try {
-      return await runInContext(command, args);
-    } catch {
-      return '';
-    }
-  };
+  const { runInContext, tryRunInContext } = createWorkspaceReviewCommands(repoRoot, warnings);
 
   await assertReviewWorkspace(repoRoot, runInContext);
   const requiredGit = (args: string[]) => requireReviewGit(runInContext, args);

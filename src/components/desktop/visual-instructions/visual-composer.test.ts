@@ -4,12 +4,24 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { VisualInstructionDraft } from '@/lib/composer/visual-draft-store';
 import { claimVisualCapture, releaseVisualCapture } from '@/lib/composer/visual-capture-state';
-const test = vi.hoisted(() => ({ principal: 'a', rows: new Map<string, VisualInstructionDraft>(), listeners: new Set<() => void>(), hold: null as Promise<void> | null }));
+import { DictationHost } from '@/components/desktop/dictation/DictationHost';
+import type { DictationStartOptions, DictationState } from '@/components/desktop/dictation/types';
+const test = vi.hoisted(() => ({ principal: 'a', rows: new Map<string, VisualInstructionDraft>(), listeners: new Set<() => void>(), hold: null as Promise<void> | null,
+  dictation: 'idle' as DictationState, words: null as DictationStartOptions | null, cancel: vi.fn() }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ user: { id: test.principal }, isLoaded: true }) }));
 vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => false, isTauri: () => false }));
 vi.mock('@/components/desktop/thoughts/InputButtons', () => ({
   InputButtons: ({ inlineLeadingExtras }: { inlineLeadingExtras?: React.ReactNode }) => React.createElement('div', null, inlineLeadingExtras), RepoTargetChip: () => null,
 }));
+vi.mock('@/components/desktop/dictation/useDictation', () => ({ useDictation: () => ({
+  snapshot: { state: test.dictation, audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' },
+  start: async (options: DictationStartOptions) => { test.words = options; test.dictation = 'recording'; },
+  stopAndSubmit: () => {}, cancel: test.cancel,
+}) }));
+vi.mock('@/components/desktop/dictation/useNativeDictation', () => ({ isNativeDictationAvailable: () => false, useNativeDictation: () => ({ snapshot: { state: 'idle' } }) }));
+vi.mock('@/components/desktop/dictation/DictationPill', () => ({ DictationPill: () => null }));
+vi.mock('@/components/desktop/dictation/useSymonEditBridge', () => ({ useSymonEditBridge: () => {} }));
+vi.mock('@/lib/tts/dictation-barge-in', () => ({ stopPlaybackForDictation: () => false }));
 vi.mock('@/components/desktop/thoughts/chat-panel/SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('@/components/desktop/thoughts/chat-panel/ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
 vi.mock('./VisualInstructionClarification', () => ({ VisualInstructionClarification: () => null }));
@@ -29,19 +41,27 @@ const sample = (): VisualInstructionDraft => ({ principal: 'a', status: 'draft',
 let root: Root; let node: HTMLDivElement;
 const fetcher = vi.fn<typeof fetch>();
 const ordinarySend = vi.fn();
-function mount() { root.render(React.createElement(VisualComposerArea, {
+const ordinaryChange = vi.fn();
+async function dictate() {
+  await act(async () => {
+    node.querySelector('textarea')!.focus();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true }));
+  });
+}
+function mount(scope = 'chat-a') { root.render(React.createElement(DictationHost, null, React.createElement(VisualComposerArea, {
   visual: { active: true, target, label: 'current chat', capture: () => sample().template },
-  activeComposer: true, showBrain: false, input: 'Unsent ordinary message', onInputChange: () => {}, isOrchestratorMode: true,
+  activeComposer: true, dictationScopeKey: scope, showBrain: false, input: 'Unsent ordinary message', onInputChange: ordinaryChange, isOrchestratorMode: true,
   displayWaiting: false, chatMessages: [], activeTargetLabel: 'Codex', targetAgentExists: true, thoughtsBodyBackground: 'var(--t-chat-surface-bg)',
   enhancing: false, preEnhanceInput: null, onEnhance: () => {}, onUndoEnhance: () => {}, onSubmit: ordinarySend, onSlashCommand: () => {},
   modelLabel: 'Codex', effort: 'low', onEffortChange: () => {}, adaptiveEnabled: false, displayMessagesCount: 0, hasAssistantActivity: false,
-})); }
+}))); }
 const send = () => node.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!;
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.listeners.clear(); fetcher.mockReset();
   vi.stubGlobal('fetch', (url: RequestInfo | URL, options?: RequestInit) => options?.method === 'POST' ? fetcher(url, options) : Promise.resolve(Response.json({})));
   ordinarySend.mockClear(); localStorage.clear(); node = document.createElement('div'); document.body.append(node); root = createRoot(node);
+  ordinaryChange.mockClear(); test.cancel.mockClear(); test.dictation = 'idle'; test.words = null;
   await act(async () => mount());
 });
 afterEach(async () => { await act(async () => { releaseVisualCapture('capture'); root.unmount(); }); node.remove(); vi.unstubAllGlobals(); });
@@ -109,4 +129,20 @@ it('coalesces Send and deliberate voice delegation into the same frozen queue re
   await act(async () => { release(Response.json({ item: { ...accepted, status: 'queued' } })); await voice; });
   expect(fetcher).toHaveBeenCalledTimes(1); expect(test.rows.get('a')?.status).toBe('saved');
   expect(accepted.payload.images).toEqual(draft.request.frames.map(frame => frame.image));
+});
+
+it('delivers composer dictation to the visible marked draft without changing the ordinary draft or submitting', async () => {
+  await dictate();
+  await act(async () => test.words!.onComplete('Make it smaller.'));
+  expect(test.rows.get('a')?.request.utterance).toBe('Keep this button. Make it smaller.');
+  expect(ordinaryChange).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+});
+it.each(['close visual', 'switch chat'])('rejects late dictation when its visible draft changes: %s', async change => {
+  await dictate();
+  const recording = test.words!;
+  if (change === 'close visual') await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Close visual draft"]')!.click());
+  else await act(async () => mount('chat-b'));
+  await act(async () => recording.onComplete('Late words for an old draft.'));
+  expect(test.cancel).toHaveBeenCalled(); expect(test.rows.get('a')?.request.utterance).toBe('Keep this button.');
+  expect(ordinaryChange).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
 });

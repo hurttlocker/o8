@@ -18,6 +18,7 @@ export const VisualComposerArea = forwardRef<HTMLTextAreaElement, Props>(functio
   return <VisualInstructionComposer key={JSON.stringify([auth.user?.id ?? 'local', visual.target])} {...visual} anchor={anchor}>{value => <>
     <ComposerArea {...props} ref={setAnchor}
       {...(value.active ? {
+        dictationId: undefined, dictationScopeKey: JSON.stringify([props.dictationScopeKey, value.draft?.request.id]),
         input: value.draft?.request.utterance ?? '', onInputChange: value.setWords, inputDisabled: value.locked,
         inputLabel: 'Visual instruction', placeholder: 'What should change here?', literalInput: true,
         onSubmit: value.send, onSteer: value.send, onSlashCommand: () => {}, queueSaving: value.busy,

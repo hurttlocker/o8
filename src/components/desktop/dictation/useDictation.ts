@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DictationSnapshot, DictationStartOptions, DictationState } from './types';
 import { transcribeVisualAudio } from './transcribeVisualAudio';
+import { captureMicrophone, type MicrophoneInput } from '@/lib/voice/microphone-input';
 
 const SUCCESS_FLASH_MS = 600;
 const ERROR_FLASH_MS = 2500;
@@ -63,6 +64,7 @@ export function useDictation() {
   });
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const microphoneRef = useRef<MicrophoneInput | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -81,6 +83,21 @@ export function useDictation() {
     setSnapshot((prev) => ({ ...prev, ...patch, state: next }));
   }, []);
 
+  const stopAudioInput = useCallback(() => {
+    const recognizer = speechRecognitionRef.current;
+    speechRecognitionRef.current = null;
+    const captureEnded = recognizer ? new Promise<void>((resolve, reject) => {
+      recognizer.onresult = null;
+      recognizer.onerror = null;
+      recognizer.onend = () => { recognizer.onend = null; resolve(); };
+      try { recognizer.abort(); } catch (error) { reject(error); }
+    }) : undefined;
+    void microphoneRef.current?.stop(captureEnded).catch(() => {});
+    microphoneRef.current = null;
+    mediaStreamRef.current = null;
+    void captureEnded?.catch(() => {});
+  }, []);
+
   const cleanup = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -91,11 +108,7 @@ export function useDictation() {
       try { recorder.stop(); } catch { /* noop */ }
     }
     recorderRef.current = null;
-    const stream = mediaStreamRef.current;
-    if (stream) {
-      stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* noop */ } });
-    }
-    mediaStreamRef.current = null;
+    stopAudioInput();
     const ctx = audioCtxRef.current;
     if (ctx && ctx.state !== 'closed') {
       ctx.close().catch(() => { /* noop */ });
@@ -103,16 +116,8 @@ export function useDictation() {
     audioCtxRef.current = null;
     analyserRef.current = null;
     chunksRef.current = [];
-    const recognizer = speechRecognitionRef.current;
-    if (recognizer) {
-      try { recognizer.abort(); } catch { /* noop */ }
-      recognizer.onresult = null;
-      recognizer.onerror = null;
-      recognizer.onend = null;
-    }
-    speechRecognitionRef.current = null;
     partialFinalRef.current = '';
-  }, []);
+  }, [stopAudioInput]);
 
   const returnToIdleAfter = useCallback((ms: number) => {
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -168,9 +173,11 @@ export function useDictation() {
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      const microphone = await captureMicrophone({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      }, () => recordingId === recordingIdRef.current);
+      microphoneRef.current = microphone;
+      stream = microphone.stream;
     } catch (err) {
       if (recordingId !== recordingIdRef.current) return;
       const name = err instanceof Error ? err.name : '';
@@ -184,7 +191,8 @@ export function useDictation() {
       return;
     }
     if (recordingId !== recordingIdRef.current) {
-      stream.getTracks().forEach((t) => t.stop());
+      void microphoneRef.current?.stop().catch(() => {});
+      microphoneRef.current = null;
       return;
     }
     mediaStreamRef.current = stream;
@@ -302,8 +310,7 @@ export function useDictation() {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    mediaStreamRef.current?.getTracks().forEach((t) => { try { t.stop(); } catch { /* noop */ } });
-    mediaStreamRef.current = null;
+    stopAudioInput();
 
     setState('transcribing');
 
@@ -374,7 +381,7 @@ export function useDictation() {
       const msg = err instanceof Error ? err.message : 'Dictation failed';
       goError(msg);
     }
-  }, [cleanup, goError, returnToIdleAfter, setState]);
+  }, [cleanup, goError, returnToIdleAfter, setState, stopAudioInput]);
 
   const cancel = useCallback(() => {
     if (stateRef.current === 'idle') return;

@@ -13,6 +13,8 @@ import type { ThoughtsChatPermissionMode } from './types';
 
 export interface ComposerAreaProps {
   activeComposer?: boolean;
+  dictationId?: string;
+  dictationScopeKey?: string;
   showBrain?: boolean;
   activityContent?: ReactNode;
   voiceControl?: ReactNode;

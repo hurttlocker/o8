@@ -64,7 +64,6 @@ import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
 import { useBufferedOrchestratorSend } from './chat-panel/useBufferedOrchestratorSend';
-import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import {
@@ -1852,17 +1851,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [setInput]);
 
-  useAgentVoiceMode({
-    active: open,
-    dictationOnly: true,
-    busy: isChatMode ? waitingForReply : displayWaiting,
-    composerNodeRef: inputRef,
-    fillInput,
-    messages: displayMessages,
-    sendNow,
-    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`,
-  });
-
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
@@ -2051,7 +2039,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      <VisualComposerArea visual={{ active: open && isOrchestratorMode && !contextualConversation,
+      <VisualComposerArea dictationScopeKey={JSON.stringify([workspaceModeKey, lockedMode ?? orchestrationMode, threadId ?? 'draft'])} visual={{ active: open && isOrchestratorMode && !contextualConversation,
         target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
         label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
         ref={inputRef} activeComposer={open}

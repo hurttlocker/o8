@@ -3,6 +3,7 @@ import { LiveActivity, type LiveActivityUsage } from './activity';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import { LiveCaptions } from './captions';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { captureMicrophone, type MicrophoneInput } from '@/lib/voice/microphone-input';
 /** Browser transport. The backend owns reasoning, approvals, tools and history. */
 export type LiveState = 'idle' | 'connecting' | 'live' | 'closing' | 'closed' | 'unknown' | 'error';
 export type LiveEvent = Record<string, unknown>;
@@ -74,7 +75,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   const abort = () => { void close(); };
   const launch = () => {
     const started = ++epoch;
-    const pending = startLiveAttempt(backend, (next, detail, canResume) => {
+    const pending = startLiveAttempt(backend, (next, detail, canResume, inputReleased) => {
       if (started !== epoch) return;
       if (next === 'closed' && canResume && !stopped && !retried && !signal?.aborted) {
         retried = true; resuming = true;
@@ -82,7 +83,13 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
         publish('connecting', 'Voice connection ended. Reconnecting once to this chat.');
         if (!stopped) resumeTimer = setTimeout(() => {
           resumeTimer = undefined;
-          void pending.then(() => {
+          void pending.then(async () => {
+            try { await inputReleased; }
+            catch {
+              resuming = false;
+              if (!stopped) publish('error', 'Microphone ownership release was not confirmed. Check voice before retrying.');
+              return;
+            }
             if (stopped) return;
             resuming = false; current = undefined; attempt = launch();
             void attempt.catch(() => {});
@@ -107,7 +114,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   return { close, activity: () => current?.activity(), get state() { return state; }, get usage() { return current?.usage ?? emptyUsage; } };
 }
 
-async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState, detail?: string, canResume?: boolean) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
+async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState, detail?: string, canResume?: boolean, inputReleased?: Promise<void>) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
   let state: LiveState = 'connecting';
   let cleaned = false;
   let pollingStarted = false;
@@ -131,6 +138,8 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   let contextAt = 0;
   let contextSending = false;
   let stream: MediaStream | undefined;
+  let microphone: MicrophoneInput | undefined;
+  let microphoneReleased: Promise<void> = Promise.resolve();
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let idleTimer: ReturnType<typeof setInterval> | undefined;
   let audioContext: AudioContext | undefined;
@@ -145,7 +154,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   let reconciling = false;
   const transition = (next: LiveState, detail?: string, canResume = false) => {
     if (state === 'closed' || (cleaned && next !== 'closed')) return;
-    state = next; onState(next, detail, canResume);
+    state = next; onState(next, detail, canResume, microphoneReleased);
   };
   const activity = () => {}; // UI interactions are not evidence of speech.
   const request = async (body: Record<string, unknown>, requestSignal?: AbortSignal) => {
@@ -159,7 +168,8 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     if (cleaned) return;
     cleaned = true; unsubscribe?.(); rejectStartup(new Error('Voice setup ended before becoming ready.')); signal?.removeEventListener('abort', abort);
     clearTimeout(startupTimer); clearTimeout(pollTimer); clearTimeout(closeTimer); clearInterval(idleTimer);
-    stream?.getTracks().forEach(track => track.stop()); peer.close(); audio.pause(); audio.srcObject = null;
+    microphoneReleased = microphone?.stop() ?? Promise.resolve();
+    void microphoneReleased.catch(() => {}); peer.close(); audio.pause(); audio.srcObject = null;
     options?.onLevel?.(0);
     void audioContext?.close(); resolveClose?.();
   };
@@ -269,11 +279,12 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     await startupStep(Promise.resolve(backend.ready?.()));
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
-    const capturedStream = await startupStep<MediaStream>(navigator.mediaDevices.getUserMedia({ audio: true }).then(captured => {
-      if (cleaned) captured.getTracks().forEach(track => track.stop());
-      return captured;
+    const captured = await startupStep(captureMicrophone({ audio: true }, () => !cleaned && !signal?.aborted).then(input => {
+      microphone = input;
+      if (cleaned) void input.stop().catch(() => {});
+      return input;
     }));
-    stream = capturedStream;
+    const capturedStream = captured.stream; stream = capturedStream;
     signal?.throwIfAborted();
     if (cleaned || closePromise) throw new Error('Voice startup was cancelled.');
     capturedStream.getTracks().forEach(track => peer.addTrack(track, stream!));

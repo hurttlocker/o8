@@ -3,6 +3,7 @@ import React, { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useDictation } from './useDictation';
+import { captureMicrophone } from '@/lib/voice/microphone-input';
 
 class Recorder extends EventTarget {
   static isTypeSupported() { return true; }
@@ -26,7 +27,7 @@ beforeEach(async () => {
   node = document.createElement('div'); document.body.append(node); root = createRoot(node);
   await act(async () => root.render(React.createElement(Host)));
 });
-afterEach(async () => { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); node.remove(); Reflect.deleteProperty(window, 'SpeechRecognition'); vi.unstubAllGlobals(); });
 it('delivers recognized visual instruction words without calling the rewrite endpoint', async () => {
   fetcher.mockResolvedValueOnce(Response.json({ text: 'Keep the button exactly here.' }));
   const complete = vi.fn(); await act(async () => engine.start({ preserveTranscript: true, onComplete: complete }));
@@ -47,4 +48,22 @@ it('preserves the normal dictation polish path for other callers', async () => {
   const complete = vi.fn(); await act(async () => engine.start({ onComplete: complete })); await act(async () => engine.stopAndSubmit());
   expect(fetcher.mock.calls.map(call => call[0])).toEqual(['/api/dictation/transcribe', '/api/dictation/polish']);
   expect(complete).toHaveBeenCalledExactlyOnceWith('Polished words.');
+});
+it.each(['stop', 'cancel'])('keeps input reserved until the partial recognizer ends on %s', async action => {
+  const recognizers: { onend: (() => void) | null; abort: ReturnType<typeof vi.fn> }[] = [];
+  Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: class {
+    onend: (() => void) | null = null; abort = vi.fn(); start() {} stop() {}
+    constructor() { recognizers.push(this); }
+  } });
+  let finish!: (response: Response) => void;
+  fetcher.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  await act(async () => engine.start({ preserveTranscript: true, onComplete: vi.fn() }));
+  const recognizer = recognizers[0];
+  let pending: Promise<void> | undefined;
+  await act(async () => { if (action === 'stop') pending = engine.stopAndSubmit(); else engine.cancel(); });
+  expect(recognizer.abort).toHaveBeenCalledOnce(); expect(stopTrack).toHaveBeenCalledOnce();
+  await expect(captureMicrophone({ audio: true })).rejects.toThrow('Another voice input is active');
+  await act(async () => recognizer.onend?.());
+  const next = await captureMicrophone({ audio: true }); await next.stop();
+  if (pending) await act(async () => { finish(Response.json({ text: 'Earlier recording.' })); await pending; });
 });
