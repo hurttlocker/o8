@@ -15,6 +15,7 @@ import { isWebMachineBrowserSurface } from '@/lib/connect/web-machine-surface';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { recordXtermSelectionSnapshot, registerXtermSelectionSource } from '@/components/desktop/workspace-terminal/xterm-selection-registry';
 import { retainInlineTerminalImages, TERMINAL_SCROLLBACK_LINES } from '@/lib/terminal/client-retention';
+import { disposeTerminalOutput, setTerminalInputDisabled, writeTerminalOutput } from '@/components/desktop/workspace-terminal/terminal-output-writer';
 import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
 import { TerminalExitNotice } from '@/components/desktop/workspace-terminal/TerminalExitNotice';
 import { retainTerminalExitBuffer } from '@/components/desktop/workspace-terminal/terminal-exit-buffer';
@@ -26,7 +27,7 @@ interface InlineImage {
 }
 
 export interface XtermPanelHandle {
-  writeData: (data: string) => void;
+  writeData: (data: string, historical?: boolean) => void;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
   setExited: (exitCode?: number | null) => void;
@@ -69,11 +70,11 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   const imageCountRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
-    writeData: (data: string) => {
+    writeData: (data: string, historical = false) => {
       if (!termRef.current) return;
       try {
         const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-        termRef.current.write(bytes);
+        writeTerminalOutput(termRef.current, bytes, undefined, historical);
       } catch { /* ignore decode errors */ }
     },
     showImage: (imageB64: string, filename: string) => {
@@ -85,19 +86,19 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         ...previous,
         { id: `img-${imageCountRef.current}`, dataUrl, filename },
       ]));
-      if (termRef.current) termRef.current.write('\r\n\r\n');
+      if (termRef.current) writeTerminalOutput(termRef.current, '\r\n\r\n');
     },
     setError: (err: string) => { if (!exitedRef.current) setError(err); },
     setExited: (exitCode) => {
       exitedRef.current = true;
-      if (termRef.current) termRef.current.options.disableStdin = true;
+      if (termRef.current) setTerminalInputDisabled(termRef.current, true);
       const term = termRef.current;
       const finish = () => {
         const state = terminalExitState(exitCode, exitBufferRef.current?.read() ?? '');
-        if (term && state.transcript) { term.reset(); term.options.disableStdin = true; term.write(state.transcript.replace(/\n/g, '\r\n')); }
+        if (term && state.transcript) { term.reset(); setTerminalInputDisabled(term, true); writeTerminalOutput(term, state.transcript.replace(/\n/g, '\r\n'), undefined, true); }
         setExited(state);
       };
-      if (term) term.write('', finish); else finish();
+      if (term) writeTerminalOutput(term, '', finish); else finish();
     },
   }), []);
 
@@ -226,7 +227,7 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       sendTerminalDetach(tmuxSession);
       cleanupPromise?.then(cleanup => cleanup?.());
       exitBufferRef.current?.dispose(); exitBufferRef.current = null;
-      if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
+      if (termRef.current) { disposeTerminalOutput(termRef.current); termRef.current.dispose(); termRef.current = null; }
       fitAddonRef.current = null;
     };
   }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, readOnly]);
