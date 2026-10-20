@@ -213,6 +213,11 @@ describe.sequential('refinement preparation through the authenticated harness ro
     expect((await POST(request(body))).status).toBe(400);
     expect(journalContents()).toEqual(before); expect(listLanes()).toEqual(lanes);
     expect((await POST(request(body, mintPacketWorkerToken('prepare-worker')))).status).toBe(403);
+    const observe = { ...body, action: 'refinement_observe_artifacts', packetId: 'missing-packet',
+      surfaceId: 'missing-surface', runId: 'missing-run' };
+    expect((await POST(request(observe))).status).toBe(400);
+    expect((await POST(request(observe, mintPacketWorkerToken('observe-worker')))).status).toBe(403);
+    expect(journalContents()).toEqual(before); expect(listLanes()).toEqual(lanes);
   });
 
 });

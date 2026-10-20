@@ -105,6 +105,39 @@ describe('trusted held refinement mission through dedicated process and real per
     expect(existsSync(join(launch.namespace.root, 'harness-refinement-packets'))).toBe(false);
   });
 
+  it('reaches held packet preparation through the authenticated API in the dedicated child', () => {
+    const { launch, pending, repository } = fixture();
+    const result = child(launch, `const fs = require('node:fs');
+      const token = 'isolated-refinement-route-fixture-0123456789';
+      fs.writeFileSync(process.env.O8_DATA_DIR + '/ws-token', token + '\\n', {mode:0o600});
+      const { NextRequest } = require(source + '/../../node_modules/next/server');
+      const { POST } = require(source + '/../app/api/harness/route.ts');
+      const body = ${JSON.stringify({ action: 'refinement_prepare_packet', repoPath: repository,
+        id: 'held-fixture', requestId: pending.pending!.id, expectedRevision: pending.revision })};
+      const request = credential => new NextRequest('http://localhost/api/harness', {method:'POST',
+        headers:{host:'localhost','content-type':'application/json',authorization:'Bearer '+credential},body:JSON.stringify(body)});
+      const denied = await POST(request('not-the-operator'));
+      const before = fs.existsSync(process.env.O8_DATA_DIR + '/orchestrator-state.json');
+      const response = await POST(request(token));
+      const payload = await response.json();
+      const snapshot = fs.readFileSync(process.env.O8_DATA_DIR + '/orchestrator-state.json','utf8');
+      const duplicate = await POST(request(token));
+      const observation = await POST(new NextRequest('http://localhost/api/harness', {method:'POST',
+        headers:{host:'localhost','content-type':'application/json',authorization:'Bearer '+token},
+        body:JSON.stringify({...body,action:'refinement_observe_artifacts',packetId:payload.result.packetId,
+          surfaceId:'missing-owned-surface',runId:'missing-owned-run'})}));
+      return {denied:denied.status,before,status:response.status,payload,duplicate:duplicate.status,
+        observationStatus:observation.status,observation:await observation.json(),
+        unchanged:snapshot===fs.readFileSync(process.env.O8_DATA_DIR + '/orchestrator-state.json','utf8')};`);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, value: { denied: 403, before: false,
+      status: 200, payload: { ok: true, result: { status: 'held', namespaceId: launch.namespace.id } },
+      observationStatus: 200, observation: { ok: true, result: { status: 'held', authorizesExecution: false } },
+      duplicate: 400, unchanged: true } });
+    const stored = JSON.parse(readFileSync(join(launch.namespace.root, 'orchestrator-state.json'), 'utf8'));
+    expect(stored.mission.packets).toHaveLength(1);
+    expect(stored.mission.packets[0]).toMatchObject({ queueState: 'held', status: 'blocked', mergeHold: true, lane: null });
+  });
+
   it('rejects unsafe database files before importing the database module', () => {
     const { root, launch, pending } = fixture(); const target = join(root, 'unrelated.db'); writeFileSync(target, 'sentinel', { mode: 0o600 });
     symlinkSync(target, join(launch.namespace.root, 'cortex-ide.db'));

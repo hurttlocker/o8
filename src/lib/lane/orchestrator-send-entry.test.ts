@@ -117,6 +117,8 @@ describe('orchestrator-send backend entry', () => {
     expect(resolveOrchestratorExecutionBackendId('claude', undefined)).toBe('claude');
     expect(orchestratorModeAllowsBackendFallback('single')).toBe(false);
     expect(orchestratorModeAllowsBackendFallback('fusion')).toBe(true);
+    expect(orchestratorModeAllowsBackendFallback('fleet', true)).toBe(false);
+    expect(orchestratorModeAllowsBackendFallback('fusion', true)).toBe(false);
     expect(orchestratorModeAllowsBackendFallback(undefined)).toBe(true);
   });
 

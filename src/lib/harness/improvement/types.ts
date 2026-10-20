@@ -23,6 +23,8 @@ export interface ImprovementManifest {
   maxInputBytes: number;
   baseline: ImprovementHarness;
   tasks: Array<{ id: string; domain: string; prompt: string }>;
+  /** Initial operator-declared advisory capture scope; never evaluator or launch authority. */
+  artifactInventory?: { files: string[]; maxFileBytes: number; maxTotalBytes: number };
 }
 export type ImprovementStageKind = 'execute' | 'propose_invariant' | 'propose_domain' | 'compose' | 'select' | 'reflect';
 export interface BehavioralEvidence {

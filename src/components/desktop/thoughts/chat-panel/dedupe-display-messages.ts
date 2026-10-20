@@ -1,5 +1,6 @@
 import { areDistinctOrchestratorSends, preserveDeliveryConfirmation, removeConfirmedDeliveryWarnings } from '@/lib/transcripts/delivery-confirmation';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
 
 /**
  * Optimistic/echo user-dedupe window. After a mid-conversation reload (HMR /
@@ -47,7 +48,7 @@ export function dedupeDisplayMessages(
       byId.push(entry);
     } else {
       idCollision = true;
-      byId[seen] = preserveDeliveryConfirmation(byId[seen], entry);
+      byId[seen] = preserveDeliveryConfirmation(byId[seen], preserveVoiceCaption(byId[seen], entry));
     }
   }
 
@@ -56,7 +57,7 @@ export function dedupeDisplayMessages(
   const seenUsers: Array<{ entry: MobileTranscriptEntry; text: string; timestamp: number | undefined }> = [];
   let userCollision = false;
   for (const entry of byId) {
-    if (entry.role === 'user') {
+    if (entry.role === 'user' && !entry.voice) {
       const text = entry.text.trim();
       const timestamp = entry.timestamp;
       const isEcho = text.length > 0 && seenUsers.some((prev) => {

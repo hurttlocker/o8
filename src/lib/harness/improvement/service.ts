@@ -67,6 +67,23 @@ export async function handleImprovementAction(body: Record<string, unknown>, con
     const next = revokeExperimentLesson(state, body.lessonId, body.reason);
     return { state: next.revision === state.revision ? state : journal.append(next, state.revision), launch: 'held' };
   }
+  if (body.action === 'refinement_observe_artifacts') {
+    object(body, ['action', 'repoPath', 'id', 'requestId', 'expectedRevision', 'packetId', 'surfaceId', 'runId']);
+    text(body.id, 128); text(body.requestId, 128); text(body.packetId, 256);
+    text(body.surfaceId, 256); text(body.runId, 128); integer(body.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
+    const state = journal.read(body.id);
+    if (!state || state.manifest.repository !== repository || state.revision !== body.expectedRevision
+      || state.pending?.id !== body.requestId || state.pending.kind !== 'execute') {
+      throw new Error('Refinement pending execution binding differs.');
+    }
+    const { requireImprovementNamespace } = await import('./namespace');
+    const namespace = requireImprovementNamespace();
+    if (namespace.experimentId !== body.id || namespace.repository !== repository) throw new Error('Refinement namespace differs.');
+    const { collectRuntimeArtifactObservation } = await import('./runtime-artifact-observation');
+    // Observation is never a receipt settlement, evaluator verdict or launch grant.
+    return collectRuntimeArtifactObservation({ experimentId: body.id, requestId: body.requestId,
+      packetId: body.packetId, surfaceId: body.surfaceId, runId: body.runId });
+  }
   if (body.action === 'refinement_launch') {
     // Fail before packet creation, provider lookup or launch. A request body,
     // operator identity, manifest or native provenance declaration is no grant.

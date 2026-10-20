@@ -175,6 +175,20 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/personal-pilot-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "src/app/api/voice/live/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/worktrees/batch/route.test.ts",
       "reasons": [
         "worktree-api"
@@ -410,6 +424,16 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/harness/improvement/runtime-artifact-observation.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "terminal-tool"
       ]
     },
     {
@@ -2686,6 +2710,15 @@
       ]
     },
     {
+      "path": "tests/harness-refinement-runtime-observation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/harness-refinement-service-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4016,6 +4049,8 @@
     {
       "path": "tests/queued-composer-execution-real-path.test.ts",
       "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },

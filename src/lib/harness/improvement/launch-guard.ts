@@ -242,7 +242,7 @@ export function bindImprovementPacketLane(packetId: string, laneId: string): voi
   assertPending(binding);
   publish(laneName(laneId), { schema: 'o8/harness-refinement-lane/v1', laneId, packetId, bindingDigest: digest(binding) });
 }
-function bindingFor(input: ImprovementPacketLaunchInput): ImprovementPacketBinding | null {
+function bindingFor(input: Pick<ImprovementPacketLaunchInput, 'packetId' | 'laneId'>): ImprovementPacketBinding | null {
   let associated = false;
   if (input.laneId) {
     const association = read(laneName(input.laneId));
@@ -261,7 +261,18 @@ function bindingFor(input: ImprovementPacketLaunchInput): ImprovementPacketBindi
   if (binding && input.laneId && !associated) held('lane_binding_missing', 'Experiment lane has no durable packet association.');
   return binding;
 }
-function assertSource(binding: ImprovementPacketBinding, path: string): void {
+/** Conservative retry suppression must remain usable after settlement or registry damage. */
+export function improvementPacketRecoveryHeld(input: Pick<ImprovementPacketLaunchInput, 'packetId' | 'laneId'>): boolean {
+  if (input.packetId?.startsWith(PREFIX)) return true;
+  try { return bindingFor(input) !== null; } catch { return true; }
+}
+/** Resolve immutable ownership only; never a launch grant. */
+export function readImprovementPacketBinding(input: Pick<ImprovementPacketLaunchInput, 'packetId' | 'laneId'>): ImprovementPacketBinding | null {
+  const binding = bindingFor(input);
+  if (binding) assertPending(binding);
+  return binding;
+}
+export function observeImprovementSource(binding: ImprovementPacketBinding, path: string): { head: string; tree: string } {
   // Do not let ambient Git overrides redirect source verification or repository
   // fsmonitor configuration execute a command during this read-only check.
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
@@ -290,6 +301,7 @@ function assertSource(binding: ImprovementPacketBinding, path: string): void {
     gitAt(binding.manifest.repository, ['rev-parse', '--git-common-dir'])));
   const actualCommon = realpathSync(resolve(path, git(['rev-parse', '--git-common-dir'])));
   if (actualCommon !== expectedCommon) held('repository_changed', 'Launch checkout is not a worktree of the pinned repository.');
+  return { head: git(['rev-parse', '--verify', 'HEAD']), tree: git(['rev-parse', '--verify', 'HEAD^{tree}']) };
 }
 function assertGrant(binding: ImprovementPacketBinding): never {
   const value = read(`${digest(binding.packetId)}.grant.json`);
@@ -310,10 +322,10 @@ function assertGrant(binding: ImprovementPacketBinding): never {
   held('launch_authorization_required', 'Separate explicit trusted launch authorization and a verified isolated carrier are required.');
 }
 
-/** Called at real dispatch/recovery/spawn boundaries, never controlled by packet body booleans. */
-export function assertImprovementPacketLaunch(input: ImprovementPacketLaunchInput): void {
+/** Read and validate current immutable experiment pins; this conveys no launch authority. */
+export function readImprovementRuntimeBinding(input: ImprovementPacketLaunchInput): ImprovementPacketBinding | null {
   const binding = bindingFor(input);
-  if (!binding) return;
+  if (!binding) return null;
   assertPending(binding);
   if (!input.repository || realpathSync(input.repository) !== binding.manifest.repository
     || input.runtime !== binding.manifest.runtime || input.model !== binding.manifest.model
@@ -321,7 +333,14 @@ export function assertImprovementPacketLaunch(input: ImprovementPacketLaunchInpu
     || (input.claudeCodeCarrier ?? null) !== binding.claudeCodeCarrier) {
     held('launch_pins_changed', 'Effective repository, runtime, model, effort or carrier differs from the immutable manifest.');
   }
-  assertSource(binding, input.sourcePath ?? input.repository);
+  return binding;
+}
+
+/** Called at real dispatch/recovery/spawn boundaries; every refinement launch remains held. */
+export function assertImprovementPacketLaunch(input: ImprovementPacketLaunchInput): void {
+  const binding = readImprovementRuntimeBinding(input);
+  if (!binding) return;
+  observeImprovementSource(binding, input.sourcePath ?? input.repository!);
   // Existing native carriers cannot attest Linux filesystem/network/credential isolation,
   // exact permission/mount enforcement, or launch-once consent. Never infer this from
   // platform, actor=user/operator, an Ori/auth preflight, or any request-body claim.

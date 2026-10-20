@@ -12,7 +12,8 @@ export function createExperiment(input: ImprovementManifest): ImprovementExperim
   const { repository, baselineRevision, contractDigest, verifierDigest, permissionsDigest, runtime, model, effort } = manifest;
   return {
     schema: 'o8/harness-refinement/v1', manifest, manifestDigest: digest(manifest),
-    scopeDigest: digest({ repository, baselineRevision, contractDigest, verifierDigest, permissionsDigest, runtime, model, effort }),
+    scopeDigest: digest({ repository, baselineRevision, contractDigest, verifierDigest, permissionsDigest, runtime, model, effort,
+      ...(manifest.artifactInventory ? { artifactInventory: manifest.artifactInventory } : {}) }),
     revision: 0, taskIndex: 0, status: 'ready', blockedReason: null, pending: null, pendingReceipt: null,
     records: [], lessons: [], lessonRevocations: [], selections: [], acceptance: { liveBenefitProven: false, promoted: false },
   };

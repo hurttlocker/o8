@@ -11,6 +11,18 @@ const input = (): ImprovementManifest => ({
   baseline: { instructions: 'Keep safety and review boundaries.' },
   tasks: [{ id: 'A', domain: 'code', prompt: 'Implement A.' }, { id: 'B', domain: 'code', prompt: 'Implement B.' }],
 });
+it('binds lesson scope to the frozen artifact inventory while preserving legacy scope', () => {
+  const baseline = input();
+  const { repository, baselineRevision, contractDigest, verifierDigest, permissionsDigest, runtime, model, effort } = baseline;
+  expect(createExperiment(baseline).scopeDigest).toBe(digest({ repository, baselineRevision, contractDigest,
+    verifierDigest, permissionsDigest, runtime, model, effort }));
+  const scoped = { ...baseline, artifactInventory: { files: ['answer.ts'], maxFileBytes: 1024, maxTotalBytes: 1024 } };
+  const first = createExperiment(scoped);
+  expect(first.scopeDigest).not.toBe(createExperiment(baseline).scopeDigest);
+  expect(first.scopeDigest).not.toBe(createExperiment({ ...scoped,
+    artifactInventory: { ...scoped.artifactInventory, files: ['other.ts'] } }).scopeDigest);
+  validatePersistedExperiment(first);
+});
 function result(request: ImprovementRequest): ImprovementReceipt {
   const receipt: ImprovementReceipt = {
     requestId: request.id, requestDigest: digest(request), status: 'completed', provenance: 'fixture',

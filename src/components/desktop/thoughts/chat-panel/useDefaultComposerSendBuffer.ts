@@ -52,6 +52,7 @@ export function useDefaultComposerSendBuffer({
   shouldBypass,
   sendUnbuffered,
 }: UseDefaultComposerSendBufferOptions): {
+  durable: ReturnType<typeof useDurableComposerQueue>;
   sendBuffer: ComposerSendBuffer;
   handleSend: () => void;
   attachmentError: string | null;
@@ -157,6 +158,7 @@ export function useDefaultComposerSendBuffer({
     cancellable: !durable.removing.has(item.sequence) && (item.status !== 'dispatching' || item.admittedAt === null),
   }));
   return {
+    durable,
     sendBuffer: { ...sendBuffer, queued, cancelQueued: id => { void durable.cancel(id); } },
     handleSend, handleSteer, saving, attachmentError: attachmentError ?? durable.error,
   };

@@ -77,9 +77,12 @@ export async function runBoundChatContinuation(
         case 'plan': hooks.publish(session.sessionName, 'plan-update', { ...data, turnId: assistantMessageId, explanation: event.explanation, steps: event.steps }); break;
         case 'done':
           completed = true;
+          receipt = { ...receipt, terminal: { userMessageId: `review-user-${assistantMessageId}`,
+            outcome: controller.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
           if (event.sessionId && (backend.id === 'codex' || backend.id === 'claude')) writeOrchestratorBackendSessionId(expected.threadId, backend.id, event.sessionId);
           persist(event.sessionId, event);
-          hooks.publish(session.sessionName, 'status', { ...data, status: controller.signal.aborted ? 'stopped' : 'ready', receipt, cost: event.cost, usage: event.usage }); break;
+          hooks.publish(session.sessionName, 'status', { ...data, status: controller.signal.aborted ? 'stopped' : 'ready', receipt,
+            voiceTerminal: { ...receipt.terminal, text }, cost: event.cost, usage: event.usage }); break;
         case 'error': turnError = event.error; hooks.publish(session.sessionName, 'error', { ...data, error: event.error }); break;
         case 'turn_retry': text = ''; persist(null); break;
         case 'collide_phase': case 'collide_proposal': case 'handoff': break;

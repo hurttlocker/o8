@@ -28,9 +28,32 @@ export function harness(value: unknown): asserts value is ImprovementHarness {
   const row = object(value, ['instructions', 'memory', 'skills', 'toolGuidance'], ['instructions']);
   for (const entry of Object.values(row)) text(entry, 16384);
 }
+/** Deliberately narrow advisory scope. Denylists do not attest secret/evaluator isolation. */
+export function artifactInventory(value: unknown): asserts value is NonNullable<ImprovementManifest['artifactInventory']> {
+  const row = object(value, ['files', 'maxFileBytes', 'maxTotalBytes']);
+  integer(row.maxFileBytes, 1, 32768); integer(row.maxTotalBytes, 1, 32768);
+  if (Number(row.maxFileBytes) > Number(row.maxTotalBytes) || !Array.isArray(row.files)
+    || row.files.length < 1 || row.files.length > 16) throw new Error('Invalid artifact inventory bounds.');
+  const files = row.files as unknown[];
+  for (const path of files) {
+    text(path, 256);
+    if (!/^[A-Za-z0-9_-][A-Za-z0-9_./-]*$/.test(path)
+      || path.split('/').some(part => !part || part === '.' || part === '..'
+        || /^(?:\.|node_modules$|harness-refinement|runs$|logs?$|credentials?$|secrets?$|private$|evaluators?$|oracle$|scorers?$|benchmarks?$)/i.test(part))
+      || /(?:^|[./_-])(?:secret|credential|token|password|private|oracle|evaluator|scorer|session|config|env)(?:[./_-]|$)/i.test(path)
+      || /\.(?:pem|key|p12|pfx|sqlite|db|log|jsonl)$/i.test(path)) throw new Error('Unsafe artifact inventory path.');
+  }
+  if (new Set(files).size !== files.length || canonical(files) !== canonical([...files].sort())) {
+    throw new Error('Artifact inventory must be unique and sorted.');
+  }
+}
+
 export function manifest(value: unknown): asserts value is ImprovementManifest {
   const row = object(value, ['id', 'repository', 'baselineRevision', 'contractDigest', 'verifierDigest', 'permissionsDigest',
+    'runtime', 'model', 'effort', 'provenance', 'mode', 'k', 'maxStages', 'maxStageWallMs', 'maxInputBytes', 'baseline', 'tasks', 'artifactInventory'],
+  ['id', 'repository', 'baselineRevision', 'contractDigest', 'verifierDigest', 'permissionsDigest',
     'runtime', 'model', 'effort', 'provenance', 'mode', 'k', 'maxStages', 'maxStageWallMs', 'maxInputBytes', 'baseline', 'tasks']);
+  if (row.artifactInventory !== undefined) artifactInventory(row.artifactInventory);
   text(row.id, 128);
   for (const key of ['repository', 'runtime', 'model', 'effort']) text(row[key], 1024);
   for (const key of ['contractDigest', 'verifierDigest', 'permissionsDigest']) {

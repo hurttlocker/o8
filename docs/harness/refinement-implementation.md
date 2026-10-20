@@ -168,3 +168,40 @@ handoffs are insufficient. The next source phase must add that producer/collecto
 and an additive locked admission primitive, not clone stale packets or reuse
 `createMission` to supersede a mission. Carrier enforcement and real process
 quiescence require validation on a legitimately supported isolated host.
+
+## Runtime observation increment (still held)
+
+The next source increment reconciles main `9827ecee7974f9733a4b5044cfe120f7c23455f3`
+without changing the original reviewed draft's evidence. The actual owned-session
+controller now rechecks the experiment launch hold before preparation and again
+at its final spawn boundary. Observation plumbing never supplies a launch grant.
+Tests that exercise the successful observation branch explicitly mock that guard
+and the child process; they are not real writable execution evidence.
+
+The prepared observation records exact session/run/packet identities, directory
+identities, post-preparation source and digests of final invocation/stdin. Only
+allowlisted nonsecret configuration metadata and declarative mount information
+are represented. These are not complete mounted-byte or confinement attestations.
+A post-spawn observation is distinct from authenticated process-birth identity.
+Private files owned by the same OS user remain untrusted observations, not a
+worker-inaccessible authority store.
+
+An optional initial `artifactInventory` freezes a sorted bounded file inventory
+and byte limits into the manifest digest. Existing manifests without it remain
+held for capture. The collector accepts no caller-selected subtree or worker
+inventory. It rejects changes outside the declared output inventory, unsafe file
+identities and ambiguous terminal/process evidence. It runs the existing probes
+for known retained runs and observed filesystem users around byte capture under
+the existing lifecycle lock order. These observations do not prove global process
+quiescence: escaped or otherwise unobserved descendants remain a carrier boundary.
+Application locks and repeated reads are not an OS-enforced freeze. The collector
+then publishes a bounded write-once scope-limited observation. Retries
+after a capture reservation require reconciliation rather than blind recapture.
+
+This inventory is advisory operator scope, not machine-verified equivalence to
+the accepted contract's prose. It does not prove that evaluator assets were
+excluded from the worker. Captured bytes and hashes are not an evaluator verdict,
+completion receipt, engine settlement, launch approval or permission to append a
+new packet. The operator-only observation route preserves these distinctions;
+missing runtime evidence returns held. A trusted grant/carrier, protected evidence
+producer, independent evaluator and additive mission admission remain unfinished.
