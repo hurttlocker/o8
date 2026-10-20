@@ -8,6 +8,7 @@ import { useComposerClock } from './useComposerClock';
 import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
 import { InputButtons } from '../InputButtons';
+import { ComposerPopoverVisibilityContext } from './ComposerPopover';
 import { BrainPipButton } from '../../brain/BrainPipButton';
 import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
@@ -648,56 +649,62 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}
           />
           {!footerOverride && isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
-          {footerOverride ?? <InputButtons
-            input={input}
-            hasAttachments={attachedImages.length > 0}
-            enhancing={enhancing}
-            preEnhanceInput={preEnhanceInput}
-            onEnhance={onEnhance}
-            onUndoEnhance={onUndoEnhance}
-            onSubmit={onSubmit}
-            modelLabel={modelLabel}
-            modelId={isOrchestratorMode ? selectorModelId : undefined}
-            onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
-            activeBackend={isOrchestratorMode ? activeBackend : undefined}
-            onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
-            effort={selectorControls.state.effort}
-            onEffortChange={selectorControls.onEffortChange}
-            adaptiveEnabled={adaptiveEnabled}
-            sessionRulesThreadId={sessionRulesThreadId}
-            repoLabel={null}
-            displayMessagesCount={displayMessagesCount}
-            working={isOrchestratorMode && displayWaiting}
-            onStop={isOrchestratorMode ? onStop : undefined}
-            onUploadDiskFiles={onUploadDiskFiles}
-            composerMode={composerMode}
-            onComposerModeChange={selectorControls.onModeChange}
-            composerSelectorController={selectorControls}
-            onFileReferenceSelect={handleFileReferenceSelect}
-            repoPath={repoPath}
-            workspaceTargets={workspaceTargets}
-            selectedRepoPath={selectedRepoPath}
-            onSelectRepoPath={onSelectRepoPath}
-            inlineLeadingExtras={composerLeadingExtras}
-            managedVoiceControl={voiceControl}
-            permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
-              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
-                // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
-                fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
-            inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
-            voiceModeEnabled={voiceModeEnabled}
-            onVoiceModeChange={onVoiceModeChange}
-            onBrowsePrompts={isOrchestratorMode ? () => {
-              window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
-            } : undefined}
-            onSavePrompt={isOrchestratorMode ? (body) => {
-              window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
-                detail: { body, repoPath: repoPath ?? null },
-              }));
-            } : undefined}
-            composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
-            onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
-          />}
+          {footerOverride}
+          {/* Keep the chat's Live owner mounted when the visible footer changes. */}
+          {footerOverride != null && !voiceControl ? null : <ComposerPopoverVisibilityContext.Provider value={footerOverride == null}>
+            <div style={{ display: footerOverride != null ? 'none' : 'contents' }}>
+              <InputButtons
+                input={input}
+                hasAttachments={attachedImages.length > 0}
+                enhancing={enhancing}
+                preEnhanceInput={preEnhanceInput}
+                onEnhance={onEnhance}
+                onUndoEnhance={onUndoEnhance}
+                onSubmit={onSubmit}
+                modelLabel={modelLabel}
+                modelId={isOrchestratorMode ? selectorModelId : undefined}
+                onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
+                activeBackend={isOrchestratorMode ? activeBackend : undefined}
+                onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
+                effort={selectorControls.state.effort}
+                onEffortChange={selectorControls.onEffortChange}
+                adaptiveEnabled={adaptiveEnabled}
+                sessionRulesThreadId={sessionRulesThreadId}
+                repoLabel={null}
+                displayMessagesCount={displayMessagesCount}
+                working={isOrchestratorMode && displayWaiting}
+                onStop={isOrchestratorMode ? onStop : undefined}
+                onUploadDiskFiles={onUploadDiskFiles}
+                composerMode={composerMode}
+                onComposerModeChange={selectorControls.onModeChange}
+                composerSelectorController={selectorControls}
+                onFileReferenceSelect={handleFileReferenceSelect}
+                repoPath={repoPath}
+                workspaceTargets={workspaceTargets}
+                selectedRepoPath={selectedRepoPath}
+                onSelectRepoPath={onSelectRepoPath}
+                inlineLeadingExtras={composerLeadingExtras}
+                managedVoiceControl={voiceControl}
+                permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
+                  ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
+                    // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
+                    fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
+                inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
+                voiceModeEnabled={voiceModeEnabled}
+                onVoiceModeChange={onVoiceModeChange}
+                onBrowsePrompts={isOrchestratorMode ? () => {
+                  window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
+                } : undefined}
+                onSavePrompt={isOrchestratorMode ? (body) => {
+                  window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
+                    detail: { body, repoPath: repoPath ?? null },
+                  }));
+                } : undefined}
+                composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
+                onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
+              />
+            </div>
+          </ComposerPopoverVisibilityContext.Provider>}
         </div>
       </div>
       <ComposerContextRow
