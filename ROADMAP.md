@@ -229,6 +229,8 @@ Browser overlay detection [#3799](https://github.com/hurttlocker/o8/issues/3799)
 
 Fresh-session dialog guards [#3916](https://github.com/hurttlocker/o8/issues/3916) ignore invisible cached portals at the app-owned creation boundary while visible dialogs still refuse creation. Real-root tests cover direct requests, late visibility changes and multiple dialogs without weakening identity or inventory checks.
 
+Built-in command activity [#3553](https://github.com/hurttlocker/o8/issues/3553) names the command requested by run/help tools in running and expanded transcript rows. Mounted component regressions cover streamed arguments, namespaced tool names and the original detail panel. Local source checks are separate from installed acceptance and release.
+
 ## 6. Runs where you are
 
 o8 should be light on the machine it runs on, and it should run on the machine you have.
