@@ -33,6 +33,27 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
 
 describe('pull request selection', () => {
+  it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
+    const files = [{ path: 'src/a.ts', status: 'modified', additions: 10, deletions: 2, patch: '' }, { path: 'tests/b.ts', status: 'modified', additions: 4, deletions: 0, patch: '' }];
+    fetchMock.mockResolvedValue(Response.json({ pr: { ...detail(9805), files, changedFiles: 2, additions: 14, deletions: 2 } }));
+    await render(9805);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Tests');
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][id$="-changes"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-pr-changes-toolbar] [aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Tests');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const changesTab = host.querySelector<HTMLButtonElement>('[role="tab"][id$="-changes"]')!;
+    await act(async () => { changesTab.focus(); changesTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    const readsAfterTabChange = fetchMock.mock.calls.length;
+    await act(async () => host.querySelector<HTMLButtonElement>('header [aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    await render(9805, 'example/repo', false);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(readsAfterTabChange);
+  });
+
   it('backs off a quota refusal while retaining the current view and labels scheduled reads as background', async () => {
     vi.useFakeTimers();
     try {
