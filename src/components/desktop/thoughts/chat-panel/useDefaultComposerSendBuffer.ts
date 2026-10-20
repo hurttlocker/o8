@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import { composerBackendSupportsImages, validateComposerImageAttachments } from '@/lib/mobile/composer-image-validation';
 import {
   useComposerSendBuffer,
@@ -62,7 +62,11 @@ export function useDefaultComposerSendBuffer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-  const latestScopeRef = useRef({ threadId, repoPath }); latestScopeRef.current = { threadId, repoPath };
+  const queueOwnerRef = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    queueOwnerRef.current = {}; savingRef.current = false; setSaving(false);
+    return () => { queueOwnerRef.current = null; };
+  }, [repoPath, threadId]);
   const imagesRef = useRef(attachedImages); imagesRef.current = attachedImages;
   const durable = useDurableComposerQueue(active && threadId && repoPath ? { repoPath, threadId } : null, busy);
   const restoreDraft = useCallback((text: string, images: ComposerSendImage[]) => {
@@ -99,6 +103,9 @@ export function useDefaultComposerSendBuffer({
     const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
     if (!text) return;
     const images = attachedImages.map((image) => ({ name: image.name, dataUri: image.dataUri }));
+    let retryPending = false;
+    try { retryPending = active && !shouldBypass(text) && durable.hasPending(text, images); }
+    catch (error) { setAttachmentError(error instanceof Error ? error.message : 'Unable to read Send next recovery.'); return; }
     if (images.length > 0) {
       try {
         validateComposerImageAttachments(images);
@@ -106,7 +113,7 @@ export function useDefaultComposerSendBuffer({
         setAttachmentError(error instanceof Error ? error.message : 'Invalid image attachment.');
         return;
       }
-      if (!active || shouldBypass(text) || !composerBackendSupportsImages(backend)) {
+      if (!active || shouldBypass(text) || (!retryPending && !composerBackendSupportsImages(backend))) {
         setAttachmentError('This chat mode cannot receive images. Select a Codex or Claude agent, then send again.');
         return;
       }
@@ -118,21 +125,22 @@ export function useDefaultComposerSendBuffer({
     }
 
     if (!durable.ready) { setAttachmentError('Wait for queued messages to load before sending.'); return; }
-    if (busy || durable.items.length > 0) {
-      const scope = { threadId, repoPath };
+    if (busy || durable.items.length > 0 || retryPending) {
+      const owner = queueOwnerRef.current;
       const attachmentSnapshot = JSON.stringify(images);
       savingRef.current = true;
       setSaving(true);
       void (async () => {
         try {
-          await durable.enqueue(captureQueuedSend(text, images));
-          const sameScope = latestScopeRef.current.threadId === scope.threadId && latestScopeRef.current.repoPath === scope.repoPath;
-          if (sameScope && latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === attachmentSnapshot) {
+          const confirm = await durable.enqueue({ text, images }, () => captureQueuedSend(text, images));
+          if (queueOwnerRef.current !== owner) return;
+          confirm();
+          if (latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === attachmentSnapshot) {
             setInput(''); latestInputRef.current = ''; clearAttachments();
           }
         } catch (error) {
-          if (latestScopeRef.current.threadId === scope.threadId && latestScopeRef.current.repoPath === scope.repoPath) setAttachmentError(error instanceof Error ? error.message : 'Unable to save the queued message.');
-        } finally { savingRef.current = false; setSaving(false); }
+          if (queueOwnerRef.current === owner) setAttachmentError(error instanceof Error ? error.message : 'Unable to save the queued message.');
+        } finally { if (queueOwnerRef.current === owner) { savingRef.current = false; setSaving(false); } }
       })();
       return;
     }
@@ -141,7 +149,7 @@ export function useDefaultComposerSendBuffer({
     setInput('');
     latestInputRef.current = '';
     clearAttachments();
-  }, [active, attachedImages, backend, busy, captureQueuedSend, clearAttachments, durable, latestInputRef, repoPath, sendBuffer, sendUnbuffered, setInput, shouldBypass, threadId]);
+  }, [active, attachedImages, backend, busy, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
   const handleSteer = useCallback(() => { setAttachmentError(COMPOSER_STEER_UNAVAILABLE_REASON); }, []);
   const queued = durable.items.map(item => ({

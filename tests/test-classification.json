@@ -839,6 +839,13 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/connection-evidence-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/opencode-service-skew.test.ts",
       "reasons": [
         "child-process",
@@ -2051,6 +2058,12 @@
     },
     {
       "path": "tests/composer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-queue-retry-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

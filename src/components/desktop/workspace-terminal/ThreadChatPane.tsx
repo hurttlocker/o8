@@ -173,6 +173,9 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
           thoughtsMutedGlass="var(--t-glass-muted-strong)"
           showInlineExport={false}
           suppressAutoRestore
+          scopeTabId={`thread-pane:${threadId}`}
+          expectsThreadLoad
+          draftConversationId={threadId}
           lockedMode={mode === 'chat' ? 'chat' : undefined}
           initialMode={mode === 'chat' ? 'chat' : 'fleet'}
           onMissionStateChange={data.onMissionStateChange}

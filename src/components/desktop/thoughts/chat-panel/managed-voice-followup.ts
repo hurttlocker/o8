@@ -19,7 +19,7 @@ export function managedVoiceFollowup(
       if (!queue.ready || queue.error) throw new Error('Queued messages are not loaded. Check the conversation before retrying.');
       const payload = capture(text);
       if (payload.routing.collide) throw new Error('Voice follow-ups require one selected orchestrator runtime.');
-      await queue.enqueue({ ...payload, afterTaskId, routing: { ...payload.routing, pinBackend: true } }, id);
+      await queue.enqueueVoice({ ...payload, afterTaskId, routing: { ...payload.routing, pinBackend: true } }, id);
     },
     cancel: queue.cancelVoiceFollowups,
   };

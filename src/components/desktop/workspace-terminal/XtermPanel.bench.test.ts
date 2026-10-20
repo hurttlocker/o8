@@ -208,6 +208,32 @@ describe('XtermPanel terminal workload instrumentation', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it('lands a validated ended state after an optimistic missing-session error without replacing the panel', async () => {
+    const panelRef = createRef<XtermPanelHandle>();
+    const props = panelProps(false);
+    const onNewShell = vi.fn();
+    await act(async () => root.render(createElement(XtermPanel, { ...props, ref: panelRef, onNewShell })));
+    await act(async () => panelRef.current?.writeData(btoa('KEPT-BEFORE-STOP\r\n')));
+    const output = container.querySelector('[data-terminal-output]');
+    await act(async () => panelRef.current?.setError('Dashboard terminal session no longer exists. Create a new shell.'));
+    const attached = vi.mocked(props.sendTerminalAttach).mock.calls.length;
+    await act(async () => root.render(createElement(XtermPanel, {
+      ...props, ref: panelRef, onNewShell, exitState: { exitCode: null, transcript: '' },
+    })));
+    expect(container.querySelector('[data-terminal-exit]')?.textContent).toContain('Exit status unknown');
+    expect(container.textContent).not.toContain('Terminal error:');
+    expect(container.querySelector('[data-terminal-output]')).toBe(output);
+    expect(output?.textContent).toContain('KEPT-BEFORE-STOP');
+    xtermMock.onData?.('must-not-send');
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    await act(async () => root.render(createElement(XtermPanel, {
+      ...props, ref: panelRef, onNewShell, connectionEpoch: 2, exitState: { exitCode: null, transcript: '' },
+    })));
+    expect(props.sendTerminalAttach).toHaveBeenCalledTimes(attached);
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'New shell')!.click());
+    expect(onNewShell).toHaveBeenCalledOnce();
+  });
+
   it('does not allocate counters when the bench flag is unset', async () => {
     const panelRef = createRef<XtermPanelHandle>();
     await act(async () => {
