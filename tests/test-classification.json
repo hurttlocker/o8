@@ -5243,6 +5243,14 @@
       ]
     },
     {
+      "path": "tests/workspace-github-polling-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/workspace-lifecycle-cross-process-real-path.test.ts",
       "reasons": [
         "child-process",
