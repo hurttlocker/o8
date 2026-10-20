@@ -218,8 +218,12 @@ mod tests {
         };
         let first = invoke(&main, "voice_input_claim", "live-old");
         assert!(first.is_ok(), "{:?}", first.err());
+        assert!(reserve_native(1).is_err());
+        #[cfg(target_os = "macos")]
         assert!(crate::stt_engine::start().is_err());
         assert!(invoke(&other, "voice_input_release", "live-old").is_err());
+        assert!(reserve_native(1).is_err());
+        #[cfg(target_os = "macos")]
         assert!(crate::stt_engine::start_with_gate(None).is_err());
         navigation_started();
         assert!(invoke(&main, "voice_input_release", "live-old").is_ok());
