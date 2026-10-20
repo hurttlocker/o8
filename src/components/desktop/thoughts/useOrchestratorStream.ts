@@ -20,6 +20,7 @@ import {
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
 import { trackComposerSubmission } from './use-orchestrator-stream/track-submission';
+import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
@@ -72,13 +73,9 @@ export type {
 // Module scope prevents remounts from re-rotating on boot-time state oscillation.
 const rotatedMissionIds = new Set<string>();
 
-
 /**
- * Hook that connects to the orchestrator WebSocket channel for real-time
- * Claude Code streaming. Replaces the poll-based orchestrator flow.
- *
- * Connects to ws-server on port 3002, subscribes to the orchestrator channel,
- * and accumulates output into renderable MobileTranscriptEntry messages.
+ * Subscribes to the selected orchestrator backend and accumulates output into
+ * renderable transcript entries. Connection details use the runtime resolver.
  */
 export function useOrchestratorStream(
   repoPath: string | null,
@@ -850,6 +847,7 @@ export function useOrchestratorStream(
     }
   }, [connected, syncMessages, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
+    if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
     const clientMessageId = createOrchestratorClientMessageId();
     const sentAtMs = Date.now();
