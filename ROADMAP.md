@@ -178,6 +178,8 @@ The development workspace rehearsal [#3876](https://github.com/hurttlocker/o8/is
 
 Shared GitHub quota and durable PR watching are implemented in [#3606](https://github.com/hurttlocker/o8/pull/3606), and commit-pinned review guides in [#3607](https://github.com/hurttlocker/o8/pull/3607). Paused queue restoration, acknowledged delivery, draft recovery, repository-scoped attachments and narrow-layout corrections are tracked in [#3598](https://github.com/hurttlocker/o8/issues/3598). Browser and route fixtures cover reload, dismissal, repeat actions and uncertain receipts. Queued intent never replays automatically after reload; released-build acceptance remains open.
 
+Workspace GitHub refresh [#4018](https://github.com/hurttlocker/o8/issues/4018) separates remote PR and linked-issue reads from local Git refreshes. Controlled route replay covers repeated and concurrent refreshes, cooldown recovery, cached-age warnings and effective CLI credential changes. The broader shared refresh policy [#3460](https://github.com/hurttlocker/o8/issues/3460) remains open. Local source checks and independent review passed; PR CI, native acceptance and release remain separate.
+
 | Arc | Lane | Done means | State | Gap | Where |
 | --- | --- | --- | --- | --- | --- |
 | First ten minutes | people | A stranger goes from download to a first merged packet, and the minutes and the stalls are measured. | open | Measured once, from source: 6.8 minutes and nine stalls. The eight frictions from that run shipped in 0.1.750. The download path is unmeasured, and no second run confirms the fixes. | [#2211](https://github.com/hurttlocker/o8/issues/2211) |
