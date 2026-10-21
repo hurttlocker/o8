@@ -40,6 +40,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 CLI installation and desktop restart share one persisted admission slot across web clients and native restart entries. An active, interrupted or unconfirmed installer defers restart before cloud-job draining or child cleanup; an admitted restart retains ownership through both. Controlled installer, API, client and native fixtures cover the boundary. Packaged acceptance and release remain separate. [#3551](https://github.com/hurttlocker/o8/issues/3551)
 
+Explicit synchronous dispatch publishes its prepared packet re-arm before worker launch. The real CLI/owned-worker/managed-run regression verifies test execution and held/stopped credential refusal; work-preserving stop/retry reconciliation remains separate in [#4022](https://github.com/hurttlocker/o8/issues/4022). Installed acceptance remains distinct. [#2536](https://github.com/hurttlocker/o8/issues/2536)
+
 [0.1.798](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.798) publishes the workspace frame, composer and worker displays, dictation ownership, delivery recovery, and restricted voice pilot. The published universal macOS app and installer passed signature and notarization verification. General managed voice remains disabled; installed conversation and provider-image acceptance remain open.
 
 Matching late acknowledgements retire only their own delivery warning, including quota-failed attempts and optimistic rows evicted from retained history. Confirmation persists across saved-history reloads and stale writes. Source, native candidate acceptance and release remain separate gates. [#3638](https://github.com/hurttlocker/o8/issues/3638)
