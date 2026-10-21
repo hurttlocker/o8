@@ -20,10 +20,7 @@ import {
   writeStoredOrchestratorModel,
 } from '@/lib/orchestrator/store';
 import type {
-  OrchestratorMissionState,
-  OrchestratorPacket,
   OrchestratorRuntime,
-  OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
@@ -33,7 +30,7 @@ import {
   executeOrchestratorSlashCommand,
   parseOrchestratorSlashCommand,
 } from '@/lib/slash-commands';
-import type { AgentTarget, FleetAgent } from './types';
+import type { ThoughtsChatPanelProps } from './ThoughtsChatPanelProps';
 import {
   entrySignature,
   generateSuggestions,
@@ -61,13 +58,12 @@ import { packetsForOrchestratorThread } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
-import { ComposerArea } from './chat-panel/ComposerArea';
+import { VisualComposerArea } from '@/components/desktop/visual-instructions/VisualComposerArea';
 import { useOrchestratorModelState } from './composer-selector/useOrchestratorModelState';
 import { BackendSwitchChoice } from './chat-panel/BackendSwitchChoice';
 import { ComposerSendBufferStatus } from './chat-panel/ComposerSendBufferStatus';
 import { useDefaultComposerSendBuffer } from './chat-panel/useDefaultComposerSendBuffer';
 import { useBufferedOrchestratorSend } from './chat-panel/useBufferedOrchestratorSend';
-import { useAgentVoiceMode } from './chat-panel/useAgentVoiceMode';
 import { shouldApplyAutoRestoreAfterFetch } from './chat-panel/autoRestoreGuard';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
 import {
@@ -103,7 +99,7 @@ import {
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { isAbortError } from '@/lib/active-long-lived-request';
 import { useContextThinkingPreferences } from './chat-panel/useContextThinkingPreferences';
-import { contextualOperatorDefaults, type ContextualConversation } from './chat-panel/contextual-turn';
+import { contextualOperatorDefaults } from './chat-panel/contextual-turn';
 import { useComposerDraftLifecycle, useDraftStartFresh } from './chat-panel/useComposerDraftLifecycle';
 import { composerDraftKey, useComposerDraftValue } from './chat-panel/composer-draft-store';
 import { findIdleOrchestratorSession } from './chat-panel/idle-orchestrator-session';
@@ -137,95 +133,7 @@ import {
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
 
-export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
-  open: boolean;
-  draftInjection?: { id: string; text: string } | null;
-  /** An isolated contextual chat keeps its draft and attaches context on send. */
-  contextualConversation?: ContextualConversation;
-  imageInjection?: { id: string; dataUri: string; name: string; mimeType: string } | null;
-  onImageInjectionConsumed?: () => void;
-  agents: FleetAgent[];
-  missionState: OrchestratorMissionState;
-  preferredRuntime: OrchestratorRuntime;
-  sessionTargets: AgentTarget[];
-  workspaceTargets: OrchestratorWorkspaceTarget[];
-  repoPath?: string | null;
-  /** Identity for the outer Project picker, including isolated panels. */
-  scopeTabId?: string;
-  /** Own the composer before its bound history finishes loading. */
-  draftConversationId?: string | null;
-  /** Workspace tab that owns this composer, when rendered in the main workspace. */
-  ownerTabId?: string;
-  projectId?: string | null;
-  thoughtsBodyBackground: string;
-  thoughtsElevatedSurface: string;
-  thoughtsElevatedBorder: string;
-  thoughtsElevatedShadow: string;
-  thoughtsMutedGlass: string;
-  permissionMode?: ThoughtsChatPermissionMode;
-  collideEnabled?: boolean;
-  onSetCollide?: (enabled: boolean) => void;
-  composerModeStorageId?: string;
-  repoLabel?: string | null;
-  emptyStateOverride?: React.ReactNode;
-  // First-message controls in the context row beneath the composer.
-  composerBelowSlot?: React.ReactNode;
-  // Rail rendered to the RIGHT of the transcript (not the composer), so the
-  // composer spans the full panel width even when the rail is up (Q ruling
-  // 2026-07-11). The caller owns the rail's own width/animation wrapper.
-  transcriptSideRail?: React.ReactNode;
-  showInlineExport?: boolean;
-  footerMeterSlot?: React.ReactNode;
-  composerLeadingExtras?: React.ReactNode;
-  // When set, the chooser surface is hidden and the mode is forced to
-  // this value for the lifetime of the panel. Used by Single-runtime
-  // tabs (lockedMode='single') and Chat tabs (lockedMode='chat').
-  lockedMode?: OrchestrationMode;
-  // Initial mode/runtime/chatModel sourced from the parent tab record.
-  // Overrides the legacy global per-workspace localStorage load when
-  // provided. Combine with onModePersist to round-trip changes.
-  initialMode?: OrchestrationMode;
-  initialSingleRuntime?: OrchestratorRuntime;
-  initialChatModelId?: ChatModelId;
-  // Optional pinned OpenRouter model for chat-mode requests (e.g.
-  // 'openai/gpt-oss-120b:free'). Empty/undefined = use server chain.
-  initialChatOpenrouterModel?: string;
-  // Called when the operator picks a different mode/runtime/chatModel
-  // in the chooser. Lets the parent persist to the tab record instead
-  // of relying on global localStorage. When omitted, falls back to the
-  // legacy per-workspace localStorage path.
-  onModePersist?: (patch: {
-    mode?: OrchestrationMode;
-    singleRuntime?: OrchestratorRuntime;
-    chatModelId?: ChatModelId;
-    chatOpenrouterModel?: string | null;
-  }) => void;
-  // Spawn handlers forwarded to ModePicker so picking Single/Chat opens
-  // a new tab instead of flipping the current tab's mode.
-  onSpawnSingleTab?: (runtime: OrchestratorRuntime) => void;
-  onSpawnChatTab?: () => void;
-  onMissionStateChange: (
-    next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
-  ) => void;
-  onFocusPacket?: (packet: OrchestratorPacket) => void;
-  onFocusSession?: (sessionKey: string) => void;
-  onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
-  // Called with the latest user message text in chat mode so the parent
-  // can stash it on the tab record and the tab strip can show a 3-word
-  // summary instead of the generic "Chat" label.
-  onChatSummary?: (text: string) => void;
-  // Isolated mounts (drag-to-split thread panes) bind to an explicit thread
-  // via the imperative handle. The mount-time auto-restore pass must never
-  // run for them — it could adopt an unrelated recently-touched thread in
-  // the race window before loadThread lands.
-  suppressAutoRestore?: boolean; suppressRuntimePrewarm?: boolean;
-  /** True when the host tab is bound to a persisted thread whose history
-   *  (incl. its backend) hasn't loaded yet. Until the load lands, the
-   *  composer chip shows '…' instead of confidently claiming the DEFAULT
-   *  backend — a wrong label on every tab right after boot/reload was the
-   *  "they all say o8" report (2026-07-16). */
-  expectsThreadLoad?: boolean;
-}>(function ThoughtsChatPanel({
+export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsChatPanelProps>(function ThoughtsChatPanel({
   open,
   draftInjection,
   contextualConversation,
@@ -1943,17 +1851,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [setInput]);
 
-  useAgentVoiceMode({
-    active: open,
-    dictationOnly: true,
-    busy: isChatMode ? waitingForReply : displayWaiting,
-    composerNodeRef: inputRef,
-    fillInput,
-    messages: displayMessages,
-    sendNow,
-    surfaceKey: `${workspaceModeKey}:${lockedMode ?? orchestrationMode}`,
-  });
-
   useImperativeHandle(ref, () => ({
     focusInput() {
       inputRef.current?.focus();
@@ -2142,7 +2039,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           onCancel={backendSwitch.clearPending}
         />
       ) : null}
-      <ComposerArea
+      <VisualComposerArea dictationScopeKey={JSON.stringify([workspaceModeKey, lockedMode ?? orchestrationMode, threadId ?? 'draft'])} visual={{ active: open && isOrchestratorMode && !contextualConversation,
+        target: threadId && resolvedRepoPath ? { threadId, repoPath: resolvedRepoPath } : null,
+        label: `${composerRepoLabel} · current chat`, capture: captureQueuedSend }}
         ref={inputRef} activeComposer={open}
         inputLabel={contextualConversation ? 'Reply preparation message' : undefined}
         placeholder={contextualConversation?.placeholder}
@@ -2200,6 +2099,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         footerMeterSlot={footerMeterSlot}
         composerLeadingExtras={composerLeadingExtras}
         voiceControl={isOrchestratorMode && !isChatMode && threadId && resolvedRepoPath ? <ManagedChatVoiceEntry chatRoot={composerDropHostRef} label={`${composerRepoLabel} · ${activeTargetLabel}`}
+          visualTarget={{ repoPath: resolvedRepoPath, threadId }}
           identity={[resolvedRepoPath, threadId, orchestratorBackend, orchestratorModel, thinkingEffort, permissionMode, composerMode, threadProjectId, collideEnabled]}
           messages={displayMessages} terminals={orchStream.voiceTerminals} busy={displayWaiting} interrupt={orchStream.interrupt}
           transcript={orchStream.appendLocalEntries}

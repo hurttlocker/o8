@@ -456,11 +456,10 @@ export async function dispatchMission(input: DispatchMissionInput) {
     Object.assign(current, releaseAbandonedMissionLifecycleHold(current, { allowOwnerTakeover: true }));
     if (!current.lifecycleHold) preparePacketsForExplicitDispatch(current, input.runtime);
     const dispatchReady = fanOutComparisonPackets(current);
-    if (dispatchReady !== current) {
-      // The fail-closed launch guard reads durable state, so checkpoint new packet ids first.
-      Object.assign(current, dispatchReady);
-      writeOrchestratorControlPlaneState(dispatchReady);
-    }
+    if (dispatchReady !== current) Object.assign(current, dispatchReady);
+    // Workers can register managed runs as soon as their process starts. Publish
+    // explicit re-arming before launch, including when comparison fan-out is a no-op.
+    writeOrchestratorControlPlaneState(dispatchReady);
     const afterDispatch = await runDispatchTick(dispatchReady, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this

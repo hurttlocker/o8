@@ -12,6 +12,7 @@ import type {
 } from '@/lib/fleet/types';
 import { parseRecentCommits } from '@/lib/git/recent-commits';
 import { parseWorktrees } from './worktrees';
+import { createWorkspaceReviewCommands } from './workspace-commands';
 import { assertReviewWorkspace, requireReviewGit } from './workspace-status';
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
@@ -31,12 +32,7 @@ function defaultReviewRootIsRepo(): boolean {
   }
   return _defaultRootIsRepoCache;
 }
-// No numeric fallback — the old value `18` was a personal dogfood issue.
-// Callers that need an active review must set CORTEX_IDE_ACTIVE_REVIEW_ISSUE.
-const FALLBACK_ACTIVE_ISSUE_NUMBER_RAW = process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE;
-const FALLBACK_ACTIVE_ISSUE_NUMBER = FALLBACK_ACTIVE_ISSUE_NUMBER_RAW
-  ? Number.parseInt(FALLBACK_ACTIVE_ISSUE_NUMBER_RAW, 10)
-  : NaN;
+const MAX_LINKED_ISSUE_LOOKUPS = 3;
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 // o8's own machinery living inside the repo — never part of "your changes".
 const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
@@ -56,6 +52,7 @@ const _reviewSnapshotCache = new Map<string, { snapshot: WorkflowReviewSnapshot;
 const _reviewSnapshotInflight = new Map<string, Promise<WorkflowReviewSnapshot>>();
 
 export interface WorkspaceReviewSnapshotOptions {
+  /** Refresh local Git state; remote metadata keeps its independent quota-safe TTL. */
   fresh?: boolean;
   workspacePath?: string | null;
   repoSlug?: string | null;
@@ -109,13 +106,16 @@ function normalizeReviewDecision(value?: string | null) {
   return value.toLowerCase();
 }
 
-function parseLinkedIssueNumbers(body?: string) {
+function parseLinkedIssueNumbers(body: string | undefined, repoSlug: string) {
   if (!body) return [] as number[];
 
   const seen = new Set<number>();
-  for (const match of body.matchAll(/#(\d+)/g)) {
-    const nextNumber = Number.parseInt(match[1] ?? '', 10);
-    if (Number.isFinite(nextNumber)) {
+  const closingReference = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:#(\d+)|([\w.-]+\/[\w.-]+)#(\d+)|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+))\b/gi;
+  for (const match of body.matchAll(closingReference)) {
+    const referencedRepo = match[2] ?? match[4];
+    if (referencedRepo && referencedRepo.toLowerCase() !== repoSlug.toLowerCase()) continue;
+    const nextNumber = Number(match[1] ?? match[3] ?? match[5]);
+    if (Number.isSafeInteger(nextNumber) && nextNumber > 0) {
       seen.add(nextNumber);
     }
   }
@@ -615,21 +615,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const startedAt = Date.now();
   const warnings: string[] = [];
 
-  const runInContext = async (command: string, args: string[]) => {
-    const { stdout } = await execFileAsync(command, args, { windowsHide: true,
-      cwd: repoRoot,
-      env: { ...process.env, LC_ALL: 'C' },
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return stdout.trim();
-  };
-  const tryRunInContext = async (command: string, args: string[]) => {
-    try {
-      return await runInContext(command, args);
-    } catch {
-      return '';
-    }
-  };
+  const { runInContext, tryRunInContext } = createWorkspaceReviewCommands(repoRoot, warnings);
 
   await assertReviewWorkspace(repoRoot, runInContext);
   const requiredGit = (args: string[]) => requireReviewGit(runInContext, args);
@@ -713,7 +699,8 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const pullRequests = selectedPullRequests.map((pullRequest) => ({
     ...pullRequest,
     reviewDecision: normalizeReviewDecision(pullRequest.reviewDecision),
-    linkedIssueNumbers: parseLinkedIssueNumbers(pullRequest.body),
+    // Fallback PRs are display context, never the current branch's issue scope.
+    linkedIssueNumbers: branchPullRequests.length ? parseLinkedIssueNumbers(pullRequest.body, repoSlug) : [],
   }));
 
   const pullRequestFiles = pullRequests[0] && repoSlug && !changesOnly
@@ -735,23 +722,22 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
       ? summarizePullRequestDiff(pullRequestChangedFiles)
       : 'Working tree clean.';
 
-  const linkedIssueNumbers = pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []);
+  const linkedIssueNumbers = [...new Set(pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []))]
+    .slice(0, MAX_LINKED_ISSUE_LOOKUPS);
   const activeIssues = repoSlug && !changesOnly
     ? (await Promise.all(
-        (linkedIssueNumbers.length ? linkedIssueNumbers : [FALLBACK_ACTIVE_ISSUE_NUMBER])
-          .filter((value, index, list) => Number.isFinite(value) && list.indexOf(value) === index)
-          .map(async (issueNumber) => {
-            const raw = await tryRunInContext('gh', [
-              'issue',
-              'view',
-              String(issueNumber),
-              '--repo',
-              repoSlug,
-              '--json',
-              'number,title,url,state',
-            ]);
-            return parseJson<ReviewIssueSummary | undefined>(raw, undefined);
-          }),
+        linkedIssueNumbers.map(async (issueNumber) => {
+          const raw = await tryRunInContext('gh', [
+            'issue',
+            'view',
+            String(issueNumber),
+            '--repo',
+            repoSlug,
+            '--json',
+            'number,title,url,state',
+          ]);
+          return parseJson<ReviewIssueSummary | undefined>(raw, undefined);
+        }),
       )).filter((issue): issue is ReviewIssueSummary => Boolean(issue))
     : [];
   const activeIssue = activeIssues[0];
@@ -759,11 +745,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   if (!changesOnly && repoSlug && !activeIssues.length) {
     if (linkedIssueNumbers.length) {
       warnings.push('Unable to load the linked GitHub issues for the current review lane.');
-    } else if (Number.isFinite(FALLBACK_ACTIVE_ISSUE_NUMBER)) {
-      warnings.push(`Unable to load fallback GitHub issue #${FALLBACK_ACTIVE_ISSUE_NUMBER}.`);
     }
-    // If the env var is unset and no linked issues exist, skip the warning
-    // entirely — the "no active review" state is the correct default.
   }
 
   if (!changesOnly && !pullRequests.length) {

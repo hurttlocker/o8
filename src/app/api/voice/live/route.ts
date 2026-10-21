@@ -7,6 +7,7 @@ import { planToken, proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { accountStateMatches, readAccountState, withAccountStateAdmission } from '@/lib/auth/account-state';
 import { loadVoiceRelay, saveVoiceRelay, voiceGatewayUrl, VoiceRelayPersistenceError } from '@/lib/voice/managed-live/relay-store';
 import { localVoicePreview, previewVoiceRequest } from '@/lib/voice/managed-live/local-preview';
+import { byokVoiceAvailable, byokVoiceRequest, isByokVoiceSession } from '@/lib/voice/managed-live/byok-request';
 import { personalVoiceGateway } from '@/lib/voice/managed-live/personal-dev';
 import { personalVoicePilot, verifyPersonalVoiceAccount, type PilotAccount } from '@/lib/voice/managed-live/personal-pilot';
 
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
     const ready = Boolean(session && session.subject === role && (role === 'operator' || session.deviceId === device?.id));
     return NextResponse.json({ ready, ...(ready && session ? { session: { sessionId: session.sessionId, engine: session.engine, model: session.model, transcript: session.transcript } } : {}) }, { status: ready ? 200 : 409 });
   }
+  const byokAvailable = await byokVoiceAvailable(resolveRequestPrincipal(request) === 'operator');
   try {
     const readiness = await withAccountStateAdmission(async () => {
       const account = readAccountState(); const token = planToken();
@@ -46,13 +48,13 @@ export async function GET(request: Request) {
       if (!account || !accountStateMatches(account) || readAccountState()?.generation !== account.generation
         || !token || hash(token) !== account.licenseDigest) throw new Error('Account unavailable');
       const enabled = resolveRequestPrincipal(request) === 'operator';
-      return NextResponse.json({ enabled, entitled: enabled, transport: 'personal-webrtc' }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ enabled, entitled: enabled, transport: 'personal-webrtc', byokAvailable }, { headers: { 'Cache-Control': 'no-store' } });
     });
     if (readiness) return readiness;
-  } catch { return NextResponse.json({ error: 'personal_voice_unavailable', enabled: false }, { status: 503 }); }
+  } catch { return NextResponse.json({ error: 'personal_voice_unavailable', enabled: false, byokAvailable }, { status: 503 }); }
   const preview = localVoicePreview();
-  if (preview !== 'disabled') return NextResponse.json({ enabled: preview === 'enabled', entitled: preview === 'enabled', transport: 'local-preview' }, { headers: { 'Cache-Control': 'no-store' } });
-  return NextResponse.json({ enabled: process.env.O8_MANAGED_LIVE_ENABLED === '1', entitled: Boolean(planToken()) });
+  if (preview !== 'disabled') return NextResponse.json({ enabled: preview === 'enabled', entitled: preview === 'enabled', transport: 'local-preview', byokAvailable }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ enabled: process.env.O8_MANAGED_LIVE_ENABLED === '1', entitled: Boolean(planToken()), byokAvailable });
 }
 export async function POST(request: Request) {
   const principal = owner(request);
@@ -62,6 +64,10 @@ export async function POST(request: Request) {
   let body: Record<string, unknown>;
   try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: 'invalid_body' }, { status: 400 }); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
+  try {
+    if (body.source === 'byok' || (body.action !== 'start' && isByokVoiceSession(body.id))) return byokVoiceRequest(body, request);
+  } catch { return NextResponse.json({ error: 'byok_voice_receipt_unavailable' }, { status: 503 }); }
+  if (body.source !== undefined && body.source !== 'managed') return NextResponse.json({ error: 'invalid_voice_source' }, { status: 400 });
   try {
     if (!personalVoiceGateway() && localVoicePreview() !== 'disabled' && (body.action === 'start' || !loadVoiceRelay(typeof body.id === 'string' ? body.id : ''))) {
       if (resolveRequestPrincipal(request) !== 'operator') return NextResponse.json({ error: 'local_voice_preview_operator_only' }, { status: 403 });

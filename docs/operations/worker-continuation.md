@@ -84,6 +84,31 @@ Nothing converts a Stop into a fresh conversation on its own.
 - Recovery after a Stop is therefore an explicit, potentially destructive lifecycle
   decision that starts a new worker turn. There is no unhold-and-continue command.
 
+### Inspect Stop evidence before recovery
+
+Keep the original Stop receipt. Request admission, an HTTP success or a quiet terminal is not proof that the owned process tree exited. Inspect the durable state before an explicit recovery:
+
+```bash
+o8 packet info <packet-id>
+o8 packet log <packet-id>
+o8 packet diff <packet-id>
+```
+
+If inspection is refused or the worktree is already unavailable, retain that result too. Do not reset the packet to obtain a cleaner diagnostic.
+
+| Observed receipt or event | What it establishes |
+| --- | --- |
+| CLI `result.ok: true`, `confirmedDead: null` | The lane command reports success without the optional death flag. Read its note and the owned-process evidence; do not turn null into true. CLI Stop does not promise archive or pruning. |
+| `kill_escalated` with `confirmed: true` | The ownership-scoped process-tree check succeeded for that event. An older confirmation cannot authorize recovery of a different session, run or packet generation. |
+| `runtime_process_exit` with `runtimeOutcome: interrupted` | Stop delivered a signal to that exact run. This event alone does not establish that every descendant or packet-managed run exited. |
+| Higher-level Stop `ok: true`, `killConfirmed: true` | No owned worker or packet-managed run remained unconfirmed. This includes an already-stopped no-op; it does not prove a signal was sent. Lane archive and worktree cleanup may still be running in the background. |
+| A `kill_unconfirmed` result | Death remains unconfirmed. Keep any existing hold and preserve bindings, worktree and receipt; do not archive, prune, reset or rerun while ownership or process death is unresolved. |
+| A refused Stop with `result.ok: false` | Stop did not establish success. Read the note and saved state: persisting the hold can itself fail, so a refusal does not prove the packet was held. |
+
+A missing escalation event can mean the process was already absent or ownership checks refused before signaling. Preserve the stricter unresolved state and ask the process owner to reconcile the saved identities and evidence. Save any available work before an explicit recovery; a missing worktree is not proof that it contained no work.
+
+Receipt sources: [CLI Stop](../../cli/src/commands/packet/stop.ts), [lane Stop](../../src/lib/lane/commands.ts), and [higher-level packet Stop](../../src/lib/orchestrator/stop-packet.ts).
+
 ## Operator commands
 
 Verified against `o8 packet --help`, `o8 --help`, and `cli/src`:

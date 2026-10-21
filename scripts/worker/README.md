@@ -30,6 +30,17 @@ pushes, and abort.
 It does not establish that a worker can keep running while the operator's
 laptop is disconnected; that requires a separate host and reachable o8 URL.
 
+Closing or reloading the operator UI and stopping the coordinator are different
+events. Verify the authoritative coordinator separately; a disconnected UI is
+not proof of its status. A worker needs a reachable coordinator, and any SSH
+tunnel used to reach it is part of that connection. Reopening the UI does not
+establish coordinator recovery or execution independent of its host.
+
+[Completed-result review previews](#completed-result-review-previews) are an
+existing, separate capability with bounded service sessions and their own
+reconnect requirements. UI reconnection alone does not establish a healthy
+preview connection.
+
 Set `O8_CLOUD_WORKER_KEY` through the host's secret manager before running the
 command. `--worker-key` also works for automation that protects process args.
 

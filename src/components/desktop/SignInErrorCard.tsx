@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import { X } from './lucide-shims';
 import { clearDesktopAuthError, type DesktopAuthError } from '@/lib/auth/desktop-auth-error';
@@ -11,6 +11,7 @@ const MUTED = 'var(--t-text-muted, #64748b)';
 
 export function SignInErrorCard({ authError, onRetry }: { authError: DesktopAuthError; onRetry?: () => void }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   const handlePrimaryClick = () => {
     if (onRetry) {
       clearDesktopAuthError();
@@ -38,7 +39,8 @@ export function SignInErrorCard({ authError, onRetry }: { authError: DesktopAuth
         <button
           type="button"
           onClick={handlePrimaryClick}
-          aria-expanded={detailsOpen}
+          aria-expanded={onRetry ? undefined : detailsOpen}
+          aria-controls={!onRetry && detailsOpen ? detailsId : undefined}
           style={{
             flex: 1,
             minHeight: 44,
@@ -83,6 +85,7 @@ export function SignInErrorCard({ authError, onRetry }: { authError: DesktopAuth
       </div>
       {detailsOpen ? (
         <div
+          id={detailsId}
           style={{
             color: MUTED,
             fontSize: 11,

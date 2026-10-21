@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { LiveConversationBridge } from './conversation-bridge';
 import { LiveTranscript, startManagedLive } from './session';
+const nativeInvoke = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeInvoke }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'operator-fixture' }));
 class Peer {
   localDescription = { sdp: 'v=0\nfixture-offer' };
@@ -26,6 +28,71 @@ describe('managed Live transport', () => {
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: vi.fn() }] }) } });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('pins the explicit personal-key choice across a confirmed reconnect and gives each attempt its own identity', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const ended = new Set<string>();
+    let starts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') return Response.json({ id: `byok-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') ended.add(body.id);
+      return Response.json({ events: ended.has(body.id)
+        ? [{ cursor: 1, event: { type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 } } }] : [] });
+    }));
+    const backend = { binding: 'same-chat', source: 'byok' as 'byok' | 'managed', context: () => '', delegate: vi.fn() };
+    const live = await startManagedLive(backend, () => {});
+    backend.source = 'managed';
+    ended.add('byok-1');
+    await vi.advanceTimersByTimeAsync(300);
+    const admissions = requests.filter(request => request.action === 'start');
+    expect(admissions).toHaveLength(2);
+    expect(admissions.map(request => request.source)).toEqual(['byok', 'byok']);
+    expect(admissions.every(request => typeof request.requestId === 'string' && /^[a-f0-9-]{36}$/.test(request.requestId))).toBe(true);
+    expect(admissions[0].requestId).not.toBe(admissions[1].requestId);
+    for (const id of ['byok-1', 'byok-2']) {
+      const attempt = admissions[id === 'byok-1' ? 0 : 1];
+      expect(requests.filter(request => request.id === id).every(request => request.requestId === attempt.requestId)).toBe(true);
+    }
+    const close = live.close(); await vi.advanceTimersByTimeAsync(300); await close;
+    expect(backend.delegate).not.toHaveBeenCalled();
+  });
+  it('does not change credential source or retry a personal-key admission refusal', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const stop = vi.fn();
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop }] }) } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return Response.json({ error: 'byok_voice_key_missing' }, { status: 403 });
+    }));
+    await expect(startManagedLive({ binding: 'signed-out-chat', source: 'byok', context: () => '', delegate: vi.fn() }, () => {})).rejects.toThrow('byok_voice_key_missing');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ action: 'start', source: 'byok', binding: 'signed-out-chat' });
+    expect(stop).toHaveBeenCalledOnce();
+  });
+  it('recovers a lost personal-key start response by its admission identity without creating another session', async () => {
+    const requests: Record<string, unknown>[] = []; const stop = vi.fn(); const states: string[] = [];
+    const id = '105d8ad9-99d6-4110-a47a-ed9e19db8c8e';
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop }] }) } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body); requests.push(body);
+      if (body.action === 'start') throw new TypeError('response lost');
+      if (body.action === 'recover') {
+        expect(stop).toHaveBeenCalledOnce();
+        return Response.json({ id, state: 'unknown' });
+      }
+      return Response.json({ events: [{ cursor: 1, event: { type: 'session.closed', usage: { seconds: 1 } } }] });
+    }));
+    const live = await startManagedLive({ binding: 'same-chat', source: 'byok', context: () => '', delegate: vi.fn() }, state => states.push(state));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(live.state).toBe('closed');
+    expect(states).toEqual(['connecting', 'closing', 'closed']);
+    expect(requests.filter(r => r.action === 'start')).toHaveLength(1);
+    expect(requests.filter(r => r.action === 'recover')).toHaveLength(1);
+    expect(new Set(requests.map(r => r.requestId)).size).toBe(1);
+    expect(requests.filter(r => r.action === 'close' || r.action === 'poll').every(r => r.id === id)).toBe(true);
+    expect(stop).toHaveBeenCalledOnce();
+  });
   it('stays connecting until RTC connects, then streams captions without creating a CLI task', async () => {
     const peers: Peer[] = [];
     class ConnectingPeer extends Peer { connectionState = 'connecting'; constructor() { super(); peers.push(this); } }
@@ -369,6 +436,30 @@ describe('managed Live transport', () => {
     expect(requests.at(-1)).toMatchObject({ id: 'retry-2', event: { delegation_id: null, content: 'Backend confirmed completion' } });
     ended.add('retry-2'); await vi.advanceTimersByTimeAsync(300);
     expect(live.state).toBe('closed'); expect(starts).toBe(2); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([true, false])('requires confirmed microphone release before automatic resume (release succeeds: %s)', async released => {
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    let confirmRelease!: () => void; let rejectRelease!: (error: Error) => void;
+    const release = new Promise<void>((resolve, reject) => { confirmRelease = resolve; rejectRelease = reject; });
+    nativeInvoke.mockImplementation((command: string) => command === 'voice_input_release' ? release : Promise.resolve());
+    let starts = 0; const ended = new Set<string>();
+    const microphone = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }));
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: microphone } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `release-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') ended.add(body.id);
+      return Response.json({ events: ended.has(body.id) ? [{ cursor: 1, event: {
+        type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 },
+      } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same-chat', context: () => '', delegate: vi.fn() }, () => {});
+    ended.add('release-1'); await vi.advanceTimersByTimeAsync(300);
+    expect(starts).toBe(1); expect(microphone).toHaveBeenCalledOnce(); expect(live.state).toBe('connecting');
+    if (released) confirmRelease(); else rejectRelease(new Error('IPC acknowledgement lost'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toBe(released ? 2 : 1); expect(live.state).toBe(released ? 'live' : 'error');
+    const closing = live.close(); await vi.advanceTimersByTimeAsync(300); await closing;
   });
   it('waits for the final receipt after RTC fails before resuming', async () => {
     const peers: Peer[] = []; let starts = 0; let confirm = false; let requested = false;

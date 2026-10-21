@@ -8,3 +8,9 @@ export function resolveBackendTurnModel(backend: string | undefined, value: unkn
   const model = normalizeOrchestratorTurnModel(value);
   return backend === 'o8' && !model?.startsWith('o8-') ? 'o8-free' : model;
 }
+
+/** A backend/default label in a receipt is not an executable model selection. */
+export function normalizeObservedOrchestratorTurnModel(backend: string, value: unknown): string | undefined {
+  const model = normalizeOrchestratorTurnModel(value);
+  return model && model !== backend && model !== 'Muse default' ? model : undefined;
+}

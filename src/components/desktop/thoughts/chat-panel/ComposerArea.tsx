@@ -1,27 +1,26 @@
 'use client';
 
+import { ComposerVoiceTurnContext } from './ComposerVoiceTurnContext';
+import type { ComposerAreaProps } from './composer-area-types';
+import { ComposerDictationContext, useComposerDictation, useComposerTextareaRef } from '../../dictation/ComposerDictation';
 import { useComposerImageBridge } from './useComposerImageBridge';
 import Image from 'next/image';
 import { useComposerClock } from './useComposerClock';
-import type { FileUploadHandler } from '@/lib/hooks/use-file-drop';
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useComposerAutosize } from './useComposerAutosize';
-import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import { InputButtons } from '../InputButtons';
+import { ComposerPopoverVisibilityContext } from './ComposerPopover';
 import { BrainPipButton } from '../../brain/BrainPipButton';
-import { composerModeSpec, type ComposerMode } from '../composer-mode';
-import type { OrchestratorBackendSetting } from '../operator-defaults';
+import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
-import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
-import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
-import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 import { registerComposerCenter } from '../../composer-center-registry';
 import { PromptStashRow } from '../PromptStashRow';
-import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
+import { stashPrompt } from '@/lib/orchestrator/prompt-stash';
 import { OPEN_PROMPT_LIBRARY_EVENT, SAVE_PROMPT_LIBRARY_EVENT } from '@/lib/prompt-library/client';
 import {
   cycleComposerSelectorMode,
@@ -35,96 +34,20 @@ import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
 import { ComposerQueueActions } from './ComposerQueueActions';
-import { WorkerCorrections, type WorkerCorrectionContext } from './WorkerCorrections';
+import { WorkerCorrections } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
-import type { ThoughtsChatPermissionMode } from './types';
 const subscribeToComposerSelectorFlag = () => () => undefined;
-interface ComposerAreaProps {
-  activeComposer?: boolean;
-  showBrain?: boolean;
-  activityContent?: React.ReactNode;
-  voiceControl?: React.ReactNode;
-  workerContext?: WorkerCorrectionContext;
-  inputLabel?: string;
-  placeholder?: string;
-  literalInput?: boolean;
-  footerOverride?: React.ReactNode;
-  input: string;
-  draftWarning?: string;
-  onInputChange: (next: string) => void;
-  isOrchestratorMode: boolean;
-  isChatMode?: boolean;
-  isSingleMode?: boolean;
-  displayWaiting: boolean;
-  chatMessages: MobileTranscriptEntry[];
-  /** Packets this thread dispatched — the status bar counts the live ones. */
-  workerPackets?: readonly ComposerActivityPacket[];
-  activeTargetLabel: string;
-  targetAgentExists: boolean;
-  thoughtsBodyBackground: string;
-  enhancing: boolean;
-  preEnhanceInput: string | null;
-  onEnhance: () => void;
-  onUndoEnhance: () => void;
-  onSubmit: () => void;
-  onStop?: () => void;
-  onSlashCommand: (cmd: string) => void;
-  modelLabel: string;
-  /** Raw orchestrator model id — only meaningful in orchestrator mode. */
-  modelId?: string;
-  /** Restore persisted model state without applying user-pick side effects. */
-  isolatedModelSelection?: boolean;
-  onModelRestore?: (model: string) => void;
-  /** Orchestrator-mode model switching from the composer chip. */
-  onModelChange?: (model: string) => void;
-  activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
-  effort: ThinkingEffort;
-  operatorDefaultEffort?: ThinkingEffort;
-  codexDefaultDispatchModel?: string;
-  onEffortChange: (next: ThinkingEffort) => void;
-  adaptiveEnabled: boolean;
-  sessionRulesThreadId?: string | null;
-  repoLabel?: string | null;
-  displayMessagesCount: number;
-  hasAssistantActivity: boolean;
-  footerMeterSlot?: React.ReactNode;
-  attachedImages?: ThoughtsAttachedImage[];
-  attachedFiles?: string[];
-  dragOver?: boolean;
-  dragHandlers?: ThoughtsComposerDragHandlers;
-  onAttachedImageRemove?: (index: number) => void;
-  onAttachedImageAnnotate?: (index: number) => void;
-  onAttachedFileRemove?: (fileName: string) => void;
-  onUploadDiskFiles?: FileUploadHandler;
-  composerMode?: ComposerMode;
-  onComposerModeChange?: (mode: ComposerMode) => void;
-  composerModeStorageId?: string;
-  repoPath?: string | null;
-  workspaceTargets?: OrchestratorWorkspaceTarget[];
-  selectedRepoPath?: string | null;
-  onSelectRepoPath?: (next: string) => void;
-  permissionMode?: ThoughtsChatPermissionMode;
-  onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
-  contextLocationSlot?: React.ReactNode;
-  composerLeadingExtras?: React.ReactNode;
-  /** ⌘⏎ requests steering; Return while busy queues the next turn. */
-  queueSaving?: boolean;
-  onSteer?: () => void;
-  sendBufferStatus?: React.ReactNode;
-  promptStash?: PromptStashContext & { onRestore: (text: string) => void };
-  voiceModeEnabled?: boolean;
-  onVoiceModeChange?: (enabled: boolean) => void;
-}
-
+export type { ComposerAreaProps } from './composer-area-types';
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
-  activeComposer = false,
+  activeComposer = false, dictationId, dictationScopeKey,
   showBrain = true,
   inputLabel,
   placeholder,
   literalInput = false,
   draftWarning,
   footerOverride,
+  attachmentContent,
+  inputDisabled = false,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -189,12 +112,23 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const setTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
-    textareaRef.current = node;
-    if (typeof inputRef === 'function') inputRef(node);
-    else if (inputRef) inputRef.current = node;
-  }, [inputRef]);
+  const [textareaRef, setTextareaRef] = useComposerTextareaRef(inputRef);
+  const voiceDelivery = useRef<((text: string) => boolean) | null>(null);
+  const localDictationId = useComposerDictation({
+    active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
+    scopeKey: JSON.stringify([dictationScopeKey, repoPath, sessionRulesThreadId, inputLabel]),
+    onText: text => {
+      if (voiceDelivery.current?.(text)) return;
+      if (text) onInputChange(`${input}${input && !/\s$/.test(input) ? ' ' : ''}${text}`);
+    },
+  });
+  const voiceTurnTarget = useMemo(() => ({
+    dictationId: dictationId ?? localDictationId,
+    intercept: (handler: (text: string) => boolean) => {
+      voiceDelivery.current = handler;
+      return () => { if (voiceDelivery.current === handler) voiceDelivery.current = null; };
+    },
+  }), [dictationId, localDictationId]);
   const now = useComposerClock(activeComposer && isOrchestratorMode);
   const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
   useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
@@ -237,7 +171,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const awaitingReply = chatMessages[chatMessages.length - 1]?.role === 'user';
   const slashSuggestions = useMemo(() => {
     const normalizedInput = input.trimStart();
-    if (!isOrchestratorMode || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
+    if (!isOrchestratorMode || literalInput || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
       return [];
     }
     const commandToken = normalizedInput.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
@@ -245,7 +179,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ...getOrchestratorSlashCommandSuggestions(input),
       ...MODE_ROUTING_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken)),
     ];
-  }, [dismissedSlashInput, input, isOrchestratorMode]);
+  }, [dismissedSlashInput, input, isOrchestratorMode, literalInput]);
 
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
@@ -255,7 +189,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Keep the textarea typeable during a running turn for steering.
   // The Send button itself still flips to Stop via `working` on InputButtons.
-  const isDisabled = !acceptsDirectInput && !targetAgentExists;
+  const isDisabled = inputDisabled || (!acceptsDirectInput && !targetAgentExists);
   useComposerImageBridge(composerCenterRef, activeComposer, isDisabled, JSON.stringify([repoPath, selectedRepoPath, sessionRulesThreadId, composerModeStorageId]), attachedImages, onUploadDiskFiles);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
@@ -332,6 +266,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
+    <ComposerVoiceTurnContext.Provider value={dictationId ? null : voiceTurnTarget}>
+    <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
       paddingTop: 24,
       paddingRight: 12,
@@ -358,7 +294,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       {sendBufferStatus}
       {draftWarning ? <div role="status" style={{ fontSize: 11, color: 'var(--t-text-secondary)', paddingBottom: 8 }}>{draftWarning}</div> : null}
       <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
-        {isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+        {!literalInput && isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
           key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
           draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
           onDelivered={sent => { if (input === sent) onInputChange(''); }}
@@ -392,6 +328,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             outlineOffset: -2,
           }}
         >
+          {attachmentContent}
           {attachedImages.length > 0 ? (
             <div style={{
               display: 'flex',
@@ -584,7 +521,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && composerMode
                 && onComposerModeChange
                 && event.key === 'Tab'
@@ -600,7 +537,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && selectorModelId
                 && activeBackend
                 && isComposerEffortShortcut(event.nativeEvent)
@@ -722,57 +659,63 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               overflowWrap: 'anywhere',
             }}
           />
-          {isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
-          {footerOverride ?? <InputButtons
-            input={input}
-            hasAttachments={attachedImages.length > 0}
-            enhancing={enhancing}
-            preEnhanceInput={preEnhanceInput}
-            onEnhance={onEnhance}
-            onUndoEnhance={onUndoEnhance}
-            onSubmit={onSubmit}
-            modelLabel={modelLabel}
-            modelId={isOrchestratorMode ? selectorModelId : undefined}
-            onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
-            activeBackend={isOrchestratorMode ? activeBackend : undefined}
-            onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
-            effort={selectorControls.state.effort}
-            onEffortChange={selectorControls.onEffortChange}
-            adaptiveEnabled={adaptiveEnabled}
-            sessionRulesThreadId={sessionRulesThreadId}
-            repoLabel={null}
-            displayMessagesCount={displayMessagesCount}
-            working={isOrchestratorMode && displayWaiting}
-            onStop={isOrchestratorMode ? onStop : undefined}
-            onUploadDiskFiles={onUploadDiskFiles}
-            composerMode={composerMode}
-            onComposerModeChange={selectorControls.onModeChange}
-            composerSelectorController={selectorControls}
-            onFileReferenceSelect={handleFileReferenceSelect}
-            repoPath={repoPath}
-            workspaceTargets={workspaceTargets}
-            selectedRepoPath={selectedRepoPath}
-            onSelectRepoPath={onSelectRepoPath}
-            inlineLeadingExtras={composerLeadingExtras}
-            managedVoiceControl={voiceControl}
-            permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
-              ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
-                // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
-                fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
-            inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
-            voiceModeEnabled={voiceModeEnabled}
-            onVoiceModeChange={onVoiceModeChange}
-            onBrowsePrompts={isOrchestratorMode ? () => {
-              window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
-            } : undefined}
-            onSavePrompt={isOrchestratorMode ? (body) => {
-              window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
-                detail: { body, repoPath: repoPath ?? null },
-              }));
-            } : undefined}
-            composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
-            onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
-          />}
+          {!footerOverride && isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
+          {footerOverride}
+          {/* Keep the chat's Live owner mounted when the visible footer changes. */}
+          {footerOverride != null && !voiceControl ? null : <ComposerPopoverVisibilityContext.Provider value={footerOverride == null}>
+            <div style={{ display: footerOverride != null ? 'none' : 'contents' }}>
+              <InputButtons
+                input={input}
+                hasAttachments={attachedImages.length > 0}
+                enhancing={enhancing}
+                preEnhanceInput={preEnhanceInput}
+                onEnhance={onEnhance}
+                onUndoEnhance={onUndoEnhance}
+                onSubmit={onSubmit}
+                modelLabel={modelLabel}
+                modelId={isOrchestratorMode ? selectorModelId : undefined}
+                onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
+                activeBackend={isOrchestratorMode ? activeBackend : undefined}
+                onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
+                effort={selectorControls.state.effort}
+                onEffortChange={selectorControls.onEffortChange}
+                adaptiveEnabled={adaptiveEnabled}
+                sessionRulesThreadId={sessionRulesThreadId}
+                repoLabel={null}
+                displayMessagesCount={displayMessagesCount}
+                working={isOrchestratorMode && displayWaiting}
+                onStop={isOrchestratorMode ? onStop : undefined}
+                onUploadDiskFiles={onUploadDiskFiles}
+                composerMode={composerMode}
+                onComposerModeChange={selectorControls.onModeChange}
+                composerSelectorController={selectorControls}
+                onFileReferenceSelect={handleFileReferenceSelect}
+                repoPath={repoPath}
+                workspaceTargets={workspaceTargets}
+                selectedRepoPath={selectedRepoPath}
+                onSelectRepoPath={onSelectRepoPath}
+                inlineLeadingExtras={composerLeadingExtras}
+                managedVoiceControl={voiceControl}
+                permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
+                  ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
+                    // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
+                    fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
+                inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
+                voiceModeEnabled={voiceModeEnabled}
+                onVoiceModeChange={onVoiceModeChange}
+                onBrowsePrompts={isOrchestratorMode ? () => {
+                  window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
+                } : undefined}
+                onSavePrompt={isOrchestratorMode ? (body) => {
+                  window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
+                    detail: { body, repoPath: repoPath ?? null },
+                  }));
+                } : undefined}
+                composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
+                onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
+              />
+            </div>
+          </ComposerPopoverVisibilityContext.Provider>}
         </div>
       </div>
       <ComposerContextRow
@@ -792,5 +735,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       ) : null}
     </div>
+    </ComposerDictationContext.Provider>
+    </ComposerVoiceTurnContext.Provider>
   );
 });
