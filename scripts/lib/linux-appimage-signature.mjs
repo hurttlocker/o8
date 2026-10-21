@@ -62,13 +62,15 @@ export function withLinuxPlatform({ latest, version, signature }) {
   if (!darwin || typeof darwin.url !== 'string') {
     throw new Error('published latest.json has no darwin-x86_64 url to anchor the download base on');
   }
-  if (!darwin.url.endsWith(`/${DARWIN_UPDATER_ASSET}`)) {
-    throw new Error(`published latest.json darwin-x86_64 url does not end in /${DARWIN_UPDATER_ASSET}: ${darwin.url}`);
+  const anchorAsset = [DARWIN_UPDATER_ASSET, 'o8_x86_64.app.tar.gz']
+    .find((asset) => darwin.url.endsWith(`/${asset}`));
+  if (!anchorAsset) {
+    throw new Error('published latest.json darwin-x86_64 url has an unsupported updater asset');
   }
   if (latest.version !== version) {
     throw new Error(`published latest.json is version ${latest.version}, not ${version}`);
   }
-  const downloadBase = darwin.url.slice(0, -(DARWIN_UPDATER_ASSET.length + 1));
+  const downloadBase = darwin.url.slice(0, -(anchorAsset.length + 1));
   return {
     ...latest,
     platforms: {
