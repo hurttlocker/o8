@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, type CSSProperties } from 'react';
 import { useTheme } from '@/lib/theme/context';
+import { PrDiffStats } from './PrDiffStats';
 import { PrFileTree } from './PrFileTree';
 import type { PrFile } from './types';
 
@@ -10,8 +11,8 @@ function Glyph({ kind }: { kind: 'fold' | 'unified' | 'split' | 'tree' }) {
   const paths = { fold: 'm8 8 4-4 4 4M8 16l4 4 4-4', unified: 'M4 4h16v16H4zM4 10h16M4 15h16', split: 'M4 4h16v16H4zM12 4v16', tree: 'M4 4v14h5M4 9h5M12 6h8v6h-8zM12 15h8v6h-8z' };
   return <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[kind]} /></svg>;
 }
-export function PrChangesToolbar({ files, totalFiles, additions, deletions, allOpen, onSetOpenFiles, diffStyle, onDiffStyleChange, treeOpen, onTreeOpenChange, collapsedFolders, onToggleFolder, onNavigate }: {
-  files: PrFile[]; totalFiles: number; additions: number; deletions: number; allOpen: boolean; onSetOpenFiles?: (paths: string[]) => void;
+export function PrChangesToolbar({ files, totalFiles, additions, deletions, statsActive = true, allOpen, onSetOpenFiles, diffStyle, onDiffStyleChange, treeOpen, onTreeOpenChange, collapsedFolders, onToggleFolder, onNavigate }: {
+  statsActive?: boolean; files: PrFile[]; totalFiles: number; additions: number; deletions: number; allOpen: boolean; onSetOpenFiles?: (paths: string[]) => void;
   diffStyle: 'unified' | 'split'; onDiffStyleChange?: (style: 'unified' | 'split') => void; treeOpen: boolean; onTreeOpenChange?: (open: boolean) => void; collapsedFolders: string[]; onToggleFolder?: (path: string) => void; onNavigate?: (path: string) => void;
 }) {
   const id = useId(); const trigger = useRef<HTMLButtonElement>(null); const tree = useRef<HTMLDivElement>(null); const toolbar = useRef<HTMLDivElement>(null);
@@ -24,7 +25,7 @@ export function PrChangesToolbar({ files, totalFiles, additions, deletions, allO
   return <div ref={toolbar} data-pr-changes-toolbar style={{ position: 'relative', flexShrink: 0, zIndex: 3, background: 'var(--t-panel)', borderBottom: '1px solid var(--t-divider-subtle)' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 40, boxSizing: 'border-box', paddingTop: 6, paddingRight: 18, paddingBottom: 6, paddingLeft: 18 }}>
       <span style={{ fontSize: 11, color: 'var(--t-text-muted)', whiteSpace: 'nowrap' }}>{totalFiles} file{totalFiles === 1 ? '' : 's'}</span>
-      <span aria-label={`${additions} additions, ${deletions} deletions`} style={{ display: 'inline-flex', gap: 5, fontSize: 11, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}><span style={{ color: 'var(--t-success)' }}>+{additions.toLocaleString()}</span><span style={{ color: 'var(--t-danger)' }}>−{deletions.toLocaleString()}</span></span>
+      <PrDiffStats key={statsActive ? 'visible' : 'hidden'} files={files} totalFiles={totalFiles} additions={additions} deletions={deletions} />
       <span style={{ flex: 1 }} />
       {onSetOpenFiles ? <button type="button" aria-label={allOpen ? 'Collapse all files' : 'Expand all files'} title={allOpen ? 'Collapse all files' : 'Expand all files'} onClick={() => onSetOpenFiles(allOpen ? [] : files.map((file) => file.path))} style={iconStyle}><Glyph kind="fold" /></button> : null}
       {onDiffStyleChange ? <div role="group" aria-label="Diff layout" style={{ display: 'flex', padding: 2, borderRadius: 9, border: '1px solid var(--t-border)', background: 'var(--t-hover)' }}>
