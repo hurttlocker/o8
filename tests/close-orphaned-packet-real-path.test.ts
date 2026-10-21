@@ -41,6 +41,7 @@ const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspac
 const worktreeCleanup = await import('@/lib/orchestrator/worktree-cleanup');
 const { removeMergedWorktree } = worktreeCleanup;
 const { exactSnapshot } = await import('@/lib/workspace/workspace-materialization-retirement');
+const { preservationIdForSnapshot, readWorkspacePreservation } = await import('@/lib/workspace/preservation-store');
 let server: Server;
 let base: string;
 const children = new Set<ChildProcess>();
@@ -231,6 +232,69 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
         expect(exactSnapshot(source.worktree.path)?.state).toBe('retired');
       }, 120_000);
     }
+  }
+
+  for (const entry of ['http', 'cli'] as const) {
+    it(`${entry} banks dirty orphan source in the retained branch and retirement snapshot`, async () => {
+      const source = await fixture(entry === 'http' ? 'archived' : 'missing');
+      writeFileSync(path.join(source.worktree.path, 'source.txt'), 'staged work\n');
+      git(source.worktree.path, 'add', 'source.txt');
+      writeFileSync(path.join(source.worktree.path, 'source.txt'), 'uncommitted completed work\n');
+      writeFileSync(path.join(source.worktree.path, 'untracked.txt'), 'untracked completed work\n');
+      if (entry === 'http') {
+        const response = await httpClose(source.packetId);
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      } else {
+        const result = await cliClose(source.packetId);
+        expect(result, result.stderr).toMatchObject({ exitCode: 0 });
+      }
+      expect(existsSync(source.worktree.path)).toBe(false);
+      const snapshot = exactSnapshot(source.worktree.path)!;
+      expect(snapshot.state).toBe('retired');
+      expect(snapshot.headCommit).not.toBe(source.head);
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(snapshot.headCommit);
+      expect(git(source.repoPath, 'show', `${snapshot.headCommit}:source.txt`)).toBe('uncommitted completed work');
+      expect(git(source.repoPath, 'show', `${snapshot.headCommit}:untracked.txt`)).toBe('untracked completed work');
+      const { receipt, payload } = await readWorkspacePreservation(preservationIdForSnapshot(snapshot)!);
+      expect(receipt.headCommit).toBe(snapshot.headCommit);
+      expect(payload.gitBundle).toBeDefined();
+      expect(payload.handoff.revision).toBe(snapshot.headCommit);
+      expect(git(source.repoPath, 'rev-parse', payload.handoff.recoveryRef)).toBe(snapshot.headCommit);
+    }, 120_000);
+  }
+
+  for (const interruption of ['after-rename', 'purging-replay'] as const) {
+    it(`refuses unbanked source at ${interruption} and retains the exact claim`, async () => {
+      const source = await fixture('missing');
+      const retire = exactRetirement.retireExactManagedDirectory;
+      const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation((input) => retire({
+        ...input,
+        ...{ [interruption === 'after-rename' ? 'afterRetirementRename' : 'beforeRetirementPurge']: async () => {
+          const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+          if (interruption === 'purging-replay' && claim.state !== 'purging') return;
+          writeFileSync(path.join(claim.claimPath, 'source.txt'), 'late unbanked work\n');
+          if (interruption === 'after-rename') writeFileSync(path.join(claim.claimPath, 'late-untracked.txt'), 'late untracked work\n');
+          if (interruption === 'purging-replay') throw new Error('Injected interruption with an unbanked purging claim.');
+        } },
+      }));
+      try {
+        let response = await httpClose(source.packetId);
+        if (interruption === 'purging-replay') {
+          expect(response.status).toBe(409);
+          expect(readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)?.state).toBe('purging');
+          interception.mockRestore();
+          response = await httpClose(source.packetId);
+        }
+        const body = await response.json();
+        expect(response.status).toBe(409);
+        expect(body.error.message).toMatch(/unbanked source|source.*uncertain/i);
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        expect(readFileSync(path.join(claim.claimPath, 'source.txt'), 'utf8')).toBe('late unbanked work\n');
+        if (interruption === 'after-rename') expect(readFileSync(path.join(claim.claimPath, 'late-untracked.txt'), 'utf8')).toBe('late untracked work\n');
+        expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+        expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+      } finally { interception.mockRestore(); }
+    }, 120_000);
   }
 
   for (const holder of ['cwd', 'open-file', 'escaped-marker', 'revoked-marker', 'archived-cwd', 'archived-marker'] as const) {

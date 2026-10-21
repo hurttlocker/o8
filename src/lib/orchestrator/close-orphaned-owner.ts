@@ -56,6 +56,12 @@ export function orphanCloseOwner(laneId: string): OrphanCloseOwner | null {
 
 export function orphanCloseRefusal(laneId: string): string | undefined { return explicitClose.getStore()?.refusals.get(laneId); }
 
+export function refuseOrphanClose(laneId: string, reason: string): never {
+  const error = new OrphanCloseRefusal(reason);
+  explicitClose.getStore()?.refusals.set(laneId, error.message);
+  throw error;
+}
+
 function digest(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 function refuse(reason: string): never { throw new OrphanCloseRefusal(reason); }
 

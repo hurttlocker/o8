@@ -225,14 +225,15 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
   );
 
   it.each([undefined, 'wontfix', 'superseded', 'spec_changed'])(
-    'does not extend archived binding recovery to disposition %s', async (disposition) => {
+    'closes an idle archived owner for disposition %s without recovering its session', async (disposition) => {
       const f = await fixture(`ordinary-${disposition ?? 'default'}`);
       const response = await closeRoute.POST(request(f.packetId, disposition));
-      expect(response.status).toBe(409);
-      expect(existsSync(f.worktreePath)).toBe(true);
-      expect(getLane(f.lane.id)?.sessionKey).toBeNull();
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(existsSync(f.worktreePath)).toBe(false);
+      expect(getLane(f.lane.id)).toMatchObject({ status: 'archived', sessionKey: null });
+      expect(git(f.repoPath, ['rev-parse', f.branch])).toBe(f.resultHead);
       expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === f.packetId))
-        .toMatchObject({ operatorStopped: true, queueState: 'held' });
+        .toMatchObject({ status: 'archived', operatorStopped: true, queueState: 'held' });
     }, 30_000,
   );
 

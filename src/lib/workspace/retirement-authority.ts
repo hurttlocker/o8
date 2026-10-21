@@ -1,4 +1,5 @@
-import { orphanCloseOwner, readOrphanCloseOwner, withOrphanCloseContext } from '@/lib/orchestrator/close-orphaned-owner';
+import { orphanCloseOwner, readOrphanCloseOwner, refuseOrphanClose, withOrphanCloseContext } from '@/lib/orchestrator/close-orphaned-owner';
+import { readdir } from 'node:fs/promises';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import {
@@ -12,6 +13,7 @@ import { getWorkspaceRetirementPreservationId } from './workspace-materializatio
 import { admitStandaloneRetirement, verifyStandaloneRetirement } from './standalone-retirement-authority';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { assertManagedRetirementQuiescence } from './retirement-process-authority';
+import { inspectArtifactRestoreRevision } from './ignored-artifact-io';
 
 export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'empty-orphan';
 
@@ -132,6 +134,27 @@ export async function verifyRetirementAuthority(input: {
       || payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
         && identity.identity === owner.sessionKey))) {
     throw new Error('Terminal preservation process owner changed after capture.');
+  }
+  // Discard receipts may omit dirty source. Check orphan source even during
+  // purge replay; a partially purged Git tree conservatively remains held.
+  if (owner.orphanedClose && owner.laneId) {
+    try {
+      const entries = await readdir(input.candidatePath).catch((error: NodeJS.ErrnoException) => {
+        if (!input.verifyContents && error.code === 'ENOENT') return [];
+        throw error;
+      });
+      if (entries.length > 0 || input.verifyContents) {
+        const revision = await inspectArtifactRestoreRevision({
+          workspacePath: input.candidatePath,
+          identity: { ...input.identity, canonicalPath: input.candidatePath },
+        });
+        if (revision.headCommit !== payload.capture.headCommit || revision.treeSha !== payload.capture.treeSha) {
+          throw new Error('Source revision differs from the retirement snapshot.');
+        }
+      }
+    } catch {
+      refuseOrphanClose(owner.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
+    }
   }
   if (input.verifyContents) {
     await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
