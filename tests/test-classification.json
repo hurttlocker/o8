@@ -3943,7 +3943,8 @@
         "git-cli",
         "network-listener",
         "process-signal",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {
