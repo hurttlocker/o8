@@ -4244,6 +4244,11 @@ mod stt_engine {
         active_session().load(Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_test_session_id(session: u64) -> u64 {
+        active_session().swap(session, Ordering::SeqCst)
+    }
+
     /// App handle for re-installing the event router after a daemon respawn.
     /// Without it, `start()`'s auto-respawn produced a daemon whose events
     /// flowed into a dropped Receiver — the dock showed "listening" forever
@@ -8106,6 +8111,8 @@ pub fn run() {
                 return;
             }
             voice_input::navigation_started();
+            #[cfg(target_os = "macos")]
+            visual_capture::reset_on_main_navigation(webview.app_handle());
             managed_voice_window::reset_on_main_navigation(webview.app_handle());
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {

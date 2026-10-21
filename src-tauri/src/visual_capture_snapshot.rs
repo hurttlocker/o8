@@ -60,6 +60,7 @@ impl SnapshotPipeline {
         screen: [f64; 4],
         cancelled: Arc<AtomicBool>,
         started: Instant,
+        artifacts: Arc<crate::visual_capture::Artifacts>,
     ) -> Arc<Self> {
         let (sender, receiver) = mpsc::sync_channel::<Work>(1);
         let pipeline = Arc::new(Self {
@@ -72,58 +73,63 @@ impl SnapshotPipeline {
         });
         let weak = Arc::downgrade(&pipeline);
         let mut stored_paths: VecDeque<[PathBuf; 2]> = VecDeque::new();
-        std::thread::spawn(move || loop {
-            let Some(owner) = weak.upgrade() else {
-                break;
-            };
-            if owner.stopped.load(Ordering::Acquire)
-                || cancelled.load(Ordering::Acquire)
-                || crate::spatial_ink_window::generation() != generation
-            {
-                break;
-            }
-            match receiver.recv_timeout(Duration::from_millis(20)) {
-                Ok(work) => {
-                    let revision = work.revision;
-                    let result = snapshot(work, &directory, screen, &capture_id, generation);
-                    if let Ok(value) = &result {
-                        if let Some(id) = value["id"].as_str() {
-                            stored_paths.push_back([
-                                directory.join(format!("{id}-source.png")),
-                                directory.join(format!("{id}.png")),
-                            ]);
-                            while stored_paths.len() > 12 {
-                                if let Some(paths) = stored_paths.pop_front() {
-                                    for path in paths {
-                                        let _ = std::fs::remove_file(path);
+        std::thread::spawn(move || {
+            let _artifacts = artifacts;
+            loop {
+                let Some(owner) = weak.upgrade() else {
+                    break;
+                };
+                if owner.stopped.load(Ordering::Acquire)
+                    || cancelled.load(Ordering::Acquire)
+                    || crate::spatial_ink_window::generation() != generation
+                {
+                    break;
+                }
+                match receiver.recv_timeout(Duration::from_millis(20)) {
+                    Ok(work) => {
+                        let revision = work.revision;
+                        let result = snapshot(work, &directory, screen, &capture_id, generation);
+                        if let Ok(value) = &result {
+                            if let Some(id) = value["id"].as_str() {
+                                stored_paths.push_back([
+                                    directory.join(format!("{id}-source.png")),
+                                    directory.join(format!("{id}.png")),
+                                ]);
+                                while stored_paths.len() > 12 {
+                                    if let Some(paths) = stored_paths.pop_front() {
+                                        for path in paths {
+                                            let _ = std::fs::remove_file(path);
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    if owner.stopped.load(Ordering::Acquire)
-                        || cancelled.load(Ordering::Acquire)
-                        || crate::spatial_ink_window::generation() != generation
-                        || revision != owner.revision.load(Ordering::Acquire)
-                    {
-                        continue;
-                    }
-                    match result {
-                        Ok(mut value) => {
-                            value["preparedAtMs"] =
-                                serde_json::json!(
-                                    owner.started.elapsed().as_millis().min(90_000) as u64
-                                );
-                            let _ = app.emit_to("main", "o8:visual-capture-observation", value);
+                        if owner.stopped.load(Ordering::Acquire)
+                            || cancelled.load(Ordering::Acquire)
+                            || crate::spatial_ink_window::generation() != generation
+                            || revision != owner.revision.load(Ordering::Acquire)
+                        {
+                            continue;
                         }
-                        Err(error) => {
-                            let _ = app.emit_to("main", "o8:visual-capture-observation-error",
+                        match result {
+                            Ok(mut value) => {
+                                value["preparedAtMs"] = serde_json::json!(owner
+                                    .started
+                                    .elapsed()
+                                    .as_millis()
+                                    .min(90_000)
+                                    as u64);
+                                let _ = app.emit_to("main", "o8:visual-capture-observation", value);
+                            }
+                            Err(error) => {
+                                let _ = app.emit_to("main", "o8:visual-capture-observation-error",
                             serde_json::json!({"captureId": capture_id, "generation": generation, "revision": revision, "error": error}));
+                            }
                         }
                     }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
         });
         pipeline

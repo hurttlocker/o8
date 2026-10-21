@@ -46,8 +46,20 @@ pub struct Shared {
 pub struct Session {
     pub shared: Arc<Shared>,
     pub directory: PathBuf,
+    _artifacts: Arc<crate::visual_capture::Artifacts>,
     worker: Option<JoinHandle<Result<(Vec<Sample>, u64), String>>>,
     input_worker: Option<JoinHandle<()>>,
+}
+
+/// Check the API itself before permissions, overlays, storage, or worker startup.
+pub(crate) fn require_recording_output() -> Result<(), String> {
+    recording_output_available(SCRecordingOutput::is_available())
+}
+pub(crate) fn recording_output_available(available: bool) -> Result<(), String> {
+    if available {
+        return Ok(());
+    }
+    Err("Capture screen requires macOS 15 or later. On macOS 14, attach an image to your chat and type your instruction instead.".into())
 }
 
 impl Session {
@@ -58,7 +70,9 @@ impl Session {
         directory: PathBuf,
         target: tauri::Monitor,
         cancelled: Arc<AtomicBool>,
+        artifacts: Arc<crate::visual_capture::Artifacts>,
     ) -> Result<Self, String> {
+        require_recording_output()?;
         if cancelled.load(Ordering::Acquire) {
             return Err("Visual capture was cancelled.".into());
         }
@@ -110,7 +124,21 @@ impl Session {
             return Err("Visual capture was cancelled.".into());
         }
         let started = Instant::now();
-        let snapshots = crate::visual_capture_snapshot::SnapshotPipeline::start(app.clone(), id.clone(), generation, directory.clone(), [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height], cancelled.clone(), started);
+        let snapshots = crate::visual_capture_snapshot::SnapshotPipeline::start(
+            app.clone(),
+            id.clone(),
+            generation,
+            directory.clone(),
+            [
+                rect.origin.x,
+                rect.origin.y,
+                rect.size.width,
+                rect.size.height,
+            ],
+            cancelled.clone(),
+            started,
+            artifacts.clone(),
+        );
         let shared = Arc::new(Shared {
             stopping: AtomicBool::new(false),
             cancelled,
@@ -205,6 +233,7 @@ impl Session {
         Ok(Self {
             shared,
             directory,
+            _artifacts: artifacts,
             worker: Some(worker),
             input_worker: Some(input_worker),
         })

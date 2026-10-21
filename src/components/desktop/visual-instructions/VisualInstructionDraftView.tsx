@@ -53,7 +53,7 @@ export function VisualInstructionAttachments({ value }: { value: VisualComposerB
       </div>)}
       {frames.length < MAX_VISUAL_FRAMES ? <button type="button" aria-label="Add another image" disabled={value.locked} onClick={value.pickImages} style={{ ...meta, width: 60, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, border: '1px dashed var(--t-divider-subtle)', borderRadius: 8, background: 'transparent', cursor: value.locked ? 'default' : 'pointer' }}><span aria-hidden style={{ fontSize: 20, fontWeight: 260, lineHeight: 1 }}>+</span><span>Add</span></button> : null}
     </div> : <p style={{ ...meta, marginTop: 8, marginBottom: 0, lineHeight: 1.5 }}>Add an image, then mark the detail you want your agent to see.</p>}
-    {value.confirmClear ? <div role="group" aria-label="Confirm discard" style={{ ...row, paddingTop: 8, paddingBottom: 8, flexWrap: 'wrap' }}><span style={{ ...meta, flex: 1 }}>Discard this draft?</span><RamsButton variant="danger" disabled={value.busy || value.capturing} onClick={value.clear}>Discard</RamsButton><RamsButton variant="ghost" onClick={value.toggleClear}>Keep draft</RamsButton></div> : null}
+    {value.confirmClear ? <div role="group" aria-label="Confirm discard" style={{ ...row, paddingTop: 8, paddingBottom: 8, flexWrap: 'wrap' }}><span style={{ ...meta, flex: 1 }}>Discard this draft?</span><RamsButton variant="danger" disabled={value.busy || value.capturing} onClick={value.clear}>Discard</RamsButton><RamsButton variant="ghost" disabled={value.busy || value.capturing} onClick={value.toggleClear}>Keep draft</RamsButton></div> : null}
   </section>;
 }
 
