@@ -8,15 +8,17 @@ import { runSetup } from './commands/setup.js';
  *     3 unauthorized, 4 not found, 5 conflict. Agents branch on these without
  *     parsing strings.
  *   - Stable, schema-versioned output. Every payload carries `schema: o8/cli/<cmd>/v1`.
- *   - No telemetry, no auto-update, no prompts. Failures loud (stderr),
+ *   - Command mode has no telemetry, auto-update, or prompts. Failures loud (stderr),
  *     successes silent unless --verbose.
- *   - DRY with MCP: every command is fetch + JSON shape, no business logic.
+ *   - Interactive `chat` presents the existing orchestrator transport.
+ *   - DRY with MCP: command actions use shared APIs, not duplicate business logic.
  *   - Auto-discovery: env first (O8_API_PORT / O8_API_TOKEN), then ~/.o8/,
  *     then legacy ~/.cortex-ide/, then fallback 3001.
  *
  * Handrolled dispatcher; deliberately no commander/yargs/oclif dependency.
  */
 
+import { CHAT_HELP, runChat } from './commands/chat.js';
 import { runAsk } from './commands/ask.js';
 import { runMsg, runPresence } from './commands/agents.js';
 import { runApp } from './commands/app.js';
@@ -73,6 +75,8 @@ import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
 import { runPacketClose } from './commands/packet/close.js';
 import { runPacketWorkspace } from './commands/packet/workspace.js';
+import { runPacketRetention } from './commands/packet/retention.js';
+import { runPacketArtifactRecovery } from './commands/packet/artifact-recovery.js';
 import { runPacketStop } from './commands/packet/stop.js';
 import {
   OPERATOR_PACKET_COMMAND_LINES,
@@ -214,6 +218,7 @@ const USAGE = `o8 — agent-first CLI for the local o8 control plane.
 usage: o8 <command> [subcommand] [flags]
 
 commands:
+  chat                 interactive conversation (o8 chat --help)
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
@@ -239,8 +244,10 @@ commands:
   machine add <target> --label <name>  save a verified SSH terminal machine; optional --port, --ssh-config
   machine list|check|rename|disable|enable|remove  manage saved SSH machines
   serve                start the headless API, WebSocket layer, and supervisor daemon
+  O8_REVIEW_MODE=manual o8 serve  hold background reviews and continuations for this run
   serve status         report the daemon pid, ports, health, and launch mode
   serve stop           stop the daemon and reap its server children
+  serve renew-token    renew a stopped private profile credential without printing it
   serve restart        stop and restart the daemon with the invoking CLI version
   serve agent install  install and load the per-user headless service
   serve agent uninstall  unload and remove the per-user headless service
@@ -302,9 +309,16 @@ commands:
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
+  plugin source review --directory <local-folder> [--repo <registered-path>]
+  plugin source review --github <owner/repository> --commit <40-character-sha> [--path <package-directory>] [--repo <registered-path>]
+  plugin source link   --directory <reviewed-folder> --revision <sha256> [--repo <registered-path>]
+  plugin state clear   <plugin-id> --revision <sha256> --confirm (clear saved data)
   plugin action list   list action IDs, revisions, and project bindings [--plugin ID]
   plugin action invoke <plugin-id> <action-id> --revision <sha256> [--repo <registered-path>]
   plugin log list      read persisted, bounded action receipts [--plugin ID] [--limit N]
+  plugin terminal list list persistent plugin terminals [--plugin ID]
+  plugin terminal launch <plugin-id> <entry-id> --revision <sha256> [--repo <path>] [--request <uuid>]
+  plugin terminal stop <receipt-id> (stop the process, retain its receipt)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -314,7 +328,7 @@ ${OPERATOR_PACKET_COMMAND_LINES}
   session checkpoint <key> save a durable provider position for later forks
   session fork <key>   create a new provider session from a checkpoint
   session rewind <key> create a new continuation while preserving the original
-  session resume <key> --message <text>  continue a durable provider session
+  session resume <key> --message <text> [--idempotency-key <key>]  admit a continuation turn
   session dismiss-pending <key> --confirm-no-continuation  clear an unresolved attempt after provider inspection
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool
@@ -355,6 +369,7 @@ error JSON:
  * (caller falls back to the full USAGE).
  */
 function groupUsage(group: string): string | null {
+  if (group === 'chat') return CHAT_HELP;
   if (group === 'packet') return packetGroupUsage();
   const lines = USAGE.split('\n').filter((line) => new RegExp(`^  ${group}( |$)`).test(line));
   if (lines.length === 0) return null;
@@ -379,10 +394,14 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     return 0;
   }
   if (!primary) {
+    if (!args.jsonExplicit && process.stdin.isTTY && process.stdout.isTTY && process.env.TERM !== 'dumb') return runChat(args.rest);
     process.stdout.write(USAGE);
     return 1;
   }
   switch (primary) {
+    case 'chat':
+      if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
+      return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));
     case 'version':
       return runVersion(args.mode);
     case 'doctor':
@@ -501,6 +520,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'park' || secondary === 'restore') {
         return runPacketWorkspace(args.mode, secondary, args.rest);
+      }
+      if (secondary === 'restore-artifacts') return runPacketArtifactRecovery(args.mode, args.rest);
+      if (secondary === 'retain' || secondary === 'release-retention') {
+        return runPacketRetention(args.mode, secondary === 'retain' ? 'hold' : 'release', args.rest);
       }
       if (secondary === 'close' || secondary === 'discard') {
         return runPacketClose(args.mode, args.rest, secondary);

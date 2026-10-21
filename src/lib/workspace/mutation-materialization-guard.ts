@@ -8,6 +8,7 @@ import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state'
 import { withWorktreeMaterializationExecution } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { assertManagedWorkspaceMaterialization } from './managed-materialization-identity';
+import { assertNoActiveWorkspaceArtifactRestore } from './artifact-restore-state';
 
 export type WorkspaceMutationUnavailableCode =
   | 'workspace_restore_required'
@@ -23,7 +24,8 @@ export class WorkspaceMutationUnavailableError extends Error {
   }
 }
 
-const heldMutationPackets = new AsyncLocalStorage<ReadonlySet<string>>();
+interface MutationAuthority { active: boolean }
+const heldMutationPackets = new AsyncLocalStorage<ReadonlyMap<string, MutationAuthority>>();
 
 /** Durable, filesystem-free precondition for any write through a packet workspace. */
 export async function assertWorkspaceMaterializedForMutation(
@@ -33,6 +35,7 @@ export async function assertWorkspaceMaterializedForMutation(
   if (!packetId) return null;
   let snapshots;
   try {
+    assertNoActiveWorkspaceArtifactRestore(packetId, lane.worktreePath ?? undefined);
     snapshots = listWorkspaceSnapshotsByPacketId(packetId);
   } catch {
     throw new WorkspaceMutationUnavailableError(
@@ -107,7 +110,7 @@ export async function withWorkspaceMaterializedMutation<T>(
       : operation();
   }
   const held = heldMutationPackets.getStore();
-  if (held?.has(packetId)) {
+  if (held?.get(packetId)?.active) {
     const identity = await assertWorkspaceMaterializedForMutation(lane);
     return identity && lane.worktreePath
       ? withWorktreeMaterializationExecution(lane.worktreePath, identity, operation)
@@ -121,7 +124,12 @@ export async function withWorkspaceMaterializedMutation<T>(
       );
     }
     const identity = await assertWorkspaceMaterializedForMutation(lane);
-    const run = () => heldMutationPackets.run(new Set([...(held ?? []), packetId]), operation);
+    const authority: MutationAuthority = { active: true };
+    const run = async () => {
+      try {
+        return await heldMutationPackets.run(new Map([...(held ?? []), [packetId, authority]]), operation);
+      } finally { authority.active = false; }
+    };
     return identity && lane.worktreePath
       ? withWorktreeMaterializationExecution(lane.worktreePath, identity, run)
       : run();

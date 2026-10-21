@@ -16,7 +16,9 @@ import {
   computeChatRuntimeStatusUpdate,
   detectLocalhostPreviews,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { claimPreviewAnnouncement } from '@/components/desktop/workspace-terminal/preview-announcements';
 import { recordTerminalBenchEvent } from '@/components/desktop/workspace-terminal/terminal-bench-instrumentation';
+import { terminalExitState, type TerminalExitState } from '@/lib/terminal/exit-state';
 
 export interface ImperativeHandleDeps {
   tabsRef: React.RefObject<TerminalTab[]>;
@@ -56,18 +58,40 @@ export interface ImperativeHandleDeps {
   recordTerminalActivity: (sessionName: string, timestamp?: number) => void;
 }
 
+export function snapshotTerminalExit(
+  deps: Pick<ImperativeHandleDeps, 'tabsRef' | 'panelRefs' | 'setTabs' | 'persistTabsNow' | 'activeTabId'>,
+  sessionName: string,
+  exitCode?: number | null,
+  cancelled?: () => boolean,
+): void {
+  const save = (state: TerminalExitState) => {
+    if (cancelled?.() || !deps.tabsRef.current.some((tab) => tab.kind === 'terminal' && tab.tmuxSession === sessionName)) return;
+    const nextTabs = deps.tabsRef.current.map((tab) => (
+      tab.kind === 'terminal' && tab.tmuxSession === sessionName
+        ? { ...tab, terminalExit: state, readOnly: tab.remoteMachine ? true : tab.readOnly } : tab
+    ));
+    deps.tabsRef.current = nextTabs;
+    deps.setTabs(nextTabs);
+    deps.persistTabsNow(nextTabs, deps.activeTabId);
+  };
+  const panel = deps.panelRefs.current.get(sessionName);
+  if (panel) panel.setExited(exitCode, save);
+  else save(terminalExitState(exitCode));
+}
+
 export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabHandle {
   return {
     setTerminalSourceDimensions: (sessionName, cols, rows) => {
       deps.panelRefs.current.get(sessionName)?.setSourceDimensions?.(cols, rows);
     },
-    writeToTerminal: (sessionName, data) => {
-      deps.panelRefs.current.get(sessionName)?.writeData(data);
+    writeToTerminal: (sessionName, data, historical) => {
+      deps.panelRefs.current.get(sessionName)?.writeData(data, historical);
       const now = Date.now();
       deps.recordTerminalActivity(sessionName, now);
-      if (deps.urlDetectionEnabledRef.current) {
+      if (!historical && deps.urlDetectionEnabledRef.current) {
         const newPreviews = detectLocalhostPreviews(data, sessionName, deps.tabsRef.current, deps.detectedPortsRef.current);
         for (const preview of newPreviews) {
+          if (!claimPreviewAnnouncement(deps.stateScope, deps.preferredRepo?.localPath, sessionName, preview.port)) continue;
           deps.onPreviewDetected?.(preview);
           deps.setPreviews((previous) => previous.some((p) => p.port === preview.port) ? previous : [...previous, preview]);
         }
@@ -102,18 +126,8 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     setTermError: (sessionName, error) => {
       deps.panelRefs.current.get(sessionName)?.setError(error);
     },
-    setTermExited: (sessionName) => {
-      deps.panelRefs.current.get(sessionName)?.setExited();
-      const remoteTab = deps.tabsRef.current.find((tab) => (
-        tab.kind === 'terminal' && tab.tmuxSession === sessionName && tab.remoteMachine && !tab.readOnly
-      ));
-      if (remoteTab) {
-        const nextTabs = deps.tabsRef.current.map((tab) => (
-          tab.id === remoteTab.id ? { ...tab, readOnly: true } : tab
-        ));
-        deps.tabsRef.current = nextTabs;
-        deps.setTabs(nextTabs);
-      }
+    setTermExited: (sessionName, exitCode) => {
+      snapshotTerminalExit(deps, sessionName, exitCode);
     },
     onSessionCreated: deps.handleSessionCreated,
     clearDetectedPreview: (port) => {
@@ -258,7 +272,9 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
         id: tab.id,
         label: tab.label,
         kind: tab.kind,
+        canvasKind: tab.canvasTab?.kind,
         sessionKey: tab.chatSessionKey,
+        terminalExited: tab.terminalExit ? true : undefined,
         laneId: tab.laneId ?? null,
         packetId: tab.orchestrationPacket?.packetId ?? null,
         orchestratorThreadId: tab.orchestratorThreadId,

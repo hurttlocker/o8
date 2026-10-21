@@ -3,6 +3,8 @@ import { Check, ChevronDown } from '../lucide-shims';
 import { createPortal } from 'react-dom';
 
 import { THEME_ACCENT, THEME_ACCENT_SOFT, type ModelOption } from './shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
+import { PLAN_USAGE_URL } from '@/lib/chatgpt-plan/types';
 
 const RUNTIME_META: Record<string, { label: string; logo?: string; color: string }> = {
   'claude-code': { label: 'Claude Code', logo: '/logos/claude.png', color: '#e07a3a' },
@@ -50,7 +52,8 @@ function ModelPickerBase({
   }, [open]);
 
   const cliModels = models.filter((m) => m.backend === 'cli');
-  const apiModels = models.filter((m) => m.backend === 'api');
+  const apiModels = models.filter((m) => m.backend === 'api' && m.provider !== 'chatgpt');
+  const planModels = models.filter((m) => m.provider === 'chatgpt');
 
   // Group CLI models by runtime
   const runtimeGroups: { runtime: string; meta: typeof RUNTIME_META[string]; models: ModelOption[] }[] = [];
@@ -89,6 +92,7 @@ function ModelPickerBase({
         {selected.label}
         <ChevronDown size={12} style={{ color: 'var(--t-text-muted)', marginLeft: 2, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
       </button>
+      {selected.provider === 'chatgpt' ? <button type="button" onClick={() => openExternalUrl(PLAN_USAGE_URL)} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11, cursor: 'pointer', paddingTop: 0, paddingBottom: 0, paddingLeft: 8, paddingRight: 0 }}>Using ChatGPT plan · Manage usage</button> : null}
 
       {open ? createPortal(
         <div ref={dropRef} style={{ position: 'fixed', bottom: dropPos.bottom, right: dropPos.right, zIndex: 9999, minWidth: 260, maxHeight: 420, overflowY: 'auto', background: 'var(--t-popover-surface)', border: '1px solid var(--t-panel-border)', borderRadius: 12, boxShadow: 'var(--t-panel-shadow)', animation: 'llmFadeIn 100ms ease-out' }}>
@@ -107,6 +111,7 @@ function ModelPickerBase({
               ))}
             </div>
           ))}
+          {planModels.length > 0 ? <><div style={{ ...SECTION_HEADER, paddingTop: 8 }}>Using ChatGPT plan</div>{planModels.map((model) => <ModelRow key={model.id} model={model} selected={selected} onSelect={select} />)}</> : null}
           {apiModels.length > 0 ? (
             <>
               <div style={{ ...SECTION_HEADER, paddingTop: runtimeGroups.length > 0 ? 8 : 6, ...(runtimeGroups.length > 0 ? { borderTop: '1px solid var(--t-divider-subtle)', marginTop: 2 } : {}) }}>

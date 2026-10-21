@@ -38,6 +38,7 @@ import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle
 import {
   ResetCleanupFailedError,
   ResetKillUnconfirmedError,
+  ResetPacketNotFoundError,
   ResetSessionArchiveUnconfirmedError,
 } from './reset-errors';
 import {
@@ -60,7 +61,7 @@ function withinScope(input: ResetPacketInput, laneId: string): boolean {
   return !input.scope || input.scope.laneIds.includes(laneId);
 }
 
-function markPacketResetHeld(packet: OrchestratorPacket) {
+function markPacketResetHeld(packet: OrchestratorPacket, preserveOperatorStopped = false) {
   // Reset packet to a CLEAN, NON-auto-dispatchable state.
   // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
   // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
@@ -91,7 +92,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   packet.typecheckAutoRetries = 0;
   packet.leaseWaitAutoRetries = 0;
   // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
-  // a reset gives a fresh stall budget and re-enables dispatch.
+  // Explicit Reset re-enables dispatch; Stop cleanup retains its stop barrier.
   packet.stallRetries = 0;
   // #2141 — and the zero-diff runtime-fault budget.
   packet.zeroDiffRuntimeRetries = 0;
@@ -100,7 +101,7 @@ function markPacketResetHeld(packet: OrchestratorPacket) {
   // #2195 — "Manual reset required" is only true if the reset actually refreshes
   // the dispatch-preflight refusal budget.
   packet.preflightRefusals = 0;
-  packet.operatorStopped = false;
+  packet.operatorStopped = preserveOperatorStopped;
   packet.tierEscalated = undefined;
   // #2045 — reset CONSUMES a still-armed alignment (stamps `alignmentResolvedAt`)
   // rather than clearing `huddle`: the operator's reset IS the alignment
@@ -178,7 +179,7 @@ async function selectPacketResetLocation(input: ResetPacketInput) {
     if (!input.scope?.skipHoldIfStateMoved) {
       const { result } = await withMissionRegistryState(registryEntry.id, (state) => {
         const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-        if (!packet) throw new Error(`Packet ${input.packetId} not found.`);
+        if (!packet) throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
         markPacketResetPending(packet);
         return {
           state,
@@ -211,26 +212,52 @@ async function mutateResetPacketGeneration(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
-  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate));
+  return withMissionHandoffBarrier(() => mutateResetPacketGenerationUnlocked(input, missionId, mutate, expectedPacket));
 }
 
 async function mutateResetPacketGenerationUnlocked(
   input: ResetPacketInput,
   missionId: string,
   mutate: (packet: OrchestratorPacket) => void,
+  expectedPacket?: OrchestratorPacket,
 ): Promise<{ referenceLabel: string; stateChanged: boolean } | null> {
+  const generationMoved = (packet: OrchestratorPacket) => {
+    if (!expectedPacket) return false;
+    const order = (packet.storageAdmissionEpoch ?? 0) - (expectedPacket.storageAdmissionEpoch ?? 0)
+      || (packet.attemptCount ?? 0) - (expectedPacket.attemptCount ?? 0);
+    return order > 0 || (order === 0 && Boolean(packet.lane?.laneId && packet.lane.laneId !== expectedPacket.lane?.laneId));
+  };
   const apply = (packet: OrchestratorPacket) => {
-    if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
+    if (generationMoved(packet) || (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input))) {
       return { referenceLabel: packet.referenceLabel, stateChanged: true };
     }
     mutate(packet);
     return { referenceLabel: packet.referenceLabel, stateChanged: false };
   };
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
-  const { result } = await withLockedState((fresh) => {
+  const { result } = await withLockedState(async (fresh) => {
     if (fresh.missionId !== missionId) return null;
     const packet = fresh.packets.find((candidate) => candidate.id === input.packetId);
+    if (packet && expectedPacket && !generationMoved(packet)
+      && (!input.scope?.skipHoldIfStateMoved || scopedPacketGenerationMatches(packet, input))
+      && readMissionRegistryEntry(missionId, { includeArchived: true })) {
+      // Cleanup has retired the captured lane/worktree. Finalize only this
+      // packet in the registry's fresh state before acknowledging the reset.
+      // A failed registry write leaves the current packet's stop hold intact.
+      const { result: mirrored } = await withMissionRegistryState(missionId, (state) => {
+        const target = state.packets.find((candidate) => candidate.id === input.packetId);
+        if (!target || generationMoved(target)) {
+          return { state, result: { referenceLabel: packet.referenceLabel, stateChanged: true } };
+        }
+        target.storageAdmissionEpoch = packet.storageAdmissionEpoch;
+        target.attemptCount = packet.attemptCount;
+        mutate(target);
+        return { state, result: { referenceLabel: target.referenceLabel, stateChanged: false } };
+      });
+      if (mirrored.stateChanged) return mirrored;
+    }
     return packet ? apply(packet) : null;
   });
   if (result) return result;
@@ -252,7 +279,7 @@ async function resetRegistryPacket(
   if (!pendingAlready && !input.scope?.skipHoldIfStateMoved) {
     await withMissionRegistryState(missionId, (state) => {
       const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packet) throw new Error(`Packet ${input.packetId} not found.`);
+      if (!packet) throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found.`);
       markPacketResetPending(packet);
       return { state, result: undefined };
     });
@@ -304,6 +331,7 @@ async function resetRegistryPacket(
   const { result } = await withMissionRegistryState(missionId, (state) => {
     const packet = state.packets.find((candidate) => candidate.id === input.packetId);
     if (!packet) {
+      // Lane cleanup already ran by this point, so this is not a plain "nothing to reset".
       throw new Error(`Packet ${input.packetId} not found.`);
     }
     if (input.scope?.skipHoldIfStateMoved && !scopedPacketGenerationMatches(packet, input)) {
@@ -320,7 +348,7 @@ async function resetRegistryPacket(
         },
       };
     }
-    markPacketResetHeld(packet);
+    markPacketResetHeld(packet, input.scope?.preserveOperatorStopped);
     log(`Reset registry packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
     return {
       state,
@@ -435,6 +463,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
   // null packet.lane while leaving the SQLite row in a non-terminal status.
   let worktreePath: string | null = null;
   const cleanupTargets: ResetCleanupTarget[] = [];
+  let worktreePruned = false;
+  let branchDeleted = false;
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
     const persisted = listLanes().filter((lane) => lane.packetId === packet.id);
@@ -482,6 +512,17 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
           overrideLiveGuard: confirmedKills.has(lane.id) ? true : undefined,
         });
       }
+    }
+    // Keep exact packet/session bindings until preservation-bound removal confirms.
+    // Session archival above must succeed before any workspace can be destroyed.
+    if (input.clearWorktree && packet.branchTarget && repoPath) {
+      const cleanup = await cleanupResetPacketTargets(cleanupTargets, packet.id);
+      worktreePruned = cleanup.worktreePruned;
+      branchDeleted = cleanup.branchDeleted;
+      log(`[lane-reset] Cleared packet-owned cleanup targets for packet ${packet.referenceLabel}`, cleanup);
+    }
+    for (const lane of bound) {
+      const terminal = lane.status === 'archived' || lane.status === 'completed';
       if (!persistedIds.has(lane.id)) continue;
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
@@ -513,8 +554,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
           partial: true,
           packetId: input.packetId,
           referenceLabel: packet.referenceLabel,
-          worktreePruned: false,
-          branchDeleted: false,
+          worktreePruned,
+          branchDeleted,
           note: `Packet ${packet.referenceLabel} worker was stopped, but lane ${lane.id} could not be retired. The packet remains held and must not be relaunched: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
@@ -556,41 +597,15 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
       partial: true,
       packetId: input.packetId,
       referenceLabel: packet.referenceLabel,
-      worktreePruned: false,
-      branchDeleted: false,
+      worktreePruned,
+      branchDeleted,
       note: `Packet ${packet.referenceLabel} worker retirement could not be confirmed. The packet remains held and must not be relaunched: ${detail}`,
     });
   }
 
   // If clearWorktree requested, prune the old worktree directory and delete
   // the packet branch so the next dispatch starts from the base branch.
-  let worktreePruned = false;
-  let branchDeleted = false;
   if (input.clearWorktree && packet.branchTarget && repoPath) {
-    try {
-      const cleanup = await cleanupResetPacketTargets(cleanupTargets, packet.id);
-      worktreePruned = cleanup.worktreePruned;
-      branchDeleted = cleanup.branchDeleted;
-      log(`[lane-reset] Cleared packet-owned cleanup targets for packet ${packet.referenceLabel}`, cleanup);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      await mutateResetPacketGeneration(
-        retryScopedInput,
-        missionId,
-        markPacketResetCleanupFailed,
-      );
-      throw new ResetCleanupFailedError({
-        reset: false,
-        salvaged: false,
-        partial: true,
-        packetId: input.packetId,
-        referenceLabel: packet.referenceLabel,
-        worktreePruned,
-        branchDeleted,
-        note: `Packet ${packet.referenceLabel} worker was stopped, but worktree cleanup was not confirmed. The packet remains held and must not be relaunched: ${detail}`,
-      });
-    }
-
     // F33 fallback (#1025): cleanupIssueBranch can miss orphan worktree dirs
     // when their meta is gone and git doesn't list them against the target
     // branch (e.g. a -<suffix> dir left on `main` after a prior bad reset).
@@ -639,7 +654,8 @@ async function resetPacketUnlocked(input: ResetPacketInput, plannedGeneration: s
   const heldPacket = await mutateResetPacketGeneration(
     retryScopedInput,
     missionId,
-    markPacketResetHeld,
+    (target) => markPacketResetHeld(target, input.scope?.preserveOperatorStopped),
+    packet,
   );
   if (!heldPacket) {
     log(`Reset packet ${packet.referenceLabel} (${input.packetId}) — packet left mission state during cleanup; lanes cleaned, no hold to record.`);

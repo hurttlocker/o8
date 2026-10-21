@@ -31,8 +31,10 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
  * `o8` is the FREE conversational backend (o8.ts) — it streams the Vercel AI
  * Gateway free model so the operator can exercise the full orchestrator UI with
  * no subscription draw; it has no tools and never dispatches (v1).
+ * `pi` is the bundled Pi SDK session on the managed model route (pi.ts), with
+ * the same built-in o8 servers as the Claude orchestrator.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable' | 'o8' | 'opencode' | 'pi' | 'muse';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -43,7 +45,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
     || value === 'acp' || value === 'collide' || value === 'fable' || value === 'o8'
-    || value === 'opencode';
+    || value === 'opencode' || value === 'pi' || value === 'muse';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
@@ -51,6 +53,10 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
+  /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */
+  reviewUsage?: { reviewTurnId: string; laneId: string; packetId: string | null; surface: string };
+  /** Start a new conversation instead of resuming the thread's; each review turn reads its diff fresh (#3742). */
+  freshSession?: boolean;
   /** Per-turn fan-out policy shared by every composer surface. */
   orchestrationMode?: OrchestratorExecutionMode;
   /**
@@ -61,6 +67,7 @@ export interface OrchestratorTurnOptions {
    */
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: import('@/lib/orchestrator/service-tier').OrchestratorServiceTier;
   model?: string;
   /** For a Collide turn, the composer backend selected before routing to `collide`. */
   collideBaseBackend?: OrchestratorBackendId;

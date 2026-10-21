@@ -1,4 +1,5 @@
 'use client';
+import { ChatGPTPlanConnection } from '../settings/ChatGPTPlanConnection';
 
 import { memo, useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -200,6 +201,7 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
         </button>
       ) : null}
 
+      <ChatGPTPlanConnection />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
         <button type="button" onClick={onContinue} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
         {renderButton({

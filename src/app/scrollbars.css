@@ -1,0 +1,13 @@
+/* App-wide policy: scrolling remains available without tracks or gutters. */
+* {
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto !important;
+}
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.monaco-scrollable-element > .scrollbar {
+  display: none !important;
+}

@@ -565,10 +565,11 @@ describe.skipIf(process.platform === 'win32')('Claude Code native sign-in verifi
         body: JSON.stringify({ workspaceMode: 'o8', currentRoute: '/mobile/ask', model: 'claude-opus' }),
       },
     ));
-    expect(symonResponse.status).toBe(501);
-    await expect(symonResponse.json()).resolves.toMatchObject({
+    expect(symonResponse.status).toBe(503);
+    await expect(symonResponse.json()).resolves.toEqual({
       ok: false,
-      error: 'no_cli',
+      error: 'desktop_unavailable',
+      detail: 'The selected native planner is unavailable. Choose another model explicitly.',
     });
     expect(symonBridgeFixture.selections).toEqual([]);
   }, 20_000);

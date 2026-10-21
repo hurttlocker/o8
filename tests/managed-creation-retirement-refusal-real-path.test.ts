@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { afterAll, expect, it, vi } from 'vitest';
+import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
@@ -38,6 +39,8 @@ const { closeDb } = await import('@/lib/db');
 const { WorktreeManager } = await import('@/lib/worktree/manager');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+const { retireExactManagedDirectory } = await import('@/lib/workspace/exact-managed-directory-retirement');
+const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
 
 function makeRepo(label: string): string {
   const repo = path.join(root, label);
@@ -71,7 +74,13 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
     Object.defineProperty(manager, 'injectSafetyHooks', { value: async () => {} });
     Object.defineProperty(manager, 'resetTrackedWorkspaceChanges', { value: async () => {} });
     Object.defineProperty(manager, 'retireFailedManagedCreation', {
-      value: async () => { throw new Error('forced exact-retirement refusal'); },
+      value: async (worktreeId: string, directoryPath: string,
+        identity: WorktreeMaterializationIdentity, parentIdentity: WorktreeMaterializationIdentity) => {
+        await retireExactManagedDirectory({ repositoryPath: repo, worktreeId, directoryPath,
+          identity, parentIdentity, retirementReason: 'creation-rollback',
+          beforeRetirementRename: async () => { throw new Error('forced exact-retirement refusal'); },
+        });
+      },
     });
 
     await expect(manager.create({
@@ -91,6 +100,7 @@ it.each(['git-worktree', 'apfs-cow-clone'] as const)(
     expect(retained?.materializationIdentity).toBeDefined();
     expect(retained?.materializationParentIdentity).toBeDefined();
     expect(existsSync(retained!.materializationIdentity!.canonicalPath)).toBe(true);
+    expect(readExactWorkspaceClaim('managed-retirement', repo, id)?.authority?.retirementReason).toBe('creation-rollback');
 
     await expect(new WorktreeManager(repo).cleanup(
       id,

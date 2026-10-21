@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchOnce, invalidateFetchOnce } from '@/lib/panel/fetch-cache';
+import { hasRepoInventoryChange } from '@/lib/repos/inventory-change';
 
 /** Window-level broadcast so every useProjects instance refreshes after any
  *  mutation (the palette + the AgentPanel + any future surface). Lets us
@@ -14,6 +15,7 @@ export const PROJECTS_UPDATED_EVENT = 'o8:projects-updated';
 
 export function broadcastProjectsUpdated() {
   if (typeof window === 'undefined') return;
+  invalidateFetchOnce('/api/panel/projects');
   window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT));
 }
 
@@ -22,6 +24,13 @@ export function refreshProjectsFromExternalMutation() {
   if (typeof window === 'undefined') return;
   broadcastProjectsUpdated();
   window.dispatchEvent(new CustomEvent('o8:repos-changed'));
+}
+
+// Changes made through the server (an MCP command, the CLI) arrive as a realtime mutation (#3559).
+if (typeof window !== 'undefined') {
+  window.addEventListener('o8:realtime', (event) => {
+    if (hasRepoInventoryChange((event as CustomEvent).detail)) refreshProjectsFromExternalMutation();
+  });
 }
 
 export const PROJECT_COLOR_PALETTE = [
@@ -56,7 +65,7 @@ interface UseProjectsResult {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  switchActive: (projectId: string) => Promise<void>;
+  switchActive: (projectId: string) => Promise<boolean>;
   createProject: (name: string) => Promise<ProjectRecord | null>;
   renameProject: (projectId: string, name: string) => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
@@ -68,20 +77,23 @@ export function useProjects(): UseProjectsResult {
   const [ledger, setLedger] = useState<ProjectsLedger | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const latestRead = useRef(0);
 
   const refresh = useCallback(async () => {
+    const read = ++latestRead.current;
     try {
       const res = await fetchOnce('/api/panel/projects');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
+      if (read !== latestRead.current) return;
       // Don't broadcast on refresh — that would feed back into every other
       // instance's refresh listener and loop forever. Mutations broadcast.
       setLedger(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load projects');
+      if (read === latestRead.current) setError(err instanceof Error ? err.message : 'Failed to load projects');
     } finally {
-      setLoading(false);
+      if (read === latestRead.current) setLoading(false);
     }
   }, []);
 
@@ -90,7 +102,10 @@ export function useProjects(): UseProjectsResult {
     if (typeof window === 'undefined') return;
     const handler = () => { void refresh(); };
     window.addEventListener(PROJECTS_UPDATED_EVENT, handler);
-    return () => { window.removeEventListener(PROJECTS_UPDATED_EVENT, handler); };
+    return () => {
+      latestRead.current += 1;
+      window.removeEventListener(PROJECTS_UPDATED_EVENT, handler);
+    };
   }, [refresh]);
 
   const switchActive = useCallback(async (projectId: string) => {
@@ -103,9 +118,12 @@ export function useProjects(): UseProjectsResult {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as ProjectsLedger;
-      setLedger(data); broadcastProjectsUpdated();
+      setLedger(data); setError(null); broadcastProjectsUpdated();
+      return true;
     } catch {
+      setError('Could not switch projects. Try again.');
       void refresh();
+      return false;
     }
   }, [refresh]);
 

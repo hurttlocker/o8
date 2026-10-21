@@ -244,13 +244,16 @@ function packet(repoPath: string, id: string): OrchestratorPacket {
   };
 }
 
-function mission(repoPath: string, target: OrchestratorPacket): OrchestratorMissionState {
-  return {
+async function mission(repoPath: string, target: OrchestratorPacket): Promise<OrchestratorMissionState> {
+  const state = {
     missionId: `mission-${target.id}`,
     repoPath,
     packets: [target],
     updatedAt: new Date().toISOString(),
   } as OrchestratorMissionState;
+  const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+  writeOrchestratorControlPlaneState(state);
+  return state;
 }
 
 async function waitFor<T>(
@@ -298,12 +301,12 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]);
 
     const successId = 'pkt-declarative-cwd';
-    const launched = await runDispatchTick(mission(repoPath, packet(repoPath, successId)), {
+    const launched = await runDispatchTick(await mission(repoPath, packet(repoPath, successId)), {
       launchBudget: { maxLaunches: 1 },
     });
     const launchedPacket = launched.packets[0];
     const launchedLane = laneRegistry.findLaneByPacket(successId);
-    expect(launchedPacket.status).toBe('launching');
+    expect(launchedPacket.status, launchedPacket.blockedReason ?? undefined).toBe('launching');
 
     const spawn = await waitFor(() => {
       if (!existsSync(capturePath)) return null;
@@ -335,7 +338,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     const captureBeforeFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     worktreeFailure.enabled = true;
     const failureId = 'pkt-declarative-worktree-failure';
-    const blocked = await runDispatchTick(mission(repoPath, packet(repoPath, failureId)), {
+    const blocked = await runDispatchTick(await mission(repoPath, packet(repoPath, failureId)), {
       launchBudget: { maxLaunches: 1 },
     });
     const blockedPacket = blocked.packets[0];
@@ -374,12 +377,12 @@ describe('declarative packet dispatch worktree reachability', () => {
       installOnCreateWorkspace: true,
     });
     const completeId = 'pkt-dependency-materialized';
-    const launched = await runDispatchTick(mission(
+    const launched = await runDispatchTick(await mission(
       completeRepo,
       packet(completeRepo, completeId),
     ), { launchBudget: { maxLaunches: 1 } });
     const completeLane = laneRegistry.findLatestLaneByPacket(completeId);
-    expect(launched.packets[0]?.status).toBe('launching');
+    expect(launched.packets[0]?.status, launched.packets[0]?.blockedReason ?? undefined).toBe('launching');
     expect(completeLane?.worktreePath).toBeTruthy();
     expect(existsSync(join(completeLane!.worktreePath!, 'node_modules', '.bin', 'gate-check'))).toBe(true);
     expect(laneRegistry.getLaneEvents(completeLane!.id, 200)).toEqual(expect.arrayContaining([
@@ -399,7 +402,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     const incompleteRegistration = await repoRegistry.addRepo(incompleteRepo);
     expect(incompleteRegistration.setup.installOnCreateWorkspace).toBe(true);
     const incompleteId = 'pkt-dependency-incomplete';
-    const initial = mission(incompleteRepo, packet(incompleteRepo, incompleteId));
+    const initial = await mission(incompleteRepo, packet(incompleteRepo, incompleteId));
     controlPlane.writeOrchestratorControlPlaneState(initial);
     const captureCountBefore = existsSync(capturePath)
       ? readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean).length
@@ -443,7 +446,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]);
 
     const packetId = 'pkt-slow-provision-race';
-    const initial = mission(repoPath, packet(repoPath, packetId));
+    const initial = await mission(repoPath, packet(repoPath, packetId));
     controlPlane.writeOrchestratorControlPlaneState(initial);
     provisioningRace.enabled = true;
     const dispatchPromise = runDispatchTick(initial, {
@@ -508,7 +511,7 @@ describe('declarative packet dispatch worktree reachability', () => {
     expect(existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '').not.toContain(packetId);
   }, 40_000);
 
-  it('rolls back a launched worker when the real route cannot persist its governance lane', async () => {
+  it('stops the worker and retains its workspace when the real route cannot persist its governance lane', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const repoPath = createRemoteBackedRepo();
     await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
@@ -533,12 +536,16 @@ describe('declarative packet dispatch worktree reachability', () => {
         }),
       }));
 
-      expect(response.status).toBe(400);
-      await expect(response.json()).resolves.toMatchObject({
+      expect(response.status).toBe(409);
+      const result = await response.json();
+      expect(result).toMatchObject({
         ok: false,
+        outcomeUnknown: true,
+        retryable: false,
         surfaceId: expect.stringMatching(/^qoder-owned:/),
-        note: expect.stringContaining('governance lane could not be persisted'),
+        note: expect.stringContaining('its worktree could not be cleaned after governance registration failed'),
       });
+      expect(existsSync(result.worktree.path)).toBe(true);
       for (let attempt = 0; attempt < 200; attempt += 1) {
         const extra = (await runtime.discoverSessions())
           .filter((session) => !sessionsBefore.has(session.sessionKey));
@@ -551,7 +558,7 @@ describe('declarative packet dispatch worktree reachability', () => {
         cwd: repoPath,
         encoding: 'utf8',
       });
-      expect(worktrees.match(/^worktree /gm)).toHaveLength(1);
+      expect(worktrees.match(/^worktree /gm)).toHaveLength(2);
     } finally {
       createLane.mockRestore();
     }

@@ -20,6 +20,8 @@ const runId = createReleaseBuildCacheRunId();
 const cacheRoot = resolveReleaseBuildCacheRoot();
 const cargoTauriArgs = process.argv.slice(2);
 const nativeBuildOptions = { cargoTauriArgs };
+const targetFlagIndex = cargoTauriArgs.indexOf('--target');
+const requestedTarget = targetFlagIndex >= 0 ? cargoTauriArgs[targetFlagIndex + 1] : undefined;
 const prebuildMarker = join(cacheRoot, 'runs', runId, 'prebuild-completed-at');
 let nativeIdentity;
 let nativeRestore;
@@ -28,6 +30,7 @@ try {
   nativeIdentity = collectReleaseBuildCacheIdentity(root, 'native', { buildOptions: nativeBuildOptions });
   nativeRestore = await restoreReleaseBuildCache(root, 'native', {
     cacheRoot,
+    runId,
     identity: nativeIdentity,
     buildOptions: nativeBuildOptions,
   });
@@ -51,6 +54,7 @@ const env = {
   O8_RELEASE_BUILD_CACHE_DIR: cacheRoot,
   O8_RELEASE_CACHE_RUN_ID: runId,
   O8_RELEASE_CACHE_PREBUILD_MARKER: prebuildMarker,
+  ...(requestedTarget ? { O8_TAURI_BUILD_TARGET: requestedTarget } : {}),
 };
 const build = spawnSync('cargo', ['tauri', 'build', ...cargoTauriArgs], {
   cwd: root,
@@ -70,6 +74,7 @@ if (!build.error && build.status === 0) {
     nativeIdentity = nativeIdentity ?? collectReleaseBuildCacheIdentity(root, 'native', { buildOptions: nativeBuildOptions });
     nativeCapture = await captureReleaseBuildCache(root, 'native', {
       cacheRoot,
+      runId,
       identity: nativeIdentity,
       buildDurationMs: nativeBuildDurationMs,
       buildOptions: nativeBuildOptions,
@@ -97,7 +102,7 @@ if (!build.error && build.status === 0) {
 
 let finalized;
 try {
-  finalized = finalizeReleaseBuildCacheReceipt(cacheRoot, runId, {
+  finalized = await finalizeReleaseBuildCacheReceipt(cacheRoot, runId, {
     outcome: !build.error && build.status === 0 ? 'PASS' : 'FAIL',
     source: nativeIdentity?.source ?? { head: 'unavailable' },
     buildDurationMs,

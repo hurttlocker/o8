@@ -13,11 +13,13 @@
  * the Activity feed maps the selected path back to a slug internally.
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import { shortRepoLabel, normalizeRepoSlug } from '../agent-panel/shared';
 import { ACTIVITY_COLORS, IconChevronDown, IconFolder } from '../o8-activity-helpers';
 import { repoSlugFromRemote } from '../canvas-utils';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import { FloatingSurface } from '../FloatingSurface';
+import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
 
 interface O8RepoSelectorProps {
   repos: RepoRegistryEntry[];
@@ -31,6 +33,7 @@ interface O8RepoSelectorProps {
   showAllReposOption?: boolean;
   /** Wrapper style override (e.g. flex:1 in the Activity header). */
   style?: CSSProperties;
+  active?: boolean;
 }
 
 function repoMeta(entry: RepoRegistryEntry): { label: string; owner: string } {
@@ -48,38 +51,30 @@ export function O8RepoSelector({
   onSelectRepo,
   showAllReposOption = true,
   style,
+  active = true,
 }: O8RepoSelectorProps) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click / Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  const [visibility, setVisibility] = useState({ active, open: false });
+  if (visibility.active !== active) setVisibility({ active, open: false });
+  const open = active && visibility.active === active && visibility.open;
+  const setOpen = useCallback((next: boolean) => setVisibility({ active, open: next }), [active]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const selectedEntry = selectedRepoPath ? repos.find((r) => r.localPath === selectedRepoPath) ?? null : null;
   const chipLabel = allRepos
     ? 'All repos'
-    : selectedEntry ? repoMeta(selectedEntry).label : (repos[0] ? repoMeta(repos[0]).label : 'No repo');
+    : selectedEntry ? repoMeta(selectedEntry).label : (selectedRepoPath?.split(/[\\/]/).filter(Boolean).pop() ?? 'No repo');
 
-  const pickAll = useCallback(() => { onSelectAll(); setOpen(false); }, [onSelectAll]);
-  const pickRepo = useCallback((localPath: string) => { onSelectRepo(localPath); setOpen(false); }, [onSelectRepo]);
+  const pickAll = useCallback(() => { onSelectAll(); setOpen(false); }, [onSelectAll, setOpen]);
+  const pickRepo = useCallback((localPath: string) => { onSelectRepo(localPath); setOpen(false); }, [onSelectRepo, setOpen]);
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', minWidth: 0, ...style }}>
+    <div style={{ position: 'relative', minWidth: 0, ...style }}>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(event) => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); } }}
         title="Switch repository"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -131,24 +126,21 @@ export function O8RepoSelector({
         <IconChevronDown size={10} color="var(--t-text-muted)" />
       </button>
 
-      {open ? (
-        <div className="cortex-themed-scroll" role="menu" style={{
-          position: 'absolute',
-          top: 32,
-          left: 0,
-          right: 0,
+      <ComposerPopover anchorRef={triggerRef} open={open} align="start" onClose={() => setOpen(false)} onOpenReady={() => (menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ?? menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"]'))?.focus()}>
+        <FloatingSurface ref={menuRef} role="menu" aria-label="Repository scope" style={{
           minWidth: 180,
-          zIndex: 20,
+          width: 280,
           borderRadius: 12,
-          border: '1px solid var(--t-panel-border)',
-          background: 'var(--t-popover-surface)',
-          boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
+        }} contentStyle={{
           maxHeight: 240,
           overflowY: 'auto',
+          scrollbarWidth: 'none',
         }}>
           {showAllReposOption ? (
             <button
               type="button"
+              role="menuitemradio"
+              aria-checked={allRepos}
               onClick={pickAll}
               style={{
                 display: 'flex',
@@ -183,6 +175,8 @@ export function O8RepoSelector({
               <button
                 key={entry.id}
                 type="button"
+                role="menuitemradio"
+                aria-checked={selected}
                 onClick={() => pickRepo(entry.localPath)}
                 style={{
                   display: 'flex',
@@ -227,8 +221,8 @@ export function O8RepoSelector({
               </button>
             );
           })}
-        </div>
-      ) : null}
+        </FloatingSurface>
+      </ComposerPopover>
     </div>
   );
 }

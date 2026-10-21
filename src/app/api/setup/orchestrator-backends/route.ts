@@ -7,13 +7,14 @@
 
 export const dynamic = 'force-dynamic';
 
+import { resolveLocalAcpLaunch } from '@/lib/acp/local-connection';
 import { NextResponse } from 'next/server';
 
 import { isHermesAvailable, isOpencodeAcpAvailable } from '@/lib/lane/orchestrator-backends/acp';
 
 export async function GET() {
   try {
-    return NextResponse.json({ hermes: isHermesAvailable(), opencode: isOpencodeAcpAvailable() });
+    return NextResponse.json({ acp: Boolean(resolveLocalAcpLaunch()), hermes: isHermesAvailable(), opencode: isOpencodeAcpAvailable() });
   } catch (error) {
     return NextResponse.json(
       { hermes: false, opencode: false, error: error instanceof Error ? error.message : String(error) },

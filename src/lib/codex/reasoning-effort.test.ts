@@ -24,6 +24,8 @@ describe('resolveCodexReasoningEffort', () => {
     expect(resolveCodexReasoningEffort('max', 'gpt-6-astra')).toBe('max');
     expect(resolveCodexReasoningEffort('ultra', 'gpt-6-astra')).toBe('ultra');
     expect(resolveCodexReasoningEffort('max', 'gpt-6-sol')).toBe('max');
+    expect(resolveCodexReasoningEffort('max', 'gpt-6.1-sol')).toBe('max');
+    expect(resolveCodexReasoningEffort('ultra', 'gpt-6.1-sol')).toBe('ultra');
     expect(resolveCodexReasoningEffort('ultra', 'gpt-6-sol')).toBe('ultra');
     expect(resolveCodexReasoningEffort('max', 'gpt-6-luna')).toBe('max');
     expect(resolveCodexReasoningEffort('ultra', 'gpt-6-luna')).toBe('xhigh');

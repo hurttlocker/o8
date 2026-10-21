@@ -44,6 +44,7 @@ describe('classifyProposerTool', () => {
       'mcp__cortex__cortex_fleet_status', 'mcp__cortex__cortex_list_approvals', 'mcp__cortex__cortex_list_issues',
       'mcp__cortex__cortex_list_prs', 'mcp__cortex__cortex_list_projects', 'mcp__cortex__cortex_ci_status',
       'cortex__cortex_ask', // Codex form
+      'mcp__cortex__cortex_worker_catalog', 'cortex__cortex_wait_workers', 'cortex_wait_workers',
     ]) {
       expect(classifyProposerTool(t)).toBe('safe');
     }

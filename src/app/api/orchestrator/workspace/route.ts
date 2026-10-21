@@ -17,6 +17,7 @@ import {
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import '@/lib/runtimes';
 import { parkWorkspace } from '@/lib/workspace/hibernator';
 import { reconcileWorkspaceSnapshot } from '@/lib/workspace/reconciler';
 import { restoreWorkspace } from '@/lib/workspace/restorer';
@@ -392,7 +393,9 @@ export async function POST(request: NextRequest) {
       }
       const result = action === 'park'
         ? await parkWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId })
-        : await restoreWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId });
+        : await restoreWorkspace({ repositoryUuid: current.repo.id, packetId, operationId: clientMutationId,
+          expectedSnapshot: target.snapshot ? { generation: target.snapshot.snapshotGeneration,
+            version: target.snapshot.version, fingerprint: target.snapshot.snapshotFingerprint } : undefined });
       const ok = result.status !== 'refused';
       return {
         ok,

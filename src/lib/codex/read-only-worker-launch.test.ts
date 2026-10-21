@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, rmSync, symlinkSync, linkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -44,7 +44,8 @@ process.env.CORTEX_IDE_DATA_DIR = tempRoot;
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = path.join(tempRoot, 'sessions');
 process.env.O8_CODEX_BIN = process.execPath;
 
-const { launchOwnedCodexSession, codexLaunchArgs, codexResumeArgs } = await import('./owned');
+const { launchOwnedCodexSession, continueOwnedCodexSession, codexLaunchArgs, codexResumeArgs } = await import('./owned');
+const { ownerInstructionPaths } = await import('@/lib/runtimes/shared/owned-session/owner-instructions');
 const {
   CODEX_FULL_ACCESS_LAUNCH_FLAGS,
   CODEX_READ_ONLY_LAUNCH_FLAGS,
@@ -60,6 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   spawnMock.mockReset();
   spawnBridgeMock.mockReset();
+  vi.unstubAllEnvs();
 });
 
 afterAll(() => {
@@ -86,6 +88,94 @@ function indexOfSequence(args: string[], sequence: readonly string[]): number {
 }
 
 describe('owned Codex read-only argv', () => {
+  it.skipIf(process.platform !== 'darwin')('reads immutable owner instructions on launch and resume without opening their neighbors', async () => {
+    const home = realpathSync(mkdtempSync(path.join(os.homedir(), '.o8-instructions-test-')));
+    const policy = path.join(home, 'AGENTS.md');
+    const agreement = path.join(home, '.o8', 'OPERATING_AGREEMENT.md');
+    const secret = path.join(home, '.o8', 'worker-token');
+    const config = path.join(repoPath, 'fixture.json');
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('CODEX_HOME', path.join(home, '.codex'));
+    try {
+      mkdirSync(path.dirname(agreement));
+      writeFileSync(policy, 'owner policy\n');
+      writeFileSync(path.join(home, 'CLAUDE.md'), 'runtime policy\n');
+      writeFileSync(agreement, 'owner agreement\n');
+      writeFileSync(secret, 'private');
+      writeFileSync(path.join(home, 'AGENTS.md.backup'), 'private');
+      writeFileSync(config, '{"strict":true}\n');
+      const result = await launchOwnedCodexSession({ cwd: repoPath, prompt: 'read the policy and configuration', workMode: 'read-only' });
+      expect(result, result.note).toMatchObject({ ok: true });
+      const profilePath = () => {
+        const args = spawnMock.mock.calls.at(-1)![1] as string[];
+        return args[args.indexOf(SANDBOX_EXEC_PATH) + 2]!;
+      };
+      const execute = (program: string, ...args: string[]) => execFileSync(SANDBOX_EXEC_PATH,
+        ['-f', profilePath(), program, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const chain = 'cat "$1" && cat "$2" && cat "$3"';
+      expect(execute('/bin/sh', '-c', chain, 'fixture', policy, agreement, config))
+        .toBe('owner policy\nowner agreement\n{"strict":true}\n');
+      for (const forbidden of [secret, path.join(home, 'AGENTS.md.backup')]) {
+        expect(() => execute('/bin/cat', forbidden)).toThrow();
+      }
+      expect(() => execute('/bin/ls', home)).toThrow();
+      expect(() => execute('/bin/ls', path.dirname(agreement))).toThrow();
+      for (const file of [policy, agreement, config, path.join(repoPath, '.git', 'config')]) {
+        const original = readFileSync(file, 'utf8');
+        for (const operation of [
+          'fs.writeFileSync(p,"changed")', 'fs.unlinkSync(p)', 'fs.chmodSync(p,0o777)',
+          'fs.renameSync(p,p+".moved")', 'fs.linkSync(p,process.argv[2])',
+          'fs.writeFileSync(process.argv[2],"replacement");fs.renameSync(process.argv[2],p)',
+        ]) {
+          expect(() => execute(process.execPath, '-e',
+            `const fs=require('node:fs');const p=process.argv[1];${operation}`, file, path.join(tempRoot, 'replacement'))).toThrow();
+          rmSync(path.join(tempRoot, 'replacement'), { force: true });
+        }
+        expect(readFileSync(file, 'utf8')).toBe(original);
+      }
+      // Reconcile a synthetic terminal runtime receipt, then exercise the real
+      // resume path with the stored read-only pin (no provider is contacted).
+      const sessionPath = path.join(tempRoot, 'sessions', result.surfaceId.slice('codex-owned:'.length), 'session.json');
+      const session = JSON.parse(readFileSync(sessionPath, 'utf8'));
+      session.threadId = 'fixture-owner-instructions';
+      session.activeRun.pid = 0;
+      writeFileSync(session.activeRun.stdoutPath,
+        JSON.stringify({ type: 'thread.started', thread_id: session.threadId }) + '\n'
+        + JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      writeFileSync(sessionPath, JSON.stringify(session));
+      const resumed = await continueOwnedCodexSession(result.surfaceId, 'read the same policy again');
+      expect(resumed, resumed.note).toMatchObject({ ok: true });
+      expect(execute('/bin/sh', '-c', chain, 'fixture', policy, agreement, config))
+        .toBe('owner policy\nowner agreement\n{"strict":true}\n');
+      // A host-side link replacement after profile creation never grants its target.
+      rmSync(policy); symlinkSync(secret, policy);
+      expect(() => execute('/bin/cat', policy)).toThrow();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(config, { force: true });
+    }
+  }, 30_000);
+
+  it('refuses aliased and non-regular owner policies without following their targets', async () => {
+    const home = realpathSync(mkdtempSync(path.join(tempRoot, 'policy-validation-')));
+    const file = path.join(home, 'AGENTS.md');
+    const secret = path.join(home, 'private');
+    writeFileSync(secret, 'private');
+    for (const kind of ['symlink', 'dangling', 'hardlink', 'directory', 'fifo']) {
+      if (kind === 'symlink') symlinkSync(secret, file);
+      if (kind === 'dangling') symlinkSync(path.join(home, 'absent'), file);
+      if (kind === 'hardlink') linkSync(secret, file);
+      if (kind === 'directory') mkdirSync(file);
+      if (kind === 'fifo') execFileSync('mkfifo', [file]);
+      await expect(ownerInstructionPaths(home, {}), kind).rejects.toThrow();
+      rmSync(file, { recursive: true, force: true });
+    }
+    const outside = path.join(home, 'other'); mkdirSync(outside);
+    writeFileSync(path.join(outside, 'OPERATING_AGREEMENT.md'), 'aliased');
+    symlinkSync(outside, path.join(home, '.o8'));
+    await expect(ownerInstructionPaths(home, {})).rejects.toThrow('non-aliased');
+  });
+
   it.skipIf(process.platform !== 'darwin').each(['read-only', 'edit'] as const)(
     'reads only the backing project config without reopening its checkout (%s)',
     async (workMode) => {
@@ -132,7 +222,18 @@ describe('owned Codex read-only argv', () => {
     },
   );
 
-  it('launches a read-only packet with approvals off and no nested inner sandbox', async () => {
+  // A read-only launch runs inside the macOS sandbox-exec profile; every other
+  // host refuses it before spawning, so the launched argv exists only on macOS.
+  it.skipIf(process.platform === 'darwin')('refuses a read-only launch without the macOS sandbox', async () => {
+    const result = await launchOwnedCodexSession({
+      cwd: repoPath, prompt: 'inspect the repository', workMode: 'read-only',
+    });
+    expect(result).toMatchObject({ ok: false });
+    expect(result.note).toContain('requires an OS-enforced sandbox');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('launches a read-only packet with approvals off and no nested inner sandbox', async () => {
     const args = await spawnedArgs('read-only');
     expect(indexOfSequence(args, CODEX_READ_ONLY_LAUNCH_FLAGS)).toBeGreaterThan(-1);
     // The blanket bypass flag must be gone entirely, not merely reordered: it

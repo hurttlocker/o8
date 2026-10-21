@@ -41,6 +41,40 @@ export function stripQueryStrings(input: string): string {
 }
 
 /**
+ * Credential-shaped values: session JWTs, bearer/basic headers, device tokens,
+ * secret keys, OAuth codes, and the value of any key that names a token,
+ * ticket, session, secret, password, credential, cookie or authorization,
+ * including escaped and nested JSON. Percent-encoding is decoded first so
+ * encoded parameters and dots cannot slip past. The native console-error hook
+ * in src-tauri/src/webview_latch.rs mirrors these rules; keep them identical.
+ */
+const SECRET_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  [/eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, '[redacted]'],
+  [/\b(Bearer|Basic)\s+[^\s"'\\,;]+/gi, '$1 [redacted]'],
+  [/\bo8d_[A-Za-z0-9_-]+/g, 'o8d_[redacted]'],
+  [/\b(sk|rk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_[redacted]'],
+  [/([?&#;]code=)[^&#\s"'\\]+/gi, '$1[redacted]'],
+  [/([A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*)(\\*["']?\s*[:=]\s*\\*["']?)([^"'\\\s&#,;{}()[\]]+)/gi, '$1$2[redacted]'],
+];
+
+function percentDecode(input: string): string {
+  return input.replace(/%([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/** Redact credential-shaped values. Never throws; fails closed to `[redacted]`. */
+export function redactSecrets(input: string): string {
+  if (typeof input !== 'string' || !input) return input;
+  try {
+    let text = input;
+    for (let pass = 0; pass < 3 && /%[0-9A-Fa-f]{2}/.test(text); pass++) text = percentDecode(text);
+    for (const [pattern, replacement] of SECRET_PATTERNS) text = text.replace(pattern, replacement);
+    return text;
+  } catch {
+    return '[redacted]';
+  }
+}
+
+/**
  * Keys whose VALUES must never leave the machine — auth material, identity,
  * env dumps. Case-insensitive; deliberately precise so ordinary keys
  * (`packetId`, `count`, `author`) are NOT dropped.
@@ -106,7 +140,7 @@ export interface ScrubOptions {
 }
 
 function scrubString(value: unknown): string | undefined {
-  return typeof value === 'string' ? stripQueryStrings(scrubPaths(value)) : undefined;
+  return typeof value === 'string' ? stripQueryStrings(scrubPaths(redactSecrets(value))) : undefined;
 }
 
 /**
@@ -154,6 +188,9 @@ export function scrubSentryEvent<T extends SentryEventLike>(event: T, opts: Scru
         const msg = scrubString(crumb.message);
         if (msg !== undefined) crumb.message = msg;
         if (crumb.data && typeof crumb.data === 'object') {
+          // Console breadcrumbs keep the raw logged values; the scrubbed
+          // message already carries their formatted text.
+          delete crumb.data.arguments;
           const u = scrubString(crumb.data.url);
           if (u !== undefined) crumb.data.url = u;
           crumb.data = dropPiiKeys(crumb.data) as Record<string, unknown>;

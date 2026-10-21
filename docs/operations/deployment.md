@@ -25,6 +25,8 @@ Development ports are conveniences, not protocol constants. The packaged shell a
 2. `npm run tauri:build` creates an unsigned local production build.
 3. `npm run tauri:build:signed` creates the signed, updater-capable build when the required credentials are present.
 
+The stable ship workflow uses `npm run tauri:build:stable-macos`, which targets `universal-apple-darwin`. Before signing and again before publication, the release scripts inspect the Mach-O headers of the app executable, `speech_recognizer`, and `speech-local` and require both x86_64 and arm64 slices. The packaged server gate separately requires the x86_64 and arm64 prebuilds for `better-sqlite3` and `node-pty`; the installed host's Node 22 runtime selects the matching prebuild through `process.arch`.
+
 The export step keeps native modules external where required, copies runtime-read assets beside the server bundles, and packages the resources declared by `src-tauri/tauri.conf.json`.
 
 Changed releases reuse verified web, native, and speech compiler intermediates through the [release build cache](release-build-cache.md). The cache never reuses final bundles or bypasses signing, notarization, publication, or exact-output verification. Any invalid entry falls back to the normal cold build.
@@ -46,6 +48,8 @@ External report reconciliation has its own [configuration and recovery runbook](
 ## Release boundary
 
 A local build or commit is not a release. Publishing uses the repository’s guarded ship workflow and requires explicit operator authorization in the current session. Keep signing material out of the repository, never run concurrent ship processes, and verify the published version and installer after notarization completes.
+
+The automated architecture gates prove artifact composition, not native execution. A stable candidate that changes macOS architecture support still requires a signed, notarized, fresh-profile launch on both Apple Silicon without Rosetta and Intel before the new artifact is described as hardware-accepted.
 
 Linux release artifacts are produced on a Linux build host. Before `npm run ship`, copy the resulting `bundle/appimage/*.AppImage`, matching `.sig`, and any `bundle/deb/*.deb` files into the corresponding directories under `src-tauri/target/release/bundle/` on the release host. The release script detects them automatically, uploads them with the macOS assets, and adds the signed AppImage to the `linux-x86_64` updater entry.
 

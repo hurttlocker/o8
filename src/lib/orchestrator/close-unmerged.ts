@@ -1,7 +1,10 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { recoverArchivedCloseOwner } from '@/lib/orchestrator/close-archived-owner';
 import { dispatch } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
-import { findLatestLaneByPacket, listLanes, updateLane } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
 import { cancelAutoReviewForLane } from '@/lib/lane/review-cancellation';
 import { stopActiveReviewTurn } from '@/lib/lane/review-turn-state';
 import {
@@ -13,11 +16,14 @@ import {
   killLaneSessionsConfirmed,
   LaneSessionArchiveUnconfirmedError,
 } from '@/lib/lane/reap-sessions';
-import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { withLockedState } from '@/lib/orchestrator/control-plane';
+import { readMissionRegistryEntry, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { withMissionHandoffBarrier, withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import {
   holdPacketLifecycleMutation,
   markPacketLifecycleFailure,
-  mutatePacketLifecycleGuard,
+  packetLifecycleGuardMatches,
   restorePacketLifecycleGuard,
   type PacketLifecycleGuard,
 } from '@/lib/orchestrator/packet-lifecycle-guard';
@@ -26,6 +32,11 @@ import { markOutcomeClosedUnmerged } from '@/lib/orchestrator/context-relay';
 import { removeMergedWorktree } from '@/lib/orchestrator/worktree-cleanup';
 import { runRuntimeAwareWorktreeCleanup } from '@/lib/orchestrator/runtime-worktree-cleanup';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
+import { ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
+import {
+  archivedSessionPathForSurfaceId,
+  readOwnedSessionState,
+} from '@/lib/runtimes/shared/owned-session/archive';
 import { formatWorktreeHolderPids } from '@/lib/worktree/holder-diagnostics';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
@@ -73,12 +84,137 @@ const CLOSEABLE_LANE_STATUSES = new Set([
   'failed',
 ]);
 
+function workerBindingKey(lane: { id: string; sessionKey: string | null }): string | null {
+  const sessionKey = lane.sessionKey?.trim();
+  return sessionKey ? `${lane.id}\0${sessionKey}` : null;
+}
+
+function isNewWorkerRunBoundary(event: ReturnType<typeof getLaneEvents>[number]): boolean {
+  if (event.verb === 'attach_session') return true;
+  if (event.verb !== 'status_change') return false;
+  return event.payload.status === 'launching' || event.payload.status === 'running';
+}
+
+async function archivedSessionMatchesInterruptedRun(input: {
+  root: string;
+  marker: string;
+  sessionKey: string;
+  runId: string;
+}): Promise<boolean> {
+  const archivePath = await archivedSessionPathForSurfaceId(
+    input.root,
+    input.sessionKey,
+    input.marker,
+  );
+  if (!archivePath) return false;
+  try {
+    const session = JSON.parse(await readFile(join(archivePath, 'session.json'), 'utf8')) as {
+      surfaceId?: unknown;
+      activeRun?: unknown;
+      recentRuns?: Array<{ id?: unknown; outcome?: unknown }>;
+    };
+    return session.surfaceId === input.sessionKey
+      && !session.activeRun
+      && Array.isArray(session.recentRuns)
+      && session.recentRuns.some((run) => run.id === input.runId && run.outcome === 'interrupted');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A close retry can retain a packet binding after the durable lane, owned
+ * session, and checkout already retired. Treat that exact binding as settled
+ * only when the lane ledger proves the stopped run end to end. Missing session
+ * metadata alone is never exit proof, and a later attach/launch invalidates the
+ * earlier receipts even when it reused the same surface id.
+ */
+async function confirmedRetiredWorkerBindings(
+  packetId: string,
+  targets: Array<{ id: string; sessionKey: string | null }>,
+): Promise<Set<string>> {
+  const retired = new Set<string>();
+  const latest = findLatestLaneByPacket(packetId);
+  if (!latest || (latest.status !== 'paused'
+    && latest.status !== 'archived'
+    && latest.status !== 'completed')) return retired;
+  const matchingTargets = targets.filter((target) => target.id === latest.id && target.sessionKey?.trim());
+  if (matchingTargets.length !== 1) return retired;
+  const matchingTarget = matchingTargets[0];
+  const sessionKey = matchingTarget?.sessionKey?.trim();
+  if (!matchingTarget || !sessionKey) return retired;
+  const latestSessionKey = latest.sessionKey?.trim();
+  if (latestSessionKey && latestSessionKey !== sessionKey) return retired;
+  const bindingKey = workerBindingKey(matchingTarget);
+  if (!bindingKey) return retired;
+
+  const events = getLaneEvents(latest.id, 500);
+  const killIndex = events.findLastIndex((event) => (
+    event.verb === 'kill_escalated'
+    && event.payload.confirmed === true
+    && event.payload.sessionKey === sessionKey
+  ));
+  if (killIndex < 0) return retired;
+  if (latest.status === 'paused' && !events.some((event, index) => (
+    index > killIndex
+    && event.verb === 'status_change'
+    && event.payload.status === 'paused'
+    && event.payload.eventLabel === 'operator_stopped'
+  ))) return retired;
+  const exitIndex = events.findIndex((event, index) => (
+    index > killIndex
+    && event.verb === 'runtime_process_exit'
+    && event.payload.surfaceId === sessionKey
+    && typeof event.payload.runId === 'string'
+    && event.payload.runId.trim().length > 0
+    && event.payload.runtimeOutcome === 'interrupted'
+  ));
+  if (exitIndex < 0 || events.slice(killIndex + 1).some(isNewWorkerRunBoundary)) return retired;
+  const runId = events[exitIndex]?.payload.runId;
+  if (typeof runId !== 'string' || !runId.trim()) return retired;
+
+  const root = ownedRoots().find((candidate) => sessionKey.startsWith(candidate.marker));
+  if (!root) return retired;
+  if (await readOwnedSessionState(root.root, sessionKey, root.marker) !== 'archived') return retired;
+  if (!await archivedSessionMatchesInterruptedRun({
+    root: root.root,
+    marker: root.marker,
+    sessionKey,
+    runId: runId.trim(),
+  })) return retired;
+  retired.add(bindingKey);
+  return retired;
+}
+
+type PacketCloseFinalization = { closed: true } | {
+  closed: false;
+  store: 'current' | 'registry';
+  reason: 'packet_missing' | 'storage_generation_changed' | 'attempt_changed' | 'lane_binding_changed' | 'lifecycle_guard_changed' | 'terminal_state_changed';
+};
+
+function terminalCloseState(packet: OrchestratorPacket): boolean {
+  return Boolean(packet.archivedAt) || packet.status === 'archived'
+    || packet.status === 'released' || packet.releaseState === 'released';
+}
+
+function closeGenerationRefusal(
+  guard: PacketLifecycleGuard,
+  packet: OrchestratorPacket | undefined,
+  store: 'current' | 'registry',
+): PacketCloseFinalization | null {
+  const reason = !packet ? 'packet_missing'
+    : packet.storageAdmissionEpoch !== guard.previousPacket.storageAdmissionEpoch ? 'storage_generation_changed'
+      : packet.attemptCount !== guard.previousPacket.attemptCount ? 'attempt_changed'
+        : packet.lane?.laneId !== guard.previousPacket.lane?.laneId ? 'lane_binding_changed' : null;
+  return reason ? { closed: false, store, reason } : null;
+}
+
 async function markPacketClosed(
   guard: PacketLifecycleGuard,
   closedAt: string,
   worktreeCleanup: 'missing' | 'removed' | 'preserved',
-): Promise<boolean> {
-  const closed = await mutatePacketLifecycleGuard(guard, (packet) => {
+): Promise<PacketCloseFinalization> {
+  const archive = (packet: OrchestratorPacket) => {
     packet.status = 'archived';
     packet.queueState = 'held';
     packet.operatorStopped = true;
@@ -91,9 +227,64 @@ async function markPacketClosed(
     packet.lastEventLabel = worktreeCleanup === 'missing'
       ? 'discarded_worktree_missing'
       : 'closed_unmerged';
-    return true;
+  };
+  return withMissionHandoffBarrier(async () => {
+    const { result } = await withLockedState<PacketCloseFinalization | null>(async (state) => {
+      if (state.missionId !== guard.missionId) return null;
+      const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
+      const refused = closeGenerationRefusal(guard, packet, 'current');
+      if (refused) return refused;
+      if (packet && terminalCloseState(packet)) {
+        return { closed: false, store: 'current', reason: 'terminal_state_changed' };
+      }
+      if (!packet || !packetLifecycleGuardMatches(packet, guard)) {
+        return { closed: false, store: 'current', reason: 'lifecycle_guard_changed' };
+      }
+      if (readMissionRegistryEntry(guard.missionId, { includeArchived: true })) {
+        const { result: mirrored } = await withMissionRegistryState<PacketCloseFinalization>(guard.missionId, (registry) => {
+          const target = registry.packets.find((candidate) => candidate.id === guard.packetId);
+          const previous = guard.previousRegistryPacket === undefined
+            ? guard.previousPacket : guard.previousRegistryPacket;
+          // The registry may lag the current lifecycle. Compare its own
+          // admission snapshot; never overwrite a later owner/generation.
+          const captured = target
+            && previous
+            && target.releaseStatePayload?.source === previous.releaseStatePayload?.source
+            && target.status === previous.status
+            && target.queueState === previous.queueState
+            && target.operatorStopped === previous.operatorStopped;
+          const refused = closeGenerationRefusal(guard, target, 'registry');
+          if (refused) return { state: registry, result: refused };
+          if (target && terminalCloseState(target)) {
+            return { state: registry, result: { closed: false, store: 'registry', reason: 'terminal_state_changed' } };
+          }
+          if (!target || (!packetLifecycleGuardMatches(target, guard) && !captured)) {
+            return { state: registry, result: { closed: false, store: 'registry', reason: 'lifecycle_guard_changed' } };
+          }
+          archive(target);
+          return { state: registry, result: { closed: true } };
+        });
+        if (!mirrored.closed) return mirrored;
+      }
+      archive(packet);
+      return { closed: true };
+    });
+    if (result !== null) return result;
+    const { result: closed } = await withMissionRegistryState<PacketCloseFinalization>(guard.missionId, (state) => {
+      const packet = state.packets.find((candidate) => candidate.id === guard.packetId);
+      const refused = closeGenerationRefusal(guard, packet, 'registry');
+      if (refused) return { state, result: refused };
+      if (packet && terminalCloseState(packet)) {
+        return { state, result: { closed: false, store: 'registry', reason: 'terminal_state_changed' } };
+      }
+      if (!packet || !packetLifecycleGuardMatches(packet, guard)) {
+        return { state, result: { closed: false, store: 'registry', reason: 'lifecycle_guard_changed' } };
+      }
+      archive(packet);
+      return { state, result: { closed: true } };
+    });
+    return closed;
   });
-  return closed.matched && closed.result === true;
 }
 
 async function closePacketUnmergedUnlocked(input: {
@@ -130,6 +321,17 @@ async function closePacketUnmergedUnlocked(input: {
       status: 404,
     } satisfies CloseUnmergedResult;
   }
+  if (guard.previousRegistryPacket) {
+    const refused = closeGenerationRefusal(guard, guard.previousRegistryPacket, 'registry')
+      ?? (terminalCloseState(guard.previousRegistryPacket) && guard.previousPacket.status !== 'archived'
+        ? { closed: false, store: 'registry', reason: 'terminal_state_changed' } as const : null);
+    if (refused && !refused.closed) {
+      await restorePacketLifecycleGuard(guard);
+      return { ok: false, code: 'packet_state_changed', status: 409,
+        message: `Packet ${input.packetId} close admission refused by registry state (${refused.reason}).`,
+        error: { store: refused.store, reason: refused.reason } };
+    }
+  }
   if (guard.previousPacket.status === 'archived') {
     const priorLane = findLatestLaneByPacket(input.packetId);
     if (!await restorePacketLifecycleGuard(guard)) {
@@ -156,7 +358,7 @@ async function closePacketUnmergedUnlocked(input: {
     && candidate.status !== 'archived'
     && candidate.status !== 'completed'
   ));
-  const lanesToClose = collectPacketLifecycleLanes(
+  let lanesToClose = collectPacketLifecycleLanes(
     guard.previousPacket,
     guard.repoPath,
     persistedLanes,
@@ -220,7 +422,18 @@ async function closePacketUnmergedUnlocked(input: {
       if (stopped) stoppedReviewTurns.push(stopped);
     }
 
-    const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(lanesToClose));
+    const archivedOwner = rawDisposition === 'adopted_elsewhere'
+      ? await recoverArchivedCloseOwner(input.packetId, lanesToClose) : null;
+    if (archivedOwner) {
+      lanesToClose = archivedOwner.targets;
+    }
+    const retiredWorkerBindings = await confirmedRetiredWorkerBindings(input.packetId, lanesToClose);
+    if (archivedOwner) retiredWorkerBindings.add(archivedOwner.bindingKey);
+    const workerLanesToKill = lanesToClose.filter((target) => {
+      const bindingKey = workerBindingKey(target);
+      return !bindingKey || !retiredWorkerBindings.has(bindingKey);
+    });
+    const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(workerLanesToKill));
     const survivors = kills.filter((outcome) => !outcome.confirmed && !outcome.alreadyDead);
     const survivorLaneIds = new Set(survivors.map((outcome) => outcome.laneId));
     const unverifiedMissing = lanesToClose.find((target) => {
@@ -320,22 +533,6 @@ async function closePacketUnmergedUnlocked(input: {
         detachedSessionRollbacks.push(() => lifecycle.setDetachedSession!(survivor.sessionKey, null));
       }
     }
-    try {
-      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
-    } catch (error) {
-      if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
-      await restoreDetachedSessions();
-      await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
-      return {
-        ok: false,
-        code: 'session_archive_unconfirmed',
-        message: error.message,
-        status: 409,
-      };
-    }
-    for (const candidate of lanesToClose.filter((target) => !survivorLaneIds.has(target.id))) {
-      if (candidate.sessionKey?.trim()) unregisterWatchedAgent(candidate.sessionKey.trim());
-    }
     let worktreeRemoved = false;
     for (const candidate of survivors.length === 0 ? lanesToClose : []) {
       const worktreePath = candidate.worktreePath?.trim();
@@ -346,7 +543,7 @@ async function closePacketUnmergedUnlocked(input: {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
           worktreePath: candidate.worktreePath,
-          cleanup: () => removeMergedWorktree(candidate),
+          cleanup: () => removeMergedWorktree(candidate, { preserveUncommittedSource: true }),
           removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
         });
         const cleanup = cleanupAttempt.result;
@@ -370,6 +567,22 @@ async function closePacketUnmergedUnlocked(input: {
           status: 409,
         };
       }
+    }
+    try {
+      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
+    } catch (error) {
+      if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
+      await restoreDetachedSessions();
+      await markPacketLifecycleFailure(guard, 'session_archive_unconfirmed');
+      return {
+        ok: false,
+        code: 'session_archive_unconfirmed',
+        message: error.message,
+        status: 409,
+      };
+    }
+    for (const candidate of lanesToClose.filter((target) => !survivorLaneIds.has(target.id))) {
+      if (candidate.sessionKey?.trim()) unregisterWatchedAgent(candidate.sessionKey.trim());
     }
     const primaryWorktreePath = lane.worktreePath?.trim();
     const worktreeCleanup = primaryWorktreePath
@@ -427,17 +640,19 @@ async function closePacketUnmergedUnlocked(input: {
     }
 
     const closedAt = new Date().toISOString();
-    if (!await markPacketClosed(guard, closedAt, worktreeCleanup)) {
+    const finalization = await markPacketClosed(guard, closedAt, worktreeCleanup);
+    if (!finalization.closed) {
       await restoreDetachedSessions();
       return {
         ok: false,
         code: 'close_failed',
-        message: `Packet ${input.packetId} disappeared before its closed state could be persisted.`,
+        message: `Packet ${input.packetId} close finalization refused by ${finalization.store} state (${finalization.reason}).`,
+        error: { store: finalization.store, reason: finalization.reason },
         status: 409,
       };
     }
     detachedSessionRollbacks.length = 0;
-    for (const survivor of survivors) {
+    for (const survivor of survivors.filter((target) => persistedIds.has(target.laneId))) {
       recordLaneEvent(survivor.laneId, 'update', 'system', {
         code: 'kill_unconfirmed',
         packetId: input.packetId,
@@ -460,11 +675,13 @@ async function closePacketUnmergedUnlocked(input: {
       preservedBranches,
       closedAt,
     });
-    recordLaneEvent(lane.id, 'update', 'system', {
-      code: PACKET_DISPOSITION_EVENT_CODE,
-      disposition: packetDisposition,
-      preservationReceipts,
-    });
+    if (persistedIds.has(lane.id)) {
+      recordLaneEvent(lane.id, 'update', 'system', {
+        code: PACKET_DISPOSITION_EVENT_CODE,
+        disposition: packetDisposition,
+        preservationReceipts,
+      });
+    }
     void import('@/lib/receipts/packet-receipt')
       .then(({ createPacketReceiptForClosedPacket }) => createPacketReceiptForClosedPacket({
         packetId: input.packetId,

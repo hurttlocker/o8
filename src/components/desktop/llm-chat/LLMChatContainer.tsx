@@ -5,27 +5,20 @@ import { useFileDrop, MAX_COMPOSER_IMAGES } from '@/lib/hooks/use-file-drop';
 
 import { LLMChatLayout } from './LLMChatLayout';
 import {
-  API_MODELS, buildOpencodeModels, buildRepoRequestHeaders, CLI_RUNTIME_MODELS, SLASH_COMMANDS,
+  API_MODELS, buildRepoRequestHeaders, SLASH_COMMANDS,
   type ActiveThinkingState, type AttachedImage, type FileSuggestion, type LLMChatProps, type LLMMessage, type ModelOption, type PendingApprovalState, type QueuedContextCard, type ToolCallInfo,
 } from './shared';
+import { planAccountHeaders } from '@/lib/chatgpt-plan/client';
+import { useChatModelOptions } from './useChatModelOptions';
+import { useChatFileApply } from './useChatFileApply';
 import { generateFollowUps, streamAssistantResponse } from './streaming';
 import { useHistoryAndMission } from './useHistoryAndMission';
 import { useLLMChatLifecycle } from './useLLMChatLifecycle';
 import { compactConversation, shouldCompact, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
 
 export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, draftInjection, onSummaryChange, onConsumeDraftInjection, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: LLMChatProps) {
-  const [cliModels, setCliModels] = useState<ModelOption[]>([]);
-  // null = keys not yet fetched (show all to avoid flicker); Set = configured provider IDs
-  const [apiKeyProviders, setApiKeyProviders] = useState<Set<string> | null>(null);
-  // Operator is always available — it's o8's branded free tier. Other API models require their key.
-  const availableApiModels = apiKeyProviders === null
-    ? API_MODELS
-    : API_MODELS.filter((m) => (
-      m.provider === 'operator'
-      || m.provider === 'local'
-      || apiKeyProviders.has(m.provider)
-    ));
-  const allModels = cliModels.length > 0 ? [...cliModels, ...availableApiModels] : availableApiModels;
+  const allModels = useChatModelOptions();
+  const { applyModal, setApplyModal, applyPath, setApplyPath, applyStatus, applyFileSuggestions, setApplyFileSuggestions, applyFileIndex, setApplyFileIndex, handleApplyToFile, handleApplyDiff, searchApplyFiles, doApply } = useChatFileApply(preferredRepo);
 
   const [messages, setMessages] = useState<LLMMessage[]>([]), [input, setInput] = useState(''), [model, setModel] = useState<ModelOption>(API_MODELS[0]), [isStreaming, setIsStreaming] = useState(false), [streamContent, setStreamContent] = useState(''), [modelResolved, setModelResolved] = useState(false);
   const [liveFallbackNotice, setLiveFallbackNotice] = useState<string | null>(null);
@@ -33,143 +26,19 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]), [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]), [activeThinking, setActiveThinking] = useState<ActiveThinkingState | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]), [followUpsLoading, setFollowUpsLoading] = useState(false), [showSlashPicker, setShowSlashPicker] = useState(false), [slashIndex, setSlashIndex] = useState(0);
   const [approvedToolsSet, setApprovedToolsSet] = useState<Set<string>>(new Set()), [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null), [editedCommand, setEditedCommand] = useState(''), [historyOpen, setHistoryOpen] = useState(false);
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false), [showTypingIndicator, setShowTypingIndicator] = useState(false), [issuePickerOpen, setIssuePickerOpen] = useState(false), [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
-  const [applyPath, setApplyPath] = useState(''), [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle'), [applyFileSuggestions, setApplyFileSuggestions] = useState<Array<{ path: string }>>([]), [applyFileIndex, setApplyFileIndex] = useState(0), [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false), [showTypingIndicator, setShowTypingIndicator] = useState(false), [issuePickerOpen, setIssuePickerOpen] = useState(false);
+  const [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
 
   const dragHostRef = useRef<HTMLDivElement>(null);
   const { pendingFiles: droppedFiles, dragOver, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false, hostRef: dragHostRef });
 
-  const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Real turn-start (epoch ms) for the streaming working indicator. Stamped on
   // every isStreaming false→true edge so a long LLM turn flips to the orbit at
   // the 7-min mark via AgentStatusDot — survives the dot remounting mid-turn.
   const turnStartRef = useRef<number | null>(null);
 
-  // Detect installed CLI runtimes + configured API keys, then build the visible model list.
-  // Only models whose CLI is installed OR whose API key is configured will appear in the picker.
-  useEffect(() => {
-    (async () => {
-      try {
-        const [detectRes, keysRes] = await Promise.all([
-          fetch('/api/setup/detect').catch(() => null),
-          fetch('/api/v2/keys').catch(() => null),
-        ]);
 
-        if (detectRes?.ok) {
-          const data = await detectRes.json();
-          const detected: ModelOption[] = [];
-          for (const tool of data.tools ?? []) {
-            if (!tool.detected) continue;
-            if (tool.id === 'opencode') {
-              const authedProviders = Array.isArray(tool.details?.authedProviders)
-                ? (tool.details.authedProviders as string[])
-                : undefined;
-              detected.push(...buildOpencodeModels(authedProviders));
-            } else if (CLI_RUNTIME_MODELS[tool.id as string]) {
-              detected.push(...CLI_RUNTIME_MODELS[tool.id as string]);
-            }
-          }
-          if (detected.length > 0) setCliModels(detected);
-        }
-
-        if (keysRes?.ok) {
-          const data = await keysRes.json();
-          const configured = new Set<string>(
-            (data.providers ?? [])
-              .filter((p: { configured: boolean }) => p.configured)
-              .map((p: { id: string }) => p.id),
-          );
-          setApiKeyProviders(configured);
-        } else {
-          setApiKeyProviders(new Set());
-        }
-      } catch {
-        setApiKeyProviders(new Set());
-      }
-    })();
-  }, []);
-
-  const handleApplyToFile = useCallback((code: string, language: string) => {
-    setApplyModal({ code, language });
-    setApplyPath('');
-    setApplyStatus('idle');
-    setApplyFileSuggestions([]);
-  }, []);
-
-  const handleApplyDiff = useCallback(async (diffText: string) => {
-    const repoPath = preferredRepo?.localPath?.trim();
-    if (!repoPath) {
-      console.error('[diff-card] Failed to apply diff:', new Error('No active repository selected.'));
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/lanes/apply-diff', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...buildRepoRequestHeaders(preferredRepo ?? null),
-        },
-        body: JSON.stringify({ diffText, repoPath }),
-      });
-      const result = await response.json().catch(() => null) as { laneId?: string; error?: string; note?: string } | null;
-      if (!response.ok || !result?.laneId) {
-        throw new Error(result?.error || result?.note || 'Apply failed');
-      }
-      window.dispatchEvent(new CustomEvent('o8:lane-lifecycle'));
-    } catch (error) {
-      console.error('[diff-card] Failed to apply diff:', error);
-    }
-  }, [preferredRepo]);
-
-  const searchApplyFiles = useCallback((query: string) => {
-    if (applySearchTimeout.current) {
-      clearTimeout(applySearchTimeout.current);
-    }
-    if (!query.trim()) {
-      setApplyFileSuggestions([]);
-      return;
-    }
-    applySearchTimeout.current = setTimeout(async () => {
-      try {
-        const response = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`, {
-          headers: buildRepoRequestHeaders(preferredRepo ?? null),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setApplyFileSuggestions(data.files ?? []);
-          setApplyFileIndex(0);
-        }
-      } catch {}
-    }, 100);
-  }, [preferredRepo]);
-
-  const doApply = useCallback(async () => {
-    if (!applyModal || !applyPath.trim()) return;
-    setApplyStatus('applying');
-    try {
-      const response = await fetch('/api/v2/files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: applyPath.trim(),
-          content: applyModal.code,
-          workspace: preferredRepo?.localPath ?? undefined,
-        }),
-      });
-      if (response.ok) {
-        setApplyStatus('done');
-        setTimeout(() => {
-          setApplyModal(null);
-          setApplyStatus('idle');
-        }, 1500);
-      } else {
-        setApplyStatus('error');
-      }
-    } catch {
-      setApplyStatus('error');
-    }
-  }, [applyModal, applyPath, preferredRepo]);
 
   const buildPersistedMessages = useCallback((baseMessages: LLMMessage[] = messages, partialContent: string = streamContent) => {
     const stableMessages = isStreaming
@@ -406,7 +275,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
       setMessages((current) => {
         const updated = [...current, assistantMessage];
-        if (shouldCompact(updated.length)) {
+        if (model.provider !== 'chatgpt' && shouldCompact(updated.length)) {
           const compactableMessages: CompactMessage[] = updated.map((message) => ({
             id: message.id,
             role: message.role as 'user' | 'assistant' | 'system',
@@ -640,15 +509,15 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     setStreamContent('');
     setActiveThinking(null);
 
-    fetch('/api/panel/approvals', {
+    Promise.resolve(model.provider === 'chatgpt' ? planAccountHeaders() : {}).then((accountHeaders) => fetch('/api/panel/approvals', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...accountHeaders },
       body: JSON.stringify({
         action: 'approve',
         id: approvalId,
         editedCommand: edited || undefined,
       }),
-    }).then(async (response) => {
+    })).then(async (response) => {
       const data = await response.json().catch(() => null) as {
         ok?: boolean;
         note?: string;
@@ -707,7 +576,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       setIsStreaming(false);
       setShowTypingIndicator(false);
     });
-  }, [editedCommand, pendingApproval]);
+  }, [editedCommand, pendingApproval, model.provider]);
 
   const handleDenyPending = useCallback(() => {
     if (!pendingApproval) return;

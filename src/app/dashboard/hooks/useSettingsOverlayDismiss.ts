@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { NavSection } from '@/app/dashboard/types';
 
 export function useSettingsOverlayDismiss({
@@ -12,12 +12,18 @@ export function useSettingsOverlayDismiss({
   panelRef: RefObject<HTMLDivElement | null>;
   setActiveNavSection: Dispatch<SetStateAction<NavSection>>;
 }) {
+  const previousDestination = useRef<NavSection>('agents');
+  useEffect(() => {
+    if (activeNavSection !== 'settings') previousDestination.current = activeNavSection;
+  }, [activeNavSection]);
   const closeSettingsOverlay = useCallback(() => {
-    setActiveNavSection((current) => current === 'settings' ? 'agents' : current);
+    const destination = previousDestination.current;
+    setActiveNavSection((current) => current === 'settings' ? destination : current);
   }, [setActiveNavSection]);
 
   const toggleSettingsOverlay = useCallback(() => {
-    setActiveNavSection((current) => current === 'settings' ? 'agents' : 'settings');
+    const destination = previousDestination.current;
+    setActiveNavSection((current) => current === 'settings' ? destination : 'settings');
   }, [setActiveNavSection]);
 
   useEffect(() => {

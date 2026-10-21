@@ -93,6 +93,8 @@ export interface CreateWorktreeOptions {
   managed?: boolean;
   /** Skip auto-setup (npm install, etc.) */
   skipSetup?: boolean;
+  /** Review-only materialization: no repository code, setup, environment copying or rebase. */
+  materializationOnly?: boolean;
   /** How env files should be bootstrapped into the worktree */
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink when bootstrapping */
@@ -159,6 +161,9 @@ export interface WorktreeMetaStore {
 }
 
 export interface WorktreeMetaEntry {
+  /** Creation-time association for bounded terminal discovery, including collision slots. */
+  packetId?: string;
+  laneId?: string;
   id: string;
   agentType: AgentType;
   sessionKey?: string;
@@ -192,6 +197,8 @@ export interface WorktreeMetaEntry {
     canonicalPath: string;
     volumeId?: string;
   };
+  /** Exact opt-in generations captured before this workspace was materialized. */
+  actionTriggerAuthorizations?: Array<{ pluginId: string; revision: string; triggerId: string; consentId: string }>;
   /** Ready creation still needs its action event copied into the durable trigger journal. */
   actionTriggerEventPending?: boolean;
   /** Exact parent namespace that owns the materialized directory name. */

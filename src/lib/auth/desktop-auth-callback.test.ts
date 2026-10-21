@@ -55,7 +55,7 @@ describe('consumeDesktopAuthCallback', () => {
     expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
-  it('reports Clerk ticket exchange longMessage', async () => {
+  it('replaces Clerk ticket exchange details with a fixed message', async () => {
     const retrySignIn = vi.fn();
     const signIn = makeSignIn({
       ticket: vi.fn(async () => ({ error: { longMessage: 'sign in token has already been used' } })),
@@ -68,7 +68,7 @@ describe('consumeDesktopAuthCallback', () => {
       retrySignIn,
     });
 
-    expect(getDesktopAuthError()?.message).toBe('sign in token has already been used');
+    expect(getDesktopAuthError()?.message).toBe('The sign-in ticket could not be exchanged. Try signing in again.');
     expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
@@ -85,7 +85,7 @@ describe('consumeDesktopAuthCallback', () => {
       retrySignIn,
     });
 
-    expect(getDesktopAuthError()?.message).toBe('finalize failed upstream');
+    expect(getDesktopAuthError()?.message).toBe('The sign-in session could not be finalized. Try signing in again.');
     expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
@@ -103,7 +103,7 @@ describe('consumeDesktopAuthCallback', () => {
       retrySignIn,
     });
 
-    expect(getDesktopAuthError()?.message).toBe('ticket exchange raced');
+    expect(getDesktopAuthError()?.message).toBe('The sign-in ticket could not be exchanged. Try signing in again.');
     expect(retrySignIn).toHaveBeenCalledOnce();
   });
 
@@ -120,7 +120,7 @@ describe('consumeDesktopAuthCallback', () => {
       clearExpectedState: vi.fn(),
     });
 
-    expect(getDesktopAuthError()?.message).toBe('session activation failed');
+    expect(getDesktopAuthError()?.message).toBe('The signed-in session could not be activated. Try signing in again.');
   });
 
   it('reports incomplete sign-in status', async () => {
@@ -131,7 +131,7 @@ describe('consumeDesktopAuthCallback', () => {
       clearExpectedState: vi.fn(),
     });
 
-    expect(getDesktopAuthError()?.message).toContain('needs_first_factor');
+    expect(getDesktopAuthError()?.message).toBe('The sign-in is incomplete. Try signing in again.');
   });
 
   it('clears stale errors after a successful activation', async () => {
@@ -165,4 +165,28 @@ describe('consumeDesktopAuthCallback', () => {
     expect(getDesktopAuthError()?.message).toContain('already used');
     expect(retrySignIn).toHaveBeenCalledOnce();
   });
+  it.each(['ticket-return', 'ticket-throw', 'finalize', 'activate', 'status', 'retry']) (
+    'never exposes upstream secrets for %s', async (stage) => {
+      const secret = 'SYNTHETIC_CALLBACK_SECRET_NOT_VALID';
+      const failure = Object.assign(new Error(secret), {
+        stack: secret, cause: { authorization: secret }, response: { ticket: secret }, longMessage: secret,
+      });
+      const signIn = makeSignIn();
+      const clerk = makeClerk();
+      const retrySignIn = vi.fn(() => { if (stage === 'retry') throw failure; });
+      if (stage === 'ticket-return' || stage === 'retry') signIn.ticket = vi.fn(async () => ({ error: failure }));
+      if (stage === 'ticket-throw') signIn.ticket = vi.fn(async () => { throw failure; });
+      if (stage === 'finalize') signIn.finalize = vi.fn(async () => { throw failure; });
+      if (stage === 'activate') clerk.setActive = vi.fn(async () => { throw failure; });
+      if (stage === 'status') signIn.status = secret;
+      await consumeDesktopAuthCallback(callbackUrl(secret), {
+        signIn, clerk, retrySignIn, getExpectedState: () => 'state_123', clearExpectedState: vi.fn(),
+      });
+      expect(getDesktopAuthError()).not.toBeNull();
+      expect(JSON.stringify(getDesktopAuthError())).not.toContain(secret);
+      expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(secret);
+      expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain(secret);
+    },
+  );
+
 });

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
+import { DASH_PROFILE_OWNER_OPTION, dashProfileOwnerId } from '@/lib/terminal/dash-session-owner';
 import { resolveTmuxBinary } from '@/lib/ws-server/pty-support';
 
 const DASH_TERMINAL_OWNER_KEY_MAX_LENGTH = 512;
@@ -49,12 +50,16 @@ interface CreateDashTmuxSessionInput {
   cwd: string;
   shell: string;
   env: NodeJS.ProcessEnv;
+  /** Reviewed fixed executable; omitted for the normal login-shell path. */
+  command?: { file: string; args: string[] };
+  retainExited?: boolean;
 }
 
 interface CreateDashTmuxSessionDependencies {
   resolveTmuxBinary: typeof resolveTmuxBinary;
   execFileSync: typeof execFileSync;
   recordHealth: typeof recordPersistentTerminalHealth;
+  resolveProfileOwnerId?: typeof dashProfileOwnerId;
 }
 
 const DEFAULT_DEPENDENCIES: CreateDashTmuxSessionDependencies = {
@@ -98,9 +103,10 @@ export function createDashTmuxSessionSync(
   }
 
   let created = false;
+  const sessionTarget = `=${input.sessionName}`;
   try {
     try {
-      dependencies.execFileSync(tmuxBin, dashTmuxArgs('has-session', '-t', input.sessionName), {
+      dependencies.execFileSync(tmuxBin, dashTmuxArgs('has-session', '-t', sessionTarget), {
         windowsHide: true,
         timeout: 3000,
         stdio: 'ignore',
@@ -113,17 +119,26 @@ export function createDashTmuxSessionSync(
       return true;
     } catch { /* not present, create it below */ }
 
+    const profileOwner = (dependencies.resolveProfileOwnerId ?? dashProfileOwnerId)();
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
       'new-session', '-d', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),
-      input.shell, '-l',
+      // tmux parses standalone semicolons even in execFile argv. Keep reviewed
+      // arguments inside one shell script, quoting every byte as literal data.
+      ...(input.command ? ['/bin/sh', '-c', `exec ${[input.command.file, ...input.command.args].map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ')}`] : [input.shell, '-l']),
+      ...(input.retainExited ? [';', 'set-option', '-t', `${sessionTarget}:`, 'remain-on-exit', 'on'] : []),
     ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env });
     created = true;
+    // Claim only a session this process created. Reusing legacy/foreign sessions
+    // never grants automatic-retirement authority over their existing owner.
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
-      'set-option', '-t', input.sessionName, 'history-limit', '50000',
+      'set-option', '-t', `${sessionTarget}:`, DASH_PROFILE_OWNER_OPTION, profileOwner,
     ), { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
-      'set-option', '-t', input.sessionName, 'status', 'off',
+      'set-option', '-t', `${sessionTarget}:`, 'history-limit', '50000',
+    ), { windowsHide: true, timeout: 3000, stdio: 'ignore' });
+    dependencies.execFileSync(tmuxBin, dashTmuxArgs(
+      'set-option', '-t', `${sessionTarget}:`, 'status', 'off',
     ), { windowsHide: true, timeout: 3000, stdio: 'ignore' });
     // #1979 — disable only tmux `indn` (CSI n S), preserving alternate-screen
     // entry/exit while making full-screen scrolling use line feeds xterm keeps.
@@ -134,7 +149,7 @@ export function createDashTmuxSessionSync(
   } catch (error) {
     if (created) {
       try {
-        dependencies.execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', input.sessionName), {
+        dependencies.execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', sessionTarget), {
           windowsHide: true,
           timeout: 3000,
           stdio: 'ignore',

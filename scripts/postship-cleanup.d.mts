@@ -8,3 +8,5 @@ export interface PostshipCleanupResult {
 }
 
 export function cleanupPostshipOutputs(repoRoot?: string): Promise<PostshipCleanupResult>;
+export function assertGeneratedTreeHasSafeLinks(root: string, rootAlias: string,
+  target: string, relativePath: string): Promise<void>;

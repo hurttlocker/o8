@@ -259,7 +259,7 @@ export function O8HandoffsPane({
       <div style={{ paddingTop: 16, paddingRight: 18, paddingBottom: 14, paddingLeft: 18, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 500, letterSpacing: '-0.3px' }}>Handoffs</div>
+            <div style={{ fontSize: 15, fontWeight: 300, letterSpacing: '-0.3px' }}>Exchanges</div>
             <div style={{ marginTop: 3, color: 'var(--t-text-muted)', fontSize: 11.5, lineHeight: 1.4 }}>Agent exchanges in this repository</div>
           </div>
           <button type="button" onClick={refresh} disabled={!scopedRepo || loading} aria-label="Refresh handoffs" style={{ border: 'none', background: 'transparent', color: 'var(--t-text-muted)', cursor: scopedRepo ? 'pointer' : 'default', fontSize: 11.5 }}>Refresh</button>
@@ -267,6 +267,7 @@ export function O8HandoffsPane({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
           <span style={{ color: 'var(--t-text-faint)', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Repository</span>
           <O8RepoSelector
+            active={active}
             repos={registeredRepos}
             allRepos={!scopedRepo}
             selectedRepoPath={scopedRepo}
@@ -311,7 +312,7 @@ export function O8HandoffsPane({
               const conversation = latest.conversation;
               return <>
                 <header style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16, paddingRight: 24, paddingBottom: 16, paddingLeft: 24, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
-                  <button type="button" onClick={() => { setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: 'pointer' }}>Back to Handoffs</button>
+                  <button type="button" onClick={() => { setDetailOpen(false); rememberSelection(scopedRepo, selectedGroup.id, false); }} style={{ minHeight: 36, paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 12, border: '1px solid var(--t-divider)', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 11.5, cursor: 'pointer' }}>Back to Exchanges</button>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <strong style={{ display: 'block', fontSize: 15, fontWeight: 400 }}>{agentIdentity(first.from, first.refs.identities?.from)} → {agentIdentity(first.to, first.refs.identities?.to)}</strong>
                     <span style={{ display: 'block', marginTop: 3, color: 'var(--t-text-faint)', fontSize: 11 }}>{conversation ? `${conversation.remainingTurns} turns left · ${conversation.status}` : 'Legacy · unthreaded'} · {scopedRepo}</span>

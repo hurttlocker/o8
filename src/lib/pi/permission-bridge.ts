@@ -1,3 +1,4 @@
+import { PI_PERMISSION_APPROVAL_TIMEOUT_MS } from './approval-policy';
 import { resolveApproval } from '@/lib/approvals/resolution';
 import { createApproval, getApproval } from '@/lib/approvals/store';
 import { appendEvent, findLaneBySession } from '@/lib/lane/registry';
@@ -16,7 +17,7 @@ export interface PiPermissionClient {
   send(command: Record<string, unknown>): boolean;
 }
 
-export const PI_PERMISSION_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+export { PI_PERMISSION_APPROVAL_TIMEOUT_MS } from './approval-policy';
 const PI_PERMISSION_APPROVAL_POLL_MS = 250;
 
 function safeRecord(value: unknown): Record<string, unknown> | null {

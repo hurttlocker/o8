@@ -1,7 +1,9 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import type { CSSProperties } from 'react';
 import { HoverPipCard } from '@/components/desktop/HoverPipCard';
+import { useFloatingSurfaceMaterial } from './FloatingSurface';
 
 export const O8_SPEC_PIP_EVENT = 'o8:spec-pip';
 
@@ -33,11 +35,14 @@ export function O8SpecPipCard({
   active,
   repoPath,
   onOpenSpec,
+  contextKey,
 }: {
   active: boolean;
   repoPath?: string | null;
   onOpenSpec?: () => void;
+  contextKey?: string;
 }) {
+  const material = useFloatingSurfaceMaterial();
   return (
     <HoverPipCard
       active={active}
@@ -48,6 +53,7 @@ export function O8SpecPipCard({
       titleTooltip={repoPath ?? undefined}
       openLabel="Open o8.md panel"
       onOpen={onOpenSpec}
+      contextKey={contextKey}
     >
       {({ shape }) => (
         <div
@@ -56,8 +62,9 @@ export function O8SpecPipCard({
             display: 'flex',
             height: shape.frameHeight,
             overflow: 'hidden',
-            background: 'var(--t-canvas-bg)',
-          }}
+            background: material.isGlass ? 'transparent' : 'var(--t-canvas-bg)',
+            ...(material.isGlass ? { '--t-canvas-bg': 'transparent' } : {}),
+          } as CSSProperties}
         >
           <div
             style={{

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Hand off work to o8"
+  short_description: "Start or continue a scoped local coding task"
+  default_prompt: "Use $hand-off-work to hand this coding task to o8 with my selected backend, model, and effort."
+policy:
+  products: ["CODEX"]

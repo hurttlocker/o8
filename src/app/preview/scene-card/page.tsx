@@ -60,14 +60,13 @@ function PricingCard(t: Tune) {
     <SceneCard {...t} width={360} height={470}>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: 26, color: ink }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.8)', textShadow: shadow }}>Founding Operator</div>
+          <div style={{ fontSize: 12, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'color-mix(in srgb, currentColor 80%, transparent)', textShadow: shadow }}>Pro · Lifetime</div>
           <div style={{ marginTop: 10, display: 'flex', alignItems: 'baseline', gap: 6, textShadow: shadow }}>
-            <span style={{ fontSize: 46, fontWeight: 600, letterSpacing: '-1.5px' }}>$150</span>
-            <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }}>/ once</span>
+            <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.5px' }}>One-time purchase</span>
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, fontSize: 13.5, fontWeight: 440, textShadow: shadow }}>
-          {['Full governed fleet — no extra sub', 'Priority on the build-in-public roadmap', 'Founding Operator status & voice', 'Lifetime — never a locked door'].map((f) => (
+          {['Full governed fleet — no extra sub', 'Priority on the build-in-public roadmap', 'Pro · Lifetime status & voice', 'Lifetime — never a locked door'].map((f) => (
             <div key={f} style={{ display: 'flex', gap: 9, alignItems: 'center', color: 'rgba(255,255,255,0.94)' }}>
               <span style={{ width: 16, height: 16, borderRadius: 999, background: 'rgba(255,255,255,0.22)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0 }}>✓</span>
               {f}
@@ -82,7 +81,7 @@ function PricingCard(t: Tune) {
             backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
           }}
         >
-          Become a Founding Operator
+          Get Pro · Lifetime
         </button>
       </div>
     </SceneCard>

@@ -17,6 +17,7 @@ fn main() {
   // build step validates that all externalBin sidecar files exist on disk.
   // We need the triple-suffixed copies in place before that validation runs.
   build_speech_recognizer();
+  build_visual_capture_media();
 
   // #932: tauri-plugin-mcp permissions are only registered when the
   // `dev-mcp-plugin` Cargo feature is on. Tauri's compile-time capability
@@ -62,6 +63,28 @@ fn main() {
   bake_sentry_dsn();
 
   tauri_build::build()
+}
+
+fn build_visual_capture_media() {
+  #[cfg(target_os = "macos")]
+  {
+    // The screen capture bridge links Swift. Resolve the OS runtime for both
+    // installed apps and Rust tests without requiring an Xcode runtime path.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    let source = Path::new("helpers/visual_capture_media.swift");
+    println!("cargo:rerun-if-changed={}", source.display());
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+      .join("visual-capture-media");
+    let target = std::env::var("TARGET").expect("TARGET");
+    let arch = if target.starts_with("x86_64") { "x86_64" } else { "arm64" };
+    let status = std::process::Command::new("swiftc")
+      .args(["-O", "-parse-as-library", "-target", &format!("{arch}-apple-macosx14.0"), "-o"])
+      .arg(&output).arg(source)
+      .args(["-framework", "Speech", "-framework", "AVFoundation", "-framework", "ImageIO"])
+      .status().expect("compile visual capture media helper");
+    assert!(status.success(), "Visual capture media helper failed to compile");
+    println!("cargo:rustc-env=O8_VISUAL_CAPTURE_MEDIA={}", output.display());
+  }
 }
 
 fn generate_app_ipc_permission() {
@@ -402,14 +425,8 @@ fn build_speech_recognizer() {
 
         // In release mode the sidecar Tauri bundles for the CURRENT cargo
         // target is the UNIVERSAL fat binary, not the thin current-arch
-        // slice. o8 ships one x86_64 build to every Mac (release.mjs points
-        // darwin-aarch64 at the same artifact), so with a thin sidecar every
-        // Apple Silicon Mac ran the speech helper under Rosetta — where the
-        // SFSpeechRecognizer client silently fails (the 2026-07-13 M4
-        // "waveform moves, zero partials" diagnosis). A fat sidecar costs
-        // ~200KB and lets exec pick the NATIVE arm64 slice on AS (child
-        // processes don't inherit the parent's Rosetta mode) while Intel
-        // keeps the identical x86_64 slice it runs today.
+        // slice. Stable macOS releases use one universal app, so both Intel
+        // and Apple Silicon must select a native slice from this sidecar.
         let arch_prefix = cargo_target.split('-').next().unwrap_or("aarch64");
         let canonical_arch_bin =
           helpers_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));

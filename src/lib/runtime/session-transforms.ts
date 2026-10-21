@@ -149,9 +149,9 @@ export async function getSessionTransformState(runtimeId: RuntimeId, sessionKey?
   };
 }
 
-async function safelyReadHead(cwd: string | null | undefined) {
-  if (!cwd) return null;
-  return readHeadSha(cwd).catch(() => null);
+async function safelyReadHead(cwd: string | null | undefined, repoPath?: string) {
+  if (!cwd || !repoPath) return null;
+  return readHeadSha(cwd, repoPath).catch(() => null);
 }
 
 function intentSession(session: RuntimeSession): SessionTransformIntentSession {
@@ -306,7 +306,7 @@ async function reconcileSessionTransformIntentLocked(runtimeId: RuntimeId, sessi
         note: recovered.note,
         resultingSession: intentSession(recovered.resultingSession),
         providerSessionCreated: recovered.providerSessionCreated === true,
-        afterHeadSha: await safelyReadHead(intent.codeCwd),
+        afterHeadSha: await safelyReadHead(intent.codeCwd, lane?.repoPath),
       },
     };
     await replaceIntent(durableIntent);
@@ -508,7 +508,11 @@ export async function performSessionTransform(
       throw new SessionTransformError('checkpoint_not_found', 'The selected checkpoint does not belong to this session.', 404);
     }
 
-    const discovered = (await runtime.discoverSessions().catch(() => []))
+    // Import is an explicit request to read provider history. Ordinary
+    // dashboard discovery intentionally returns only o8-owned sessions.
+    const discovered = (await runtime.discoverSessions(
+      request.action === 'import' ? { fresh: true } : undefined,
+    ).catch(() => []))
       .find((session) => session.sessionKey === sessionKey);
     if (request.action === 'import' && !discovered) {
       throw new SessionTransformError('session_not_found', 'The provider session is not currently discoverable.', 404);
@@ -522,7 +526,7 @@ export async function performSessionTransform(
     })();
     const codeCwd = lane?.worktreePath || lane?.repoPath || imported?.cwd || discovered?.cwd;
     const identityId = imported?.identityId ?? discovered?.identityId ?? undefined;
-    const beforeHeadSha = await safelyReadHead(codeCwd);
+    const beforeHeadSha = await safelyReadHead(codeCwd, lane?.repoPath);
     let intent: SessionTransformIntent | null = null;
     if ((request.action === 'fork' || request.action === 'rewind') && checkpoint) {
       intent = {
@@ -630,7 +634,7 @@ export async function performSessionTransform(
         502,
       );
     }
-    const afterHeadSha = await safelyReadHead(codeCwd);
+    const afterHeadSha = await safelyReadHead(codeCwd, lane?.repoPath);
     if (intent) {
       intent = {
         ...intent,

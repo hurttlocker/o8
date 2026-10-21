@@ -1,4 +1,6 @@
+import { areDistinctOrchestratorSends, preserveDeliveryConfirmation, removeConfirmedDeliveryWarnings } from '@/lib/transcripts/delivery-confirmation';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { preserveVoiceCaption } from '@/lib/transcripts/voice-captions';
 
 /**
  * Optimistic/echo user-dedupe window. After a mid-conversation reload (HMR /
@@ -46,20 +48,20 @@ export function dedupeDisplayMessages(
       byId.push(entry);
     } else {
       idCollision = true;
-      byId[seen] = entry;
+      byId[seen] = preserveDeliveryConfirmation(byId[seen], preserveVoiceCaption(byId[seen], entry));
     }
   }
 
   // ── Pass 2 — optimistic/echo user dedupe (differing ids, same message).
   const result: MobileTranscriptEntry[] = [];
-  const seenUsers: Array<{ text: string; timestamp: number | undefined }> = [];
+  const seenUsers: Array<{ entry: MobileTranscriptEntry; text: string; timestamp: number | undefined }> = [];
   let userCollision = false;
   for (const entry of byId) {
-    if (entry.role === 'user') {
+    if (entry.role === 'user' && !entry.voice) {
       const text = entry.text.trim();
       const timestamp = entry.timestamp;
       const isEcho = text.length > 0 && seenUsers.some((prev) => {
-        if (prev.text !== text) return false;
+        if (prev.text !== text || areDistinctOrchestratorSends(prev.entry, entry)) return false;
         // Both timestamps present → require the tight window. If either is
         // missing (persisted restores always carry one, so this is an edge),
         // fall back to text-identity — that only happens for an echo.
@@ -72,11 +74,10 @@ export function dedupeDisplayMessages(
         userCollision = true;
         continue;
       }
-      seenUsers.push({ text, timestamp });
+      seenUsers.push({ entry, text, timestamp });
     }
     result.push(entry);
   }
 
-  if (!idCollision && !userCollision) return entries;
-  return result;
+  return removeConfirmedDeliveryWarnings(!idCollision && !userCollision ? entries : result);
 }

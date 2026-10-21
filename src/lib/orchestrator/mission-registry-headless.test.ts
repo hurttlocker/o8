@@ -188,10 +188,17 @@ function stubMissionApiFetch() {
       });
     }
     if (urlText.includes('/api/orchestrator/reset-packet')) {
-      return apiResponse(async () => {
-        const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
-        return resetPacket(body as Parameters<typeof resetPacket>[0]);
-      });
+      const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
+      const { resetFailureReceipt } = await import('@/lib/orchestrator/operator-mission-service/reset-receipt');
+      try {
+        const result = await resetPacket(body as Parameters<typeof resetPacket>[0]);
+        return new Response(JSON.stringify({ ok: true, result }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (error) {
+        // The route's own failure mapping, so the MCP handler sees the status the route sends.
+        const failure = resetFailureReceipt(error);
+        return new Response(JSON.stringify({ ok: false, error: { code: failure.code, message: failure.message } }), {
+          status: failure.status, headers: { 'Content-Type': 'application/json' } });
+      }
     }
     if (urlText.includes('/api/orchestrator/rerun-with-feedback')) {
       return apiResponse(async () => {
@@ -978,7 +985,8 @@ describe('headless mission registry dispatch', () => {
       packetId: 'pkt-missing-from-registry',
       reason: 'negative case',
     }));
-    expect(result.error).toContain('Packet pkt-missing-from-registry not found');
+    // An unknown packet is a 404, so the handler does not retry it; the route's nested message stays in the host log (#3434).
+    expect(result.error).toBe('o8 API error (404)');
   });
 
   it('serializes registry-row mutations per mission', async () => {

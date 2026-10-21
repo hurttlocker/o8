@@ -25,8 +25,11 @@
  * resolution mismatch. Inline styles only (repo rule); no emoji.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
+import { VisualCaptureInput, type VisualCaptureBounds, type VisualCaptureVoice } from '@/components/desktop/visual-instructions/VisualCaptureInput';
+import { VisualCaptureControls } from '@/components/desktop/visual-instructions/VisualCaptureControls';
+import { getPalette, resolveTheme } from '@/lib/theme/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +37,9 @@ export const dynamic = 'force-dynamic';
 // vocabulary so the operator's marks and Symon's point-backs are one language.
 const ORANGE = '#FF5A1F';
 const CORE_HOT = '#FFE2CF'; // warm-white hot core over the glow
+// This satellite has no ThemeProvider. A dark floating material stays legible
+// over arbitrary apps, using the same palette tokens as the other o8 surfaces.
+const CAPTURE_THEME = resolveTheme(getPalette('dark'), 'solid').cssVars;
 
 // Terminal STT types that always tear the ink down, regardless of lane.
 const TERMINAL = new Set(['system-idle', 'error', 'system-pasted']);
@@ -63,6 +69,19 @@ interface SttPayload {
 }
 
 export default function SpatialInkPage() {
+  const [visualCaptureId, setVisualCaptureId] = useState<string | null>(null);
+  const [visualBackground, setVisualBackground] = useState<string | null>(null);
+  const [visualVoice, setVisualVoice] = useState<VisualCaptureVoice>('starting');
+  const [visualVoiceText, setVisualVoiceText] = useState('');
+  const [visualWords, setVisualWords] = useState('');
+  const [visualBounds, setVisualBounds] = useState<VisualCaptureBounds | null>(null);
+  const [visualBusy, setVisualBusy] = useState(false);
+  const [viewport, setViewport] = useState({ width: 1, height: 1 });
+  const [visualElapsed, setVisualElapsed] = useState(0);
+  const visualWordsRef = useRef('');
+  const visualIdRef = useRef<string | null>(null);
+  const visualGenerationRef = useRef<number | null>(null);
+  const visualActionRef = useRef<(action: 'finish' | 'cancel' | 'undo') => void>(() => {});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const currentRef = useRef<Stroke | null>(null);
@@ -70,6 +89,7 @@ export default function SpatialInkPage() {
   const activeRef = useRef(false);
   const sessionIdRef = useRef<number | null>(null);
   const firstStrokeEmittedRef = useRef(false);
+  const visualStartRef = useRef(0);
   const handedOffRef = useRef(false);
   const phaseRef = useRef<Phase>('idle');
   const phaseStartRef = useRef(0);
@@ -78,6 +98,43 @@ export default function SpatialInkPage() {
   const emitRef = useRef<((event: string, payload: unknown) => void) | null>(null);
   const dprRef = useRef(1);
   const reducedRef = useRef(false);
+  const visualFadeAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!visualCaptureId) return;
+    const timer = setInterval(() => setVisualElapsed(performance.now() - visualStartRef.current), 200);
+    return () => clearInterval(timer);
+  }, [visualCaptureId]);
+
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (!visualIdRef.current || event.defaultPrevented || event.isComposing) return;
+      if (event.key === 'Escape') { event.preventDefault(); visualActionRef.current('cancel'); }
+      if (event.key.toLowerCase() === 'z' && (event.metaKey || event.ctrlKey) && !event.shiftKey
+        && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); visualActionRef.current('undo'); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+
+  useEffect(() => {
+    if (!visualCaptureId || !isTauri()) return;
+    let disposed = false;
+    const update = () => {
+      const regions = Array.from(document.querySelectorAll('[data-visual-capture-controls]')).map(element => {
+        const rect = element.getBoundingClientRect(); return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      });
+      const typing = document.hasFocus() && document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest('[data-visual-capture-controls]'));
+      void import('@tauri-apps/api/core').then(({ invoke }) => { if (!disposed) return invoke('o8_visual_capture_widget', { id: visualCaptureId, generation: visualGenerationRef.current, widget: { regions, typing } }); }).catch(() => {});
+    };
+    const observer = new ResizeObserver(update);
+    document.querySelectorAll('[data-visual-capture-controls]').forEach(element => observer.observe(element));
+    const focus = () => queueMicrotask(update);
+    document.addEventListener('focusin', focus); document.addEventListener('focusout', focus);
+    window.addEventListener('focus', update); window.addEventListener('blur', update);
+    update();
+    return () => { disposed = true; observer.disconnect(); document.removeEventListener('focusin', focus); document.removeEventListener('focusout', focus); window.removeEventListener('focus', update); window.removeEventListener('blur', update); };
+  }, [visualCaptureId, visualBounds, viewport, visualBusy]);
 
   // The OS-level window is transparent; html/body must not paint a background or
   // the whole monitor shows an opaque rectangle instead of just the strokes.
@@ -108,6 +165,7 @@ export default function SpatialInkPage() {
       dprRef.current = dpr;
       const w = window.innerWidth;
       const h = window.innerHeight;
+      setViewport({ width: w, height: h });
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       canvas.style.width = `${w}px`;
@@ -195,8 +253,13 @@ export default function SpatialInkPage() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, window.innerWidth + 2, window.innerHeight + 2);
 
-      const phase = phaseRef.current;
       const now = performance.now();
+      if (visualIdRef.current && visualFadeAtRef.current > 0 && now >= visualFadeAtRef.current && !drawingRef.current) {
+        visualFadeAtRef.current = 0;
+        if (reducedRef.current) { clearAll(); return; }
+        phaseRef.current = 'fade'; phaseStartRef.current = now;
+      }
+      const phase = phaseRef.current;
       let alpha = 1;
       let glow = 1;
 
@@ -249,12 +312,14 @@ export default function SpatialInkPage() {
     };
 
     const onDown = (e: PointerEvent) => {
+      if ((e.target as Element)?.closest?.('[data-visual-capture-controls]')) return;
+      if (visualIdRef.current) return; // visual strokes come from the native Shift + pointer monitor
       if (handedOffRef.current) return; // already sending — ignore stray input
       beginSession();
       drawingRef.current = true;
       const stroke: Stroke = { pts: [], done: false };
       strokeStartRef.current = performance.now();
-      stroke.pts.push({ x: e.clientX, y: e.clientY, t: 0 });
+      stroke.pts.push({ x: e.clientX, y: e.clientY, t: visualIdRef.current ? performance.now() - visualStartRef.current : 0 });
       currentRef.current = stroke;
       strokesRef.current.push(stroke);
       if (!firstStrokeEmittedRef.current) {
@@ -272,7 +337,8 @@ export default function SpatialInkPage() {
     const pushPoint = (x: number, y: number) => {
       const stroke = currentRef.current;
       if (!stroke) return;
-      stroke.pts.push({ x, y, t: performance.now() - strokeStartRef.current });
+      if (visualIdRef.current && strokesRef.current.reduce((count, item) => count + item.pts.length, 0) >= 8192) return;
+      stroke.pts.push({ x, y, t: performance.now() - (visualIdRef.current ? visualStartRef.current : strokeStartRef.current) });
     };
 
     const onMove = (e: PointerEvent) => {
@@ -293,6 +359,11 @@ export default function SpatialInkPage() {
       drawingRef.current = false;
       if (currentRef.current) currentRef.current.done = true;
       currentRef.current = null;
+      if (visualIdRef.current) {
+        const points = strokesRef.current.flatMap(stroke => stroke.pts);
+        setVisualBounds({ left: Math.min(...points.map(point => point.x)), top: Math.min(...points.map(point => point.y)),
+          right: Math.max(...points.map(point => point.x)), bottom: Math.max(...points.map(point => point.y)) });
+      }
       // Strokes HOLD (still 'live') until the final event hands off — a big
       // circle survives the rest of the utterance.
       ensureLoop();
@@ -310,10 +381,13 @@ export default function SpatialInkPage() {
       const strokes = strokesRef.current
         .filter((s) => s.pts.length > 0)
         .map((s) => ({
-          points: s.pts.map((p) => ({ x: p.x / vw, y: p.y / vh, t: p.t })),
+          points: s.pts.map((p) => ({ x: Math.min(1, Math.max(0, p.x / vw)), y: Math.min(1, Math.max(0, p.y / vh)), t: p.t })),
         }));
       emitRef.current?.('o8:spatial-ink-strokes', {
         sessionId: sessionIdRef.current,
+        visualCaptureId: visualIdRef.current,
+        visualCaptureGeneration: visualGenerationRef.current,
+        instruction: visualIdRef.current ? visualWordsRef.current : '',
         strokes,
         viewport: { w: vw, h: vh, scale: dprRef.current },
       });
@@ -351,9 +425,20 @@ export default function SpatialInkPage() {
       clearAll();
       resetSession();
       handedOffRef.current = false;
+      visualIdRef.current = null;
+      visualGenerationRef.current = null;
+      setVisualCaptureId(null);
+      setVisualBackground(null);
+      setVisualBounds(null); setVisualWords(''); visualWordsRef.current = ''; setVisualVoiceText(''); setVisualBusy(false);
+      visualFadeAtRef.current = 0;
     };
 
     const handleStt = (p: SttPayload) => {
+      if (visualIdRef.current) {
+        if (p.type !== 'system-start') return;
+        emitRef.current?.('o8:visual-capture-action', { id: visualIdRef.current, action: 'cancel' });
+        hardClear();
+      }
       const type = p.type;
       if (typeof p.sessionId === 'number') sessionIdRef.current = p.sessionId;
 
@@ -387,6 +472,7 @@ export default function SpatialInkPage() {
     let disposed = false;
     let unStt: (() => void) | null = null;
     let unClear: (() => void) | null = null;
+    let visualUnlisten: Array<() => void> = [];
     if (isTauri()) {
       import('@tauri-apps/api/event')
         .then(({ listen, emit }) => {
@@ -396,9 +482,58 @@ export default function SpatialInkPage() {
           const p1 = listen<SttPayload>('o8:stt-event', (e) => handleStt(e.payload ?? {}));
           const p2 = listen('o8:spatial-ink-clear', () => {
             // Rust disarm — clear unless a flash/fade is mid-play.
-            if (phaseRef.current !== 'flash' && phaseRef.current !== 'fade') hardClear();
+            if (visualIdRef.current || (phaseRef.current !== 'flash' && phaseRef.current !== 'fade')) hardClear();
           });
-          return Promise.all([p1, p2]);
+          visualActionRef.current = (action) => {
+            if (action === 'undo' && visualIdRef.current) {
+              const id = visualIdRef.current; const generation = visualGenerationRef.current;
+              void import('@tauri-apps/api/core').then(({ invoke }) => invoke('o8_visual_capture_undo', { id, generation })).catch(() => {}); return;
+            }
+            if (action === 'finish') setVisualBusy(true);
+            if (visualIdRef.current) void emit('o8:visual-capture-action', { id: visualIdRef.current, action });
+          };
+          const p3 = listen<{ id: string; generation: number; background?: string; elapsedMs?: number }>('o8:visual-capture-begin', (event) => {
+            hardClear();
+            visualIdRef.current = event.payload.id;
+            visualGenerationRef.current = event.payload.generation;
+            visualStartRef.current = performance.now() - Math.min(90_000, Math.max(0, event.payload.elapsedMs ?? 0));
+            void import('@tauri-apps/api/core').then(({ invoke }) => invoke('o8_visual_capture_ready', { id: event.payload.id, generation: event.payload.generation })).catch(() => {});
+            setVisualCaptureId(event.payload.id);
+            setVisualBackground(event.payload.background ?? null);
+            setVisualVoice('starting');
+            activeRef.current = true;
+            phaseRef.current = 'live';
+          });
+          const p4 = listen<{ id: string; generation: number }>('o8:visual-capture-finish', (event) => {
+            if (visualIdRef.current === event.payload.id && visualGenerationRef.current === event.payload.generation) { setVisualBusy(true); handoff(); }
+          });
+          const p5 = listen<{ id: string }>('o8:visual-capture-superseded', (event) => { if (visualIdRef.current === event.payload.id) hardClear(); });
+          const p6 = listen<{ id: string; recording: boolean; state?: VisualCaptureVoice; text?: string }>('o8:visual-capture-voice', (event) => {
+            if (visualIdRef.current !== event.payload.id) return;
+            setVisualVoice(event.payload.state ?? (event.payload.recording ? 'recording' : 'unavailable'));
+            setVisualVoiceText(event.payload.text ?? '');
+          });
+          const p7 = listen<{ id: string; generation: number; phase: string; point: { x: number; y: number; t: number } }>('o8:visual-capture-ink', (event) => {
+            const { id, generation, phase, point } = event.payload;
+            if (id !== visualIdRef.current || generation !== visualGenerationRef.current || handedOffRef.current || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) return;
+            if (phase === 'start') {
+              strokesRef.current = []; currentRef.current = { pts: [], done: false }; strokesRef.current.push(currentRef.current);
+              visualFadeAtRef.current = 0;
+              setVisualBounds(null); drawingRef.current = true; phaseRef.current = 'live';
+            }
+            const stroke = currentRef.current;
+            if (!stroke) return;
+            if (phase !== 'end') stroke.pts.push({ x: point.x * window.innerWidth, y: point.y * window.innerHeight, t: point.t });
+            if (phase === 'end') {
+              stroke.done = true; drawingRef.current = false; currentRef.current = null;
+              const points = stroke.pts;
+              if (points.length) setVisualBounds({ left: Math.min(...points.map(p => p.x)), right: Math.max(...points.map(p => p.x)), top: Math.min(...points.map(p => p.y)), bottom: Math.max(...points.map(p => p.y)) });
+              phaseRef.current = 'live'; visualFadeAtRef.current = performance.now() + 1_400;
+            }
+            ensureLoop();
+          });
+          const p8 = listen<{ id: string; generation: number }>('o8:visual-capture-undo', event => { if (event.payload.id === visualIdRef.current && event.payload.generation === visualGenerationRef.current) { clearAll(); setVisualBounds(null); } });
+          return Promise.all([p1, p2, p3, p4, p5, p6, p7, p8]);
         })
         .then((uns) => {
           if (disposed) {
@@ -407,6 +542,7 @@ export default function SpatialInkPage() {
           }
           unStt = uns?.[0] ?? null;
           unClear = uns?.[1] ?? null;
+          visualUnlisten = uns?.slice(2) ?? [];
         })
         .catch(() => {
           /* noop — no bridge means the overlay simply never draws */
@@ -424,6 +560,7 @@ export default function SpatialInkPage() {
       try {
         unStt?.();
         unClear?.();
+        visualUnlisten.forEach(unlisten => unlisten());
       } catch {
         /* noop */
       }
@@ -433,6 +570,8 @@ export default function SpatialInkPage() {
   return (
     <div
       style={{
+        ...CAPTURE_THEME,
+        colorScheme: 'dark',
         position: 'fixed',
         inset: 0,
         margin: 0,
@@ -444,6 +583,7 @@ export default function SpatialInkPage() {
         overflow: 'hidden',
       }}
     >
+      {visualBackground ? <div aria-hidden="true" style={{ position: 'absolute', inset: 0, backgroundImage: `url("${visualBackground}")`, backgroundSize: '100% 100%', pointerEvents: 'none' }} /> : null}
       <canvas
         ref={canvasRef}
         style={{
@@ -453,6 +593,10 @@ export default function SpatialInkPage() {
           background: 'transparent',
         }}
       />
+      {visualCaptureId && visualBounds ? <VisualCaptureInput bounds={visualBounds} viewport={viewport} value={visualWords} voice={visualVoice} voiceText={visualVoiceText} busy={visualBusy}
+        onChange={value => { visualWordsRef.current = value; setVisualWords(value); emitRef.current?.('o8:visual-capture-words', { id: visualIdRef.current, generation: visualGenerationRef.current, text: value }); }} onFinish={() => visualActionRef.current('finish')}
+        onCancel={() => visualActionRef.current('cancel')} /> : null}
+      {visualCaptureId ? <VisualCaptureControls elapsedMs={visualElapsed} busy={visualBusy} onUndo={() => visualActionRef.current('undo')} onCancel={() => visualActionRef.current('cancel')} onFinish={() => visualActionRef.current('finish')} /> : null}
     </div>
   );
 }

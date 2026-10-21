@@ -38,6 +38,7 @@ export function restoreReleaseBuildCache(
   root: string,
   phase: ReleaseBuildCachePhase,
   options?: {
+    runId?: string;
     identity?: ReleaseBuildCacheIdentity;
     cacheRoot?: string;
     env?: NodeJS.ProcessEnv;
@@ -48,6 +49,7 @@ export function captureReleaseBuildCache(
   root: string,
   phase: ReleaseBuildCachePhase,
   options?: {
+    runId?: string;
     identity?: ReleaseBuildCacheIdentity;
     cacheRoot?: string;
     env?: NodeJS.ProcessEnv;
@@ -70,13 +72,19 @@ export function finalizeReleaseBuildCacheReceipt(
     buildDurationMs: number;
   },
   options?: { projectRoot?: string },
-): { receipt: Record<string, unknown>; receiptPath: string };
+): Promise<{ receipt: Record<string, unknown>; receiptPath: string }>;
 export const releaseBuildCacheInternals: {
   PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;
+  isReleaseBuildCacheJsonCandidate(name: string): boolean;
+  isReleaseBuildCachePhaseReceiptName(name: string): boolean;
   assertOutsideProjectNodeModules(target: string, projectRoot: string): void;
   collectWebEnvironmentFiles(root: string): Array<{ path: string; sha256: string }>;
   normalizeArchivePath(value: string): string | null;
   pathAllowed(candidate: string, targets: string[], excludes: string[]): boolean;
+  phaseConfig(phase: ReleaseBuildCachePhase, buildOptions?: Record<string, unknown>): {
+    targets: string[];
+    excludes: string[];
+  };
   pruneCacheToBudget(
     cacheRoot: string,
     budgetBytes: number,

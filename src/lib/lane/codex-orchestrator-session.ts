@@ -27,12 +27,16 @@ import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
-import { prepareCodexHome } from './codex-orchestrator-config';
+import { codexAppThreadConfig, prepareCodexHome, userCodexHome } from './codex-orchestrator-config';
+import { CODEX_USER_MESSAGE_MARKER, splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
+import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
+import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { codexCliSupportsUltraEfforts, resolveCodexReasoningEffort } from '@/lib/codex/reasoning-effort';
-import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { resolveCodexAppThreadsSync, resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { MODEL_IDS } from '@/lib/models';
+import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
@@ -43,6 +47,8 @@ import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import { prepareSingleOrchestratorLaunch } from './single-orchestrator-policy';
 import { codexComposerImagePaths, type ComposerImageAttachment } from '@/lib/mobile/orchestrator-image-media';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { getCodexSpeedCatalogue } from '@/lib/codex/service-tier-catalogue';
+import { serviceTierForTurn, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import {
   ensureRegisteredSession,
   getRegisteredSession,
@@ -93,6 +99,7 @@ export interface SendToCodexOrchestratorOptions {
    */
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: OrchestratorServiceTier;
   model?: string;
   attachments?: ComposerImageAttachment[];
   signal?: AbortSignal;
@@ -160,14 +167,14 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       options.onReboundEvent?.(record, event);
     };
     const handleLine = (line: string) => {
-      handleCodexJsonLine(line, lineState, emit, { isLocalModel });
+      handleCodexJsonLine(line, lineState, emit, { isLocalModel, model: record.model ?? undefined });
       if (lineState.threadId) session!.threadId = lineState.threadId;
     };
     const finishRecord = () => {
       if (lineState.threadId) session!.threadId = lineState.threadId;
       session!.status = 'ready';
       emit({
-        type: 'done',
+        type: 'done', terminalOutcome: lineState.terminalOutcome ?? 'unconfirmed',
         sessionId: lineState.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
@@ -280,12 +287,11 @@ export function buildCodexOrchestratorPrompt(
 ): string {
   // Single mode launches Codex with `mcp_servers={}` (codexOrchestrationModeFlags).
   const mcpServers = scope.orchestrationMode !== 'single';
-  return [
+  const instructions = [
     buildOrchestratorSystemPrompt(repoPath, { backend: 'codex', toolProfile: scope.toolProfile, mcpServers }),
     codexBrainFirstSection(mcpServers),
-    '## USER MESSAGE',
-    message,
   ].join('\n\n');
+  return `${instructions}${CODEX_USER_MESSAGE_MARKER}${message}`;
 }
 
 // ── Event mapping (codex JSON → OrchestratorEvent) ───────────────────────────
@@ -305,7 +311,9 @@ export async function sendToCodexOrchestrator(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
 ): Promise<void> {
-  if (!session.threadId) {
+  const requestedModel = resolveOrchestratorModelSync(options.model);
+  const resumed = Boolean(session.threadId);
+  if (!resumed && requestedModel !== MODEL_IDS.raw.openAiGpt61Sol) {
     return sendToCodexOrchestratorAttempt(session, message, onEvent, options);
   }
 
@@ -317,12 +325,19 @@ export async function sendToCodexOrchestrator(
       if (event.type !== 'turn_receipt') streamed = true;
       onEvent(event);
     }
-  }, options);
+  }, options, () => { streamed = true; });
 
+  const unsupported = deferredTerminalEvents.some((event) => event.type === 'error'
+    && isCodexSolUnsupported(requestedModel, event.error));
+  if (!streamed && unsupported && !options.signal?.aborted) {
+    session.status = 'ready';
+    onEvent({ type: 'turn_retry', attempt: 2, reason: 'codex-model-unsupported', notice: CODEX_SOL_UPDATE_NOTICE });
+    return sendToCodexOrchestratorAttempt(session, message, onEvent, { ...options, model: CODEX_SOL_FALLBACK_MODEL, serviceTier: options.serviceTier === undefined ? undefined : 'default' });
+  }
   const terminalError = deferredTerminalEvents.find((event) => event.type === 'error');
   const missingRollout = terminalError?.type === 'error'
     && isMissingCodexRolloutResumeError(terminalError.error);
-  if (!streamed && missingRollout && !options.signal?.aborted) {
+  if (resumed && !streamed && missingRollout && !options.signal?.aborted) {
     console.warn(`[codex-orchestrator-session] Saved Codex thread is gone; retrying ${session.sessionName} fresh`);
     session.threadId = null;
     session.status = 'ready';
@@ -338,6 +353,7 @@ async function sendToCodexOrchestratorAttempt(
   message: string,
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
+  onActivity?: () => void,
 ): Promise<void> {
   // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
   // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
@@ -458,6 +474,25 @@ async function sendToCodexOrchestratorAttempt(
 
   onEvent({ type: 'turn_receipt', leadModel: model, effort: reasoningEffort });
 
+  const serviceTier = serviceTierForTurn(options.serviceTier, 'codex', resolveOrchestratorModelSync(options.model), 'codex', model);
+  if (serviceTier && serviceTier !== 'default') {
+    try {
+      const catalogue = await getCodexSpeedCatalogue(codexHome);
+      if (!catalogue.models[model]?.some((tier) => tier.id === serviceTier)) throw new Error();
+    } catch {
+      session.status = 'ready';
+      onEvent({ type: 'error', error: 'This service tier is not available for the selected Codex model and account. Choose Standard or check the CLI.' });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      return;
+    }
+    if (settleBeforeSpawnIfAborted()) return;
+  }
+  const serviceTierArgs = serviceTier ? ['-c', `service_tier="${serviceTier}"`] : [];
+  // #3573: with "Show chats in the Codex app" on, the turn runs through the
+  // app-server bridge in the operator's own Codex home, so the Codex app lists
+  // it. Solo keeps its sandboxed private home; local models keep exec's --oss path.
+  const codexApp = options.orchestrationMode !== 'single' && !isLocalModel && resolveCodexAppThreadsSync();
+
   // First-turn launch vs resume.
   const isResume = Boolean(session.threadId);
   const args: string[] = isResume
@@ -469,6 +504,7 @@ async function sendToCodexOrchestratorAttempt(
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
+        ...serviceTierArgs,
         // Disable the hosted image_generation tool (defaults to nonexistent
         // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
         '-c',
@@ -483,6 +519,7 @@ async function sendToCodexOrchestratorAttempt(
         ...(options.orchestrationMode === 'single' ? [] : sandboxFlagsForMode(permissionMode)),
         ...codexOrchestrationModeFlags(options.orchestrationMode),
         ...codexOrchestratorModelFlags(model, reasoningEffort),
+        ...serviceTierArgs,
         '-c',
         'tools.image_generation=false',
         '-C',
@@ -504,6 +541,33 @@ async function sendToCodexOrchestratorAttempt(
   let spawnArgs = args;
   let spawnEnv = baseEnv;
   let cleanupSingleLaunch = () => {};
+  if (codexApp) {
+    try {
+      const prompt = splitCodexOrchestratorPrompt(message);
+      const specPath = writeCodexAppBridgeSpec({
+        codexBin,
+        cwd: session.repoPath,
+        threadId: session.threadId,
+        developerInstructions: prompt.instructions,
+        message: prompt.message,
+        imagePaths,
+        model,
+        effort: reasoningEffort,
+        serviceTier: serviceTier ?? null,
+        sandbox: permissionMode === 'plan' ? 'read-only' : 'danger-full-access',
+        config: codexAppThreadConfig(session.repoPath, options.toolProfile ?? 'full', session.historyThreadId),
+      });
+      const bridge = codexAppBridgeLaunch();
+      spawnBinary = bridge.command;
+      spawnArgs = [...bridge.args, specPath];
+      spawnEnv = { ...baseEnv, CODEX_HOME: userCodexHome() };
+    } catch (err) {
+      session.status = 'dead';
+      onEvent({ type: 'error', error: `Codex app mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
+      onEvent({ type: 'done', sessionId: session.threadId, cost: null });
+      return;
+    }
+  }
   if (options.orchestrationMode === 'single') {
     try {
       const prepared = await prepareSingleOrchestratorLaunch({
@@ -590,7 +654,8 @@ async function sendToCodexOrchestratorAttempt(
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
     const handleCodexLine = (line: string) => {
-      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel });
+      if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
+      const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
       if (parsed) {
         sawFirstEvent = true;
         if (firstEventTimeout) {
@@ -625,7 +690,7 @@ async function sendToCodexOrchestratorAttempt(
       session.status = status;
       if (error) onEvent({ type: 'error', error });
       onEvent({
-        type: 'done',
+        type: 'done', terminalOutcome: options.signal?.aborted ? 'unconfirmed' : lineState.terminalOutcome ?? 'unconfirmed',
         sessionId: lineState.threadId,
         cost: lineState.cost,
         ...(lineState.usage ? { usage: lineState.usage } : {}),
@@ -693,7 +758,8 @@ async function sendToCodexOrchestratorAttempt(
       const diagnostic = (stderr || crashStderr).trim();
       // Startup warnings can fill the display limit before the resume failure.
       // Keep that diagnostic visible to the one-time missing-thread recovery.
-      const resumeDiagnostic = diagnostic.split(/\r?\n/).find(isMissingCodexRolloutResumeError);
+      const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
+        || isCodexSolUnsupported(model, line));
       const error = code === 0
         ? undefined
         : (resumeDiagnostic || diagnostic).slice(0, 500) || `codex exited with code ${code}`;

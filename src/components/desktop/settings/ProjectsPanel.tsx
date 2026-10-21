@@ -43,8 +43,10 @@ import { ProjectForm, emptyFormState, formStateFromProject } from './projects/Pr
 import { UnassignedReposGroup } from './projects/ProjectRepoRows';
 import { useProjectsData } from './projects/useProjectsData';
 import { WorkspacePageHeader } from '../WorkspacePageHeader';
+import { ControlRoomTab } from '../repo-focus/tabs/ControlRoomTab';
+import { toRepoFocusRepo } from '../repo-focus/types';
 
-export function ProjectsPanel({ library = false, opening = false, initialProjectId = null, onOpenWorkspace, onBackToWorkspace }: { library?: boolean; initialProjectId?: string | null; opening?: boolean; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void>; onBackToWorkspace?: () => void }) {
+export function ProjectsPanel({ library = false, openingProjectId = null, initialProjectId = null, onOpenWorkspace, onBackToWorkspace }: { library?: boolean; initialProjectId?: string | null; openingProjectId?: string | null; onOpenWorkspace?: (projectId: string, repoId: string, repoPath: string) => Promise<void>; onBackToWorkspace?: () => void }) {
   const data = useProjectsData();
   const {
     projects,
@@ -72,11 +74,18 @@ export function ProjectsPanel({ library = false, opening = false, initialProject
   const [requestedProjectId, setOpenedProjectId] = useState<string | null>(initialProjectId);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
+  const [tasksProjectId, setTasksProjectId] = useState<string | null>(null);
 
   const isAnythingOpen = creating || editingProjectId !== null;
+  const opening = openingProjectId !== null;
   const openedProject = projects.find((project) => project.id === requestedProjectId);
   const openedProjectId = openedProject?.id ?? null;
   const mainRepo = reposById.get(openedProject?.mainRepoId ?? openedProject?.repos[0]?.repoId ?? '');
+  const taskRepos = useMemo(() => (openedProject?.repos ?? []).flatMap((link) => {
+    const repo = reposById.get(link.repoId);
+    return repo ? [toRepoFocusRepo(repo)] : [];
+  }), [openedProject, reposById]);
+  const tasksOpen = library && Boolean(openedProject) && tasksProjectId === openedProjectId;
 
   // Repos connected but not in any project — their home is the quiet group at
   // the bottom now that the repo list left the Connectors surface.
@@ -189,16 +198,24 @@ export function ProjectsPanel({ library = false, opening = false, initialProject
         <input aria-label="Search projects" placeholder="Search projects" value={query} onChange={(event) => setQuery(event.target.value)} style={{ width: '100%', boxSizing: 'border-box', minHeight: 42, borderRadius: 12, border: '1px solid var(--t-divider)', background: 'var(--t-input-bg)', color: 'var(--t-text)', paddingLeft: 16, paddingRight: 16, font: 'inherit', marginBottom: 24 }} />
         {openedProjectId ? <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
           <RamsButton variant="ghost" onClick={() => { setOpenedProjectId(null); setEditingProjectId(null); }}>All projects</RamsButton>
-          {mainRepo && onOpenWorkspace ? <RamsButton disabled={opening || isAnythingOpen} onClick={() => { void onOpenWorkspace(openedProjectId, mainRepo.id, mainRepo.localPath); }}>{opening ? 'Opening…' : 'Open workspace'}</RamsButton> : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <RamsButton disabled={isAnythingOpen || taskRepos.length === 0} onClick={() => setTasksProjectId(tasksOpen ? null : openedProjectId)}>{tasksOpen ? 'Project details' : 'Tasks'}</RamsButton>
+            {mainRepo && onOpenWorkspace ? <RamsButton disabled={opening || isAnythingOpen} onClick={() => { void onOpenWorkspace(openedProjectId, mainRepo.id, mainRepo.localPath); }}>{opening ? 'Opening…' : 'Open workspace'}</RamsButton> : null}
+          </div>
         </div> : null}
         {!openedProjectId ? <div aria-label="Saved projects">
-          {projects.filter((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())).map((project) => <div key={project.id} style={{ display: 'flex', alignItems: 'center', gap: 20, borderBottom: '1px solid var(--t-divider-subtle)', minHeight: 84 }}>
-            <button type="button" onClick={() => setOpenedProjectId(project.id)} style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer', paddingTop: 20, paddingBottom: 20 }}>
-              <span style={{ display: 'block', fontSize: 15 }}>{project.name}</span>
+          {projects.filter((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())).map((project) => {
+            const workspaceRepo = reposById.get(project.mainRepoId ?? project.repos[0]?.repoId ?? '');
+            return <div key={project.id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 20, rowGap: 8, borderBottom: '1px solid var(--t-divider-subtle)', minHeight: 84, paddingBottom: 12 }}>
+            <button type="button" aria-label={`View details for ${project.name}`} onClick={() => setOpenedProjectId(project.id)} style={{ flex: '1 1 180px', minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer', paddingTop: 20, paddingBottom: 8 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project.name}</span><span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Details</span></span>
               <span style={{ display: 'block', marginTop: 7, fontSize: 12, color: 'var(--t-text-muted)' }}>{project.repos.length} {project.repos.length === 1 ? 'repository' : 'repositories'}{project.description ? ` · ${project.description}` : ''}</span>
             </button>
-            <RamsButton variant="ghost" onClick={() => { setOpenedProjectId(project.id); setEditingProjectId(project.id); }}>Edit</RamsButton>
-          </div>)}
+            <div role="group" aria-label={`${project.name} actions`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <RamsButton disabled={!workspaceRepo || !onOpenWorkspace || opening || isAnythingOpen} onClick={() => { if (workspaceRepo) void onOpenWorkspace?.(project.id, workspaceRepo.id, workspaceRepo.localPath); }}>{openingProjectId === project.id ? 'Opening…' : 'Open workspace'}</RamsButton>
+              <RamsButton variant="ghost" disabled={opening} onClick={() => { setOpenedProjectId(project.id); setEditingProjectId(project.id); }}>Edit</RamsButton>
+            </div>
+          </div>; })}
           {!loading && projects.length > 0 && !projects.some((project) => `${project.name} ${project.description ?? ''}`.toLowerCase().includes(query.toLowerCase())) ? <p style={{ color: 'var(--t-text-muted)' }}>No projects match your search.</p> : null}
         </div> : null}
       </> : null}
@@ -206,6 +223,10 @@ export function ProjectsPanel({ library = false, opening = false, initialProject
         {loading ? (
           <div style={{ paddingTop: 20, paddingBottom: 20, color: RAMS_INK_QUIET, fontSize: 13 }}>
             Loading...
+          </div>
+        ) : tasksOpen && openedProject ? (
+          <div aria-label="Project tasks">
+            <ControlRoomTab project={{ id: openedProject.id, name: openedProject.name, createdAt: String(openedProject.createdAt), repoPaths: taskRepos.map((repo) => repo.localPath) }} repos={taskRepos} />
           </div>
         ) : (
           <>

@@ -106,11 +106,17 @@ export function ensureUsageLogSchema(sqlite: Database.Database): void {
   }
 }
 
+/** OpenRouter's generation id on a usage row. Malformed metadata reads as no id instead of failing. */
+export const OPENROUTER_GENERATION_ID_SQL =
+  "CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '$.generationId') END";
+
 export function ensureUsageLogIndexes(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_period ON usage_logs(user_id, billing_period);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_created ON usage_logs(created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key ON usage_logs(session_key);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_packet_attempt ON usage_logs(packet_id, attempt);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_openrouter_generation
+      ON usage_logs(${OPENROUTER_GENERATION_ID_SQL}) WHERE provider = 'openrouter';
   `);
 }

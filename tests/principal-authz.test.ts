@@ -666,22 +666,12 @@ describe('principal-authz — worker credentials are bound to their persisted pa
     const { createLane } = await import('@/lib/lane/registry');
     const packetA = `pkt-authz-owner-a-${Date.now()}`;
     const packetB = `pkt-authz-owner-b-${Date.now()}`;
-    createLane({
-      label: 'packet ownership A',
-      repoPath: '/tmp/authz-packet-owner-a',
-      branch: `agent/${packetA}`,
-      baseBranch: 'main',
-      runtime: 'codex',
-      packetId: packetA,
-    });
-    createLane({
-      label: 'packet ownership B',
-      repoPath: '/tmp/authz-packet-owner-b',
-      branch: `agent/${packetB}`,
-      baseBranch: 'main',
-      runtime: 'codex',
-      packetId: packetB,
-    });
+    // The worker card reads the lane diff through hardened lane Git, which needs a real repository.
+    const repoPath = join(dataDir, 'packet-owner-repo');
+    execFileSync('git', ['init', '-q', '-b', 'main', repoPath], { stdio: 'pipe' });
+    for (const [label, packetId] of [['A', packetA], ['B', packetB]]) {
+      createLane({ label: `packet ownership ${label}`, repoPath, branch: `agent/${packetId}`, baseBranch: 'main', runtime: 'codex', packetId });
+    }
     const packetAToken = mintPacketWorkerToken(packetA);
 
     const mismatch = await merge.POST(req(url, {

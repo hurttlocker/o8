@@ -21,7 +21,7 @@ export const LEGACY_COMPOSER_EFFORT_STORAGE_KEY = 'o8:orchestrator:thinking-effo
 
 export type ComposerSelectorMode = 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
 export type ComposerEffortMap = Partial<Record<string, ThinkingEffort>>;
-export type ComposerProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal';
+export type ComposerProviderMark = import('./provider-marks').ProviderMark;
 
 export const COMPOSER_PROVIDER_MARK_TABLE = {
   leadModelFamilies: [
@@ -41,16 +41,19 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     collide: 'terminal',
     fable: 'anthropic',
     o8: 'o8',
-    opencode: 'terminal',
+    opencode: 'opencode',
+    pi: 'terminal',
+    muse: 'terminal',
+    acp: 'terminal',
   },
   workerRuntimes: {
     codex: 'openai',
     cloud: 'openai',
     'claude-code': 'anthropic',
     gemini: 'gemini',
-    antigravity: 'gemini',
+    antigravity: 'antigravity',
     magnitude: 'terminal',
-    opencode: 'terminal',
+    opencode: 'opencode',
     'copilot-cli': 'copilot',
     crush: 'terminal',
     openhands: 'terminal',
@@ -59,12 +62,15 @@ export const COMPOSER_PROVIDER_MARK_TABLE = {
     qoder: 'terminal',
     kimi: 'terminal',
     aider: 'terminal',
-    '3code': 'terminal',
-    pi: 'terminal',
-    cursor: 'terminal',
+    '3code': 'threecode',
+    pi: 'pi',
+    'pi-builtin': 'pi',
+    cursor: 'cursor',
     grok: 'x',
     'prime-agent': 'terminal',
     'deepseek-harness': 'deepseek',
+    hermes: 'terminal',
+    muse: 'terminal',
   },
 } as const satisfies {
   leadModelFamilies: readonly { pattern: RegExp; mark: ComposerProviderMark }[];
@@ -93,9 +99,6 @@ export function composerEffortConsequence(
   backend: OrchestratorBackendSetting,
   effort: ThinkingEffort,
 ): string {
-  if (backend === 'o8') {
-    return `${THINKING_EFFORT_LABELS[effort].long} · ${effort === 'high' ? 'founders' : 'free'}`;
-  }
   return THINKING_EFFORT_LABELS[effort].detail;
 }
 
@@ -118,23 +121,23 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
     long: 'Solo',
     short: 'Solo',
     sublabel: 'Works alone, nothing is dispatched',
-    placeholder: 'Build solo, no dispatches · / for commands',
+    placeholder: 'Ask anything · delegation is off',
     directive: COMPOSER_MODE_DIRECTIVES.solo,
   },
   {
     id: 'multitask',
-    long: 'Multitask',
-    short: 'Multitask',
-    sublabel: 'Parallel packets in isolated worktrees',
-    placeholder: 'Parallel packets in isolated worktrees…',
+    long: 'Worktrees',
+    short: 'Worktrees',
+    sublabel: 'Give delegated workers separate checkouts',
+    placeholder: 'Ask anything · workers use isolated worktrees',
     directive: COMPOSER_MODE_DIRECTIVES.multitask,
   },
   {
     id: 'fast',
-    long: 'Fast · shared checkout',
-    short: 'Fast',
-    sublabel: 'Workers edit one checkout; orchestrator reviews and commits',
-    placeholder: 'Parallel workers in this checkout…',
+    long: 'Shared',
+    short: 'Shared',
+    sublabel: 'Work here; delegate to suitable workers when useful',
+    placeholder: 'Ask anything · delegate when useful',
     directive: COMPOSER_MODE_DIRECTIVES.fast,
   },
   {
@@ -155,7 +158,10 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
   },
 ];
 
-const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
+/** Visible choices; the advanced execution modes remain available internally. */
+export const VISIBLE_COMPOSER_SELECTOR_MODES = ['fast', 'multitask'] as const;
+
+const BASE_EFFORTS: readonly ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const EFFORT_RANK: Record<ThinkingEffort, number> = {
   low: 0,
   medium: 1,
@@ -278,7 +284,14 @@ export function composerSelectorModeSpec(mode: ComposerSelectorMode): ComposerSe
 }
 
 export function composerSupportsFastMode(backend: OrchestratorBackendSetting): boolean {
-  return backend === 'codex' || backend === 'claude' || backend === 'fable';
+  // Both bundled lead IDs receive the thread-bound cortex delegation surface.
+  // ACP-only leads do not yet carry that surface, so do not infer support from installation.
+  return backend === 'codex' || backend === 'claude' || backend === 'fable'
+    || backend === 'pi' || backend === 'o8';
+}
+
+export function defaultComposerMode(backend: OrchestratorBackendSetting = 'codex'): ComposerSelectorMode {
+  return composerSupportsFastMode(backend) ? 'fast' : 'solo';
 }
 
 export function cycleComposerSelectorMode(
@@ -286,11 +299,12 @@ export function cycleComposerSelectorMode(
   direction = 1,
   backend?: OrchestratorBackendSetting,
 ): ComposerSelectorMode {
-  const index = Math.max(0, COMPOSER_SELECTOR_MODES.findIndex((entry) => entry.id === mode));
-  for (let step = 1; step <= COMPOSER_SELECTOR_MODES.length; step += 1) {
-    const candidate = COMPOSER_SELECTOR_MODES[
-      (index + direction * step + COMPOSER_SELECTOR_MODES.length * step) % COMPOSER_SELECTOR_MODES.length
-    ].id;
+  const index = VISIBLE_COMPOSER_SELECTOR_MODES.findIndex(entry => entry === mode);
+  if (index < 0) return !backend || composerSupportsFastMode(backend) ? 'fast' : 'multitask';
+  for (let step = 1; step <= VISIBLE_COMPOSER_SELECTOR_MODES.length; step += 1) {
+    const candidate = VISIBLE_COMPOSER_SELECTOR_MODES[
+      (index + direction * step + VISIBLE_COMPOSER_SELECTOR_MODES.length * step) % VISIBLE_COMPOSER_SELECTOR_MODES.length
+    ];
     if (candidate !== 'fast' || !backend || composerSupportsFastMode(backend)) return candidate;
   }
   return mode;
@@ -305,13 +319,15 @@ export function resolveComposerSelectorExecutionMode(mode: ComposerSelectorMode)
 export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
-  adaptiveEnabled: boolean,
-  isFreePlan = false,
+  _adaptiveEnabled: boolean,
+  _isFreePlan = false,
   ultraEnabled = false,
 ): readonly ThinkingEffort[] {
-  if (backend === 'o8') return isFreePlan ? ['low'] : ['low', 'high'];
+  // The o8 lead has one setting on every plan (#2999), so it offers no effort control (#3660).
+  if (backend === 'o8') return [];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
-  const base = adaptiveEnabled ? [...BASE_EFFORTS] : BASE_EFFORTS.filter((effort) => effort !== 'adaptive');
+  // Adaptive is a provider thinking mode, not a manual effort level.
+  const base = [...BASE_EFFORTS];
   const supportsMax = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'max');
   const supportsUltra = backend === 'codex' && codexSupportsReasoningEffort(modelId, 'ultra');
   if (backend === 'codex') {
@@ -355,8 +371,9 @@ export function setModelEffort(
 export function resolveComposerSelectorState(input: ResolveComposerSelectorInput): ResolvedComposerSelectorState {
   const storedEffort = input.inSessionEffortByModel[input.leadModelId]
     ?? input.threadEffortByModel[input.leadModelId];
+  // The o8 lead always sends Low; a saved effort from the old two-tier picker never applies.
   const requestedEffort = input.leadBackend === 'o8'
-    ? input.isFreePlan ? 'low' : storedEffort ?? 'high'
+    ? 'low'
     : storedEffort ?? input.operatorDefaultEffort;
   const effortOptions = supportedEffortsForLead(
     input.leadBackend,
@@ -365,9 +382,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.isFreePlan,
     input.ultraEnabled,
   );
-  const lockedEffortOptions: readonly ThinkingEffort[] = input.leadBackend === 'o8' && input.isFreePlan
-    ? ['high']
-    : [];
+  const lockedEffortOptions: readonly ThinkingEffort[] = [];
   const clamped = clampEffortToLead(requestedEffort, effortOptions);
   const effort = clamped.effort;
   const clampedFrom = clamped.clampedFrom
@@ -384,7 +399,7 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     workerStartMode: resolveSelectorSetting('workerStartMode', ...settingSources) ?? null,
   };
   const mode = composerSelectorModeSpec(resolvedSettings.mode === 'fast' && !composerSupportsFastMode(input.leadBackend)
-    ? 'multitask' : resolvedSettings.mode);
+    ? 'solo' : resolvedSettings.mode);
   const workerRuntimeLabel = resolvedSettings.workerRuntime
     ? composerRuntimeLabel(resolvedSettings.workerRuntime)
     : input.workerRuntimeLabel?.trim() || '';
@@ -398,7 +413,10 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
   const workerTail = workerModelLabel
     ? `${workerRuntimeLabel} · ${workerModelLabel}`
     : workerRuntimeLabel;
-  const atRestText = `${input.leadModelLabel} · ${THINKING_EFFORT_LABELS[effort].short} / workers ${workerTail}`;
+  const leadText = input.leadBackend === 'o8'
+    ? input.leadModelLabel
+    : `${input.leadModelLabel} · ${THINKING_EFFORT_LABELS[effort].short}`;
+  const atRestText = `${leadText} / workers ${workerTail}`;
   return {
     mode: mode.id,
     modeLabel: mode.long,

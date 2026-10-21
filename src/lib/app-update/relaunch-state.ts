@@ -5,6 +5,15 @@ export interface AppUpdateState {
   version: string | null;
   updatedAt: string | null;
   check: AppUpdateCheckState;
+  /** The webview's latest install attempt (#3588). A successful one restarts the app, which clears this state. */
+  lastInstall: AppUpdateInstallState | null;
+}
+
+export interface AppUpdateInstallState {
+  outcome: 'started' | 'failed';
+  version: string | null;
+  at: string;
+  error: string | null;
 }
 
 export type AppUpdateCheckOutcome = 'never' | 'available' | 'current' | 'failed';
@@ -28,6 +37,7 @@ let state: AppUpdateState = {
     errorCode: 'update_check_not_run',
     error: NEVER_CHECKED_MESSAGE,
   },
+  lastInstall: null,
 };
 
 export function getAppUpdateState(): AppUpdateState {
@@ -69,6 +79,23 @@ export function setAppUpdateState(update: {
           ? 'update_check_failed'
           : null,
       error,
+    },
+    lastInstall: state.lastInstall,
+  };
+  return state;
+}
+
+/** Records the start or the failure of an install, with the error message for a failure. */
+export function recordAppUpdateInstall(update: { outcome: 'started' | 'failed'; version?: string | null; error?: string | null }): AppUpdateState {
+  state = {
+    ...state,
+    lastInstall: {
+      outcome: update.outcome,
+      version: update.version?.trim() || null,
+      at: new Date().toISOString(),
+      error: update.outcome === 'failed'
+        ? update.error?.trim().slice(0, 1_000) || 'The install failed without an error message.'
+        : null,
     },
   };
   return state;

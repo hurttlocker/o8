@@ -24,7 +24,8 @@ export async function GET(request: Request) {
     setCached(cacheKey, runs);
     return NextResponse.json({ runs, repo });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[panel-ci] Read failed:', err);
+    const message = 'Unable to read CI runs.';
     return NextResponse.json({ error: message, runs: [], repo }, { status: 200 });
   }
 }

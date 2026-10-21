@@ -22,6 +22,8 @@ export interface PendingQueueItem {
   id: string;
   text: string;
   queuedAt: number;
+  /** Opaque confirmation receipt, validated by the assistant consumer before replay. */
+  ripple?: unknown;
 }
 
 export const PENDING_QUEUE_MAX = 10;
@@ -46,7 +48,7 @@ function readRaw(channel: PendingQueueChannel, tabId: string): PendingQueueItem[
       const text = typeof record.text === 'string' ? record.text : '';
       const queuedAt = typeof record.queuedAt === 'number' ? record.queuedAt : NaN;
       if (!id || !text || !Number.isFinite(queuedAt)) continue;
-      items.push({ id, text, queuedAt });
+      items.push({ id, text, queuedAt, ...('ripple' in record ? { ripple: record.ripple } : {}) });
     }
     return items;
   } catch {
@@ -91,6 +93,7 @@ export function enqueuePending(
   tabId: string,
   text: string,
   id: string = generatePendingId(),
+  ripple?: unknown,
 ): PendingQueueItem | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -99,7 +102,7 @@ export function enqueuePending(
   if (current.some((item) => item.id === id)) {
     return current.find((item) => item.id === id) ?? null;
   }
-  const item: PendingQueueItem = { id, text: trimmed, queuedAt: Date.now() };
+  const item: PendingQueueItem = { id, text: trimmed, queuedAt: Date.now(), ...(ripple !== undefined ? { ripple } : {}) };
   writeRaw(channel, tabId, [...current, item]);
   return item;
 }

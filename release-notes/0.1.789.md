@@ -1,0 +1,8 @@
+- Navigate long conversations with prompt shortcuts, folded work details, file previews and clearer progress.
+- Organize repositories into projects, add local folders or Git URLs, and move between workspace tools more easily.
+- Read source files with syntax colors, formatted documents and quick-document shortcuts.
+- Keep browser previews nearby, expand side panels and inspect installed iOS simulators from the workspace.
+- Connect supported agent runtimes and choose which provider models appear in the composer.
+- Keep saved conversations and review replies easier to find, with smoother repository refreshes.
+- Restore the main window from the Dock and preserve application permissions during installation.
+- Improve workspace ownership, recovery and storage cleanup while preserving unfinished work.

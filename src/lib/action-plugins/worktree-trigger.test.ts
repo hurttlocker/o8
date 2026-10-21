@@ -54,6 +54,8 @@ function fixture(delaySeconds = 0, exitCode = 0) {
   return { root, repo, source, output };
 }
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   registryState.repos = [];
   delete process.env.O8_DATA_DIR;
   delete process.env.O8_WORKTREE_ROOT;
@@ -133,6 +135,26 @@ describe('managed worktree action triggers', () => {
     expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({ worktreeId: created.id, worktreePath: created.path });
   }, 60_000);
 
+  it('preserves the reviewed project state scope on a triggered action and receipt', async () => {
+    const { repo, source, output } = fixture();
+    const script = `#!/bin/sh\nprintf 'saved by trigger' > "$O8_PLUGIN_STATE_DIR/trigger-note.txt"\ncat >> '${output}'\n`;
+    writeFileSync(path.join(source, 'run.sh'), script);
+    const manifest = JSON.parse(readFileSync(path.join(source, 'o8-actions.json'), 'utf8'));
+    manifest.state = { scope: 'source-and-project' };
+    manifest.files[0].sha256 = createHash('sha256').update(script).digest('hex');
+    writeFileSync(path.join(source, 'o8-actions.json'), JSON.stringify(manifest));
+    const host = await import('./host');
+    const review = await host.reviewActionSource(source, repo);
+    await host.linkActionSource(source, review.revision, repo);
+    host.changeActionPluginTrigger('sample', review.revision, 'on-create', true);
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    await new WorktreeManager(repo).create({ agentType: 'codex', taskName: 'trigger with state', managed: true, skipSetup: true, baseBranch: 'main', isolationPreference: 'git-worktree' });
+    await host.recoverActionPluginTriggers();
+    expect(host.actionReceipts('sample')[0]).toMatchObject({ status: 'succeeded', state: review.execution.state, triggerId: 'on-create' });
+    expect(readFileSync(path.join(review.execution.state!.directory, 'trigger-note.txt'), 'utf8')).toBe('saved by trigger');
+    expect(readFileSync(output, 'utf8').trim().split('\n')).toHaveLength(1);
+  }, 60_000);
+
   it('does not run a pre-opt-in event if the trigger is enabled before its delayed delivery', async () => {
     const { repo, source, output, root } = fixture();
     const host = await import('./host');
@@ -176,6 +198,59 @@ describe('managed worktree action triggers', () => {
     }
     expect(host.actionReceipts('sample').map((receipt) => receipt.status)).toEqual(['succeeded', 'succeeded']);
     expect(readFileSync(output, 'utf8').trim().split('\n')).toHaveLength(2);
+  }, 60_000);
+
+  it('never grants later same-tick opt-in to a creation whose journal was unavailable', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-21T19:00:00.000Z'));
+    const { repo, source, output, root } = fixture();
+    const host = await import('./host');
+    const revision = (await host.reviewActionSource(source, repo)).revision;
+    await host.linkActionSource(source, revision, repo);
+    const receiptDb = path.join(root, 'data', 'customizations', 'actions', 'receipts.sqlite');
+    const savedDb = `${receiptDb}.temporarily-unavailable`;
+    renameSync(receiptDb, savedDb);
+    symlinkSync(savedDb, receiptDb);
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    const created = await new WorktreeManager(repo).create({ agentType: 'codex', taskName: 'before same tick consent', managed: true, skipSetup: true, baseBranch: 'main', isolationPreference: 'git-worktree' });
+    rmSync(receiptDb);
+    renameSync(savedDb, receiptDb);
+    host.changeActionPluginTrigger('sample', revision, 'on-create', true);
+    await host.reconcileWorktreeCreatedEvents();
+    await host.recoverActionPluginTriggers();
+    expect(created.status).toBe('ready');
+    expect(host.actionReceipts('sample')).toMatchObject([{ status: 'skipped', error: 'Trigger was not enabled when this worktree was created.' }]);
+    expect(() => readFileSync(output)).toThrow();
+  }, 60_000);
+
+  it.each(['trigger', 'plugin'] as const)('does not let a new %s opt-in authorize a previously eligible pending event', async (kind) => {
+    const { repo, source, output, root } = fixture();
+    const host = await import('./host');
+    const revision = (await host.reviewActionSource(source, repo)).revision;
+    await host.linkActionSource(source, revision, repo);
+    host.changeActionPluginTrigger('sample', revision, 'on-create', true);
+    const receiptDb = path.join(root, 'data', 'customizations', 'actions', 'receipts.sqlite');
+    const database = new Database(receiptDb);
+    database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run('manual-busy', 'sample', 'run', 'local-operator', revision, 'running', new Date().toISOString());
+    database.close();
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    await new WorktreeManager(repo).create({ agentType: 'codex', taskName: 'pending prior consent', managed: true, skipSetup: true, baseBranch: 'main', isolationPreference: 'git-worktree' });
+    const finished = new Database(receiptDb);
+    finished.prepare("UPDATE receipts SET status = 'succeeded', finished_at = ? WHERE id = 'manual-busy'").run(new Date().toISOString());
+    finished.close();
+    if (kind === 'trigger') {
+      host.changeActionPluginTrigger('sample', revision, 'on-create', false);
+      host.changeActionPluginTrigger('sample', revision, 'on-create', true);
+    } else {
+      host.changeActionPlugin('sample', revision, 'disable');
+      host.changeActionPlugin('sample', revision, 'enable');
+    }
+    await host.recoverActionPluginTriggers();
+    expect(host.actionReceipts('sample').filter((receipt) => receipt.eventId)).toMatchObject([
+      { status: 'skipped', error: 'Trigger consent changed after this worktree was created.' },
+    ]);
+    expect(() => readFileSync(output)).toThrow();
   }, 60_000);
 
   it('retries an enabled event after a different run of the same plugin finishes', async () => {
@@ -226,6 +301,33 @@ describe('managed worktree action triggers', () => {
     expect(restarted.actionReceipts('sample')).toMatchObject([{ status: 'succeeded', eventId: expect.any(String), triggerId: 'on-create' }]);
     expect((await readWorktreeMetaSnapshot(repo))[created.id].actionTriggerEventPending).toBe(false);
     expect(readFileSync(output, 'utf8').trim().split('\n')).toHaveLength(1);
+  }, 60_000);
+
+  it('does not clear a replacement creation marker during an older reconciliation', async () => {
+    const { repo, source } = fixture();
+    const host = await import('./host');
+    const revision = (await host.reviewActionSource(source, repo)).revision;
+    await host.linkActionSource(source, revision, repo);
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    const created = await new WorktreeManager(repo).create({ agentType: 'codex', taskName: 'replacement marker', managed: true, skipSetup: true, baseBranch: 'main', isolationPreference: 'git-worktree' });
+    const metadata = await import('@/lib/worktree/metadata-store');
+    const transact = metadata.withWorktreeMetaTransaction;
+    await transact(repo, async (transaction) => {
+      const entry = (await transaction.readAll())[created.id];
+      await transaction.save(created.id, { ...entry, actionTriggerEventPending: true });
+    });
+    let replace = true;
+    vi.spyOn(metadata, 'withWorktreeMetaTransaction').mockImplementation((repoPath, operation) => transact(repoPath, async (transaction) => {
+      if (replace) {
+        replace = false;
+        const entry = (await transaction.readAll())[created.id];
+        await transaction.save(created.id, { ...entry, createdAt: entry.createdAt + 1, materializationIdentity: { ...entry.materializationIdentity!, inode: entry.materializationIdentity!.inode + 1 } });
+      }
+      return operation(transaction);
+    }));
+    await host.reconcileWorktreeCreatedEvents();
+    expect(replace).toBe(false);
+    expect((await metadata.readWorktreeMetaSnapshot(repo))[created.id]).toMatchObject({ createdAt: created.createdAt + 1, actionTriggerEventPending: true });
   }, 60_000);
 
   it('does not retry a claimed delivery after process recovery', async () => {

@@ -45,6 +45,8 @@ function createFixture(): { repo: string; setup: RepoSetupConfig } {
   const repo = path.join(root, 'repo');
   const npmVersion = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
   git(root, 'init', '-q', '-b', 'main', repo);
+  git(repo, 'config', 'user.name', 'o8-test');
+  git(repo, 'config', 'user.email', 'test@invalid');
   writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({
     name: 'manager-dependency-fixture',
@@ -60,12 +62,7 @@ function createFixture(): { repo: string; setup: RepoSetupConfig } {
     stdio: 'ignore',
   });
   git(repo, 'add', '.gitignore', 'package.json', 'package-lock.json');
-  git(
-    repo,
-    '-c', 'user.name=o8-test',
-    '-c', 'user.email=test@invalid',
-    'commit', '-qm', 'fixture',
-  );
+  git(repo, 'commit', '-qm', 'fixture');
   return {
     repo,
     setup: {

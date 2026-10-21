@@ -16,6 +16,8 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { LaneTurnContextUsage } from '@/lib/lane/types';
 import type { ResolvedWorkerMcpServer } from '@/lib/mcp/worker-injection';
 import type { SandboxDenial } from './sandbox-denial';
+import type { OwnedExecutionPolicy } from './execution-policy';
+import type { ControlledTaskBinding } from '@/lib/mcp/task-execution-store';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
 
@@ -72,10 +74,15 @@ export interface OwnedRunRecord {
   /** Persisted so refresh/restart cannot re-emit the same denial event. */
   sandboxDenial?: SandboxDenial;
   childExit?: OwnedChildExitOutcome;
+  /** Compatibility retry receipt, shown once beside the rejected run. */
+  modelFallback?: { fromModel: string; toModel: string; notice: string };
 }
 
 export interface OwnedSessionRecord {
   surfaceId: string;
+  controlledTask?: ControlledTaskBinding;
+  /** Durable limits checked by every spawn and recovery entry point. */
+  executionPolicy?: OwnedExecutionPolicy;
   /** Launch receipt correlation, persisted before the external process starts. */
   launchMutationId?: string;
   /** Lane known at spawn time, so an immediate child exit can reach its audit stream. */
@@ -141,6 +148,9 @@ export interface OwnedWorkspaceBinding {
 }
 
 export interface OwnedWorkspaceBindingReceipt {
+  /** Exact persisted record proof for quiescent archive recovery. */
+  recordFingerprint?: string;
+  detached?: boolean;
   surfaceId: string;
   runtimeId: string;
   sessionState: OwnedSessionState;
@@ -248,6 +258,8 @@ export type OwnedCodexFleetAdditions = OwnedFleetAdditions;
 
 export interface OwnedLaunchRequest {
   cwd: string;
+  controlledTask?: ControlledTaskBinding;
+  executionPolicy?: 'single-attempt';
   prompt: string;
   taskName?: string;
   clientMutationId?: string;
@@ -316,8 +328,16 @@ export interface OwnedRuntimeAdapter {
    */
   extraSpawnEnv?: (session: OwnedSessionRecord) => Record<string, string> | Promise<Record<string, string>>;
 
+  /** Capture trusted adapter state before initial persistence, never during spawn preparation. */
+  captureRuntimeConfig?: (config?: Record<string, string>) => Record<string, string>;
+
   /** Supported isolated config-home variable for session-pinned identities. */
   isolatedConfigHomeEnv?: string;
+  /** A runtime state folder below a shared configuration root, so sandbox grants stay narrow. */
+  configStateSubdir?: string;
+  /** Separate mutable session-data root for CLIs using XDG configuration and data directories. */
+  sessionDataHomeEnv?: string;
+  sessionDataSubdir?: string;
 
   /** How this adapter attaches operator-registered MCP servers to packet workers. */
   workerMcpInjection?: 'config-file' | 'config-override';
@@ -413,6 +433,9 @@ export interface OwnedRuntimeAdapter {
     failedRunRaw: string;
     currentModel: string | undefined;
   }): { nextModel: string; reason: string } | null;
+
+  /** One pre-turn model rejection may recover even when general auto-retry is disabled. */
+  modelCompatibilityFallback?(model: string | undefined, diagnostic: string): { nextModel: string; notice: string } | null;
 }
 
 // ── Store contract ───────────────────────────────────────────────────────────
@@ -459,6 +482,9 @@ export interface OwnedSessionStore {
   } | null>;
   getSessionIdentityId(surfaceId: string): Promise<string | null>;
   getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  recoverArchivedWorkspace?(
+    surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void,
+  ): Promise<OwnedWorkspaceBindingReceipt>;
   rebindWorkspace?(
     surfaceId: string,
     input: RebindOwnedWorkspaceInput,

@@ -1,3 +1,5 @@
+import { resolveStatus, readOwnedRecoveryState } from './recovery-status';
+import { sharedWorkerLaunchContext } from '@/lib/orchestrator/shared-worker-recovery';
 import { access, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,7 +68,6 @@ const CLAUDE_PROJECTS_DIR = path.join(
   process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
   'projects',
 );
-
 // ── State ──
 const watchedAgents = new Map<string, WatchedAgent>();
 const transcriptSourceCache = new Map<string, TranscriptSourceCacheEntry>();
@@ -75,7 +76,6 @@ let callbacks: SupervisorCallbacks | null = null;
 let heartbeatInFlight = false;
 const pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
 let registrationOrdinal = 0;
-
 // ── #458: SQLite persistence for watched agents ──
 
 function persistWatchedAgent(agent: WatchedAgent): void {
@@ -120,7 +120,7 @@ function recordWatchedAgentEvent(watched: WatchedAgent, at: number): void {
 export function rehydrateWatchedAgents(): number {
   try {
     const db = getSqlite();
-    const rows = db.prepare('SELECT * FROM watched_agents WHERE completion_reported = 0').all() as PersistedAgentRow[];
+    const rows = db.prepare('SELECT * FROM watched_agents').all() as PersistedAgentRow[];
     let count = 0;
     let purged = 0;
     const rehydratedSurfaceIds: string[] = [];
@@ -128,6 +128,8 @@ export function rehydrateWatchedAgents(): number {
 
     for (const row of rows) {
       if (watchedAgents.has(row.surface_id)) continue;
+      const launchContext = sharedWorkerLaunchContext(row.repo_path, row.surface_id);
+      if (row.completion_reported && !launchContext) continue;
       const pollOrdinal = registrationOrdinal++;
       const lastEventAt = row.last_event_at || row.last_activity_at || row.registered_at;
       watchedAgents.set(row.surface_id, {
@@ -135,6 +137,7 @@ export function rehydrateWatchedAgents(): number {
         repoPath: row.repo_path,
         name: row.name,
         prompt: row.prompt,
+        launchContext,
         registeredAt: row.registered_at,
         lastStatus: row.last_status,
         lastRuntimeStatus: null,
@@ -146,7 +149,7 @@ export function rehydrateWatchedAgents(): number {
         lastEventAt,
         retryCount: row.retry_count,
         steerCount: row.steer_count,
-        completionReported: Boolean(row.completion_reported),
+        completionReported: launchContext ? false : Boolean(row.completion_reported),
         lastProgressEntryId: null,
         batchReported: false,
         tentativeFinishedSince: null,
@@ -176,7 +179,7 @@ export function rehydrateWatchedAgents(): number {
       const activeLane = db
         .prepare("SELECT 1 FROM lanes WHERE session_key = ? AND status NOT IN ('archived','completed') LIMIT 1")
         .get(surfaceId);
-      if (activeLane && now - agent.lastEventAt <= STALE_WATCH_THRESHOLD_MS) continue;
+      if (agent.launchContext?.checkoutMode === 'shared' || (activeLane && now - agent.lastEventAt <= STALE_WATCH_THRESHOLD_MS)) continue;
       removePersistedAgent(surfaceId);
       watchedAgents.delete(surfaceId);
       transcriptSourceCache.delete(surfaceId);
@@ -192,7 +195,6 @@ export function rehydrateWatchedAgents(): number {
     return 0;
   }
 }
-
 // ── Public API ──
 
 export function registerWatchedAgent(
@@ -276,9 +278,11 @@ export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
  * Returns false when the surface isn't watched (registration was lost) so the
  * caller can re-register from the lane row and retry.
  */
-export async function ingestAgentCompletionSignal(surfaceId: string): Promise<boolean> {
+export async function ingestAgentCompletionSignal(surfaceId: string, runId?: string): Promise<boolean> {
   const watched = watchedAgents.get(surfaceId);
   if (!watched || !callbacks) return false;
+  const current = await readOwnedRecoveryState(surfaceId);
+  if (current.owned && (current.interrupted || current.outcome !== 'finished' || (runId && runId !== current.runId))) return true;
   await handleStatusChange(watched, 'finished', Date.now());
   return true;
 }
@@ -309,7 +313,6 @@ export function stopSupervisorLoop(): void {
   }
   console.log('[supervisor] Stopped');
 }
-
 // ── Scheduler ──
 
 function queueNextHeartbeat(delayMs = SUPERVISOR_HEARTBEAT_MS): void {
@@ -379,10 +382,10 @@ function pollIntervalForAgent(
   }
   return pollIntervalMs;
 }
-
 // ── Core Poll Tick ──
 
 async function supervisorTick(): Promise<void> {
+  callbacks?.onHeartbeat?.();
   if (!callbacks || watchedAgents.size === 0) return;
 
   const now = Date.now();
@@ -439,7 +442,10 @@ async function pollWatchedAgent(
   }
   watched.lastRuntimeStatus = runtimeAgent?.status ?? null;
 
-  const currentStatus = resolveStatus(runtimeAgent, watched, now);
+  const recovery = await readOwnedRecoveryState(watched.surfaceId);
+  const currentStatus = recovery.owned
+    ? recovery.interrupted ? 'interrupted' : !recovery.runId ? 'unavailable' : resolveStatus(runtimeAgent, watched, now)
+    : resolveStatus(runtimeAgent, watched, now);
 
   if (currentStatus === 'finished' && !watched.completionReported) {
     const confirmed = await confirmFinishedAgent(watched, transcriptStatus, now);
@@ -466,7 +472,7 @@ async function pollWatchedAgent(
   }
 
   if ((currentStatus === 'running' || currentStatus === 'waiting') && !watched.completionReported) {
-    await checkStuck(watched, transcriptStatus, now);
+    await checkStuck(watched, transcriptStatus, now, recovery.owned ? recovery.runId : undefined);
     if (!watchedAgents.has(watched.surfaceId)) {
       return;
     }
@@ -474,31 +480,7 @@ async function pollWatchedAgent(
 
   scheduleNextAgentPoll(watched, watched.lastStatus, watched.lastRuntimeStatus, now);
 }
-
 // ── Status Resolution ──
-
-function resolveStatus(
-  agent: AgentStatusEntry | undefined,
-  watched: WatchedAgent,
-  now: number,
-): string {
-  if (!agent) {
-    // Not in fleet — if recently registered, may not have appeared yet
-    const age = now - watched.registeredAt;
-    if (age < 30_000) return 'launching';
-    // Old and missing — treat as finished or failed
-    return 'finished';
-  }
-
-  const status = agent.status;
-  if (status === 'running') return 'running';
-  if (status === 'failed' || status === 'blocked') return 'failed';
-  if (status === 'reviewing') return 'finished';
-  if (status === 'waiting') return 'waiting';
-  if (status === 'idle') return 'finished';
-  return status;
-}
-
 // ── Completion Grace ──
 
 async function confirmFinishedAgent(
@@ -594,7 +576,6 @@ function resumeWatchedAgentAfterCompletionCheck(watched: WatchedAgent, now: numb
   watched.tentativeTranscriptSignature = watched.lastTranscriptSignature;
   persistWatchedAgent(watched);
 }
-
 // ── Event Handlers ──
 
 async function handleStatusChange(
@@ -702,7 +683,7 @@ async function handleStatusChange(
         // Best effort.
       }
 
-      callbacks.queueOrchestratorEscalation(
+      if (watched.launchContext?.checkoutMode !== 'shared') callbacks.queueOrchestratorEscalation(
         watched.repoPath,
         [
           `[SUPERVISOR] Agent "${watched.name}" (${watched.surfaceId}) — FAILED after ${watched.retryCount + 1} attempts (${formatDuration(duration)})`,
@@ -731,13 +712,13 @@ async function handleStatusChange(
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId, watched), COMPLETION_CLEANUP_MS);
   }
 }
-
 // ── Stuck Detection ──
 
 async function checkStuck(
   watched: WatchedAgent,
   transcriptStatus: TranscriptBatchStatus,
   now: number,
+  automaticRecoveryRunId?: string,
 ): Promise<void> {
   if (!callbacks) return;
   // Terminal state — don't escalate a stuck signal on top of a reported
@@ -753,6 +734,9 @@ async function checkStuck(
   const staleDuration = now - watched.lastActivityAt;
   const stuckThresholdMs = watched.steerCount === 0 ? FIRST_STEER_THRESHOLD_MS : STUCK_THRESHOLD_MS;
   if (staleDuration < stuckThresholdMs) return;
+  // Shared workers report to their bound parent. Generic repo-wide escalation
+  // must not steer or interrupt them, especially after the parent was stopped.
+  if (watched.launchContext?.checkoutMode === 'shared') return;
 
   if (watched.steerCount < MAX_STEERS) {
     watched.steerCount += 1;
@@ -773,7 +757,7 @@ async function checkStuck(
       : 'You are still stuck. Stop your current approach. Try the simplest possible solution to complete the task.';
 
     try {
-      await callbacks.steerAgent(watched.surfaceId, steerMessage);
+      await callbacks.steerAgent(watched.surfaceId, steerMessage, automaticRecoveryRunId);
     } catch (err) {
       console.error(`[supervisor] Steer failed for "${watched.name}":`, err);
     }
@@ -842,7 +826,6 @@ async function refreshTranscriptActivityIfNeeded(
     return false;
   }
 }
-
 // ── All-Done Check ──
 
 function checkAllDone(): void {
@@ -850,6 +833,7 @@ function checkAllDone(): void {
 
   const byRepo = new Map<string, WatchedAgent[]>();
   for (const agent of watchedAgents.values()) {
+    if (agent.launchContext?.checkoutMode === 'shared') continue;
     const list = byRepo.get(agent.repoPath) ?? [];
     list.push(agent);
     byRepo.set(agent.repoPath, list);
@@ -891,7 +875,6 @@ function checkAllDone(): void {
     );
   }
 }
-
 // ── Fleet Summary ──
 
 function buildFleetStatusSummaries(repoPath?: string): SupervisorFleetStatusSummary[] {
@@ -944,7 +927,6 @@ function isIdleAgent(agent: WatchedAgent): boolean {
   if (agent.tentativeFinishedSince) return true;
   return agent.lastRuntimeStatus === 'idle' || agent.lastRuntimeStatus === 'reviewing';
 }
-
 // ── Transcript Status Batching ──
 
 async function readTranscriptBatchStatuses(

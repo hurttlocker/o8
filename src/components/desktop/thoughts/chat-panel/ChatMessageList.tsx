@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, forwardRef } from 'react';
+import { Fragment, forwardRef, useRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
@@ -13,6 +13,12 @@ import { TaskArtifactCard, type TaskArtifactDeliverInput } from './TaskArtifactC
 import type { TaskArtifactView } from '@/lib/task-artifacts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { noteUserScroll } from '@/lib/tts/scroll-follow';
+import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
+import { VisualizationFrame } from '@/components/desktop/visualizations/VisualizationFrame';
+import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
+
+import { TranscriptTurns } from '../../transcript/TranscriptTurns';
+import { TranscriptNavigator } from '../../transcript/TranscriptNavigator';
 
 // A run of ≥2 consecutive mission-complete cards collapses into ONE aggregate
 // (MissionCompleteGroupCard); everything else renders as its own message. Keys
@@ -67,7 +73,10 @@ export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): Miss
 }
 
 interface ChatMessageListProps {
+  logLabel?: string;
   displayMessages: MobileTranscriptEntry[];
+  threadId?: string | null;
+  active?: boolean;
   displayWaiting: boolean;
   repoPath?: string | null;
   activeTargetLabel: string;
@@ -82,6 +91,8 @@ interface ChatMessageListProps {
   /** Rendered at the live edge of the transcript — after the last message,
    *  before the thinking indicator. Used for the inline swarm crew card. */
   bottomContent?: React.ReactNode;
+  /** Stable transcript-turn slots, keyed by the original turn-start entry. */
+  turnContent?: ReadonlyMap<string, React.ReactNode>;
   // Orchestrator has its own sticky ComposerStatusBar above the textarea
   // that already surfaces "working" state + elapsed time + running tools.
   // Duplicating the inline "is thinking…" bubble here makes the chat feel
@@ -114,7 +125,10 @@ interface ChatMessageListProps {
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
   displayMessages: rawDisplayMessages,
+  logLabel,
   displayWaiting,
+  threadId,
+  active = false,
   repoPath,
   activeTargetLabel,
   activeTargetColor,
@@ -126,6 +140,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   composeFirst = false,
   topContent,
   bottomContent,
+  turnContent,
   isOrchestratorMode = false,
   suggestedReplyMessageId,
   suggestedReplies,
@@ -145,7 +160,14 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   // renders as ONE merged cluster (a single counted "Running N commands"
   // line) instead of a stack of shimmer rows. Render-time derivation — the
   // underlying message state is untouched.
+  const scrollRef = useRef<HTMLDivElement>(null);
   const displayMessages = mergeAdjacentToolOnlyEntries(rawDisplayMessages);
+  const items = buildMissionRenderItems(displayMessages);
+  const visualizations = useTranscriptVisualizations({ repoPath, threadId, active, length: rawDisplayMessages.length });
+  const visualsByIndex = placeTranscriptVisualizations(visualizations, displayMessages);
+  const renderVisualizations = (index: number) => (visualsByIndex.get(index) ?? []).map(reference => (
+    <VisualizationFrame key={reference.id} reference={reference} />
+  ));
   // Each artifact renders after the last transcript entry that precedes its
   // creation; anything newer than the transcript lands at the end. Key -1 is
   // the "no entries yet" bucket.
@@ -181,22 +203,24 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   // map below renders the chip row right after that bubble.
   let lastAssistantIndex = -1;
   for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
-    if (displayMessages[i]?.role === 'assistant') {
+    if (displayMessages[i]?.role === 'assistant' && !displayMessages[i]?.voice) {
       lastAssistantIndex = i;
       break;
     }
   }
-  const turnSummaryReceiptEntry = turnSummary
-    ? displayMessages.find((entry) => entry.id === turnSummary.assistantMessageId && entry.receipt)
-      ?? displayMessages.find((entry) => entry.id === turnSummary.firstAssistantMessageId && entry.receipt)
-    : undefined;
   const showEmptyWithOverride = displayMessages.length === 0 && !displayWaiting && emptyStateOverride;
   const showEmptyWithFallback = displayMessages.length === 0 && !displayWaiting && !emptyStateOverride;
   const isCompacting = displayWaiting && displayMessages.length > 0 &&
     displayMessages[displayMessages.length - 1]?.text?.toLowerCase().includes('compact');
 
   return (
-    <div
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, flex: composeFirst ? '0 1 auto' : 1 }}>
+    <TranscriptNavigator entries={displayMessages} scrollRef={scrollRef} />
+    <div ref={scrollRef}
+      role={logLabel ? 'log' : undefined}
+      aria-label={logLabel}
+      data-o8-chat-thread={threadId || undefined}
+      data-o8-active-chat={active && threadId ? 'true' : undefined}
       className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll"
       // Voice-playback scroll-follow yields to a manual scroll gesture here.
       onWheel={noteUserScroll}
@@ -248,8 +272,11 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         {showEmptyWithFallback ? emptyStateFallback : null}
 
         {topContent}
+        {renderVisualizations(-1)}
 
-        {buildMissionRenderItems(displayMessages).map((item) => {
+        <TranscriptTurns busy={displayWaiting} repoPath={repoPath} summary={turnSummary} turnContent={turnContent}
+          entries={items.map(item => item.kind === 'msg' ? item.msg : item.entries[0])}
+          nodes={items.map((item) => {
           if (item.kind === 'mission-group') {
             const isLastGroup = item.lastIndex === displayMessages.length - 1 && !displayWaiting;
             return (
@@ -279,38 +306,22 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           if (msg.type === 'handoff' && msg.handoff) {
             return <HandoffTranscriptCard key={msg.id} handoff={msg.handoff} timestampLabel={msg.timestampLabel} />;
           }
-          // The "Worked for Ns" line anchors ABOVE the turn's FIRST assistant
-          // message (Cursor position — right under the operator prompt).
-          // Legacy summaries without the first-message anchor fall back to the
-          // old after-last position so restored threads don't lose the line.
-          const summaryAnchorsBefore = turnSummary?.firstAssistantMessageId
-            ? msg.id === turnSummary.firstAssistantMessageId
-            : false;
-          const summaryAnchorsAfter = turnSummary && !turnSummary.firstAssistantMessageId
-            ? msg.id === turnSummary.assistantMessageId
-            : false;
-          const belongsToCurrentSummary = Boolean(turnSummary && (
-            msg.id === turnSummary.assistantMessageId
-            || msg.id === turnSummary.firstAssistantMessageId
-          ));
-          const showsPersistedReceipt = msg.role === 'assistant' && Boolean(msg.receipt) && !belongsToCurrentSummary;
+          const showsPersistedReceipt = msg.role === 'assistant' && Boolean(msg.receipt);
           return (
             <Fragment key={msg.id}>
               {showsPersistedReceipt ? <TurnSummaryCard persistedEntry={msg} /> : null}
-              {summaryAnchorsBefore && turnSummary ? (
-                <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
-              ) : null}
-              <DesktopAgentMessage
-                entry={msg}
-                isLast={index === displayMessages.length - 1 && !displayWaiting}
-                isStreaming={isLatestAssistant && !!displayWaiting}
-                repoPath={repoPath}
-                onRetryDelivery={onRetryDelivery}
-              />
-              {summaryAnchorsAfter && turnSummary ? (
-                <TurnSummaryCard summary={turnSummary} persistedEntry={turnSummaryReceiptEntry} />
-              ) : null}
+              <div data-o8-message-id={msg.id} style={{ minWidth: 0 }}>
+                <DesktopAgentMessage
+                  entry={msg}
+                  isLast={index === displayMessages.length - 1 && !displayWaiting}
+                  isStreaming={isLatestAssistant && !!displayWaiting}
+                  repoPath={repoPath}
+                  onRetryDelivery={onRetryDelivery}
+                  visualizations={msg.role === 'assistant' ? visualsByIndex.get(index) : undefined}
+                />
+              </div>
               {renderTaskArtifacts(index)}
+              {msg.role !== 'assistant' ? renderVisualizations(index) : null}
               {showChipsHere ? (
                 <SuggestedReplies
                   chips={suggestedReplies ?? []}
@@ -324,7 +335,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               ) : null}
             </Fragment>
           );
-        })}
+        })} />
 
         {renderTaskArtifacts(-1)}
         {bottomContent}
@@ -381,6 +392,6 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
         <div ref={chatEndRef} />
       </div>
-    </div>
+    </div></div>
   );
 });

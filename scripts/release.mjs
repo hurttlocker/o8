@@ -26,13 +26,21 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { buildManifest, readPublished, releaseRange, resolveNewFixes } from './lib/fixed-reports.mjs';
+import { contributorCreditLine, creditsForSubjects, ghCreditLookups } from './lib/contributor-credits.mjs';
 import { publishFixed } from './publish-fixed.mjs';
 import { syncReports } from './sync-reports.mjs';
 import { verifyNativeBundle } from './native-bundle.mjs';
 import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
+import {
+  resolveMacosReleaseArtifacts,
+  verifyMacosDmgMatchesApp,
+  verifyUniversalMacUpdaterArchive,
+} from './lib/macos-release-artifacts.mjs';
+import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
+import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
 const REPO = 'hurttlocker/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
@@ -110,6 +118,7 @@ try {
 const tag = releaseChannel.tag;
 const dryRun = process.argv.includes('--dry-run');
 const dryRunOutDir = optionValue('--out-dir') || join(tmpdir(), 'o8-public-release-out');
+let releaseSummary = null;
 
 // The authoring toolchain stays pinned to Node 22 via package.json + .nvmrc.
 // Runtime ABI compatibility is independent of this guard: tauri-export now
@@ -187,21 +196,53 @@ try {
   console.warn(`[release] WARNING: HEAD is not ${tag}; fixed-report receipts will scan ${releaseRange(tag)}.`);
 }
 
-const BUNDLE = join(root, 'src-tauri/target/release/bundle');
-const DMG = join(BUNDLE, 'dmg', `o8_${version}_x64.dmg`);
-const APP_TAR = join(BUNDLE, 'macos', 'o8.app.tar.gz');
-const APP_SIG = join(BUNDLE, 'macos', 'o8.app.tar.gz.sig');
+const artifacts = resolveMacosReleaseArtifacts(root, version);
+const BUNDLE = artifacts.bundleDir;
+const DMG = artifacts.dmg;
+const APP_TAR = artifacts.updaterArchive;
+const APP_SIG = artifacts.updaterSignature;
 
 for (const path of [DMG, APP_TAR, APP_SIG]) {
   if (!existsSync(path)) {
     console.error(`[release] missing artifact: ${path}`);
     console.error(`[release] Run this first:`);
-    console.error(`[release]   TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/cortex-ide.key) cargo tauri build`);
+    console.error('[release]   npm run tauri:build:stable-macos');
     process.exit(1);
   }
 }
 
-const PACKAGED_SERVER = join(BUNDLE, 'macos', 'o8.app', 'Contents', 'Resources', 'server');
+let darwinIdentity;
+try {
+  darwinIdentity = verifyUniversalMacUpdaterArchive(artifacts.app, APP_TAR);
+  console.log('[release] universal macOS updater archive gate passed', JSON.stringify(darwinIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish either Darwin updater entry without an archive matching the verified x86_64 + arm64 app and sidecar slices.');
+  process.exit(1);
+}
+
+try {
+  const signatureIdentity = verifyUpdaterSignature(root, APP_TAR, APP_SIG);
+  if (signatureIdentity.artifactSha256 !== darwinIdentity.updaterArchiveSha256) {
+    throw new Error('verified updater signature identity does not match the inspected updater archive');
+  }
+  console.log('[release] updater signature gate passed', JSON.stringify(signatureIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish an updater archive without a valid signature from the configured updater key.');
+  process.exit(1);
+}
+
+try {
+  const dmgIdentity = verifyMacosDmgMatchesApp(artifacts.app, DMG, version);
+  console.log('[release] macOS installer identity gate passed', JSON.stringify(dmgIdentity));
+} catch (error) {
+  console.error(`[release] FATAL: ${error.message}`);
+  console.error('[release] Refusing to publish a DMG that does not contain the same signed, versioned universal app.');
+  process.exit(1);
+}
+
+const PACKAGED_SERVER = join(artifacts.app, 'Contents', 'Resources', 'server');
 try {
   runNativeGate(PACKAGED_SERVER);
 } catch (error) {
@@ -253,23 +294,27 @@ const gateReleaseNote = existsSync(gateReleaseNotePath)
 const warnStamp = gateWarnFailed
   ? '\n\ngate:warn-failed — pre-ship boot gate did not pass; shipped warn-only per #1163.'
   : '';
+const creditLine = contributorCreditLine(releaseCredits());
 const releaseNotes = (gateReleaseNote
   ? `o8 ${tag} — see installer assets.\n\n${gateReleaseNote}`
-  : `o8 ${tag} — see installer assets.`) + warnStamp;
+  : `o8 ${tag} — see installer assets.`) + (creditLine ? `\n\n${creditLine}` : '') + warnStamp;
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
-// Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
-// point both platforms at the same artifact until a native arm64 runner
-// exists. Still signed with the same minisign key the installed app trusts.
+// Both Darwin entries intentionally share the one updater archive. The
+// inspected artifact identity above proves that archive's app is universal;
+// buildReleaseManifest rejects an identity missing either native slice.
 const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 const { latestJson, uploadArgs } = buildReleaseManifest({
-  bundleDir: BUNDLE,
+  // Linux preview artifacts are produced separately under the non-targeted
+  // Cargo bundle directory. Keep discovering them there while macOS uses the
+  // explicit universal target directory.
+  bundleDir: join(root, 'src-tauri/target/release/bundle'),
   version,
   notes: latestNotes,
   pubDate,
   downloadBase,
-  darwinSignature: signature,
+  darwinArtifact: { signature, identity: darwinIdentity },
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
   trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
@@ -342,6 +387,17 @@ if (releaseExists && process.env.O8_RELEASE_CLOBBER !== '1') {
   process.exit(1);
 }
 
+let mirrorNotes = `o8 ${tag} is published. See the release history for details.`;
+try {
+  const notesPath = join(root, 'release-notes', 'next.md');
+  releaseSummary = prepareReleaseSummary(buildLatestShip({ version, tag, publishedAt: new Date().toISOString(),
+    releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`, commits: releaseCommits(),
+    notesMarkdown: existsSync(notesPath) ? readFileSync(notesPath, 'utf8') : '' }));
+  mirrorNotes = formatReleaseSummary(releaseSummary);
+  console.log(`[release] public summary ${releaseSummary.status}${releaseSummary.cached ? ' (cached)' : ''}`);
+} catch { console.warn('[release] Public summary preparation unavailable; publishing the release fallback.'); }
+if (gateReleaseNote) mirrorNotes += `\n\n${gateReleaseNote}`;
+
 if (releaseExists) {
   console.log(`[release] ${tag} already exists — replacing assets (O8_RELEASE_CLOBBER=1)`);
   execFileSync('gh', [
@@ -374,10 +430,6 @@ console.log(`[release] published ${tag}`);
 // of truth for code + full release notes; PUBLIC_MIRROR only carries the
 // updater payload. Failures here are logged but non-fatal — the private
 // publish above already succeeded.
-const mirrorNotes = gateReleaseNote
-  ? `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.\n\n${gateReleaseNote}`
-  : `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.`;
-
 try {
   let mirrorExists = false;
   try {
@@ -527,6 +579,29 @@ function optionValue(name) {
   return index === -1 ? null : process.argv[index + 1] || null;
 }
 
+// #3459: outside contributors in this release, by pull request number.
+// Resolved once (cached on the function: it runs before a module-level `let`
+// below this point would be initialized); any GitHub failure yields no
+// credits, never a failed ship.
+function releaseCredits() {
+  if (releaseCredits.cached) return releaseCredits.cached;
+  try {
+    const commits = releaseCommits();
+    const oldest = commits.at(-1)?.sha;
+    const since = oldest
+      ? execFileSync('git', ['show', '-s', '--format=%as', oldest], { cwd: root, encoding: 'utf8' }).trim()
+      : undefined;
+    releaseCredits.cached = creditsForSubjects(
+      commits.map((commit) => commit.subject),
+      ghCreditLookups(REPO, { since }),
+    );
+  } catch (error) {
+    console.warn(`[release] contributor credits skipped: ${error?.message ?? error}`);
+    releaseCredits.cached = {};
+  }
+  return releaseCredits.cached;
+}
+
 function releaseCommits() {
   return execFileSync('git', [
     'log',
@@ -567,7 +642,9 @@ function publishPublicRelease({ publishedAt, dryRun: preview = false, outDir = n
     releaseUrl: `https://github.com/${REPO}/releases/tag/${tag}`,
     commits: releaseCommits(),
     notesMarkdown,
+    credits: releaseCredits(),
   });
+  if (releaseSummary) latestShip.summary = releaseSummary.summary;
   const stagingDir = mkdtempSync(join(tmpdir(), 'o8-latest-ship-'));
   const latestShipPath = join(stagingDir, 'latest-ship.json');
 

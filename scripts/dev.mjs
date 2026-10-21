@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolveSpawn, withServerOnlyStubNodeOptions } from './run-lib.mjs';
+import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
 
 const root = process.cwd();
 const stateDir = join(
@@ -21,6 +22,12 @@ const env = {
   WS_PORT: process.env.WS_PORT || '47125',
   O8_WS_PORT: process.env.O8_WS_PORT || process.env.WS_PORT || '47125',
 };
+// Next reads standalone production configuration before the checkout's config.
+// A dev command must always resolve this checkout, including when launched from
+// a packaged application or an older terminal server.
+delete env.__NEXT_PRIVATE_STANDALONE_CONFIG;
+delete env.O8_PACKAGED_APP;
+delete env.NEXT_PHASE;
 
 function readEntries() {
   try {
@@ -102,7 +109,11 @@ function run(label, command, args) {
   // package's JS entry here but a .cmd shim on Windows that bare spawn() cannot
   // exec. resolveSpawn() runs that JS entry under process.execPath instead, so
   // the PID we remember below stays the real child on every platform (#1744).
-  const { file, args: spawnArgs, shell } = resolveSpawn(command, args);
+  const invocation = command === 'next'
+    ? generatedOutputLaunch('dev', args.slice(1)) : null;
+  const { file, args: spawnArgs, shell } = invocation
+    ? { file: invocation.command, args: invocation.args, shell: false }
+    : resolveSpawn(command, args);
   const child = spawn(file, spawnArgs, { cwd: root, env, stdio: 'inherit', shell });
   remember(child.pid, label);
 

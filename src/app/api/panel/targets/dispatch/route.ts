@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextResponse } from 'next/server';
 import { homedir } from 'node:os';
 
@@ -24,13 +25,16 @@ import {
  * No throw — structured errors.
  */
 export async function POST(request: Request) {
-  let body: { repoPath?: string; path?: string; clientMutationId?: string };
+  let body: { repoPath?: string; projectId?: string; path?: string; clientMutationId?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400 });
   }
 
+  if (body.projectId !== undefined && (typeof body.projectId !== 'string' || !body.projectId.trim())) {
+    return NextResponse.json({ ok: false, error: 'projectId must be a non-empty project identifier' }, { status: 400 });
+  }
   const rawRepo = (body.repoPath || process.cwd()).trim();
   const repoPath = rawRepo.startsWith('~') ? rawRepo.replace('~', homedir()) : rawRepo;
   const filePath = (body.path || '').trim();
@@ -62,6 +66,7 @@ export async function POST(request: Request) {
     const createInput: CreateMissionInput = {
       issues: [{ number: issueNumber!, title: `Targeting: ${filePath}`, body: brief, url: '' }],
       repoPath,
+      ...(body.projectId ? { projectId: body.projectId.trim() } : {}),
       runtime: routing.runtime,
       requestedRuntime: routing.runtime,
       requestedModel: routing.model || null,
@@ -127,6 +132,9 @@ export async function POST(request: Request) {
       effort: routing.effort,
     });
   } catch (err) {
+    if (err instanceof MissionProjectScopeError) {
+      return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
+    }
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'dispatch failed' },
       { status: 500 },

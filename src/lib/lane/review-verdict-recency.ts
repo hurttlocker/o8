@@ -26,7 +26,7 @@ export async function findPendingSecondPassApproval(lane: Lane) {
       import('@/lib/approvals/store'),
       import('@/lib/lane/head-sha-lock'),
     ]);
-    const currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
+    const currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath));
     if (!currentHeadSha) return null;
     const approvals = listApprovalsForContext({
       packetId: lane.packetId ?? undefined,

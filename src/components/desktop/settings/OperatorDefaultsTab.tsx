@@ -15,6 +15,7 @@ import { SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import { ApfsDependencyImagesRow } from './ApfsDependencyImagesRow';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { isPaidPlan } from '@/lib/entitlement/flags';
 import { DispatchTaskSettings } from './DispatchTaskSettings';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsTomlEditor } from './SettingsTomlEditor';
@@ -113,8 +114,8 @@ function CpuIcon() {
 export function OperatorDefaultsTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const { founder, plan } = useEntitlement();
-  const foundersMode = founder !== null || plan === 'founder';
+  const { plan } = useEntitlement();
+  const earlyAccess = isPaidPlan(plan);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingToml, setEditingToml] = useState(false);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
@@ -511,7 +512,7 @@ export function OperatorDefaultsTab({ onNavigateTab }: { onNavigateTab?: (tab: S
       </SettingsGroup>
       </section>
       <SettingsAdvanced description="Design task limits, workspace setup, and preview features.">
-        <DispatchTaskSettings values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={foundersMode} />
+        <DispatchTaskSettings values={values} sources={sources} busyField={busyField} updateField={updateField} showExperimental={earlyAccess} />
       </SettingsAdvanced>
     </div>
   );

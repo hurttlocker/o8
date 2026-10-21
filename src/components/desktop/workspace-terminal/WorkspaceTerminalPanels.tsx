@@ -17,6 +17,7 @@ import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/re
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { useWsConnectionEpoch } from '@/components/desktop/hooks/DesktopWebSocketContext';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -25,6 +26,7 @@ import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })), { label: 'Canvas' });
 const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })), { label: 'Fleet canvas' });
+const LazyChatGPTPlanChat = retryingLazy(() => import('@/components/desktop/workspace-terminal/ChatGPTPlanChat').then((module) => ({ default: module.ChatGPTPlanChat })), { label: 'ChatGPT plan chat' });
 
 interface WorkspaceTerminalPanelsProps {
   workspaceId: string;
@@ -42,6 +44,7 @@ interface WorkspaceTerminalPanelsProps {
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   onCloseTab: (tabId: string) => void;
+  onNewTerminal?: (repo?: RegisteredRepo) => void;
   onRunInTerminal: (command: string) => void;
   onOpenWorkspaceCommitTab: (hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => void;
   onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
@@ -74,6 +77,7 @@ function WorkspaceTerminalPanelsBase({
   termWsConnected,
   panelRefs,
   onCloseTab,
+  onNewTerminal,
   onRunInTerminal,
   onOpenWorkspaceCommitTab,
   onUpdateLlmSummary,
@@ -189,7 +193,7 @@ function WorkspaceTerminalPanelsBase({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {!restoreSettled && !restoreHoldExpired ? <WorkspaceBootLoaderClaim /> : null}
-      {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) ? (
+      {visibleTabs.map((tab) => residentTabIdSet.has(tab.id) || tab.kind === 'chatgpt-plan' ? (
         tab.kind === 'orchestrator' ? (
           <OrchestratorResidentPanel
             key={tab.id}
@@ -208,6 +212,10 @@ function WorkspaceTerminalPanelsBase({
             projectContextRailVisible={projectContextRailVisible}
             onUpdateLlmSummary={onUpdateLlmSummary}
           />
+        ) : tab.kind === 'chatgpt-plan' ? (
+          <div key={tab.id} style={{ display: tab.id === effectiveActiveTabId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <Suspense fallback={<div role="status">Opening ChatGPT plan chat…</div>}><LazyChatGPTPlanChat tabId={tab.id} active={tab.id === effectiveActiveTabId} /></Suspense>
+          </div>
         ) : tab.kind === 'chat' ? (
           <ChatResidentPanel
             key={tab.id}
@@ -242,6 +250,9 @@ function WorkspaceTerminalPanelsBase({
             tmuxSession={tab.tmuxSession}
             readOnly={tab.readOnly}
             inputLocked={tab.remoteLaunchPending}
+            exitState={tab.terminalExit}
+            onNewShell={!tab.readOnly && !tab.remoteMachine && onNewTerminal ? () => onNewTerminal(tab.repo) : undefined}
+            onClose={() => onCloseTab(tab.id)}
             panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
@@ -543,6 +554,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession,
   readOnly,
   inputLocked,
+  exitState,
+  onNewShell,
+  onClose,
   panelRefs,
   sendTerminalAttach,
   sendTerminalInput,
@@ -556,6 +570,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession: string;
   readOnly?: boolean;
   inputLocked?: boolean;
+  exitState?: TerminalTab['terminalExit'];
+  onNewShell?: () => void;
+  onClose?: () => void;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
   sendTerminalInput: WorkspaceTerminalPanelsProps['sendTerminalInput'];
@@ -566,6 +583,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   active: boolean;
 }) {
   const { workspaceGlass } = useTheme();
+  const connectionEpoch = useWsConnectionEpoch();
   const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
@@ -607,8 +625,12 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
             else panelRefs.current.delete(tmuxSession);
           }}
           tmuxSession={tmuxSession}
+          exitState={exitState}
+          onNewShell={onNewShell}
+          onClose={onClose}
           readOnly={readOnly}
           inputLocked={inputLocked}
+          connectionEpoch={connectionEpoch}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
           sendTerminalResize={sendTerminalResize}
@@ -642,6 +664,7 @@ const CanvasPanel = memo(function CanvasPanel({
   return (
     <div
       aria-hidden={!active}
+      inert={!active}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -657,6 +680,7 @@ const CanvasPanel = memo(function CanvasPanel({
     >
       <Suspense fallback={null}>
         <LazyCanvas
+          active={active}
           tabs={[tab.canvasTab]}
           activeTabId={tab.canvasTab.id}
           onSelectTab={() => undefined}

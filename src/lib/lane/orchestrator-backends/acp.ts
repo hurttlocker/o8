@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
+import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 /**
  * Generic ACP orchestrator backend.
  *
@@ -21,7 +24,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
-import { AcpClient, mapStopReason, type AcpConfigOption, type AcpMcpServer } from '@/lib/acp/client';
+import { AcpClient, AcpRequestError, mapStopReason, type AcpConfigOption, type AcpMcpServer } from '@/lib/acp/client';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
@@ -30,6 +33,7 @@ import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import { resolveOpencodeOrchestratorModelSync } from '@/lib/operator/defaults';
 import { scanForBinary } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { resolveHermesBinary } from '@/lib/hermes/runtime-resolution';
 import { governHermesProfile } from './hermes-profile';
 import type {
   OrchestratorBackend,
@@ -41,18 +45,28 @@ import type {
 /** Hang watchdog (not a work budget) — mirrors the other backends' 4h ceiling. */
 const ACP_PROCESS_TIMEOUT_MS = 14_400_000;
 
+/** A refused model reset must not destroy an established conversation. */
+class AcpDefaultModelResetError extends Error {}
+class AcpModelSelectionError extends Error {}
+
 interface AcpSession {
   key: string;
   sessionName: string;
   repoPath: string;
+  threadId: string | null;
   client: AcpClient;
+  credentialFingerprint: string;
+  launchFingerprint: string;
   sessionId: string | null;
   status: 'ready' | 'busy' | 'dead';
   createdAt: number;
   /** `session/new`'s configOptions — the agent's own model/mode catalogue. */
   configOptions: AcpConfigOption[];
+  /** Startup model retained separately so an explicit default can undo a pin. */
+  initialModel: string | null;
   /** Last model pushed via `session/set_model`, so we only switch on change. */
   appliedModel: string | null;
+  modelUnconfirmed: boolean;
   /**
    * Turns this session has actually completed. Guards the handoff seam: setting
    * a model before the first turn is configuration, not a change of hands, and
@@ -110,9 +124,9 @@ function sessionKey(backendId: string, repoPath: string, threadId?: string | nul
 }
 
 /** o8's operator MCP server in ACP's session/new shape (env as {name,value}[]). */
-function o8McpServersForAcp(repoPath: string): AcpMcpServer[] {
+function o8McpServersForAcp(repoPath: string, threadId: string | null): AcpMcpServer[] {
   try {
-    const o8 = toOpenclawJson(buildToolRegistry(repoPath)).servers['o8'] as
+    const o8 = toOpenclawJson(buildToolRegistry(repoPath, { threadId })).servers['o8'] as
       | { command: string; args: string[]; env?: Record<string, string> }
       | undefined;
     if (!o8) return [];
@@ -132,7 +146,7 @@ function publishAcpLifecycle(backendId: string, session: AcpSession, event: Orch
   const realtime = event.type === 'text'
     ? { event: 'output' as const, action: 'orchestrator-output', status: 'completed' as const, note: `${backendId} assistant output (${event.text.length} chars)`, data: { ...base, text: event.text, thinking: false } }
     : event.type === 'error'
-      ? { event: 'error' as const, action: 'orchestrator-error', status: 'failed' as const, note: event.error.slice(0, 240), data: { ...base, error: event.error } }
+      ? { event: 'error' as const, action: 'orchestrator-error', status: 'failed' as const, note: event.error.slice(0, 240), data: { ...base, error: event.error, ...(event.code ? { code: event.code } : {}) } }
       : event.type === 'done'
         ? { event: 'status' as const, action: 'orchestrator-status', status: 'completed' as const, note: `${backendId} orchestrator turn completed`, data: { ...base, status: 'ready' as const, sessionId: event.sessionId, cost: event.cost } }
         : null;
@@ -161,6 +175,7 @@ export interface AcpLaunch {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  omitEnv?: string[];
 }
 
 export interface AcpBackendConfig {
@@ -183,18 +198,24 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       key,
       sessionName: key,
       repoPath,
+      threadId: threadId ?? null,
       sessionId: null,
       status: 'ready',
       createdAt: Date.now(),
       configOptions: [],
+      initialModel: null,
       appliedModel: null,
+      modelUnconfirmed: false,
       completedTurns: 0,
+      launchFingerprint: acpLaunchFingerprint(launch),
+      credentialFingerprint: createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex'),
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
         cwd: repoPath,
         env: launch.env,
-        onEvent: (event) => session.onEvent?.(event),
+        omitEnv: launch.omitEnv,
+        onEvent: (event, sourceSessionId) => { if (sourceSessionId === session.sessionId && session.status === 'busy') session.onEvent?.(event); },
         requestTimeoutMs: config.requestTimeoutMs,
       }),
     };
@@ -205,7 +226,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
   function ensureSync(repoPath: string, threadId?: string | null): AcpSession {
     const key = sessionKey(id, repoPath, threadId);
     const existing = sessions.get(key);
-    if (existing && existing.status !== 'dead' && existing.client.alive) return existing;
+    if (existing && existing.status !== 'dead' && existing.client.alive) {
+      const launch = config.resolveLaunch(repoPath);
+      if (existing.sessionId || existing.status === 'busy' || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))) return existing;
+      existing.client.kill();
+    }
     if (existing) sessions.delete(key);
     return spawnSession(repoPath, threadId);
   }
@@ -213,12 +238,13 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
   async function ensureHandshake(session: AcpSession): Promise<string> {
     if (session.sessionId) return session.sessionId;
     await session.client.initialize();
-    const created = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath));
+    const created = await session.client.newSession(session.repoPath, o8McpServersForAcp(session.repoPath, session.threadId));
     session.sessionId = created.sessionId;
     session.configOptions = created.configOptions;
     // The agent reports what it booted with, so a composer pick that already
     // matches costs no set_model round-trip on the first turn.
-    session.appliedModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
+    session.initialModel = modelConfigOption(session.configOptions)?.currentValue ?? null;
+    session.appliedModel = session.initialModel;
     if (session.configOptions.length) {
       sessionConfigCache.set(id, session.configOptions);
     }
@@ -227,9 +253,8 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 
   /**
    * Push the composer's model onto the live session. Skipped when unchanged, and
-   * never fatal: an agent without a model axis rejects `session/set_model` with
-   * "Method not found", which must not take the turn down with it — the turn
-   * simply runs on whatever the agent already had.
+   * a refused selection stops this turn while preserving the conversation and
+   * its previous model. Never silently run a request on a different model.
    */
   async function applyModel(
     session: AcpSession,
@@ -240,27 +265,41 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     // Precedence: the composer's per-turn pick, then the operator's pinned
     // default, then whatever the agent booted with. The last one is a real
     // option, not a failure — an unpinned backend still runs.
-    const requested = (model?.trim() || defaultModelFor(id)) ?? undefined;
-    if (!requested || requested === session.appliedModel) return;
+    const restoringDefault = model !== undefined && !model.trim();
+    const resetError = () => new AcpDefaultModelResetError(`${label} could not restore its agent default. Choose a model or start a new conversation. This conversation was preserved.`);
+    const requested = restoringDefault ? session.initialModel ?? undefined : (model?.trim() || defaultModelFor(id)) ?? undefined;
+    if (restoringDefault && !requested && (session.appliedModel !== null || session.modelUnconfirmed)) throw resetError();
+    if (session.modelUnconfirmed && !requested) throw new AcpModelSelectionError(`${label} could not confirm its model. Select a model or its default before sending. This conversation was preserved.`);
+    if (!requested || (requested === session.appliedModel && !session.modelUnconfirmed)) return;
     const previous = session.appliedModel;
     try {
-      await session.client.setModel(sessionId, requested);
-      // Only a switch on a session that has already answered something is a
-      // handoff. `lossless: true` is earned here specifically: the ACP session
-      // id is unchanged, so the receiving model inherits the real conversation
-      // rather than a replay (verified live 2026-08-04).
-      if (session.completedTurns > 0 && previous !== requested) {
-        onEvent({
-          type: 'handoff',
-          from: previous ? { backend: id, model: previous } : null,
-          to: { backend: id, model: requested },
-          lossless: true,
-        });
+      await session.client.setModel(sessionId, requested, modelConfigOption(session.configOptions)?.id ?? 'model');
+    } catch (error) {
+      if (!(error instanceof AcpRequestError)) {
+        session.modelUnconfirmed = true;
+        session.configOptions = session.configOptions.map(option => option.id === 'model' || option.category === 'model' ? { ...option, currentValue: undefined } : option);
+        sessionConfigCache.set(id, session.configOptions);
+        throw new AcpModelSelectionError(`${label} could not confirm that model switch. Select a model or its default before sending. This conversation was preserved.`);
       }
-      session.appliedModel = requested;
-    } catch (err) {
-      console.log(`[acp-orchestrator] ${label} refused model ${requested}: ${err instanceof Error ? err.message : String(err)}`);
+      if (restoringDefault) throw resetError();
+      throw new AcpModelSelectionError(`${label} could not select that model. ${session.modelUnconfirmed ? 'Its current model is unconfirmed.' : `This conversation still uses ${previous ?? 'the agent default'}.`} Choose another model or its default.`);
     }
+    session.modelUnconfirmed = false;
+    // Only a switch on a session that has already answered something is a
+    // handoff. `lossless: true` is earned here specifically: the ACP session
+    // id is unchanged, so the receiving model inherits the real conversation
+    // rather than a replay (verified live 2026-08-04).
+    if (session.completedTurns > 0 && previous !== requested) {
+      onEvent({
+        type: 'handoff',
+        from: previous ? { backend: id, model: previous } : null,
+        to: { backend: id, model: requested },
+        lossless: true,
+      });
+    }
+    session.appliedModel = requested;
+    session.configOptions = session.configOptions.map(option => option.id === 'model' || option.category === 'model' ? { ...option, currentValue: requested } : option);
+    sessionConfigCache.set(id, session.configOptions);
   }
 
   return {
@@ -275,7 +314,16 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       return { sessionName: session.sessionName, status: session.status };
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
+      if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', null)); return; }
+      if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
+        await resolveOpenRouterKey();
+        const cold = sessions.get(sessionKey(id, repoPath, options?.threadId));
+        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex')) {
+          cold.client.kill(); cold.status = 'dead';
+        }
+      }
       const session = ensureSync(repoPath, options?.threadId);
+      if (session.status === 'busy') { onEvent({ type: 'error', error: `${label} is already handling a turn in this conversation. Wait or stop it before sending another.` }); return; }
       session.status = 'busy';
 
       // Silent-empty-turn guard. opencode's `session/set_model` validates
@@ -287,8 +335,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       // operator an empty reply and no reason, which is the worst outcome. Count
       // real output so a turn that produced none can say why.
       let produced = 0;
+      let awaitingFinalReply = false;
       const countingOnEvent = (event: OrchestratorEvent) => {
         if (event.type === 'text' || event.type === 'thinking' || event.type === 'tool_use') produced += 1;
+        if (event.type === 'tool_use' || event.type === 'tool_result') awaitingFinalReply = true;
+        else if (event.type === 'text' && event.text.trim()) awaitingFinalReply = false;
         onEvent(event);
       };
       session.onEvent = countingOnEvent;
@@ -305,7 +356,9 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 
       try {
         const sessionId = await ensureHandshake(session);
+        if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', sessionId)); return; }
         await applyModel(session, sessionId, options?.model, countingOnEvent);
+        if (options?.signal?.aborted) { onEvent(mapStopReason('cancelled', sessionId)); return; }
         countingOnEvent({
           type: 'turn_receipt',
           leadModel: session.appliedModel ?? defaultModelFor(id) ?? id,
@@ -315,7 +368,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         // default would bound the whole turn (#2472). The watchdog and abort
         // are the real bounds.
         const stopReason = await session.client.prompt(sessionId, message, ACP_PROCESS_TIMEOUT_MS);
-        const doneOrError = produced === 0 && stopReason === 'end_turn'
+        const doneOrError = awaitingFinalReply && stopReason === 'end_turn'
+          ? ({ type: 'error', code: 'acp_ended_after_tools',
+            error: `${label} ended after tool activity without a final reply. You can continue this conversation; no retry was started.` } satisfies OrchestratorEvent)
+          : produced === 0 && stopReason === 'end_turn'
           ? ({
             type: 'error',
             error: session.appliedModel
@@ -332,8 +388,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         const errorEvent: OrchestratorEvent = { type: 'error', error: err instanceof Error ? err.message : String(err) };
         onEvent(errorEvent);
         publishAcpLifecycle(id, session, errorEvent);
-        session.status = 'dead';
-        session.client.kill();
+        if (!(err instanceof AcpDefaultModelResetError) && !(err instanceof AcpModelSelectionError)) {
+          session.status = 'dead';
+          session.client.kill();
+        }
       } finally {
         clearTimeout(watchdog);
         options?.signal?.removeEventListener('abort', onAbort);
@@ -345,24 +403,6 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
 }
 
 // ── Concrete backends ──────────────────────────────────────────────────────────
-
-/** Resolve the `hermes` binary (PATH); null when not installed. */
-function resolveHermesBinary(): string | null {
-  for (const candidate of [
-    process.env.O8_HERMES_BIN,
-    `${process.env.HOME ?? ''}/.local/bin/hermes`,
-    '/opt/homebrew/bin/hermes',
-    '/usr/local/bin/hermes',
-    `${process.env.HOME ?? ''}/.npm-global/bin/hermes`,
-  ]) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  // The list above is POSIX-shaped in both halves — HOME is normally unset on
-  // Windows, and none of those paths exist there. scanForBinary knows the
-  // Windows install dirs and the extensions (`.cmd`) an npm-installed CLI
-  // actually carries, so it is the only branch that can hit off macOS/Linux.
-  return scanForBinary('hermes');
-}
 
 /**
  * Hermes via `hermes acp`, run against the GOVERNED profile (3d): an isolated
@@ -440,6 +480,7 @@ export const opencodeBackend: OrchestratorBackend = makeAcpBackend({
  * outside a turn (the model-catalogue probe). Null when unavailable.
  */
 export function resolveAcpLaunch(id: OrchestratorBackendId): AcpLaunch | null {
+  if (id === 'acp') return localAcpProcessLaunch();
   if (id === 'opencode') {
     const bin = resolveOpencodeBinary();
     return bin ? { command: bin, args: ['acp'] } : null;
@@ -469,10 +510,7 @@ export const acpBackend: OrchestratorBackend = makeAcpBackend({
   id: 'acp',
   label: 'ACP',
   resolveLaunch: () => {
-    const command = process.env.O8_ACP_COMMAND?.trim();
-    if (!command) return null;
-    const args = (process.env.O8_ACP_ARGS ?? '').split(' ').map((a) => a.trim()).filter(Boolean);
-    return { command, args };
+    return localAcpProcessLaunch();
   },
 });
 

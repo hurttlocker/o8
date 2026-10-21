@@ -19,12 +19,13 @@ function turnCursor(laneId: string, allowRuntimeExit: boolean): number {
 }
 
 /** Durable insertion order also distinguishes two turns in one millisecond. */
-export function createCompletionTurnGuard(lane: Lane, options: { allowRuntimeExit?: boolean } = {}) {
+export function createCompletionTurnGuard(lane: Lane, options: { allowRuntimeExit?: boolean; checkCurrent?: () => void } = {}) {
   // Forced review intentionally interrupts this runtime. Its exit is expected;
   // new user turns and durable Stop/archive holds still supersede the transition.
   const allowRuntimeExit = options.allowRuntimeExit === true;
   const cursor = turnCursor(lane.id, allowRuntimeExit);
   function check(): void {
+    options.checkCurrent?.();
     const current = getLane(lane.id);
     if (!current || current.sessionKey !== lane.sessionKey || current.packetId !== lane.packetId
       || ['paused', 'merging', 'completed', 'archived'].includes(current.status)

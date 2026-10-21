@@ -3,19 +3,13 @@ import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { resolveRate, type ResolvedRate } from '@/lib/cost/rate-table';
+import { codexUsageCostUsd, resolveRate } from '@/lib/cost/rate-table';
 import type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 import { registerCostParser } from '@/lib/runtimes/shared/cost-parser-registry';
 export type { SessionCostData } from '@/lib/runtimes/shared/cost-parser-registry';
 
-const TOKENS_PER_MILLION = 1_000_000;
-const LONG_CONTEXT_THRESHOLD = 272_000;
-const LONG_CONTEXT_INPUT_MULTIPLIER = 2;
-const LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_CONFIG_PATH = path.join(CODEX_HOME, 'config.toml');
-
-type CodexPricingModel = ResolvedRate & { longContextEligible: boolean };
 
 type NormalizedUsage = {
   inputTokens: number;
@@ -90,35 +84,11 @@ function diffUsage(next: NormalizedUsage, previous: NormalizedUsage | null): Nor
     : null;
 }
 
-function detectPricingModel(rawModel: string | null | undefined): CodexPricingModel | null {
-  const rate = resolveRate('codex', rawModel);
-  if (!rate) return null;
-  return {
-    ...rate,
-    longContextEligible: rate.modelKey === 'gpt-5.6-sol'
-      || rate.modelKey === 'gpt-5.6-terra'
-      || rate.modelKey === 'gpt-5.5'
-      || rate.modelKey === 'gpt-5.4',
-  };
-}
-
 function buildParsedUsageEntry(usage: NormalizedUsage, rawModel: string | null | undefined): ParsedUsageEntry {
-  const pricing = detectPricingModel(rawModel);
+  const pricing = resolveRate('codex', rawModel);
   const model = pricing?.modelKey ?? rawModel?.trim() ?? null;
   const uncachedInputTokens = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
-  const inputMultiplier = pricing?.longContextEligible && usage.inputTokens > LONG_CONTEXT_THRESHOLD
-    ? LONG_CONTEXT_INPUT_MULTIPLIER
-    : 1;
-  const outputMultiplier = pricing?.longContextEligible && usage.inputTokens > LONG_CONTEXT_THRESHOLD
-    ? LONG_CONTEXT_OUTPUT_MULTIPLIER
-    : 1;
-  const totalCostUsd = pricing
-    ? (
-      (uncachedInputTokens * pricing.inputUsdPerMillion * inputMultiplier)
-      + (usage.cachedInputTokens * (pricing.cacheReadUsdPerMillion ?? 0) * inputMultiplier)
-      + (usage.outputTokens * pricing.outputUsdPerMillion * outputMultiplier)
-    ) / TOKENS_PER_MILLION
-    : 0;
+  const totalCostUsd = pricing ? codexUsageCostUsd(pricing, usage) : 0;
 
   return {
     inputTokens: uncachedInputTokens,

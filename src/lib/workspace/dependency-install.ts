@@ -321,10 +321,18 @@ async function localDependencyDigests(
   return result.sort((left, right) => left.identity.localeCompare(right.identity));
 }
 
-export async function detectDependencyInstallCommand(workspacePath: string): Promise<string | null> {
+export async function detectDependencyInstallCommand(
+  workspacePath: string,
+  inputs?: {
+    readPackage: () => Promise<Buffer | null>;
+    hasLockfile: (name: string) => Promise<boolean>;
+  },
+): Promise<string | null> {
   let packageBytes: Buffer;
   try {
-    packageBytes = await regularFileBytes(workspacePath, 'package.json');
+    const bytes = inputs ? await inputs.readPackage() : await regularFileBytes(workspacePath, 'package.json');
+    if (!bytes) return null;
+    packageBytes = bytes;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
@@ -335,7 +343,11 @@ export async function detectDependencyInstallCommand(workspacePath: string): Pro
   for (const manager of Object.keys(LOCKFILES) as SupportedPackageManager[]) {
     for (const lockfile of LOCKFILES[manager]) {
       try {
-        await lstat(path.join(workspacePath, lockfile));
+        if (inputs) {
+          if (!await inputs.hasLockfile(lockfile)) continue;
+        } else {
+          await lstat(path.join(workspacePath, lockfile));
+        }
         present.push(manager);
         break;
       } catch (error) {

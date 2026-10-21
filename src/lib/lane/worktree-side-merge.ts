@@ -19,6 +19,7 @@ import { runLaneRebaseVerify } from '@/lib/lane/rebase-verify';
 import { buildCheckList } from '@/lib/lane/preview-merge';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { handlePostRebaseVerifyFailure } from '@/lib/lane/worktree-side-merge-verify';
+import { prepareDurableMergeRelease } from '@/lib/lane/durable-merge-release';
 import { settleSuccessfulMergeWorktreeCleanup } from '@/lib/lane/successful-merge-worktree-cleanup';
 import {
   commitSpokenReviewSnapshotWithDriftRecovery,
@@ -65,6 +66,7 @@ import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { settleReturnedMergeState } from '@/lib/lane/merge-state-settlement';
 import { enqueueMergeDecompositions } from '@/lib/lane/merge-decomposition';
 import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
+import { withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { captureWorkspaceMaterializationSnapshot } from '@/lib/workspace/workspace-materialization-retirement';
 
@@ -421,6 +423,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
   if (!worktreePath) {
     return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
   }
+  const persistRelease = await prepareDurableMergeRelease(lane);
   const spokenEvidence = validateSpokenReviewEvidenceBundle(command);
   let cleanupIntegrationWorktree: (() => Promise<void>) | undefined;
   try {
@@ -473,7 +476,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return { ok: false, laneId: command.laneId, note: formatReviewedHeadMismatchNote(reviewedHead), reason: 'head_moved_since_review', reviewedHeadSha: reviewedHead.reviewedHeadSha, currentHeadSha: reviewedHead.currentHeadSha };
     }
 
-    const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
+    const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha, lane.repoPath);
     if (!headLock.ok) {
       setLaneStatus(command.laneId, 'reviewing', 'system', 'head_sha_drift');
       appendEvent(command.laneId, 'merge_head_drift', actor, {
@@ -708,12 +711,12 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       });
 
       try {
-        await fastForwardBaseBranch({
+        await withSessionMergePublication(lane.packetId, () => fastForwardBaseBranch({
           repoPath: lane.repoPath,
           baseBranch: lane.baseBranch,
           candidateRef: integrationRef,
           candidateSha: mergeCandidateSha,
-        });
+        }));
       } catch (error) {
         return createFastForwardFailureApproval(input, error);
       }
@@ -735,7 +738,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     let pushedToOrigin = false, pushError: string | undefined;
     if (originPushAvailable) {
       try {
-        await pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha);
+        await withSessionMergePublication(lane.packetId, () => pushExactBase(lane.repoPath, lane.baseBranch, mergeSha, expectedRemoteBaseSha));
         pushedToOrigin = true;
         console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
       } catch (error) {
@@ -743,6 +746,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
         console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
       }
     }
+    await persistRelease(mergeSha, reviewedSnapshotSha ?? mergeSha);
     const worktreeRemoved = await settleSuccessfulMergeWorktreeCleanup({
       manager: mgr,
       lane,

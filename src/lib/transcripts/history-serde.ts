@@ -1,6 +1,9 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { readVoiceCaption } from './voice-captions';
 
 export type StoredTranscriptMessage = {
+  voice?: MobileTranscriptEntry['voice'];
+  deliveryConfirmed?: boolean;
   id?: string;
   role?: MobileTranscriptEntry['role'];
   content?: string;
@@ -72,7 +75,9 @@ function deserializeMessage(value: unknown, dropInvalid: boolean): MobileTranscr
     : (message.text ?? message.content ?? '');
 
   return {
+    voice: readVoiceCaption(message.voice),
     id: message.id as string,
+    deliveryConfirmed: message.deliveryConfirmed === true ? true : undefined,
     role: message.role as MobileTranscriptEntry['role'],
     text,
     persistedVersion: typeof message.persistedVersion === 'number'
@@ -118,7 +123,9 @@ export function serializeTranscriptForStorage(
 ): StoredTranscriptMessage[] {
   const timestampFallback = options?.timestampFallback ?? 'now';
   return entries.map((entry) => ({
+    voice: readVoiceCaption(entry.voice),
     id: entry.id,
+    deliveryConfirmed: entry.deliveryConfirmed === true ? true : undefined,
     role: entry.role,
     content: entry.text,
     persistedVersion: entry.persistedVersion,

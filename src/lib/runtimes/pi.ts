@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { parsePiSessionCost } from '@/lib/runtimes/pi-cost-parser';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
+import { listUserPiSessions } from '@/lib/pi/user-setup';
 import {
   getOwnedPiFleetAdditions,
   getOwnedPiReviewPacket,
@@ -85,7 +86,8 @@ export const piRuntime: AgentRuntime = {
       console.warn('[pi-runtime] owned-session discovery failed:', error);
       return null;
     });
-    return owned ? owned.agents.map(mapAgentToSession) : [];
+    const userSessions = await listUserPiSessions();
+    return [...(owned ? owned.agents.map(mapAgentToSession) : []), ...userSessions];
   },
 
   async readTranscript(sessionKey: string, sinceId?: string, limit?: number): Promise<RuntimeTranscriptEntry[]> {
@@ -108,7 +110,9 @@ export const piRuntime: AgentRuntime = {
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
     if (!sessionKey.startsWith('pi-owned:')) {
-      return { ok: false, note: 'Pi runtime only supports resume for owned sessions (pi-owned: prefix).' };
+      if (!sessionKey.startsWith('pi:')) return { ok: false, note: 'Pi session key is not recognized.' };
+      const result = await launchOwnedPiSession({ cwd: '', prompt: message, userSessionKey: sessionKey });
+      return { ok: result.ok, note: result.note, sessionKey: result.surfaceId };
     }
     const result = await steerOwnedPiSession(sessionKey, message);
     return { ok: result.ok, note: result.note, sessionKey };

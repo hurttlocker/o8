@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { fetchGitHubCommits, resolveRepoSlug, DEFAULT_GITHUB_REPO } from '@/lib/github-broker';
 import { getCached, setCached } from '@/lib/github/cache';
 import { getRecentWorkspaceCommits, resolveWorkspaceRoot } from '@/lib/panel/git-commits';
+import { WorkspaceReviewError } from '@/lib/review/workspace-status';
 
 function parseLimit(value: string | null, fallback: number, max: number) {
   const parsed = Number.parseInt(value ?? '', 10);
@@ -18,17 +19,27 @@ export async function GET(req: NextRequest) {
   if (workspace) {
     const limit = parseLimit(req.nextUrl.searchParams.get('limit'), 20, 50);
     try {
-      const commits = getRecentWorkspaceCommits(workspace, limit);
+      const commits = await getRecentWorkspaceCommits(workspace, limit);
       return NextResponse.json({
         commits,
+        workspaceState: 'ready',
         workspace: resolveWorkspaceRoot(workspace),
       }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
     } catch (error) {
+      const code = error instanceof WorkspaceReviewError ? error.code : 'REVIEW_GIT_UNAVAILABLE';
+      const states: Record<string, string> = { REVIEW_NOT_GIT: 'not_git', REVIEW_PATH_MISSING: 'missing', REVIEW_PATH_UNAVAILABLE: 'unavailable' };
+      const messages: Record<string, string> = {
+        REVIEW_NOT_GIT: 'This folder is not a Git repository. Choose a Git repository to see commit activity.',
+        REVIEW_PATH_MISSING: 'This folder is no longer available. Choose an existing folder.',
+        REVIEW_PATH_UNAVAILABLE: 'This folder cannot be read. Check its permissions or choose another folder.',
+      };
       return NextResponse.json({
         commits: [],
         workspace: resolveWorkspaceRoot(workspace),
-        error: error instanceof Error ? error.message : 'Failed to fetch local commits',
-      }, { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+        workspaceState: states[code] ?? 'git_error',
+        code,
+        error: messages[code] ?? 'Git could not read local commit activity. Check Git and repository access, then retry.',
+      }, { status: error instanceof WorkspaceReviewError ? error.status : 503, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
     }
   }
 

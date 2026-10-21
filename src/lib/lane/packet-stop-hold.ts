@@ -1,12 +1,18 @@
 import {
   readOrchestratorControlPlaneState,
-  withLockedState,
+  withControlPlaneLock,
+  writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
 import {
   findMissionRegistryEntryByPacketId,
-  withMissionRegistryState,
+  readMissionRegistryEntry,
+  persistMissionRegistryStateIfVersion,
 } from '@/lib/orchestrator/mission-registry';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { isDeepStrictEqual } from 'node:util';
+import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { missionLifecycleHoldIsActive } from '@/lib/orchestrator/mission-lifecycle-hold';
+import type { Lane } from './types';
+import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import { hasCanonicalReleaseEvidence } from '@/lib/orchestrator/packet-release-truth';
 import { getSqlite } from '@/lib/db';
 import { findLaneByPacket } from './registry';
@@ -123,24 +129,86 @@ export function inspectPacketManagedRunAdmission(packetId: string): PacketManage
   return managedRunAdmissionForPacket(readManagedRunPacket(packetId));
 }
 
-/** Persist the lane stop guard in whichever durable mission store owns it. */
-export async function persistLanePacketHold(packetId: string): Promise<boolean> {
-  let currentFound = false;
-  await withLockedState((state) => {
-    const packet = state.packets.find((candidate) => candidate.id === packetId);
-    if (!packet) return;
-    currentFound = true;
-    applyOperatorHold(packet);
-  });
-  if (currentFound) return true;
+type StopLaneOwner = Pick<Lane, 'id' | 'sessionKey' | 'worktreePath' | 'repoPath' | 'runtime'>;
 
-  const entry = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true });
-  if (!entry) return false;
-  const { result } = await withMissionRegistryState(entry.id, (state) => {
-    const packet = state.packets.find((candidate) => candidate.id === packetId);
-    if (!packet) return { state, result: false };
-    applyOperatorHold(packet);
-    return { state, result: true };
-  });
-  return result;
+function laneOwnsStop(packet: OrchestratorPacket, lane?: StopLaneOwner): boolean {
+  return !lane || Boolean(packet.lane && packet.lane.laneId === lane.id
+    && (packet.lane.sessionKey ?? null) === (lane.sessionKey ?? null)
+    && (packet.lane.worktreePath ?? packet.lane.repoPath) === (lane.worktreePath ?? lane.repoPath)
+    && packet.lane.repoPath === lane.repoPath && packet.runtime === lane.runtime);
+}
+
+function stopAuthority(packet: OrchestratorPacket) {
+  return {
+    id: packet.id, storageAdmissionEpoch: packet.storageAdmissionEpoch ?? 0, attemptCount: packet.attemptCount ?? 0,
+    runtime: packet.runtime, projectId: packet.projectId ?? null, workspaceTargetPath: packet.workspaceTargetPath ?? null,
+    branchTarget: packet.branchTarget ?? null, laneId: packet.lane?.laneId ?? null,
+    sessionKey: packet.lane?.sessionKey ?? null, worktreePath: packet.lane?.worktreePath ?? null,
+    repoPath: packet.lane?.repoPath ?? null, manualLaunchClaim: packet.manualLaunchClaim ?? null,
+    holdIntent: packet.holdIntent ?? null, releaseState: packet.releaseState,
+    releaseStatePayload: packet.releaseStatePayload ?? null, archivedAt: packet.archivedAt ?? null,
+    recovery: packet.recovery ?? null, review: packet.review ?? null,
+  };
+}
+
+function terminalStopOwner(packet: OrchestratorPacket): boolean {
+  return Boolean(packet.archivedAt) || packet.status === 'archived' || packet.status === 'released'
+    || packet.releaseState === 'released';
+}
+
+function ownedMissionStop(hold: OrchestratorMissionState['lifecycleHold']): boolean {
+  return Boolean(hold?.source.startsWith('mission_stop:') && hold.reason === 'operator_stop'
+    && hold.ownerPid === process.pid && missionLifecycleHoldIsActive(hold));
+}
+
+function lifecycleAllowsStop(current: OrchestratorMissionState, registered: OrchestratorMissionState): boolean {
+  if (!current.lifecycleHold && !registered.lifecycleHold) return true;
+  // Mission Stop intentionally installs its own current-only admission before
+  // stopping each lane. Accept that exact live owner, never a foreign hold.
+  return ownedMissionStop(current.lifecycleHold) && (!registered.lifecycleHold
+    || isDeepStrictEqual(current.lifecycleHold, registered.lifecycleHold));
+}
+
+function copyStopFields(target: OrchestratorPacket, stopped: OrchestratorPacket) {
+  Object.assign(target, { operatorStopped: stopped.operatorStopped, queueState: stopped.queueState,
+    status: stopped.status, blockedReason: stopped.blockedReason,
+    lastEventAt: stopped.lastEventAt, lastEventLabel: stopped.lastEventLabel });
+}
+
+/** Persist the exact lane's stop in both stores before interrupting its worker. */
+export function persistLanePacketHold(packetId: string, lane?: StopLaneOwner): Promise<boolean> {
+  return withMissionHandoffBarrier(() => withControlPlaneLock(async () => {
+    const current = readOrchestratorControlPlaneState();
+    const packet = current.packets.find(candidate => candidate.id === packetId);
+    if (packet) {
+      if (terminalStopOwner(packet) || !laneOwnsStop(packet, lane)) return false;
+      const entry = current.missionId ? readMissionRegistryEntry(current.missionId, { includeArchived: true }) : null;
+      if (!entry && current.missionId && getSqlite().prepare('SELECT id FROM missions WHERE id = ?').get(current.missionId)) return false;
+      const stored = entry?.mission.packets.find(candidate => candidate.id === packetId);
+      if (entry && (entry.archivedAt || !stored || terminalStopOwner(stored)
+        || entry.mission.missionId !== current.missionId || entry.mission.repoPath !== current.repoPath
+        || !lifecycleAllowsStop(current, entry.mission)
+        || !isDeepStrictEqual(stopAuthority(packet), stopAuthority(stored)))) return false;
+      applyOperatorHold(packet);
+      // Keep this checkpoint if publication throws or loses its version race.
+      // Another Stop can recapture this same owner; stop fields are not identity.
+      writeOrchestratorControlPlaneState(current);
+      if (entry && stored) {
+        copyStopFields(stored, packet);
+        if (!await persistMissionRegistryStateIfVersion(entry.mission, entry.updatedAt)) {
+          throw new Error('Registry ownership advanced; the local packet remains held and its worker was not interrupted.');
+        }
+      }
+      return true;
+    }
+    const entry = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true });
+    const stored = entry?.mission.packets.find(candidate => candidate.id === packetId);
+    if (!entry || entry.archivedAt || !stored || terminalStopOwner(stored) || !laneOwnsStop(stored, lane)
+      || (entry.mission.lifecycleHold && !ownedMissionStop(entry.mission.lifecycleHold))) return false;
+    applyOperatorHold(stored);
+    if (!await persistMissionRegistryStateIfVersion(entry.mission, entry.updatedAt)) {
+      throw new Error('Registry ownership advanced; the stop was not published and its worker was not interrupted.');
+    }
+    return true;
+  }));
 }

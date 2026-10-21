@@ -63,9 +63,13 @@ export default function HistoryTab() {
     return () => window.removeEventListener('focus', onFocus);
   }, [load]);
 
-  const copy = (id: string, text: string) => {
+  const copy = async (id: string, text: string) => {
     if (!text.trim()) return;
-    void navigator.clipboard?.writeText(text).catch(() => { /* noop */ });
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return;
+    }
     setCopiedId(id);
     setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1400);
   };

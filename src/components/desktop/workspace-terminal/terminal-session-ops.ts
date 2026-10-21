@@ -2,6 +2,7 @@ import {
   adHocLaneTitle,
   laneDisplayTitle,
 } from '@/lib/orchestrator/display';
+import { runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels } from '@/components/desktop/workspace-terminal/constants';
 import type {
@@ -85,22 +86,8 @@ export function computeCliChatSession(
   currentActiveTabId: string,
 ): CliChatSessionResult {
   const currentActiveTab = currentTabs.find((tab) => tab.id === currentActiveTabId);
-  const targetRuntime = options.targetSessionKey?.startsWith('codex:')
-    || options.targetSessionKey?.startsWith('codex-owned:')
-    || options.targetSessionKey?.startsWith('codex-discovered:')
-    || options.targetSessionKey?.startsWith('codex-live:')
-    ? 'codex'
-    : options.targetSessionKey?.startsWith('claude-code:')
-      ? 'claude-code'
-      : options.targetSessionKey?.startsWith('gemini-owned:')
-        ? 'gemini'
-        : options.targetSessionKey?.startsWith('opencode-owned:')
-          ? 'opencode'
-          : options.targetSessionKey?.startsWith('cursor-owned:')
-            ? 'cursor'
-            : options.targetSessionKey?.startsWith('grok-owned:')
-              ? 'grok'
-          : null;
+  const targetRuntime = runtimeFromSessionKeyId(options.targetSessionKey)
+    ?? (options.targetSessionKey?.startsWith('codex-live:') ? 'codex' : null);
   // When the targetSessionKey carries a definitive runtime prefix, trust it
   // over options.runtime. Prevents wrong-runtime tabs when upstream (e.g.
   // a stale WS mutation) passes runtime='codex' but the actual lane is a
@@ -198,7 +185,8 @@ export function computeCliChatSession(
     // localStorage tabs with `chatRuntime: 'claude-code'` don't crash on
     // restore; the 410 from /api/claude-code/send surfaces a clear error if
     // the user actually tries to chat. Same pattern as terminal-tab-handlers.ts.
-    const fallbackModelForRuntime = resolvedRuntime === 'claude-code'
+    const fallbackModelForRuntime = resolvedRuntime === 'cloud' ? undefined
+      : resolvedRuntime === 'claude-code'
       ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
       : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
       : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
@@ -212,9 +200,10 @@ export function computeCliChatSession(
             label: cleanRuntimeSessionLabel(options.label ?? options.orchestrationPacket?.title) ?? tab.label,
             chatRuntime: resolvedRuntime,
             chatSessionKey: normalizedTargetSessionKey ?? tab.chatSessionKey,
+            repo: resolvedRuntime === 'cloud' ? options.repo ?? tab.repo : tab.repo,
             laneId: options.laneId ?? tab.laneId ?? null,
-            chatModel: options.modelId
-              ?? (tab.chatRuntime === resolvedRuntime ? tab.chatModel : fallbackModelForRuntime),
+            chatModel: resolvedRuntime === 'cloud' ? options.modelId
+              : options.modelId ?? (tab.chatRuntime === resolvedRuntime ? tab.chatModel : fallbackModelForRuntime),
             chatContinueLatest: tab.chatContinueLatest ?? false,
             chatDraftInjection: injection ?? tab.chatDraftInjection,
             orchestrationPacket: options.orchestrationPacket ?? tab.orchestrationPacket ?? null,
@@ -248,7 +237,8 @@ export function computeCliChatSession(
     laneId: options.laneId ?? null,
     chatModel: options.modelId ?? (
       // claude-code runtime guard — see comment above.
-      resolvedRuntime === 'claude-code' ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
+      resolvedRuntime === 'cloud' ? undefined
+        : resolvedRuntime === 'claude-code' ? (CLAUDE_CLI_MODELS[0]?.id ?? CODEX_CLI_MODELS[0].id)
         : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
         : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
         : resolvedRuntime === 'cursor' ? 'cli:cursor:default'

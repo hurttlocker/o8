@@ -38,6 +38,11 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
 }));
 
 const testRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-execution-carrier-'));
+// Stop owns asynchronous cleanup. Retain its exact evidence rather than deleting
+// a data parent while a failed or timed-out retirement can still be running.
+writeFileSync(path.join(process.env.O8_TEST_RUN_DATA_ROOT!, '.o8-test-run-retain.json'),
+  JSON.stringify({ schema: 'o8/native-stop-fixture-retention/v1', reason: 'Preserve Stop retirement evidence' }) + '\n',
+  { mode: 0o600 });
 const dataDir = path.join(testRoot, 'data');
 const runtimeDir = path.join(testRoot, 'runtime-bin');
 const carrierDir = path.join(testRoot, 'carrier-bin');
@@ -99,6 +104,10 @@ function createRemoteRepo() {
   git(seed, 'push', '-u', 'origin', 'main');
   git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
   execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' });
+  // Cleanup preserves the worker's dirty bytes with a commit. A clone does
+  // not inherit the seed repository's one-command author configuration.
+  git(repo, 'config', 'user.name', 'o8-test');
+  git(repo, 'config', 'user.email', 'test@o8.test');
   return repo;
 }
 
@@ -117,7 +126,7 @@ afterAll(async () => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  rmSync(testRoot, { recursive: true, force: true });
+  console.error(`[execution-carrier-fixture] retained native evidence at ${testRoot}`);
 });
 
 describe.skipIf(process.platform === 'win32')('execution carrier isolated worktree real path', () => {
@@ -186,7 +195,7 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
 
     const repoPath = createRemoteRepo();
     const { addRepo } = await import('@/lib/repos/registry');
-    await addRepo(repoPath);
+    const registeredRepo = await addRepo(repoPath);
     const threadHistory = await import('@/lib/mobile/orchestrator-thread-history');
     const receiptThread = threadHistory.createMobileOrchestratorThread({ repoPath, backend: 'codex' });
     const turnId = 'assistant-worker-receipt';
@@ -317,7 +326,7 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
     expect(existsSync(shellInjectionSentinel)).toBe(false);
 
     const worktreePath = lane.worktreePath!;
-    const { stopPacket } = await import('@/lib/orchestrator/stop-packet');
+    const { stopPacket, stopAllLanes } = await import('@/lib/orchestrator/stop-packet');
     const { lookupOwnedActiveRunFresh } = await import('@/lib/runtimes/shared/owned-session-index');
     const { probeOwnedRunProcessClaim, resolveSpawnedProcessGroupId } = await import('@/lib/runtimes/shared/owned-session/run-process-proof');
     const activeRun = await lookupOwnedActiveRunFresh(lane.sessionKey!);
@@ -327,6 +336,17 @@ writeFileSync(process.env.O8_TEST_CARRIER_PID_FILE, String(process.pid));
     const stopped = await stopPacket(packet.id);
     expect(stopped).toMatchObject({ ok: true, killConfirmed: true, interruptedSessions: 1 });
     await waitUntil(() => !isPidAlive(carrierPid) && !isPidAlive(childPid), 'carrier wrapper or runtime child survived stop');
+    // The real aggregate Stop entry point awaits the same background cleanup
+    // receipt; a successful kill alone does not prove workspace retirement.
+    const cleanup = await stopAllLanes({ repoPath: lane.repoPath });
+    expect(cleanup).toMatchObject({ failedPackets: 0, failedLanes: 0 });
     await waitUntil(() => !existsSync(worktreePath), 'isolated worktree was not reclaimed after stop');
-  }, 45_000);
+    const { getWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
+    const snapshot = getWorkspaceSnapshot(registeredRepo.id, packet.id);
+    expect(snapshot).toMatchObject({ state: 'retired', packetId: packet.id });
+    expect(git(repoPath, 'show', `${snapshot!.recoveryRef}:carrier-proof.txt`).toString())
+      .toBe('carrier review proof');
+  // Two native carrier launches and exact Stop retirement retain their own
+  // safety deadlines; the fixture budget includes their combined cost.
+  }, 120_000);
 });

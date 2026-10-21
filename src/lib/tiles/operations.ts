@@ -184,9 +184,24 @@ export function computeTileLayout(
   const leafRects = new Map<string, TileRect>();
   const splitFrames: TileSplitFrame[] = [];
 
+  function hasVisibleLeaf(node: TileNode): boolean {
+    return isTileLeafNode(node)
+      ? node.content.kind !== 'contextual-panel' || node.content.hidden !== true
+      : node.children.some(hasVisibleLeaf);
+  }
+
   function walk(node: TileNode, rect: TileRect) {
     if (isTileLeafNode(node)) {
       leafRects.set(node.id, rect);
+      return;
+    }
+
+    const firstVisible = hasVisibleLeaf(node.children[0]);
+    const secondVisible = hasVisibleLeaf(node.children[1]);
+    if (!firstVisible || !secondVisible) {
+      const hiddenRect = { left: 0, top: 0, width: 0, height: 0 };
+      walk(node.children[0], firstVisible ? rect : hiddenRect);
+      walk(node.children[1], secondVisible ? rect : hiddenRect);
       return;
     }
 
@@ -516,7 +531,7 @@ function normalizeNode(node: TileNode): TileNode {
             ? node.content.repoPath
             : null,
           ...(node.content.createdFromSplit === true ? { createdFromSplit: true } : {}),
-          ...(node.content.initialTab === 'chat' || node.content.initialTab === 'terminal' || node.content.initialTab === 'remote'
+          ...(node.content.initialTab === 'orchestrator' || node.content.initialTab === 'chat' || node.content.initialTab === 'terminal' || node.content.initialTab === 'remote'
             ? { initialTab: node.content.initialTab }
             : {}),
         },

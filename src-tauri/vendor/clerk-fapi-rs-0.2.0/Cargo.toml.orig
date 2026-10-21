@@ -1,0 +1,57 @@
+[package]
+name = "clerk-fapi-rs"
+version = "0.2.0"
+authors = ["@Nipsuli"]
+homepage = "https://github.com/Nipsuli/clerk-fapi-rs/"
+repository = "https://github.com/Nipsuli/clerk-fapi-rs/"
+description = "An unofficial Rust SDK for the Clerk REST Frontend API"
+keywords = ["clerk", "auth", "frontend"]
+license = "MIT"
+edition = "2021"
+readme = "README.md"
+
+[dependencies]
+reqwest = { version = "0.12.0", features = ["json", "multipart"] }
+anyhow = "1.0.0"
+serde = { version = "^1.0", features = ["derive"] }
+serde_with = { version = "^3.8", default-features = false, features = [
+    "base64",
+    "std",
+    "macros",
+] }
+serde_json = "^1.0"
+url = "^2.5.4"
+http = "1.0.0"
+base64 = "0.22.1"
+parking_lot = "0.12"
+pin-project-lite = "0.2"
+futures = "0.3"
+log = "0.4"
+
+[dev-dependencies]
+clerk-fapi-rs = { path = "." }
+tokio = { version = "1.0", features = ["full", "test-util", "rt-multi-thread"] }
+dotenv = "0.15"
+mockito = "1.2"
+
+[workspace]
+members = [
+    "examples",
+    "examples/dioxus-example"
+]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+uuid = { version = "^1.8", features = ["serde", "v4", "rng-getrandom"] }
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"

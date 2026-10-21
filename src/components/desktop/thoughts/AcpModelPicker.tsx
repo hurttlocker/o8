@@ -24,7 +24,12 @@ import {
   shortModelLabel,
   stripRedundantProviderPrefix,
   type CatalogueGroup,
+  type CatalogueModel,
 } from '@/lib/orchestrator/acp-model-catalogue';
+
+import { useModelVisibility, openRouterModelKey } from './composer-selector/model-visibility';
+import { ModelPickerRow } from './composer-selector/ModelPickerRow';
+import { useModelFavorites, type ModelFavorite } from './composer-selector/model-favorites';
 
 /**
  * Recently picked model ids, newest first, per backend.
@@ -62,53 +67,53 @@ function rememberRecent(backend: string, modelId: string): void {
 
 interface AcpModelPickerProps {
   backend: string;
-  /** Currently selected model id (base or effort-variant). */
   value: string | null;
   onSelect: (modelId: string) => void;
   repoPath?: string | null;
-  /** Rendered width — matches the composer menu it opens from. */
   width?: number;
-  /** Optional catalogue route for model sources that are not ACP backends. */
   catalogueUrl?: string;
+  embedded?: boolean;
+  defaultProvider?: string;
+  allowEffortVariants?: boolean;
+  disabled?: boolean;
+  manageVisibility?: boolean;
+  favorites?: ModelFavorite[];
+  onToggleFavorite?: (favorite: ModelFavorite) => void;
 }
 
-type LoadState = 'idle' | 'loading' | 'ready' | 'unavailable' | 'error';
+type LoadState = 'loading' | 'ready' | 'unavailable' | 'error';
 type CatalogueSort = 'most-popular' | 'newest';
-
-const ROW_TEXT = { fontFamily: 'var(--font-sans-system)', fontWeight: 300, letterSpacing: '0' } as const;
+const ROW_TEXT = { fontFamily: 'var(--font-sans-system)', fontWeight: 300 } as const;
+const PAGE_SIZE = 16;
 
 function providerLabel(provider: string): string {
-  const known: Record<string, string> = {
-    openrouter: 'OpenRouter',
-    opencode: 'OpenCode',
-    xai: 'xAI',
-  };
-  return known[provider] ?? provider.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return ({ openrouter: 'OpenRouter', opencode: 'OpenCode', xai: 'xAI' } as Record<string, string>)[provider]
+    ?? provider.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function filterButtonStyle(selected: boolean) {
-  return {
-    ...ROW_TEXT,
-    minHeight: 22,
-    paddingTop: 2,
-    paddingRight: 7,
-    paddingBottom: 2,
-    paddingLeft: 7,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: selected ? 'var(--t-accent)' : 'var(--t-border)',
-    borderRadius: 6,
-    background: selected ? 'var(--t-accent-soft)' : 'transparent',
-    color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)',
-    cursor: 'pointer',
-    fontSize: 10,
-  } as const;
+  return { ...ROW_TEXT, minHeight: 24, paddingTop: 2, paddingRight: 6, paddingBottom: 2, paddingLeft: 6, borderWidth: 0, borderRadius: 6, background: selected ? 'var(--t-hover)' : 'transparent', color: selected ? 'var(--t-text)' : 'var(--t-text-muted)', cursor: 'pointer', fontSize: 10 } as const;
 }
 
-export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl }: AcpModelPickerProps) {
+function modelDetail(model: CatalogueModel): string {
+  const meta = model.metadata;
+  const details: string[] = [];
+  if (meta?.contextLength) details.push(`${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(meta.contextLength)} context`);
+  if (meta?.inputPricePerMillion !== undefined && meta.outputPricePerMillion !== undefined) {
+    const price = (amount: number) => new Intl.NumberFormat('en', { style: 'currency', currency: 'USD', maximumFractionDigits: amount < 1 ? 3 : 2 }).format(amount);
+    details.push(`${price(meta.inputPricePerMillion)} / ${price(meta.outputPricePerMillion)} per 1M`);
+  }
+  return details.join(' · ') || (model.id.startsWith(`${model.provider}/`) ? model.id.slice(model.provider.length + 1) : model.id);
+}
+
+function isStealth(model: CatalogueModel): boolean {
+  return model.metadata?.stealth === true || model.id.startsWith('openrouter/stealth/');
+}
+
+export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320, catalogueUrl, embedded = false, defaultProvider, allowEffortVariants = true, disabled = false, favorites: suppliedFavorites, onToggleFavorite, manageVisibility = false }: AcpModelPickerProps) {
+  const visibility = useModelVisibility();
+  const hiddenIds = new Set(visibility.hidden);
   const [groups, setGroups] = useState<CatalogueGroup[]>([]);
-  // Starts at 'loading' rather than 'idle' so the fetch effect never has to
-  // setState synchronously on mount (which would cascade a render).
   const [state, setState] = useState<LoadState>('loading');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -117,347 +122,129 @@ export function AcpModelPicker({ backend, value, onSelect, repoPath, width = 320
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [freeOnly, setFreeOnly] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [loadedCatalogueKey, setLoadedCatalogueKey] = useState<string | null>(null);
-  // Bumped by Retry. The effect keys off it, so a refresh is a re-run rather
-  // than an imperative fetch that has to manage its own loading state.
+  const [catalogueTime, setCatalogueTime] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const [recents, setRecents] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
   const catalogueKey = `${backend}\u0000${catalogueUrl ?? ''}\u0000${repoPath ?? ''}`;
   const previousCatalogueKey = useRef(catalogueKey);
+  const valueRef = useRef(value);
+  useEffect(() => { valueRef.current = value; }, [value]);
+  const ownFavorites = useModelFavorites(`catalogue:${backend}`);
+  const favorites = suppliedFavorites ?? ownFavorites.favorites;
+  const favoriteIds = new Set(favorites.filter((favorite) => favorite.house === backend).map((favorite) => favorite.id));
+  const toggleFavorite = onToggleFavorite ?? ownFavorites.toggleFavorite;
 
-  // localStorage is client-only; read after mount, never during render.
   useEffect(() => { setRecents(readRecents(backend)); }, [backend]);
-
   useEffect(() => {
     let cancelled = false;
-    const sourceChanged = previousCatalogueKey.current !== catalogueKey;
+    const changed = previousCatalogueKey.current !== catalogueKey;
     previousCatalogueKey.current = catalogueKey;
-    setState('loading');
-    setGroups([]);
-    if (sourceChanged) {
-      setSelectedProvider(null);
-      setFreeOnly(false);
-      setShowAll(false);
-    }
-    const params = new URLSearchParams(catalogueUrl ? {} : { backend, sort });
+    setState('loading'); setGroups([]); setError(null); setLimit(PAGE_SIZE);
+    if (changed) { setSelectedProvider(null); setFreeOnly(false); setShowAll(false); }
+    const params = new URLSearchParams(catalogueUrl ? { sort } : { backend, sort });
     if (repoPath) params.set('repoPath', repoPath);
     if (reloadKey > 0) params.set('refresh', '1');
-    const baseUrl = catalogueUrl ?? '/api/orchestrator/backend-models';
-    const queryString = params.toString();
-    fetch(`${baseUrl}${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' })
-      .then((res) => res.json())
+    fetch(`${catalogueUrl ?? '/api/orchestrator/backend-models'}${params.size ? `?${params}` : ''}`, { cache: 'no-store' })
+      .then(async (res) => { if (!res.ok) throw new Error('Could not read the model list.'); return res.json(); })
       .then((data) => {
         if (cancelled) return;
         if (data?.available === false) { setState('unavailable'); return; }
         if (data?.error) { setError(String(data.error)); setState('error'); return; }
-        setGroups(Array.isArray(data?.groups) ? data.groups : []);
-        setRankingAvailable(data?.rankingAvailable === true);
-        setLoadedCatalogueKey(catalogueKey);
-        setState('ready');
+        const next: CatalogueGroup[] = Array.isArray(data?.groups) ? data.groups : [];
+        setGroups(next); setRankingAvailable(data?.rankingAvailable === true); setLoadedCatalogueKey(catalogueKey); setCatalogueTime(Date.now() / 1000); setState('ready');
+        if (defaultProvider) setSelectedProvider((current) => !changed && current && next.some((group) => group.provider === current) ? current
+          : next.find((group) => group.provider === valueRef.current?.split('/')[0])?.provider ?? next.find((group) => group.provider === defaultProvider)?.provider ?? null);
       })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setState('error');
-      });
+      .catch((err: unknown) => { if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setState('error'); } });
     return () => { cancelled = true; };
-  }, [backend, catalogueKey, catalogueUrl, repoPath, reloadKey, sort]);
-
-  const reload = useCallback(() => {
-    setState('loading');
-    setError(null);
-    setReloadKey((key) => key + 1);
-  }, []);
-
+    // Selection changes do not require another runtime probe.
+  }, [backend, catalogueKey, catalogueUrl, defaultProvider, repoPath, reloadKey, sort]);
+  const reload = useCallback(() => { setState('loading'); setReloadKey((key) => key + 1); }, []);
   useEffect(() => { if (state === 'ready') searchRef.current?.focus(); }, [state]);
-
-  const choose = useCallback((modelId: string) => {
-    rememberRecent(backend, modelId);
-    onSelect(modelId);
-  }, [backend, onSelect]);
-
-  const filtered = useMemo(() => filterCatalogue(groups, query), [groups, query]);
-  const total = useMemo(() => catalogueSize(groups), [groups]);
+  const choose = (id: string) => {
+    if (disabled) return;
+    rememberRecent(backend, id); onSelect(id);
+  };
   const active = useMemo(() => findCatalogueModel(groups, value), [groups, value]);
-  const recentModels = useMemo(() => recents
-    .map((id) => findCatalogueModel(groups, id))
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null), [groups, recents]);
-  const selectedGroup = useMemo(() => filtered.find((group) => group.provider === selectedProvider) ?? null, [filtered, selectedProvider]);
-  const defaultToCompatible = rankingAvailable && !showAll && selectedProvider === 'openrouter';
-  const visibleGroups = useMemo(() => {
-    const scoped = query.trim() || !selectedProvider ? filtered : selectedGroup ? [selectedGroup] : [];
-    return scoped.map((group) => ({
-      ...group,
-      models: group.models.filter((model) => {
-        if (freeOnly && model.metadata?.free !== true) return false;
-        if (defaultToCompatible && model.metadata?.compatible !== true) return false;
-        return true;
-      }),
-    })).filter((group) => group.models.length > 0);
-  }, [defaultToCompatible, filtered, freeOnly, query, selectedGroup, selectedProvider]);
-  const visibleTotal = useMemo(() => catalogueSize(visibleGroups), [visibleGroups]);
-  const showProviderDirectory = !query.trim() && selectedProvider === null;
-  const hasKnownFreeModels = useMemo(() => groups.some((group) => group.models.some((model) => model.metadata?.free === true)), [groups]);
+  const filtered = useMemo(() => filterCatalogue(groups, query), [groups, query]);
+  const searching = Boolean(query.trim());
+  const scoped = searching || !selectedProvider ? filtered : filtered.filter((group) => group.provider === selectedProvider);
+  const visibleGroups = scoped.map((group) => ({ ...group, models: group.models.filter((model) => {
+    if (!manageVisibility && group.provider === 'openrouter' && hiddenIds.has(openRouterModelKey(model.id)) && model.id !== active?.model.id) return false;
+    if (freeOnly && model.metadata?.free !== true) return false;
+    // Default suggestions are curated; a search always reaches the whole catalogue.
+    if (!searching && rankingAvailable && !showAll && group.provider === 'openrouter' && model.metadata?.compatible !== true && model.id !== active?.model.id && !favoriteIds.has(model.id) && !isStealth(model)) return false;
+    return true;
+  }) })).filter((group) => group.models.length > 0);
+  const showDirectory = !searching && selectedProvider === null;
   const ready = state === 'ready' && loadedCatalogueKey === catalogueKey;
-  const loading = state === 'loading' || (state === 'ready' && !ready);
-
-  return (
-    <div style={{ width: `min(${width}px, calc(100vw * var(--zoom-inverse, 1) - 24px))`, display: 'flex', flexDirection: 'column', maxHeight: 'min(420px, calc(100vh * var(--zoom-inverse, 1) - 72px))', minWidth: 0, overflowX: 'hidden' }}>
-      <div style={{ paddingTop: 6, paddingRight: 8, paddingBottom: 6, paddingLeft: 8 }}>
-        <input
-          ref={searchRef}
-          type="text"
-          value={query}
-          onChange={(event) => { setQuery(event.target.value); }}
-          placeholder={state === 'ready' ? `Search ${total} ${total === 1 ? 'model' : 'models'}` : 'Search models'}
-          aria-label="Search models"
-          style={{
-            ...ROW_TEXT,
-            width: '100%',
-            boxSizing: 'border-box',
-            fontSize: 12,
-            minHeight: 28,
-            paddingTop: 5,
-            paddingRight: 8,
-            paddingBottom: 5,
-            paddingLeft: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-border)',
-            borderRadius: 8,
-            background: 'var(--t-input-bg)',
-            color: 'var(--t-text)',
-            outline: 'none',
-          }}
-        />
-      </div>
-
-      {ready && rankingAvailable ? (
-        <div aria-label="Catalogue filters" style={{ display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
-          <button type="button" aria-pressed={sort === 'most-popular'} onClick={() => setSort('most-popular')} style={filterButtonStyle(sort === 'most-popular')}>Popular</button>
-          <button type="button" aria-pressed={sort === 'newest'} onClick={() => setSort('newest')} style={filterButtonStyle(sort === 'newest')}>Newest</button>
-          {selectedProvider === 'openrouter' ? <><button type="button" aria-pressed={!showAll} onClick={() => setShowAll(false)} style={filterButtonStyle(!showAll)}>Coding</button><button type="button" aria-pressed={showAll} onClick={() => setShowAll(true)} style={filterButtonStyle(showAll)}>All</button></> : null}
-          {hasKnownFreeModels ? <button type="button" aria-pressed={freeOnly} onClick={() => setFreeOnly((current) => !current)} style={filterButtonStyle(freeOnly)}>Free</button> : null}
-        </div>
-      ) : null}
-
-      {loading ? (
-        <StatusLine text="Reading the agent’s model list…" />
-      ) : null}
-      {state === 'unavailable' ? (
-        <StatusLine text={`${backend} is not installed on this machine.`} />
-      ) : null}
-      {state === 'error' ? (
-        <StatusLine text={error ?? 'Could not read the model list.'} onRetry={reload} />
-      ) : null}
-      {ready && total === 0 ? (
-        <StatusLine text="The agent reported no models. Check its provider auth." onRetry={reload} />
-      ) : null}
-      {ready && total > 0 && !showProviderDirectory && visibleTotal === 0 ? (
-        <StatusLine text={query.trim() ? `No model matches “${query}”.` : 'No compatible models match these filters.'} />
-      ) : null}
-
-      {/* Recents only when idle: while searching, the query IS the intent and a
-          pinned strip on top just eats rows. */}
-      {ready && !query.trim() && recentModels.length > 0 ? (
-        <div style={{ paddingRight: 6, paddingLeft: 6, paddingBottom: 4 }}>
-          <div style={{ ...ROW_TEXT, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--t-text-faint)', paddingTop: 4, paddingBottom: 3, paddingLeft: 4 }}>
-            Recent
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {recentModels.map(({ model, effort }) => {
-              const selectedId = effort ? model.efforts.find((variant) => variant.effort === effort)?.id : model.id;
-              const isActive = value === selectedId;
-              return (
-                <button
-                  key={selectedId}
-                  type="button"
-                  onClick={() => { if (selectedId) choose(selectedId); }}
-                  title={selectedId}
-                  style={{
-                    ...ROW_TEXT,
-                    fontSize: 11,
-                    maxWidth: '100%',
-                    minHeight: 22,
-                    paddingTop: 3,
-                    paddingRight: 8,
-                    paddingBottom: 3,
-                    paddingLeft: 8,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: isActive ? 'var(--t-accent)' : 'var(--t-border)',
-                    borderRadius: 999,
-                    background: isActive ? 'var(--t-accent-soft)' : 'transparent',
-                    color: isActive ? 'var(--t-accent)' : 'var(--t-text)',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {shortModelLabel(selectedId) ?? selectedId}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {ready && showProviderDirectory ? (
-        <div role="list" aria-label="Providers" style={{ overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
-          {visibleGroups.map((group) => (
-            <div key={group.provider} role="listitem">
-              <button type="button" aria-label={`Provider ${providerLabel(group.provider)}`} onClick={() => setSelectedProvider(group.provider)} style={{ ...ROW_TEXT, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: 32, paddingTop: 4, paddingRight: 10, paddingBottom: 4, paddingLeft: 10, borderWidth: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left' }}>
-                <span>{providerLabel(group.provider)}</span>
-                <span style={{ color: 'var(--t-text-faint)', fontSize: 10 }}>{group.models.length}</span>
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {ready && !showProviderDirectory && visibleTotal > 0 ? (
-        <div role="listbox" aria-label="Models" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', paddingBottom: 6 }}>
-          {selectedProvider && !query.trim() ? (
-            <button type="button" onClick={() => { setSelectedProvider(null); setShowAll(false); setFreeOnly(false); }} style={{ ...ROW_TEXT, display: 'inline-flex', alignItems: 'center', minHeight: 24, marginTop: 2, marginRight: 8, marginBottom: 2, marginLeft: 8, paddingTop: 2, paddingRight: 4, paddingBottom: 2, paddingLeft: 4, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer', fontSize: 10.5 }}>
-              Back to providers
-            </button>
-          ) : null}
-          {visibleGroups.map((group) => (
-            <div key={group.provider}>
-              {query.trim() ? <div
-                style={{
-                  ...ROW_TEXT,
-                  fontSize: 9,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  color: 'var(--t-text-faint)',
-                  paddingTop: 8,
-                  paddingRight: 10,
-                  paddingBottom: 3,
-                  paddingLeft: 10,
-                }}
-              >
-                {providerLabel(group.provider)}
-              </div> : null}
-              {group.models.map((model) => {
-                const isActive = active?.model.id === model.id;
-                return (
-                  <div key={model.id} style={{ paddingRight: 6, paddingLeft: 6 }}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={isActive && !active?.effort}
-                      onClick={() => { choose(model.id); }}
-                      title={model.id}
-                      style={{
-                        ...ROW_TEXT,
-                        display: 'block',
-                        width: '100%',
-                        minHeight: 26,
-                        paddingTop: 3,
-                        paddingRight: 8,
-                        paddingBottom: 3,
-                        paddingLeft: 10,
-                        borderWidth: 0,
-                        borderRadius: 8,
-                        background: isActive ? 'var(--t-accent-soft)' : 'transparent',
-                        color: isActive ? 'var(--t-accent)' : 'var(--t-text)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                      onMouseEnter={(event) => { if (!isActive) event.currentTarget.style.background = 'var(--t-hover)'; }}
-                      onMouseLeave={(event) => { if (!isActive) event.currentTarget.style.background = 'transparent'; }}
-                    >
-                      {/* The group header already names the provider, so both
-                          lines drop their leading provider segment — at menu
-                          width that prefix is what pushed the Flash/Pro
-                          discriminator past the ellipsis. Display only: title
-                          and set_model keep the full id. */}
-                      <span style={{ display: 'block', fontSize: 13, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {stripRedundantProviderPrefix(model.label, group.provider)}
-                      </span>
-                      <span style={{ display: 'block', fontSize: 9, lineHeight: 1.2, color: isActive ? 'var(--t-accent)' : 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {model.id.startsWith(`${group.provider}/`) ? model.id.slice(group.provider.length + 1) : model.id}
-                      </span>
-                    </button>
-                    {/* Effort variants exist only when the agent reported suffix
-                        siblings — never synthesized, so a model without them
-                        simply shows no row. */}
-                    {model.efforts.length ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, paddingTop: 3, paddingRight: 8, paddingBottom: 4, paddingLeft: 10 }}>
-                        {model.efforts.map((variant) => {
-                          const variantActive = value === variant.id;
-                          return (
-                            <button
-                              key={variant.id}
-                              type="button"
-                              onClick={() => { choose(variant.id); }}
-                              title={variant.id}
-                              style={{
-                                ...ROW_TEXT,
-                                fontSize: 9,
-                                minHeight: 18,
-                                paddingTop: 2,
-                                paddingRight: 7,
-                                paddingBottom: 2,
-                                paddingLeft: 7,
-                                borderWidth: 1,
-                                borderStyle: 'solid',
-                                borderColor: variantActive ? 'var(--t-accent)' : 'var(--t-border)',
-                                borderRadius: 999,
-                                background: variantActive ? 'var(--t-accent-soft)' : 'transparent',
-                                color: variantActive ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {variant.effort}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      ) : null}
+  const total = catalogueSize(groups);
+  const recentModels = recents.map((id) => findCatalogueModel(groups, id)).filter((entry): entry is NonNullable<typeof entry> => entry !== null && (entry.model.provider !== 'openrouter' || !hiddenIds.has(openRouterModelKey(entry.model.id)) || entry.model.id === active?.model.id));
+  const knownFree = groups.some((group) => group.models.some((model) => model.metadata?.free === true));
+  const badge = (model: CatalogueModel) => {
+    const age = model.metadata?.created ? catalogueTime - model.metadata.created : Infinity;
+    return <>{age >= 0 && age < 14 * 86_400 ? <span style={{ flexShrink: 0, fontSize: 8, color: 'var(--t-accent)' }}>NEW</span> : null}{model.metadata?.free ? <span style={{ flexShrink: 0, fontSize: 8, color: 'var(--t-text-muted)' }}>FREE</span> : null}</>;
+  };
+  const row = (model: CatalogueModel) => <div key={model.id} style={{ paddingRight: 4, paddingLeft: 4 }}>
+    {manageVisibility ? <button type="button" aria-pressed={!hiddenIds.has(openRouterModelKey(model.id))} aria-label={`${hiddenIds.has(openRouterModelKey(model.id)) ? 'Show' : 'Hide'} ${model.label}`} onClick={() => visibility.toggle(model.id)} style={{ ...filterButtonStyle(false), display: 'flex', width: '100%', justifyContent: 'space-between', gap: 12, textAlign: 'left', minHeight: 36 }}><span style={{ overflowWrap: 'anywhere' }}>{model.label}</span><span style={{ color: 'var(--t-text-muted)' }}>{hiddenIds.has(openRouterModelKey(model.id)) ? 'Hidden' : 'Shown'}</span></button> : <ModelPickerRow label={stripRedundantProviderPrefix(model.label, model.provider)} detail={modelDetail(model)} title={model.id} selected={active?.model.id === model.id} disabled={disabled} favorite={favoriteIds.has(model.id)} onFavorite={() => toggleFavorite({ house: backend, id: model.id, label: model.label })} onSelect={() => choose(model.id)} badge={badge(model)} />}
+    {allowEffortVariants && model.efforts.length ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, paddingTop: 2, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
+      {model.efforts.map((variant) => <button key={variant.id} type="button" title={variant.id} disabled={disabled} onClick={() => choose(variant.id)} style={filterButtonStyle(value === variant.id)}>{variant.effort}</button>)}
+    </div> : null}
+  </div>;
+  return <div style={{ width: embedded ? '100%' : `min(${width}px, calc(100vw * var(--zoom-inverse, 1) - 24px))`, display: 'flex', flexDirection: 'column', flex: '1 1 auto', maxHeight: 390, minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
+    <div style={{ paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
+      <input ref={searchRef} type="text" value={query} onChange={(event) => { setQuery(event.target.value); setLimit(PAGE_SIZE); }} placeholder={ready ? `Search all ${total} models` : 'Search models'} aria-label="Search models" style={{ ...ROW_TEXT, boxSizing: 'border-box', width: '100%', minHeight: 28, paddingTop: 4, paddingRight: 0, paddingBottom: 4, paddingLeft: 0, borderWidth: 0, borderBottom: '1px solid var(--t-border)', background: 'transparent', color: 'var(--t-text)', fontSize: 12, outline: 'none' }} />
     </div>
-  );
+    {ready && selectedProvider && !searching ? <button type="button" aria-label="Change model provider" onClick={() => { setSelectedProvider(null); setLimit(PAGE_SIZE); }} style={{ ...ROW_TEXT, display: 'flex', justifyContent: 'space-between', minHeight: 24, paddingTop: 2, paddingRight: 8, paddingBottom: 2, paddingLeft: 8, borderWidth: 0, background: 'transparent', color: 'var(--t-text-muted)', fontSize: 10.5, cursor: 'pointer' }}><span>{providerLabel(selectedProvider)}</span><span>⌄</span></button> : null}
+    {ready && rankingAvailable && selectedProvider === 'openrouter' ? <div aria-label="Catalogue filters" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, paddingRight: 6, paddingBottom: 4, paddingLeft: 6 }}>
+      <button type="button" title="Ranked by tokens processed this week" aria-pressed={sort === 'most-popular'} onClick={() => setSort('most-popular')} style={filterButtonStyle(sort === 'most-popular')}>Popular</button>
+      <button type="button" aria-pressed={sort === 'newest'} onClick={() => setSort('newest')} style={filterButtonStyle(sort === 'newest')}>Newest</button>
+      <span style={{ flex: 1 }} />
+      <button type="button" aria-pressed={!showAll} onClick={() => { setShowAll(false); setLimit(PAGE_SIZE); }} style={filterButtonStyle(!showAll)}>Coding</button>
+      <button type="button" aria-pressed={showAll} onClick={() => { setShowAll(true); setLimit(PAGE_SIZE); }} style={filterButtonStyle(showAll)}>All</button>
+      {knownFree ? <button type="button" aria-pressed={freeOnly} onClick={() => { setFreeOnly(!freeOnly); setLimit(PAGE_SIZE); }} style={filterButtonStyle(freeOnly)}>Free</button> : null}
+    </div> : null}
+    {ready && selectedProvider === 'openrouter' && !showDirectory ? <div style={{ fontSize: 9.5, color: 'var(--t-text-muted)', paddingRight: 8, paddingBottom: 3, paddingLeft: 8 }}>Prices per 1M tokens · input / output</div> : null}
+    {visibility.error ? <StatusLine text={visibility.error} /> : null}
+    {!ready && state !== 'error' && state !== 'unavailable' ? <StatusLine text="Reading the agent’s model list…" /> : null}
+    {state === 'unavailable' ? <StatusLine text={`${backend} is not installed on this machine.`} /> : null}
+    {state === 'error' ? <StatusLine text={error ?? 'Could not read the model list.'} onRetry={reload} /> : null}
+    {ready && total === 0 ? <StatusLine text={backend === 'acp' ? 'This agent does not expose a model list. Use its default model.' : 'The agent reported no models. Check its provider auth.'} onRetry={reload} /> : null}
+    {ready && total > 0 && !showDirectory && !visibleGroups.length ? <StatusLine text={searching ? `No model matches “${query}”.` : 'No models match these filters.'} /> : null}
+    {ready && !searching && showDirectory && recentModels.length > 0 ? <div style={{ paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}><SectionLabel label="Recent" />
+      {recentModels.map(({ model, effort }) => <button key={model.id} type="button" disabled={disabled} title={model.id} onClick={() => choose(allowEffortVariants && effort ? model.efforts.find((variant) => variant.effort === effort)?.id ?? model.id : model.id)} style={{ ...filterButtonStyle(value === model.id), marginRight: 4 }}>{shortModelLabel(model.id)}</button>)}
+    </div> : null}
+    {ready && showDirectory ? <div role="list" aria-label="Providers" style={{ minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', paddingRight: 6, paddingBottom: 6, paddingLeft: 6 }}>
+      {groups.map((group) => <div key={group.provider} role="listitem"><button type="button" aria-label={`Provider ${providerLabel(group.provider)}`} onClick={() => { setSelectedProvider(group.provider); setLimit(PAGE_SIZE); }} style={{ ...ROW_TEXT, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minHeight: 32, paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8, borderWidth: 0, borderRadius: 8, background: 'transparent', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left', fontSize: 12 }}><span>{providerLabel(group.provider)}</span><span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>{group.models.length}</span></button></div>)}
+    </div> : null}
+    {ready && !showDirectory ? <div role="list" aria-label="Models" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none', overscrollBehavior: 'contain', paddingBottom: 4 }}>
+      {visibleGroups.map((group) => {
+        const pinned = searching ? [] : group.models.filter((model) => favoriteIds.has(model.id));
+        const stealth = searching ? [] : group.models.filter((model) => isStealth(model) && !favoriteIds.has(model.id));
+        const rest = group.models.filter((model) => !pinned.includes(model) && !stealth.includes(model));
+        const shown = searching ? rest : rest.slice(0, limit);
+        const selected = rest.find((model) => model.id === active?.model.id && !shown.includes(model));
+        return <div key={group.provider}>
+          {searching ? <SectionLabel label={providerLabel(group.provider)} /> : null}
+          {pinned.length ? <><SectionLabel label="Favorites" />{pinned.map(row)}</> : null}
+          {stealth.length ? <><SectionLabel label="Stealth" />{stealth.map(row)}</> : null}
+          {selected ? <><SectionLabel label="Selected" />{row(selected)}</> : null}
+          {!searching && group.provider === 'openrouter' && rankingAvailable ? <SectionLabel label={sort === 'most-popular' ? 'Popular this week' : 'Recently added'} /> : null}
+          {shown.map(row)}
+          {!searching && rest.length > limit ? <button type="button" onClick={() => setLimit((current) => current + PAGE_SIZE)} style={{ ...filterButtonStyle(false), width: '100%', marginTop: 4 }}>Show {Math.min(PAGE_SIZE, rest.length - limit)} more · {rest.length} models</button> : null}
+        </div>;
+      })}
+    </div> : null}
+  </div>;
+}
+
+function SectionLabel({ label }: { label: string }) {
+  return <div style={{ ...ROW_TEXT, fontSize: 9.5, color: 'var(--t-text-muted)', paddingTop: 7, paddingRight: 8, paddingBottom: 3, paddingLeft: 8 }}>{label}</div>;
 }
 
 function StatusLine({ text, onRetry }: { text: string; onRetry?: () => void }) {
-  return (
-    <div style={{ ...ROW_TEXT, fontSize: 11, color: 'var(--t-text-faint)', paddingTop: 10, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span>{text}</span>
-      {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          style={{
-            ...ROW_TEXT,
-            alignSelf: 'flex-start',
-            fontSize: 11,
-            minHeight: 22,
-            paddingTop: 3,
-            paddingRight: 9,
-            paddingBottom: 3,
-            paddingLeft: 9,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-border)',
-            borderRadius: 999,
-            background: 'transparent',
-            color: 'var(--t-text)',
-            cursor: 'pointer',
-          }}
-        >
-          Retry
-        </button>
-      ) : null}
-    </div>
-  );
+  return <div role="status" style={{ ...ROW_TEXT, fontSize: 11, color: 'var(--t-text-muted)', paddingTop: 10, paddingRight: 10, paddingBottom: 10, paddingLeft: 10 }}><span>{text}</span>{onRetry ? <button type="button" onClick={onRetry} style={{ ...filterButtonStyle(false), marginLeft: 6 }}>Retry</button> : null}</div>;
 }

@@ -33,6 +33,18 @@ export interface TypecheckSkip {
   reason?: string;
 }
 
+export type TypecheckAvailability = 'no-project' | 'missing-compiler' | 'available';
+
+/** Shared project/compiler observation; callers decide how to report unavailable checks. */
+export async function detectTypecheckAvailability(cwd: string): Promise<TypecheckAvailability> {
+  const hasTsconfig = await exists(path.join(cwd, 'tsconfig.json'));
+  if (!hasTsconfig) return 'no-project';
+  const hasLocalTsc =
+    (await exists(path.join(cwd, 'node_modules', '.bin', 'tsc')))
+    || (await exists(path.join(cwd, 'node_modules', 'typescript', 'package.json')));
+  return hasLocalTsc ? 'available' : 'missing-compiler';
+}
+
 /**
  * Decide whether `npx tsc --noEmit` should run in this worktree at all. Skips
  * when there's no TS project (no tsconfig) or no local compiler to run it
@@ -40,15 +52,11 @@ export interface TypecheckSkip {
  * typecheck runs exactly as before.
  */
 export async function detectTypecheckSkip(cwd: string): Promise<TypecheckSkip> {
-  const hasTsconfig = await exists(path.join(cwd, 'tsconfig.json'));
-  if (!hasTsconfig) {
+  const availability = await detectTypecheckAvailability(cwd);
+  if (availability === 'no-project') {
     return { skip: true, reason: 'no tsconfig.json (not a TypeScript project)' };
   }
-  // Local TypeScript compiler — the bin shim or the package dir.
-  const hasLocalTsc =
-    (await exists(path.join(cwd, 'node_modules', '.bin', 'tsc')))
-    || (await exists(path.join(cwd, 'node_modules', 'typescript', 'package.json')));
-  if (!hasLocalTsc) {
+  if (availability === 'missing-compiler') {
     return { skip: true, reason: 'no local TypeScript installed (node_modules missing)' };
   }
   return { skip: false };

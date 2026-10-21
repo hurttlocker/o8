@@ -14,6 +14,7 @@ export const RAW_MODEL_IDS = {
   anthropicClaudeSonnet45: 'claude-sonnet-4-5',
   anthropicClaudeHaiku45: 'claude-haiku-4-5',
   anthropicClaudeHaiku45Dated: 'claude-haiku-4-5-20251001',
+  openAiGpt61Sol: 'gpt-6.1-sol',
   openAiGpt6Astra: 'gpt-6-astra',
   openAiGpt6Sol: 'gpt-6-sol',
   openAiGpt6Luna: 'gpt-6-luna',
@@ -37,6 +38,7 @@ export const SUPPORTED_MODEL_IDS = Object.freeze(
 );
 
 export const CODEX_MODEL_IDS = Object.freeze([
+  RAW_MODEL_IDS.openAiGpt61Sol,
   RAW_MODEL_IDS.openAiGpt6Astra,
   RAW_MODEL_IDS.openAiGpt6Sol,
   RAW_MODEL_IDS.openAiGpt6Luna,
@@ -59,14 +61,13 @@ export function isCodexModelId(value: unknown): value is ModelId {
 
 export const MODEL_IDS = {
   orchestratorDefault: RAW_MODEL_IDS.anthropicClaudeOpus55,
-  // Codex ORCHESTRATOR default. Worker and generic CLI defaults stay on the
-  // 5.6 family; gpt-5.6-sol remains pickable.
+  // Orchestrator and worker defaults track their own model tiers.
   codexDefault: RAW_MODEL_IDS.openAiGpt6Astra,
-  // Codex WORKER default (Sonnet-class, ~half Sol's price) for dispatched packets.
+  // Codex WORKER default (Sonnet-class) for dispatched packets.
   codexWorkerDefault: RAW_MODEL_IDS.openAiGpt56Terra,
   // Codex SCOUT / cheap tier (Haiku-class) for triage-style work.
   codexScoutDefault: RAW_MODEL_IDS.openAiGpt56Luna,
-  codexCliDefault: RAW_MODEL_IDS.openAiGpt56Sol,
+  codexCliDefault: RAW_MODEL_IDS.openAiGpt61Sol,
   claudeWorkerDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeQaDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
   claudeReviewDefault: RAW_MODEL_IDS.anthropicClaudeSonnet5,
@@ -76,8 +77,8 @@ export const MODEL_IDS = {
   // Grok Build CLI worker default (Opus-class, cheaper for context) — sub-billed
   // via SuperGrok through the CLI adapter, not a metered API route.
   grokWorkerDefault: RAW_MODEL_IDS.xaiGrok45,
-  mobileOpenAiDefault: RAW_MODEL_IDS.openAiGpt56Sol,
-  mobileCliDefault: `cli:codex:${RAW_MODEL_IDS.openAiGpt56Sol}`,
+  mobileOpenAiDefault: RAW_MODEL_IDS.openAiGpt61Sol,
+  mobileCliDefault: `cli:codex:${RAW_MODEL_IDS.openAiGpt61Sol}`,
   mobileGeminiDefault: RAW_MODEL_IDS.gemini25Flash,
   raw: RAW_MODEL_IDS,
 } as const;

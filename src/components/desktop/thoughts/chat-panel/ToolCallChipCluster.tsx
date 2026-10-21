@@ -56,6 +56,7 @@ function shellCommandOf(tool: MobileTranscriptToolCall): string | null {
 /** classifyToolCall with the shell command threaded through, so worker
  *  `o8 ask` execs render as the same Brain chip the orchestrator gets. */
 function classifyTool(tool: MobileTranscriptToolCall) {
+  if (/(?:^|__|\.)o8_command_help$/i.test(tool.name)) return { verb: 'Help', kind: 'generic' as const };
   return classifyToolCallChip(tool.name, shellCommandOf(tool));
 }
 
@@ -63,6 +64,10 @@ function toolArgument(tool: MobileTranscriptToolCall) {
   const args = tool.args ?? {};
   const name = tool.name.toLowerCase();
 
+  if (/(?:^|__|\.)o8_(?:run|command_help)$/.test(name)) {
+    const command = firstDetail(args, ['name']);
+    if (command) return compact(command);
+  }
   if (name === 'exec' || name === 'exec_command' || name === 'bash' || name === 'shell') {
     const command = firstDetail(args, ['command', 'cmd', 'shell']);
     const brainQuestion = command ? extractO8AskQuestion(command) : null;
@@ -105,6 +110,7 @@ function toolStatusLabel(tool: MobileTranscriptToolCall) {
   if (tool.status === 'calling') return 'calling';
   if (tool.status === 'running') return 'running';
   if (tool.status === 'error') return 'error';
+  if (tool.status === 'stopped') return 'stopped';
   return 'done';
 }
 
@@ -364,7 +370,7 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
             WebkitTapHighlightColor: 'transparent',
           }}
         >
-          <span>{describeToolRollup(toolCalls)}</span>
+          <span>{describeToolRollup(toolCalls)}{toolCalls.some((tool) => tool.status === 'stopped') ? ' · stopped' : ''}</span>
           <TurnChevron open={showAll} />
         </button>
       )}
@@ -417,6 +423,8 @@ export function ToolCallChipCluster({ toolCalls, suppressSettledRollup = false }
             </span>
             {status === 'error' ? (
               <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 500, color: 'var(--t-brand-red, #ef4444)' }}>failed</span>
+            ) : tool.status === 'stopped' ? (
+              <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 500, color: 'var(--t-text-muted)' }}>stopped</span>
             ) : null}
           </button>
         );

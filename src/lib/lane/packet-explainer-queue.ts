@@ -1,3 +1,4 @@
+import { manualReviewRequested } from './review-mode';
 import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
@@ -230,6 +231,7 @@ export function notifyCorrectnessReviewQueued(): void {
 export async function drainPacketExplainerQueue(
   runner: ExplainerRunner = generatePacketExplainer,
 ): Promise<void> {
+  if (manualReviewRequested()) return;
   if (!resolvePacketExplainerEnabledSync()) {
     activeExplainer?.controller.abort('packet explainer disabled');
     return;
@@ -321,6 +323,7 @@ export async function drainPacketExplainerQueue(
 }
 
 export function startPacketExplainerQueueDrain(): () => void {
+  if (manualReviewRequested()) return () => {};
   if (drainTimer) return () => { /* already running */ };
   drainTimer = setInterval(() => {
     void drainPacketExplainerQueue().catch((error) => {

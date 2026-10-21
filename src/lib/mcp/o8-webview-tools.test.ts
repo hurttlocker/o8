@@ -63,7 +63,7 @@ describe('o8 webview composite tools', () => {
 
   it('documents the primitive composition in descriptions', () => {
     const byName = new Map(O8_WEBVIEW_COMPOSITE_TOOLS.map((tool) => [tool.name, tool]));
-    expect(byName.get('o8_view_new_orchestrator_session')?.description).toContain('New tab menu');
+    expect(byName.get('o8_view_new_orchestrator_session')?.description).toContain('New session menu');
     expect(byName.get('o8_view_pick_menu_option')?.description).toContain('verifies the popover closed');
     expect(byName.get('o8_view_surface_state')?.description).toContain('one eval batch');
   });

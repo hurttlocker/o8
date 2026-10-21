@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { lstat, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type Database from 'better-sqlite3';
@@ -17,6 +18,7 @@ import {
 import { getSqlite } from '@/lib/db';
 import {
   assertManagedWorktreeMaterializationBoundary,
+  canonicalWorktreeNamespace,
   observeManagedWorktreeRootIdentity,
   resolveWorktreeRootLayout,
 } from '@/lib/worktree/root-layout';
@@ -29,8 +31,18 @@ import {
   writePinnedWorkspaceFile,
 } from './materialization-leaf-io';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
+import { assertWorktreeMetadataEntryBudget, chargeWorktreeMetadataRead, worktreeMetadataReadLimit, WorktreeMaintenanceHeldError } from './maintenance-budget';
 
 const META_FILENAME = '.meta.json';
+
+export function sameWorktreeCreation(current: WorktreeMetaEntry, expected: Pick<WorktreeMetaEntry, 'id' | 'createdAt' | 'branchName' | 'materializationIdentity'>): boolean {
+  const actual = current.materializationIdentity;
+  const captured = expected.materializationIdentity;
+  return current.id === expected.id && current.createdAt === expected.createdAt
+    && current.branchName === expected.branchName && !!actual && !!captured
+    && actual.canonicalPath === captured.canonicalPath && actual.device === captured.device
+    && actual.inode === captured.inode && actual.volumeId === captured.volumeId;
+}
 
 const mutationQueues = new Map<string, Promise<void>>();
 export interface WorktreeMetadataBoundary {
@@ -73,6 +85,8 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const entry = value as Partial<WorktreeMetaEntry>;
   return entry.id === id
+    && (entry.packetId === undefined || typeof entry.packetId === 'string')
+    && (entry.laneId === undefined || typeof entry.laneId === 'string')
     && typeof entry.agentType === 'string'
     && entry.agentType.trim().length > 0
     && (entry.sessionKey === undefined || typeof entry.sessionKey === 'string')
@@ -136,6 +150,12 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
         && (entry.materializationIdentity.volumeId === undefined
           || (typeof entry.materializationIdentity.volumeId === 'string'
             && entry.materializationIdentity.volumeId.length > 0))))
+    && (entry.actionTriggerAuthorizations === undefined || (Array.isArray(entry.actionTriggerAuthorizations)
+      && entry.actionTriggerAuthorizations.every((authorization) => authorization && typeof authorization === 'object'
+        && typeof authorization.pluginId === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(authorization.pluginId)
+        && typeof authorization.triggerId === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(authorization.triggerId)
+        && typeof authorization.revision === 'string' && /^[a-f0-9]{64}$/.test(authorization.revision)
+        && typeof authorization.consentId === 'string' && /^[a-f0-9-]{36}$/.test(authorization.consentId))))
     && (entry.actionTriggerEventPending === undefined || typeof entry.actionTriggerEventPending === 'boolean')
     && (entry.materializationParentIdentity === undefined
       || (typeof entry.materializationParentIdentity === 'object'
@@ -163,6 +183,9 @@ function validatedMetaStore(value: unknown, metaPath: string): WorktreeMetaStore
     throw new Error(`Worktree metadata at ${metaPath} is not an object.`);
   }
   const store = value as Partial<WorktreeMetaStore>;
+  if (store.worktrees && typeof store.worktrees === 'object') {
+    assertWorktreeMetadataEntryBudget(metaPath, Object.keys(store.worktrees).length);
+  }
   if (store.version !== 1
     || !store.worktrees
     || typeof store.worktrees !== 'object'
@@ -192,6 +215,30 @@ async function readMeta(
   if (!metaStat.isFile() || metaStat.isSymbolicLink()) {
     throw new Error(`Worktree metadata at ${metaPath} is not a regular file.`);
   }
+  const limit = worktreeMetadataReadLimit();
+  if (limit !== undefined) {
+    const handle = await open(metaPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size > limit) {
+        throw new WorktreeMaintenanceHeldError(metaPath, `metadata ${before.size} bytes exceeds the read allowance ${limit}`);
+      }
+      const bytes = Buffer.alloc(before.size);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+        if (read.bytesRead === 0) throw new Error('Metadata changed during bounded read.');
+        offset += read.bytesRead;
+      }
+      const after = await handle.stat();
+      if (before.dev !== after.dev || before.ino !== after.ino
+        || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+        throw new Error('Metadata changed during bounded read.');
+      }
+      chargeWorktreeMetadataRead(metaPath, bytes.length);
+      return validatedMetaStore(JSON.parse(bytes.toString('utf8')) as unknown, metaPath).worktrees;
+    } finally { await handle.close(); }
+  }
   return validatedMetaStore(await readJsonFile<unknown>(metaPath), metaPath).worktrees;
 }
 
@@ -212,6 +259,8 @@ export async function readWorktreeMetaSnapshot(
     if (!rootCandidates.includes(canonicalRoot)) rootCandidates.unshift(canonicalRoot);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const canonicalRoot = canonicalWorktreeNamespace(metadataRoot);
+    if (!rootCandidates.includes(canonicalRoot)) rootCandidates.unshift(canonicalRoot);
   }
   for (const root of rootCandidates) {
     const durableState = readMetadataTransactionStateSnapshot(root, sqlite);
@@ -298,6 +347,7 @@ export async function withWorktreeMetaTransaction<T>(
         lease,
         JSON.stringify({ version: 1, worktrees: entries } satisfies WorktreeMetaStore),
         mirrorIdentity,
+        repoPath,
       );
     } else {
       entries = validatedMetaStore(JSON.parse(durableState.payload) as unknown, metaPath).worktrees;
@@ -305,7 +355,7 @@ export async function withWorktreeMetaTransaction<T>(
     }
     const persist = async (): Promise<void> => {
       const serialized = JSON.stringify({ version: 1, worktrees: entries } satisfies WorktreeMetaStore, null, 2);
-      writeMetadataTransactionState(lease, serialized, mirrorIdentity);
+      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath);
       mirrorIdentity = await writePinnedWorkspaceFile(
         path.dirname(metaPath),
         boundary.base,
@@ -314,7 +364,7 @@ export async function withWorktreeMetaTransaction<T>(
         undefined,
         mirrorIdentity,
       );
-      writeMetadataTransactionState(lease, serialized, mirrorIdentity);
+      writeMetadataTransactionState(lease, serialized, mirrorIdentity, repoPath);
       const persisted = await readMeta(metaPath, {
         basePath: path.dirname(metaPath), identity: boundary.base,
       });

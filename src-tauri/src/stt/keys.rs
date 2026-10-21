@@ -156,21 +156,63 @@ pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
         .unwrap_or_default()
 }
 
-/// The prefs object with secret keys stripped — what the settings UI reads back,
-/// so the panel never round-trips API keys.
-pub fn config_public() -> serde_json::Value {
-    let mut value = config();
+/// Test stored-key presence without decrypting values or prompting for access.
+#[cfg(target_os = "macos")]
+fn keychain_secret_present(key: &str) -> bool {
+    #[cfg(test)]
+    if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") {
+        return false;
+    }
+
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+
+    ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(KEYCHAIN_SERVICE)
+        .account(key)
+        .load_attributes(true)
+        .load_data(false)
+        .skip_authenticated_items(true)
+        .limit(Limit::Max(1))
+        .search()
+        .map(|items| !items.is_empty())
+        .unwrap_or(false)
+}
+
+fn redact_config(
+    mut value: serde_json::Value,
+    stored_presence: impl Fn(&str) -> bool,
+) -> serde_json::Value {
     if let Some(obj) = value.as_object_mut() {
         for secret in SECRET_PREF_KEYS {
-            // Redacted presence flag: the settings UI shows "you have a key
-            // saved" without ever receiving the value. `stored_secret` also
-            // migrates a legacy plaintext value into Keychain on macOS.
-            let is_set = stored_secret(secret).is_some();
-            obj.insert(format!("{secret}_set"), serde_json::Value::Bool(is_set));
+            let legacy_present = obj
+                .get(secret)
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty());
+            obj.insert(
+                format!("{secret}_set"),
+                serde_json::Value::Bool(legacy_present || stored_presence(secret)),
+            );
             obj.remove(secret);
         }
     }
     value
+}
+
+/// Read public preferences without retrieving or migrating secret values.
+/// Secret migration remains in the explicit provider-use path.
+pub fn config_public() -> serde_json::Value {
+    redact_config(config(), |key| {
+        #[cfg(target_os = "macos")]
+        {
+            keychain_secret_present(key)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = key;
+            false
+        }
+    })
 }
 
 /// Write a single key into `~/.o8/dictation.json` (read-modify-write, preserving
@@ -316,9 +358,30 @@ pub fn get_groq_key() -> Option<String> {
         .or_else(|| stored_secret("groq_api_key"))
 }
 
+/// The OpenRouter connection record the server writes (#3583). Holds no secret.
+fn openrouter_connection_path() -> PathBuf {
+    o8_data_dir().join("providers").join("openrouter.json")
+}
+
+/// False only after the operator turns the OpenRouter connection off in
+/// Providers. A missing or unreadable record means on, matching the server.
+pub fn openrouter_enabled() -> bool {
+    openrouter_enabled_from(std::fs::read_to_string(openrouter_connection_path()).ok().as_deref())
+}
+
+fn openrouter_enabled_from(raw: Option<&str>) -> bool {
+    raw.and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+        .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+        .unwrap_or(true)
+}
+
 /// Resolve the OpenRouter API key. Env-first (`OPENROUTER_API_KEY`), then the
-/// o8 config file. UN-GATED — works in release.
+/// o8 config file. Returns None while the OpenRouter connection is turned off,
+/// whatever the key's source; otherwise works in release.
 pub fn get_openrouter_key() -> Option<String> {
+    if !openrouter_enabled() {
+        return None;
+    }
     std::env::var("OPENROUTER_API_KEY")
         .ok()
         .map(|s| s.trim().to_string())
@@ -349,12 +412,97 @@ pub fn get_google_tts_key() -> Option<String> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{keychain_delete_error_is_ignorable, ERR_SEC_ITEM_NOT_FOUND};
+    use super::{keychain_delete_error_is_ignorable, redact_config, ERR_SEC_ITEM_NOT_FOUND};
+
+    #[test]
+    fn public_prefs_redact_legacy_keys_without_mutating_or_migrating_them() {
+        let input = serde_json::json!({
+            "gemini_api_key": " legacy-test-secret ",
+            "groq_api_key": "  ",
+            "tts_provider": "google",
+        });
+        let public = redact_config(input.clone(), |key| key == "elevenlabs_api_key");
+        assert_eq!(public["gemini_api_key_set"], true);
+        assert_eq!(public["groq_api_key_set"], false);
+        assert_eq!(public["elevenlabs_api_key_set"], true);
+        assert_eq!(public["tts_provider"], "google");
+        assert!(public.get("gemini_api_key").is_none());
+        assert!(public.get("groq_api_key").is_none());
+        assert!(!public.to_string().contains("legacy-test-secret"));
+        assert_eq!(input["gemini_api_key"], " legacy-test-secret ");
+    }
 
     #[test]
     fn only_missing_keychain_items_are_ignored_on_delete() {
         assert!(keychain_delete_error_is_ignorable(ERR_SEC_ITEM_NOT_FOUND));
         assert!(!keychain_delete_error_is_ignorable(-25293));
         assert!(!keychain_delete_error_is_ignorable(-50));
+    }
+}
+
+#[cfg(test)]
+mod openrouter_connection_tests {
+    use super::openrouter_enabled_from;
+
+    #[test]
+    fn only_an_explicit_off_record_disables_openrouter() {
+        assert!(openrouter_enabled_from(None));
+        assert!(openrouter_enabled_from(Some("not json")));
+        assert!(openrouter_enabled_from(Some(r#"{"version":1}"#)));
+        assert!(openrouter_enabled_from(Some(r#"{"enabled":true}"#)));
+        assert!(!openrouter_enabled_from(Some(r#"{"version":1,"enabled":false}"#)));
+    }
+}
+
+#[cfg(test)]
+mod public_read_tests {
+    use super::config_public;
+
+    #[test]
+    fn public_read_preserves_persisted_legacy_keys_and_non_secret_preferences() {
+        const CHILD: &str = "O8_TEST_PUBLIC_VOICE_PREFS_CHILD";
+        if std::env::var(CHILD).as_deref() == Ok("1") {
+            let path = std::path::PathBuf::from(std::env::var_os("O8_DATA_DIR").unwrap())
+                .join("dictation.json");
+            let original = std::fs::read(&path).unwrap();
+            for _ in 0..2 {
+                let public = config_public();
+                assert_eq!(public["gemini_api_key_set"], true);
+                assert_eq!(public["groq_api_key_set"], false);
+                assert_eq!(public["tts_provider"], "google");
+                assert_eq!(public["language"], "en");
+                assert!(!public.to_string().contains("fixture-secret"));
+                assert!(public.get("gemini_api_key").is_none());
+                assert!(public.get("groq_api_key").is_none());
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+            }
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "o8-public-voice-prefs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct RemoveFixture(std::path::PathBuf);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _fixture = RemoveFixture(dir.clone());
+        std::fs::write(dir.join("dictation.json"),
+            br#"{"gemini_api_key":" fixture-secret ","groq_api_key":"  ","tts_provider":"google","language":"en"}"#,
+        ).unwrap();
+        let module = module_path!().split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("{module}::public_read_preserves_persisted_legacy_keys_and_non_secret_preferences"), "--nocapture"])
+            .env(CHILD, "1")
+            .env("O8_DATA_DIR", &dir)
+            .env("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1")
+            .output().unwrap();
+        assert!(output.status.success(), "isolated public-read regression failed: {}{}",
+            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     }
 }

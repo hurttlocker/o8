@@ -86,6 +86,7 @@ const LIGHT_BASE: Record<string, string> = {
   '--t-text-faint': '#94a3b8',
   // Accent
   '--t-accent': '#2563eb',
+  '--t-accent-contrast': '#ffffff',
   '--t-accent-soft': 'rgba(37, 99, 235, 0.1)',
   '--t-accent-soft-strong': 'rgba(37, 99, 235, 0.18)',
   '--t-accent-border': 'rgba(37, 99, 235, 0.26)',
@@ -262,6 +263,8 @@ const LIGHT_GLASS: Record<string, string> = {
 // Solid light: opaque paper. Slight elevation between layers via tonal
 // shifts (#FFFFFF brightest, #F4F2ED canvas, #EDE9DF subtle wells).
 const LIGHT_SOLID: Record<string, string> = {
+  '--t-sidebar-bg': '#FAF9F4',
+  '--t-shell-frame-bg': '#e8e6e1',
   '--t-canvas-bg': '#F4F2ED',
   '--t-bg': '#F4F2ED',
   '--t-bg-gradient': '#F4F2ED',
@@ -303,6 +306,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-text-muted': '#8b95a3',
   '--t-text-faint': '#5f6b7a',
   '--t-accent': '#8fb4ff',
+  '--t-accent-contrast': '#141414',
   '--t-accent-soft': 'rgba(143, 180, 255, 0.14)',
   '--t-accent-soft-strong': 'rgba(143, 180, 255, 0.22)',
   '--t-accent-border': 'rgba(143, 180, 255, 0.28)',
@@ -457,20 +461,25 @@ const DARK_GLASS: Record<string, string> = {
     '0 32px 72px rgba(0, 0, 0, 0.36), 0 10px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06)',
 };
 
-// Solid dark: opaque graphite. #1c1c1c base, #222222 chrome, #262626 panel,
-// #2e2e2e inputs and chips. Tonal lift across layers stays small so the eye
-// reads the surface as one continuous dark page.
+// Solid dark: matching near-black workspace, tools and chat rail,
+// and raised graphite controls. Content panes share the same dark floor.
 const DARK_SOLID: Record<string, string> = {
-  '--t-bg': '#1c1c1c',
-  '--t-bg-gradient': '#242424',
-  '--t-bg-subtle': '#222222',
-  '--t-panel': '#262626',
-  '--t-panel-translucent': '#222222',
-  '--t-panel-solid': '#262626',
-  '--t-input-bg': '#2a2a2a',
-  '--t-chrome': '#242424',
-  '--t-chrome-nav': '#262626',
-  '--t-chrome-timeline': '#262626',
+  '--t-terminal-bg': '#0c0e11',
+  '--t-sidebar-bg': '#0c0e11',
+  '--t-shell-frame-bg': '#141920',
+  '--t-chat-surface-bg': '#0c0e11',
+  '--t-chat-user-bg': '#252930',
+  '--t-chat-surface-input-bg': '#1b1e23',
+  '--t-bg': '#0c0e11',
+  '--t-bg-gradient': '#0c0e11',
+  '--t-bg-subtle': '#16191d',
+  '--t-panel': '#1b1e23',
+  '--t-panel-translucent': '#16191d',
+  '--t-panel-solid': '#1b1e23',
+  '--t-input-bg': '#1b1e23',
+  '--t-chrome': '#0c0e11',
+  '--t-chrome-nav': '#121518',
+  '--t-chrome-timeline': '#121518',
   '--t-search-bg': '#2a2a2a',
   '--t-btn-secondary-bg': '#2a2a2a',
   '--t-chrome-btn-bg': '#2e2e2e',
@@ -481,9 +490,9 @@ const DARK_SOLID: Record<string, string> = {
   '--t-chrome-btn-active-shadow':
     'inset 0 0 0 1px rgba(143, 180, 255, 0.4), 0 0 8px rgba(143, 180, 255, 0.18)',
   '--t-kbd-bg': '#262626',
-  '--t-canvas-bg': '#242424',
+  '--t-canvas-bg': '#0c0e11',
   '--t-timeline-bar': '#262626',
-  '--t-shell-backdrop': '#1c1c1c',
+  '--t-shell-backdrop': '#0c0e11',
   '--t-glass-elevated': '#262626',
   '--t-glass-muted': '#242424',
   '--t-glass-muted-strong': '#262626',

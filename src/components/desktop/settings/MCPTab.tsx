@@ -28,6 +28,7 @@ import {
 } from './shared';
 import { SettingsGroup } from './grouped';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
+import { PluginTaskReview } from './mcp/PluginTaskReview';
 import { ExternalMcpServersSection } from './mcp/ExternalMcpServersSection';
 import { AccessPointDiagnostics, type AccessPointDiagnosticsData } from './mcp/AccessPointDiagnostics';
 import {
@@ -254,6 +255,7 @@ export function MCPTab() {
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
       }}>
+        <PluginTaskReview />
         Failed to load MCP config: {error}
       </div>
     );
@@ -267,6 +269,7 @@ export function MCPTab() {
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
       }}>
+        <PluginTaskReview />
         Loading MCP config...
       </div>
     );
@@ -290,6 +293,8 @@ export function MCPTab() {
         title="MCP"
         subtitle="Connect compatible apps to o8, or add MCP servers that give your orchestrator more tools and context."
       />
+
+      <PluginTaskReview />
 
       {!ready ? (
         <div style={{
@@ -469,7 +474,7 @@ export function MCPTab() {
                   <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
                     Install with{' '}
                     <code style={{ fontFamily: MONO_FONT_STACK, fontSize: 11, color: RAMS_ACCENT }}>
-                      npm i -g @openai/codex-cli
+                      npm i -g @openai/codex
                     </code>
                     {' '}and sign in with ChatGPT Plus or an OPENAI_API_KEY. Without Codex, missions still dispatch via Claude Code or Gemini — but Codex is the recommended default workhorse.
                   </div>

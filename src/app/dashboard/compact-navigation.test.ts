@@ -12,7 +12,11 @@ describe('desktop navigation entry point', () => {
     expect(expression).toBeDefined();
     expect(visible({ env: { NODE_ENV: mode } }, false, false, false)).toBe(true);
   });
-  it.each([[true, false, false], [false, true, false], [false, false, true]])('avoids duplicate navigation for %j', (...state) => {
+  it.each([[true, false, false], [false, false, true], [true, false, true]])('keeps navigation available beside the list and on destination pages %j', (...state) => {
+    expect(visible({ env: { NODE_ENV: 'production' } }, ...state)).toBe(true);
+  });
+  it('preserves the existing compact mobile shell', () => {
+    const state = [false, true, false];
     expect(visible({ env: { NODE_ENV: 'production' } }, ...state)).toBe(false);
   });
 });

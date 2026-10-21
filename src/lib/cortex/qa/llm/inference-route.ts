@@ -17,6 +17,8 @@
 
 import 'server-only';
 
+import { decodeJwt } from 'jose';
+
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { ensureFreeEntitlement } from '@/lib/entitlement/bootstrap';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
@@ -31,6 +33,25 @@ const LOCAL_LIVENESS_TTL_MS = 30_000;
 const LOCAL_LIVENESS_TIMEOUT_MS = 1_500;
 
 /** Base URL of the hosted o8 API. Overridable. */
+/**
+ * The managed text model for the Brain, dictation polish, and the o8 model.
+ * On the managed route the hosted endpoint serves it on paid plans and on the
+ * free plan up to its daily allowance, then answers with its $0 model.
+ */
+export const O8_MANAGED_TEXT_MODEL = 'openai/gpt-6-luna';
+
+/** The $0 model callers fall back to when the managed text model fails. */
+export const O8_MANAGED_ZERO_COST_MODEL = 'nvidia/nemotron-3.5-lightning:free';
+
+/**
+ * Luna's Chat Completions accepts tools only with reasoning effort none, and
+ * these short text tasks gain nothing from reasoning, so its requests set none.
+ * Other models, including local runtimes, get no reasoning field.
+ */
+export function managedTextModelOptions(model: string): { reasoning_effort?: 'none' } {
+  return model === O8_MANAGED_TEXT_MODEL ? { reasoning_effort: 'none' } : {};
+}
+
 export function proxyBaseUrl(): string {
   const raw = process.env.O8_PROXY_URL?.trim();
   return (raw || DEFAULT_O8_API_BASE_URL).replace(/\/+$/, '');
@@ -89,7 +110,10 @@ export function freeAllowanceToken(): string | null {
   const resolved = getEntitlementSync();
   if (resolved.plan !== 'free' || resolved.overrideActive) return null;
   const token = readCachedEntitlement()?.licenseKey?.trim();
-  return token && token.split('.').length === 3 ? token : null;
+  // A local free-plan pin does not change the cached license's claims. Only
+  // forward a free allowance here; retain paid licenses for normal paid use.
+  // Signature and allowance enforcement remain with the relay.
+  return token && tokenPlanClaim(token) === 'free' ? token : null;
 }
 
 function resolveGeminiKey(): string | undefined {
@@ -204,7 +228,7 @@ export async function probeLocalInference(baseUrl: string): Promise<LocalInferen
 export async function resolveOpenRouterRoute(
   options: ResolveOpenRouterRouteOptions = {},
 ): Promise<InferenceRoute | null> {
-  const token = planToken();
+  let token = planToken();
   if (token) {
     return {
       url: `${proxyBaseUrl()}/v1/inference`,
@@ -251,17 +275,55 @@ export async function resolveOpenRouterRoute(
   let freeToken = freeAllowanceToken();
   if (!freeToken && options.provisionInstallAllowance) {
     await ensureFreeEntitlement();
+    token = planToken();
     freeToken = freeAllowanceToken();
   }
-  if (freeToken) {
+  const proxyToken = token ?? freeToken;
+  if (proxyToken) {
     return {
       url: `${proxyBaseUrl()}/v1/inference`,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freeToken}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${proxyToken}` },
       via: 'proxy',
     };
   }
 
   return null;
+}
+
+function tokenPlanClaim(token: string): unknown {
+  try {
+    return decodeJwt(token).plan;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pi worker route (#3256): the entitled managed proxy, else the install's free
+ * allowance on the same relay. Never local, BYOK, or CLI tiers: the relay owns
+ * the model policy and the daily cap for both. Starting a Pi run is an explicit
+ * managed-model request, so a keyless install provisions its allowance here.
+ */
+export async function resolvePiInferenceRoute(): Promise<InferenceRoute | null> {
+  let token = planToken();
+  if (!token) {
+    let freeToken = freeAllowanceToken();
+    if (!freeToken) {
+      await ensureFreeEntitlement();
+      token = planToken();
+      freeToken = freeAllowanceToken();
+    }
+    // An O8_PLAN pin can resolve a paid install as free; its paid token must
+    // not ride the free route. The relay still verifies the signature.
+    token ??= freeToken && tokenPlanClaim(freeToken) === 'free' ? freeToken : null;
+  }
+  return token
+    ? {
+      url: `${proxyBaseUrl()}/v1/inference`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      via: 'proxy',
+    }
+    : null;
 }
 
 /**
@@ -308,11 +370,21 @@ export function resolveEmbedRoute(
 }
 
 /**
- * Whisper transcription route (OpenRouter audio/transcriptions). Direct (the
- * user's OpenRouter key) → proxy (plan token) → null. The request body is
- * identical either way, so the caller only swaps url + headers.
+ * Whisper transcription route (OpenRouter audio/transcriptions). A paid plan
+ * pays first (#3583): proxy (plan token) → direct (the user's OpenRouter key)
+ * → null. The request body is identical either way, so the caller only swaps
+ * url + headers.
  */
 export async function resolveTranscribeRoute(): Promise<InferenceRoute | null> {
+  const paidToken = planToken();
+  if (paidToken) {
+    return {
+      url: `${proxyBaseUrl()}/v1/transcribe`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${paidToken}` },
+      via: 'proxy',
+    };
+  }
+
   const localKey = await resolveOpenRouterKey();
   if (localKey) {
     return {

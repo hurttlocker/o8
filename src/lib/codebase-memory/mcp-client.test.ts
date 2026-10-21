@@ -52,6 +52,20 @@ describe('codebase-memory MCP transport', () => {
     });
   });
 
+  it('keeps fixture initialization outside the one-shot tool-call deadline', async () => {
+    const session = await withCodebaseMemoryToolSession(
+      { binPath: stubBin, cwd: process.cwd() },
+      (callTool) => callTool({ toolName: 'index_repo', timeoutMs: 1000 }),
+    );
+
+    expect(session.ok).toBe(true);
+    if (!session.ok) throw new Error(session.error);
+    expect(parsePayload(session.value)).toMatchObject({
+      callCount: 1,
+      toolName: 'index_repo',
+    });
+  });
+
   it('returns timeout and child-exit failures without leaking the process error', async () => {
     const timedOut = await withCodebaseMemoryToolSession(
       { binPath: stubBin, cwd: process.cwd() },

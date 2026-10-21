@@ -27,6 +27,7 @@ function fullPacketFixture() {
   const packet = {
     id: 'pkt-control-1',
     referenceLabel: 'P1',
+    projectId: 'project-captured',
     title: 'Control-field packet',
     summary: 'Full normalize fixture',
     origin: 'design-mode',
@@ -164,6 +165,7 @@ function fullPacketFixture() {
     predictedFiles: ['src/a.ts', 'src/b.ts'],
     workerIntent: 'reviewer',
     useBrain: true,
+    mergeHold: true,
     huddle: true,
     alignmentResolvedAt: '2026-01-01T00:07:30.000Z',
     workerRouting: resolveWorkerRouting({
@@ -277,6 +279,7 @@ describe('packet fields survive normalize', () => {
   it('does not invent absent optional control fields', () => {
     const normalized = normalizeOrchestratorMissionState(stateWithPacket({
       ...fullPacketFixture(),
+      projectId: undefined,
       operatorStopped: undefined,
       tierEscalated: undefined,
       dispatchRuntimePin: undefined,
@@ -288,6 +291,7 @@ describe('packet fields survive normalize', () => {
       alignmentResolvedAt: undefined,
     }));
 
+    expect(normalized.packets[0].projectId).toBeUndefined();
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
     expect(normalized.packets[0].tierEscalated).toBeUndefined();
     expect(normalized.packets[0].dispatchRuntimePin).toBeNull();

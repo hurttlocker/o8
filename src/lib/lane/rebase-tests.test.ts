@@ -30,7 +30,8 @@ describe('runLaneRebaseTests', () => {
   it('passes when the configured test command exits zero', async () => {
     const cwd = scaffold('exit 0');
     const result = await runLaneRebaseTests({ ...base, cwd });
-    expect(result).toEqual({ ok: true, skipped: false });
+    // Without confinement on the host (no Linux helper here) the result also carries `unconfined`.
+    expect(result).toMatchObject({ ok: true, skipped: false });
   });
 
   it('fails with output when the test command exits non-zero', async () => {

@@ -87,7 +87,7 @@ export function createFleetComputer({
             // this inventory read waited. Never write that stale snapshot back.
             const current = await io.loadSession(sessionDir);
             if (current.detachedAt) return null;
-            await runController.refreshSession(current);
+            await runController.refreshSession(current, true);
             return current;
           });
         } catch {

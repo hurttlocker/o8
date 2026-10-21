@@ -120,7 +120,7 @@ export async function handleSpecRead(args: Record<string, unknown>): Promise<Mcp
   try {
     return jsonResult(await apiFetch(specPath(requiredString(args, 'repoPath'))));
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -128,7 +128,7 @@ export async function handleSpecReviewIndex(args: Record<string, unknown>): Prom
   try {
     return jsonResult(await apiFetch(specPath(requiredString(args, 'repoPath'), { view: 'index' })));
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -140,7 +140,7 @@ export async function handleSpecPendingFeedback(args: Record<string, unknown>): 
     const items = (res.index?.items ?? []).filter((i) => i.status !== 'resolved');
     return jsonResult({ ok: true, items, summary: res.index?.summary });
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -148,7 +148,7 @@ export async function handleSpecValidate(args: Record<string, unknown>): Promise
   try {
     return jsonResult(await apiFetch(specPath(requiredString(args, 'repoPath'), { view: 'validate' })));
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -164,7 +164,7 @@ export async function handleSpecComment(args: Record<string, unknown>): Promise<
     });
     return jsonResult(result);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -180,7 +180,7 @@ export async function handleSpecReply(args: Record<string, unknown>): Promise<Mc
     });
     return jsonResult(result);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -195,7 +195,7 @@ export async function handleSpecResolve(args: Record<string, unknown>): Promise<
     });
     return jsonResult(result);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -222,6 +222,6 @@ export async function handleSpecSuggest(args: Record<string, unknown>): Promise<
     });
     return jsonResult(result);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }

@@ -1,11 +1,7 @@
 import 'server-only';
-
-import { execFile } from 'node:child_process';
-import { access, readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
-
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   ORCHESTRATOR_RUNTIMES,
@@ -20,10 +16,11 @@ import { claudeCarrierPresentation } from './claude-carrier-presentation';
 import { scanAndLink } from './cli-locate';
 import { probeAntigravityLogin } from './antigravity-login-probe';
 import { detectNativeClaudeAuth, type ClaudeLoginState } from './claude-login-probe';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   localProviderIds,
   opencodeAuthenticatedProviders,
+  opencodeCredentialProviders,
+  opencodeCliProviders,
   clearOpencodeCliProbeMemo,
   opencodeCliModels,
   opencodeCliResolvesModel,
@@ -32,18 +29,18 @@ import {
   providerIdForModel,
   readOpencodeConfig,
 } from './opencode-readiness';
-import {
-  deepSeekHarnessInstallGuidance,
-  resolveDeepSeekHarnessLaunch,
-} from '@/lib/deepseek-harness/runtime-resolution';
+import { deepSeekHarnessInstallGuidance, resolveDeepSeekHarnessLaunch } from '@/lib/deepseek-harness/runtime-resolution';
+import { hermesReadiness } from './hermes-readiness';
+import { piBuiltinReadiness } from './pi-builtin-readiness';
+import { museAvailability } from '@/lib/muse/availability';
+import { detectPiUserSetup, type PiUserSetup } from '@/lib/pi/user-setup';
 import { validateRuntimeModelSelection } from './model-compatibility';
 import { suggestMachineAuthProfile } from './auth-profile-suggestion';
+import { codexAuthEvidence } from './codex-auth-evidence';
+import { connectionEvidence, localCredentialEvidence, runtimeConnection, type RuntimeConnectionEvidence } from './connection-evidence';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
-
-const execFileAsync = promisify(execFile);
 const CACHE_TTL_MS = 60_000;
 const UNKNOWN_CLAUDE_CACHE_TTL_MS = 5_000;
-const PROBE_TIMEOUT_MS = 1_500;
 
 export type RuntimeHouse = RuntimeAuthHouse;
 export type RuntimeUnavailableReason = 'not_installed' | 'needs_auth' | 'needs_restart' | 'adapter_unavailable' | 'incompatible_model';
@@ -64,11 +61,14 @@ export interface RuntimeAuthStatus {
   nativeSignInBlocked?: boolean;
   /** Claude Code only: bounded CLI probe outcome, retained for safe constant messaging. */
   nativeLoginState?: ClaudeLoginState;
+  nativeConnection?: RuntimeConnectionEvidence;
   unavailableReason: RuntimeUnavailableReason | null;
   detail: string;
   fix: string;
   checkedAt: number;
   binaryPath?: string;
+  connection?: RuntimeConnectionEvidence;
+  piSetup?: PiUserSetup;
 }
 
 export interface MachineAuthProfileSuggestion {
@@ -82,6 +82,8 @@ export interface RuntimeAuthSnapshot {
 }
 
 export interface DispatchableRuntimeAvailability {
+  connection?: RuntimeConnectionEvidence;
+  piSetup?: PiUserSetup;
   installed?: boolean;
   id: OrchestratorRuntime;
   label: string;
@@ -103,7 +105,6 @@ class DispatchPreflightError extends Error {
 }
 
 export { DispatchPreflightError };
-
 let cache: { snapshot: RuntimeAuthSnapshot; cachedAt: number } | null = null;
 let cacheGeneration = 0;
 let snapshotRefresh: { generation: number; promise: Promise<RuntimeAuthSnapshot> } | null = null;
@@ -128,6 +129,7 @@ function nowStatus(
     runtime,
     checkedAt: Date.now(),
     ...update,
+    connection: update.connection ?? runtimeConnection({ installed: update.installed, checkedAt: Date.now() }),
     ready,
     fix: update.fix ?? (house === 'codex' ? 'Run `codex login`.' : 'Run `claude` once to sign in.'),
     unavailableReason: update.unavailableReason
@@ -141,18 +143,6 @@ async function fileExists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-async function readJsonRecord(filePath: string): Promise<Record<string, unknown> | null> {
-  try {
-    const text = await readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
   }
 }
 
@@ -208,47 +198,19 @@ async function opencodeModelStatus(
   };
 }
 
-async function probeCodexAuth(binaryPath: string): Promise<boolean> {
-  try {
-    const probe = cliInvocation(binaryPath, ['login', 'status']);
-    const { stdout, stderr } = await execFileAsync(probe.command, probe.args, {
-      windowsHide: true,
-      timeout: PROBE_TIMEOUT_MS,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-      maxBuffer: 64 * 1024,
-    });
-    return `${stdout}\n${stderr}`.toLowerCase().includes('logged in');
-  } catch {
-    return false;
-  }
-}
-
 async function detectCodex(): Promise<RuntimeAuthStatus> {
   const binaryPath = scanAndLink('codex') ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('codex', 'codex', {
-      installed: false,
-      authenticated: false,
-      detail: 'Codex CLI is not installed.',
-      fix: 'Install Codex, then run `codex login`.',
-    });
-  }
-
-  const authFile = path.join(os.homedir(), '.codex', 'auth.json');
-  const authJson = await readJsonRecord(authFile);
-  const hasToken = Boolean(
-    process.env.OPENAI_API_KEY
-    || process.env.CODEX_ACCESS_TOKEN
-    || (authJson?.tokens && typeof authJson.tokens === 'object'),
-  );
-  const cliSaysLoggedIn = await probeCodexAuth(binaryPath);
+  if (!binaryPath) return nowStatus('codex', 'codex', {
+    installed: false, authenticated: false, detail: 'Codex CLI is not installed.',
+    fix: 'Install Codex, then run `codex login`.',
+  });
+  const evidence = await codexAuthEvidence(binaryPath);
   return nowStatus('codex', 'codex', {
-    installed: true,
-    authenticated: cliSaysLoggedIn || hasToken,
-    detail: cliSaysLoggedIn || hasToken
-      ? 'Codex CLI is installed and signed in.'
-      : 'Codex CLI is installed but not signed in.',
-    binaryPath,
+    installed: true, ...evidence, binaryPath,
+    detail: evidence.authenticated
+      ? 'Codex CLI has credential evidence. Provider access has not been checked.'
+      : evidence.connection.state === 'not_connected' ? 'Codex CLI reports it is not signed in.'
+      : 'Codex CLI is installed but its sign-in state could not be verified.',
   });
 }
 
@@ -276,17 +238,23 @@ async function detectClaude(binaryPath = scanAndLink('claude') ?? undefined): Pr
   }
 
   const carrier = claudeWorkerCarrier();
-  const { authenticated, loginState } = await detectNativeClaudeAuth(binaryPath);
+  const { authenticated, loginState, source } = await detectNativeClaudeAuth(binaryPath);
   // Native launch is fail-closed: an inconclusive probe without an environment or
   // stored OAuth credential is not positive authentication evidence. Gateway carriers
   // remain ready because their launch path never consumes the native credential.
   const nativeSignInBlocked = !authenticated;
+  const nativeConnection = connectionEvidence(authenticated ? ['Anthropic'] : [], [
+    { source: source ?? 'cli_report', outcome: authenticated ? 'present' : loginState === 'logged_out' ? 'absent' : 'unknown' },
+  ]);
 
   return nowStatus('claude', 'claude-code', {
     installed: true,
     authenticated,
     nativeSignInBlocked,
     nativeLoginState: loginState,
+    nativeConnection,
+    connection: carrier === 'native' ? nativeConnection : connectionEvidence(
+      [carrier === 'openrouter' ? 'OpenRouter' : 'OpenAI'], [{ source: 'runtime_config', outcome: 'configured' }]),
     // Details are short constants: probe stdout never reaches an operator-facing string.
     ...claudeCarrierPresentation(carrier, authenticated, nativeSignInBlocked, loginState),
     binaryPath,
@@ -319,6 +287,8 @@ function claudeSnapshotForCarrier(
   const claude: RuntimeAuthStatus = {
     ...status,
     ...presentation,
+    connection: carrier === 'native' ? status.nativeConnection : connectionEvidence(
+      [carrier === 'openrouter' ? 'OpenRouter' : 'OpenAI'], [{ source: 'runtime_config', outcome: 'configured' }], status.checkedAt),
     unavailableReason: presentation.ready ? null : 'needs_auth',
   };
   return { ...snapshot, statuses: { ...snapshot.statuses, claude } };
@@ -344,6 +314,7 @@ async function detectGemini(): Promise<RuntimeAuthStatus> {
   return nowStatus('gemini', 'gemini', {
     installed: true,
     authenticated,
+    connection: localCredentialEvidence([process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated, 'Google'),
     detail: authenticated
       ? 'Gemini CLI is installed and has local sign-in or API-key evidence.'
       : 'Gemini CLI is installed but no local sign-in or API-key evidence was found.',
@@ -363,18 +334,27 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
     });
   }
 
-  const [credentialProviders, config, serviceVersion, cliModels] = await Promise.all([
-    opencodeAuthenticatedProviders(os.homedir(), binaryPath),
+  const [storedProviders, reportedProviders, config, serviceVersion, cliModels] = await Promise.all([
+    opencodeCredentialProviders(os.homedir()),
+    opencodeCliProviders(binaryPath),
     readOpencodeConfig(os.homedir()),
     probeOpencodeServiceVersion(binaryPath),
     opencodeCliModels(binaryPath),
   ]);
+  const credentialProviders = new Set([...storedProviders, ...(reportedProviders ?? [])]);
   const authenticated = credentialProviders.size > 0;
-  const localProviderConfigured = localProviderIds(config).size > 0;
+  const localProviders = localProviderIds(config);
+  const localProviderConfigured = localProviders.size > 0;
+  const connection = connectionEvidence([...credentialProviders, ...localProviders,
+    ...[...(cliModels ?? [])].map(providerIdForModel).filter((id): id is string => Boolean(id))], [
+    { source: 'cli_report', outcome: reportedProviders?.size || cliModels?.size ? 'present' : 'unknown' },
+    { source: 'runtime_config', outcome: localProviderConfigured ? 'configured' : 'unknown' },
+    { source: 'credential_store', outcome: storedProviders.size ? 'present' : 'unknown' },
+  ]);
   if (serviceVersion.state === 'version_skew') {
     return nowStatus('opencode', 'opencode', {
       installed: true,
-      authenticated,
+      authenticated, connection,
       ready: false,
       unavailableReason: 'needs_restart',
       detail: `OpenCode 2 CLI ${serviceVersion.cliVersion} does not match resident service ${serviceVersion.serviceVersion}.`,
@@ -385,7 +365,7 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
   if (serviceVersion.state === 'incompatible') {
     return nowStatus('opencode', 'opencode', {
       installed: true,
-      authenticated,
+      authenticated, connection,
       ready: false,
       unavailableReason: 'needs_restart',
       detail: 'OpenCode 2 has a running resident service that did not return a compatible health response.',
@@ -400,7 +380,7 @@ async function detectOpencode(): Promise<RuntimeAuthStatus> {
   const ready = authenticated || cliDispatchable || localProviderConfigured;
   return nowStatus('opencode', 'opencode', {
     installed: true,
-    authenticated,
+    authenticated, connection,
     ready,
     detail: authenticated
       ? 'OpenCode 2 CLI is installed and has provider credential evidence.'
@@ -450,6 +430,7 @@ async function detectCursor(): Promise<RuntimeAuthStatus> {
   return nowStatus('cursor', 'cursor', {
     installed: true,
     authenticated,
+    connection: localCredentialEvidence([process.env.CURSOR_API_KEY ? 'Cursor' : ''].filter(Boolean), authenticated, 'Cursor', 'runtime_config'),
     detail: authenticated
       ? 'Cursor CLI is installed and has local sign-in or CURSOR_API_KEY evidence.'
       : 'Cursor CLI is installed but no local sign-in evidence was found.',
@@ -473,6 +454,7 @@ async function detectGrok(): Promise<RuntimeAuthStatus> {
   return nowStatus('grok', 'grok', {
     installed: true,
     authenticated,
+    connection: localCredentialEvidence([process.env.GROK_CODE_XAI_API_KEY ? 'xAI' : ''].filter(Boolean), authenticated, 'xAI', 'runtime_config'),
     detail: authenticated
       ? 'Grok Build CLI is installed and has local sign-in or GROK_CODE_XAI_API_KEY evidence.'
       : 'Grok Build CLI is installed but no local sign-in evidence was found.',
@@ -482,30 +464,27 @@ async function detectGrok(): Promise<RuntimeAuthStatus> {
 }
 
 async function detectPi(): Promise<RuntimeAuthStatus> {
-  const binaryPath = scanAndLink('pi') ?? process.env.O8_PI_BIN?.trim() ?? undefined;
-  if (!binaryPath) {
-    return nowStatus('pi', 'pi', {
-      installed: false,
-      authenticated: false,
-      detail: 'Pi CLI is not installed.',
-      fix: 'Install Pi, then configure a provider with `pi`.',
-    });
-  }
-
-  const authenticated = Boolean(
+  const piSetup = await detectPiUserSetup();
+  const binaryPath = piSetup.binaryPath;
+  const authenticated = Boolean(binaryPath && (
     process.env.ANTHROPIC_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.GEMINI_API_KEY
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-  ) || await fileExists(path.join(os.homedir(), '.pi', 'agent', 'auth.json'));
+    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    || piSetup.credentialsPresent
+  ));
   return nowStatus('pi', 'pi', {
-    installed: true,
+    installed: Boolean(binaryPath),
     authenticated,
-    detail: authenticated
+    connection: localCredentialEvidence([process.env.ANTHROPIC_API_KEY ? 'Anthropic' : '', process.env.OPENAI_API_KEY ? 'OpenAI' : '', process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated),
+    detail: !binaryPath
+      ? process.platform === 'win32' ? 'Existing Pi setup detection is not available on Windows yet.' : 'Pi CLI is not installed.'
+      : authenticated
       ? 'Pi CLI is installed and has provider credentials.'
       : 'Pi CLI is installed but no provider credentials were found.',
-    fix: 'Run `pi` and configure a provider before dispatching.',
+    fix: !binaryPath ? 'Install Pi, then configure a provider with `pi`.' : 'Run `pi` and configure a provider before dispatching.',
     binaryPath,
+    piSetup,
   });
 }
 
@@ -529,6 +508,7 @@ async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
   return nowStatus('prime-agent', 'prime-agent', {
     installed: true,
     authenticated,
+    connection: localCredentialEvidence([process.env.ANTHROPIC_API_KEY ? 'Anthropic' : '', process.env.OPENAI_API_KEY ? 'OpenAI' : '', process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated, undefined, 'runtime_config'),
     detail: authenticated
       ? 'Prime Agent CLI is installed and has provider credentials.'
       : 'Prime Agent CLI is installed but no provider credentials were found.',
@@ -607,7 +587,10 @@ export function detectRuntimeAuthStatus(runtime: OrchestratorRuntime, deadlineAt
     case 'grok': return detectGrok();
     case 'pi': return detectPi();
     case 'prime-agent': return detectPrimeAgent();
+    case 'hermes': return hermesReadiness().then(status => nowStatus('hermes', 'hermes', status));
+    case 'muse': return museAvailability().then(status => nowStatus('muse', 'muse', status));
     case 'deepseek-harness': return detectDeepSeekHarness();
+    case 'pi-builtin': return piBuiltinReadiness().then(status => nowStatus('pi-builtin', 'pi-builtin', status));
     default: return detectDeclarativeRuntime(runtime);
   }
 }
@@ -632,6 +615,7 @@ async function refreshNativeWorkerReadiness(snapshot: RuntimeAuthSnapshot): Prom
 }
 
 export async function getRuntimeAuthSnapshot(): Promise<RuntimeAuthSnapshot> {
+  await (await import('@/lib/cortex/qa/llm/byok-keys')).resolveOpenRouterKey();
   while (true) {
     const generation = cacheGeneration;
     const cached = cache;
@@ -718,10 +702,12 @@ export async function getDispatchableRuntimeAvailability(
       id,
       label: ORCHESTRATOR_RUNTIMES[id].label,
       installed: status?.installed ?? false,
+      connection: runtimeConnection(status),
       available,
       unavailableReason: available ? null : status?.unavailableReason ?? 'adapter_unavailable',
       detail: status?.detail ?? `${ORCHESTRATOR_RUNTIMES[id].label} readiness could not be determined.`,
       fix: status?.fix ?? 'Check the runtime installation and credentials.',
+      ...(status?.piSetup ? { piSetup: status.piSetup } : {}),
     };
   });
 }

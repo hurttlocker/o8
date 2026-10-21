@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -248,7 +249,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  testRoot = mkdtempSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-mcp-routing-'));
+  testRoot = realpathSync(mkdtempSync(path.join(process.env.CORTEX_IDE_DATA_DIR!, 'operator-mcp-routing-')));
   process.env.CORTEX_IDE_DATA_DIR = testRoot;
   process.env.O8_DATA_DIR = testRoot;
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = path.join(testRoot, 'owned-codex');
@@ -271,16 +272,17 @@ beforeEach(() => {
   delete process.env.O8_PACKAGED_APP;
   delete process.env.OPENROUTER_API_KEY;
   vi.resetModules();
+  // Declarative runtimes register a root under the data dir, which changes per test.
+  delete (globalThis as { __o8DeclarativeOwnedRuntimeRegistry?: unknown }).__o8DeclarativeOwnedRuntimeRegistry;
 
   spawnMock.mockReset();
   nativePreflightMock.mockClear();
   carrierPreflightMock.mockClear();
-  spawnMock.mockReturnValue({
+  spawnMock.mockImplementation(() => Object.assign(new EventEmitter(), {
     pid: 987_654,
     stdin: { end: vi.fn() },
     unref: vi.fn(),
-    once: vi.fn(),
-  });
+  }));
   ensureDispatchBackendReadyMock.mockClear();
   ensureCodexSubscriptionProxyReadyMock.mockClear();
   ensureCodexSubscriptionClaudeConfigDirMock.mockClear();
@@ -526,6 +528,16 @@ describe('MCP operator defaults and dispatch routing', () => {
 
     const cleared = await handleOperatorDefaults({ defaultDispatchModel: '' });
     expect(cleared.isError).not.toBe(true);
+    // The worker exits first: reset retires a workspace only once its run ledger proves quiescence.
+    const worker = spawnMock.mock.results[0]!.value as EventEmitter;
+    worker.emit('exit', 0, null);
+    worker.emit('close', 0, null);
+    const { findLaneByPacket } = await import('@/lib/lane/registry');
+    const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+    const sessionKey = findLaneByPacket(created.packets[0]!.id)!.sessionKey!;
+    await vi.waitFor(async () => {
+      expect((await getOwnedSessionLifecycle(sessionKey)!.getWorkspaceBinding!(sessionKey))?.activeRun).toBeNull();
+    }, { timeout: 10_000 });
     const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
     await resetPacket({
       packetId: created.packets[0]!.id,

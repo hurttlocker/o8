@@ -20,8 +20,21 @@ const RECIPE_FILES = [
   'src-tauri/tauri.macos.conf.json',
   'scripts/build.mjs',
   'scripts/build-speech-local.mjs',
+  'scripts/build-pi-write.mjs',
+  'src-tauri/sidecars/pi-write/Cargo.lock',
   'scripts/tauri-export.mjs',
   'scripts/tauri-prebuild.mjs',
+  'scripts/lib/prebuild-continuation.mjs',
+  'scripts/lib/registered-build.mjs',
+  'scripts/lib/release-build-profile.mjs',
+  'scripts/lib/generated-output-launch.mjs',
+  'scripts/generated-output-run.ts',
+  'src/lib/workspace/generated-output-producer.ts',
+  'src/lib/workspace/generated-output-state.ts',
+  'src/lib/workspace/generated-output-validation.ts',
+  'src/lib/workspace/generated-output-disposal.ts',
+  'scripts/postship-cleanup.mjs',
+  'scripts/preship-cleanup.mjs',
   'scripts/packaged-server-smoke.mjs',
   'scripts/lib/packaged-server-smoke.mjs',
   'scripts/lib/tauri-export-safety.mjs',
@@ -30,7 +43,15 @@ const RECIPE_FILES = [
 const SPEECH_ARTIFACTS = [
   'src-tauri/helpers/speech-local',
   'src-tauri/helpers/speech-local-aarch64-apple-darwin',
+  'src-tauri/helpers/speech-local-universal-apple-darwin',
   'src-tauri/helpers/speech-local-x86_64-apple-darwin',
+];
+
+const PI_WRITE_ARTIFACTS = [
+  'src-tauri/helpers/o8-pi-write',
+  'src-tauri/helpers/o8-pi-write-aarch64-apple-darwin',
+  'src-tauri/helpers/o8-pi-write-universal-apple-darwin',
+  'src-tauri/helpers/o8-pi-write-x86_64-apple-darwin',
 ];
 
 function sha256File(path) {
@@ -61,7 +82,7 @@ function commandVersion(root, command, args) {
 function outputRoots(root) {
   return [
     { absolute: join(root, 'out'), relative: 'out' },
-    ...SPEECH_ARTIFACTS.map((path) => ({ absolute: join(root, path), relative: path })),
+    ...[...SPEECH_ARTIFACTS, ...PI_WRITE_ARTIFACTS].map((path) => ({ absolute: join(root, path), relative: path })),
   ];
 }
 

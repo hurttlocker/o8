@@ -23,7 +23,7 @@ import { isThoughtsOrchestratorBackendSetting } from '@/components/desktop/thoug
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 
 const ALL: OrchestratorBackendSetting[] = [
-  'auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'o8', 'opencode',
+  'auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable', 'o8', 'opencode', 'pi', 'acp',
 ];
 
 describe('OrchestratorBackendSetting — one definition', () => {
@@ -62,8 +62,8 @@ describe('setting union vs backend-id union', () => {
     }
   });
 
-  it("'acp' is a backend id with no setting — the generic escape hatch", () => {
+  it("'acp' is selectable for a configured local connection", () => {
     expect(isOrchestratorBackendId('acp')).toBe(true);
-    expect(isOrchestratorBackendSetting('acp')).toBe(false);
+    expect(isOrchestratorBackendSetting('acp')).toBe(true);
   });
 });

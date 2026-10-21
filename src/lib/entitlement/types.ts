@@ -51,13 +51,13 @@ export interface EntitlementState {
 }
 
 /**
- * Founding Operator display metadata. Client-safe (pure, no I/O) so both the
+ * Pro · Lifetime display metadata. Client-safe (pure, no I/O) so both the
  * server founder record (founder.ts) and the client context (context.tsx) share
  * one shape. Cosmetic — the entitlement is the signed `plan: 'founder'`; this
- * only carries the "Founding Operator #N" badge + pricing tier.
+ * only carries the lifetime badge serial and legacy metadata.
  */
 export interface FounderInfo {
   operatorNumber: number;
-  /** Pricing tier (1=$150, 2=$250, 3=$500), from the assigned operator number. */
+  /** Legacy metadata retained for compatibility. */
   tier: number | null;
 }

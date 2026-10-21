@@ -10,8 +10,11 @@
  * absolutely-positioned sibling of the container so React preserves
  * component state across split/resize/close changes.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { projectLiveSessionMeshParticipants } from '@/components/desktop/workspace-terminal/LiveSessionMesh';
+import { useSplitResize } from '../hooks/useSplitResize';
+import { SESSION_PANE_INSET } from './SessionPaneFrame';
+import { ResizeEdge } from '../shell/ResizeEdge';
 import { SessionTranscriptPane } from '@/components/desktop/SessionTranscriptPane';
 export { projectLiveSessionMeshParticipants };
 import { ThreadChatPane } from '@/components/desktop/workspace-terminal/ThreadChatPane';
@@ -21,7 +24,6 @@ import {
   type SessionTileLayout,
   type SessionTileLeaf,
   type SessionTileRect,
-  type SessionTileSplitDirection,
   type SessionTileSplitFrame,
 } from '@/lib/orchestrator/session-tiles';
 
@@ -58,27 +60,6 @@ export function SessionTileSurface({
   renderSessionPane,
 }: SessionTileSurfaceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Track listeners so we can remove them on unmount-during-drag (issue #818).
-  const dragListenersRef = useRef<{
-    handleMove: (event: MouseEvent) => void;
-    handleUp: () => void;
-  } | null>(null);
-
-  // Cleanup: if component unmounts while a drag is in progress, reset the
-  // body cursor and remove any dangling document listeners so they don't
-  // persist after the surface is gone.
-  useEffect(() => {
-    return () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      if (dragListenersRef.current) {
-        document.removeEventListener('mousemove', dragListenersRef.current.handleMove);
-        document.removeEventListener('mouseup', dragListenersRef.current.handleUp);
-        dragListenersRef.current = null;
-      }
-    };
-  }, []);
-
   const { leaves, leafRects, splitFrames } = useMemo(() => {
     const { leafRects, splitFrames } = computeSessionTileLayout(layout.root);
     const leaves = collectAllLeaves(layout.root);
@@ -146,40 +127,7 @@ export function SessionTileSurface({
     };
   }, [leafRects, workerGroup]);
 
-  const makeResizeStart = useCallback(
-    (splitId: string, direction: SessionTileSplitDirection, container: SessionTileRect) =>
-      (event: ReactMouseEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        const surface = containerRef.current;
-        if (!surface) return;
-        const rect = surface.getBoundingClientRect();
-        const splitPx = {
-          left: rect.left + rect.width * container.left,
-          top: rect.top + rect.height * container.top,
-          width: rect.width * container.width,
-          height: rect.height * container.height,
-        };
-        const handleMove = (moveEvent: MouseEvent) => {
-          const ratio = direction === 'vertical'
-            ? (moveEvent.clientX - splitPx.left) / splitPx.width
-            : (moveEvent.clientY - splitPx.top) / splitPx.height;
-          onResizeSplit(splitId, ratio);
-        };
-        const handleUp = () => {
-          document.removeEventListener('mousemove', handleMove);
-          document.removeEventListener('mouseup', handleUp);
-          dragListenersRef.current = null;
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-        };
-        document.body.style.cursor = direction === 'vertical' ? 'col-resize' : 'row-resize';
-        document.body.style.userSelect = 'none';
-        dragListenersRef.current = { handleMove, handleUp };
-        document.addEventListener('mousemove', handleMove);
-        document.addEventListener('mouseup', handleUp);
-      },
-    [onResizeSplit],
-  );
+  const makeResizeStart = useSplitResize(containerRef, onResizeSplit);
 
   const renderLeaf = (leaf: SessionTileLeaf) => {
     const rect = leafRects.get(leaf.id);
@@ -217,6 +165,7 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
+                  paddingBottom: leaves.length > 1 ? SESSION_PANE_INSET : 0,
                   '--o8-compose-first-rail-clearance': leaves.some((entry) => entry.kind === 'session') ? '0px' : undefined,
                 } as CSSProperties}
               >
@@ -230,10 +179,10 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  paddingTop: 8,
-                  paddingRight: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 8,
+                  paddingTop: SESSION_PANE_INSET,
+                  paddingRight: SESSION_PANE_INSET,
+                  paddingBottom: SESSION_PANE_INSET,
+                  paddingLeft: SESSION_PANE_INSET,
                 }}
               >
                 <ThreadChatPane
@@ -255,10 +204,10 @@ export function SessionTileSurface({
                   minWidth: 0,
                   display: 'flex',
                   flexDirection: 'column',
-                  paddingTop: 8,
-                  paddingRight: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 8,
+                  paddingTop: SESSION_PANE_INSET,
+                  paddingRight: SESSION_PANE_INSET,
+                  paddingBottom: SESSION_PANE_INSET,
+                  paddingLeft: SESSION_PANE_INSET,
                 }}
               >
                 {renderSessionPane ? renderSessionPane(leaf) : (
@@ -313,7 +262,10 @@ export function SessionTileSurface({
         <SessionResizeHandle
           key={frame.id}
           frame={frame}
-          onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
+          onResize={(ratio) => onResizeSplit(frame.id, ratio)}
+          onPointerDown={makeResizeStart(frame.id, frame.direction, frame.container, frame.direction === 'vertical'
+            ? (frame.boundary.left - frame.container.left) / frame.container.width
+            : (frame.boundary.top - frame.container.top) / frame.container.height)}
         />
       ))}
     </div>
@@ -322,12 +274,15 @@ export function SessionTileSurface({
 
 function SessionResizeHandle({
   frame,
-  onMouseDown,
+  onPointerDown,
+  onResize,
 }: {
   frame: SessionTileSplitFrame;
-  onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onResize: (ratio: number) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   const isVertical = frame.direction === 'vertical';
+  const ratio = isVertical ? (frame.boundary.left - frame.container.left) / frame.container.width : (frame.boundary.top - frame.container.top) / frame.container.height;
   const style: CSSProperties = isVertical
     ? {
         position: 'absolute',
@@ -346,40 +301,24 @@ function SessionResizeHandle({
         cursor: 'row-resize',
       };
   return (
-    <div
-      role="separator"
-      aria-orientation={isVertical ? 'vertical' : 'horizontal'}
+    <ResizeEdge
+      orientation={isVertical ? 'vertical' : 'horizontal'}
+      hitSlop={8}
       aria-label={`Resize ${isVertical ? 'columns' : 'rows'}`}
       data-session-resize-handle={frame.id}
       data-session-resize-direction={frame.direction}
-      onMouseDown={onMouseDown}
-      onMouseEnter={(event) => {
-        const bar = event.currentTarget.firstElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '1';
+      onPointerDown={onPointerDown}
+      aria-valuemin={20}
+      aria-valuemax={80}
+      aria-valuenow={Math.round(ratio * 100)}
+      onKeyDown={(event) => {
+        const step = isVertical ? (event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0)
+          : (event.key === 'ArrowUp' ? -0.05 : event.key === 'ArrowDown' ? 0.05 : 0);
+        if (!step) return;
+        event.preventDefault();
+        onResize(Math.max(0.2, Math.min(0.8, ratio + step)));
       }}
-      onMouseLeave={(event) => {
-        const bar = event.currentTarget.firstElementChild as HTMLElement | null;
-        if (bar) bar.style.opacity = '0';
-      }}
-      style={{
-        ...style,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-        zIndex: 10,
-      }}
-    >
-      <div
-        style={{
-          width: isVertical ? 3 : 42,
-          height: isVertical ? 42 : 3,
-          borderRadius: 999,
-          backgroundColor: 'var(--t-drag-handle, var(--t-border))',
-          opacity: 0,
-          transition: 'opacity 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-    </div>
+      style={style}
+    />
   );
 }

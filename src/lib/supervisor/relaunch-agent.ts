@@ -1,5 +1,9 @@
+import { currentRecoveryRun, recoveryInterrupted } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
+import { readAbnormalStderrTail } from '@/lib/runtimes/shared/owned-session/exit-outcome';
+import { codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failure';
+import { CODEX_AUTH_RECOVERY_LANE_LABEL } from '@/lib/lane/current-auth-exit';
 
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { findLaneBySession, getLane, updateLane } from '@/lib/lane/registry';
@@ -24,17 +28,17 @@ export async function relaunchSupervisedAgent(
   if (!['running', 'recovering'].includes(lane.status)) {
     return { status: 'held', reason: 'Automatic retry held: the lane is no longer running or recovering.' };
   }
-  const hold = (reason: string): SupervisorRelaunchResult => {
-    const note = `Automatic retry held: ${reason}. Use an explicit governed retry.`;
+  const hold = (reason: string, direct = false, eventLabel = 'supervisor_retry_held'): SupervisorRelaunchResult => {
+    const note = direct ? reason : `Automatic retry held: ${reason}. Use an explicit governed retry.`;
     const current = getLane(lane.id);
     if (current?.sessionKey === retryOfSurfaceId && current.status === lane.status
       && current.runtime === lane.runtime && current.worktreePath === lane.worktreePath) {
       updateLane(lane.id, {
         status: 'awaiting_input',
         outcomeNote: note,
-        lastEventLabel: 'supervisor_retry_held',
+        lastEventLabel: eventLabel,
         lastEventAt: new Date().toISOString(),
-      }, 'system', { reason: 'supervisor_retry_held', note });
+      }, 'system', { reason: eventLabel, note });
     }
     return { status: 'held', reason: note };
   };
@@ -54,9 +58,21 @@ export async function relaunchSupervisedAgent(
     root: root.root, surfacePrefix: root.marker, invalidateFleetCache: () => {},
   });
   const session = await io.findSession(retryOfSurfaceId).catch(() => null);
+  if (session?.executionPolicy !== undefined) return hold('this worker has a single-attempt execution limit');
   if (!session || session.laneId !== lane.id || session.packetId !== (lane.packetId ?? undefined)
     || session.cwd !== lane.worktreePath || session.activeRun) {
     return hold('the original stopped session cannot be verified');
+  }
+  const generation = currentRecoveryRun(session);
+  if (!generation || recoveryInterrupted(session)) return hold('the current run was interrupted or is unavailable');
+  if (runtime === 'codex') {
+    const failedRun = session.recentRuns.find((run) => run.outcome === 'failed');
+    const stderr = failedRun?.childExit?.stderrTail
+      ?? (failedRun?.childExit
+        ? await readAbnormalStderrTail(failedRun.stderrPath, failedRun.childExit, 4_000)
+        : undefined);
+    const authMessage = codexAuthRecoveryMessage(stderr ?? '');
+    if (authMessage) return hold(authMessage, true, CODEX_AUTH_RECOVERY_LANE_LABEL);
   }
   const model = session.model?.trim();
   if (!model || !isThinkingEffort(session.effort)) {
@@ -79,6 +95,7 @@ export async function relaunchSupervisedAgent(
   const clientMutationId = randomUUID();
   const launchBody: RuntimeLaunchRequest & { clientMutationId: string } = {
     runtime, prompt, taskName, model, effort: session.effort,
+    automaticRecoverySurfaceId: retryOfSurfaceId, automaticRecoveryRunId: generation.id,
     ...(runtime === 'claude-code' && isClaudeCodeModelSource(carrier)
       ? { claudeCodeModel: model, claudeCodeCarrier: carrier } : {}),
     workMode: session.runtimeConfig?.workMode === 'read-only' ? 'read-only' : undefined,

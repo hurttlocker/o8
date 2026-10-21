@@ -4,6 +4,9 @@ import { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   defaults: {
     subscriptionProfile: 'both',
+    workerRuntimes: ['codex', 'opencode', 'claude-code'],
+    codexWorkerEffort: 'adaptive',
+    claudeWorkerEffort: 'adaptive',
     defaultDispatchRuntime: 'opencode',
     opencodeWorkerModel: 'openrouter/deepseek/deepseek-v4-flash' as string | null,
     defaultDispatchModel: '',
@@ -30,6 +33,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/lane/commands', () => ({ dispatch: mocks.dispatch }));
+// Routing is under test, not this machine's installs (#3657 refuses a runtime that is not installed).
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] } }) }));
+vi.mock('@/lib/lane/orchestrator-backends/acp', () => ({ resolveAcpLaunch: () => ({ command: 'fixture', args: [] }) }));
+vi.mock('@/lib/orchestrator/acp-model-probe', () => ({ probeAcpModels: async () => ({ models: [{ value: 'openrouter/deepseek/deepseek-v4-flash' }, { value: 'opencode/deepseek-v4-flash-free' }], source: 'fixture' }) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
@@ -40,7 +48,7 @@ vi.mock('@/lib/dispatch/read-budget', () => ({
 }));
 vi.mock('@/lib/orchestrator/preservation-envelope', () => ({ computePredictedFiles: () => [] }));
 vi.mock('@/lib/operator/defaults', () => ({
-  getOperatorDefaultsSync: () => ({ values: mocks.defaults }),
+  getOperatorDefaultsSync: () => ({ values: mocks.defaults, sources: { workerRuntimes: 'file' } }),
 }));
 vi.mock('@/lib/projects/context', () => ({
   getProjectContext: vi.fn(async () => ({ id: 'project-opencode2-test' })),
@@ -180,7 +188,7 @@ describe('orchestrator delegate worker routing', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      error: 'Unsupported worker runtime: not-a-runtime',
+      code: 'worker_not_enabled',
     });
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });

@@ -3,7 +3,6 @@ import { MODEL_IDS } from '@/lib/models';
 
 export const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
 export const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b[^\s)"]*/g;
-export const IGNORED_PORTS = new Set([3000, 3002]);
 export const ORCHESTRATED_TAB_AUTO_ARCHIVE_MS = 10 * 60_000;
 
 export const CLI_AGENTS = [
@@ -61,6 +60,7 @@ export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
 
 export const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: MODEL_IDS.raw.openAiGpt6Astra, label: 'GPT-6 Astra', color: '#10b981' },
+  { id: MODEL_IDS.raw.openAiGpt61Sol, label: 'GPT-6.1 Sol', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt6Sol, label: 'GPT-6 Sol', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt6Luna, label: 'GPT-6 Luna', color: '#10b981' },
   { id: MODEL_IDS.raw.openAiGpt56Sol, label: 'GPT-5.6 Sol', color: '#10b981' },

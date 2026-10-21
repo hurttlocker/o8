@@ -1648,6 +1648,7 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
 #[serde(rename_all = "camelCase")]
 pub struct SymonTextPlannerInfo {
     available: bool,
+    allow_default_fallback: bool,
     engine: Option<&'static str>,
     model: Option<String>,
     effort: Option<&'static str>,
@@ -1659,13 +1660,8 @@ pub struct SymonTextPlannerInfo {
     detail: Option<&'static str>,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SymonTextTurnResult {
-    status: &'static str,
-    text: String,
-    active_machine: machine::MachineIdentity,
-}
+mod text_turn;
+pub use text_turn::SymonTextTurnResult;
 
 fn text_task_id(session_id: &str, turn_id: &str) -> Result<String, String> {
     fn valid(value: &str) -> bool {
@@ -1695,18 +1691,22 @@ pub fn symon_text_planner_info(
     model: Option<&str>,
     effort: Option<&str>,
 ) -> SymonTextPlannerInfo {
-    let routing = match (engine, model, effort) {
+    let (routing, allow_default_fallback) = match (engine, model, effort) {
         (Some(engine), Some(model), Some(effort)) => {
-            planner_route::resolve_bound(engine, model, effort)
+            (planner_route::resolve_bound(engine, model, effort), false)
         }
-        (None, None, None) => planner_route::resolve(),
-        _ => planner_route::PlannerRouting::Unavailable {
-            message: "incomplete Symon planner selection",
-        },
+        (None, None, None) => planner_route::resolve_text(),
+        _ => (
+            planner_route::PlannerRouting::Unavailable {
+                message: "incomplete Symon planner selection",
+            },
+            false,
+        ),
     };
     match routing {
         planner_route::PlannerRouting::Selected(selection) => SymonTextPlannerInfo {
             available: true,
+            allow_default_fallback,
             engine: Some(selection.provider.id),
             model: Some(selection.bound_model().to_string()),
             effort: Some(selection.effort),
@@ -1716,6 +1716,7 @@ pub fn symon_text_planner_info(
         },
         planner_route::PlannerRouting::Unavailable { message } => SymonTextPlannerInfo {
             available: false,
+            allow_default_fallback: false,
             engine: None,
             model: None,
             effort: None,
@@ -1734,8 +1735,11 @@ pub async fn run_symon_text_turn(
     engine: String,
     model: String,
     effort: String,
+    allow_default_fallback: bool,
 ) -> Result<SymonTextTurnResult, String> {
-    run_symon_text_turn_with(Some(app), session_id, turn_id, prompt, engine, model, effort).await
+    run_symon_text_turn_with(
+        Some(app), session_id, turn_id, prompt, engine, model, effort, allow_default_fallback,
+    ).await
 }
 
 /// The bound surface's run path. `app` is optional so the real entry can be
@@ -1749,6 +1753,7 @@ pub(crate) async fn run_symon_text_turn_with(
     engine: String,
     model: String,
     effort: String,
+    allow_default_fallback: bool,
 ) -> Result<SymonTextTurnResult, String> {
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() || prompt.len() > 40_000 {
@@ -1780,6 +1785,9 @@ pub(crate) async fn run_symon_text_turn_with(
         session_id,
         call_id: turn_id,
     };
+    let effective_selection = text_turn::EffectiveTextSelection::new(
+        selection.model_label(), selection.effort,
+    );
     let result = match selection.provider.transport {
         planner_route::PlannerTransport::ClaudeStreamJson => {
             claude::run_phone_text_loop_with_binary(
@@ -1799,6 +1807,8 @@ pub(crate) async fn run_symon_text_turn_with(
                 &prompt,
                 &ctx,
                 correlation,
+                allow_default_fallback,
+                effective_selection.clone(),
             )
             .await
         }
@@ -1827,18 +1837,11 @@ pub(crate) async fn run_symon_text_turn_with(
     };
     let interrupted = ctx.is_cancelled();
     unregister_cancel(&task_id);
-    if interrupted {
-        return Ok(SymonTextTurnResult {
-            status: "interrupted",
-            text: String::new(),
-            active_machine: machine::active_machine(&ctx.machine_session_id),
-        });
-    }
-    result.map(|value| SymonTextTurnResult {
-        status: "done",
-        text: value.result_text,
-        active_machine: machine::active_machine(&ctx.machine_session_id),
-    })
+    Ok(effective_selection.finish(
+        result,
+        interrupted,
+        machine::active_machine(&ctx.machine_session_id),
+    ))
 }
 
 pub fn interrupt_symon_text_turn(session_id: &str, turn_id: &str) -> bool {

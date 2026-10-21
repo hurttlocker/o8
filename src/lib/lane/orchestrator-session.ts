@@ -30,8 +30,10 @@ import { DEFAULT_CLAUDE_ORCHESTRATOR_MODEL, resolveClaudeOrchestratorModel } fro
 import { fableEnvOverride } from '@/lib/lane/fable-profile';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
-import { fingerprintMcpConfig, firstMcpConfigDivergence } from '@/lib/lane/orchestrator-mcp-fingerprint';
+import { fingerprintMcpConfig } from '@/lib/lane/orchestrator-mcp-fingerprint';
 import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
+import { claudeModelSupportsFast, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
+import { procConfigMatches, firstProcConfigDivergence } from './orchestrator-session-state';
 import type {
   OrchestratorActiveTurn,
   OrchestratorProcConfig,
@@ -521,6 +523,7 @@ export interface SendToOrchestratorOptions {
    */
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: OrchestratorServiceTier;
   model?: string;
   /**
    * #624 — Abort signal for user-initiated interrupt. When aborted mid-stream,
@@ -569,24 +572,6 @@ export function getWarmState(sessionName: string): WarmState {
     warmStates.set(sessionName, w);
   }
   return w;
-}
-
-function procConfigMatches(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): boolean {
-  return !!a && a.cwd === b.cwd && a.model === b.model && a.permissionMode === b.permissionMode
-    && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash
-    && a.modelSource === b.modelSource && a.carrierFingerprint === b.carrierFingerprint;
-}
-
-function firstProcConfigDivergence(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): string {
-  if (!a) return 'procConfig';
-  for (const key of ['cwd', 'model', 'permissionMode', 'toolProfile', 'effort', 'modelSource', 'carrierFingerprint'] as const) {
-    if (a[key] !== b[key]) return key;
-  }
-  if (a.mcpConfigHash !== b.mcpConfigHash) {
-    const key = firstMcpConfigDivergence(a.mcpConfigMaterial, b.mcpConfigMaterial);
-    return `${key} (${a.mcpConfigHash}->${b.mcpConfigHash})`;
-  }
-  return 'procConfig';
 }
 
 function clearIdleTimer(w: WarmState): void {
@@ -654,7 +639,7 @@ function settleOrchestratorTurn(
   session: OrchestratorSession,
   w: WarmState,
   error: Error | null,
-  successfulResult = false,
+  successfulResult = false, terminalOutcome: 'completed' | 'failed' | 'unconfirmed' = 'unconfirmed',
 ): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
@@ -707,7 +692,7 @@ function settleOrchestratorTurn(
   // to the retry driver, which replays it only if the LAST attempt also fails
   // (so the client latch still releases) and drops it for a discarded attempt.
   const done: Extract<OrchestratorEvent, { type: 'done' }> = {
-    type: 'done', sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
+    type: 'done', terminalOutcome: turn.abortSignal?.aborted ? 'unconfirmed' : successfulResult ? 'completed' : terminalOutcome, sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
   };
   if (!falseDispatch && !w.resumeUnavailable) turn.onEvent(done);
   if (error && !w.resumeUnavailable) turn.onEvent({ type: 'error', error: error.message });
@@ -745,7 +730,7 @@ function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: 
     turn.usage = parseOrchestratorTurnUsage(raw);
     const successfulResult = raw.is_error !== true && !(typeof raw.subtype === 'string' && raw.subtype.startsWith('error_'));
     // Only a successful result drives false-dispatch checks and prompt delivery.
-    settleOrchestratorTurn(session, w, null, successfulResult);
+    settleOrchestratorTurn(session, w, null, successfulResult, successfulResult ? 'completed' : 'failed');
     return false;
   }
   return true;
@@ -813,7 +798,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
       }
       w.stdoutLineBuffer = '';
       const stderr = w.stderrBuffer.trim();
-      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`));
+      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
     }
     session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
   });
@@ -837,6 +822,7 @@ function spawnOrchestratorProc(
     permissionMode: config.permissionMode,
     toolProfile: config.toolProfile,
     effort: config.effort,
+    fastMode: config.fastMode,
     mcpConfigPath: config.mcpConfigPath,
     model: config.model,
     claudeSessionId: session.claudeSessionId,
@@ -973,6 +959,9 @@ export async function sendToOrchestrator(
     throw failure;
   }
   const model = carrier.model;
+  if (options.serviceTier && options.serviceTier !== 'default' && (options.serviceTier !== 'fast' || carrier.source !== 'native' || !claudeModelSupportsFast(model) || process.env.CLAUDE_CODE_DISABLE_FAST_MODE === '1')) {
+    throw new Error('Fast mode is not available for this Claude model and provider. Choose Standard.');
+  }
 
   if (consumeOrchestratorResetSignal(session.repoPath, session.threadId)) {
     session.claudeSessionId = null;
@@ -992,6 +981,7 @@ export async function sendToOrchestrator(
     permissionMode,
     toolProfile,
     effort: thinkingEffort,
+    fastMode: options.serviceTier === undefined ? undefined : options.serviceTier === 'fast',
     mcpConfigPath,
     mcpConfigHash: mcpFingerprint.hash,
     mcpConfigMaterial: mcpFingerprint.material,

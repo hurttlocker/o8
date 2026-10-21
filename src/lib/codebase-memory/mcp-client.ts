@@ -289,11 +289,14 @@ export async function withCodebaseMemoryToolSession<T>(
 export async function callCodebaseMemoryTool(
   input: McpToolCallInput,
 ): Promise<McpToolCallResult> {
-  const session = await withCodebaseMemoryToolSession(input, (callTool) => callTool({
-    toolName: input.toolName,
-    args: input.args,
-    timeoutMs: input.timeoutMs,
-  }));
+  const session = await withCodebaseMemoryToolSession(
+    { binPath: input.binPath, cwd: input.cwd },
+    (callTool) => callTool({
+      toolName: input.toolName,
+      args: input.args,
+      timeoutMs: input.timeoutMs,
+    }),
+  );
   if (!session.ok) return session;
   return { ...session.value, durationMs: session.durationMs };
 }

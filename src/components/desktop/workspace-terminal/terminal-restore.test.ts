@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { applyCreatedTerminalSession, canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, mergeUserSpawnedTabs, needsRuntimeSessionLivenessCheck, reconcileValidatedTabs, resetControllerRefs } from './terminal-restore';
+import { computeCliChatSession } from './terminal-session-ops';
+import { buildPersistedState } from './terminal-tab-handlers';
 import type { TerminalTab } from './types';
+import { invalidateFetchOnce } from '@/lib/panel/fetch-cache';
 
 function tab(overrides: Partial<TerminalTab>): TerminalTab {
   return {
@@ -15,9 +18,35 @@ function tab(overrides: Partial<TerminalTab>): TerminalTab {
   };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); invalidateFetchOnce('/api/panel/terminal-sessions'); });
 
 describe('loadInitialTabState', () => {
+  it.each([false, true])('restores the newer primary conversation across global repo preference; repo newer: %s', async (repoIsNewer) => {
+    const root = { version: 1, activeTabId: 'selected', savedAt: '2026-10-11T12:00:00.000Z', tabs: [
+      { id: 'selected', kind: 'orchestrator', label: 'Selected conversation', repoPath: '/selected-repo', orchestratorThreadId: 'thoughts-selected' },
+    ] };
+    const repo = { version: 1, activeTabId: 'preferred', savedAt: repoIsNewer ? '2026-10-11T13:00:00.000Z' : '2026-10-10T12:00:00.000Z', tabs: [
+      { id: 'preferred', kind: 'orchestrator', label: 'Preferred', repoPath: '/preferred-repo', orchestratorThreadId: 'thoughts-preferred' },
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).includes('scope=tile-root') ? root : repo))));
+    const saved = await loadInitialTabState({ stateScope: 'tile-root', defaultTab: 'orchestrator', splitCreated: false, preferredRepoPath: '/preferred-repo' }, () => false);
+    expect(saved).toEqual(repoIsNewer ? repo : root);
+    const restored = await computeRestoredTabs(saved!, { preferredRepo: { name: 'Preferred', localPath: '/preferred-repo' }, defaultTab: 'orchestrator', createDefaultChatTab: () => { throw new Error('The selected thread must restore'); } }, undefined, 'optimistic');
+    expect(restored?.activeTabId).toBe(repoIsNewer ? 'preferred' : 'selected');
+    expect(restored?.tabs[0].orchestratorThreadId).toBe(repoIsNewer ? 'thoughts-preferred' : 'thoughts-selected');
+  });
+
+  it.each(['tile-other', 'tile-root'])('retains repo isolation for %s without a selected bound conversation', async (scope) => {
+    const root = { version: 1, activeTabId: 'shell', savedAt: '2026-10-11T12:00:00.000Z', tabs: [
+      { id: 'shell', kind: 'terminal', label: 'Shell', repoPath: '/other-repo' },
+    ] };
+    const repo = { version: 1, activeTabId: 'preferred', savedAt: '2026-10-10T12:00:00.000Z', tabs: [
+      { id: 'preferred', kind: 'terminal', label: 'Preferred', repoPath: '/preferred-repo' },
+    ] };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(String(input).includes(`scope=${scope}`) ? root : repo))));
+    expect(await loadInitialTabState({ stateScope: scope, defaultTab: 'terminal', splitCreated: false, preferredRepoPath: '/preferred-repo' }, () => false)).toEqual(repo);
+  });
+
   it('restores a split pane from its own tile scope without reading a shared repo state', async () => {
     const saved = {
       version: 1,
@@ -144,10 +173,21 @@ describe('reconcileValidatedTabs', () => {
       tab({ id: 'terminal-b', tmuxSession: null, label: 'Optimistic B' }),
     ];
 
-    expect(reconcileValidatedTabs(validated, current)).toEqual([
+    expect(reconcileValidatedTabs(validated, current, new Set(['terminal-a']))).toEqual([
       { ...validated[0], tmuxSession: 'cortex-dash-a' },
       validated[1],
     ]);
+  });
+
+  it('does not revive an unchanged saved session that validation found absent', () => {
+    const validated = [tab({ id: 'terminal-a', tmuxSession: null })];
+    expect(reconcileValidatedTabs(validated, [tab({ id: 'terminal-a', tmuxSession: 'expired' })], new Set())).toEqual(validated);
+  });
+
+  it('keeps a freshly acknowledged replacement ahead of an older live inventory result', () => {
+    const validated = [tab({ id: 'terminal-a', tmuxSession: 'older-session' })];
+    const current = [tab({ id: 'terminal-a', tmuxSession: 'newly-acknowledged' })];
+    expect(reconcileValidatedTabs(validated, current, new Set(['terminal-a']))[0].tmuxSession).toBe('newly-acknowledged');
   });
 });
 
@@ -173,7 +213,6 @@ describe('resetControllerRefs', () => {
     resetControllerRefs({
       restoredRef: { current: true },
       restoreSettledRef: { current: true },
-      previousWsConnectedRef: { current: true },
       initialTerminalBootstrapRef: { current: true },
       reportedRepoScopeRef: { current: '/repo' },
       reportedChatSessionsSignatureRef: { current: 'signature' },
@@ -191,6 +230,33 @@ describe('resetControllerRefs', () => {
 });
 
 describe('computeRestoredTabs — optimistic crash recovery', () => {
+  it.each(['missing', 'unavailable', 'malformed'])('never substitutes a saved process after %s liveness evidence', async (evidence) => {
+    vi.stubGlobal('fetch', vi.fn(async () => evidence === 'unavailable'
+      ? new Response('{}', { status: 503 })
+      : new Response(JSON.stringify(evidence === 'missing' ? { sessions: [] } : {}))));
+    const saved = {
+      version: 1 as const, activeTabId: 'plugin-view', savedAt: new Date().toISOString(),
+      tabs: [{ id: 'plugin-view', label: 'Console / console', kind: 'terminal' as const,
+        cliAgent: 'shell', tmuxSession: 'cortex-dash-stopped', repoPath: '/selected-repo' }],
+    };
+    const restored = await computeRestoredTabs(saved, {
+      preferredRepo: { name: 'Other', localPath: '/other-repo' }, defaultTab: 'terminal',
+      createDefaultChatTab: () => { throw new Error('No replacement chat'); },
+    });
+    expect(restored?.deadTerminalTabs).toEqual([]);
+    expect(restored?.tabs[0]).toMatchObject({
+      id: 'plugin-view', label: 'Console / console', tmuxSession: 'cortex-dash-stopped', repo: { localPath: '/selected-repo' },
+    });
+    expect(restored?.tabs[0].terminalExit).toEqual(evidence === 'missing' ? { exitCode: null, transcript: '' } : undefined);
+    expect(restored?.sessionsToAttach).toEqual(evidence === 'missing' ? [] : ['cortex-dash-stopped']);
+    const persisted = buildPersistedState(restored!.tabs, restored!.activeTabId);
+    const reloaded = await computeRestoredTabs(persisted, {
+      preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => tab({ kind: 'llm-chat' }),
+    }, undefined, 'optimistic');
+    expect(reloaded?.deadTerminalTabs).toEqual([]);
+    expect(reloaded?.tabs[0].tmuxSession).toBe('cortex-dash-stopped');
+  });
+
   it('keeps a disconnected saved-machine tab inert instead of creating a local shell', async () => {
     const remoteMachine = { id: '12345678-1234-1234-1234-123456789abc', label: 'Studio', sessionId: 'dash-1' };
     const result = await computeRestoredTabs({
@@ -270,5 +336,25 @@ describe('computeRestoredTabs — optimistic crash recovery', () => {
         chatSessionKey: sessionKey,
       }),
     ]));
+  });
+});
+
+describe('persisted cloud task navigation', () => {
+  it.each(['codex:cloud:worker', 'cloud-owned:cloud:worker'])('repairs a persisted wrapped cloud key: %s', async (key) => {
+    const saved = buildPersistedState([tab({ id: 'chat-cloud', kind: 'chat', chatRuntime: 'codex', chatSessionKey: key })], 'chat-cloud');
+    const restored = await computeRestoredTabs(saved, { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => tab({ kind: 'llm-chat' }) }, undefined, 'optimistic');
+    expect(restored?.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker' });
+    expect(restored?.tabs[0].chatModel).toBeUndefined();
+  });
+
+  it.each(['optimistic', 'validated'] as const)('preserves cloud identity through %s restore without a live local session', async (mode) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ agents: [] }), { status: 200 })));
+    const opened = computeCliChatSession({ runtime: 'cloud', targetSessionKey: 'cloud:worker', label: 'Review worker', repo: { name: 'Repo', localPath: '/repo' } }, [], '');
+    const saved = JSON.parse(JSON.stringify(buildPersistedState(opened.tabs, opened.activeTabId)));
+    const restored = await computeRestoredTabs(saved, { preferredRepo: null, defaultTab: 'terminal', createDefaultChatTab: () => tab({ kind: 'llm-chat' }) }, undefined, mode);
+    expect(restored?.tabs[0]).toMatchObject({ chatRuntime: 'cloud', chatSessionKey: 'cloud:worker', label: 'Review worker' });
+    const reopened = computeCliChatSession({ runtime: 'codex', targetSessionKey: 'cloud:worker' }, restored!.tabs, restored!.activeTabId);
+    expect(reopened.tabs).toHaveLength(1);
+    expect(reopened.activeTabId).toBe(opened.activeTabId);
   });
 });

@@ -3,10 +3,6 @@
 /**
  * AnalyticsPage — Cost & Usage Dashboard
  *
- * Dieter Rams × Swiss-Korean editorial design language.
- * Numbered sections, hairlines, solid page surface, mono metric callouts.
- * One orange accent (RAMS_ACCENT) scarce per fold. No colored pill backgrounds.
- * Flat text + hairline rows over cards wherever possible.
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
@@ -680,7 +676,7 @@ const TopSessionsRows = memo(function TopSessionsRows({ sessions }: { sessions: 
 // MAIN COMPONENT
 // ══════════════════════════════════════════════════
 
-export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: { embedded?: boolean }) {
+export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false, active = true }: { embedded?: boolean; active?: boolean }) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState(24);
@@ -698,10 +694,11 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
   }, []);
 
   useEffect(() => {
+    if (!active) return;
     fetchData(selectedRange);
     const interval = setInterval(() => fetchData(selectedRange), 60_000);
     return () => clearInterval(interval);
-  }, [selectedRange, fetchData]);
+  }, [selectedRange, fetchData, active]);
 
   const agentEntries = useMemo(() => {
     if (!data?.byAgent) return [];
@@ -742,8 +739,8 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
           marginBottom: 28,
         }}>
           <TabHeading
-            title="analytics"
-            subtitle="Spend stays king. Autonomy + governance on top — how much shipped clean, and the approval funnel."
+            title="Activity"
+            subtitle="Recorded or estimated API costs, sessions, and outcomes. These are not subscription charges. Account allowances are shown in Limits."
           />
           {/* Time range picker */}
           <div style={{

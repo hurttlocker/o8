@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { MobileTranscriptEntry, MobileTranscriptToolLaunchLink } from '@/lib/mobile/types';
+import { stopRunningTools } from '@/components/desktop/transcript/activity';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
@@ -18,7 +19,10 @@ import {
   type PendingOrchestratorSend,
 } from './use-orchestrator-stream/delivery';
 import { useDurablePendingSend } from './use-orchestrator-stream/durable-pending-send';
+import { trackComposerSubmission } from './use-orchestrator-stream/track-submission';
+import { canReadSessionContext } from './use-orchestrator-stream/session-context-preflight';
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
+import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import { primeCompactedOrchestratorSession, refreshOrchestratorTokenTelemetry, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
@@ -48,6 +52,7 @@ import {
 } from './use-orchestrator-stream/socket';
 import { prepareOrchestratorTurn, useTurnOptionResolution } from './use-orchestrator-stream/turn-option-resolution';
 import type {
+  ActiveTurnState,
   OrchestratorSendHandle,
   OrchestratorSendOptions,
   OrchestratorStreamOptions,
@@ -68,26 +73,16 @@ export type {
 // Module scope prevents remounts from re-rotating on boot-time state oscillation.
 const rotatedMissionIds = new Set<string>();
 
-interface ActiveTurnState {
-  startedAt: number;
-  toolCallsStarted: number;
-  toolCallsCompleted: number;
-  latestToolLabel: string | null;
-  launches: MobileTranscriptToolLaunchLink[];
-}
-
 /**
- * Hook that connects to the orchestrator WebSocket channel for real-time
- * Claude Code streaming. Replaces the poll-based orchestrator flow.
- *
- * Connects to ws-server on port 3002, subscribes to the orchestrator channel,
- * and accumulates output into renderable MobileTranscriptEntry messages.
+ * Subscribes to the selected orchestrator backend and accumulates output into
+ * renderable transcript entries. Connection details use the runtime resolver.
  */
 export function useOrchestratorStream(
   repoPath: string | null,
   options?: OrchestratorStreamOptions,
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useReducer(retainedTranscriptReducer, []);
+  const [voiceTerminals, setVoiceTerminals] = useState<Record<string, { outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }>>({});
   const [planText, setPlanText] = useState<string | null>(null);
   const [status, setStatus] = useState<OrchestratorStreamStatus>('connecting');
   const [busyState, setBusyState] = useState(() => createIdleBusyState());
@@ -598,6 +593,7 @@ export function useOrchestratorStream(
       lastSeqRef,
       lastEventAtRef,
       messagesRef,
+      onVoiceTerminal: (receipt) => setVoiceTerminals(previous => Object.fromEntries([...Object.entries(previous).slice(-63), [receipt.userMessageId, receipt]])),
       onOrchestratorActivity: settlePendingSend,
       onSnapshotTurnTerminal: reconcileSnapshotTerminalTurn,
       onSettledAssistantMissing: (turn) => {
@@ -838,6 +834,9 @@ export function useOrchestratorStream(
         ...(activeTurnBackendRef.current ? { backend: activeTurnBackendRef.current } : {}),
       }));
     }
+    // Later events for this turn no longer reach its reply, so its in-flight calls end now (#3659).
+    const stoppedTools = stopRunningTools(messagesRef.current);
+    if (stoppedTools !== messagesRef.current) syncMessages(stoppedTools);
     if (statusRef.current === 'busy') {
       const nextStatus = connected ? 'ready' : 'connecting';
       statusRef.current = nextStatus;
@@ -846,8 +845,9 @@ export function useOrchestratorStream(
       activeTurnRef.current = null;
       currentAssistantRef.current = null;
     }
-  }, [connected, turnOptionResolution]);
+  }, [connected, syncMessages, turnOptionResolution]);
   const send = useCallback((message: string, options?: OrchestratorSendOptions) => {
+    if (!canReadSessionContext(repoPathRef.current, threadIdRef.current, setMessages, messagesRef)) return null;
     suppressTurnEventsRef.current = false;
     const clientMessageId = createOrchestratorClientMessageId();
     const sentAtMs = Date.now();
@@ -872,7 +872,7 @@ export function useOrchestratorStream(
     lastEventAtRef.current = sentAtMs;
     setPendingStatusBusy();
 
-    void (async () => {
+    void trackComposerSubmission(sendHandle.userMessageId, (receipt) => setVoiceTerminals(previous => ({ ...previous, [receipt.userMessageId]: receipt })), async (markDispatch) => {
       const turnOptions = await turnOptionResolution.resolve(clientMessageId, options);
       if (turnOptions === null || repoPathRef.current !== repoPathAtSend || threadIdRef.current !== sendHandle.threadId) {
         activeTurnBackendRef.current = null;
@@ -885,7 +885,7 @@ export function useOrchestratorStream(
         return;
       }
       const {
-        permissionMode, thinkingEffort, model, displayMessage, wireMessage,
+        permissionMode, thinkingEffort, serviceTier, model, displayMessage, wireMessage,
         localEntriesAfterUser, collideBaseBackend, backend, orchestrationMode, pickedMode,
       } = prepareOrchestratorTurn(message, turnOptions);
       activeTurnBackendRef.current = backend ?? null;
@@ -976,17 +976,17 @@ export function useOrchestratorStream(
       currentAssistantRef.current = null;
       captureFirstTurnPlanRef.current = !planTextRef.current
         && !hasHistoryRef.current
-        && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
+        && !planCaptureSource.some((entry) => !entry.voice && (entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool'));
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
-      let outboundMessage = wireMessage;
-      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId);
-      if (resumePrelude) {
-        outboundMessage = `${resumePrelude}\n\nOperator message:\n${wireMessage}`;
-      }
+      const outboundMessage = withSessionPrelude(
+        wireMessage,
+        consumeOrchestratorSessionPrelude(activeRepoPath, sendHandle.threadId),
+        orchestrationMode,
+      );
       turnTranscriptEventCountRef.current = 0;
       const payload = buildOrchestratorSendPayload({
-        repoPath: activeRepoPath,
+        pinBackend: turnOptions?.pinBackend, repoPath: activeRepoPath,
         projectId: projectIdRef.current,
         threadId: sendHandle.threadId,
         clientMessageId,
@@ -996,7 +996,7 @@ export function useOrchestratorStream(
         displayMessage,
         permissionMode,
         orchestrationMode, pickedMode,
-        thinkingEffort,
+        thinkingEffort, serviceTier,
         model,
         // Per-turn override stays truthful while the global default write settles.
         backend,
@@ -1013,7 +1013,7 @@ export function useOrchestratorStream(
         sentAtMs,
         wirePayload: payload, attachmentsRequired: Boolean(turnOptions?.attachments?.length),
       };
-      durablePendingSend.recordPending(pendingRecord);
+      markDispatch(); durablePendingSend.recordPending(pendingRecord);
       const delivered = await deliverOrchestratorPayload({
         payload,
         getWebSocket: () => wsRef.current,
@@ -1031,7 +1031,7 @@ export function useOrchestratorStream(
       lastEventAtRef.current = deliveredAt;
       durablePendingSend.armRecord(pendingRecord, deliveredAt);
       setPendingStatusBusy();
-    })();
+    });
     return sendHandle;
   }, [connect, connected, durablePendingSend, estimateNextTurnTokens, primeCompactedSession, requestCompaction, setPendingStatusBusy, turnOptionResolution, updateRunningTotal]);
 
@@ -1068,6 +1068,7 @@ export function useOrchestratorStream(
   }, [connect, connected, durablePendingSend, resetFirstTurnPlanCapture, syncMessages, turnOptionResolution]);
 
   return {
+    voiceTerminals,
     messages,
     planText,
     status,

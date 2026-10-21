@@ -4,18 +4,38 @@ mod agent;
 mod ai;
 mod agent_partials_window;
 mod spatial_ink_window;
+#[cfg(target_os = "macos")]
+mod visual_capture;
+#[cfg(target_os = "macos")]
+mod visual_capture_session;
+#[cfg(target_os = "macos")]
+mod visual_capture_snapshot;
+#[cfg(target_os = "macos")]
+mod visual_capture_input;
+#[cfg(target_os = "macos")]
+mod visual_capture_media;
+#[cfg(any(target_os = "macos", test))]
+mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
+mod remote_preview;
+mod restart_job_drain;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
+mod desktop_attach_retry;
+mod desktop_attach_owner;
 mod dictation_history;
 mod dock_window;
 #[cfg(target_os = "macos")]
 mod first_run_install;
 mod fn_hotkey;
+mod voice_surfaces;
+mod voice_input;
+mod managed_voice_window;
 mod launch_updater;
+mod update_ping;
 #[cfg(target_os = "macos")]
 mod live_dictation;
 #[cfg(target_os = "macos")]
@@ -247,16 +267,18 @@ fn master_key_ensure(window: tauri::Window) -> Result<String, String> {
 //   3. ~/.o8           — default, auto-migrate from ~/.cortex-ide on first use
 
 fn o8_data_dir() -> String {
-    if let Ok(dir) = std::env::var("O8_DATA_DIR") {
-        return dir;
-    }
-    if let Ok(dir) = std::env::var("CORTEX_IDE_DATA_DIR") {
-        return dir;
-    }
+    let primary = std::env::var("O8_DATA_DIR").ok();
+    let legacy = std::env::var("CORTEX_IDE_DATA_DIR").ok();
     let home = home_dir_string();
-    let new_dir = format!("{}/.o8", home);
-    migrate_data_dir_once(&home, &new_dir);
-    new_dir
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let directory = o8_restart_safety::resolve_data_directory(primary.as_deref(), legacy.as_deref(),
+        std::path::Path::new(&home), &cwd).expect("Native data directory must be absolute");
+    let resolved = directory.to_string_lossy().into_owned();
+    if !primary.as_ref().is_some_and(|value| !value.is_empty())
+        && !legacy.as_ref().is_some_and(|value| !value.is_empty()) {
+        migrate_data_dir_once(&home, &resolved);
+    }
+    resolved
 }
 
 #[cfg(test)]
@@ -952,7 +974,7 @@ fn decide_desktop_attach(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ServeStateV1 {
     schema: String,
@@ -960,6 +982,7 @@ struct ServeStateV1 {
     pid: u32,
     api_port: u16,
     ws_port: u16,
+    generation: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -980,12 +1003,19 @@ struct DesktopAttachAttempt {
 // normally single-digit milliseconds; 75ms leaves scheduler margin while
 // keeping an unhealthy daemon below the common 100ms perception threshold.
 const DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS: u64 = 75;
+// Reopening a live profile can race a cold route or a busy scheduler. Other
+// listener probes retain their short budget; attachment has a recovery prompt.
+const DESKTOP_RECONNECT_IDENTITY_TIMEOUT_MS: u64 = 2_000;
 
 fn fetch_setup_identity(port: u16) -> Option<SetupIdentityResponse> {
+    fetch_setup_identity_with_timeout(port, DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS)
+}
+
+fn fetch_setup_identity_with_timeout(port: u16, timeout_ms: u64) -> Option<SetupIdentityResponse> {
     let url = format!("http://127.0.0.1:{}/api/setup/identity", port);
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(
-            DESKTOP_ATTACH_IDENTITY_TIMEOUT_MS,
+            timeout_ms,
         ))
         .build()
         .ok()?;
@@ -1028,22 +1058,26 @@ fn daemon_pid_is_alive(_pid: u32) -> bool {
     false
 }
 
+fn unowned_desktop_boot(data_dir: &str, reason: String) -> DesktopAttachAttempt {
+    if let Some(reason) = desktop_attach_owner::retained_owner_reason(data_dir, daemon_pid_is_alive) {
+        return DesktopAttachAttempt { decision: DesktopAttachDecision::Coexist, target: None, reason };
+    }
+    DesktopAttachAttempt { decision: DesktopAttachDecision::NormalBoot, target: None, reason }
+}
+
 fn inspect_desktop_attach() -> DesktopAttachAttempt {
     let data_dir = o8_data_dir();
     let pid_path = format!("{data_dir}/serve.pid");
     let state_path = format!("{data_dir}/serve-state.json");
     let pid_raw = match std::fs::read_to_string(&pid_path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
-                target: None,
-                reason: "serve.pid is absent".to_string(),
-            };
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            && matches!(std::fs::symlink_metadata(&pid_path), Err(ref error) if error.kind() == std::io::ErrorKind::NotFound) => {
+            return unowned_desktop_boot(&data_dir, "serve.pid is absent".to_string());
         }
         Err(error) => {
             return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
+                decision: DesktopAttachDecision::Coexist,
                 target: None,
                 reason: format!("serve.pid could not be read: {error}"),
             };
@@ -1053,18 +1087,14 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
         Ok(pid) if pid > 0 => pid,
         _ => {
             return DesktopAttachAttempt {
-                decision: decide_desktop_attach(None, None, None),
+                decision: DesktopAttachDecision::Coexist,
                 target: None,
                 reason: "serve.pid is malformed".to_string(),
             };
         }
     };
     if !daemon_pid_is_alive(pid) {
-        return DesktopAttachAttempt {
-            decision: decide_desktop_attach(Some(false), None, None),
-            target: None,
-            reason: format!("serve.pid references dead pid {pid}"),
-        };
+        return unowned_desktop_boot(&data_dir, format!("serve.pid references dead pid {pid}"));
     }
 
     let state_raw = match std::fs::read_to_string(&state_path) {
@@ -1100,7 +1130,7 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
         };
     }
 
-    let identity = fetch_setup_identity(state.api_port).and_then(|response| {
+    let identity = fetch_setup_identity_with_timeout(state.api_port, DESKTOP_RECONNECT_IDENTITY_TIMEOUT_MS).and_then(|response| {
         let SetupIdentityResponse {
             product: Some(product),
             instance_id: Some(instance_id),
@@ -1154,6 +1184,23 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
             ),
         };
     };
+    // The probe awaited an external process. Re-read ownership before using its
+    // result so a reply from a superseded generation cannot select our backend.
+    let owner_unchanged = std::fs::read_to_string(&pid_path)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok()) == Some(pid)
+        && daemon_pid_is_alive(pid)
+        && std::fs::read_to_string(&state_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<ServeStateV1>(&raw).ok())
+            .as_ref() == Some(&state);
+    if !owner_unchanged {
+        return DesktopAttachAttempt {
+            decision: DesktopAttachDecision::Coexist,
+            target: None,
+            reason: "daemon ownership changed during the identity probe".to_string(),
+        };
+    }
     DesktopAttachAttempt {
         decision,
         target: Some(DesktopAttachTarget {
@@ -1167,10 +1214,25 @@ fn inspect_desktop_attach() -> DesktopAttachAttempt {
     }
 }
 
+/// A live or unreadable owner is never permission to start another backend in
+/// its profile. Dismissal exits before boot identity, listeners or sidecars.
+fn resolve_desktop_attach(mut retry: impl FnMut(&str) -> bool) -> Option<DesktopAttachAttempt> {
+    loop {
+        let attempt = inspect_desktop_attach();
+        if attempt.decision != DesktopAttachDecision::Coexist {
+            return Some(attempt);
+        }
+        eprintln!("[desktop-attach] waiting for existing profile: {}", attempt.reason);
+        if !retry(&attempt.reason) {
+            return None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod desktop_attach_tests {
     use super::{
-        decide_desktop_attach, inspect_desktop_attach, DesktopAttachDecision,
+        decide_desktop_attach, inspect_desktop_attach, resolve_desktop_attach, DesktopAttachDecision,
         DATA_DIR_ENV_TEST_LOCK,
     };
     use std::ffi::OsString;
@@ -1243,6 +1305,13 @@ mod desktop_attach_tests {
     }
 
     fn spawn_identity_stub() -> (u16, JoinHandle<()>) {
+        spawn_delayed_identity_stub(Duration::ZERO, || {})
+    }
+
+    fn spawn_delayed_identity_stub(
+        delay: Duration,
+        before_response: impl FnOnce() + Send + 'static,
+    ) -> (u16, JoinHandle<()>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind identity stub");
         listener
             .set_nonblocking(true)
@@ -1266,6 +1335,8 @@ mod desktop_attach_tests {
                                 .starts_with("GET /api/setup/identity "),
                             "identity probe must use the setup identity route"
                         );
+                        std::thread::sleep(delay);
+                        before_response();
                         let body = r#"{"product":"o8","instanceId":"daemon-instance","bootId":"daemon-boot"}"#;
                         write!(
                             stream,
@@ -1340,6 +1411,158 @@ mod desktop_attach_tests {
         assert_eq!(target.ws_port, 47105);
         assert_eq!(target.identity.instance_id, "daemon-instance");
         assert_eq!(target.identity.boot_id, "daemon-boot");
+    }
+
+    #[test]
+    fn delayed_valid_daemon_attaches_without_replacing_profile_metadata() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_delayed_identity_stub(Duration::from_millis(200), || {});
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+        let before = std::fs::read(fixture.path.join("serve-state.json")).unwrap();
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().expect("join delayed identity stub");
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert_eq!(std::fs::read(fixture.path.join("serve-state.json")).unwrap(), before);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn dismissing_reconnect_preserves_the_live_owner_and_saved_profile() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id().to_string();
+        std::fs::write(fixture.path.join("serve.pid"), &pid).unwrap();
+        std::fs::write(fixture.path.join("serve-state.json"), "{unfinished").unwrap();
+        std::fs::write(fixture.path.join("boot-id"), "existing-boot").unwrap();
+        std::fs::write(fixture.path.join("terminal-state.json"), "saved terminal").unwrap();
+
+        for _ in 0..2 {
+            let mut prompted = 0;
+            assert!(resolve_desktop_attach(|reason| {
+                assert!(reason.contains("malformed"));
+                prompted += 1;
+                false
+            }).is_none());
+            assert_eq!(prompted, 1);
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve.pid")).unwrap(), pid);
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), "{unfinished");
+            assert_eq!(std::fs::read_to_string(fixture.path.join("boot-id")).unwrap(), "existing-boot");
+            assert_eq!(std::fs::read_to_string(fixture.path.join("terminal-state.json")).unwrap(), "saved terminal");
+        }
+    }
+
+    #[test]
+    fn retry_rechecks_the_profile_and_connects_when_it_becomes_ready() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        std::fs::write(fixture.path.join("serve-state.json"), "{unfinished").unwrap();
+        let mut prompted = 0;
+
+        let attempt = resolve_desktop_attach(|_| {
+            prompted += 1;
+            write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+            true
+        }).expect("ready owner attaches after retry");
+        identity_stub.join().unwrap();
+
+        assert_eq!(prompted, 1);
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn a_live_supervisor_without_a_live_daemon_pid_keeps_the_profile_owned() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for dead_pid in [false, true] {
+            let fixture = DataDirFixture::new();
+            if dead_pid {
+                std::fs::write(fixture.path.join("serve.pid"), u32::MAX.to_string()).unwrap();
+            }
+            let state = serde_json::json!({
+                "schema": "o8/serve-state/v1", "supervisorPid": std::process::id(), "generation": "restarting"
+            }).to_string();
+            std::fs::write(fixture.path.join("serve-state.json"), &state).unwrap();
+            assert!(resolve_desktop_attach(|_| false).is_none());
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), state);
+            assert!(!fixture.path.join("boot-id").exists());
+        }
+    }
+
+    #[test]
+    fn retry_after_supervisor_startup_uses_its_ready_daemon() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let pid = std::process::id();
+        std::fs::write(fixture.path.join("serve-state.json"), serde_json::json!({
+            "schema": "o8/serve-state/v1", "supervisorPid": pid, "generation": "starting"
+        }).to_string()).unwrap();
+        let (api_port, identity_stub) = spawn_identity_stub();
+        let mut prompted = 0;
+        let attempt = resolve_desktop_attach(|_| {
+            prompted += 1;
+            assert!(!fixture.path.join("boot-id").exists());
+            std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+            write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+            true
+        }).expect("attach to supervisor's ready daemon");
+        identity_stub.join().unwrap();
+        assert_eq!(prompted, 1);
+        assert_eq!(attempt.decision, DesktopAttachDecision::Attach);
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn retained_children_and_uncertain_lifecycle_metadata_block_a_new_backend() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for state in [
+            serde_json::json!({ "schema": "o8/serve-state/v1", "children": [{ "pid": std::process::id() }] }).to_string(),
+            "{unfinished".to_string(),
+        ] {
+            let fixture = DataDirFixture::new();
+            std::fs::write(fixture.path.join("serve-state.json"), &state).unwrap();
+            assert!(resolve_desktop_attach(|_| false).is_none());
+            assert_eq!(std::fs::read_to_string(fixture.path.join("serve-state.json")).unwrap(), state);
+            assert!(!fixture.path.join("boot-id").exists());
+        }
+        let fixture = DataDirFixture::new();
+        std::fs::create_dir(fixture.path.join("serve-operation.lock")).unwrap();
+        assert!(resolve_desktop_attach(|_| false).is_none());
+        assert!(fixture.path.join("serve-operation.lock").is_dir());
+        assert!(!fixture.path.join("boot-id").exists());
+    }
+
+    #[test]
+    fn a_successful_identity_from_a_superseded_generation_is_rejected() {
+        let _env_lock = DATA_DIR_ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let fixture = DataDirFixture::new();
+        let state_path = fixture.path.join("serve-state.json");
+        let state_for_reply = state_path.clone();
+        let (api_port, identity_stub) = spawn_delayed_identity_stub(Duration::from_millis(50), move || {
+            let mut state: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&state_for_reply).unwrap()).unwrap();
+            state["generation"] = serde_json::json!("replacement");
+            std::fs::write(state_for_reply, state.to_string()).unwrap();
+        });
+        let pid = std::process::id();
+        std::fs::write(fixture.path.join("serve.pid"), pid.to_string()).unwrap();
+        write_state(&fixture.path, pid, api_port, env!("CARGO_PKG_VERSION"));
+
+        let attempt = inspect_desktop_attach();
+        identity_stub.join().unwrap();
+
+        assert_eq!(attempt.decision, DesktopAttachDecision::Coexist);
+        assert!(attempt.target.is_none());
+        assert!(attempt.reason.contains("ownership changed"));
+        assert!(!fixture.path.join("boot-id").exists());
     }
 
     #[test]
@@ -1773,6 +1996,14 @@ fn compile_cache_dir() -> String {
     format!("{}/compile-cache", o8_data_dir())
 }
 
+/// The native approved-write helper for Pi workers (#3289), shipped as an
+/// externalBin next to the app binary. The packaged servers refuse approved
+/// writes without it.
+fn pi_write_helper() -> Option<std::path::PathBuf> {
+    let helper = std::env::current_exe().ok()?.parent()?.join("o8-pi-write");
+    helper.is_file().then_some(helper)
+}
+
 fn open_child_log(name: &str) -> Option<std::fs::File> {
     let dir = format!("{}/logs", o8_data_dir());
     if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -1903,53 +2134,7 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         }
         log::info!("[boot] sidecar answering at {}ms — the dashboard can load", boot_ms());
 
-        // Window creation must run on the main thread.
-        let app_main = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            dock_window::create(&app_main, api_port);
-            // Outside-the-window live agent-transcription HUD (bottom-center).
-            // Same server-up prerequisite as the dock — it loads /agent-partials
-            // on the same port.
-            agent_partials_window::create(&app_main, api_port);
-            // Symon Spatial Context — the draw-on-screen ink overlay. Sized to
-            // the cursor's monitor + mouse-captured only during an agent hold
-            // (arm/disarm); click-through + transparent at rest.
-            spatial_ink_window::create(&app_main, api_port);
-        });
-        // Relay the canvas composer's partials-surface CLAIM directly to the HUD
-        // window. The canvas emits it as a JS broadcast, and cross-webview
-        // broadcasts can miss secondary windows (the dock's known failure mode,
-        // 2026-07-08 live-hit: the HUD painted an empty bar over the canvas
-        // because the claim never arrived). Rust listen → emit_to is reliable.
-        //
-        // CRITICAL: the forward MUST use a DIFFERENT event name. `listen_any`
-        // hears EVERY emit — including this handler's own `emit_to` — so
-        // re-emitting under the same name recursed until the thread's stack
-        // blew (2026-07-09 crash ×2: EXC_BAD_ACCESS / stack_overflow abort on
-        // tokio-rt-worker, triggered the moment the canvas claimed). The HUD
-        // page listens for both the direct name and the `-fwd` relay name.
-        #[cfg(target_os = "macos")]
-        {
-            use tauri::Listener;
-            let relay = app.clone();
-            app.listen_any("o8:agent-partials-claim", move |event| {
-                if let Ok(payload) =
-                    serde_json::from_str::<serde_json::Value>(event.payload())
-                {
-                    let _ = relay.emit_to(
-                        agent_partials_window::PARTIALS_LABEL,
-                        "o8:agent-partials-claim-fwd",
-                        payload,
-                    );
-                }
-            });
-        }
-        // JS → Rust listeners for the ink page (first-stroke capture trigger,
-        // stroke payload at finalize, page-side disarm request).
-        spatial_ink_window::register_listeners(&app);
-        // Stash the resolved port for the lazily-created Symon Points overlay
-        // (point_overlay builds its window on first [POINT:...] tag, not here).
-        point_overlay::init(api_port);
+        crate::voice_surfaces::create(&app, api_port);
         // Fleet visibility in the dock — the worker-pulse poller drives the
         // idle sliver's orbiting dot + count while packets are in flight.
         #[cfg(target_os = "macos")]
@@ -1980,6 +2165,7 @@ fn spawn_bundled_ws_server(
         );
         let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
         let spawn = BundledWsSpawn {
+            data_dir: o8_data_dir(),
             node_bin: node_bin.to_string(),
             server_dir: server_dir.to_path_buf(),
             server_js: ws_server_js,
@@ -2536,12 +2722,19 @@ fn check_port(port: u16) -> bool {
 /// calls THIS command instead of the raw plugin relaunch so the children are
 /// reaped and the ports freed before the new instance boots.
 #[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    log::info!("[restart] killing tracked children before relaunch");
-    sidecar_lifecycle::kill_tracked_children();
-    // Give the OS a beat to release the listening sockets the children held.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+fn restart_app(app: tauri::AppHandle, reservation_id: Option<String>) -> Result<(), String> {
+    app.state::<o8_restart_safety::RestartSafety>().before_restart(reservation_id.as_deref())?;
     app.restart();
+}
+
+#[tauri::command]
+fn prepare_app_restart(app: tauri::AppHandle) -> Result<String, String> {
+    app.state::<o8_restart_safety::RestartSafety>().prepare()
+}
+
+#[tauri::command]
+fn cancel_app_restart(app: tauri::AppHandle, reservation_id: String) -> Result<(), String> {
+    app.state::<o8_restart_safety::RestartSafety>().cancel(&reservation_id)
 }
 
 /// Start the WebSocket server as a background process
@@ -4051,6 +4244,11 @@ mod stt_engine {
         active_session().load(Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_test_session_id(session: u64) -> u64 {
+        active_session().swap(session, Ordering::SeqCst)
+    }
+
     /// App handle for re-installing the event router after a daemon respawn.
     /// Without it, `start()`'s auto-respawn produced a daemon whose events
     /// flowed into a dropped Receiver — the dock showed "listening" forever
@@ -4130,7 +4328,12 @@ mod stt_engine {
     /// live morph (recording waveform + transcript + paste flash) reliably lands
     /// in the second webview — `app.emit` broadcast can miss the dock. The
     /// agent-partials HUD gets the same direct delivery for the same reason.
-    fn emit_stt(app: &AppHandle, origin: &str, payload: serde_json::Value) {
+    fn emit_stt(app: &AppHandle, origin: &str, mut payload: serde_json::Value) {
+        // Direct delivery and broadcast share one gesture identity, including
+        // when a recognizer frame interleaves with those duplicate starts.
+        if payload["type"] == "system-start" && payload["startId"].is_null() {
+            payload["startId"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
+        }
         if origin == "system" {
             let _ = app.emit_to(
                 crate::dock_window::DOCK_LABEL,
@@ -4153,6 +4356,10 @@ mod stt_engine {
             );
         }
         let _ = app.emit("o8:stt-event", payload);
+    }
+
+    pub(crate) fn emit_system_stt(app: &AppHandle, payload: serde_json::Value) {
+        emit_stt(app, "system", payload);
     }
 
     fn with_agent_lane(mut payload: serde_json::Value) -> serde_json::Value {
@@ -4256,6 +4463,13 @@ mod stt_engine {
                 );
             }
             TE::Error { session_id, text } => {
+                if let Some(session_id) = session_id {
+                    // Daemon startup can fail after the start command was accepted.
+                    // Stop capture before releasing only that session's input claim.
+                    if let Err(error) = stop_session(session_id) {
+                        log::warn!("[stt] failed to stop errored session {session_id}: {error}");
+                    }
+                }
                 if origin == "system" {
                     if let Some(session_id) = session_id {
                         crate::live_dictation::cancel_session(session_id);
@@ -4400,8 +4614,7 @@ mod stt_engine {
                 emit_agent_stt(app, idle);
                 crate::fn_hotkey::clear_agent_event_session(Some(session_id));
             } else {
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                let _ = app.emit("o8:stt-event", idle);
+                emit_stt(app, "system", idle);
             }
         } else {
             let _ = app.emit(
@@ -4447,8 +4660,7 @@ mod stt_engine {
             emit_agent_stt(app, error);
             crate::fn_hotkey::clear_agent_event_session(Some(session_id));
         } else if system_origin {
-            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", error.clone());
-            let _ = app.emit("o8:stt-event", error);
+            emit_stt(app, "system", error);
         } else {
             let _ = app.emit("o8:stt-event", error);
         }
@@ -4634,12 +4846,7 @@ mod stt_engine {
                         {
                             let idle =
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(
-                                crate::dock_window::DOCK_LABEL,
-                                "o8:stt-event",
-                                idle.clone(),
-                            );
-                            let _ = app.emit("o8:stt-event", idle);
+                            emit_stt(&app, "system", idle);
                         }
                         return;
                     }
@@ -4656,12 +4863,7 @@ mod stt_engine {
                             }
                             let idle =
                                 serde_json::json!({ "type": "system-idle", "origin": "system" });
-                            let _ = app.emit_to(
-                                crate::dock_window::DOCK_LABEL,
-                                "o8:stt-event",
-                                idle.clone(),
-                            );
-                            let _ = app.emit("o8:stt-event", idle);
+                            emit_stt(&app, "system", idle);
                         }
                         #[cfg(not(target_os = "macos"))]
                         let _ = t;
@@ -4702,6 +4904,14 @@ mod stt_engine {
             let polished = if crate::stt::polish::is_available()
                 && !crate::stt::polish::should_skip_polish(&ctx)
             {
+                // Publish the actual processing phase before the provider call.
+                let origin = origin_str();
+                emit_session_stt(
+                    &app,
+                    origin,
+                    Some(session_id),
+                    serde_json::json!({ "type": "polishing", "origin": origin, "sessionId": session_id }),
+                );
                 crate::stt::polish::polish(&ctx)
             } else {
                 raw_text.clone()
@@ -4738,8 +4948,7 @@ mod stt_engine {
                 // The dock was morphed to 'recording' on ask-start; return it to
                 // idle now — the Ask answer panel takes over when the answer lands.
                 let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                let _ = app.emit("o8:stt-event", idle);
+                emit_stt(&app, "system", idle);
                 crate::dictation_history::record("ask", &polished, None);
                 crate::spawn_ask_and_speak(app.clone(), polished);
                 return;
@@ -4827,9 +5036,7 @@ mod stt_engine {
                     // false "Pasted". Symon parity: never claim a paste it didn't
                     // make. emit_to(DOCK_LABEL) + broadcast (same reliable path).
                     let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
-                    let _ =
-                        app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
-                    let _ = app.emit("o8:stt-event", idle);
+                    emit_stt(&app, "system", idle);
                 } else {
                     // In-app delivery (#1542 slim-down + composer-focus fix):
                     // when o8 itself is frontmost, a synthetic Cmd+V into our
@@ -4940,12 +5147,7 @@ mod stt_engine {
                             "sessionId": session_id,
                             "text": message,
                         });
-                        let _ = app.emit_to(
-                            crate::dock_window::DOCK_LABEL,
-                            "o8:stt-event",
-                            error.clone(),
-                        );
-                        let _ = app.emit("o8:stt-event", error);
+                        emit_stt(&app, "system", error);
                     } else {
                         let pasted = serde_json::json!({
                             "type": "system-pasted",
@@ -4959,12 +5161,7 @@ mod stt_engine {
                             // than a false "pasted".
                             "clipboardOnly": !paste_outcome.did_paste(),
                         });
-                        let _ = app.emit_to(
-                            crate::dock_window::DOCK_LABEL,
-                            "o8:stt-event",
-                            pasted.clone(),
-                        );
-                        let _ = app.emit("o8:stt-event", pasted);
+                        emit_stt(&app, "system", pasted);
                         // Cue: paste landed (#1208).
                         crate::sound::play_sound("Done");
                     }
@@ -5000,11 +5197,23 @@ mod stt_engine {
     pub fn start_with_gate(
         duck_gate: Option<crate::stt::capture::DuckGate>,
     ) -> Result<u64, String> {
-        let sid = next_session_id();
-        active_session().store(sid, Ordering::SeqCst);
+        start_prepared(prepare_input()?, duck_gate)
+    }
+
+    pub(crate) fn prepare_input() -> Result<crate::voice_input::NativeInput, String> {
+        crate::voice_input::reserve_native(next_session_id())
+    }
+
+    pub(crate) fn start_prepared(
+        input: crate::voice_input::NativeInput,
+        duck_gate: Option<crate::stt::capture::DuckGate>,
+    ) -> Result<u64, String> {
+        let sid = input.session();
         let mut guard = recognizer()
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
+        input.activate()?;
+        active_session().store(sid, Ordering::SeqCst);
         // Respawn if the daemon died between sessions — and REWIRE the event
         // router to the new receiver. Discarding it (the old `let _ =`) left
         // the fresh daemon's final/audio_file/complete events flowing into a
@@ -5031,7 +5240,11 @@ mod stt_engine {
         // default. Read per-start so the choice survives an app restart.
         let mic = crate::stt::keys::config_string("dictation_microphone_uid");
         let _ = guard.set_input_device(mic.as_deref().filter(|s| !s.is_empty() && *s != "default"));
-        guard.start(sid, duck_gate)?;
+        if let Err(error) = guard.start(sid, duck_gate) {
+            guard.stop(sid);
+            crate::voice_input::release_native(sid);
+            return Err(error);
+        }
         Ok(sid)
     }
 
@@ -5043,6 +5256,7 @@ mod stt_engine {
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
         guard.stop(sid);
+        crate::voice_input::release_native(sid);
         Ok(())
     }
 
@@ -5062,6 +5276,7 @@ mod stt_engine {
         // unlocked check above and acquiring the recognizer.
         if active_session().load(Ordering::SeqCst) == expected {
             guard.stop(expected);
+            crate::voice_input::release_native(expected);
         }
         Ok(())
     }
@@ -5671,8 +5886,11 @@ fn make_window_zoom_instant(win: &tauri::WebviewWindow) {
 /// macOS only — the pref store lives in the macOS-gated stt module (#1673).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn voice_prefs_get() -> serde_json::Value {
-    crate::stt::keys::config_public()
+async fn voice_prefs_get() -> Result<serde_json::Value, String> {
+    // Even metadata-only Keychain I/O must not hold the native event loop.
+    tauri::async_runtime::spawn_blocking(crate::stt::keys::config_public)
+        .await
+        .map_err(|error| format!("read public voice preferences: {error}"))
 }
 
 /// Write one voice preference into `~/.o8/dictation.json` (read-modify-write).
@@ -5681,13 +5899,18 @@ fn voice_prefs_get() -> serde_json::Value {
 /// `reading_speed`, `tts_provider`, `tts_voice_id`, etc. macOS only (#1673).
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
+fn voice_prefs_set(app: tauri::AppHandle, key: String, value: serde_json::Value) -> Result<(), String> {
+    let top_pill = if key == "dictation_top_pill" { value.as_bool() } else { None };
     let external_symon_left_control = if key == "external_symon_left_control" {
         value.as_bool()
     } else {
         None
     };
     crate::stt::keys::set_pref(&key, value)?;
+    if let Some(enabled) = top_pill {
+        use tauri::Emitter;
+        let _ = app.emit("o8:top-pill-preference", serde_json::json!({ "enabled": enabled }));
+    }
     if let Some(enabled) = external_symon_left_control {
         // #2158: hand the pref to the device watcher, which re-evaluates at once
         // and arms the tap only while a non-Apple external keyboard is attached.
@@ -5864,8 +6087,9 @@ async fn symon_text_run_turn(
     engine: String,
     model: String,
     effort: String,
+    allow_default_fallback: Option<bool>,
 ) -> Result<agent::SymonTextTurnResult, String> {
-    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort).await
+    agent::run_symon_text_turn(app, session_id, turn_id, prompt, engine, model, effort, allow_default_fallback.unwrap_or(false)).await
 }
 
 #[cfg(target_os = "macos")]
@@ -6694,6 +6918,7 @@ where
 
 #[derive(Clone)]
 struct BundledNextSpawn {
+    data_dir: String,
     node_bin: String,
     server_dir: std::path::PathBuf,
     server_js: std::path::PathBuf,
@@ -6711,6 +6936,8 @@ impl BundledNextSpawn {
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
+            .env("O8_DATA_DIR", &self.data_dir)
+            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("PORT", self.api_port.to_string())
             .env("HOSTNAME", "0.0.0.0")
@@ -6724,6 +6951,9 @@ impl BundledNextSpawn {
             .env("WS_PORT", self.ws_port.to_string())
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
@@ -6760,6 +6990,7 @@ where
 
 #[derive(Clone)]
 struct BundledWsSpawn {
+    data_dir: String,
     node_bin: String,
     server_dir: std::path::PathBuf,
     server_js: std::path::PathBuf,
@@ -6776,6 +7007,8 @@ impl BundledWsSpawn {
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
+            .env("O8_DATA_DIR", &self.data_dir)
+            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("O8_NODE_BIN", &self.node_bin)
             .env("WS_PORT", self.ws_port.to_string())
@@ -6786,6 +7019,9 @@ impl BundledWsSpawn {
             .env("O8_INSTANCE_ID", &self.boot_identity.instance_id)
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", compile_cache_dir());
+        if let Some(path) = pi_write_helper() {
+            command.env("O8_PI_WRITE_BIN", path);
+        }
         if let Some(path) = self.bundled_operator_mcp.as_ref() {
             command.env("O8_BUNDLED_MCP_DIR", &self.server_dir);
             command.env("O8_BUNDLED_MCP_PATH", path);
@@ -7211,7 +7447,7 @@ count=0
 if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
-printf '%s\n' "$PORT|$O8_API_PORT|$O8_WS_PORT|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+printf '%s\n' "$PORT|$O8_API_PORT|$O8_WS_PORT|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0|$O8_DATA_DIR|$CORTEX_IDE_DATA_DIR" > "$O8_WATCHDOG_CAPTURE"
 if [ "$count" -eq 1 ]; then sleep 0.2; exit 17; fi
 sleep 30
 "#,
@@ -7219,6 +7455,7 @@ sleep 30
         .expect("write spawn fixture");
 
         let spawn = BundledNextSpawn {
+            data_dir: root.join("state").to_string_lossy().into_owned(),
             node_bin: "sh".to_string(),
             server_dir: root.clone(),
             server_js: script.clone(),
@@ -7259,6 +7496,8 @@ sleep 30
         assert!(environment.contains("47120|47120|47125|test-boot|test-instance|1"));
         assert!(environment.contains(root.to_string_lossy().as_ref()));
         assert!(environment.contains(script.to_string_lossy().as_ref()));
+        let state_dir = root.join("state");
+        assert!(environment.contains(&format!("|{}|{}", state_dir.display(), state_dir.display())));
 
         crate::sidecar_lifecycle::kill_tracked_children();
         let outcome = supervisor
@@ -7297,13 +7536,14 @@ count=0
 if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
-printf '%s\n' "$WS_PORT|$NEXT_ORIGIN|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+printf '%s\n' "$WS_PORT|$NEXT_ORIGIN|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0|$O8_DATA_DIR|$CORTEX_IDE_DATA_DIR" > "$O8_WATCHDOG_CAPTURE"
 if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi
 sleep 30
 "#,
         )
         .expect("write WS spawn fixture");
         let spawn = BundledWsSpawn {
+            data_dir: root.join("state").to_string_lossy().into_owned(),
             node_bin: "sh".to_string(),
             server_dir: root.clone(),
             server_js: script.clone(),
@@ -7345,6 +7585,8 @@ sleep 30
         );
         assert!(environment.contains(root.to_string_lossy().as_ref()));
         assert!(environment.contains(script.to_string_lossy().as_ref()));
+        let state_dir = root.join("state");
+        assert!(environment.contains(&format!("|{}|{}", state_dir.display(), state_dir.display())));
 
         crate::sidecar_lifecycle::kill_tracked_children();
         let outcome = supervisor
@@ -7439,6 +7681,7 @@ fn finish_bundled_bootstrap(
     }
 
     let next_spawn = BundledNextSpawn {
+        data_dir: o8_data_dir(),
         node_bin: node_bin.clone(),
         server_dir: server_dir.clone(),
         server_js,
@@ -7526,6 +7769,10 @@ fn boot_trace(stage: &str) {
     }
 }
 
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     // A disposable native test process runs beside the operator's installed app.
     // Treat its environment as an all-or-nothing safety contract and fail before
@@ -7600,7 +7847,10 @@ pub fn run() {
             reason: format!("{} owns backend selection", dev_frontend::ENV_VAR),
         }
     } else {
-        inspect_desktop_attach()
+        let Some(attempt) = resolve_desktop_attach(|_| desktop_attach_retry::prompt_retry()) else {
+            return;
+        };
+        attempt
     };
     let desktop_attached = desktop_attach.decision == DesktopAttachDecision::Attach;
     let boot_identity = desktop_attach
@@ -7655,7 +7905,7 @@ pub fn run() {
     }
 
     boot_trace("BEFORE generate_context!");
-    let mut context = tauri::generate_context!();
+    let mut context = app_context();
     log::info!("[boot] tauri context at {}ms", boot_ms());
     boot_trace("generate_context! DONE");
 
@@ -7856,9 +8106,18 @@ pub fn run() {
             if webview.label() != "main" {
                 return;
             }
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                voice_input::navigation_finished();
+                return;
+            }
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            voice_input::navigation_started();
+            #[cfg(target_os = "macos")]
+            visual_capture::reset_on_main_navigation(webview.app_handle());
+            managed_voice_window::reset_on_main_navigation(webview.app_handle());
+            remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
                 launch_updater::start_launch_update_check(webview.app_handle().clone());
             }
@@ -7867,10 +8126,13 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            update_ping::check_app_update,
             get_desktop_info,
             get_running_bundle_integrity,
             check_port,
             restart_app,
+            prepare_app_restart,
+            cancel_app_restart,
             start_ws_server,
             cortex_available,
             get_app_data_dir,
@@ -7905,6 +8167,24 @@ pub fn run() {
             master_key_ensure,
             #[cfg(target_os = "macos")]
             o8_stt_start,
+            managed_voice_window::managed_voice_overlay_update,
+            managed_voice_window::managed_voice_presentation_epoch,
+            voice_input::voice_input_claim,
+            voice_input::voice_input_release,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_begin,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_ready,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_widget,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_undo,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_transcribe_audio,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_finish,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_cancel,
             #[cfg(target_os = "macos")]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
@@ -7952,6 +8232,10 @@ pub fn run() {
             browser_view_hide,
             #[cfg(target_os = "macos")]
             browser_view_show,
+            remote_preview::remote_preview_supported,
+            remote_preview::remote_preview_open,
+            remote_preview::remote_preview_set_rect,
+            remote_preview::remote_preview_close,
             #[cfg(target_os = "macos")]
             open_voice_settings,
             #[cfg(target_os = "macos")]
@@ -8055,6 +8339,9 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            if let Err(err) = update_ping::initialize(app.handle()) {
+                log::warn!("[updater] update identity unavailable: {}", err);
+            }
             log::info!("[boot] setup() entered at {}ms (Builder + plugins done)", boot_ms());
             boot_trace("setup() entered (plugins INITIALISED)");
             match desktop_attach.decision {
@@ -8281,6 +8568,7 @@ pub fn run() {
                 // even when the main window is hidden.
                 log::info!("[boot] pre-hotkeys at {}ms", boot_ms());
                 fn_hotkey::start(app.handle().clone());
+                visual_capture::register_shortcut(app.handle());
                 log::info!("[boot] fn_hotkey CGEventTap at {}ms", boot_ms());
 
                 // Drive the Microphone permission prompt deterministically at
@@ -8348,6 +8636,19 @@ pub fn run() {
                             let _ = h.emit_to("main", "o8:open-settings", ());
                         }) {
                             log::warn!("[hotkey] failed to register CmdShiftComma (settings): {e}");
+                        }
+                    }
+
+                    // Voice Settings stays reachable with the top pill disabled
+                    // and without bringing the main workspace to the front.
+                    if let Ok(sc) = "CommandOrControl+Alt+,".parse::<Shortcut>() {
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |app, _sc, event| {
+                            if event.state == ShortcutState::Pressed {
+                                let handle = app.clone();
+                                let _ = app.run_on_main_thread(move || open_voice_settings(handle));
+                            }
+                        }) {
+                            log::warn!("[hotkey] failed to register voice settings: {e}");
                         }
                     }
 
@@ -8608,6 +8909,9 @@ pub fn run() {
             let _ = write_port_file("ws-port", ws_port);
             std::env::set_var("O8_API_PORT", api_port.to_string());
             std::env::set_var("O8_WS_PORT", ws_port.to_string());
+            app.manage(restart_job_drain::guard(
+                std::path::PathBuf::from(o8_data_dir()), api_port, sidecar_lifecycle::kill_tracked_children,
+            ));
             // Expose the resolved ports to the frontend loader HTML so it
             // knows where to navigate.
             std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());
@@ -8871,7 +9175,11 @@ pub fn run() {
             // the main thread via `run_on_main_thread`, exactly where it ran
             // before, so we introduce no new set_var/getenv race.
             match boot_mode {
-                BootMode::Attached => {}
+                BootMode::Attached => {
+                    // The attached daemon is already verified and listening.
+                    // Voice windows belong to this shell, not the daemon.
+                    voice_surfaces::create(app.handle(), api_port);
+                }
                 BootMode::Bundled => {
                     let app_handle = app.handle().clone();
                     let server_dir = server_dir.clone();
@@ -8965,7 +9273,10 @@ pub fn run() {
                         }
                     });
                 }
-                BootMode::DevServerRunning | BootMode::NoBundle => {}
+                BootMode::DevServerRunning => {
+                    voice_surfaces::create(app.handle(), api_port);
+                }
+                BootMode::NoBundle => {}
             }
 
             #[cfg(target_os = "macos")]
@@ -8980,6 +9291,10 @@ pub fn run() {
         .build({ boot_trace("builder chain constructed (plugins registered, not yet init)"); context })
         .expect("error while building Cortex IDE")
         .run(move |_app_handle, event| match event {
+            // Auxiliary windows can keep has_visible_windows true while main
+            // is hidden. Every Dock reopen restores the existing main window.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_desktop_window(_app_handle),
             // Finder "Open With → o8" / dock drop (file:// URLs) AND the auth
             // deep-link handoff (o8://auth/callback?...). macOS delivers both
             // through Opened; we partition by scheme. Buffer for cold launch

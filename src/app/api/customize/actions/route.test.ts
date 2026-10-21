@@ -438,7 +438,9 @@ describe('action plugin API and subprocess', () => {
       mkdirSync(repo);
       writeFileSync(path.join(state.root, 'data', 'repos.json'), JSON.stringify({ version: 1, repos: [{ id: 'test-repo', name: 'Test repo', localPath: repo, remoteUrl: null, defaultBranch: 'main', isGitRepo: false, addedAt: new Date().toISOString(), lastOpenedAt: null, storagePressureParkingDisabled: false, setup: {} }] }));
       const manifest = JSON.parse(readFileSync(path.join(directory, 'o8-actions.json'), 'utf8')) as Record<string, unknown>;
-      writeFileSync(path.join(directory, 'o8-actions.json'), JSON.stringify({ ...manifest, workspace: 'registered-project' }));
+      writeFileSync(path.join(directory, 'o8-actions.json'), JSON.stringify({ ...manifest, workspace: 'registered-project',
+        triggers: [{ id: 'on-create', event: 'worktree.created', actionId: 'run' }],
+      }));
       const operatorPost = (body: unknown) => actualAuthRoute.POST(new NextRequest('http://example.com/api/customize/actions', {
         method: 'POST', body: JSON.stringify(body), headers: { host: 'example.com', 'x-o8-client-addr': '203.0.113.1', authorization: 'Bearer test-operator-token-for-route-auth' },
       }));
@@ -446,9 +448,21 @@ describe('action plugin API and subprocess', () => {
       expect(reviewed.status).toBe(200);
       const realRevision = (await reviewed.json()).review.revision;
       expect((await operatorPost({ action: 'link', directory, repo, expectedRevision: realRevision })).status).toBe(200);
+      writeFileSync(path.join(state.root, 'data', 'worker-token'), 'fixture-worker-token');
+      const { panelGateMiddleware } = await import('@/middleware');
+      const triggerInput = { action: 'trigger', id: 'sample', revision: realRevision, triggerId: 'on-create', enabled: true };
+      const workerRequest = new NextRequest('http://localhost/api/customize/actions', {
+        method: 'POST', body: JSON.stringify({ ...triggerInput, actor: 'local-operator' }),
+        headers: { host: 'localhost', 'x-o8-client-addr': '127.0.0.1', authorization: 'Bearer fixture-worker-token', 'x-o8-actor': 'local-operator' },
+      });
+      expect(panelGateMiddleware(workerRequest).status).toBe(403);
+      const operatorGet = new NextRequest('http://example.com/api/customize/actions', { headers: { host: 'example.com', 'x-o8-client-addr': '203.0.113.1', authorization: 'Bearer test-operator-token-for-route-auth' } });
+      expect((await (await actualAuthRoute.GET(operatorGet)).json()).installed[0].enabledTriggers).toEqual([]);
+      expect((await operatorPost({ ...triggerInput, actor: 'local-operator' })).status).toBe(400);
+      expect((await operatorPost(triggerInput)).status).toBe(200);
+      expect((await (await actualAuthRoute.GET(operatorGet)).json()).installed[0].enabledTriggers).toEqual(['on-create']);
       const invoked = (await (await operatorPost({ action: 'invoke', id: 'sample', actionId: 'run', revision: realRevision, repo })).json()).receipt;
       expect(invoked).toMatchObject({ status: 'succeeded', revision: realRevision, stdout: 'hello action\n' });
-      const operatorGet = new NextRequest('http://example.com/api/customize/actions', { headers: { host: 'example.com', 'x-o8-client-addr': '203.0.113.1', authorization: 'Bearer test-operator-token-for-route-auth' } });
       expect((await (await actualAuthRoute.GET(operatorGet)).json()).receipts[0].status).toBe('succeeded');
     } finally { if (previous === undefined) delete process.env.WS_TOKEN; else process.env.WS_TOKEN = previous; }
   });

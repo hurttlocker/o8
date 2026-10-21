@@ -462,6 +462,7 @@ async function handleMobileActionPost(request: NextRequest) {
         }
       }
 
+      if (action === 'approve' && currentApproval.continuation?.kind === 'llm-chat' && currentApproval.continuation.provider === 'chatgpt') return actionStructuredError('chatgpt_plan_desktop_resume_required', 409);
       const approvalId = currentApproval.id;
       const resolutionClaim = claimApprovalResolution(
         approvalId,
@@ -478,7 +479,6 @@ async function handleMobileActionPost(request: NextRequest) {
           ? actionStructuredError('approval_continuation_unconfirmed', 409)
           : actionStructuredError('approval_resolved', 410);
       }
-
       let decisionNote = action === 'approve' ? 'Approved.' : action === 'request_changes' ? 'Changes requested.' : 'Denied.';
       const continuation = approval.continuation;
       let continuationOutcome: 'completed' | 'failed' | 'outcome_unknown' = 'completed';

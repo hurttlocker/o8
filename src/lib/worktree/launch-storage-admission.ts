@@ -55,7 +55,7 @@ async function withManagedWorktreeStorageAdmissionUnlocked<T>(
 
   const ownerProbe = await probeMetadataLockProcessIdentity(process.pid);
   if (ownerProbe.state !== 'live') {
-    throw new Error('Managed worktree admission could not prove its process owner.');
+    throw new Error(`Managed worktree admission could not prove its process owner${ownerProbe.state === 'unknown' ? `: ${ownerProbe.detail.replace(/\.$/, '')}` : ''}.`);
   }
   const encodedOwner = Buffer.from(JSON.stringify(ownerProbe.identity)).toString('base64url');
   const ownerId = `managed-worktree-process:${process.pid}:${encodedOwner}:${input.packetId ?? randomUUID()}`;

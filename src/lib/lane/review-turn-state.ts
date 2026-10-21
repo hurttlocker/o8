@@ -2,14 +2,17 @@ import { randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
 import { finalizeOrchestratorReviewTurn, type ReviewTurnOutcome } from '@/lib/approvals/store';
+import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { recordLaneEvent } from '@/lib/lane/events';
 
 interface ReviewTurnEventPayload {
   reviewTurnId?: unknown;
   threadId?: unknown;
+  sessionThreadId?: unknown;
   backend?: unknown;
   surface?: unknown;
   expectedHeadSha?: unknown;
+  formatRetryRejecting?: unknown;
 }
 
 interface ReviewAttemptStatusRow {
@@ -22,6 +25,7 @@ export interface ActiveReviewTurn {
   backend: string | null;
   surface: string | null;
   expectedHeadSha: string | null;
+  formatRetryRejecting?: boolean;
 }
 
 export interface ReviewTurnStopResult extends ActiveReviewTurn {
@@ -36,19 +40,68 @@ const reviewTurnAbortControllers = new Map<string, {
 export function startReviewTurn(input: {
   laneId: string;
   threadId: string;
+  sessionThreadId?: string;
   backend: string;
   surface: string;
   expectedHeadSha?: string | null;
+  formatRetryRejecting?: boolean;
 }): string {
   const reviewTurnId = `review-turn-${randomUUID()}`;
   recordLaneEvent(input.laneId, 'review_turn_started', 'system', {
     reviewTurnId,
     threadId: input.threadId,
+    sessionThreadId: input.sessionThreadId ?? input.threadId,
+    runtimeRoute: null,
     backend: input.backend,
     surface: input.surface,
     expectedHeadSha: input.expectedHeadSha ?? null,
+    ...(input.formatRetryRejecting ? { formatRetryRejecting: true } : {}),
   });
   return reviewTurnId;
+}
+
+/** Internal backend callback only. Never convert requested settings into execution evidence. */
+export function recordReviewTurnRuntimeReceipt(input: {
+  laneId: string;
+  reviewTurnId: string;
+  threadId: string;
+  sessionThreadId: string;
+  backend: string;
+  surface: string;
+  expectedHeadSha: string | null;
+  model: string;
+  effort: ThinkingEffort;
+}): 'observed' | 'conflicting' | 'refused' {
+  return getSqlite().transaction(() => {
+    const active = findUnsettledReviewTurn(input.laneId);
+    if (!active || active.id !== input.reviewTurnId) return 'refused';
+    const db = getSqlite();
+    const row = db.prepare("SELECT payload_json FROM lane_events WHERE lane_id = ? AND verb = 'review_turn_started' AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1")
+      .get(input.laneId, input.reviewTurnId) as { payload_json: string };
+    const started = JSON.parse(row.payload_json) as ReviewTurnEventPayload;
+    if (started.backend !== input.backend || started.threadId !== input.threadId || started.surface !== input.surface
+      || (started.sessionThreadId ?? started.threadId) !== input.sessionThreadId
+      || (started.expectedHeadSha ?? null) !== input.expectedHeadSha) return 'refused';
+    const previous = db.prepare("SELECT payload_json FROM lane_events WHERE lane_id = ? AND json_extract(payload_json, '$.event') = 'review_turn_runtime_receipt' AND json_extract(payload_json, '$.reviewTurnId') = ? ORDER BY rowid DESC LIMIT 1")
+      .get(input.laneId, input.reviewTurnId) as { payload_json: string } | undefined;
+    const prior = previous ? JSON.parse(previous.payload_json) as {
+      status: string; runtimeRoute?: { model: string; effort: ThinkingEffort };
+    } : null;
+    if (prior?.status === 'conflicting') return 'conflicting';
+    const valid = typeof input.model === 'string' && !!input.model.trim() && input.model === input.model.trim()
+      && input.model.length <= 256 && isThinkingEffort(input.effort);
+    const identical = prior?.status === 'observed' && prior.runtimeRoute?.model === input.model
+      && prior.runtimeRoute?.effort === input.effort;
+    if (valid && identical) return 'observed';
+    const status = valid && !prior ? 'observed' : 'conflicting';
+    recordLaneEvent(input.laneId, 'update', 'system', {
+      event: 'review_turn_runtime_receipt', source: 'backend-turn-receipt', status,
+      reviewTurnId: input.reviewTurnId, threadId: input.threadId, sessionThreadId: input.sessionThreadId,
+      backend: input.backend, surface: input.surface, expectedHeadSha: input.expectedHeadSha,
+      runtimeRoute: status === 'observed' ? { model: input.model, effort: input.effort } : null,
+    });
+    return status;
+  })();
 }
 
 function findUnsettledReviewTurn(laneId: string): ActiveReviewTurn | null {
@@ -68,6 +121,7 @@ function findUnsettledReviewTurn(laneId: string): ActiveReviewTurn | null {
           id: payload.reviewTurnId,
           threadId: typeof payload.threadId === 'string' ? payload.threadId : null,
           backend: typeof payload.backend === 'string' ? payload.backend : null,
+          ...(payload.formatRetryRejecting === true ? { formatRetryRejecting: true } : {}),
           surface: typeof payload.surface === 'string' ? payload.surface : null,
           expectedHeadSha: typeof payload.expectedHeadSha === 'string'
             ? payload.expectedHeadSha

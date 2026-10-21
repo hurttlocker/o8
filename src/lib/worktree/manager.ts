@@ -22,6 +22,8 @@
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { mayHaveGitRepositoryContext } from '@/lib/git/repository-context';
+import { taskDraftGitOptions } from '@/lib/mcp/task-draft-git';
+import { assertReviewMaterializationOptions, finishReviewMaterialization } from './review-materialization';
 import type {
   CleanupOptions,
   ConflictReport,
@@ -36,6 +38,7 @@ import { getApfsCowCapability } from './apfs';
 import { worktreeActivityMtimeMs } from './activity';
 import {
   readWorktreeMetaSnapshot,
+  sameWorktreeCreation,
   withWorktreeMetadataBoundary,
   withWorktreeMetaTransaction,
 } from './metadata-store';
@@ -62,6 +65,8 @@ import {
   retireExactManagedDirectory,
 } from '@/lib/workspace/exact-managed-directory-retirement';
 import { readExactWorkspaceClaim } from '@/lib/workspace/exact-workspace-claim-state';
+import { assertWorkspaceRetentionReleased } from '@/lib/workspace/retention-holds';
+import { assertManagedRetirementQuiescence, withManagedRetirementOwnership } from '@/lib/workspace/retirement-process-authority';
 import {
   confirmWorkspaceMaterializationRetirement,
   finishWorkspaceMaterializationRetirement,
@@ -317,6 +322,7 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    if (opts.materializationOnly) assertReviewMaterializationOptions(opts);
     if (opts.agentType === 'claude-code' && !opts.managed) {
       return this.createMaterialized(opts, null, null, () => {});
     }
@@ -325,6 +331,10 @@ export class WorktreeManager {
       packetId: opts.packetId,
       reservationId: opts.storageAdmissionReservationId,
     }, async (volumeId, rootIdentity) => {
+      const repositoryPath = await realpath(this.repoRoot);
+      const authorizations = await import('@/lib/action-plugins/host')
+        .then(({ captureWorktreeCreatedAuthorizations }) => captureWorktreeCreatedAuthorizations(repositoryPath))
+        .catch(() => []);
       let baseIdentity: StorageRootIdentity | null = null;
       const created = await this.createMaterialized(
         opts, volumeId, rootIdentity, (identity) => { baseIdentity = identity; },
@@ -348,22 +358,22 @@ export class WorktreeManager {
           if (!entry || entry.claudeManaged) {
             throw new Error('Managed workspace metadata disappeared before ownership was receipted.');
           }
-          const ready = { ...entry, status: 'ready' as const, materializationIdentity, actionTriggerEventPending: true };
+          const ready = { ...entry, status: 'ready' as const, materializationIdentity, actionTriggerEventPending: true, actionTriggerAuthorizations: authorizations };
           delete ready.creationOwner;
           await transaction.save(created.id, ready);
         }));
       try {
         const { publishWorktreeCreated } = await import('@/lib/action-plugins/host');
         publishWorktreeCreated({
-          repositoryPath: await realpath(this.repoRoot),
+          repositoryPath,
           worktreeId: created.id,
           worktreePath: created.path,
           branch: created.branch,
           createdAt: new Date(created.createdAt).toISOString(),
-        });
+        }, authorizations);
         await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
           const entry = (await transaction.readAll())[created.id];
-          if (entry?.actionTriggerEventPending) await transaction.save(created.id, { ...entry, actionTriggerEventPending: false });
+          if (entry?.actionTriggerEventPending && sameWorktreeCreation(entry, { id: created.id, createdAt: created.createdAt, branchName: created.branch, materializationIdentity })) await transaction.save(created.id, { ...entry, actionTriggerEventPending: false });
         });
       } catch (error) {
         console.warn('[action-triggers] Worktree event publication failed', { error: String(error) });
@@ -384,7 +394,7 @@ export class WorktreeManager {
     // Git worktree maintenance and creation mutate the same shared registry.
     // Keep every create behind the throttled prune instead of letting a cold
     // start race `git worktree prune` against `git worktree add`.
-    if (!autoPrunePromise && Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
+    if (!opts.materializationOnly && !autoPrunePromise && Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
       lastAutoPruneAt = Date.now();
       const prune = this.prune().catch(() => []);
       autoPrunePromise = prune;
@@ -392,7 +402,7 @@ export class WorktreeManager {
         if (autoPrunePromise === prune) autoPrunePromise = null;
       });
     }
-    if (autoPrunePromise) await autoPrunePromise;
+    if (!opts.materializationOnly && autoPrunePromise) await autoPrunePromise;
 
     const baseTaskId = deriveWorktreeId(opts);
     let taskId = baseTaskId;
@@ -489,6 +499,8 @@ export class WorktreeManager {
 
       await this.saveMeta(taskId, {
         id: taskId,
+        packetId: opts.packetId,
+        laneId: opts.laneId,
         agentType: 'claude-code',
         baseBranch,
         createdAt: now,
@@ -542,6 +554,7 @@ export class WorktreeManager {
       });
     }
 
+    const reviewGitOptions = opts.materializationOnly ? await taskDraftGitOptions(this.repoRoot) : [];
     const preparedExecutionIdentity = await ensurePinnedWorkspaceDirectory(
       this.worktreeBase, baseExecutionIdentity, taskId,
     );
@@ -550,6 +563,8 @@ export class WorktreeManager {
     // than an identity-less workspace that cleanup must refuse forever.
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,
@@ -572,6 +587,7 @@ export class WorktreeManager {
     if (!path.isAbsolute(gitDirectory)) throw new Error('Repository Git directory is not absolute.');
     await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
       execFileAsync('git', [
+        ...reviewGitOptions,
         `--git-dir=${gitDirectory}`,
         'worktree', 'add',
         taskId,
@@ -586,6 +602,11 @@ export class WorktreeManager {
       worktreePath, preparedExecutionIdentity,
     );
     await this.bindCreatedMaterializationIdentity(taskId, createdExecutionIdentity);
+    if (opts.materializationOnly) {
+      const info = await withWorktreeMaterializationExecution(worktreePath, createdExecutionIdentity, () => finishReviewMaterialization({ id: taskId, path: worktreePath, branch: branchName, baseBranch, agentType: opts.agentType, status: 'ready', createdAt: now, lastActivityAt: now, dirtyFiles: [], claudeManaged: false, isolationKind: 'git-worktree' }, reviewGitOptions));
+      await this.updateMetaStatus(taskId, 'ready');
+      return info;
+    }
 
     // Packet lanes with a pinned creation receipt were cut from the exact
     // fetched base above. Other callers retain the remote-first rebase path.
@@ -682,6 +703,9 @@ export class WorktreeManager {
     return info;
     });
     } catch (err) {
+      // Preserve failed review materialization and its inode receipt for
+      // inspection; ordinary rollback may invoke repository Git hooks.
+      if (opts.materializationOnly) throw err;
       if (isPinnedWorkspacePublishError(err)) throw err;
       try {
         await this.detachDependencyMaterializationForWorkspace(
@@ -753,6 +777,8 @@ export class WorktreeManager {
     );
     await this.saveMeta(taskId, {
       id: taskId,
+      packetId: opts.packetId,
+      laneId: opts.laneId,
       agentType: opts.agentType,
       baseBranch,
       createdAt: now,
@@ -1450,6 +1476,7 @@ export class WorktreeManager {
       directoryPath: worktreePath,
       identity,
       parentIdentity,
+      retirementReason: 'creation-rollback',
     });
     await execFileAsync('git', ['worktree', 'prune'], {
       windowsHide: true,
@@ -1461,7 +1488,7 @@ export class WorktreeManager {
   private async captureCreationOwner(): Promise<NonNullable<WorktreeMetaEntry['creationOwner']>> {
     const probe = await probeMetadataLockProcessIdentity(process.pid);
     if (probe.state !== 'live') {
-      throw new Error('Managed worktree creation could not prove its process owner.');
+      throw new Error(`Managed worktree creation could not prove its process owner${probe.state === 'unknown' ? `: ${probe.detail.replace(/\.$/, '')}` : ''}.`);
     }
     return { pid: process.pid, identity: probe.identity };
   }
@@ -1816,7 +1843,17 @@ export class WorktreeManager {
    * Checks for uncommitted changes first and auto-commits to preserve agent work.
    */
   async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
-    const meta = await this.loadAllMeta();
+    try {
+      const worktreePath = await this.resolveManagedWorktreePath(worktreeId);
+      return await withManagedRetirementOwnership(this.repoRoot, worktreePath, () => this.cleanupOwned(worktreeId, opts));
+    } catch (error) {
+      console.error(`[worktree-cleanup] REFUSED lifecycle authority for ${worktreeId}: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  private async cleanupOwned(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
+    const meta = await readWorktreeMetaSnapshot(this.repoRoot);
     const entry = meta[worktreeId];
 
     if (entry?.claudeManaged) {
@@ -1864,10 +1901,60 @@ export class WorktreeManager {
       );
       return false;
     }
+    if (entry?.materializationParentIdentity) {
+      const parent = await captureWorktreeMaterializationIdentity(containingBase);
+      await assertWorktreeMaterializationIdentity(containingBase, entry.materializationParentIdentity, {
+        legacyVolumeId: parent.volumeId,
+      });
+    }
 
     const retirementAction = opts?.workspaceRetirementAction
       ?? getWorkspaceRetirementAction(worktreePath)
       ?? 'cleanup';
+
+    try {
+      assertWorkspaceRetentionReleased(worktreePath, entry?.materializationIdentity);
+    } catch {
+      return false;
+    }
+
+    if (entry?.status === 'creating' || entry?.status === 'setup') {
+      const pending = readExactWorkspaceClaim('managed-retirement', this.repoRoot, worktreeId);
+      if (pending?.authority?.retirementReason !== 'creation-rollback'
+        || !entry.materializationIdentity || !entry.materializationParentIdentity) return false;
+      if (pathInitiallyExists && !(await allowWorktreeRemoval(worktreePath, {
+        logPrefix: 'worktree-creation-cleanup', overrideLiveGuard: opts?.overrideLiveGuard,
+      }))) return false;
+      try {
+        const branchName = entry.branchName ?? `worktree/${entry.agentType}/${worktreeId}`;
+        let branchHead = entry.creationBranchHead ?? null;
+        if (opts?.deleteBranch && entry.isolationKind === 'git-worktree') {
+          if (pathInitiallyExists) {
+            branchHead = await this.captureCreationBranchHead(
+              worktreeId, worktreePath, entry.materializationIdentity, branchName,
+            ) ?? branchHead;
+          }
+          if (!branchHead && await execFileAsync(
+            'git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`],
+            { windowsHide: true, cwd: this.repoRoot, timeout: 5_000 },
+          ).then(() => true, () => false)) {
+            throw new Error('Creation branch has no exact ownership receipt.');
+          }
+        }
+        await this.retireFailedManagedCreation(
+          worktreeId, worktreePath, entry.materializationIdentity, entry.materializationParentIdentity,
+        );
+        if (opts?.deleteBranch && entry.isolationKind === 'git-worktree' && branchHead) {
+          await this.deleteCreationBranch(branchName, branchHead);
+        }
+        await this.removeMeta(worktreeId);
+        completeExactManagedDirectoryRetirement(this.repoRoot, worktreeId);
+        return true;
+      } catch (error) {
+        console.error(`[worktree-creation-cleanup] REFUSED rollback replay for ${worktreeId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    }
 
     let cleanupIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = null;
     let confirmedMissingRetirement = false;
@@ -1880,6 +1967,10 @@ export class WorktreeManager {
         cleanupIdentity = entry?.materializationIdentity
           ? await assertWorktreeMaterializationIdentity(worktreePath, entry.materializationIdentity)
           : await captureWorktreeMaterializationIdentity(worktreePath);
+        await assertManagedRetirementQuiescence({
+          repositoryPath: this.repoRoot, worktreeId, sourcePath: worktreePath,
+          candidatePath: worktreePath, identity: cleanupIdentity,
+        });
         const preserved = await withWorktreeMaterializationExecution(
           worktreePath,
           cleanupIdentity,
@@ -2185,6 +2276,7 @@ export class WorktreeManager {
               directoryPath: orphanPath,
               identity: orphanIdentity,
               parentIdentity: worktreeBaseIdentity,
+              retirementReason: 'empty-orphan',
             });
           } catch (error) {
             console.warn(

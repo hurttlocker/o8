@@ -25,7 +25,7 @@ process.env.HOME = userHome;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '0';
 
-const { prepareCodexHome } = await import('./codex-orchestrator-config');
+const { mergeCodexMcpConfig, prepareCodexHome } = await import('./codex-orchestrator-config');
 const { ensureCodexOrchestratorSession, sendToCodexOrchestrator } = await import('./codex-orchestrator-session');
 
 beforeEach(() => {
@@ -114,6 +114,123 @@ async function readCortexTeamFromGeneratedServer(
 }
 
 describe('Codex orchestrator home model config', () => {
+  it('replaces inherited MCP tables while preserving provider, project, feature, and custom endpoint settings', () => {
+    const inherited = [
+      'model_provider = "fixture-provider"',
+      'custom_base_url = "http://127.0.0.1:43123/v1"',
+      '',
+      '[features]',
+      'web_search = true',
+      '',
+      '[model_providers.fixture-provider]',
+      'name = "Fixture provider"',
+      'base_url = "http://127.0.0.1:43123/v1"',
+      '',
+      '[projects."/tmp/review-fixture"]',
+      'trust_level = "trusted"',
+      '',
+      '[mcp_servers.unrelated]',
+      'command = "unrelated-server"',
+      '',
+      '[mcp_servers."quoted.server"]',
+      'command = "quoted-server"',
+      '',
+      '[mcp_servers."bracket]server".env] # a bracket inside a quoted key is valid TOML',
+      'FIXTURE = "value"',
+      '',
+      '[mcp_servers_backup]',
+      'preserved = true',
+    ].join('\n');
+
+    const merged = mergeCodexMcpConfig(inherited, {
+      'app-external': {
+        type: 'stdio',
+        command: 'app-external-server',
+        args: ['--stdio'],
+      },
+    });
+    const parsed = parse(merged) as Record<string, unknown>;
+
+    expect(parsed).toMatchObject({
+      model_provider: 'fixture-provider',
+      custom_base_url: 'http://127.0.0.1:43123/v1',
+      features: { web_search: true },
+      model_providers: {
+        'fixture-provider': {
+          name: 'Fixture provider',
+          base_url: 'http://127.0.0.1:43123/v1',
+        },
+      },
+      projects: { '/tmp/review-fixture': { trust_level: 'trusted' } },
+      mcp_servers_backup: { preserved: true },
+    });
+    expect(parsed.mcp_servers).toEqual({
+      'app-external': {
+        command: 'app-external-server',
+        args: ['--stdio'],
+      },
+    });
+    expect(merged).not.toContain('unrelated-server');
+    expect(merged).not.toContain('quoted-server');
+    expect(merged).not.toContain('bracket]server');
+  });
+
+  it.each([
+    [
+      'an escaped quoted root key',
+      '["mcp\\u005fservers"."escaped.server"]\ncommand = "escaped-server"',
+      'escaped',
+    ],
+    [
+      'a dotted-key definition',
+      'mcp_servers.dotted.command = "dotted-server"',
+      'dotted',
+    ],
+    [
+      'an inline-table definition',
+      'mcp_servers = { inline = { command = "inline-server" } }',
+      'inline',
+    ],
+  ])('removes inherited MCP configuration expressed as %s through the generated home', (_label, inheritedMcp, threadSuffix) => {
+    const topLevelMcp = inheritedMcp.startsWith('mcp_servers');
+    writeFileSync(join(userCodexHome, 'config.toml'), [
+      ...(topLevelMcp ? [inheritedMcp, ''] : []),
+      'model_provider = "fixture-provider"',
+      '',
+      '[model_providers.fixture-provider]',
+      'base_url = "http://127.0.0.1:43123/v1"',
+      'instructions = """',
+      '[mcp_servers.header-looking-text]',
+      '[plugins.header-looking-text]',
+      'remains part of the string',
+      '"""',
+      ...(!topLevelMcp ? ['', inheritedMcp] : []),
+    ].join('\n'));
+
+    const prepared = prepareCodexHome(repoPath, 'full', 'gpt-5.6-sol', `thoughts-mcp-${threadSuffix}`);
+    const parsed = readGeneratedConfig(prepared.codexHome).parsed as {
+      model_providers: { 'fixture-provider': { instructions: string } };
+      mcp_servers: Record<string, unknown>;
+    };
+
+    expect(parsed.model_providers['fixture-provider'].instructions)
+      .toContain('[mcp_servers.header-looking-text]');
+    expect(parsed.model_providers['fixture-provider'].instructions)
+      .toContain('[plugins.header-looking-text]');
+    expect(parsed.mcp_servers).not.toHaveProperty('escaped.server');
+    expect(parsed.mcp_servers).not.toHaveProperty('dotted');
+    expect(parsed.mcp_servers).not.toHaveProperty('inline');
+    expect(parsed.mcp_servers).toEqual(expect.objectContaining({
+      operator: expect.any(Object),
+      cortex: expect.any(Object),
+    }));
+  });
+
+  it('fails closed with the parser diagnostic when inherited TOML is invalid', () => {
+    expect(() => mergeCodexMcpConfig('[features]\ninvalid = [', {}))
+      .toThrow(/Unable to isolate inherited MCP configuration:[\s\S]*unfinished array/i);
+  });
+
   it('binds each o8 chat to a separate MCP config for Fast worker placement', () => {
     const first = prepareCodexHome(repoPath, 'full', 'gpt-6-astra', 'thoughts-team-a');
     const second = prepareCodexHome(repoPath, 'full', 'gpt-6-astra', 'thoughts-team-b');

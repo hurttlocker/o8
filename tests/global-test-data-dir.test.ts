@@ -1,5 +1,5 @@
 import {
-  existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,7 @@ import {
 import {
   retainTestRunAfterTimeout,
   TEST_RUN_OWNER_FILE,
+  TEST_RUN_RETAIN_FILE,
   writeTestRunOwner,
 } from './test-fixture-lifecycle';
 
@@ -76,12 +77,14 @@ describe('test data root cleanup', () => {
     );
   });
 
-  it('retains a timed-out run root until the stale-fixture sweep owns cleanup', () => {
+  it.each([undefined, 'failed_test_evidence'] as const)('retains a run root with reason %s through global teardown', (reason) => {
     const parent = mkdtempSync(path.join(os.tmpdir(), 'o8-test-retain-parent-'));
     const runRoot = mkdtempSync(path.join(parent, 'o8-test-data-run-'));
     roots.push(parent);
     writeTestRunOwner(runRoot);
-    retainTestRunAfterTimeout(runRoot);
+    retainTestRunAfterTimeout(runRoot, reason);
+    expect(JSON.parse(readFileSync(path.join(runRoot, TEST_RUN_RETAIN_FILE), 'utf8')).reason)
+      .toBe(reason ?? 'test_timeout_or_cancellation');
 
     expect(removeOwnedTestRunRootUnlessRetained(parent, runRoot)).toBe(false);
     expect(existsSync(runRoot)).toBe(true);

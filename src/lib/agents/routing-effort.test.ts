@@ -21,8 +21,9 @@ describe('resolveWorkerRouting — effort parity (unset)', () => {
     expect(r.modelDisposition).toBe('runtime-default');
   });
 
-  it("'adaptive' is treated as no explicit effort (runtime default) ⇒ null", () => {
+  it("'adaptive' retains the reset while the concrete selected effort stays null", () => {
     const r = resolveWorkerRouting({ requestedRuntime: 'codex', requestedEffort: 'adaptive' });
+    expect(r.requestedEffort).toBe('adaptive');
     expect(r.selectedEffort).toBeNull();
   });
 
@@ -33,6 +34,10 @@ describe('resolveWorkerRouting — effort parity (unset)', () => {
 });
 
 describe('resolveWorkerRouting — effort per-runtime', () => {
+  it('keeps explicit remote placement and model without a local fallback', () => {
+    expect(resolveWorkerRouting({ requestedRuntime: 'cloud', requestedModel: 'gpt-6-sol', requestedEffort: 'medium' }))
+      .toMatchObject({ selectedRuntime: 'cloud', selectedModel: 'gpt-6-sol', selectedEffort: 'medium' });
+  });
   it('codex honors the effort', () => {
     const r = resolveWorkerRouting({ requestedRuntime: 'codex', requestedEffort: 'high' });
     expect(r.selectedEffort).toBe('high');

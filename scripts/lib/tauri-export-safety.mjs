@@ -42,11 +42,12 @@ export function assertTauriExportInputsSafe(standaloneRoot) {
   }
 
   // lstat also catches dangling links. Never silently package or delete a
-  // traced cache or development tree: reject before clearing previous output.
-  for (const directory of ['cache', 'dev']) {
-    const generated = join(standaloneRoot, '.next', directory);
+  // traced cache, development tree or profiling log: reject before clearing
+  // previous output. Runtime manifests and per-route tracing metadata remain.
+  for (const entry of ['cache', 'dev', 'trace', 'trace-build']) {
+    const generated = join(standaloneRoot, '.next', entry);
     if (lstatSync(generated, { throwIfNoEntry: false })) {
-      throw new Error(`standalone build contains .next/${directory}; exclude build-only files from tracing and rebuild before packaging`);
+      throw new Error(`standalone build contains .next/${entry}; exclude build-only files from tracing and rebuild before packaging`);
     }
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type MouseEvent, type ReactNode } from 'react';
+import { useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '../../../repo-registry/shared';
 import { REPO_FOCUS_FONT } from '../../utils';
 import { FLAT_HOVER_SURFACE, GROUP_LABELS, GROUP_TONES } from './constants';
@@ -28,7 +28,7 @@ export function IconActionButton({
   label: string;
   active?: boolean;
   disabled?: boolean;
-  onClick: () => void;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
   return (
@@ -96,12 +96,14 @@ export function StatusChip({ group, count }: { group: 'blocked' | 'review' | 'ru
 export function ActionButton({
   label,
   icon,
+  style,
   primary = false,
   disabled = false,
   onClick,
 }: {
   label: string;
   icon?: ReactNode;
+  style?: CSSProperties;
   primary?: boolean;
   disabled?: boolean;
   onClick: () => void;
@@ -133,6 +135,7 @@ export function ActionButton({
         fontSize: 10.5,
         lineHeight: '14px',
         fontWeight: 620,
+        ...style,
       }}
     >
       {icon}

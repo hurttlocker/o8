@@ -143,7 +143,18 @@ describe('owned Claude Code read-only argv', () => {
     for (const tool of CLAUDE_READ_ONLY_DISALLOWED_TOOLS) expect(args.indexOf(tool)).toBeGreaterThan(denyIndex);
   });
 
-  it('denies the native write tools for a read-only launch', async () => {
+  // A read-only launch runs inside the macOS sandbox-exec profile; every other
+  // host refuses it before spawning, so the launched argv exists only on macOS.
+  it.skipIf(process.platform === 'darwin')('refuses a read-only launch without the macOS sandbox', async () => {
+    const result = await launchOwnedClaudeCodeSession({
+      cwd: repoPath, prompt: 'inspect the repository', workMode: 'read-only',
+    });
+    expect(result).toMatchObject({ ok: false });
+    expect(result.note).toContain('requires an OS-enforced sandbox');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'darwin')('denies the native write tools for a read-only launch', async () => {
     const args = await spawnedArgs('read-only');
     const denyIndex = args.indexOf('--disallowedTools');
     expect(denyIndex).toBeGreaterThan(-1);
@@ -152,7 +163,7 @@ describe('owned Claude Code read-only argv', () => {
     }
   });
 
-  it('pins --strict-mcp-config so user-scope MCP servers cannot merge in write tools', async () => {
+  it.skipIf(process.platform !== 'darwin')('pins --strict-mcp-config so user-scope MCP servers cannot merge in write tools', async () => {
     // --disallowedTools names the NATIVE write tools only. A user-scope MCP
     // server merged in from ~/.claude.json contributes `mcp__<server>__*` tools
     // the deny list does not cover, and those can write files. Strict mode

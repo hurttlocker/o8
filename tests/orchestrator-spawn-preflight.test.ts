@@ -63,7 +63,7 @@ describe('#1551 — codex orchestrator (the default backend) preflights the repo
 
     const errorEvent = events.find((event) => event.type === 'error');
     const message = errorEvent && 'error' in errorEvent ? errorEvent.error : '';
-    expect(message).toContain('no longer exists');
+    expect(message).toContain('Repository folder not found');
     expect(message).not.toContain('ENOENT');
   });
 });
@@ -90,6 +90,6 @@ describe('#1551 — claude orchestrator preflights the repo path', () => {
     expect(message).toContain('O8_CLAUDE_CODE_BIN');
     expect(message).not.toContain('ENOENT');
     expect(message).not.toContain('Git repository');
-    expect(message).not.toContain('no longer exists');
+    expect(message).not.toContain('Repository folder not found');
   });
 });

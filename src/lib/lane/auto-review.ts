@@ -9,8 +9,9 @@
  * (#456) — Persistent queue survives process restarts. No more lost reviews.
  */
 
+import { manualReviewRequested } from './review-mode';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { laneGitSync } from '@/lib/lane/lane-git';
 import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { readPacketDeviations, type PacketDeviations } from '@/lib/orchestrator/packet-deviations';
@@ -74,8 +75,6 @@ let stopExplainerDrain: (() => void) | null = null;
 
 export { isLaneAutoReviewActive, cancelAutoReviewForLane };
 
-// ── Public API ──
-
 /**
  * Called when a lane transitions to 'reviewing' during reconciliation.
  * Enqueues a durable review job — does not block the caller.
@@ -88,6 +87,7 @@ export function triggerAutoReview(lane: Lane): void {
  * Start the review queue drain loop. Call once per server process.
  */
 export function startReviewQueueDrain(): () => void {
+  if (manualReviewRequested()) return () => {};
   if (drainTimer) return () => { /* already running */ };
 
   // At boot no claim from the prior process is live; reclaim with a receipt.
@@ -120,7 +120,6 @@ export function startReviewQueueDrain(): () => void {
   };
 }
 
-// ── Drain Logic ──
 type ReviewDepth = keyof typeof REVIEW_DIFF_LINES;
 
 /** Structured settlement prevents an early return from looking completed. */
@@ -224,6 +223,7 @@ async function drainAvailableReviewSlot(): Promise<void> {
 }
 
 export async function drainReviewQueue(): Promise<void> {
+  if (manualReviewRequested()) return;
   // Recovery stays ahead of capacity checks so an abandoned turn cannot pin a
   // slot or disable the path that reclaims and replaces it.
   await runReviewRecoveryPass();
@@ -307,20 +307,20 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth, comparisonRef?: string):
       : isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
     let stat = '';
     try {
-      stat = execFileSync('git', ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+      stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { timeout: 10_000 }).trim();
     } catch {
       try {
-        stat = execFileSync('git', ['diff', '--stat', 'HEAD~1'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+        stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', 'HEAD~1'], { timeout: 10_000 }).trim();
       } catch { /* no commits yet */ }
     }
 
     let diff = '';
     try {
-      const rawDiff = execFileSync('git', ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color', '-U2'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' });
+      const rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color', '-U2'], { timeout: 10_000 });
       diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
     } catch {
       try {
-        const rawDiff = execFileSync('git', ['diff', 'HEAD~1', '--no-color', '-U2'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' });
+        const rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color', '-U2'], { timeout: 10_000 });
         diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
       } catch { /* no commits yet */ }
     }
@@ -378,10 +378,10 @@ function runMechanicalChecks(lane: Lane, comparisonRef?: string): { findings: Me
   // ── Diff stats check ──
   let stat = '';
   try {
-    stat = execFileSync('git', ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+    stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { timeout: 10_000 }).trim();
   } catch {
     try {
-      stat = execFileSync('git', ['diff', '--stat', 'HEAD~1'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+      stat = laneGitSync(cwd, lane.repoPath, ['diff', '--stat', 'HEAD~1'], { timeout: 10_000 }).trim();
     } catch { /* no commits */ }
   }
 
@@ -410,10 +410,10 @@ function runMechanicalChecks(lane: Lane, comparisonRef?: string): { findings: Me
   // ── Security pattern scan ──
   let rawDiff = '';
   try {
-    rawDiff = execFileSync('git', ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color'], { timeout: 10_000, maxBuffer: 10 * 1024 * 1024 });
   } catch {
     try {
-      rawDiff = execFileSync('git', ['diff', 'HEAD~1', '--no-color'], { windowsHide: true, cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+      rawDiff = laneGitSync(cwd, lane.repoPath, ['diff', 'HEAD~1', '--no-color'], { timeout: 10_000, maxBuffer: 10 * 1024 * 1024 });
     } catch { /* no commits */ }
   }
 
@@ -645,15 +645,15 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
       rawText: reviewTurn.text,
       requiresSecondPass: reviewRisk.tier === 'high',
       reviewTurnId: reviewTurn.reviewTurnId,
-      // #1812 — one stricter retry when the reviewer answers with prose. A
-      // verdict that fails to parse is a reviewer outage, not a packet
-      // rejection, so nothing is written against the packet if it fails twice.
+      expectedHeadSha: review.head_sha,
+      // Retry prose once; two parse failures leave the packet unjudged.
       retry: {
         reviewPrompt,
         threadId: `auto-review-${lane.id}-${review.id}-verdict-retry`,
         sessionThreadId: reviewerSessionThreadId(reviewerSlot, 'verdict-retry'),
       },
     });
+    if (requeueIfReviewHeadMoved(review, lane)) return skipped('HEAD moved during verdict retry; successor queued.');
     if (recorded?.reviewUnavailable) {
       console.warn(`[auto-review] Codex review unavailable for lane ${lane.id} (${recorded.verdict.parseWarning}); existing verdict left untouched`);
     } else if (recorded?.verdict.parseWarning) {
@@ -734,7 +734,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   ]);
   let currentHeadSha: string | undefined;
   try {
-    currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
+    currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath));
   } catch (error) {
     console.warn(`[auto-review] Failed to re-read HEAD after second pass for lane ${lane.id}:`, error);
     return { kind: 'reviewed' };

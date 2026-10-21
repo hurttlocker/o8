@@ -239,6 +239,11 @@ beforeAll(async () => {
 
   apiServer = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+    if (requestUrl.pathname === '/api/panel/status') {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ready: true }));
+      return;
+    }
     if (requestUrl.pathname === '/api/setup/identity') {
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ configured: false }));
@@ -598,10 +603,18 @@ describe('persistent lead handoff real path', () => {
     expect(resolvePortInfo().wsPort).toBe(wsPort);
     await addRepo(repoPath);
     const mission = await createMission({
-      issues: [{ number: 2541, title: 'Persistent lead worker fixture', body: 'Write the deterministic proof file.', url: '' }],
+      issues: [{ number: 92541, title: 'Persistent lead worker fixture', body: 'Write the deterministic proof file.', url: '' }],
       repoPath,
       runtime: 'codex',
       constraints: '',
+      sealedTaskContract: {
+        version: 1,
+        requirements: [{ id: 'R1', source: 'Write the deterministic proof file.',
+          expectedBehavior: 'Commit the worker proof in lead-worker-proof.txt.',
+          productionPath: 'lead-worker-proof.txt', verification: 'Read the committed proof file.' }],
+        smallestRoute: [{ path: 'lead-worker-proof.txt', requirements: ['R1'], reason: 'The worker returns one proof file.' }],
+        exclusions: ['No external provider calls.'],
+      },
       orchestratorThreadId: lead.threadId,
       orchestratorTurnId: `lead-assistant-${leadTurnId}`,
     });
@@ -635,7 +648,7 @@ describe('persistent lead handoff real path', () => {
     const terminal = JSON.parse(waited.stdout) as LeadCliReceipt;
     expect(
       ['completed', 'needs_approval'],
-      `${JSON.stringify(terminal)}\nprovider calls:\n${JSON.stringify(readArgs())}\ndispatch:\n${existsSync(dispatchDebugPath) ? readFileSync(dispatchDebugPath, 'utf8') : '(missing)'}\nws tail:\n${wsOutput.slice(-4_000)}`,
+      `${JSON.stringify(terminal)}\nreview:\n${existsSync(reviewCapturePath) ? readFileSync(reviewCapturePath, 'utf8') : '(missing)'}\nprovider calls:\n${JSON.stringify(readArgs())}\ndispatch:\n${existsSync(dispatchDebugPath) ? readFileSync(dispatchDebugPath, 'utf8') : '(missing)'}\nws tail:\n${wsOutput.slice(-4_000)}`,
     ).toContain(terminal.lead.status);
     expect(existsSync(workerCapturePath)).toBe(true);
     const worker = JSON.parse(readFileSync(workerCapturePath, 'utf8')) as {
@@ -650,10 +663,11 @@ describe('persistent lead handoff real path', () => {
     expect(existsSync(reviewCapturePath)).toBe(true);
     const review = JSON.parse(readFileSync(reviewCapturePath, 'utf8')) as {
       packetId: string;
-      review: { recorded: boolean };
+      review: { recorded: boolean; contractCoverage: { status: string } };
     };
     expect(review.packetId).toBe(worker.packetId);
     expect(review.review.recorded).toBe(true);
+    expect(review.review.contractCoverage.status).toBe('passed');
     expect(terminal.lead.status).toBe('needs_approval');
     expect(readArgs().filter((args) => args[0] === 'exec').at(-1)?.slice(0, 3))
       .toEqual(['exec', 'resume', 'fixture-persistent-lead-thread']);

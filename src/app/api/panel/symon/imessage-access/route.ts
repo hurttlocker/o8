@@ -10,6 +10,7 @@ import {
   setIMessageExecutionBackend,
   setIMessageGroupFullAccess,
 } from '@/lib/symon/imessage-access-settings';
+import { configureMessagesReceiver, readMessagesReceiverFile } from '@/lib/symon/messages-receiver/receiver';
 
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -35,6 +36,9 @@ export async function POST(request: NextRequest) {
   }
   if (body && typeof body.enabled === 'boolean' && !('groupId' in body)) {
     try {
+      // One receiver answers at a time: the external connector replaces o8's own.
+      const receiver = readMessagesReceiverFile();
+      if (body.enabled && receiver.enabled) configureMessagesReceiver({ enabled: false, handles: receiver.handles });
       const enabled = setIMessageBridgeEnabled(body.enabled);
       if (enabled === null) return NextResponse.json({ ok: false, error: 'bridge_not_configured' }, { status: 409 });
       return NextResponse.json({ ok: true, enabled });

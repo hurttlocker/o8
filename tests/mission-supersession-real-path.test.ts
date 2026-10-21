@@ -68,6 +68,7 @@ async function createMissionThroughRoute(input: {
       clientMutationId: input.clientMutationId,
       repoPath: input.repoPath,
       runtime: 'codex',
+      dispatchOnCreate: true,
       orchestratorThreadId: input.threadId,
       issues: [{
         number: input.issueNumber,
@@ -140,7 +141,8 @@ describe('mission supersession real path', () => {
     await runHeadlessSprintTick();
 
     expect(findLaneByPacket(firstPacketId)).toBeNull();
-    expect(findLaneByPacket(secondPacketId)?.id).toMatch(/^lane-/);
+    const { readMissionRegistryEntry: readCurrent } = await import('@/lib/orchestrator/mission-registry');
+    expect(findLaneByPacket(secondPacketId)?.id, JSON.stringify(readCurrent(second.missionId)?.mission.packets.map(({ status, blockedReason, storageAdmission }) => ({ status, blockedReason, storageAdmission })))).toMatch(/^lane-/);
     expect(launchMock.calls.map((call) => call.packetId)).toEqual([secondPacketId]);
   }, 20_000);
 

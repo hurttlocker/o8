@@ -28,7 +28,10 @@ export interface BuildReleaseManifestOptions {
   notes: string;
   pubDate: string;
   downloadBase: string;
-  darwinSignature: string;
+  darwinArtifact: {
+    signature: string;
+    identity: import('./macos-release-artifacts.mjs').MacosUniversalArtifactIdentity;
+  };
   baseUploadAssets?: string[];
   trailingUploadAssets?: string[];
 }

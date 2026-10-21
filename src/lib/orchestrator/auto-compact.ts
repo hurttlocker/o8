@@ -67,17 +67,33 @@ async function readThread(repoPath: string, threadId: string): Promise<Persisted
     return null;
   }
 }
+// Orchestrator replies open with progress and end with the result, so a long
+// turn keeps both ends and marks the cut (#2958).
+const EXCERPT_TURN_HEAD_CHARS = 400;
+const EXCERPT_TURN_TAIL_CHARS = 1_000;
+function clipExcerptTurn(text: string) {
+  const omitted = text.length - EXCERPT_TURN_HEAD_CHARS - EXCERPT_TURN_TAIL_CHARS;
+  if (omitted <= 0) return text;
+  return `${text.slice(0, EXCERPT_TURN_HEAD_CHARS)}\n[... ${omitted} characters omitted ...]\n${text.slice(-EXCERPT_TURN_TAIL_CHARS)}`;
+}
 function buildExcerpt(messages: MobileTranscriptEntry[], maxChars: number) {
-  let size = 0;
-  return messages.map((entry, index) => {
+  const chunks = messages.map((entry, index) => {
     const role = entry.type === 'compaction' ? 'COMPACTION' : entry.role.toUpperCase();
-    const text = (entry.type === 'compaction' ? stripCompactionTags(entry.compaction?.summary ?? entry.text) : entry.text.trim()).slice(0, 1400) || '[no text]';
+    const text = clipExcerptTurn(entry.type === 'compaction' ? stripCompactionTags(entry.compaction?.summary ?? entry.text) : entry.text.trim()) || '[no text]';
     const tools = entry.toolCalls?.map((tool) => tool.name).filter(Boolean).join(', ');
     return [`Turn ${index + 1} · ${role}${entry.timestampLabel ? ` · ${entry.timestampLabel}` : ''}`, text, tools ? `Tools: ${tools}` : null].filter(Boolean).join('\n');
-  }).filter((chunk) => {
-    size += chunk.length;
-    return size <= maxChars;
-  }).join('\n\n');
+  });
+  // Over budget, the oldest turns go first: the newest carry the live state. An
+  // earlier compaction summary stays, since it already condenses everything before it.
+  const isSummary = (index: number) => messages[index]!.type === 'compaction';
+  let size = chunks.reduce((sum, chunk, index) => (isSummary(index) ? sum + chunk.length : sum), 0);
+  let start = chunks.length;
+  for (; start > 0; start -= 1) {
+    if (isSummary(start - 1)) continue;
+    if (size + chunks[start - 1]!.length > maxChars) break;
+    size += chunks[start - 1]!.length;
+  }
+  return chunks.filter((_, index) => index >= start || isSummary(index)).join('\n\n');
 }
 const toStoredMessage = (entry: MobileTranscriptEntry) => ({ ...entry, content: entry.text });
 

@@ -4,10 +4,12 @@ export function SurfaceEmptyState({
   icon,
   title,
   detail,
+  action,
 }: {
   icon: React.ReactNode;
   title: string;
   detail: string;
+  action?: React.ReactNode;
 }) {
   return (
     <div style={{
@@ -38,6 +40,7 @@ export function SurfaceEmptyState({
       </div>
       <div style={{ fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</div>
       <div style={{ maxWidth: 360, fontSize: 13, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)' }}>{detail}</div>
+      {action}
     </div>
   );
 }

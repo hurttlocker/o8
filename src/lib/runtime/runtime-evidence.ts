@@ -11,6 +11,7 @@ import {
 import { cachedAcpModels, probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
 import { resolveAcpLaunch } from '@/lib/lane/orchestrator-backends/acp';
 import { getAllRuntimes } from '@/lib/runtimes';
+import { runtimeConnection, type RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { detectRuntimeAuthStatus } from '@/lib/runtimes/shared/auth-detect';
 import { scanAndLink } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -92,6 +93,7 @@ export interface RuntimeEvidenceEntry extends RuntimeEvidenceDefinition {
   installed: boolean;
   ready: boolean;
   installedVersion: string | null;
+  connection: RuntimeConnectionEvidence;
   checkedAt: string;
   localCarrier: {
     os: NodeJS.Platform;
@@ -171,6 +173,7 @@ const BUILT_IN_ARCHIVE_RUNTIMES = new Set<OrchestratorRuntime>([
   'cursor',
   'grok',
   'pi',
+  'pi-builtin',
   'prime-agent',
   'deepseek-harness',
 ]);
@@ -303,6 +306,11 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
   aider: unknownEvidence('aider', ['text'], 'configured-provider'),
   '3code': unknownEvidence('3code', ['text'], 'configured-provider'),
   pi: unknownEvidence('pi', ['stdio-json-rpc'], 'configured-provider'),
+  // One managed model on o8's relay, under the plan or the free allowance.
+  'pi-builtin': {
+    ...unknownEvidence('pi-builtin', ['stdio-json-rpc'], 'fixed'),
+    advertisedModelIds: ['openai/gpt-6-luna'],
+  },
   cursor: unknownEvidence('cursor', ['stream-json'], 'provider-native'),
   grok: {
     carriers: [{
@@ -337,6 +345,28 @@ export const RUNTIME_EVIDENCE_DEFINITIONS = {
     ],
   },
   'prime-agent': unknownEvidence('prime-agent', ['jsonl'], 'configured-provider'),
+  muse: {
+    ...unknownEvidence('muse', ['stdio-json-rpc', 'jsonl'], 'live-catalog'),
+    billingModes: ['unknown'],
+    sources: [internalSource('muse'), { id: 'muse-session-protocol', label: 'Muse Code session protocol',
+      url: 'https://dev.meta.ai/docs/muse-code', observedAt: '2026-10-13', maxAgeDays: 30,
+      confidence: 'reported', scope: 'runtime-upstream' }],
+  },
+  hermes: {
+    ...unknownEvidence('hermes', ['acp'], 'configured-provider'),
+    sources: [
+      internalSource('hermes'),
+      {
+        id: 'hermes-agent-upstream',
+        label: 'Hermes Agent upstream runtime',
+        url: 'https://github.com/NousResearch/hermes-agent',
+        observedAt: '2026-10-07',
+        maxAgeDays: 30,
+        confidence: 'verified',
+        scope: 'runtime-upstream',
+      },
+    ],
+  },
   'deepseek-harness': {
     carriers: [{
       os: 'darwin',
@@ -588,6 +618,7 @@ export async function getRuntimeEvidenceSnapshot(options: {
         : Boolean(binaryPath && adapter),
       installedVersion: binaryPath ? await probeVersion(binaryPath) : null,
       checkedAt: now.toISOString(),
+      connection: runtimeConnection(authStatus),
       localCarrier: {
         os: process.platform,
         architecture: process.arch,

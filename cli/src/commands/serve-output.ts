@@ -8,6 +8,7 @@ interface ServeOutputState {
   apiPort: number;
   children: Array<{ role: 'api' | 'ws'; pid: number }>;
   mode: 'development' | 'packaged';
+  reviewMode?: 'automatic' | 'manual';
   pgid: number;
   pid: number;
   startedAt: string;
@@ -37,6 +38,7 @@ export function outputServeState(
     apiPort: state.apiPort,
     wsPort: state.wsPort,
     mode: state.mode,
+    reviewMode: state.reviewMode ?? 'automatic',
     status: state.status,
     children: state.children,
     startedAt: state.startedAt,
@@ -59,6 +61,7 @@ export function outputServeState(
     ['api', String(state.apiPort)],
     ['ws', String(state.wsPort)],
     ['mode', state.mode],
+    ['review mode', state.reviewMode ?? 'automatic'],
     ['status', state.status],
     ['supervisor pid', state.supervisorPid ? String(state.supervisorPid) : '(none)'],
     ['cli version', CLI_VERSION],

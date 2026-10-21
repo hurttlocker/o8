@@ -1,10 +1,10 @@
-import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
 import { normalizePacketSpendCap, normalizePacketSpendTelemetry } from '@/lib/orchestrator/metered-spend';
 import { normalizePacketContextTelemetry, reconcilePacketContextTelemetry } from '@/lib/orchestrator/packet-context-telemetry';
-import type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
+import { preferRuntimeRecoveryMessage, type DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 import { normalizeQualitySearchPacketState } from '@/lib/orchestrator/quality-search';
 import { normalizePacketStorageAdmission, normalizePacketStorageAdmissionEpoch } from '@/lib/orchestrator/packet-storage-admission-normalize';
 import { normalizePacketAlignmentResolvedAt } from '@/lib/orchestrator/packet-alignment-normalize';
@@ -40,7 +40,7 @@ import { normalizeReleaseStatePayload } from '@/lib/orchestrator/release-state-p
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 export type { DomainLaneSummary } from '@/lib/orchestrator/domain-lane-summary';
 function normalizeRuntime(value: unknown): OrchestratorRuntime {
-  return isDispatchableRuntime(value) ? value : 'codex';
+  return isDispatchableRuntime(value) || value === 'cloud' ? value : 'codex';
 }
 if (typeof window !== 'undefined') installOrchestratorTurnPinFetchPatch();
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
@@ -323,7 +323,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     referenceLabel,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
     summary: typeof packet.summary === 'string' ? packet.summary : '', origin: packet.origin === 'design-mode' ? 'design-mode' : undefined,
-    workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
+    ...normalizePacketWorkspaceIdentity(packet),
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
     runtime: workerRouting.selectedRuntime, model: typeof packet.model === 'string' && packet.model.trim() ? packet.model.trim() : null,
     dependencyLabels: Array.isArray(packet.dependencyLabels)
@@ -393,7 +393,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
       : undefined,
     workerIntent,
-    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined,
+    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined, mergeHold: packet.mergeHold === true ? true : undefined,
     workerRouting,
     // Nullable on purpose: an absent pin must stay null — normalizeRuntime()'s
     // 'codex' default would re-manufacture the #1460 always-truthy boot pin.
@@ -653,7 +653,7 @@ export function queueOrchestratorSessionPrelude(
 ) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = text.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   const nextItem = {
     id: `prelude-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     text: trimmed,
@@ -706,13 +706,13 @@ export function readStoredOrchestratorModel(repoPath: string | null | undefined)
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return null;
   const stored = window.localStorage.getItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`)?.trim();
-  return stored ? stored : null;
+  return stored ?? null;
 }
 
 export function writeStoredOrchestratorModel(repoPath: string | null | undefined, model: string) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = model.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   window.localStorage.setItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`, trimmed);
 }
 
@@ -997,7 +997,7 @@ export function reconcileOrchestratorMissionState(
 
     if (packet.status === 'failed' && (!domainLane || domainLane.status === 'failed')) {
       next.status = 'failed';
-      next.blockedReason = packet.blockedReason ?? null;
+      next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane?.failureMessage) ?? null;
       return next;
     }
 
@@ -1024,13 +1024,13 @@ export function reconcileOrchestratorMissionState(
       if (ds === 'recovering') { next.status = 'recovering'; next.blockedReason = domainLane.lastEventLabel ?? 'Lane recovering'; return next; }
       if (ds === 'failed') {
         next.status = 'failed';
-        next.blockedReason = packet.blockedReason ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);
+        next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane.failureMessage) ?? (domainLane.lastEventLabel === 'zero_diff_failed' ? 'no_changes_produced' : domainLane.lastEventLabel);
         return next;
       }
       if (ds === 'running') { next.status = 'running'; return next; }
       if (ds === 'launching') { next.status = 'launching'; return next; }
       if (ds === 'awaiting_input') {
-        next.status = 'blocked';
+        next.status = 'blocked'; if (domainLane.authRecoveryRequired) next.queueState = 'held';
         // #1469 — preserve the REAL reason. The dag fold-back and the
         // rebase-conflict path both set a truthful blockedReason (conflicting
         // files, fetch failure) before the lane parks awaiting_input;
@@ -1038,7 +1038,7 @@ export function reconcileOrchestratorMissionState(
         // operator staring at 'Awaiting operator input' while the actual
         // error lived only in next-server.log. Mirrors the
         // awaiting_orchestrator branch below.
-        next.blockedReason = packet.blockedReason
+        next.blockedReason = preferRuntimeRecoveryMessage(packet.blockedReason, domainLane.failureMessage)
           ?? friendlyAwaitingInputReason(domainLane.lastEventLabel)
           ?? 'Awaiting operator input';
         return next;

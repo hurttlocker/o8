@@ -34,6 +34,7 @@ export interface PersistedLlmChatMessage {
   receipt?: MobileTranscriptEntry['receipt'];
   tokens?: { input: number; output: number };
   costUsd?: number;
+  inferenceRoute?: { provider: 'chatgpt-plan'; billing: 'subscription'; allowanceUse: 'unknown'; meter: 'provider-tokens' };
   timestamp: number;
   timestampLabel?: string;
   toolCalls?: MobileTranscriptToolCall[];

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -60,6 +60,7 @@ describe('direct managed worktree admission', () => {
     const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
     const { retireExactManagedDirectory } = await import('@/lib/workspace/exact-managed-directory-retirement');
     const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
+    const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
     const manager = new WorktreeManager(repo);
 
     await manager.create({
@@ -69,9 +70,17 @@ describe('direct managed worktree admission', () => {
       skipSetup: true,
     });
     const pendingId = `pending-retirement-${Date.now()}`;
+    // Retirement authority requires exact manager ownership, so the claimed id
+    // starts as a ready standalone workspace created through the manager.
+    const pending = await manager.create({
+      agentType: 'codex',
+      taskName: pendingId,
+      baseBranch: 'main',
+      skipSetup: true,
+    });
+    expect(pending.id).toBe(pendingId);
+    const pendingPath = pending.path;
     const base = resolveWorktreeRootLayout(repo).primaryBase;
-    const pendingPath = path.join(base, pendingId);
-    mkdirSync(pendingPath);
     await retireExactManagedDirectory({
       repositoryPath: repo,
       worktreeId: pendingId,
@@ -79,6 +88,9 @@ describe('direct managed worktree admission', () => {
       identity: await captureWorktreeMaterializationIdentity(pendingPath),
       parentIdentity: await captureWorktreeMaterializationIdentity(base),
     });
+    // A crash after metadata removal leaves only the trusted claim holding the id.
+    await withWorktreeMetaTransaction(repo, (tx) => tx.remove(pendingId));
+    expect(existsSync(pendingPath)).toBe(false);
     expect(readExactWorkspaceClaim('managed-retirement', repo, pendingId)?.state)
       .toBe('purging');
 

@@ -3,6 +3,7 @@ import 'server-only';
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
+import { resolvePublishedCloudBase } from './published-base';
 import type { LaunchOptions } from '@/lib/runtimes/types';
 
 const GIT_OPTIONS = { encoding: 'utf8' as const, timeout: 5_000, maxBuffer: 64 * 1024 };
@@ -49,7 +50,7 @@ export async function resolveCloudRemoteSource(opts: LaunchOptions) {
   const origin = git(repo.localPath, 'remote', 'get-url', 'origin');
   if (origin !== repo.remoteUrl) throw new Error('The registered remote changed. Refresh the repository before dispatch.');
   git(repo.localPath, 'check-ref-format', '--branch', opts.branchName);
-  const baseSha = git(repo.localPath, 'rev-parse', '--verify', `${baseRef}^{commit}`);
+  const baseSha = await resolvePublishedCloudBase(repo.localPath, baseRef);
   if (!/^[a-f0-9]{40,64}$/.test(baseSha)) throw new Error('The remote base revision is invalid.');
   return { repoUrl: repo.remoteUrl, baseSha, branch: opts.branchName };
 }

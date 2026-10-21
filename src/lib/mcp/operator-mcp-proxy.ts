@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { withVisualizationContext } from './visualization-context';
 
 type JsonRpcId = number | string | null;
 
@@ -46,8 +47,10 @@ async function forward(message: unknown): Promise<void> {
       Accept: 'application/json, text/event-stream',
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(process.env.O8_OPERATOR_MCP_PROFILE ? { 'x-o8-mcp-profile': process.env.O8_OPERATOR_MCP_PROFILE } : {}),
     },
-    body: JSON.stringify(message),
+    body: JSON.stringify(withVisualizationContext(message, { repoPath: process.env.O8_VISUALIZATION_REPO_PATH,
+      threadId: process.env.O8_VISUALIZATION_THREAD_ID })),
   });
 
   if (response.status === 202) return;

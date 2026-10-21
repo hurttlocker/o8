@@ -33,4 +33,6 @@ try {
 
 if (typegenStatus !== 0) process.exit(typegenStatus);
 if (process.argv.includes('--typegen-only')) process.exit(0);
-process.exit(runNodeModule('typescript/bin/tsc', ['--noEmit']));
+const appStatus = runNodeModule('typescript/bin/tsc', ['--noEmit']);
+if (appStatus !== 0) process.exit(appStatus);
+process.exit(runNodeModule('typescript/bin/tsc', ['--noEmit', '--project', 'cli/tsconfig.chat.json']));

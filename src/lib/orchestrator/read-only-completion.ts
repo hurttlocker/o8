@@ -6,6 +6,7 @@ import { resolvePacketLaunchContext } from '@/lib/orchestrator/packet-launch-con
 import { markPacketReleased } from '@/lib/orchestrator/packet-release-truth';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { packetReleaseGeneration, packetReleaseIdentityIsCurrent } from './release-ownership';
+import { persistCapturedCompletionHandoff } from '@/lib/orchestrator/completion-handoff';
 
 export const READ_ONLY_COMPLETED_EVENT_LABEL = 'read_only_completed';
 
@@ -98,20 +99,36 @@ export async function completeReadOnlyZeroDiffLane(
   const hasReceipt = hasCompleteReadOnlyReceipt(context) && context?.packetId === packetId
     && (!lane.sessionKey || context?.sessionKey === lane.sessionKey);
   const detail = `Packet ${packetId} ended its read-only run without a complete Outcome, Evidence, Residual, and finding_ready receipt.`;
-  const apply = (packet: OrchestratorPacket | undefined): ReadOnlyCompletionResult => {
+  const apply = async (packet: OrchestratorPacket | undefined): Promise<ReadOnlyCompletionResult> => {
+    const checkAccepted = () => {
+      const fresh = getLane(lane.id);
+      const durable = readOrchestratorControlPlaneState().packets.find((candidate) => candidate.id === packetId)
+        ?? findMissionRegistryEntryByPacketId(packetId)?.mission.packets.find((candidate) => candidate.id === packetId);
+      if (!packet || !fresh || packet.launchContext?.workMode !== 'read-only'
+        || fresh.sessionKey !== lane.sessionKey || ['paused', 'archived'].includes(fresh.status)
+        || !durable || !packetReleaseIdentityIsCurrent(durable, lane.id, generation)
+        || !packetReleaseIdentityIsCurrent(packet, lane.id, generation)) throw new Error('Read-only completion owner changed.');
+    };
     const freshLane = getLane(lane.id);
-    if (!packet || !freshLane || packet.launchContext?.workMode !== 'read-only'
-      || freshLane.sessionKey !== lane.sessionKey || ['paused', 'archived'].includes(freshLane.status)
-      || !packetReleaseIdentityIsCurrent(packet, lane.id, generation)) return { completed: false };
+    try { checkAccepted(); } catch { return { completed: false }; }
+    if (hasReceipt) {
+      try {
+        await persistCapturedCompletionHandoff(context!, 'no_changes', checkAccepted);
+        checkAccepted();
+      } catch (error) {
+        console.warn(`[completion-handoff] Read-only completion retained without publication: ${error instanceof Error ? error.message : String(error)}`);
+        return { completed: false, blocked: true, detail: 'Private completion handoff could not verify the current owner and source. Retain the workspace and provider archive.' };
+      }
+    }
     const settledLane = updateLane(lane.id, {
       status: hasReceipt ? 'completed' : 'awaiting_input',
       outcome: hasReceipt ? 'no_changes' : null,
       outcomeNote: hasReceipt ? context!.selfReview!.outcome!.trim() : detail,
       lastEventAt: completedAt,
       lastEventLabel: hasReceipt ? READ_ONLY_COMPLETED_EVENT_LABEL : 'read_only_evidence_missing',
-    }, 'system') ?? freshLane;
-    if (hasReceipt) markPacketCompleted(packet, completedAt, settledLane);
-    else markPacketEvidenceMissing(packet, completedAt, settledLane);
+    }, 'system') ?? freshLane!;
+    if (hasReceipt) markPacketCompleted(packet!, completedAt, settledLane);
+    else markPacketEvidenceMissing(packet!, completedAt, settledLane);
     return hasReceipt ? { completed: true, lane: settledLane }
       : { completed: false, blocked: true, detail, lane: settledLane };
   };
@@ -120,7 +137,7 @@ export async function completeReadOnlyZeroDiffLane(
   if (currentPacket) {
     return (await withLockedState((state) => apply(state.packets.find((packet) => packet.id === packetId)))).result;
   }
-  return (await withMissionRegistryState(entry!.id, (state) => ({
-    state, result: apply(state.packets.find((packet) => packet.id === packetId)),
+  return (await withMissionRegistryState(entry!.id, async (state) => ({
+    state, result: await apply(state.packets.find((packet) => packet.id === packetId)),
   }))).result;
 }

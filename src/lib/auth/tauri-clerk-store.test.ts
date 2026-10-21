@@ -59,4 +59,16 @@ describe('tauri Clerk store purge', () => {
     expect(invokeMock).not.toHaveBeenCalled();
     expect(loadMock).not.toHaveBeenCalled();
   });
+  it('uses a fixed diagnostic for native store failures', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    const secret = 'SYNTHETIC_STORE_SECRET_NOT_VALID';
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    loadMock.mockRejectedValueOnce(Object.assign(new Error(secret), { cause: { token: secret } }));
+    const { purgeTauriClerkStore } = await import('./tauri-clerk-store');
+    await purgeTauriClerkStore();
+    expect(error).toHaveBeenCalledWith('[auth] failed to purge native Clerk store');
+    expect(JSON.stringify(error.mock.calls)).not.toContain(secret);
+    error.mockRestore();
+  });
+
 });

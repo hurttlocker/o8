@@ -20,6 +20,9 @@ import {
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { resolveEffortAliases, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { readOrchestratorControlPlaneState, withLockedState } from '@/lib/orchestrator/control-plane';
 import { settlePacketStorageBeforeRemoval } from '@/lib/orchestrator/packet-storage-removal';
 import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
@@ -33,6 +36,7 @@ import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
 import { resolveTaskContractRequired } from '@/lib/orchestrator/task-contract-required';
 import { assertRuntimeDispatchable, DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
+import { remoteWorkerPreflightError } from '@/lib/cloud/worker-readiness';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
 export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
@@ -61,6 +65,7 @@ export interface TaskCreateInput extends TaskMutationInput {
   title: string;
   summary?: string | null;
   model?: string | null;
+  requestedEffort?: ThinkingEffort | null;
   workerIntent?: string | null;
   requestedProvider?: string | null;
   requestedRuntime?: string | null;
@@ -81,6 +86,7 @@ export interface TaskClaimInput extends TaskMutationInput {
 export interface TaskDispatchInput extends TaskMutationInput {
   message?: string | null;
   model?: string | null;
+  requestedEffort?: ThinkingEffort | null;
   workerIntent?: string | null;
   requestedProvider?: string | null;
   requestedRuntime?: string | null;
@@ -115,6 +121,25 @@ export class TaskMutationError extends Error {
     super(message);
     this.name = 'TaskMutationError';
   }
+}
+
+export function readTaskEffortSelection(body: Record<string, unknown>): ThinkingEffort | null {
+  const selection = resolveEffortAliases(body.requestedEffort, body.thinkingEffort);
+  if (!selection.ok) throw new TaskMutationError(400, selection.message);
+  return selection.requestedEffort;
+}
+
+function resolveTaskWorkerRouting(input: NonNullable<Parameters<typeof resolveWorkerRouting>[0]>): WorkerRouting {
+  const routing = resolveWorkerRouting(input);
+  const pin = resolveEffortPin({
+    requestedEffort: input.requestedEffort,
+    runtime: routing.selectedRuntime,
+    model: routing.selectedModel ?? getRuntimeCapability(routing.selectedRuntime).defaultModel ?? null,
+    explicitModel: typeof input.requestedModel === 'string' ? input.requestedModel : null,
+    modelDisposition: routing.modelDisposition,
+  });
+  if (!pin.ok) throw new TaskMutationError(400, pin.message);
+  return routing;
 }
 
 function nowIso() {
@@ -205,7 +230,14 @@ async function syncPacketForLane(
       lastEventLabel,
     };
 
-    if (patch.status) nextPacket.status = patch.status;
+    if (patch.status) {
+      nextPacket.status = patch.status;
+      if ((patch.status === 'running' || patch.status === 'launching')
+        && nextPacket.queueState === 'held' && nextPacket.holdIntent === 'explicit-dispatch') {
+        nextPacket.queueState = 'queued';
+        nextPacket.holdIntent = undefined;
+      }
+    }
     if (patch.blockedReason !== undefined) nextPacket.blockedReason = patch.blockedReason;
 
     state.packets = state.packets.map((candidate, candidateIndex) => (
@@ -327,11 +359,12 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
   const repoPath = targetRepo.localPath;
   const summary = input.summary?.trim() || title;
   const now = nowIso();
-  const workerRouting = resolveWorkerRouting({
+  const workerRouting = resolveTaskWorkerRouting({
     workerIntent: input.workerIntent,
     requestedProvider: input.requestedProvider,
     requestedRuntime: input.requestedRuntime,
     requestedModel: input.model,
+    requestedEffort: input.requestedEffort,
     source: 'task-create',
   });
   const allowedFiles = normalizeAllowedFiles(input.allowedFiles);
@@ -360,6 +393,7 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
     const packet: OrchestratorPacket = {
       id: packetId,
       referenceLabel: nextPacketReferenceLabel(current.packets),
+      projectId: context.id,
       title,
       summary,
       workspaceTargetPath: repoPath,
@@ -367,9 +401,10 @@ export async function createTask(input: TaskCreateInput): Promise<TaskMutationRe
       runtime: workerRouting.selectedRuntime,
       dependencyLabels: [],
       dependencyPacketIds: [],
-      queueState: 'queued',
+      queueState: workerRouting.selectedRuntime === 'cloud' ? 'held' : 'queued',
+      holdIntent: workerRouting.selectedRuntime === 'cloud' ? 'explicit-dispatch' : undefined,
       releaseState: 'pending',
-      status: 'queued',
+      status: workerRouting.selectedRuntime === 'cloud' ? 'draft' : 'queued',
       attemptCount: 0,
       maxAttempts: 3,
       blockedReason: null,
@@ -448,15 +483,21 @@ export async function claimTask(taskId: string, input: TaskClaimInput = {}): Pro
 export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}): Promise<TaskMutationResult> {
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
-  const workerRouting = resolveWorkerRouting({
+  const workerRouting = resolveTaskWorkerRouting({
     workerIntent: input.workerIntent ?? task.workerIntent ?? undefined,
     requestedProvider: input.requestedProvider ?? task.workerRouting?.requestedProvider ?? undefined,
     requestedRuntime: input.requestedRuntime ?? task.workerRouting?.requestedRuntime ?? task.runtime,
     requestedModel: input.model ?? task.workerRouting?.requestedModel ?? undefined,
+    requestedEffort: input.requestedEffort ?? task.workerRouting?.requestedEffort ?? undefined,
     source: 'task-dispatch',
   });
   try {
-    await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, task.repoPath);
+    if (workerRouting.selectedRuntime === 'cloud') {
+      const error = remoteWorkerPreflightError(input.model ?? task.workerRouting?.requestedModel);
+      if (error) throw new TaskMutationError(409, error);
+    } else {
+      await assertRuntimeDispatchable(workerRouting.selectedRuntime, workerRouting.selectedModel, task.repoPath);
+    }
   } catch (error) {
     if (error instanceof DispatchPreflightError) {
       throw new TaskMutationError(409, `${error.status.detail} ${error.status.fix}`);

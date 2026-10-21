@@ -36,6 +36,7 @@ import {
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
+import { buildProjectVerificationPrompt } from './project-verification-prompt';
 import { buildPreservationEnvelope, checkFileSizeThresholds } from './preservation-envelope';
 
 function formatChangedFiles(changedFiles: string[]) {
@@ -402,6 +403,10 @@ export async function buildPacketPrompt(
   const readOnlySection = readOnlyPacket
     ? 'Read-only packet: inspect the repository and report the requested findings. Do not edit files, create commits, create branches, or run commands that mutate repository state. A clean zero-diff completion is the expected successful outcome.'
     : null;
+  const projectVerificationSection = readOnlyPacket ? null : await buildProjectVerificationPrompt(
+    worktreePath ?? packet.lane?.worktreePath,
+    packet.workspaceTargetPath,
+  );
   const outcomeOwnershipSection = buildWorkerOutcomeOwnershipPromptV1(readOnlyPacket);
   // Alignment turn (#1282 Huddle + single-sub Advisor) — armed per-mission by
   // the orchestrator (huddle flag) OR auto-armed for cheap-tier workers (advisor
@@ -512,7 +517,7 @@ export async function buildPacketPrompt(
     captureProofSection,
     brainSection,
     learnedRuleSection,
-    readOnlyPacket ? null : 'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize when typecheck passes and your changed-file checks are clean. A committed, typecheck-clean packet is implementation-ready for independent review; report that handoff immediately instead of claiming the user-facing outcome is closed or waiting on advisory output.',
+    projectVerificationSection,
     ...(readOnlyPacket
       ? buildReadOnlyPacketSelfReviewInstructions()
       : buildPacketSelfReviewInstructions(baseBranch)),

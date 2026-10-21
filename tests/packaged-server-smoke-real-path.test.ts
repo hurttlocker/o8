@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -33,5 +34,22 @@ http.createServer((request, response) => {
 }).listen(Number(process.env.PORT), '127.0.0.1');`);
     await expect(smokePackagedServer(root, { timeoutMs: 5000 }))
       .resolves.toMatchObject({ version: 'test' });
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a supervised smoke server in the caller process group and waits for its exit', async () => {
+    const root = fixture(`const http = require('node:http');
+const fs = require('node:fs');
+const cp = require('node:child_process');
+fs.writeFileSync('identity.json', JSON.stringify({pid: process.pid, group: cp.execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], {encoding: 'utf8'}).trim()}));
+http.createServer((request, response) => {
+  response.setHeader('Content-Type', 'application/json');
+  response.end(JSON.stringify({product: 'o8', apiPort: Number(process.env.PORT), bootId: process.env.O8_BOOT_ID, version: 'supervised'}));
+}).listen(Number(process.env.PORT), '127.0.0.1');`);
+    await expect(smokePackagedServer(root, { timeoutMs: 5000, supervised: true }))
+      .resolves.toMatchObject({ version: 'supervised' });
+    const identity = JSON.parse(readFileSync(join(root, 'identity.json'), 'utf8'));
+    const group = execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim();
+    expect(identity.group).toBe(group);
+    expect(() => process.kill(identity.pid, 0)).toThrow();
   });
 });

@@ -77,21 +77,20 @@ export default function PortalCardPreviewPage() {
         <PortalCard variant="light" width={360} height={520} portalHeight={196}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
-              <div style={{ fontSize: 11.5, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5d6a78' }}>Founding Operator</div>
+              <div style={{ fontSize: 11.5, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5d6a78' }}>Pro · Lifetime</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 7 }}>
-                <span style={{ fontSize: 42, fontWeight: 600, letterSpacing: '-1.4px' }}>$150</span>
-                <span style={{ fontSize: 13.5, color: '#5d6a78' }}>/ once</span>
+                <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.5px' }}>One-time purchase</span>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 9, fontSize: 13.5 }}>
-              {['Full governed fleet — no extra sub', 'Build-in-public roadmap priority', 'Founding status & voice', 'Lifetime — never a locked door'].map((f) => (
+              {['Full governed fleet — no extra sub', 'Build-in-public roadmap priority', 'Pro · Lifetime status & voice', 'Lifetime — never a locked door'].map((f) => (
                 <div key={f} style={{ display: 'flex', gap: 9, alignItems: 'center', color: '#3a4654' }}>
                   <Check dark={false} />
                   {f}
                 </div>
               ))}
             </div>
-            <button type="button" style={cta(false)}>Become a Founding Operator</button>
+            <button type="button" style={cta(false)}>Get Pro · Lifetime</button>
           </div>
         </PortalCard>
 

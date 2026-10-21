@@ -12,12 +12,13 @@ const mocks = vi.hoisted(() => ({
   fillInput: vi.fn(),
   play: vi.fn(async () => undefined),
   sendNow: vi.fn(() => true),
-  setActiveComposer: vi.fn(),
+  registerComposer: vi.fn((_target: { fill: (text: string) => void }) => () => undefined),
+  activateComposer: vi.fn(),
   stop: vi.fn(),
 }));
 
 vi.mock('@/components/desktop/dictation/DictationHost', () => ({
-  useDictationHostOptional: () => ({ setActiveComposer: mocks.setActiveComposer }),
+  useDictationHostOptional: () => ({ registerComposer: mocks.registerComposer, activateComposer: mocks.activateComposer }),
 }));
 
 vi.mock('@/lib/tts/engine', () => ({
@@ -63,7 +64,7 @@ function Harness({
 }
 
 function activeDelivery(): (text: string) => void {
-  const claim = [...mocks.setActiveComposer.mock.calls]
+  const claim = [...mocks.registerComposer.mock.calls]
     .reverse()
     .find(([composer]) => composer !== null)?.[0] as { fill: (text: string) => void } | undefined;
   if (!claim) throw new Error('composer was not registered');
@@ -105,26 +106,22 @@ describe('useAgentVoiceMode', () => {
     expect(localStorage.getItem('o8:agent-voice-mode:v1:draft-test')).toBe('true');
   });
 
-  it('plays one complete assistant reply after the active voice turn settles', () => {
+  it('keeps restored preferences inert and never infers speech from busy state or assistant text', () => {
     localStorage.setItem('o8:agent-voice-mode:v1:playback-test', 'true');
     act(() => root.render(createElement(Harness, { surfaceKey: 'playback-test' })));
+    act(() => activeDelivery()('draft after restore'));
+    expect(mocks.sendNow).not.toHaveBeenCalled();
+    expect(mocks.fillInput).toHaveBeenCalledWith('draft after restore');
+    act(() => container.querySelector('button')!.click());
     act(() => root.render(createElement(Harness, {
-      surfaceKey: 'playback-test',
-      busy: true,
+      surfaceKey: 'playback-test', busy: true,
       messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'partial')],
     })));
-    expect(mocks.play).not.toHaveBeenCalled();
-
     act(() => root.render(createElement(Harness, {
       surfaceKey: 'playback-test',
       messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'complete answer')],
     })));
-
-    expect(mocks.play).toHaveBeenCalledOnce();
-    expect(mocks.play).toHaveBeenCalledWith(
-      'complete answer',
-      'voice-mode:playback-test:a1',
-    );
+    expect(mocks.play).not.toHaveBeenCalled();
   });
 
   it('keeps legacy enabled preferences inert in a dictation-only composer', () => {

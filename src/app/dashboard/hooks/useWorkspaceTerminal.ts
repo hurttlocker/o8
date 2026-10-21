@@ -270,7 +270,7 @@ export function useWorkspaceTerminal({
       return {
         ...current,
         root: replaceTileContent(current.root, tileId, {
-          kind: 'terminal',
+          ...tile.content,
           repoPath: nextRepoPath,
         }),
       };
@@ -549,13 +549,13 @@ export function useWorkspaceTerminal({
         }
       }
     },
-    onTerminalData: (sessionName: string, data: string) => {
+    onTerminalData: (sessionName: string, data: string, historical?: boolean) => {
       terminalRef.current?.writeToTerminal(data);
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
-        handle.writeToTerminal(sessionName, data);
+        handle.writeToTerminal(sessionName, data, historical);
       }
       for (const handle of contextualPanelHandlesRef.current.values()) {
-        handle.writeToTerminal(sessionName, data);
+        handle.writeToTerminal(sessionName, data, historical);
       }
     },
     onTerminalDimensions: (sessionName: string, cols: number, rows: number) => {
@@ -587,13 +587,13 @@ export function useWorkspaceTerminal({
         handle.setTermError(sessionName, error);
       }
     },
-    onTerminalExited: (sessionName: string, _exitCode: number) => {
+    onTerminalExited: (sessionName: string, exitCode: number | null) => {
       terminalRef.current?.setTermExited(true);
       for (const handle of workspaceTerminalHandlesRef.current.values()) {
-        handle.setTermExited(sessionName);
+        handle.setTermExited(sessionName, exitCode);
       }
       for (const handle of contextualPanelHandlesRef.current.values()) {
-        handle.setTermExited(sessionName);
+        handle.setTermExited(sessionName, exitCode);
       }
     },
     onTerminalImage: (sessionName: string, imageB64: string, filename: string) => {

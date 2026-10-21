@@ -1,3 +1,4 @@
+import { errorText } from '@/lib/mcp/operator-handlers/shared';
 import { listProblemDossiers, listProblemRemedies } from '@/lib/problems/dossiers';
 import { projectProblemDossierMetrics } from '@/lib/problems/metrics';
 import { reconcileProblemDossiers } from '@/lib/problems/service';
@@ -52,7 +53,7 @@ export async function handleProblemList(args: Record<string, unknown>): Promise<
       metrics: projectProblemDossierMetrics(dossiers),
     });
   } catch (error) {
-    return textResult(`Failed to read problem dossiers: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to read problem dossiers: ${errorText(error)}`, true);
   }
 }
 
@@ -67,6 +68,6 @@ export async function handleProblemGet(args: Record<string, unknown>): Promise<M
       ? jsonResult(project(dossier))
       : textResult(`Problem dossier not found: ${dossierId}`, true);
   } catch (error) {
-    return textResult(`Failed to read problem dossier: ${error instanceof Error ? error.message : String(error)}`, true);
+    return textResult(`Failed to read problem dossier: ${errorText(error)}`, true);
   }
 }

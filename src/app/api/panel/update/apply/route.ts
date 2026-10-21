@@ -1,3 +1,4 @@
+import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
@@ -21,6 +22,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function unavailableIdleWindow(error: unknown): UpdateIdleWindow {
   return {
     idle: false,
+    idleExceptParked: false,
+    parkedLanes: [],
     active: { lanes: [], terminalSessions: [], managedRuns: [], ownedSessions: [], cloudJobs: [] },
     unavailable: [error instanceof Error ? error.message : 'idle-window'],
     checkedAt: new Date().toISOString(),
@@ -37,7 +40,8 @@ async function readIdleWindow(): Promise<UpdateIdleWindow> {
 
 export async function GET() {
   const idle = await readIdleWindow();
-  return response({ ok: true, idle });
+  // The state carries the last install attempt, so a caller can read a failed apply back (#3588).
+  return response({ ok: true, idle, state: getAppUpdateState() });
 }
 
 export async function POST(request: Request) {
@@ -81,6 +85,10 @@ export async function POST(request: Request) {
       state,
     }, 409);
   }
+
+  const admission = inspectCliOperationAdmission();
+  if (admission.blocked) return response({ ok: false, requested: false,
+    error: { code: admission.code, message: admission.message }, state }, 409);
 
   const idle = await readIdleWindow();
   if (!force && !idle.idle) {

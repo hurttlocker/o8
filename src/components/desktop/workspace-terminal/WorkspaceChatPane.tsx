@@ -7,6 +7,8 @@ import {
   CheckCircle2,
   MessageSquare,
 } from '../lucide-shims';
+import { runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
+import { O8ThreadsPane } from '@/components/desktop/o8-panel/O8ThreadsPane';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
@@ -30,6 +32,8 @@ import {
   type WorkspaceTranscriptHeader,
 } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
 import { PromptGlyph } from '@/components/desktop/workspace-terminal/workspace-chat-prompt';
+import { TranscriptNavigator } from '../transcript/TranscriptNavigator';
+import { TranscriptActivity } from '../transcript/TranscriptActivity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 interface WorkspaceChatPaneProps {
@@ -195,6 +199,7 @@ function WorkspaceChatPaneBase({
           </span>
         </div>
       ) : null}
+      <TranscriptNavigator entries={chat.visibleTranscriptEntries} scrollRef={scrollRef} />
       <div
         ref={scrollRef}
         onScroll={chat.handleScroll}
@@ -383,8 +388,11 @@ function WorkspaceChatPaneBase({
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
                       <WorkspaceTranscript
                         entries={chat.packetTranscriptEntries}
+                        markLast={!stillWorking}
                         packetHeader={packetHeader}
                         repoPath={transcriptRepoPath}
+                        packetId={tab.orchestrationPacket?.packetId}
+                        active={active}
                         onRunInTerminal={onRunInTerminal}
                         onPermissionDecision={chat.handleClaudePermissionDecision}
                       />
@@ -568,7 +576,9 @@ function WorkspaceChatPaneBase({
               entries={chat.visibleTranscriptEntries}
               packetHeader={packetHeader}
               repoPath={transcriptRepoPath}
-              markLast={!chat.sending}
+              packetId={tab.orchestrationPacket?.packetId}
+              active={active}
+              markLast={!chat.sending && !chat.agentRunning}
               onRunInTerminal={onRunInTerminal}
               onPermissionDecision={chat.handleClaudePermissionDecision}
             />
@@ -702,6 +712,8 @@ function WorkspaceChatPaneBase({
         </div>
       ) : null}
 
+      <TranscriptActivity entries={[...(chat.visibleTranscriptEntries.length ? chat.visibleTranscriptEntries : chat.packetTranscriptEntries), ...streamingEntries]}
+        packets={[]} busy={chat.sending || chat.agentRunning} repoPath={transcriptRepoPath} />
       <WorkspaceChatComposer
         active={active}
         chat={{ ...chat, composeRef, scrollRef }}
@@ -723,4 +735,16 @@ function WorkspaceChatPaneBase({
   );
 }
 
-export const WorkspaceChatPane = memo(WorkspaceChatPaneBase);
+export const WorkspaceChatPane = memo(function WorkspaceChatPane(props: WorkspaceChatPaneProps) {
+  const runtime = runtimeFromSessionKeyId(props.tab.chatSessionKey) ?? props.tab.chatRuntime;
+  // Remote attempts already have an authoritative task/evidence surface. They
+  // must never enter the local CLI composer or inherit its default model.
+  if (runtime === 'cloud') return <O8ThreadsPane
+    key={props.tab.chatSessionKey}
+    active={props.active}
+    repoPath={props.tab.repo?.localPath ?? null}
+    repos={[]}
+    boundSessionKey={props.tab.chatSessionKey}
+  />;
+  return <WorkspaceChatPaneBase {...props} />;
+});

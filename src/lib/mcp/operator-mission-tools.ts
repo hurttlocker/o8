@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { sanitizeErrorMessage } from '@/lib/api/error-format';
+import { apiError, McpInputError, O8ApiError, unreachableApiError } from '@/lib/mcp/api-error';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpMutation } from '@/lib/mcp/correlated-mutation';
 import type { CorrelatedActionPayload } from '@/lib/orchestrator/action-receipt';
@@ -105,6 +105,7 @@ function getApiBaseLive(): string {
 interface CreateMissionInput {
   issues: string[];
   repoPath: string;
+  projectId?: string | null;
   runtime: OrchestratorRuntime;
   origin?: 'design-mode';
   workerIntent?: WorkerIntent;
@@ -118,8 +119,10 @@ interface CreateMissionInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  holdMerges?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -141,6 +144,7 @@ interface InlineIssue {
 interface CreateMissionInlineInput {
   issues_inline: InlineIssue[];
   repoPath: string;
+  projectId?: string | null;
   runtime: OrchestratorRuntime;
   origin?: 'design-mode';
   workerIntent?: WorkerIntent;
@@ -154,8 +158,10 @@ interface CreateMissionInlineInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  holdMerges?: boolean;
   huddle?: boolean;
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
   qualitySearch?: { taskContract: PacketTaskContract };
@@ -195,7 +201,7 @@ function log(message: string, details?: unknown) {
 function ensureRepoPath(repoPath: string) {
   const normalized = repoPath.trim();
   if (!normalized) {
-    throw new Error('repoPath is required.');
+    throw new McpInputError('repoPath is required.');
   }
   if (!existsSync(normalized) || !statSync(normalized).isDirectory()) {
     throw new Error(`Repository path not found: ${normalized}`);
@@ -247,7 +253,7 @@ function normalizeIssueRef(value: string) {
 async function loadIssue(repoPath: string, issueRef: string): Promise<LoadedIssue> {
   const normalizedIssueRef = normalizeIssueRef(issueRef);
   if (!normalizedIssueRef) {
-    throw new Error('Issue references must be non-empty.');
+    throw new McpInputError('Issue references must be non-empty.');
   }
 
   const { stdout } = await execFileAsync(
@@ -269,25 +275,6 @@ async function loadIssue(repoPath: string, issueRef: string): Promise<LoadedIssu
   };
 }
 
-function extractApiErrorMessage(path: string, status: number, payload: unknown) {
-  if (payload && typeof payload === 'object' && 'error' in payload) {
-    const errorValue = (payload as { error: unknown }).error;
-    if (typeof errorValue === 'string' && errorValue.trim()) {
-      return errorValue;
-    }
-    if (
-      errorValue
-      && typeof errorValue === 'object'
-      && 'message' in errorValue
-      && typeof (errorValue as { message?: unknown }).message === 'string'
-    ) {
-      return (errorValue as { message: string }).message;
-    }
-  }
-
-  return `Request to ${path} failed with HTTP ${status}.`;
-}
-
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [500, 1500, 4000];
 const FETCH_TIMEOUT_MS = 15_000;
@@ -298,7 +285,6 @@ function sleep(ms: number): Promise<void> {
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | undefined;
-  let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -313,47 +299,35 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
       const panelToken = readPanelToken();
       const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (panelToken) baseHeaders.Authorization = `Bearer ${panelToken}`;
-      response = await fetch(`${getApiBaseLive()}${path}`, {
-        ...init,
-        signal: controller.signal,
-        headers: {
-          ...baseHeaders,
-          ...init?.headers,
-        },
-      });
-      clearTimeout(timer);
+      try {
+        response = await fetch(`${getApiBaseLive()}${path}`, {
+          ...init,
+          signal: controller.signal,
+          headers: { ...baseHeaders, ...init?.headers },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       break;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (lastError.name === 'AbortError') {
-        lastError = new Error(`Request to ${path} timed out after ${FETCH_TIMEOUT_MS}ms`);
-      }
+      console.error('[mcp] API request failed:', { path }, error);
       response = undefined;
     }
   }
 
-  if (!response) {
-    throw new Error(
-      `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
-      `Expected the o8 backend at ${getApiBaseLive()}. ` +
-      `Open the o8 desktop app or run \`npm run desktop:dev\` from the o8 repo.`,
-    );
+  // A network failure after every retry usually means the backend is not running.
+  if (!response) throw unreachableApiError();
+  const status = response.status;
+  const body = await response.text().catch((error) => { throw apiError(path, status, '', error); });
+  if (!response.ok) throw apiError(path, response.status, body);
+  let payload: ApiResponse<T> | null;
+  try {
+    payload = JSON.parse(body) as ApiResponse<T> | null;
+  } catch (error) {
+    throw apiError(path, response.status, body, error);
   }
-
-  const payload = await response.json().catch(() => null) as ApiResponse<T> | Record<string, unknown> | null;
-  if (!response.ok) {
-    throw new Error(extractApiErrorMessage(path, response.status, payload));
-  }
-
-  if (payload && typeof payload === 'object' && 'ok' in payload) {
-    if (payload.ok === true && 'result' in payload) {
-      return payload.result as T;
-    }
-
-    throw new Error(extractApiErrorMessage(path, response.status, payload));
-  }
-
-  throw new Error(`Invalid response from ${path}.`);
+  if (payload?.ok === true && 'result' in payload) return payload.result;
+  throw apiError(path, response.status, body);
 }
 
 async function correlatedApiRequest<T>(
@@ -370,27 +344,29 @@ async function correlatedApiRequest<T>(
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (panelToken) headers.Authorization = `Bearer ${panelToken}`;
       try {
-        return await fetch(`${getApiBaseLive()}${path}`, {
+        const response = await fetch(`${getApiBaseLive()}${path}`, {
           method: 'POST',
           headers,
           body: requestBody,
           signal: controller.signal,
         });
+        if (!response.ok) apiError(path, response.status, await response.clone().text());
+        return response;
+      } catch (error) {
+        throw apiError(path, null, '', error);
       } finally {
         clearTimeout(timer);
       }
     },
-    parseError: (response, responsePayload) => new Error(
-      extractApiErrorMessage(path, response.status, responsePayload),
-    ),
+    parseError: (response, responsePayload) => apiError(path, response.status, JSON.stringify(responsePayload)),
   });
   if (payload.ok === true && 'result' in payload) return payload.result as T;
-  throw new Error(extractApiErrorMessage(path, 200, payload));
+  throw apiError(path, 200, JSON.stringify(payload));
 }
 
 function missionToolError(action: string, error: unknown, fallback: string): MissionToolError {
   console.error(`${LOG_PREFIX} ${action} failed`, error);
-  return { error: sanitizeErrorMessage(error, fallback) };
+  return { error: error instanceof O8ApiError ? error.summary : error instanceof McpInputError ? error.message : fallback };
 }
 
 export async function createMission(input: CreateMissionInput) {
@@ -405,6 +381,7 @@ export async function createMission(input: CreateMissionInput) {
       {
           issues: loadedIssues,
           repoPath,
+          projectId: input.projectId,
           runtime: input.runtime,
           origin: input.origin,
           workerIntent: input.workerIntent,
@@ -419,8 +396,10 @@ export async function createMission(input: CreateMissionInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          holdMerges: input.holdMerges,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,
@@ -456,6 +435,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
       {
           issues: loadedIssues,
           repoPath,
+          projectId: input.projectId,
           runtime: input.runtime,
           origin: input.origin,
           workerIntent: input.workerIntent,
@@ -470,8 +450,10 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          holdMerges: input.holdMerges,
           huddle: input.huddle,
           taskContract: input.taskContract,
+          sealedTaskContract: input.sealedTaskContract,
           comparisonModels: input.comparisonModels,
           qualitySearch: input.qualitySearch,
           orchestratorThreadId: input.orchestratorThreadId,

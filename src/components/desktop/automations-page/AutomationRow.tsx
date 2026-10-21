@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { AutomationFireRecord, AutomationRecord, RunStatus } from './types';
 
 const UI_FONT = 'var(--font-sans-system)';
@@ -207,6 +207,7 @@ export function AutomationListRow({
   const [focusWithin, setFocusWithin] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const historyPanelId = useId();
   const [busy, setBusy] = useState<'toggle' | 'run' | 'delete' | null>(null);
   const running = row.lastRunStatus === 'running' || busy === 'run';
   const revealActions = hovered || focusWithin || confirmDelete;
@@ -290,6 +291,7 @@ export function AutomationListRow({
             <button
               type="button"
               aria-expanded={historyOpen}
+              aria-controls={historyOpen ? historyPanelId : undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 setHistoryOpen((current) => !current);
@@ -342,7 +344,7 @@ export function AutomationListRow({
         </div>
       </div>
       {historyOpen ? (
-        <div style={{
+        <div id={historyPanelId} style={{
           display: 'flex',
           flexDirection: 'column',
           gap: 5,

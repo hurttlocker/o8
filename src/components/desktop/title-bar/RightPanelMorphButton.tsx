@@ -9,11 +9,13 @@ export function RightPanelMorphButton({
   o8PanelVisible,
   onToggleO8Panel,
   disabledReason,
+  yNudge = -3,
 }: {
   workspacePanelVisible: boolean;
   o8PanelVisible: boolean;
   onToggleO8Panel?: () => void;
   disabledReason?: string;
+  yNudge?: number;
 }) {
   // 3-state model kept for visual transitions, but the click action is now
   // a 2-state toggle: O8 ⇄ collapsed. The review/workspace side panel
@@ -64,7 +66,8 @@ export function RightPanelMorphButton({
         alignItems: 'center',
         justifyContent: 'center',
         height: 26,
-        minWidth: 26,
+        width: 30,
+        minWidth: 30,
         paddingLeft: 7,
         paddingRight: 7,
         borderRadius: 7,
@@ -72,7 +75,7 @@ export function RightPanelMorphButton({
         cursor: disabledReason ? 'not-allowed' : 'pointer',
         opacity: disabledReason ? 0.45 : 1,
         flexShrink: 0,
-        marginTop: -3,
+        marginTop: yNudge,
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}

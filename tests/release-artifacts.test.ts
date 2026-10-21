@@ -24,6 +24,7 @@ function makeArtifact() {
   for (const name of [
     'speech-local',
     'speech-local-aarch64-apple-darwin',
+    'speech-local-universal-apple-darwin',
     'speech-local-x86_64-apple-darwin',
   ]) {
     writeFileSync(join(root, 'src-tauri', 'helpers', name), `binary-${name}`);
@@ -50,7 +51,7 @@ describe('release artifact provenance', () => {
     const recipe = { recipeSha256: 'recipe-a', head: 'head-a', version: '0.1.999' };
     const written = writeReleaseArtifactManifest(root, recipe);
 
-    expect(written.manifest.outputs.length).toBe(4);
+    expect(written.manifest.outputs.length).toBe(5);
     expect(verifyReleaseArtifactManifest(root, recipe)).toMatchObject({ reusable: true });
     expect(verifyReleaseArtifactManifest(root, { ...recipe, recipeSha256: 'recipe-b' }))
       .toMatchObject({ reusable: false, reason: 'recipe_mismatch' });
@@ -84,7 +85,7 @@ function makeReleaseBundle(includeLinux: boolean, linuxAppImageVersion = '0.1.99
   mkdirSync(macosDir, { recursive: true });
   mkdirSync(dmgDir, { recursive: true });
   const macosAssets = [
-    join(dmgDir, 'o8_0.1.999_x64.dmg'),
+    join(dmgDir, 'o8_0.1.999_universal.dmg'),
     join(macosDir, 'o8.app.tar.gz'),
     join(macosDir, 'o8.app.tar.gz.sig'),
   ];
@@ -120,7 +121,14 @@ function releasePlan(bundle: ReturnType<typeof makeReleaseBundle>) {
     notes: 'o8 v0.1.999',
     pubDate: '2026-08-27T12:00:00.000Z',
     downloadBase: 'https://github.com/example/releases/download/v0.1.999',
-    darwinSignature: 'darwin-fixture-signature',
+    darwinArtifact: {
+      signature: 'darwin-fixture-signature',
+      identity: {
+        kind: 'macos-universal-app',
+        architectures: ['x86_64', 'arm64'],
+        binaries: [],
+      },
+    },
     baseUploadAssets: bundle.macosAssets,
     trailingUploadAssets: bundle.trailingAssets,
   });
@@ -184,8 +192,34 @@ describe('release updater manifest', () => {
         notes: 'o8 v0.1.999',
         pubDate: '2026-08-27T12:00:00.000Z',
         downloadBase: 'https://github.com/example/releases/download/v0.1.999',
-        darwinSignature: 'darwin-fixture-signature',
+        darwinArtifact: {
+          signature: 'darwin-fixture-signature',
+          identity: {
+            kind: 'macos-universal-app',
+            architectures: ['x86_64', 'arm64'],
+            binaries: [],
+          },
+        },
       }),
     ).toThrow(/does not match the expected "o8_<version>_amd64\.AppImage" naming pattern/);
+  });
+
+  it('refuses to emit an arm64 updater entry for an x86_64-only macOS identity', () => {
+    const bundle = makeReleaseBundle(false);
+    expect(() => buildReleaseManifest({
+      bundleDir: bundle.bundleDir,
+      version: '0.1.999',
+      notes: 'o8 v0.1.999',
+      pubDate: '2026-08-27T12:00:00.000Z',
+      downloadBase: 'https://github.com/example/releases/download/v0.1.999',
+      darwinArtifact: {
+        signature: 'darwin-fixture-signature',
+        identity: {
+          kind: 'macos-universal-app',
+          architectures: ['x86_64'],
+          binaries: [],
+        },
+      },
+    })).toThrow('macOS updater artifact identity is missing arm64');
   });
 });
