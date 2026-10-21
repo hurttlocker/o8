@@ -63,7 +63,7 @@ async function fixture(respawn = false, race: 'successor' | 'overlap' | null = n
   writeFileSync(join(dir, 'serve-state.json'), JSON.stringify(state));
   return { dir, child, leaf, state };
 }
-function stop(dir: string, command = 'stop', env: NodeJS.ProcessEnv = {}): Promise<{code:number;output:string}> {
+function stop(dir: string, command = 'stop', env: Partial<NodeJS.ProcessEnv> = {}): Promise<{code:number;output:string}> {
   return new Promise((done) => {
     execFile(process.execPath, [join(dir, 'server/bin/o8.mjs'), 'serve', ...(command ? [command] : [])], {
       cwd: dir, env: { ...process.env, ...env, O8_DATA_DIR: dir, CORTEX_IDE_DATA_DIR: dir }, encoding: 'utf8', timeout: 20_000,
