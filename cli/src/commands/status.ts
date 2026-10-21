@@ -9,6 +9,7 @@
 
 import { apiFetch } from '../api.js';
 import { resolveConfig } from '../config.js';
+import { approvalAge } from '../../../src/lib/orchestrator/status-age.js';
 import { runtimeConnectionRows, connectionDetail, connectionLabel } from '../../../src/lib/runtimes/shared/connection-evidence.js';
 import {
   color,
@@ -27,6 +28,7 @@ interface Lane {
   repoPath: string;
   worktreePath: string | null;
   packetId: string | null;
+  sessionKey?: string | null;
   updatedAt: string;
   lastEventAt: string | null;
   lastEventLabel: string | null;
@@ -41,7 +43,14 @@ interface Approval {
   summary?: string;
   packetId?: string | null;
   laneId?: string | null;
-  createdAt?: string;
+  createdAt?: string | number;
+}
+
+interface StatusSession {
+  sessionKey: string;
+  status: string;
+  summary: string;
+  nextActions?: Array<{ endpoint: string; action: string; surfaceId: string; requiredInputs: string[] }>;
 }
 
 interface MissionStatusPacket {
@@ -111,15 +120,20 @@ const RUNNING_STATUSES = new Set([
 export async function runStatus(mode: OutputMode): Promise<number> {
   const cfg = resolveConfig();
 
-  const [activeRes, allRes, approvalsRes, missionRes, panelStatusRes] = await Promise.all([
+  const [activeRes, allRes, approvalsRes, missionRes, panelStatusRes, operatorRes] = await Promise.all([
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'true' } }),
     apiFetch<{ lanes: Lane[] }>(cfg, '/api/lanes', { query: { active: 'false' } }),
     apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
     apiFetch<MissionStatusResponse>(cfg, '/api/orchestrator/status', { allowNotFound: true }),
     apiFetch<PanelStatusResponse>(cfg, '/api/panel/status', { allowNotFound: true }),
+    apiFetch<{ agents?: StatusSession[] }>(cfg, '/api/operator/status', { allowNotFound: true }),
   ]);
 
-  const activeLanes = activeRes.data?.lanes ?? [];
+  const staleSessions = (operatorRes?.data?.agents ?? []).filter((session) => session.status === 'stale');
+  const staleKeys = new Set(staleSessions.map((session) => session.sessionKey));
+  const activeLanes = (activeRes.data?.lanes ?? []).map((lane) => (
+    lane.sessionKey && staleKeys.has(lane.sessionKey) ? { ...lane, status: 'stale' } : lane
+  ));
   const connectionResponse = await Promise.resolve(apiFetch(cfg, '/api/panel/operator-defaults', { timeoutMs: 15_000 }))
     .catch(() => null);
   const runtimeConnections = runtimeConnectionRows(connectionResponse?.data);
@@ -171,6 +185,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   const payload = {
     schema: 'o8/cli/status/v1',
     runtimeConnections,
+    staleSessions: staleSessions.slice(0, LANE_CAP),
+    staleSessionsTruncated: staleSessions.length > LANE_CAP,
     counts: {
       runningPackets: running.length,
       awaitingReview: awaitingReview.length,
@@ -179,6 +195,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       pendingApprovals: approvals.length,
       storageHolds: storageHolds.length,
       shippedDarkWarnings: shippedDarkWarnings.length,
+      staleSessions: staleSessions.length,
     },
     activeLanesTruncated: activeLanes.length > LANE_CAP,
     awaitingReviewTruncated: awaitingReview.length > LANE_CAP,
@@ -194,6 +211,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       packetId: a.packetId ?? null,
       laneId: a.laneId ?? null,
       createdAt: a.createdAt ?? null,
+      ...approvalAge(a.createdAt),
     })),
     storageHolds,
     shippedDarkAudit,
@@ -227,6 +245,15 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       printHumanHeading('awaiting review');
       for (const l of awaitingReview) process.stdout.write(formatLaneLine(l));
     }
+    if (staleSessions.length > 0) {
+      printHumanHeading('stale sessions');
+      for (const session of staleSessions) {
+        process.stdout.write(`  stale ${session.sessionKey}  ${session.summary}\n`);
+        for (const action of session.nextActions ?? []) {
+          process.stdout.write(`    Recover: POST ${action.endpoint} action=${action.action} surfaceId=${action.surfaceId}; supply ${action.requiredInputs.join(', ')}\n`);
+        }
+      }
+    }
     if (recentMerges.length > 0) {
       printHumanHeading('recent merges');
       for (const l of recentMerges) process.stdout.write(formatLaneLine(l));
@@ -234,8 +261,9 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     if (approvals.length > 0) {
       printHumanHeading('pending approvals');
       for (const a of approvals) {
+        const age = approvalAge(a.createdAt);
         process.stdout.write(
-          `  ${a.id.padEnd(28)} ${a.kind ?? '?'}  ${a.summary ?? ''}\n`,
+          `  ${a.id.padEnd(28)} ${a.kind ?? '?'}  ${a.summary ?? ''}  age ${age.age}${age.overdue ? ' [overdue]' : ''}\n`,
         );
       }
     }

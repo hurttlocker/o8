@@ -5,6 +5,8 @@ import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { buildOperatorStatusAgents, summarizeOperatorStatus } from '@/lib/orchestrator/operator-status-model';
 import { readTranscriptActivityBySession } from '@/lib/orchestrator/operator-mission-service/mission-status-transcript';
 import { listTerminalReviewQueueEvidence } from '@/lib/terminal-status/store';
+import { applyOperatorStatusFreshness } from '@/lib/orchestrator/operator-status-freshness';
+import { approvalAge } from '@/lib/orchestrator/status-age';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -60,11 +62,11 @@ export async function GET(request: NextRequest) {
     const laneEventsByLaneId = new Map(
       lanes.map((lane) => [lane.id, getLaneEvents(lane.id, 200)]),
     );
-    const agents = buildOperatorStatusAgents(sessions, lanes, sessionKeyFilter, {
+    const agents = await applyOperatorStatusFreshness(buildOperatorStatusAgents(sessions, lanes, sessionKeyFilter, {
       laneEventsByLaneId,
       approvals: pendingApprovals,
       reviewQueue: listTerminalReviewQueueEvidence(),
-    });
+    }), lanes);
     const laneBySessionKey = new Map(
       lanes
         .filter((lane) => lane.sessionKey)
@@ -95,13 +97,15 @@ export async function GET(request: NextRequest) {
 
     const approvals = {
       count: pending.length,
-      items: pending.slice(0, 5).map((a) => ({
+      overdueCount: pending.filter((approval) => approvalAge(approval.createdAt).overdue).length,
+      items: [...pending].sort((a, b) => a.createdAt - b.createdAt).slice(0, 5).map((a) => ({
         id: a.id,
         title: a.title,
         risk: a.risk || 'medium',
         tool: a.toolName || '',
         agent: a.sessionKey || '',
         created: a.createdAt,
+        ...approvalAge(a.createdAt),
       })),
     };
 
