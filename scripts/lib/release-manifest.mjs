@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { MACOS_REQUIRED_BINARIES } from './macos-release-artifacts.mjs';
 
 function listFiles(directory, suffix) {
   if (!existsSync(directory)) return [];
@@ -85,6 +86,49 @@ function assertUniversalDarwinArtifact(artifact) {
   }
 }
 
+function cpuDarwinPlatforms(artifacts, universal, version, downloadBase) {
+  if (!Array.isArray(artifacts) || ![1, 2].includes(artifacts.length)
+    || new Set(artifacts.map((artifact) => artifact?.architecture)).size !== artifacts.length
+    || !artifacts.some((artifact) => artifact?.architecture === 'x86_64')
+    || artifacts.some((artifact) => !['x86_64', 'arm64'].includes(artifact?.architecture))) {
+    throw new Error('CPU packages require exactly one x86_64 artifact, optionally with one arm64 artifact');
+  }
+  const platforms = {};
+  const uploadAssets = [];
+  for (const architecture of ['x86_64', 'arm64']) {
+    const artifact = artifacts.find((candidate) => candidate.architecture === architecture);
+    if (!artifact) continue;
+    const identity = artifact.identity;
+    if (identity?.kind !== 'macos-cpu-app' || identity.architectures?.length !== 1
+      || identity.architectures[0] !== architecture
+      || identity.binaries?.length !== MACOS_REQUIRED_BINARIES.length
+      || !MACOS_REQUIRED_BINARIES.every((path) => identity.binaries.some((binary) =>
+        binary.relativePath === path && binary.architectures?.length === 1 && binary.architectures[0] === architecture))) {
+      throw new Error(`${architecture} CPU artifact identity is incomplete or mismatched`);
+    }
+    if (!/^[a-f0-9]{64}$/.test(universal.identity.bundleSha256 ?? '')
+      || identity.sourceBundleSha256 !== universal.identity.bundleSha256) {
+      throw new Error(`${architecture} CPU artifact has a different universal source identity`);
+    }
+    if (typeof artifact.signature !== 'string' || !artifact.signature.trim()
+      || !/^[a-f0-9]{64}$/.test(identity.updaterArchiveSha256 ?? '')
+      || !/^[a-f0-9]{64}$/.test(identity.bundleSha256 ?? '')) {
+      throw new Error(`${architecture} CPU artifact requires a verified archive and signature`);
+    }
+    const name = `o8_${architecture}.app.tar.gz`;
+    if (typeof artifact.archivePath !== 'string' || basename(artifact.archivePath) !== name
+      || artifact.signaturePath !== `${artifact.archivePath}.sig`
+      || typeof artifact.dmgPath !== 'string' || basename(artifact.dmgPath) !== `o8_${version}_${architecture}.dmg`) {
+      throw new Error(`${architecture} CPU artifact filenames do not match the release`);
+    }
+    platforms[architecture === 'arm64' ? 'darwin-aarch64' : 'darwin-x86_64'] = {
+      signature: artifact.signature, url: `${downloadBase}/${name}`,
+    };
+    uploadAssets.push(artifact.dmgPath, artifact.archivePath, artifact.signaturePath);
+  }
+  return { platforms, uploadAssets };
+}
+
 export function buildReleaseManifest({
   bundleDir,
   version,
@@ -92,12 +136,13 @@ export function buildReleaseManifest({
   pubDate,
   downloadBase,
   darwinArtifact,
+  darwinCpuArtifacts,
   baseUploadAssets = [],
   trailingUploadAssets = [],
 }) {
   assertUniversalDarwinArtifact(darwinArtifact);
   const linux = discoverLinuxArtifacts(bundleDir);
-  const platforms = {
+  let platforms = {
     'darwin-x86_64': {
       signature: darwinArtifact.signature,
       url: `${downloadBase}/o8.app.tar.gz`,
@@ -107,6 +152,12 @@ export function buildReleaseManifest({
       url: `${downloadBase}/o8.app.tar.gz`,
     },
   };
+  let cpuUploadAssets = [];
+  if (darwinCpuArtifacts !== undefined) {
+    const cpu = cpuDarwinPlatforms(darwinCpuArtifacts, darwinArtifact, version, downloadBase);
+    platforms = { ...platforms, ...cpu.platforms };
+    cpuUploadAssets = cpu.uploadAssets;
+  }
 
   if (linux.updater) {
     assertLinuxAppImageVersionMatches(linux.updater.artifactPath, version);
@@ -126,6 +177,7 @@ export function buildReleaseManifest({
     },
     uploadArgs: [
       ...baseUploadAssets,
+      ...cpuUploadAssets,
       ...linux.uploadAssets,
       ...trailingUploadAssets,
     ],
