@@ -236,6 +236,7 @@ export function spawnSync(command, args) {
       // Simulate only process/platform edges. The actual signing entry point,
       // size policy, cache guard, stat reads and temp cleanup execute unchanged.
       const childProcess = `import { appendFileSync, readFileSync, writeFileSync, truncateSync } from 'node:fs';
+export function spawnSync() { throw new Error('UNEXPECTED_PLATFORM_SPAWN'); }
 export function execFileSync(command, args) {
   appendFileSync(process.env.O8_SIZE_TEST_LOG, JSON.stringify({command, args}) + '\\n');
   if (command === 'cat') return readFileSync(args[0], 'utf8');
@@ -293,6 +294,7 @@ export function execFileSync(command, args) {
     const childProcess = `import { appendFileSync, cpSync, existsSync, writeFileSync, readlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const real = process.getBuiltinModule('node:child_process');
+export function spawnSync() { throw new Error('UNEXPECTED_PLATFORM_SPAWN'); }
 export function execFileSync(command, args = [], options = {}) {
   appendFileSync(process.env.O8_DMG_TEST_LOG, JSON.stringify({ command, args }) + '\\n');
   if (['cat', 'du', 'tar'].includes(command)) return real.execFileSync(command, args, options);
@@ -315,7 +317,7 @@ export function execFileSync(command, args = [], options = {}) {
     // or host artifact. All other filesystem operations execute unchanged.
     const fileSystem = `const fs = process.getBuiltinModule('node:fs');
 export const { appendFileSync, writeFileSync, readdirSync, statSync, readFileSync, mkdirSync, symlinkSync, cpSync,
-  lstatSync, mkdtempSync, readlinkSync, realpathSync, closeSync, openSync, readSync } = fs;
+  lstatSync, mkdtempSync, readlinkSync, realpathSync, closeSync, openSync, readSync, chmodSync, renameSync } = fs;
 export const existsSync = path => path === '/tmp/o8-notarize.zip' ? false : fs.existsSync(path);
 export const rmSync = (path, options) => {
   if (path === '/tmp/o8-notarize.zip') throw new Error('unexpected shared zip removal');

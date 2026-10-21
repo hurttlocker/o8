@@ -32,7 +32,7 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 
-const { createLane, getLaneEvents } = await import('@/lib/lane/registry');
+const { appendEvent, createLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { performWorktreeSideMerge } = await import('@/lib/lane/worktree-side-merge');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
@@ -178,6 +178,12 @@ function createMergeCard(lane: ReturnType<typeof createLane>) {
 type ApprovalRow = Record<string, unknown>;
 const approvalRow = (id: string) => getSqlite().prepare('SELECT * FROM approvals WHERE id = ?').get(id) as ApprovalRow;
 
+function refereeReceipt(laneId: string, approvalId: string) {
+  return getLaneEvents(laneId).find((event) => event.verb === 'judgment'
+    && event.payload?.surface === 'approval-card'
+    && event.payload?.approvalId === approvalId)?.payload;
+}
+
 /** Row with only the per-creation values (id, clock times) masked. */
 function comparableRow(row: ApprovalRow) {
   const audit = (JSON.parse(String(row.audit_json)) as Array<Record<string, unknown>>)
@@ -253,11 +259,10 @@ describe('approval card referee through the merge-card creation path', () => {
     expect(JSON.stringify(sent.state)).not.toContain(created.title);
 
     const stored = getApproval(approvalId)!;
-    const receiptEvent = getLaneEvents(lane.id).find((event) => event.verb === 'judgment');
-    expect(receiptEvent).toBeDefined();
-    const receiptPayload = (receiptEvent as { payload?: Record<string, unknown> }).payload ?? {};
+    const receiptPayload = refereeReceipt(lane.id, approvalId);
+    expect(receiptPayload).toBeDefined();
     expect(stored.referee).toMatchObject({
-      receiptId: receiptPayload.receiptId,
+      receiptId: receiptPayload!.receiptId,
       model: 'jev-1.13.0',
       truncated: false,
       hiddenText: false,
@@ -275,7 +280,7 @@ describe('approval card referee through the merge-card creation path', () => {
     expect(receiptPayload).toMatchObject({ ok: true, approvalId, surface: 'approval-card', packetId: lane.packetId });
     // Record-only answers stay on the receipt.
     expect(Object.keys(stored.referee!.answers).sort()).toEqual(['addsTests', 'containsPlaceholderOrMockData', 'docsOnly', 'risk', 'touchesMiddlewareOrAuth']);
-    expect((receiptPayload.answers as Record<string, unknown>).recommendedAction).toBeDefined();
+    expect((receiptPayload!.answers as Record<string, unknown>).recommendedAction).toBeDefined();
     // Nothing in the decision path moved: rule risk, status, and the resolve CAS token are unchanged.
     expect(stored.risk).toBe(created.risk);
     expect(stored.status).toBe('pending');
@@ -326,8 +331,7 @@ describe('approval card referee through the merge-card creation path', () => {
     expect(fixture.seen).toHaveLength(1);
     expect(referee).not.toBeNull();
     expect(getApproval(result.approvalId!)!.referee).toMatchObject({ model: 'jev-1.13.0' });
-    const receipt = getLaneEvents(lane.id).find((event) => event.verb === 'judgment') as { payload?: Record<string, unknown> } | undefined;
-    expect(receipt?.payload).toMatchObject({ ok: true, provider: 'managed', surface: 'approval-card', approvalId: result.approvalId });
+    expect(refereeReceipt(lane.id, result.approvalId!)).toMatchObject({ ok: true, provider: 'managed', surface: 'approval-card', approvalId: result.approvalId });
   }, 60_000);
 
   it('never holds approval creation on a failing referee and leaves the card as created', async () => {
@@ -343,6 +347,11 @@ describe('approval card referee through the merge-card creation path', () => {
     const createdRow = approvalRow(result.approvalId!);
     expect(createdRow).toBeDefined();
     await waitFor(() => fixture.seen.length === 1);
+    // Other judgment surfaces can finish first for the same approval.
+    appendEvent(lane.id, 'judgment', 'system', {
+      surface: 'approval-triage', approvalId: result.approvalId,
+      ok: false, attempts: 1, error: { kind: 'http', status: 401 },
+    });
     expect(fixture.responded()).toBe(0);
     expect((await getApprovals(`laneId=${lane.id}`)).map((approval) => approval.id)).toContain(result.approvalId);
 
@@ -353,8 +362,7 @@ describe('approval card referee through the merge-card creation path', () => {
     const card = (await getApprovals(`laneId=${lane.id}`)).find((approval) => approval.id === result.approvalId)!;
     expect(card).not.toHaveProperty('referee');
 
-    const receipt = getLaneEvents(lane.id).find((event) => event.verb === 'judgment') as { payload?: Record<string, unknown> } | undefined;
-    expect(receipt?.payload).toMatchObject({ ok: false, attempts: 3, approvalId: result.approvalId, error: { kind: 'http', status: 529 } });
+    expect(refereeReceipt(lane.id, result.approvalId!)).toMatchObject({ ok: false, attempts: 3, approvalId: result.approvalId, error: { kind: 'http', status: 529 } });
   }, 60_000);
   it('keeps the fresh referee when a reused approval\'s earlier call answers late', async () => {
     await updateOperatorDefaults({ judgmentProvider: 'typesafe' });

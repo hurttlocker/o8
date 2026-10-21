@@ -287,7 +287,7 @@ describe('spawn-prompt effort pin — supported + launch boundary', () => {
     expect(launch.some((arg) => arg.startsWith('model_reasoning_effort='))).toBe(false);
   }, 30_000);
 
-  it('treats adaptive as an explicit reset to the runtime default (accepted, nulls persisted)', async () => {
+  it('treats adaptive as an explicit reset to the runtime default (preserves requested reset)', async () => {
     const repoPath = makeRepo();
     const response = await spawnViaRoute({
       repoPath,
@@ -299,7 +299,7 @@ describe('spawn-prompt effort pin — supported + launch boundary', () => {
     const json = await response.json() as { result: { packets: Array<{ id: string }> } };
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const persisted = readOrchestratorControlPlaneState().packets.find((p) => p.id === json.result.packets[0]?.id);
-    expect(persisted?.workerRouting).toMatchObject({ requestedEffort: null, selectedEffort: null });
+    expect(persisted?.workerRouting).toMatchObject({ requestedEffort: 'adaptive', selectedEffort: null });
   }, 30_000);
 });
 

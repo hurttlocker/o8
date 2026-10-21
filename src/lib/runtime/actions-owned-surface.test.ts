@@ -82,7 +82,7 @@ describe('performRuntimeAction owned surface resolution', () => {
     });
   });
 
-  it('returns a retryable operator-safe result without auditing a not-ready steer', async () => {
+  it('returns a retryable operator-safe result when the owned store refuses a not-ready steer', async () => {
     const agent = {
       id: 'codex-owned:not-ready',
       sessionKey: 'codex-owned:not-ready',
@@ -94,6 +94,7 @@ describe('performRuntimeAction owned surface resolution', () => {
       },
     };
     mocks.getRuntimeInventorySnapshot.mockResolvedValue({ agents: [agent] });
+    mocks.continueOwnedCodexSession.mockRejectedValue(new Error('This owned Codex session still has an active run.'));
     const { performRuntimeAction } = await import('./actions');
 
     const result = await performRuntimeAction({
@@ -109,7 +110,7 @@ describe('performRuntimeAction owned surface resolution', () => {
       reason: 'surface_not_ready',
     });
     expect(result.note).not.toMatch(/IDE-owned|thread id/i);
-    expect(mocks.continueOwnedCodexSession).not.toHaveBeenCalled();
+    expect(mocks.continueOwnedCodexSession).toHaveBeenCalledExactlyOnceWith(agent.id, 'follow up after this turn');
     expect(mocks.recordLaneEvent).not.toHaveBeenCalled();
   });
 
