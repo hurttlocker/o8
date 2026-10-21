@@ -2710,6 +2710,13 @@
       ]
     },
     {
+      "path": "tests/harness-improvement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/harness-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4772,6 +4779,13 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/status-freshness-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
