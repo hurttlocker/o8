@@ -38,6 +38,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Local ancestry reconciliation preserves cloud-owned packet and lane results even when their remote branch is absent from the coordinator checkout, including conflicting ownership metadata and lanes whose mission has rotated away. Controlled sweep regressions retain review state, event history and the pushed remote commit across repeated sweeps. Live remote/native acceptance and release remain separate. [#3065](https://github.com/hurttlocker/o8/issues/3065)
+
 Pull request summaries and the Changes toolbar show estimated Code, Tests, Mocks and Other change counts from their already-loaded file metadata. Partial metadata stays separate from authoritative totals, and the disclosure closes when its owning view becomes inactive. Source regression and controlled browser evidence do not establish installed acceptance or release. [#4035](https://github.com/hurttlocker/o8/issues/4035)
 
 CLI installation and desktop restart share one persisted admission slot across web clients and native restart entries. An active, interrupted or unconfirmed installer defers restart before cloud-job draining or child cleanup; an admitted restart retains ownership through both. Controlled installer, API, client and native fixtures cover the boundary. Packaged acceptance and release remain separate. [#3551](https://github.com/hurttlocker/o8/issues/3551)
