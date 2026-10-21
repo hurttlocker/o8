@@ -14,7 +14,10 @@ const { launchRuntimeSurface } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 vi.mock('@/lib/runtimes/shared/owned-session-index', () => ({ findOwnedLaunchByMutationId: vi.fn(async () => null) }));
-vi.mock('@/lib/panel/api-port', () => ({ resolvePortInfo: () => ({ wsPort: 12345 }) }));
+vi.mock('@/lib/panel/api-port', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/panel/api-port')>(),
+  resolvePortInfo: () => ({ wsPort: 12345 }),
+}));
 vi.mock('@/lib/ws-auth', () => ({ getOrCreateWsToken: () => 'test-token' }));
 
 import { launchSharedCheckoutWorker } from './shared-checkout-launch';
