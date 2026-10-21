@@ -226,6 +226,7 @@ rodio = "0.19"
 # cpal: stt/capture.rs input-device streaming for local Whisper capture.
 cpal = "0.17.1"
 security-framework = "3.7"
+screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 objc2 = "0.6"
 # NSString/NSData/NSJSONSerialization power browser_view::eval_result — the host
 # reads the WKWebView evaluateJavaScript return value back as JSON (see browser_view.rs).

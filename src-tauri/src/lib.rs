@@ -4,6 +4,18 @@ mod agent;
 mod ai;
 mod agent_partials_window;
 mod spatial_ink_window;
+#[cfg(target_os = "macos")]
+mod visual_capture;
+#[cfg(target_os = "macos")]
+mod visual_capture_session;
+#[cfg(target_os = "macos")]
+mod visual_capture_snapshot;
+#[cfg(target_os = "macos")]
+mod visual_capture_input;
+#[cfg(target_os = "macos")]
+mod visual_capture_media;
+#[cfg(any(target_os = "macos", test))]
+mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
@@ -20,6 +32,7 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
+mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
@@ -4231,6 +4244,11 @@ mod stt_engine {
         active_session().load(Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_test_session_id(session: u64) -> u64 {
+        active_session().swap(session, Ordering::SeqCst)
+    }
+
     /// App handle for re-installing the event router after a daemon respawn.
     /// Without it, `start()`'s auto-respawn produced a daemon whose events
     /// flowed into a dropped Receiver — the dock showed "listening" forever
@@ -4445,6 +4463,13 @@ mod stt_engine {
                 );
             }
             TE::Error { session_id, text } => {
+                if let Some(session_id) = session_id {
+                    // Daemon startup can fail after the start command was accepted.
+                    // Stop capture before releasing only that session's input claim.
+                    if let Err(error) = stop_session(session_id) {
+                        log::warn!("[stt] failed to stop errored session {session_id}: {error}");
+                    }
+                }
                 if origin == "system" {
                     if let Some(session_id) = session_id {
                         crate::live_dictation::cancel_session(session_id);
@@ -5172,11 +5197,23 @@ mod stt_engine {
     pub fn start_with_gate(
         duck_gate: Option<crate::stt::capture::DuckGate>,
     ) -> Result<u64, String> {
-        let sid = next_session_id();
-        active_session().store(sid, Ordering::SeqCst);
+        start_prepared(prepare_input()?, duck_gate)
+    }
+
+    pub(crate) fn prepare_input() -> Result<crate::voice_input::NativeInput, String> {
+        crate::voice_input::reserve_native(next_session_id())
+    }
+
+    pub(crate) fn start_prepared(
+        input: crate::voice_input::NativeInput,
+        duck_gate: Option<crate::stt::capture::DuckGate>,
+    ) -> Result<u64, String> {
+        let sid = input.session();
         let mut guard = recognizer()
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
+        input.activate()?;
+        active_session().store(sid, Ordering::SeqCst);
         // Respawn if the daemon died between sessions — and REWIRE the event
         // router to the new receiver. Discarding it (the old `let _ =`) left
         // the fresh daemon's final/audio_file/complete events flowing into a
@@ -5203,7 +5240,11 @@ mod stt_engine {
         // default. Read per-start so the choice survives an app restart.
         let mic = crate::stt::keys::config_string("dictation_microphone_uid");
         let _ = guard.set_input_device(mic.as_deref().filter(|s| !s.is_empty() && *s != "default"));
-        guard.start(sid, duck_gate)?;
+        if let Err(error) = guard.start(sid, duck_gate) {
+            guard.stop(sid);
+            crate::voice_input::release_native(sid);
+            return Err(error);
+        }
         Ok(sid)
     }
 
@@ -5215,6 +5256,7 @@ mod stt_engine {
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
         guard.stop(sid);
+        crate::voice_input::release_native(sid);
         Ok(())
     }
 
@@ -5234,6 +5276,7 @@ mod stt_engine {
         // unlocked check above and acquiring the recognizer.
         if active_session().load(Ordering::SeqCst) == expected {
             guard.stop(expected);
+            crate::voice_input::release_native(expected);
         }
         Ok(())
     }
@@ -7723,6 +7766,10 @@ fn boot_trace(stage: &str) {
     }
 }
 
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
+}
+
 pub fn run() {
     // A disposable native test process runs beside the operator's installed app.
     // Treat its environment as an all-or-nothing safety contract and fail before
@@ -7855,7 +7902,7 @@ pub fn run() {
     }
 
     boot_trace("BEFORE generate_context!");
-    let mut context = tauri::generate_context!();
+    let mut context = app_context();
     log::info!("[boot] tauri context at {}ms", boot_ms());
     boot_trace("generate_context! DONE");
 
@@ -8056,9 +8103,16 @@ pub fn run() {
             if webview.label() != "main" {
                 return;
             }
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                voice_input::navigation_finished();
+                return;
+            }
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            voice_input::navigation_started();
+            #[cfg(target_os = "macos")]
+            visual_capture::reset_on_main_navigation(webview.app_handle());
             managed_voice_window::reset_on_main_navigation(webview.app_handle());
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
@@ -8112,6 +8166,22 @@ pub fn run() {
             o8_stt_start,
             managed_voice_window::managed_voice_overlay_update,
             managed_voice_window::managed_voice_presentation_epoch,
+            voice_input::voice_input_claim,
+            voice_input::voice_input_release,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_begin,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_ready,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_widget,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_undo,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_transcribe_audio,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_finish,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_cancel,
             #[cfg(target_os = "macos")]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
@@ -8495,6 +8565,7 @@ pub fn run() {
                 // even when the main window is hidden.
                 log::info!("[boot] pre-hotkeys at {}ms", boot_ms());
                 fn_hotkey::start(app.handle().clone());
+                visual_capture::register_shortcut(app.handle());
                 log::info!("[boot] fn_hotkey CGEventTap at {}ms", boot_ms());
 
                 // Drive the Microphone permission prompt deterministically at

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { LiveConversationBridge } from './conversation-bridge';
 import { LiveTranscript, startManagedLive } from './session';
+const nativeInvoke = vi.hoisted(() => vi.fn());
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeInvoke }));
 vi.mock('@/lib/mobile/ws-token-client', () => ({ getMobileWsToken: () => 'operator-fixture' }));
 class Peer {
   localDescription = { sdp: 'v=0\nfixture-offer' };
@@ -369,6 +371,30 @@ describe('managed Live transport', () => {
     expect(requests.at(-1)).toMatchObject({ id: 'retry-2', event: { delegation_id: null, content: 'Backend confirmed completion' } });
     ended.add('retry-2'); await vi.advanceTimersByTimeAsync(300);
     expect(live.state).toBe('closed'); expect(starts).toBe(2); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([true, false])('requires confirmed microphone release before automatic resume (release succeeds: %s)', async released => {
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    let confirmRelease!: () => void; let rejectRelease!: (error: Error) => void;
+    const release = new Promise<void>((resolve, reject) => { confirmRelease = resolve; rejectRelease = reject; });
+    nativeInvoke.mockImplementation((command: string) => command === 'voice_input_release' ? release : Promise.resolve());
+    let starts = 0; const ended = new Set<string>();
+    const microphone = vi.fn(async () => ({ getTracks: () => [{ stop: vi.fn() }] }));
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: microphone } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (body.action === 'start') return Response.json({ id: `release-${++starts}`, sdp: 'answer' });
+      if (body.action === 'close') ended.add(body.id);
+      return Response.json({ events: ended.has(body.id) ? [{ cursor: 1, event: {
+        type: 'session.closed', reason: 'connection_lost', usage: { seconds: 1 },
+      } }] : [] });
+    }));
+    const live = await startManagedLive({ binding: 'same-chat', context: () => '', delegate: vi.fn() }, () => {});
+    ended.add('release-1'); await vi.advanceTimersByTimeAsync(300);
+    expect(starts).toBe(1); expect(microphone).toHaveBeenCalledOnce(); expect(live.state).toBe('connecting');
+    if (released) confirmRelease(); else rejectRelease(new Error('IPC acknowledgement lost'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toBe(released ? 2 : 1); expect(live.state).toBe(released ? 'live' : 'error');
+    const closing = live.close(); await vi.advanceTimersByTimeAsync(300); await closing;
   });
   it('waits for the final receipt after RTC fails before resuming', async () => {
     const peers: Peer[] = []; let starts = 0; let confirm = false; let requested = false;
