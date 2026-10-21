@@ -285,6 +285,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await waitForInboxUrgency();
+  expect(background.prunes.length).toBeGreaterThan(0);
   await Promise.all(background.prunes);
   setApprovalRefereeOptionsForTests(undefined);
   setInboxUrgencyTransportForTests(undefined);
