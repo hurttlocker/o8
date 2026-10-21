@@ -1806,6 +1806,15 @@
       ]
     },
     {
+      "path": "tests/cli-installer-restart-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-output-completeness-real-path.test.ts",
       "reasons": [
         "child-process",
