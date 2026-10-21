@@ -3,7 +3,7 @@
  * §"Mutual exclusion"). Covers last-start-wins, terminal-status clearing, the
  * 10-min stale sweep, and the cross-process disk mirror the Next GET reads.
  */
-import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -44,7 +44,7 @@ describe('symon-agent-registry — last-start-wins', () => {
       startedAt: 1_000,
       lastStatus: 'connecting',
       source: 'phone',
-      activeMachine: { id: 'local', displayName: 'This Mac' },
+      activeMachine: { id: 'local', displayName: 'This computer' },
     });
     expect(getAgentSession()?.sessionId).toBe('sym-a');
   });
@@ -130,6 +130,21 @@ describe('symon-agent-registry — disk mirror (cross-process)', () => {
 
     // A crashed writer can't leave a phantom banner: a stale mirror loads as null.
     expect(loadPersistedAgentSession(1_000 + AGENT_SESSION_STALE_MS + 1)).toBeNull();
+  });
+
+  it('reads a legacy local label without replacing the session or rewriting its mirror', () => {
+    const { record } = startAgentSession('sym-legacy-label', 1_000);
+    const legacy = { ...record, activeMachine: { id: 'local' as const, displayName: 'This Mac' } };
+    persistAgentSession(legacy);
+    const file = path.join(dataDir, 'symon-agent-session.json');
+    const bytes = readFileSync(file, 'utf8');
+
+    expect(loadPersistedAgentSession(2_000)).toEqual({
+      ...legacy,
+      activeMachine: { id: 'local', displayName: 'This computer' },
+    });
+    expect(readFileSync(file, 'utf8')).toBe(bytes);
+    expect(getAgentSession()?.sessionId).toBe('sym-legacy-label');
   });
 
   it('persisting null clears the mirror', () => {

@@ -5,7 +5,7 @@ export interface SymonMachineIdentity {
 
 export const DEFAULT_SYMON_MACHINE: SymonMachineIdentity = {
   id: 'local',
-  displayName: 'This Mac',
+  displayName: 'This computer',
 };
 
 export const SYMON_MACHINES: readonly SymonMachineIdentity[] = [
@@ -16,6 +16,8 @@ export const SYMON_MACHINES: readonly SymonMachineIdentity[] = [
 export function parseSymonMachineIdentity(value: unknown): SymonMachineIdentity | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
+  // Older native bridges and saved sessions still use the previous local label.
+  if (record.id === 'local' && record.displayName === 'This Mac') return DEFAULT_SYMON_MACHINE;
   return SYMON_MACHINES.find(
     (machine) => machine.id === record.id && machine.displayName === record.displayName,
   ) ?? null;
