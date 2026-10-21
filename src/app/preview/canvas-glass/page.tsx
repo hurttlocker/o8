@@ -431,8 +431,8 @@ export default function CanvasGlassPreviewPage() {
         card.requestId === requestId ? { ...card, sessionName } : card
       )));
     },
-    onTerminalData: (sessionName, data) => {
-      xtermHandlesRef.current.get(sessionName)?.writeData(data);
+    onTerminalData: (sessionName, data, historical) => {
+      xtermHandlesRef.current.get(sessionName)?.writeData(data, historical);
       // First PTY byte = the shell is real — flip the title off the
       // summoning verb. One-shot per session, not per chunk.
       if (!dataSeenRef.current.has(sessionName)) {

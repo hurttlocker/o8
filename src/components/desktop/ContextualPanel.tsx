@@ -29,7 +29,7 @@ import { CLI_AGENTS, AgentGlyph, AgentDot, TerminalIcon, FilesIcon, PlusIcon, XI
 export interface ContextualPanelHandle {
   confirmClose?: () => Promise<boolean>;
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
-  writeToTerminal: (sessionName: string, data: string) => void;
+  writeToTerminal: (sessionName: string, data: string, historical?: boolean) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string, exitCode?: number | null) => void;
@@ -239,8 +239,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         }
         return true;
       },
-      writeToTerminal: (sessionName: string, data: string) => {
-        xtermRefs.current.get(sessionName)?.writeData(data);
+      writeToTerminal: (sessionName: string, data: string, historical?: boolean) => {
+        xtermRefs.current.get(sessionName)?.writeData(data, historical);
         setTabs((prev) => prev.map((entry) => (
           entry.tmuxSession === sessionName
             ? { ...entry, lastActivity: Date.now() }

@@ -85,7 +85,9 @@ vi.mock('@/components/desktop/workspace-terminal/xterm-selection-registry', () =
 }));
 
 import { XtermPanel } from './XtermPanel';
+import { BottomXtermPanel, type XtermPanelHandle as BottomHandle } from '../BottomXtermPanel';
 import { WorkspaceTerminalPanels } from './WorkspaceTerminalPanels';
+import { buildTerminalTabHandle, type ImperativeHandleDeps } from './terminal-imperative-handle';
 import { DesktopWebSocketProvider, useSharedDesktopWs } from '../hooks/DesktopWebSocketContext';
 
 vi.mock('@/lib/react/retrying-lazy', () => ({ retryingLazy: () => () => null }));
@@ -112,7 +114,13 @@ class FixtureSocket {
 
 function ReconnectingWorkspace() {
   const panelRefs = useMemo(() => ({ current: new Map<string, XtermPanelHandle>() }), []);
+  const handle = useMemo(() => buildTerminalTabHandle({
+    panelRefs,
+    tabsRef: { current: [{ id: 'persisted-tab', kind: 'terminal', tmuxSession: 'cortex-dash-persisted' }] },
+    urlDetectionEnabledRef: { current: false }, recordTerminalActivity: () => {},
+  } as unknown as ImperativeHandleDeps), [panelRefs]);
   const ws = useSharedDesktopWs(undefined, {
+    onTerminalData: handle.writeToTerminal,
     onTerminalResync: (session, data, epoch, truncated, source) => panelRefs.current.get(session)?.applyResync?.(data, epoch, truncated, source),
   });
   const noop = () => {};
@@ -287,7 +295,7 @@ describe('XtermPanel terminal workload instrumentation', () => {
     expect(xtermMock.constructorOptions.at(-1)?.screenReaderMode).toBe(true);
   });
 
-  it('does not install render or write-completion instrumentation when the bench flag is unset', async () => {
+  it('keeps benchmark instrumentation off while retaining parser-order callbacks', async () => {
     const panelRef = createRef<XtermPanelHandle>();
     await act(async () => {
       root.render(createElement(XtermPanel, { ...panelProps(true), ref: panelRef }));
@@ -298,7 +306,9 @@ describe('XtermPanel terminal workload instrumentation', () => {
 
     expect(xtermMock.onRenderCalls).toBe(0);
     expect(xtermMock.writes).toHaveLength(1);
-    expect(xtermMock.writeCallbacks).toEqual([undefined]);
+    // Completion is needed for output provenance, not benchmark timing.
+    expect(xtermMock.writeCallbacks).toEqual([expect.any(Function)]);
+    expect(window.__o8TerminalWriteStats).toBeUndefined();
   });
 
   it('resizes a visible terminal after its session name arrives', async () => {
@@ -458,6 +468,42 @@ describe('XtermPanel terminal workload instrumentation', () => {
     expect(props.sendTerminalInput).not.toHaveBeenCalled();
     await act(async () => xtermMock.writeCallbacks[1]?.());
     expect(props.sendTerminalInput).toHaveBeenCalledWith('cortex-dash-bench-fixture', 'queued-input');
+  });
+
+  it('does not answer historical WebSocket replay after visibility is ready, while live queries and typing still work', async () => {
+    FixtureSocket.instances = [];
+    vi.stubGlobal('WebSocket', FixtureSocket);
+    await act(async () => {
+      root.render(createElement(DesktopWebSocketProvider, null, createElement(ReconnectingWorkspace)));
+      await Promise.resolve();
+    });
+    const socket = FixtureSocket.instances.at(-1)!;
+    await act(async () => socket.open());
+    const epoch = socket.sent.findLast(message => message.type === 'terminal-visibility' && message.visible)?.epoch;
+    expect(epoch).toBeTypeOf('number');
+    await act(async () => socket.receive('resync', { sessionName: 'cortex-dash-persisted', data: btoa('shell> '), epoch, historyTruncated: false, source: 'tmux' }));
+    socket.sent = [];
+    await act(async () => socket.receive('data', { sessionName: 'cortex-dash-persisted', data: btoa('saved scrollback \x1b[c'), historical: true }));
+    expect(container.textContent).toContain('saved scrollback');
+    expect(socket.sent.filter(message => message.type === 'terminal-input')).toEqual([]);
+    await act(async () => socket.receive('data', { sessionName: 'cortex-dash-persisted', data: btoa('\x1b[c') }));
+    expect(socket.sent.filter(message => message.type === 'terminal-input').map(message => message.data)).toEqual(['\x1b[?1', ';2c']);
+    xtermMock.onData?.('typed');
+    expect(socket.sent.at(-1)).toMatchObject({ type: 'terminal-input', sessionName: 'cortex-dash-persisted', data: 'typed' });
+  });
+
+  it('preserves historical provenance in the bottom terminal without muting live queries', async () => {
+    const panelRef = createRef<BottomHandle>();
+    const props = { ...panelProps(true), tmuxSession: 'cortex-dash-bottom-fixture' };
+    await act(async () => root.render(createElement(BottomXtermPanel, { ...props, ref: panelRef })));
+    await act(async () => panelRef.current?.writeData(btoa('saved bottom output \x1b[c'), true));
+    expect(container.textContent).toContain('saved bottom output');
+    expect(props.sendTerminalInput).not.toHaveBeenCalled();
+    await act(async () => panelRef.current?.writeData(btoa('\x1b[c')));
+    expect(props.sendTerminalInput).toHaveBeenNthCalledWith(1, props.tmuxSession, '\x1b[?1');
+    expect(props.sendTerminalInput).toHaveBeenNthCalledWith(2, props.tmuxSession, ';2c');
+    xtermMock.onData?.('typed bottom input');
+    expect(props.sendTerminalInput).toHaveBeenLastCalledWith(props.tmuxSession, 'typed bottom input');
   });
 
   it('does not forward probe replies from replayed scrollback, but preserves live replies and typing', async () => {
