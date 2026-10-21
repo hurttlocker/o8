@@ -71,8 +71,8 @@ describe('composer dictation ownership', () => {
 
   it('marks only the composer that started recording', () => {
     render(); act(() => field('a').focus()); act(() => button('a').click()); render();
-    expect(button('a').title).toBe('Click to send');
-    expect(button('b').title).not.toBe('Click to send');
+    expect(button('a').title).toBe('Click to finish dictation');
+    expect(button('b').title).not.toBe('Click to finish dictation');
   });
   it('delivers to its original composer after focus changes', () => {
     render(); act(() => field('a').focus()); act(() => button('a').click()); render();
@@ -102,7 +102,7 @@ describe('composer dictation ownership', () => {
   it('keeps keyboard hold state across the recording render', () => {
     render(); act(() => field('a').focus());
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true })));
-    render(); expect(button('a').title).toBe('Click to send');
+    render(); expect(button('a').title).toBe('Click to finish dictation');
     act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: 'z', ctrlKey: true })));
     expect(engine.stopAndSubmit).toHaveBeenCalledOnce();
   });
@@ -152,7 +152,7 @@ describe('composer dictation ownership', () => {
     render(false);
     await act(async () => { button('b').click(); });
     render(false);
-    expect(button('b').title).toBe('Click to send');
+    expect(button('b').title).toBe('Click to finish dictation');
     act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: 'z', ctrlKey: true })));
     expect(engine.stopAndSubmit).not.toHaveBeenCalled();
   });

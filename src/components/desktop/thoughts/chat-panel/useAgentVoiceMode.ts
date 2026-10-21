@@ -1,14 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 
 import { useComposerDictation } from '@/components/desktop/dictation/ComposerDictation';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { ttsEngine } from '@/lib/tts/engine';
-import {
-  createAgentVoiceTurnState,
-  observeAgentVoiceTurn,
-} from './agent-voice-turn';
 
 const STORAGE_PREFIX = 'o8:agent-voice-mode:v1:';
 const CHANGE_EVENT = 'o8:agent-voice-mode-change';
@@ -59,10 +55,8 @@ interface UseAgentVoiceModeOptions {
 export function useAgentVoiceMode({
   active,
   dictationOnly = false,
-  busy,
   composerNodeRef,
   fillInput,
-  messages,
   sendNow,
   surfaceKey,
   composerScopeKey = surfaceKey,
@@ -78,12 +72,13 @@ export function useAgentVoiceMode({
   );
   const getSnapshot = useCallback(() => readVoiceMode(storageKey), [storageKey]);
   const savedEnabled = useSyncExternalStore(subscribe, getSnapshot, () => false);
-  const enabled = !dictationOnly && savedEnabled;
+  const [consentScope, setConsentScope] = useState<string | null>(null);
+  const scope = `${surfaceKey}:${composerScopeKey}`;
+  const enabled = active && !dictationOnly && savedEnabled && consentScope === scope;
   const enabledRef = useRef(enabled);
   const fillInputRef = useRef(fillInput);
   const sendNowRef = useRef(sendNow);
-  const turnStateRef = useRef(createAgentVoiceTurnState());
-  const turnSurfaceRef = useRef(surfaceKey);
+
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -96,6 +91,7 @@ export function useAgentVoiceMode({
   }, [sendNow]);
 
   const setEnabled = useCallback((next: boolean) => {
+    setConsentScope(next ? `${surfaceKey}:${composerScopeKey}` : null);
     memoryPreferences.set(storageKey, next);
     enabledRef.current = !dictationOnly && next;
     try {
@@ -107,7 +103,7 @@ export function useAgentVoiceMode({
     if (!next && ttsEngine.state.activeMessageId?.startsWith(`voice-mode:${surfaceKey}:`)) {
       ttsEngine.stop();
     }
-  }, [storageKey, surfaceKey, dictationOnly]);
+  }, [storageKey, surfaceKey, composerScopeKey, dictationOnly]);
 
   const dictationId = useComposerDictation({
     active, nodeRef: composerNodeRef, scopeKey: `${surfaceKey}:${composerScopeKey}`,
@@ -118,25 +114,9 @@ export function useAgentVoiceMode({
     },
   });
 
-  useEffect(() => {
-    if (turnSurfaceRef.current !== surfaceKey) {
-      turnSurfaceRef.current = surfaceKey;
-      turnStateRef.current = createAgentVoiceTurnState();
-    }
-    const observation = observeAgentVoiceTurn(turnStateRef.current, {
-      active,
-      busy,
-      enabled,
-      messages,
-    });
-    turnStateRef.current = observation.state;
-    if (observation.speak) {
-      void ttsEngine.play(
-        observation.speak.text,
-        `voice-mode:${surfaceKey}:${observation.speak.id}`,
-      );
-    }
-  }, [active, busy, enabled, messages, surfaceKey]);
+  // This legacy worker composer has no correlated terminal receipt. Never infer
+  // speech from busy=false or the latest assistant bubble. Current-chat voice
+  // uses useTurnByTurnVoice and an accepted userMessageId instead.
 
   return { enabled, setEnabled, dictationId };
 }

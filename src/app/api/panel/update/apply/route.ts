@@ -1,3 +1,4 @@
+import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
@@ -84,6 +85,10 @@ export async function POST(request: Request) {
       state,
     }, 409);
   }
+
+  const admission = inspectCliOperationAdmission();
+  if (admission.blocked) return response({ ok: false, requested: false,
+    error: { code: admission.code, message: admission.message }, state }, 409);
 
   const idle = await readIdleWindow();
   if (!force && !idle.idle) {

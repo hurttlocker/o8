@@ -7,7 +7,11 @@ vi.mock('@/lib/desktop/open-external', () => ({ openExternalUrl: fixture.open })
 vi.mock('@/lib/app-update/check', () => ({ check: async () => fixture.hasUpdate ? {
   version: '0.1.902', downloadAndInstall: async () => { fixture.calls.push('app-download'); fixture.download(); },
 } : null }));
-vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => { fixture.calls.push('restart'); fixture.restart(); } }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string) => {
+  if (command === 'prepare_app_restart') { fixture.calls.push('reserve-restart'); return 'native-reservation'; }
+  if (command !== 'restart_app') throw new Error(`Unexpected native command: ${command}`);
+  fixture.calls.push('restart'); fixture.restart();
+} }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: fixture.restart }));
 const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
 beforeEach(() => {
@@ -29,7 +33,7 @@ beforeEach(() => {
 describe('unified updates through the existing app install entry point', () => {
   it('installs only o8 without checking or modifying connected CLIs', async () => {
     expect(await installUpdateAndRestart()).toMatchObject({ installed: true, restartDeferred: false });
-    expect(fixture.calls).toEqual(['release-health', 'app-download', 'lease-drain', 'restart']);
+    expect(fixture.calls).toEqual(['release-health', 'app-download', 'reserve-restart', 'restart']);
   });
   it.each(['failInstall', 'failFinal'] as const)('does not let a CLI failure block the app (%s)', async key => {
     fixture[key] = true;
@@ -53,7 +57,7 @@ describe('unified updates through the existing app install entry point', () => {
       }
       return original(url, options);
     });
-    const cli = synchronizeConnectedClis();
+    const cli = synchronizeConnectedClis('codex');
     await postStarted;
     const idle = vi.fn(async () => true);
     const app = installUpdateAndRestart(undefined, { beforeRestart: idle });

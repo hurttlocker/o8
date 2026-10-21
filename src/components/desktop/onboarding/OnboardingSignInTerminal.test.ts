@@ -64,7 +64,9 @@ it('filters other terminal output, never reruns on reconnect, and cleans up only
   await act(async () => transport.callbacks.onTerminalData?.('other-session', 'Unrelated output'));
   expect(transport.write).not.toHaveBeenCalled();
   await act(async () => transport.callbacks.onTerminalData?.('cortex-dash-owned', 'Login instructions'));
-  expect(transport.write).toHaveBeenCalledExactlyOnceWith('Login instructions');
+  expect(transport.write).toHaveBeenCalledExactlyOnceWith('Login instructions', undefined);
+  await act(async () => transport.callbacks.onTerminalData?.('cortex-dash-owned', 'saved instructions', true));
+  expect(transport.write).toHaveBeenLastCalledWith('saved instructions', true);
   transport.commands.isConnected = false;
   await act(async () => root.render(createElement(OnboardingSignInTerminal, props)));
   expect(document.querySelector('[data-input-locked="true"]')).not.toBeNull();

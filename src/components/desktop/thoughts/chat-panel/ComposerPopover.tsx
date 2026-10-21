@@ -1,7 +1,9 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+
+export const ComposerPopoverVisibilityContext = createContext(true);
 
 /**
  * ComposerPopover — the ONE way a composer control opens a floating panel.
@@ -50,6 +52,8 @@ function focusTrigger(anchor: HTMLElement | null) {
 }
 
 export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align = 'end', children }: ComposerPopoverProps) {
+  const visible = useContext(ComposerPopoverVisibilityContext);
+  const shown = open && visible;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef(true);
   const focusedControlRef = useRef<HTMLElement | null>(null);
@@ -61,6 +65,13 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
     onCloseRef.current = onClose;
     onOpenReadyRef.current = onOpenReady;
   }, [onClose, onOpenReady]);
+  useLayoutEffect(() => {
+    if (visible || !open) return;
+    // A retained toolbar can own Live while hidden. Its body portals must close
+    // without moving focus back into that hidden toolbar.
+    restoreFocusRef.current = false;
+    onCloseRef.current();
+  }, [open, visible]);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     if (!open) return;
@@ -76,7 +87,7 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
     };
   }, [open, anchorRef]);
 
-  const ready = open && pos !== null;
+  const ready = shown && pos !== null;
   useLayoutEffect(() => {
     if (!ready) return;
     onOpenReadyRef.current?.();
@@ -89,7 +100,7 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
   }, [ready]);
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!shown) return;
     const anchor = anchorRef.current;
     if (!anchor) return;
 
@@ -169,9 +180,9 @@ export function ComposerPopover({ anchorRef, open, onClose, onOpenReady, align =
       document.removeEventListener('mousedown', onDown, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, anchorRef, align]);
+  }, [shown, anchorRef, align]);
 
-  if (!open) return null;
+  if (!shown) return null;
 
   return createPortal(
     <div

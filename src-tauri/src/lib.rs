@@ -4,10 +4,23 @@ mod agent;
 mod ai;
 mod agent_partials_window;
 mod spatial_ink_window;
+#[cfg(target_os = "macos")]
+mod visual_capture;
+#[cfg(target_os = "macos")]
+mod visual_capture_session;
+#[cfg(target_os = "macos")]
+mod visual_capture_snapshot;
+#[cfg(target_os = "macos")]
+mod visual_capture_input;
+#[cfg(target_os = "macos")]
+mod visual_capture_media;
+#[cfg(any(target_os = "macos", test))]
+mod visual_capture_packet;
 mod audio_ducker;
 mod background;
 mod browser_view;
 mod remote_preview;
+mod restart_job_drain;
 mod cli_locate;
 mod dev_frontend;
 mod desktop_close;
@@ -19,6 +32,7 @@ mod dock_window;
 mod first_run_install;
 mod fn_hotkey;
 mod voice_surfaces;
+mod voice_input;
 mod managed_voice_window;
 mod launch_updater;
 mod update_ping;
@@ -253,16 +267,18 @@ fn master_key_ensure(window: tauri::Window) -> Result<String, String> {
 //   3. ~/.o8           — default, auto-migrate from ~/.cortex-ide on first use
 
 fn o8_data_dir() -> String {
-    if let Ok(dir) = std::env::var("O8_DATA_DIR") {
-        return dir;
-    }
-    if let Ok(dir) = std::env::var("CORTEX_IDE_DATA_DIR") {
-        return dir;
-    }
+    let primary = std::env::var("O8_DATA_DIR").ok();
+    let legacy = std::env::var("CORTEX_IDE_DATA_DIR").ok();
     let home = home_dir_string();
-    let new_dir = format!("{}/.o8", home);
-    migrate_data_dir_once(&home, &new_dir);
-    new_dir
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let directory = o8_restart_safety::resolve_data_directory(primary.as_deref(), legacy.as_deref(),
+        std::path::Path::new(&home), &cwd).expect("Native data directory must be absolute");
+    let resolved = directory.to_string_lossy().into_owned();
+    if !primary.as_ref().is_some_and(|value| !value.is_empty())
+        && !legacy.as_ref().is_some_and(|value| !value.is_empty()) {
+        migrate_data_dir_once(&home, &resolved);
+    }
+    resolved
 }
 
 #[cfg(test)]
@@ -2149,6 +2165,7 @@ fn spawn_bundled_ws_server(
         );
         let bundled_operator_mcp = server_dir.join("operator-mcp-server.mjs");
         let spawn = BundledWsSpawn {
+            data_dir: o8_data_dir(),
             node_bin: node_bin.to_string(),
             server_dir: server_dir.to_path_buf(),
             server_js: ws_server_js,
@@ -2705,12 +2722,19 @@ fn check_port(port: u16) -> bool {
 /// calls THIS command instead of the raw plugin relaunch so the children are
 /// reaped and the ports freed before the new instance boots.
 #[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    log::info!("[restart] killing tracked children before relaunch");
-    sidecar_lifecycle::kill_tracked_children();
-    // Give the OS a beat to release the listening sockets the children held.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+fn restart_app(app: tauri::AppHandle, reservation_id: Option<String>) -> Result<(), String> {
+    app.state::<o8_restart_safety::RestartSafety>().before_restart(reservation_id.as_deref())?;
     app.restart();
+}
+
+#[tauri::command]
+fn prepare_app_restart(app: tauri::AppHandle) -> Result<String, String> {
+    app.state::<o8_restart_safety::RestartSafety>().prepare()
+}
+
+#[tauri::command]
+fn cancel_app_restart(app: tauri::AppHandle, reservation_id: String) -> Result<(), String> {
+    app.state::<o8_restart_safety::RestartSafety>().cancel(&reservation_id)
 }
 
 /// Start the WebSocket server as a background process
@@ -4220,6 +4244,11 @@ mod stt_engine {
         active_session().load(Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_test_session_id(session: u64) -> u64 {
+        active_session().swap(session, Ordering::SeqCst)
+    }
+
     /// App handle for re-installing the event router after a daemon respawn.
     /// Without it, `start()`'s auto-respawn produced a daemon whose events
     /// flowed into a dropped Receiver — the dock showed "listening" forever
@@ -4434,6 +4463,13 @@ mod stt_engine {
                 );
             }
             TE::Error { session_id, text } => {
+                if let Some(session_id) = session_id {
+                    // Daemon startup can fail after the start command was accepted.
+                    // Stop capture before releasing only that session's input claim.
+                    if let Err(error) = stop_session(session_id) {
+                        log::warn!("[stt] failed to stop errored session {session_id}: {error}");
+                    }
+                }
                 if origin == "system" {
                     if let Some(session_id) = session_id {
                         crate::live_dictation::cancel_session(session_id);
@@ -5161,11 +5197,23 @@ mod stt_engine {
     pub fn start_with_gate(
         duck_gate: Option<crate::stt::capture::DuckGate>,
     ) -> Result<u64, String> {
-        let sid = next_session_id();
-        active_session().store(sid, Ordering::SeqCst);
+        start_prepared(prepare_input()?, duck_gate)
+    }
+
+    pub(crate) fn prepare_input() -> Result<crate::voice_input::NativeInput, String> {
+        crate::voice_input::reserve_native(next_session_id())
+    }
+
+    pub(crate) fn start_prepared(
+        input: crate::voice_input::NativeInput,
+        duck_gate: Option<crate::stt::capture::DuckGate>,
+    ) -> Result<u64, String> {
+        let sid = input.session();
         let mut guard = recognizer()
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
+        input.activate()?;
+        active_session().store(sid, Ordering::SeqCst);
         // Respawn if the daemon died between sessions — and REWIRE the event
         // router to the new receiver. Discarding it (the old `let _ =`) left
         // the fresh daemon's final/audio_file/complete events flowing into a
@@ -5192,7 +5240,11 @@ mod stt_engine {
         // default. Read per-start so the choice survives an app restart.
         let mic = crate::stt::keys::config_string("dictation_microphone_uid");
         let _ = guard.set_input_device(mic.as_deref().filter(|s| !s.is_empty() && *s != "default"));
-        guard.start(sid, duck_gate)?;
+        if let Err(error) = guard.start(sid, duck_gate) {
+            guard.stop(sid);
+            crate::voice_input::release_native(sid);
+            return Err(error);
+        }
         Ok(sid)
     }
 
@@ -5204,6 +5256,7 @@ mod stt_engine {
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
         guard.stop(sid);
+        crate::voice_input::release_native(sid);
         Ok(())
     }
 
@@ -5223,6 +5276,7 @@ mod stt_engine {
         // unlocked check above and acquiring the recognizer.
         if active_session().load(Ordering::SeqCst) == expected {
             guard.stop(expected);
+            crate::voice_input::release_native(expected);
         }
         Ok(())
     }
@@ -6861,6 +6915,7 @@ where
 
 #[derive(Clone)]
 struct BundledNextSpawn {
+    data_dir: String,
     node_bin: String,
     server_dir: std::path::PathBuf,
     server_js: std::path::PathBuf,
@@ -6878,6 +6933,8 @@ impl BundledNextSpawn {
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
+            .env("O8_DATA_DIR", &self.data_dir)
+            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("PORT", self.api_port.to_string())
             .env("HOSTNAME", "0.0.0.0")
@@ -6930,6 +6987,7 @@ where
 
 #[derive(Clone)]
 struct BundledWsSpawn {
+    data_dir: String,
     node_bin: String,
     server_dir: std::path::PathBuf,
     server_js: std::path::PathBuf,
@@ -6946,6 +7004,8 @@ impl BundledWsSpawn {
         command
             .arg(&self.server_js)
             .current_dir(&self.server_dir)
+            .env("O8_DATA_DIR", &self.data_dir)
+            .env("CORTEX_IDE_DATA_DIR", &self.data_dir)
             .no_window()
             .env("O8_NODE_BIN", &self.node_bin)
             .env("WS_PORT", self.ws_port.to_string())
@@ -7384,7 +7444,7 @@ count=0
 if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
-printf '%s\n' "$PORT|$O8_API_PORT|$O8_WS_PORT|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+printf '%s\n' "$PORT|$O8_API_PORT|$O8_WS_PORT|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0|$O8_DATA_DIR|$CORTEX_IDE_DATA_DIR" > "$O8_WATCHDOG_CAPTURE"
 if [ "$count" -eq 1 ]; then sleep 0.2; exit 17; fi
 sleep 30
 "#,
@@ -7392,6 +7452,7 @@ sleep 30
         .expect("write spawn fixture");
 
         let spawn = BundledNextSpawn {
+            data_dir: root.join("state").to_string_lossy().into_owned(),
             node_bin: "sh".to_string(),
             server_dir: root.clone(),
             server_js: script.clone(),
@@ -7432,6 +7493,8 @@ sleep 30
         assert!(environment.contains("47120|47120|47125|test-boot|test-instance|1"));
         assert!(environment.contains(root.to_string_lossy().as_ref()));
         assert!(environment.contains(script.to_string_lossy().as_ref()));
+        let state_dir = root.join("state");
+        assert!(environment.contains(&format!("|{}|{}", state_dir.display(), state_dir.display())));
 
         crate::sidecar_lifecycle::kill_tracked_children();
         let outcome = supervisor
@@ -7470,13 +7533,14 @@ count=0
 if [ -f "$O8_WATCHDOG_COUNTER" ]; then count=$(cat "$O8_WATCHDOG_COUNTER"); fi
 count=$((count + 1))
 printf '%s' "$count" > "$O8_WATCHDOG_COUNTER"
-printf '%s\n' "$WS_PORT|$NEXT_ORIGIN|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0" > "$O8_WATCHDOG_CAPTURE"
+printf '%s\n' "$WS_PORT|$NEXT_ORIGIN|$O8_BOOT_ID|$O8_INSTANCE_ID|$O8_PACKAGED_APP|$PWD|$0|$O8_DATA_DIR|$CORTEX_IDE_DATA_DIR" > "$O8_WATCHDOG_CAPTURE"
 if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi
 sleep 30
 "#,
         )
         .expect("write WS spawn fixture");
         let spawn = BundledWsSpawn {
+            data_dir: root.join("state").to_string_lossy().into_owned(),
             node_bin: "sh".to_string(),
             server_dir: root.clone(),
             server_js: script.clone(),
@@ -7518,6 +7582,8 @@ sleep 30
         );
         assert!(environment.contains(root.to_string_lossy().as_ref()));
         assert!(environment.contains(script.to_string_lossy().as_ref()));
+        let state_dir = root.join("state");
+        assert!(environment.contains(&format!("|{}|{}", state_dir.display(), state_dir.display())));
 
         crate::sidecar_lifecycle::kill_tracked_children();
         let outcome = supervisor
@@ -7612,6 +7678,7 @@ fn finish_bundled_bootstrap(
     }
 
     let next_spawn = BundledNextSpawn {
+        data_dir: o8_data_dir(),
         node_bin: node_bin.clone(),
         server_dir: server_dir.clone(),
         server_js,
@@ -7697,6 +7764,10 @@ fn boot_trace(stage: &str) {
     if std::env::var("O8_BOOT_TRACE").is_ok_and(|v| v == "1") {
         eprintln!("[boot-trace] {} at {}ms", stage, boot_ms());
     }
+}
+
+fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
+    tauri::generate_context!()
 }
 
 pub fn run() {
@@ -7831,7 +7902,7 @@ pub fn run() {
     }
 
     boot_trace("BEFORE generate_context!");
-    let mut context = tauri::generate_context!();
+    let mut context = app_context();
     log::info!("[boot] tauri context at {}ms", boot_ms());
     boot_trace("generate_context! DONE");
 
@@ -8032,9 +8103,16 @@ pub fn run() {
             if webview.label() != "main" {
                 return;
             }
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                voice_input::navigation_finished();
+                return;
+            }
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
+            voice_input::navigation_started();
+            #[cfg(target_os = "macos")]
+            visual_capture::reset_on_main_navigation(webview.app_handle());
             managed_voice_window::reset_on_main_navigation(webview.app_handle());
             remote_preview::close_on_main_reload(webview.app_handle());
             if !preship_gate {
@@ -8050,6 +8128,8 @@ pub fn run() {
             get_running_bundle_integrity,
             check_port,
             restart_app,
+            prepare_app_restart,
+            cancel_app_restart,
             start_ws_server,
             cortex_available,
             get_app_data_dir,
@@ -8086,6 +8166,22 @@ pub fn run() {
             o8_stt_start,
             managed_voice_window::managed_voice_overlay_update,
             managed_voice_window::managed_voice_presentation_epoch,
+            voice_input::voice_input_claim,
+            voice_input::voice_input_release,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_begin,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_ready,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_widget,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_undo,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_transcribe_audio,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_finish,
+            #[cfg(target_os = "macos")]
+            visual_capture::o8_visual_capture_cancel,
             #[cfg(target_os = "macos")]
             o8_stt_stop,
             #[cfg(target_os = "macos")]
@@ -8469,6 +8565,7 @@ pub fn run() {
                 // even when the main window is hidden.
                 log::info!("[boot] pre-hotkeys at {}ms", boot_ms());
                 fn_hotkey::start(app.handle().clone());
+                visual_capture::register_shortcut(app.handle());
                 log::info!("[boot] fn_hotkey CGEventTap at {}ms", boot_ms());
 
                 // Drive the Microphone permission prompt deterministically at
@@ -8809,6 +8906,9 @@ pub fn run() {
             let _ = write_port_file("ws-port", ws_port);
             std::env::set_var("O8_API_PORT", api_port.to_string());
             std::env::set_var("O8_WS_PORT", ws_port.to_string());
+            app.manage(restart_job_drain::guard(
+                std::path::PathBuf::from(o8_data_dir()), api_port, sidecar_lifecycle::kill_tracked_children,
+            ));
             // Expose the resolved ports to the frontend loader HTML so it
             // knows where to navigate.
             std::env::set_var("CORTEX_IDE_API_PORT", api_port.to_string());

@@ -106,26 +106,22 @@ describe('useAgentVoiceMode', () => {
     expect(localStorage.getItem('o8:agent-voice-mode:v1:draft-test')).toBe('true');
   });
 
-  it('plays one complete assistant reply after the active voice turn settles', () => {
+  it('keeps restored preferences inert and never infers speech from busy state or assistant text', () => {
     localStorage.setItem('o8:agent-voice-mode:v1:playback-test', 'true');
     act(() => root.render(createElement(Harness, { surfaceKey: 'playback-test' })));
+    act(() => activeDelivery()('draft after restore'));
+    expect(mocks.sendNow).not.toHaveBeenCalled();
+    expect(mocks.fillInput).toHaveBeenCalledWith('draft after restore');
+    act(() => container.querySelector('button')!.click());
     act(() => root.render(createElement(Harness, {
-      surfaceKey: 'playback-test',
-      busy: true,
+      surfaceKey: 'playback-test', busy: true,
       messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'partial')],
     })));
-    expect(mocks.play).not.toHaveBeenCalled();
-
     act(() => root.render(createElement(Harness, {
       surfaceKey: 'playback-test',
       messages: [entry('u1', 'user', 'question'), entry('a1', 'assistant', 'complete answer')],
     })));
-
-    expect(mocks.play).toHaveBeenCalledOnce();
-    expect(mocks.play).toHaveBeenCalledWith(
-      'complete answer',
-      'voice-mode:playback-test:a1',
-    );
+    expect(mocks.play).not.toHaveBeenCalled();
   });
 
   it('keeps legacy enabled preferences inert in a dictation-only composer', () => {
