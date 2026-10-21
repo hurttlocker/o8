@@ -336,7 +336,7 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
   });
   try {
     expect(await sendTurn('terminal-first')).toMatchObject({
-      status: status === 'error' ? 'failed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
+      status: status === 'error' ? 'unconfirmed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
       ...(status === 'error' ? { detail: 'fixture terminal failure' } : {}),
     });
     testState.terminal = null;
@@ -399,7 +399,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await new Promise((resolve) => setTimeout(resolve, 200));
     if (deadlineExpired) {
       await waitFor(() => terminal().length >= 1);
-      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'failed' });
+      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'unconfirmed' });
       expect(terminal()[0].model, 'an unresolved native result has no verified effective model').toBeUndefined();
     } else {
       expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
@@ -410,7 +410,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await waitFor(() => terminal().length === 2);
     expect(terminal().map(({ turnId, status, model, effort }) => ({ turnId, status, model, effort }))).toEqual([
       deadlineExpired
-        ? { turnId: 'stop-first', status: 'failed', model: undefined, effort: undefined }
+        ? { turnId: 'stop-first', status: 'unconfirmed', model: undefined, effort: undefined }
         : { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
       { turnId: 'stop-next', status: 'done', model: 'gpt-5.6-sol', effort: 'high' },
     ]);
