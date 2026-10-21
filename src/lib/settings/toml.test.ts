@@ -47,6 +47,32 @@ async function applyToml(raw: string): Promise<void> {
 }
 
 describe('settings.toml operator defaults', () => {
+  it('persists a disabled volume reserve through GUI and TOML saves', async () => {
+    const saved = await POST(postDefaults({ storageReserveRatio: 0 }));
+    expect(saved.status).toBe(200);
+    expect(parseOperatorDefaultsToml(readFileSync(tomlPath, 'utf8')).storageReserveRatio).toBe(0);
+    const readback = await GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
+    expect((await readback.json()).values.storageReserveRatio).toBe(0);
+
+    const tomlSaved = await POST(postDefaults({
+      settingsToml: '[git]\nstorage_reserve_ratio = 0\nstorage_reserve_floor_gb = 3\n',
+      settingsTomlRevision: await currentRevision(),
+    }));
+    expect(tomlSaved.status).toBe(200);
+    expect((await getOperatorDefaults()).values).toMatchObject({
+      storageReserveRatio: 0, storageReserveFloorGb: 3,
+    });
+  });
+
+  it.each([null, '', [], false])('rejects a non-numeric reserve without interpreting %j as zero', async (value) => {
+    await applyToml('[git]\nstorage_reserve_ratio = 0.15\n');
+    const before = readFileSync(tomlPath, 'utf8');
+    const saved = await POST(postDefaults({ storageReserveRatio: value }));
+    expect(saved.status).toBe(400);
+    expect(readFileSync(tomlPath, 'utf8')).toBe(before);
+    expect((await getOperatorDefaults()).values.storageReserveRatio).toBe(0.15);
+  });
+
   it('maps every OperatorDefaults key to settings.toml (exhaustive-key-coverage)', () => {
     expect(Object.keys(OPERATOR_DEFAULTS_TOML_MAPPING).sort()).toEqual(
       Object.keys(OPERATOR_DEFAULTS_FALLBACK).sort(),

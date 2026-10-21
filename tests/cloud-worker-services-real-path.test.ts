@@ -188,6 +188,7 @@ describe('leased remote workspace services', () => {
       expect(getJob('team_default', jobId)?.launch).toMatchObject({
         remoteManifestHash: hash, model: 'gpt-6.1-sol', effort: 'medium',
       });
+
       await waitFor(() => getJob('team_default', jobId)?.status === 'completed' ? true : null);
       const events = readJobEvents('team_default', jobId);
       expect(events.filter((event) => event.type === 'service').map((event) => event.payload))

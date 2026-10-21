@@ -291,6 +291,8 @@ export interface OrchestratorPacket {
   referenceLabel: string;
   title: string;
   summary: string;
+  /** Project identity captured at task creation; independent of active UI selection. */
+  projectId?: string | null;
   /** Packet was created from the Design Mode element-edit loop. */
   origin?: 'design-mode';
   workspaceTargetPath: string | null;
@@ -437,6 +439,11 @@ export interface OrchestratorPacket {
    * inherits the setting ('auto' = on for non-frontier runtime tiers).
    */
   useBrain?: boolean;
+  /**
+   * Merge hold (#3740). When true, an approved review does not merge this
+   * packet: any merge not made by the operator routes to an approval card.
+   */
+  mergeHold?: boolean;
   /**
    * Huddle mode (per-packet, armed by the orchestrator). When true,
    * `buildPacketPrompt` instructs the worker to read the repo, post its plan +
@@ -661,6 +668,13 @@ export interface PacketSelfReview {
 }
 
 export interface PacketContext {
+  /** Current recovery availability; the immutable completion handoff remains historical. */
+  recovery?: {
+    source: 'retained-source' | 'verified-preservation' | 'unavailable';
+    instructions: string;
+    preservationId?: string;
+    bundleSha256?: string;
+  };
   packetId: string;
   projectId?: string | null;
   sessionKey: string;
@@ -767,7 +781,7 @@ export type WorkspaceLaneTranscriptState =
 export interface WorkspaceLaneState {
   tileId: string;
   tabId: string | null;
-  kind: 'chat' | 'llm-chat' | 'terminal' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
+  kind: 'chat' | 'llm-chat' | 'chatgpt-plan' | 'terminal' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
   title: string;
   subtitle: string | null;
   repoPath: string | null;

@@ -1,3 +1,4 @@
+import { firstMcpConfigDivergence } from './orchestrator-mcp-fingerprint';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { FalseDispatchAttemptResult } from './orchestrator-false-dispatch';
@@ -14,6 +15,7 @@ export interface OrchestratorProcConfig {
   permissionMode: 'full' | 'plan';
   toolProfile: ToolProfile;
   effort: ThinkingEffort;
+  fastMode?: boolean;
   mcpConfigPath: string;
   mcpConfigHash: string;
   mcpConfigMaterial: string;
@@ -54,4 +56,22 @@ export interface WarmState {
   resumeAfterKill: boolean;
   resumeUnavailable: boolean;
   sessionPrompt: string | null;
+}
+
+export function procConfigMatches(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): boolean {
+  return !!a && a.cwd === b.cwd && a.model === b.model && a.permissionMode === b.permissionMode
+    && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash
+    && a.modelSource === b.modelSource && a.carrierFingerprint === b.carrierFingerprint && a.fastMode === b.fastMode;
+}
+
+export function firstProcConfigDivergence(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): string {
+  if (!a) return 'procConfig';
+  for (const key of ['cwd', 'model', 'permissionMode', 'toolProfile', 'effort', 'fastMode', 'modelSource', 'carrierFingerprint'] as const) {
+    if (a[key] !== b[key]) return key;
+  }
+  if (a.mcpConfigHash !== b.mcpConfigHash) {
+    const key = firstMcpConfigDivergence(a.mcpConfigMaterial, b.mcpConfigMaterial);
+    return `${key} (${a.mcpConfigHash}->${b.mcpConfigHash})`;
+  }
+  return 'procConfig';
 }

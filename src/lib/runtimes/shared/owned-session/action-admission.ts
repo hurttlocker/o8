@@ -1,0 +1,35 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { advanceCorrectionStop } from '@/lib/db/worker-correction-fences';
+import { getSqlite } from '@/lib/db';
+import type { OwnedSessionRecord } from './types';
+
+interface Admission { correctionId: string; surfaceId: string; runId: string; allowInterrupted: boolean; check: () => void }
+const admission = new AsyncLocalStorage<Admission>();
+
+/** An explicit correction may continue only the exact run the operator selected. */
+export function withOwnedActionAdmission<T>(input: Admission, action: () => Promise<T>): Promise<T> {
+  return admission.run(input, action);
+}
+
+export function assertOwnedActionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
+  const expected = admission.getStore();
+  if (!expected) return;
+  expected.check();
+  const run = session?.activeRun ?? session?.recentRuns[0];
+  if (!session || session.surfaceId !== expected.surfaceId || session.detachedAt || session.orphanedAt
+    || run?.id !== (preparedRunId ?? expected.runId)
+    || (!preparedRunId && !expected.allowInterrupted && (run.outcome === 'interrupted' || run.interruptRequestedAt))) {
+    throw new Error('Worker run changed or was stopped. The correction was not admitted.');
+  }
+}
+
+/** An explicit Stop cancels pending corrections before waiting on the owned lock. */
+export function holdPendingOwnedCorrections(surfaceId: string): void {
+  getSqlite().transaction(() => {
+    advanceCorrectionStop(`worker:${surfaceId}`);
+    getSqlite().prepare(`UPDATE worker_correction_deliveries SET status = 'held',
+    note = 'Worker stopped. Inspect it before resuming.', updated_at = ?
+    WHERE surface_id = ? AND status IN ('pending','sending') AND correction_id != ?`)
+    .run(Date.now(), surfaceId, admission.getStore()?.correctionId ?? '');
+  })();
+}

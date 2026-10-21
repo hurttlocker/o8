@@ -3,9 +3,14 @@ import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { launchRuntimeSurface } from '@/lib/runtime/actions';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
-import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
+import type { ExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
+import type { ThinkingEffort } from './thinking-effort';
+import type { ClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
+import type { WorkerRouting, WorkerLaunchContext } from '@/lib/orchestrator/types';
 
 import { failSharedCheckoutMember, recordSharedCheckoutMember, reserveSharedCheckoutMember, validateSharedCheckoutPaths } from './shared-checkout-team';
+import { captureSharedWorkerOrigin } from './shared-worker-origin';
+import { registerSharedWorkerParent } from './shared-worker-returns';
 
 export async function launchSharedCheckoutWorker(input: {
   repoPath: string;
@@ -14,12 +19,17 @@ export async function launchSharedCheckoutWorker(input: {
   taskName: string;
   runtime: OrchestratorRuntime;
   model: string | null;
+  effort?: ThinkingEffort | null;
+  carrier?: ClaudeCodeModelSource | null;
+  executionCarrier?: ExecutionCarrierId | null;
+  workerRouting?: WorkerRouting;
   readOnly: boolean;
   clientMutationId: string;
   repoInProject: boolean;
   assignedPaths: string[];
 }) {
   const assignedPaths = validateSharedCheckoutPaths(input.assignedPaths);
+  const origin = captureSharedWorkerOrigin(input.repoPath, input.parentThreadId);
   const team = await reserveSharedCheckoutMember({ ...input, runtime: input.runtime, paths: assignedPaths });
   const recovered = await findOwnedLaunchByMutationId(input.clientMutationId);
   if (recovered && recovered.cwd !== team.path) {
@@ -53,6 +63,9 @@ export async function launchSharedCheckoutWorker(input: {
       projectRepoPath: team.path,
       taskName: input.taskName,
       model: input.model ?? undefined,
+      effort: input.effort ?? undefined,
+      executionCarrier: input.executionCarrier ?? undefined,
+      ...(input.carrier ? { claudeCodeCarrier: input.carrier, claudeCodeModel: input.model ?? undefined } : {}),
       clientMutationId: input.clientMutationId,
       isolate: false,
       skipSetup: true,
@@ -68,17 +81,20 @@ export async function launchSharedCheckoutWorker(input: {
   }
   if (!result.ok || !result.surfaceId) {
     if (result.surfaceId) {
-      await recordSharedCheckoutMember({ ...input, surfaceId: result.surfaceId, runtime: input.runtime, taskName: input.taskName });
+      await recordSharedCheckoutMember({ ...input, parentTurnId: origin?.turnId, surfaceId: result.surfaceId, runtime: input.runtime, taskName: input.taskName });
+      if (origin) registerSharedWorkerParent({ repoPath: input.repoPath, surfaceId: result.surfaceId, origin });
     }
     await failSharedCheckoutMember(input);
     return { ok: false as const, error: result.note, teamId: team.id, surfaceId: result.surfaceId ?? null };
   }
   await recordSharedCheckoutMember({
     ...input,
+    parentTurnId: origin?.turnId,
     surfaceId: result.surfaceId,
     runtime: input.runtime,
     taskName: input.taskName,
   });
+  if (origin) registerSharedWorkerParent({ repoPath: input.repoPath, surfaceId: result.surfaceId, origin });
   try {
     const { wsPort } = resolvePortInfo();
     const response = await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {

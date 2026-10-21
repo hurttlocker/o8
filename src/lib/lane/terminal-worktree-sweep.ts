@@ -126,7 +126,7 @@ export async function sweepTerminalCortexWorktrees(
         result.removed += 1;
       } else {
         result.failed += 1;
-        if (existsSync(dirPath) && await worktreeIsNotGitRepository(dirPath)) {
+        if (existsSync(dirPath) && await worktreeIsNotGitRepository(dirPath, lane?.repoPath ?? repoRoot)) {
           unrecoverableWorktreeDirs.add(unrecoverableKey(dirPath, lane));
         }
       }

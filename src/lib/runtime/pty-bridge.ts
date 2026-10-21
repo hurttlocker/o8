@@ -8,6 +8,9 @@ interface SpawnBridgeTerminalRequest {
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
+  /** Trusted ownership metadata for governed worker terminal actions. */
+  packetId?: string;
+  laneId?: string;
 }
 
 interface SpawnBridgeTerminalResponse {

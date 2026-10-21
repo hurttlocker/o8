@@ -4,8 +4,10 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
 import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { OrchestratorPermissionMode } from './shared';
+import type { OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 
 export function buildOrchestratorSendPayload(input: {
+  pinBackend?: boolean;
   repoPath: string;
   projectId?: string | null;
   threadId: string;
@@ -16,6 +18,7 @@ export function buildOrchestratorSendPayload(input: {
   orchestrationMode: OrchestratorExecutionMode;
   pickedMode?: ComposerWireMode;
   thinkingEffort?: ThinkingEffort;
+  serviceTier?: OrchestratorServiceTier;
   model: string;
   backend?: OrchestratorBackendId;
   collideBaseBackend?: OrchestratorBackendId;
@@ -25,6 +28,7 @@ export function buildOrchestratorSendPayload(input: {
 }): string {
   return JSON.stringify({
     type: 'orchestrator-send',
+    ...(input.pinBackend ? { pinBackend: true } : {}),
     repoPath: input.repoPath,
     ...(input.projectId ? { projectId: input.projectId } : {}),
     threadId: input.threadId,
@@ -38,6 +42,7 @@ export function buildOrchestratorSendPayload(input: {
       ? { thinkingEffort: input.thinkingEffort }
       : {}),
     model: input.model,
+    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.backend ? { backend: input.backend } : {}),
     ...(input.collideBaseBackend ? { collideBaseBackend: input.collideBaseBackend } : {}),
     ...(input.handoffMode ? { handoffMode: input.handoffMode } : {}),

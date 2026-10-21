@@ -23,7 +23,10 @@ function registeredToolNames(files: URL[]): Set<string> {
   return names;
 }
 
-const CORTEX_TOOLS = registeredToolNames([new URL('cortex-mcp-server.ts', MCP_DIR)]);
+const CORTEX_TOOLS = registeredToolNames([
+  new URL('cortex-mcp-server.ts', MCP_DIR),
+  new URL('cortex-worker-tools.ts', MCP_DIR),
+]);
 const OPERATOR_TOOLS = registeredToolNames(
   readdirSync(new URL('operator-handlers/', MCP_DIR))
     .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
@@ -43,15 +46,27 @@ function namedTools(prompt: string): string[] {
 
 function toolsFor(surface: OrchestratorPromptSurface): Set<string> {
   if (surface.dispatch) return ALL_TOOLS;
-  return surface.cortexReads ? new Set(CORTEX_READONLY_TOOLS) : new Set();
+  return surface.cortexReads ? new Set([...CORTEX_READONLY_TOOLS, 'o8_html_preview', 'o8_html_render', 'o8_visualization_read']) : new Set();
 }
 
 const PROFILES: ToolProfile[] = ['full', 'propose', 'solo', 'fable', 'fable-solo'];
-const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex'];
+const BACKENDS: OrchestratorPromptBackend[] = ['claude', 'codex', 'pi'];
 
 describe('orchestrator prompt tool scope (#2898)', () => {
+  it.each(BACKENDS)('teaches explicit and natural visualization requests to %s without dispatch authority', backend => {
+    const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend, firstRunClarify: false, toolProfile: 'solo' });
+    expect(prompt).toContain('`/visualization`');
+    expect(prompt).toContain('show me a visualization');
+    expect(prompt).toContain('o8_html_preview');
+    expect(prompt).toContain('o8_html_render');
+    expect(prompt).toContain('o8_visualization_read');
+    expect(prompt).toContain('a rendered mock does not');
+    expect(prompt).not.toContain('## ORCHESTRATOR PROTOCOL');
+  });
   it('finds the registered tool catalogs it guards', () => {
+    expect(readFileSync(new URL('cortex-mcp-server.ts', MCP_DIR), 'utf8')).toContain('...CORTEX_WORKER_TOOLS');
     expect(CORTEX_TOOLS).toContain('cortex_launch_agent');
+    expect(CORTEX_TOOLS).toContain('cortex_worker_catalog');
     expect(OPERATOR_TOOLS).toContain('create_mission');
     expect(OPERATOR_TOOLS).toContain('o8_render');
     for (const name of CORTEX_READONLY_TOOLS) expect(CORTEX_TOOLS, name).toContain(name);
@@ -74,6 +89,17 @@ describe('orchestrator prompt tool scope (#2898)', () => {
       }
     }
   }
+
+  it.each(BACKENDS)('teaches subject-bound review and receipt reconciliation on %s', backend => {
+    const prompt = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend, firstRunClarify: false });
+    expect(prompt).toContain('Generic readOnly delegation creates a new packet');
+    expect(prompt).toContain('does not grant access to a sibling checkout or materialize its commit');
+    expect(prompt).toContain('Before declaring not-merged or submitting another review');
+    expect(prompt).toContain('get_mission_status, get_packet_scope, cortex_list_approvals, and mission_tail');
+    expect(prompt).toContain('cannot enforce an extra reviewer prerequisite');
+    expect(prompt).toContain('report that limit before dispatch');
+    expect(namedTools(prompt).filter(name => !toolsFor(orchestratorPromptSurface({ backend })).has(name))).toEqual([]);
+  });
 
   it('keeps the fleet doctrine on a full turn and drops it on a Solo turn', () => {
     const full = buildOrchestratorSystemPrompt('/tmp/example-repo', { backend: 'claude', firstRunClarify: false });

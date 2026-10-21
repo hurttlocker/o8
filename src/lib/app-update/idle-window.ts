@@ -1,3 +1,4 @@
+import { inspectCliOperationAdmission, type CliInstallerActivity } from '@/lib/setup/cli-operation-admission';
 import 'server-only';
 
 import { listLanes } from '@/lib/lane/registry';
@@ -46,14 +47,36 @@ export interface UpdateIdleCloudJob {
   leaseExpiresAt: string | null;
 }
 
+/**
+ * Lane states with no worker process: the task is waiting for review, input or
+ * a retry. A restart keeps their persisted state, so an operator may restart
+ * past them after confirming. Every other non-terminal lane is live work.
+ */
+const PARKED_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
+  'idle', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing',
+]);
+
+export function isParkedLaneStatus(status: LaneStatus): boolean {
+  return PARKED_LANE_STATUSES.has(status);
+}
+
 export interface UpdateIdleWindow {
   idle: boolean;
+  /**
+   * True when the only blockers are parked lanes. An operator-confirmed restart
+   * may proceed; automatic and remote applies still wait for `idle`.
+   */
+  idleExceptParked: boolean;
+  /** Parked lanes among `active.lanes`, named so the operator can confirm past them. */
+  parkedLanes: UpdateIdleLane[];
   active: {
     lanes: UpdateIdleLane[];
     terminalSessions: UpdateIdleTerminalSession[];
     managedRuns: UpdateIdleManagedRun[];
     ownedSessions: UpdateIdleOwnedSession[];
     cloudJobs: UpdateIdleCloudJob[];
+    cliInstallers?: CliInstallerActivity[];
+    restartPending?: boolean;
   };
   unavailable: string[];
   checkedAt: string;
@@ -65,6 +88,9 @@ interface IdleWindowInput {
   managedRuns: UpdateIdleManagedRun[];
   ownedSessions: UpdateIdleOwnedSession[];
   cloudJobs?: UpdateIdleCloudJob[];
+  cliInstallers?: CliInstallerActivity[];
+  cliAdmissionUnavailable?: boolean;
+  restartPending?: boolean;
   terminalInventoryAvailable: boolean;
   checkedAt?: string;
 }
@@ -75,19 +101,27 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     session.kind === 'managed-process' || session.clientCount > 0
   ));
   const unavailable = input.terminalInventoryAvailable ? [] : ['terminal-sessions'];
+  if (input.cliAdmissionUnavailable) unavailable.push('cli-update-ownership');
+  const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status));
+  const otherWorkIdle = terminalSessions.length === 0
+    && input.managedRuns.length === 0
+    && input.ownedSessions.length === 0
+    && (input.cloudJobs?.length ?? 0) === 0
+    && (input.cliInstallers?.length ?? 0) === 0
+    && !input.restartPending
+    && unavailable.length === 0;
   return {
-    idle: activeLanes.length === 0
-      && terminalSessions.length === 0
-      && input.managedRuns.length === 0
-      && input.ownedSessions.length === 0
-      && (input.cloudJobs?.length ?? 0) === 0
-      && unavailable.length === 0,
+    idle: activeLanes.length === 0 && otherWorkIdle,
+    idleExceptParked: activeLanes.length === parkedLanes.length && otherWorkIdle,
+    parkedLanes,
     active: {
       lanes: activeLanes,
       terminalSessions,
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,
       cloudJobs: input.cloudJobs ?? [],
+      cliInstallers: input.cliInstallers ?? [],
+      ...(input.restartPending ? { restartPending: true } : {}),
     },
     unavailable,
     checkedAt: input.checkedAt ?? new Date().toISOString(),
@@ -155,8 +189,12 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
       workerId: job.claimedBy ?? null,
       leaseExpiresAt: job.leaseExpiresAt ?? null,
     }));
+  const cliAdmission = inspectCliOperationAdmission();
   return evaluateUpdateIdleWindow({
     lanes,
+    cliInstallers: cliAdmission.installers,
+    cliAdmissionUnavailable: cliAdmission.blocked && cliAdmission.installers.length === 0 && cliAdmission.code !== 'app_restart_pending',
+    restartPending: cliAdmission.code === 'app_restart_pending',
     terminalSessions: terminalInventory.sessions,
     terminalInventoryAvailable: terminalInventory.available,
     ownedSessions: ownedSessions.map((session) => ({
@@ -166,7 +204,7 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
     })),
     cloudJobs,
     managedRuns: managedRuns
-      .filter((run) => run.status === 'running')
+      .filter((run) => run.status === 'running' || run.status === 'settling')
       .map((run) => ({ id: run.id, session: run.session, command: run.command, cwd: run.cwd })),
   });
 }

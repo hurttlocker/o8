@@ -40,6 +40,7 @@ function makeHarness(initial: {
   const scheduleFlushCurrentAssistant = vi.fn();
   const flushCurrentAssistant = vi.fn();
   const snapshotSeenRef = { current: false };
+  const onVoiceTerminal = vi.fn();
   const onSnapshotTurnTerminal = vi.fn();
   const onSettledAssistantMissing = vi.fn();
   const suppressTurnEventsRef = { current: initial.suppressTurnEvents ?? false };
@@ -59,6 +60,7 @@ function makeHarness(initial: {
     lastBackendRef,
     lastEventAtRef,
     messagesRef,
+    onVoiceTerminal,
     onSnapshotTurnTerminal,
     onSettledAssistantMissing,
     resetEpochRef,
@@ -87,6 +89,7 @@ function makeHarness(initial: {
     scheduleFlushCurrentAssistant,
     flushCurrentAssistant,
     snapshotSeenRef,
+    onVoiceTerminal,
     onSnapshotTurnTerminal,
     onSettledAssistantMissing,
     suppressTurnEventsRef,
@@ -181,6 +184,21 @@ describe('orchestrator socket — first-turn streaming race', () => {
 
     h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'tok', assistantMessageId: 'assistant-123' } });
     expect(h.currentAssistantRef.current?.id).toBe('assistant-123');
+  });
+
+  it('starts automatic turns at their persisted user boundary without replacing the originating reply', () => {
+    const h = makeHarness({ status: 'ready', messages: [userMsg, { id: 'origin', role: 'assistant', text: 'Workers launched.' }], threadId: 'thoughts-parent' });
+    const data = { threadId: 'thoughts-parent', userMessageId: 'result-user', assistantMessageId: 'result-answer', message: 'Worker results received.', timestamp: 200 };
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data: { ...data, threadId: 'thoughts-other' } });
+    expect(h.setMessages).not.toHaveBeenCalled();
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { ...data, text: 'Result summary.' } });
+    h.fire({ channel: 'orchestrator', event: 'turn-start', data });
+    expect(h.currentAssistantRef.current).toMatchObject({ id: 'result-answer', chunks: ['Result summary.'] });
+    const messages = h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>((rows, [update]) => typeof update === 'function' ? update(rows) : update,
+      [userMsg, { id: 'origin', role: 'assistant', text: 'Workers launched.' }]);
+    expect(messages.map(row => row.id)).toEqual(['orch-user-1', 'origin', 'result-user']);
+    expect(messages[1].text).toBe('Workers launched.');
   });
 
   it('a tool-use event also promotes to busy instead of dropping the pill', () => {
@@ -760,5 +778,22 @@ describe('orchestrator socket — stall clock scoping (six-hour-timer incident)'
     const h = makeHarness({ status: 'busy', threadId: null, lastEventAt: 12345 });
     h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'recovered', threadId: 'thoughts-unowned' } });
     expect(h.lastEventAtRef.current).toBeGreaterThan(12345);
+  });
+});
+
+ describe('managed voice terminal receipts', () => {
+  it('does not turn legacy ready, snapshots, or partial text into confirmed completion', () => {
+    const h = makeHarness({ status: 'busy', threadId: 'thoughts-a' });
+    h.fire({ channel: 'orchestrator', event: 'output', data: { threadId: 'thoughts-a', text: 'partial' } });
+    h.fire({ channel: 'orchestrator', event: 'status', data: { threadId: 'thoughts-a', status: 'ready' } });
+    expect(h.onVoiceTerminal).not.toHaveBeenCalled();
+  });
+  it('accepts a correlated interruption after optimistic Stop but rejects another thread', () => {
+    const h = makeHarness({ status: 'ready', threadId: 'thoughts-a', suppressTurnEvents: true });
+    const voiceTerminal = { userMessageId: 'orch-user-request', outcome: 'interrupted', text: 'partial' };
+    h.fire({ channel: 'orchestrator', event: 'status', data: { threadId: 'thoughts-b', status: 'ready', voiceTerminal } });
+    expect(h.onVoiceTerminal).not.toHaveBeenCalled();
+    h.fire({ channel: 'orchestrator', event: 'status', data: { threadId: 'thoughts-a', status: 'ready', voiceTerminal } });
+    expect(h.onVoiceTerminal).toHaveBeenCalledWith(voiceTerminal);
   });
 });

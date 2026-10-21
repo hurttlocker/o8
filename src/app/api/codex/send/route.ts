@@ -282,7 +282,7 @@ export async function POST(req: NextRequest) {
 
       child.on('error', (err) => {
         enqueueChunk(encoder.encode(
-          `data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`
+          `data: ${JSON.stringify({ type: 'error', delivery: 'rejected', text: err.message })}\n\n`
         ));
         closeStream();
       });

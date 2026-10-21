@@ -4,6 +4,7 @@ export interface WorkspaceHeaderStripProps {
   /** Sidebar toggle. Shown only when a handler is provided (left column collapsed). */
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
+  onSearch?: () => void;
   /** When the sidebar is collapsed, hovering the toggle pill drops the
    *  hover-preview overlay. These handlers wire that trigger to the same
    *  callbacks the overlay itself uses, so moving between pill and overlay
@@ -29,6 +30,8 @@ export interface WorkspaceHeaderStripProps {
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   }>;
   /** Session owner for the tabs, which may differ from the active pane. */
   tabWorkspaceId?: string | null;

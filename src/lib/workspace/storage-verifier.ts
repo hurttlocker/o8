@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
+
+import { defaultRunGit, workspaceScanGitContext, type WorkspaceScanGitRunner } from '@/lib/workspace/storage-verifier-git';
 
 export type WorkspaceVerificationState = 'verified_clean' | 'dirty' | 'unknown';
 
@@ -71,11 +72,6 @@ export interface WorkspaceCopyBindingRequirement {
   sourceContentFingerprint: string | null;
 }
 
-interface GitCommandResult {
-  stdout: string | Buffer;
-  stderr?: string | Buffer;
-}
-
 export interface WorkspaceStorageVerifierOptions {
   maxEntries?: number;
   maxRebuildableEntries?: number;
@@ -86,7 +82,9 @@ export interface WorkspaceStorageVerifierOptions {
     canonicalTarget: string;
   }>;
   requiredCopyBindings?: Record<string, WorkspaceCopyBindingRequirement>;
-  runGit?: (args: string[], cwd: string) => Promise<GitCommandResult>;
+  runGit?: WorkspaceScanGitRunner;
+  /** Original path of an exact-manifest-verified, sibling-renamed clone. */
+  quarantinedFrom?: string;
   fs?: {
     lstat: typeof lstat;
     readdir: typeof readdir;
@@ -121,26 +119,6 @@ function text(value: string | Buffer | undefined): string {
 function compact(value: unknown): string {
   if (value instanceof Error) return value.message.replace(/\s+/g, ' ').slice(0, 500);
   return String(value).replace(/\s+/g, ' ').slice(0, 500);
-}
-
-function defaultRunGit(args: string[], cwd: string): Promise<GitCommandResult> {
-  return new Promise((resolve, reject) => {
-    execFile('git', args, {
-      cwd,
-      encoding: 'buffer',
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 10_000,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        Object.assign(error, { stdout, stderr });
-        reject(error);
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-  });
 }
 
 function normalizeRelativePath(value: string): string | null {
@@ -566,13 +544,25 @@ export async function scanWorkspaceStorageState(
 
   let submodulePaths = new Set<string>();
   if (canonicalWorkspacePath) {
-    const runGit = options.runGit ?? defaultRunGit;
+    const executeGit = options.runGit ?? defaultRunGit;
     try {
+      const context = await workspaceScanGitContext(canonicalWorkspacePath, options.quarantinedFrom, executeGit);
+      const excludeIdentity = context.managedExcludePath
+        ? await captureWorkspaceRegularFileIdentity(context.managedExcludePath)
+        : null;
+      const runGit: WorkspaceScanGitRunner = (args, cwd) => executeGit([...context.args, ...args], cwd);
       const [statusResult, flagsResult, stagedResult] = await Promise.all([
         runGit(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching', '--ignore-submodules=none'], canonicalWorkspacePath),
         runGit(['ls-files', '-v', '-z'], canonicalWorkspacePath),
         runGit(['ls-files', '--stage', '-z'], canonicalWorkspacePath),
       ]);
+      if (context.managedExcludePath && excludeIdentity) {
+        const after = await captureWorkspaceRegularFileIdentity(context.managedExcludePath);
+        if (after.nodeFingerprint !== excludeIdentity.nodeFingerprint) {
+          throw new Error('Managed Git exclude file changed during the storage scan.');
+        }
+        gitFingerprint.push(`managed-excludes:${excludeIdentity.nodeFingerprint}`);
+      }
       for (const result of [statusResult, flagsResult, stagedResult]) {
         const stderr = text(result.stderr).trim();
         if (stderr) findings.push({ reason: 'git_error', detail: `Git reported: ${stderr.slice(0, 500)}` });

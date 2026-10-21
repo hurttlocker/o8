@@ -6,7 +6,6 @@ import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { useLaneReviewChanges } from './useLaneReviewChanges';
 import { useLaneReviewSummary } from './useLaneReviewSummary';
 import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
-import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
 import { useArtifacts } from '../artifacts/useArtifacts';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -14,7 +13,6 @@ import type { DiffMode, CollapseSignal, ReviewScope } from './panel/types';
 import {
   SCOPE_LABELS,
   SCOPE_ORDER,
-  BIG_CHANGESET,
   UI_FONT,
   REVIEW_CONTROL_BG,
   REVIEW_CONTROL_BG_ACTIVE,
@@ -66,7 +64,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [wordDiff, setWordDiff] = useState(false);
   const [hideWhitespace, setHideWhitespace] = useState(false);
   const [richPreview, setRichPreview] = useState(false);
-  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
+  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: false, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [scope, setScope] = useState<ReviewScope>('all');
@@ -218,12 +216,14 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     [visible],
   );
   const hasFiles = changes.files.length > 0;
-  const denseChangeset = visible.length > BIG_CHANGESET;
 
   useEffect(() => {
-    if (!selectedFile) return;
-    jumpToFile(selectedFile);
-  }, [jumpToFile, selectedFile]);
+    if (!selectedFile || changes.loading) return;
+    const root = diffRepoPath?.replace(/\/$/, '');
+    const path = root && selectedFile.startsWith(`${root}/`) ? selectedFile.slice(root.length + 1) : selectedFile;
+    const row = reviewRowPathForSourcePath(path, changedFilesKey.split('\n'));
+    if (row) jumpToFile(row);
+  }, [changedFilesKey, changes.loading, diffRepoPath, jumpToFile, selectedFile]);
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg)', overflow: 'hidden' }}>
@@ -344,13 +344,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             </span>
           ) : null}
           <div style={{ flex: 1, minWidth: 8 }} />
-          <O8ScratchChat
-            surfaceLabel="review"
-            repoPath={repoPath}
-            selectedFile={selectedFile ?? null}
-            surface="diff"
-            placement="review-toolbar"
-          />
+
           <ToolbarButton
             title={filesDrawerOpen ? 'Hide files' : 'Show files'}
             active={filesDrawerOpen}
@@ -394,7 +388,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               </div>
             ) : null}
           </div>
-          {!reviewLaneId ? (
+          {!reviewLaneId && !changes.error && !changes.loading ? (
             <ReviewGitActions repoPath={repoPath} branch={changes.branch} repoSlug={changes.repoSlug} onChanged={changes.refresh} />
           ) : null}
         </div>
@@ -414,7 +408,12 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               onDiscarded={() => { void changes.refresh(); }}
             />
           ) : (
-            <PanelMessage text={changes.error} tone="error" />
+            <div>
+              <PanelMessage text={changes.error} tone={changes.errorCode === 'REVIEW_NOT_GIT' ? undefined : 'error'} />
+              <div style={{ paddingLeft: 16, paddingBottom: 16 }}>
+                <ToolbarButton title="Refresh review" onClick={() => { void changes.refresh(); }}>Retry</ToolbarButton>
+              </div>
+            </div>
           )
         ) : !hasFiles ? (
           <PanelMessage text={reviewLaneId ? 'No branch diff to review.' : 'Working tree clean — nothing to review.'} />
@@ -463,7 +462,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               wordDiff={wordDiff}
               hideWhitespace={hideWhitespace}
               richPreview={richPreview}
-              initialOpen={!denseChangeset}
+              initialOpen={collapseSignal.open}
               collapseSignal={collapseSignal}
               focusSignal={focusSignal}
               selected={focusSignal.path === file.path}

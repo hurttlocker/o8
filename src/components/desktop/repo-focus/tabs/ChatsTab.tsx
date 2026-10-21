@@ -1,26 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { orchestratorBackendDisplayLabel } from '@/lib/orchestrator/display';
 import { OrchestratorHoverCard } from '@/components/desktop/OrchestratorHoverCard';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import { clearLastOrchestratorThreadForId } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
-import { canCreateOrchestratorForRepo } from '../../agent-panel-repo-selection';
 import {
   packetBelongsToRepo,
   packetVisualState,
   REPO_FOCUS_FONT,
 } from '../utils';
 import { SessionRow } from './AgentRows';
-import { ChatGroupPicker, type ChatGroupMode } from './chats/ChatGroupPicker';
-import { MissingRepoRailNotice } from './chats/MissingRepoRailNotice';
+import { CompactChatHistory } from './chats/CompactChatHistory';
+import { WorkingChatHistory } from './chats/WorkingChatHistory';
+import { useSidebarFixtures } from './chats/use-sidebar-fixtures';
+import { staysInWorkingView, type ChatGroupMode } from './chats/sidebar-view';
+import { setSidebarView, usePublishSidebarAttention, useSidebarView } from './chats/sidebar-view-store';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
-  CONVERSATIONS_GROUP_KEY,
   historyIsVisibleForRepos,
   historyRepoContext,
   historySection,
   isAutomationSession,
+  isOwnedAutomationSession,
   packetSortTime,
   packetStateTone,
   packetTimestamp,
@@ -30,23 +32,28 @@ import {
 } from './chats/helpers';
 import {
   ArchivedLaneCompactRow,
+  CompactSessionRow,
   HistoryChatRow,
   MergedPacketRow,
 } from './chats/HistoryRows';
 import { HistoryActionMenu } from './chats/Menus';
-import { RepoGroupLabel, SectionLabel } from './chats/shared';
+import { SectionLabel } from './chats/shared';
 import {
+  attentionRank,
   deriveArchivedLanes,
   deriveHistoryDateGroups,
   deriveHistoryRepoGroups,
   derivePrioritySplit,
-  deriveShowRepoSuffix,
   deriveSweptThreads,
   isCompletionUnread,
   repoSuffix,
   SIDEBAR_HOVER_THREAD_EVENT,
 } from './chats/sections';
+import { useRowReadState } from './chats/use-row-read-state';
 import { getLastVisited, markVisited } from './chats/read-state';
+import { useSidebarManualOrder } from './chats/use-sidebar-manual-order';
+import { SidebarSortableRow } from './chats/SidebarSortableRow';
+import { EMPTY_CHAT_VIEW_ACTIONS, EMPTY_SIDEBAR_AGENTS, mergeSidebarAgentHistory, sidebarAgentItemId } from './chats/sidebar-agent-navigation';
 import type {
   ArchivedLaneRow,
   ChatHistoryItem,
@@ -70,32 +77,26 @@ export function ChatsTab({
   showLiveSessions = true,
   groupMode = 'sections',
   packets = [],
-  agentsSection,
+  agentEntries = EMPTY_SIDEBAR_AGENTS,
+  agentViewActions = EMPTY_CHAT_VIEW_ACTIONS,
   onCreateOrchestratorForRepo,
+  emptyActions,
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
   const [showAllChats, setShowAllChats] = useState(false);
+  const demoFixtures = useSidebarFixtures(variant === 'mini');
+  const agentByTabId = useMemo(() => new Map(agentEntries.map(entry => [sidebarAgentItemId(entry), entry])), [agentEntries]);
 
   // Group-by mode for the left-rail chat list (mini / flat variant).
-  // Three modes, persisted to localStorage. The filter icon on a
-  // group header opens a Group by / Sort by popover.
-  const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
-  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupMode>('flat');
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
-    if (stored === 'repo' || stored === 'date' || stored === 'flat') {
-      setChatGroupBy(stored);
-    }
-  }, []);
+  // Keep the existing persisted grouping ids compatible with the view menu.
+  const chatGroupBy = useSidebarView();
   const updateChatGroupBy = useCallback((next: ChatGroupMode) => {
-    setChatGroupBy(next);
-    if (typeof window !== 'undefined') {
-      try { window.localStorage.setItem(CHAT_GROUP_BY_KEY, next); } catch { /* ignore */ }
-    }
+    setSidebarView(next);
+    setShowAllChats(false);
   }, []);
+  useEffect(() => { setShowAllChats(false); }, [chatGroupBy]);
   // Per-repo drawer collapse (repo grouping only) — each repo header is a
   // minimizable drawer. Persisted as a JSON array of
   // collapsed group keys so the drawer state survives reloads.
@@ -124,6 +125,7 @@ export function ChatsTab({
     });
   }, []);
   const [loading, setLoading] = useState(true);
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
   // Rail recency = the last time the conversation SPOKE (Q ruling
   // 2026-07-16). The previous ChatGPT-style click-bump (an optimistic
@@ -147,17 +149,17 @@ export function ChatsTab({
     setLoading(true);
     try {
       const response = await fetch('/api/v2/chat-history/list?include=orchestrator&archived=include', { cache: 'no-store' });
-      const payload = response.ok
-        ? await response.json() as { conversations?: ChatHistoryItem[] }
-        : { conversations: [] };
+      if (!response.ok) throw new Error('Chat history unavailable');
+      const payload = await response.json() as { conversations?: ChatHistoryItem[] };
+      if (!Array.isArray(payload.conversations)) throw new Error('Chat history unavailable');
       if (cancelled?.()) return;
       const conversations = payload.conversations ?? [];
       setHistoryItems(conversations.filter((item) => !item.archivedAt));
       setArchivedHistoryItems(conversations.filter((item) => Boolean(item.archivedAt)));
+      setHistoryUnavailable(false);
     } catch {
       if (cancelled?.()) return;
-      setHistoryItems([]);
-      setArchivedHistoryItems([]);
+      setHistoryUnavailable(true);
     } finally {
       if (!cancelled?.()) setLoading(false);
     }
@@ -185,11 +187,6 @@ export function ChatsTab({
     if (!historyItems.some((item) => item.tabId === activeThreadId)) return;
     markVisited(`thread:${activeThreadId}`);
   }, [activeSessionKey, historyItems]);
-
-  const openHistoryItem = useCallback((item: ChatHistoryItem) => {
-    markVisited(`thread:${item.tabId}`);
-    onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item));
-  }, [onOpenHistoryChat]);
 
   // Archived agent sessions (Codex / lanes table) — only fetched in the
   // compact left-rail variant where they render inline under each repo.
@@ -310,8 +307,9 @@ export function ChatsTab({
   ), [packets, targetRepos]);
 
   const visibleHistory = useMemo(() => (
-    historyItems.filter((item) => historyIsVisibleForRepos(item, targetRepos))
-  ), [historyItems, targetRepos]);
+    historyItems.filter((item) => !demoFixtures.some((sample) => sample.tabId === item.tabId)
+      && historyIsVisibleForRepos(item, targetRepos))
+  ), [historyItems, targetRepos, demoFixtures]);
   const historyPacketsByTabId = useMemo(() => new Map(
     visibleHistory.map((item) => [item.tabId, pickHistoryPacket(item, visiblePackets)]),
   ), [visibleHistory, visiblePackets]);
@@ -366,6 +364,31 @@ export function ChatsTab({
     return map;
   }, [visiblePackets]);
 
+  const readStateVersion = useRowReadState();
+  const packetAttention = useCallback((packet: typeof packets[number]) => ({
+    status: packet.status, rejected: packet.review?.approved === false,
+    outcome: packet.releaseState === 'released' ? 'merged' : null,
+    unread: isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`)),
+  }), []);
+  const historyAttentionPackets = useMemo(() => {
+    void readStateVersion; // Receipt reads change priority without a server refresh.
+    return new Map(visibleHistory.map((item) => {
+    const candidates = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])]
+      .filter((packet): packet is typeof visiblePackets[number] => Boolean(packet));
+    candidates.sort((a, b) => attentionRank(packetAttention(b)) - attentionRank(packetAttention(a))
+      || Number(staysInWorkingView({ status: b.status })) - Number(staysInWorkingView({ status: a.status }))
+      || packetSortTime(b) - packetSortTime(a));
+    return [item.tabId, candidates[0]];
+    }));
+  }, [historyPacketsByTabId, ownedPacketsByThread, packetAttention, readStateVersion, visibleHistory]);
+
+  const openHistoryItem = useCallback((item: ChatHistoryItem) => {
+    markVisited(`thread:${item.tabId}`);
+    const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
+    for (const packet of related) if (packet) markVisited(`packet:${packet.id}`);
+    onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item));
+  }, [historyPacketsByTabId, onOpenHistoryChat, ownedPacketsByThread]);
+
   const visibleSessions = useMemo(() => (
     ideWorkspaceSessions
       .filter((session) => targetRepos.some((repo) => sessionBelongsToRepo(session, repo)))
@@ -381,14 +404,36 @@ export function ChatsTab({
   const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
-  const sortedChatItems = useMemo(() => (
-    [...sweptThreads.chats].sort((a, b) => (
-      effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a)
-    ))
-  ), [effectiveModifiedAtMs, sweptThreads.chats]);
+  const dateSortedChatItems = useMemo(() => {
+    return (
+    mergeSidebarAgentHistory(sweptThreads.chats, chatGroupBy === 'scheduled' ? [] : agentEntries).filter((item) => {
+      if (compact && chatGroupBy === 'scheduled') return ideWorkspaceSessions.some((session) =>
+        isOwnedAutomationSession(session) && sessionIdentity(session).includes(item.tabId));
+      return true;
+    }).sort((a, b) => effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a))
+    );
+  }, [agentEntries, chatGroupBy, compact, effectiveModifiedAtMs, ideWorkspaceSessions, sweptThreads.chats]);
+  const manualOrder = useSidebarManualOrder(dateSortedChatItems);
+  const sortedChatItems = chatGroupBy === 'manual' ? manualOrder.orderedItems : dateSortedChatItems;
+  const workingHistoryIds = useMemo(() => {
+    void readStateVersion;
+    return new Set(sortedChatItems.filter(item => {
+      const agent = agentByTabId.get(item.tabId);
+      if (agent) return staysInWorkingView(agent.attention, agent.active);
+      const selected = activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`;
+      const related = [historyPacketsByTabId.get(item.tabId), ...(ownedPacketsByThread.get(item.tabId) ?? [])];
+      return selected || related.some((packet) => packet && staysInWorkingView({
+        status: packet.status, rejected: packet.review?.approved === false,
+        outcome: packet.releaseState === 'released' ? 'merged' : null,
+        unread: isCompletionUnread(packetTimestamp(packet), getLastVisited(`packet:${packet.id}`)),
+      })) || ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId)
+        && staysInWorkingView({ status: session.status }));
+    }).map(item => item.tabId));
+  }, [activeSessionKey, agentByTabId, historyPacketsByTabId, ideWorkspaceSessions, ownedPacketsByThread, readStateVersion, sortedChatItems]);
   const chatCap = compact && !showAllChats ? 12 : Number.POSITIVE_INFINITY;
   const historyCap = Number.isFinite(remainingHistorySlots) ? remainingHistorySlots : Number.POSITIVE_INFINITY;
-  const flatHistoryItems = sortedChatItems.slice(0, Math.max(0, Math.min(chatCap, historyCap)));
+  const flatHistoryItems = [...sortedChatItems.filter(item => item.pinned), ...sortedChatItems.filter(item => !item.pinned)]
+    .slice(0, Math.max(0, Math.min(chatCap, historyCap)));
   const cappedChatCount = Math.min(sortedChatItems.length, historyCap);
   const flatHistoryRepoGroups = useMemo(
     () => deriveHistoryRepoGroups(flatHistoryItems, targetRepos),
@@ -399,9 +444,12 @@ export function ChatsTab({
     [flatHistoryItems],
   );
   const flatPrioritySplit = useMemo(() => {
+    void readStateVersion;
     const eligibleItems = sortedChatItems.slice(0, historyCap);
     const split = derivePrioritySplit(eligibleItems.map((item) => {
-      const packet = historyPacketsByTabId.get(item.tabId);
+      const agent = agentByTabId.get(item.tabId);
+      if (agent) return { item, modifiedAt: item.modifiedAt, ...agent.attention };
+      const packet = historyAttentionPackets.get(item.tabId);
       return {
         item,
         modifiedAt: item.modifiedAt,
@@ -414,19 +462,21 @@ export function ChatsTab({
       };
     }));
     return {
-      priority: split.priority.map((entry) => entry.item),
-      remainder: split.remainder.map((entry) => entry.item),
+      needsAttention: split.priority.length,
+      priority: [...split.priority, ...split.remainder.filter((entry) => staysInWorkingView(entry))].map((entry) => entry.item),
+      remainder: split.remainder.filter((entry) => !staysInWorkingView(entry)).map((entry) => entry.item),
     };
-  }, [historyCap, historyPacketsByTabId, sortedChatItems]);
-  const flatRemainderItems = flatPrioritySplit.remainder.slice(
+  }, [agentByTabId, historyAttentionPackets, historyCap, readStateVersion, sortedChatItems]);
+  usePublishSidebarAttention([...historyAttentionPackets.values()].filter((packet) => packet && attentionRank(packetAttention(packet)) > 0).length
+    + sortedChatItems.filter(item => { const agent = agentByTabId.get(item.tabId); return agent && attentionRank(agent.attention) > 0; }).length, compact);
+  const flatRemainderItems = [...flatPrioritySplit.remainder].sort((a, b) => Number(b.pinned) - Number(a.pinned)).slice(
     0,
     compact && !showAllChats ? Math.max(0, 12 - flatPrioritySplit.priority.length) : Number.POSITIVE_INFINITY,
   );
   const shownActivityCount = flatPrioritySplit.priority.length + flatRemainderItems.length;
   const hiddenChatCount = Math.max(0, cappedChatCount - (
-    chatGroupBy === 'flat' ? shownActivityCount : flatHistoryItems.length
+    chatGroupBy === 'flat' || chatGroupBy === 'working' ? shownActivityCount : flatHistoryItems.length
   ));
-  const showRepoSuffix = deriveShowRepoSuffix([...visibleHistory, ...visibleArchivedHistory]);
 
   const flatArchivedLanes = useMemo(
     () => deriveArchivedLanes(archivedLanes, targetRepos.map((repo) => repo.localPath)),
@@ -467,12 +517,12 @@ export function ChatsTab({
     return groups.filter((group) => group.items.length > 0);
   }, [allowedSections, remainingHistorySlots, sectionLabel, visibleChatHistory, visibleOrchestratorHistory]);
   const showMergedPackets = groupMode === 'sections' && !compact && visibleMergedPackets.length > 0;
-  const showArchivedHistory = combinedArchivedHistory.length > 0 || flatArchivedLanes.length > 0;
+  const showArchivedHistory = chatGroupBy !== 'scheduled' && (combinedArchivedHistory.length > 0 || flatArchivedLanes.length > 0);
   const hasContent = displayedSessions.length > 0 || (
     groupMode === 'flat'
       ? flatHistoryItems.length > 0
       : historyGroups.some((group) => group.items.length > 0)
-  ) || Boolean(agentsSection) || showMergedPackets || showArchivedHistory;
+  ) || agentEntries.length > 0 || showMergedPackets || showArchivedHistory;
   const toggleGroup = (key: HistoryGroupKey) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -508,12 +558,22 @@ export function ChatsTab({
     // Never leave the Agents section stuck dimmed if this tab unmounts mid-hover.
     clearThreadHoverTimers();
     broadcastThreadLink(null);
-  }, [broadcastThreadLink, clearThreadHoverTimers]);
+    setThreadHover(null);
+  }, [broadcastThreadLink, chatGroupBy, clearThreadHoverTimers]);
 
   const renderHistoryRow = (item: ChatHistoryItem, archived = false) => {
+    const wrap = (node: ReactNode) => compact && !archived ? <SidebarSortableRow key={item.tabId} item={item}
+      insertion={manualOrder.insertion} onMove={manualOrder.move} siblings={sortedChatItems}>{node}</SidebarSortableRow>
+      : <Fragment key={item.tabId}>{node}</Fragment>;
+    const agent = agentByTabId.get(item.tabId);
+    if (agent) return wrap(<Fragment key={item.tabId}>{agent.render({
+      roomy: compact && (chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId)),
+      showPreview: chatGroupBy === 'flat' || chatGroupBy === 'working' && !item.pinned && workingHistoryIds.has(item.tabId),
+      repoLabel: chatGroupBy === 'repo' ? null : repoSuffix(item, targetRepos),
+    })}</Fragment>);
     const owned = archived ? [] : ownedPacketsByThread.get(item.tabId) ?? [];
-    const packet = historyPacketsByTabId.get(item.tabId);
-    return (
+    const packet = historyAttentionPackets.get(item.tabId);
+    return wrap(
       <HistoryChatRow
         key={item.tabId}
         item={item}
@@ -521,15 +581,12 @@ export function ChatsTab({
         disabled={!onOpenHistoryChat}
         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
         tone={archived ? HISTORY_ROW_TONES.neutral : packetStateTone(packet)}
-        // Repo ALWAYS shows (Q ruling 2026-07-31: glanceability — "where" is
-        // what you scan for). Branch only when the list is single-repo, so
-        // multi-repo meta lines don't crowd at 9.5px.
-        repoLabel={repoSuffix(item)}
-        branchLabel={!showRepoSuffix ? item.repoBranch ?? packet?.branchTarget ?? null : null}
+        repoLabel={compact && chatGroupBy === 'repo' ? null : repoSuffix(item, targetRepos)}
         ownedCount={owned.length}
-        onHoverChange={owned.length > 0
-          ? (rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)
-          : undefined}
+        roomy={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned))}
+        preview={compact && (chatGroupBy === 'flat' || (chatGroupBy === 'working' && workingHistoryIds.has(item.tabId) && !item.pinned)) ? item.preview : undefined}
+        scheduled={ideWorkspaceSessions.some((session) => sessionIdentity(session).includes(item.tabId) && isOwnedAutomationSession(session))}
+        onHoverChange={(rect) => handleThreadHover(item, owned.map((packet) => packet.id), rect)}
         onOpen={() => openHistoryItem(item)}
         onOpenMenu={(event) => setHistoryActionMenu({ item, archived, x: event.clientX, y: event.clientY })}
       />
@@ -563,99 +620,29 @@ export function ChatsTab({
         ))
       ) : null}
 
-      {groupMode === 'flat' && (flatHistoryItems.length > 0 || (compact && chatGroupBy === 'flat')) ? (
+      {groupMode === 'flat' && (flatHistoryItems.length > 0 || compact) ? (
         <div>
           {compact ? (
             <>
-              <SectionLabel label="Chats" compact />
-              {chatGroupBy === 'flat' ? (
-                <>
-                  <RepoGroupLabel
-                    label="Priority"
-                    noIcon
-                    trailing={<ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} />}
-                  />
-                  {flatPrioritySplit.priority.length > 0 ? (
-                    flatPrioritySplit.priority.map((item) => renderHistoryRow(item))
-                  ) : (
-                    <div
-                      style={{
-                        paddingTop: 2,
-                        paddingRight: 12,
-                        paddingBottom: 5,
-                        paddingLeft: 29,
-                        color: 'var(--t-text-faint)',
-                        fontSize: 9.5,
-                        lineHeight: 1.25,
-                        fontWeight: 260,
-                        letterSpacing: '-0.4px',
-                      }}
-                    >
-                      Nothing needs attention
-                    </div>
-                  )}
-                  {flatRemainderItems.map((item) => renderHistoryRow(item))}
-                </>
-              ) : chatGroupBy === 'date' ? (
-                flatHistoryDateGroups.map((group, index) => (
-                  <div key={group.key}>
-                    <RepoGroupLabel
-                      label={group.label}
-                      trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
-                    />
-                    {group.items.map((item) => renderHistoryRow(item))}
-                  </div>
-                ))
-              ) : (
-                flatHistoryRepoGroups.map((group, index) => {
-                  const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
-                  const groupCollapsed = collapsedRepoGroups.has(group.key);
-                  const groupRepo = isConversations ? undefined : repoByGroupKey.get(group.key);
-                  const groupRepoMissing = groupRepo?.readiness?.state === 'missing';
-                  return (
-                    <div key={group.key}>
-                      <RepoGroupLabel
-                        label={group.label}
-                        noIcon={isConversations}
-                        collapsed={groupCollapsed}
-                        onToggle={() => toggleRepoGroup(group.key)}
-                        onCreate={canCreateOrchestratorForRepo(groupRepo) && onCreateOrchestratorForRepo
-                          ? () => onCreateOrchestratorForRepo(groupRepo)
-                          : undefined}
-                        createTitle={groupRepo ? `New session in ${groupRepo.name}` : undefined}
-                        trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
-                      />
-                      {groupRepoMissing ? <MissingRepoRailNotice summary={groupRepo.readiness?.summary ?? ''} /> : null}
-                      {groupCollapsed ? null : group.items.map((item) => renderHistoryRow(item))}
-                    </div>
-                  );
-                })
-              )}
-              {hiddenChatCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAllChats(true)}
-                  style={{
-                    width: '100%',
-                    minHeight: 25,
-                    borderWidth: 0,
-                    background: 'transparent',
-                    color: 'var(--t-text-faint)',
-                    cursor: 'pointer',
-                    paddingTop: 4,
-                    paddingRight: 12,
-                    paddingBottom: 4,
-                    paddingLeft: 37,
-                    textAlign: 'left',
-                    fontFamily: REPO_FOCUS_FONT,
-                    fontSize: 9.5,
-                    fontWeight: 260,
-                    letterSpacing: '-0.4px',
-                  }}
-                >
-                  Show {hiddenChatCount} more
-                </button>
-              ) : null}
+              {chatGroupBy === 'working' ? <WorkingChatHistory
+                items={sortedChatItems.slice(0, historyCap)} workingIds={workingHistoryIds} fixtures={demoFixtures}
+                activeSessionKey={activeSessionKey} renderHistoryRow={renderHistoryRow} onOpenHistoryChat={onOpenHistoryChat}
+                onChangeView={updateChatGroupBy} showAll={showAllChats} onShowMore={() => setShowAllChats(true)}
+                viewActions={agentViewActions}
+              /> : <CompactChatHistory
+                chatGroupBy={chatGroupBy} updateChatGroupBy={updateChatGroupBy}
+                priority={flatPrioritySplit.priority} remainder={flatRemainderItems}
+                flatHistoryItems={flatHistoryItems} flatHistoryDateGroups={flatHistoryDateGroups}
+                flatHistoryRepoGroups={flatHistoryRepoGroups} collapsedRepoGroups={collapsedRepoGroups}
+                repoByGroupKey={repoByGroupKey} toggleRepoGroup={toggleRepoGroup}
+                onCreateOrchestratorForRepo={onCreateOrchestratorForRepo} renderHistoryRow={renderHistoryRow}
+                hiddenChatCount={hiddenChatCount} showMore={() => setShowAllChats(true)}
+                fixtures={demoFixtures} activeSessionKey={activeSessionKey} onOpenHistoryChat={onOpenHistoryChat}
+                viewActions={agentViewActions}
+                scheduledSessions={chatGroupBy === 'scheduled' ? visibleSessions.filter(isOwnedAutomationSession).map((session) => (
+                  <CompactSessionRow key={session.sessionKey} session={session} onSelectSession={onSelectSession} />
+                )) : null}
+              />}
             </>
           ) : (
             <>
@@ -676,7 +663,6 @@ export function ChatsTab({
           <SectionLabel
             label="Merged"
             compact={compact}
-            count={visibleMergedPackets.length}
             collapsed={collapsedGroups.merged}
             onToggle={() => toggleGroup('merged')}
           />
@@ -693,7 +679,6 @@ export function ChatsTab({
           <SectionLabel
             label={group.label}
             compact={compact}
-            count={group.items.length}
             collapsed={collapsedGroups[group.key]}
             onToggle={() => toggleGroup(group.key)}
           />
@@ -702,8 +687,6 @@ export function ChatsTab({
           )}
         </div>
       )) : null}
-
-      {agentsSection}
 
       {showArchivedHistory ? (
         <div>
@@ -728,7 +711,8 @@ export function ChatsTab({
         </div>
       ) : null}
 
-      {!hasContent ? (
+      {!hasContent && !demoFixtures.length ? (
+        !loading && !historyUnavailable && emptyActions ? <div style={{ paddingTop: 8, paddingBottom: 8 }}>{emptyActions}</div> :
         <div
           style={{
             paddingTop: 42,
@@ -740,10 +724,10 @@ export function ChatsTab({
           }}
         >
           <div style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, color: 'var(--t-text-muted)' }}>
-            {loading ? 'Loading project chats…' : 'No project chats yet'}
+            {loading ? 'Loading project chats…' : historyUnavailable ? 'Project chats unavailable' : 'No project chats yet'}
           </div>
           <div style={{ marginTop: 4, fontSize: 12, lineHeight: '16px' }}>
-            {loading ? 'Saved conversations will appear here.' : 'New and saved chats for this project will collect here.'}
+            {loading ? 'Saved conversations will appear here.' : historyUnavailable ? <button type="button" onClick={() => void fetchHistory()} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', font: 'inherit' }}>Try again</button> : 'New and saved chats for this project will collect here.'}
           </div>
         </div>
       ) : null}
@@ -766,8 +750,12 @@ export function ChatsTab({
       ) : null}
       {threadHover ? (
         <OrchestratorHoverCard
+          threadId={threadHover.item.tabId}
           title={threadHover.item.title}
           repoLabel={repoSuffix(threadHover.item)}
+          branchLabel={threadHover.item.repoBranch}
+          workspacePath={threadHover.item.repoPath}
+          updatedAt={threadHover.item.modifiedAt}
           backendLabel={threadHover.item.backend
             ? orchestratorBackendDisplayLabel({ backend: threadHover.item.backend, agent: threadHover.item.agent })
             : null}

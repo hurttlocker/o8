@@ -2501,3 +2501,22 @@ button.workflow-file-item.workflow-file-item-active {
 @media (prefers-reduced-motion: reduce) {
   [data-design-composer] { animation: none !important; }
 }
+
+/* Navigation and retained chat rows share a visible keyboard focus treatment. */
+[data-o8-chat-list] :is(button, [role="button"]):focus-visible,
+[data-pull-requests-list] :is(button, input, select):focus-visible,
+[data-pr-menu] :is(button, select):focus-visible,
+[data-pr-detail] :is(button, a, textarea, [role="tabpanel"]):focus-visible,
+[data-right-pr-tabs] button:focus-visible,
+[aria-label="Panel views"] button:focus-visible,
+[aria-label="Open a panel"]:focus-visible,
+[data-mcp-scope="compact-navigation-rail"] button:focus-visible {
+  outline: 2px solid var(--t-accent) !important;
+  outline-offset: -3px;
+  border-radius: 9px;
+}
+
+[data-pr-brain-chat] textarea::placeholder { color: var(--t-text-faint); }
+@media (prefers-reduced-motion: reduce) {
+  [data-pr-brain-chat] { transition: none !important; }
+}

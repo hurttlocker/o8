@@ -13,13 +13,39 @@ vi.mock('@/lib/tauri/ipc-fetch', () => ({
   ipcFetch: (...args: unknown[]) => mockIpcFetch(...args),
 }));
 
-import { fetchOnce } from './fetch-cache';
+import { fetchOnce, fetchSWRJson, invalidateFetchOnce } from './fetch-cache';
 
 beforeEach(() => {
   mockIpcFetch.mockReset();
 });
 
 describe('fetchOnce dedup window', () => {
+  it.each([
+    new DOMException('Fetch is aborted', 'AbortError'),
+    new TypeError('Failed to fetch'),
+  ])('delivers a failed shared read to callers and permits an immediate retry: %s', async (error) => {
+    const controller = new AbortController();
+    mockIpcFetch.mockImplementationOnce((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(error), { once: true });
+    }));
+    const url = `/api/panel/repos?rejected-read=${Math.random()}`;
+    const key = `repos-rejection:${Math.random()}`;
+    const reads = Promise.allSettled([
+      fetchSWRJson(key, url, { signal: controller.signal }),
+      fetchOnce(url),
+    ]);
+    controller.abort();
+    expect(await reads).toEqual([
+      { status: 'rejected', reason: error },
+      { status: 'rejected', reason: error },
+    ]);
+    mockIpcFetch.mockResolvedValueOnce(Response.json({ repos: ['recovered'] }));
+    await expect(fetchSWRJson(key, url)).resolves.toEqual({ repos: ['recovered'] });
+    expect(mockIpcFetch).toHaveBeenCalledTimes(2);
+    // Let orphaned promise rejections reach the runner, as they do the webview.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   it('lets every deduped caller read the body independently', async () => {
     mockIpcFetch.mockResolvedValue(new Response(JSON.stringify({ ok: 1 }), {
       headers: { 'Content-Type': 'application/json' },
@@ -82,6 +108,33 @@ describe('fetchOnce dedup window', () => {
       expect(mockIpcFetch).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps a replacement read shared when an invalidated older request settles', async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseOld!: (response: Response) => void;
+      let releaseFresh!: (response: Response) => void;
+      mockIpcFetch
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { releaseOld = resolve; }))
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => { releaseFresh = resolve; }));
+      const url = '/api/panel/projects?replacement-read';
+      const oldRead = fetchOnce(url);
+      invalidateFetchOnce(url);
+      const freshRead = fetchOnce(url);
+      releaseOld(Response.json({ revision: 'old' }));
+      await oldRead;
+      await vi.advanceTimersByTimeAsync(151);
+      const joiningRead = fetchOnce(url);
+      expect(mockIpcFetch).toHaveBeenCalledTimes(2);
+      releaseFresh(Response.json({ revision: 'fresh' }));
+      const responses = await Promise.all([freshRead, joiningRead]);
+      expect(await Promise.all(responses.map((response) => response.json())))
+        .toEqual([{ revision: 'fresh' }, { revision: 'fresh' }]);
+      await vi.advanceTimersByTimeAsync(151);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

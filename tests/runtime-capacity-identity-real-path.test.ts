@@ -12,9 +12,11 @@ vi.mock('@clerk/nextjs/server', () => ({
 const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'o8-capacity-identity-'));
 const dataDir = path.join(tempRoot, 'data');
 const wsToken = 'capacity-operator-token-0123456789abcdef';
+const originalCodexHome = process.env.CODEX_HOME;
 mkdirSync(dataDir, { recursive: true });
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+process.env.CODEX_HOME = makeCodexHome('default-config-home', 'fixture-default-token');
 writeFileSync(path.join(dataDir, 'ws-token'), `${wsToken}\n`, 'utf8');
 
 const capacityRoute = await import('@/app/api/runtime/capacity/route');
@@ -91,6 +93,8 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = originalCodexHome;
   rmSync(tempRoot, { recursive: true, force: true });
 });
 

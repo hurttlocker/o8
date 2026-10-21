@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorDataValue } from '../orchestrator-data-context';
+import { SessionTranscriptPane } from '../SessionTranscriptPane';
 import * as actionReceipt from '@/lib/orchestrator/action-receipt';
+
+const context = vi.hoisted(() => ({ value: null as OrchestratorDataValue | null }));
+vi.mock('../orchestrator-data-context', () => ({ useOrchestratorData: () => context.value }));
 
 const transcriptMock = vi.hoisted(() => ({
   slice: {
@@ -17,13 +22,6 @@ const transcriptMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/transcripts/useTranscript', () => ({
   useTranscript: () => transcriptMock.slice,
-}));
-
-vi.mock('framer-motion', () => ({
-  AnimatePresence: ({ children }: { children: ReactNode }) => children,
-  motion: {
-    form: ({ children, ...props }: { children?: ReactNode }) => createElement('form', props, children),
-  },
 }));
 
 vi.mock('./SessionTransformMenu', () => ({ SessionTransformMenu: () => null }));
@@ -240,7 +238,10 @@ describe('AgentTilePane worker identity', () => {
     expect(host?.querySelector('[data-worker-model]')?.textContent).toBe('· gpt-6-sol');
     expect(host?.querySelector('[data-worker-model]')?.parentElement?.parentElement?.textContent).toContain('Worker');
     expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
-    expect(host?.textContent).toContain('To @Worker · Steer');
+    expect(host?.querySelector('[data-o8-composer-root]')).not.toBeNull();
+    expect(host?.querySelector('[data-brain-dock-tab]')).toBeNull();
+    expect(host?.querySelector('[data-testid="composer-send-control"]')).not.toBeNull();
+    expect(host?.textContent).not.toContain('To @Worker · Steer');
     expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');
   });
 
@@ -337,7 +338,7 @@ describe('AgentTilePane worker identity', () => {
       const check = [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent === 'Check receipt');
       check?.click();
     });
-    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Steer accepted');
+    expect(host?.querySelector('[data-worker-steer-receipt]')).toBeNull();
     expect(receipt).toHaveBeenCalledTimes(2);
     expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
     expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body)).clientMutationId).toBe('one-steer-id');
@@ -364,6 +365,16 @@ describe('classifyAgentTileStatus', () => {
 });
 
 describe('canSteerAgentState', () => {
+  it('keeps completed owned conversations available without enabling unrelated external sessions or failed packets', () => {
+    for (const sessionKey of ['codex-owned:one', 'claude-code-owned:two']) {
+      expect(canSteerAgentState({ status: 'completed' }, null, sessionKey)).toBe(true);
+      expect(canSteerAgentState({ status: 'idle' }, null, sessionKey)).toBe(true);
+      expect(canSteerAgentState({ status: 'failed' }, null, sessionKey)).toBe(false);
+      expect(canSteerAgentState({ status: 'completed' }, { status: 'failed' }, sessionKey)).toBe(false);
+    }
+    expect(canSteerAgentState({ status: 'completed' }, null, 'external:other')).toBe(false);
+  });
+
   it('keeps the composer available for a huddle waiting on direction', () => {
     expect(canSteerAgentState(
       { status: 'idle' },
@@ -396,4 +407,23 @@ describe('canSteerAgentState', () => {
     expect(canSteerAgentState({ status: 'idle' }, { status: 'released' })).toBe(false);
     expect(canSteerAgentState(null, null)).toBe(false);
   });
+});
+
+it('opens review from the matching worker header with its exact lane and repository, without merging', async () => {
+  const openReview = vi.fn(); const request = vi.fn(async (_input: RequestInfo | URL) => Response.json({})); vi.stubGlobal('fetch', request);
+  const packets = ['alpha', 'beta'].map(id => ({ id, title: `Work ${id}`, status: 'awaiting_review',
+    lane: { laneId: `lane-${id}`, sessionKey: `session-${id}`, repoPath: `/projects/${id}` },
+  } as OrchestratorPacket));
+  context.value = { agents: [], missionState: { packets }, onOpenO8Panel: openReview } as unknown as OrchestratorDataValue;
+  try {
+    act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
+    const headers = host!.querySelectorAll('[data-worker-pane-header]');
+    expect(headers).toHaveLength(2);
+    act(() => headers[1].querySelector<HTMLButtonElement>('[data-worker-open-review]')!.click());
+    expect(openReview).toHaveBeenCalledExactlyOnceWith({ tab: 'review', reviewLaneId: 'lane-beta', repoPath: '/projects/beta' });
+    expect(request.mock.calls.some(call => String(call[0]).includes('/merge'))).toBe(false);
+    context.value = { ...context.value, missionState: { packets: packets.map(packet => ({ ...packet, status: 'running' })) } } as OrchestratorDataValue;
+    act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
+    expect(host!.querySelector('[data-worker-pane-header] [data-worker-open-review]')).toBeNull();
+  } finally { context.value = null; }
 });

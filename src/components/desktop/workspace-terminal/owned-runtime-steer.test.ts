@@ -76,4 +76,9 @@ describe('owned runtime steer queue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]).toEqual(fetchMock.mock.calls[1]);
   });
+  it('preserves a queued intent identity in the actual outbound request', async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({ ok: true, status: 'completed' })); vi.stubGlobal('fetch', request);
+    await fetchOwnedRuntimeSteerReceipt('muse-owned:fixture', 'queued intent', 'd2fe8743-d3e3-4100-a93e-e18ab442f576');
+    expect(JSON.parse(request.mock.calls[0][1].body)).toMatchObject({ clientMutationId: 'd2fe8743-d3e3-4100-a93e-e18ab442f576', message: 'queued intent' });
+  });
 });

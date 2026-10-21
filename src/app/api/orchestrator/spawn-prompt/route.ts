@@ -1,8 +1,11 @@
+import { MissionProjectScopeError } from '@/lib/orchestrator/mission-project-context';
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import {
   buildInlineIssuesFromPrompt,
+  resolveSpawnCount,
+  assertSpawnBatchMaterializable,
   createMission,
   dispatchMission,
 } from '@/lib/orchestrator/operator-mission-service';
@@ -74,6 +77,18 @@ export async function POST(request: NextRequest) {
     : '';
   if (!clientMutationId) {
     return operatorError('client_mutation_id_required', 'clientMutationId is required.', 400);
+  }
+
+  let count: number;
+  try {
+    count = resolveSpawnCount(record.count);
+  } catch (error) {
+    return operatorError('invalid_request', (error as Error).message, 400);
+  }
+  try {
+    assertSpawnBatchMaterializable(task, count, typeof record.constraints === 'string' ? record.constraints : '', repoPath);
+  } catch (error) {
+    return operatorError('resource_limit', (error as Error).message, 400);
   }
 
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
@@ -163,15 +178,19 @@ export async function POST(request: NextRequest) {
 
   let issues;
   try {
-    issues = buildInlineIssuesFromPrompt(task, typeof record.count === 'number' ? record.count : 1);
+    issues = buildInlineIssuesFromPrompt(task, count);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to build spawn tasks.';
     return operatorError('invalid_request', message, 400);
   }
 
+  if (record.projectId !== undefined && (typeof record.projectId !== 'string' || !record.projectId.trim())) {
+    return operatorError('invalid_request', 'projectId must be a non-empty project identifier.', 400);
+  }
   const createInput = {
       issues,
       repoPath,
+      ...(typeof record.projectId === 'string' ? { projectId: record.projectId.trim() } : {}),
       runtime: workerRouting.selectedRuntime,
       workerIntent: workerRouting.workerIntent,
       requestedProvider: workerRouting.requestedProvider,
@@ -253,6 +272,7 @@ export async function POST(request: NextRequest) {
       inProgress: outcome.inProgress || undefined,
     }, outcome.inProgress ? 202 : 201);
   } catch (error) {
+    if (error instanceof MissionProjectScopeError) return operatorError(error.code, error.message, 400);
     const message = error instanceof Error ? error.message : 'Unable to spawn agents.';
     return operatorError('spawn_prompt_failed', message, 500, error);
   }

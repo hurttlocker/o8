@@ -2,12 +2,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
 import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
+import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
@@ -17,8 +19,15 @@ import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
+import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
+import { DARK_FRAME_GLASS_TINT } from '@/lib/theme/glass-material';
+import { SHELL_EDGE_INSET, SHELL_HEADER_HEIGHT, workspaceFrameCorners } from '@/components/desktop/shell/shell-geometry';
+import { RightPanelResizeEdge } from '@/components/desktop/shell/RightPanelResizeEdge';
+import { useColumnResize, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '@/components/desktop/hooks/useColumnResize';
+import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
 import { ProjectsPage } from '@/components/desktop/ProjectsPage';
-import { RetainedCustomizeView } from '@/components/desktop/customize/RetainedCustomizeView';
+import { WorkspaceUtilityProvider } from '@/components/desktop/canvas/WorkspaceUtilityContext';
+import { isWorkspaceUtilityKind, workspaceUtilityTab, type WorkspaceUtilityKind } from '@/components/desktop/canvas/workspace-utility-navigation';
 // AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import {
@@ -27,6 +36,7 @@ import {
   supersedeHistoryOpenRequest,
 } from '@/components/desktop/repo-focus/tabs/chats/helpers';
 import type { CanvasTab } from '@/components/desktop/Canvas';
+import { useVisualizationWorkspaceEvents } from '@/components/desktop/visualizations/useVisualizationWorkspaceEvents';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { EntitlementProvider } from '@/lib/entitlement/context';
@@ -39,9 +49,17 @@ import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { requestTerminalModeToggle } from '@/components/desktop/shell/TerminalModePill';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
+import { useRightPanelMaximize } from '@/components/desktop/shell/useRightPanelMaximize';
+import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
+import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
+import { TerminalCloseDialog } from '@/components/desktop/workspace-terminal/TerminalCloseDialog';
+import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
+import { threadPanelAvailability } from '@/components/desktop/o8-panel/thread-navigation';
+import { resolveThreadProject } from '@/components/desktop/o8-panel/threads-model';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
+import { AddRepoFlowHost } from '@/components/desktop/repo-registry/AddRepoFlowHost';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { useCommandPaletteHotkey } from '@/components/desktop/use-command-palette-hotkey';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
@@ -54,6 +72,7 @@ import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { SymonTextBridgeHost } from '@/components/desktop/dictation/SymonTextBridgeHost';
+import { VisualInstructionHost } from '@/components/desktop/visual-instructions/VisualInstructionHost';
 import { NarrationSpeakerHost } from '@/components/desktop/dictation/NarrationSpeakerHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
@@ -65,12 +84,13 @@ import {
   FOCUS_REPO_WORKSPACE_TAB_EVENT,
   OPEN_MOBILE_PAIRING_EVENT,
   OPEN_SETTINGS_TAB_EVENT,
+  OPEN_KEYBOARD_SHORTCUTS_EVENT,
   type OpenSettingsTabDetail,
 } from '@/lib/desktop/events';
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo } from './types';
-import type { O8Tab } from '@/components/desktop/o8-panel/types';
+import { canonicalPanelTab, normalizePanelTab as normalizeO8ActiveTab, type O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   logDashboardBootTiming,
   markDashboardScriptStart,
@@ -151,6 +171,7 @@ import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useRightPanelPersistence } from './hooks/useRightPanelPersistence';
+import { useBrowserOpenRequests } from './hooks/useBrowserOpenRequests';
 import {
   MAX_O8_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
@@ -161,6 +182,7 @@ import {
 import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
+import { isOrchestratorRuntime, runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
 import { resolveFocusableLaneBinding } from './hooks/focusOrchestrationPacketLane';
 import { handleRepoWorkspaceFocusEvent } from './hooks/focusRepoWorkspace';
 import { useDesignMode } from '@/hooks/useDesignMode';
@@ -172,6 +194,7 @@ import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { createDashboardChromeKeydownHandler } from './dashboard-chrome-shortcuts';
+import { openMainTerminal } from '@/app/dashboard/open-main-terminal';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -187,8 +210,6 @@ markDashboardScriptStart();
 const LazySettingsPage = retryingLazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })), { label: 'Settings' });
 // LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
 // the live entry point. AnalyticsPage is still consumed via that tab.
-const LazyAutomationsPage = retryingLazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })), { label: 'Automations' });
-const LazyCustomizePage = retryingLazy(() => import('@/components/desktop/CustomizePage').then(m => ({ default: m.CustomizePage })), { label: 'Customize' });
 const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
 const LazyTelemetryConsentCard = retryingLazy(() => import('@/components/desktop/TelemetryConsentCard').then(m => ({ default: m.TelemetryConsentCard })), { label: 'Telemetry consent' });
 const LazyCommandPalette = retryingLazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })), { label: 'Command palette' });
@@ -234,28 +255,8 @@ import {
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
-const DEFAULT_LEFT_PANEL_WIDTH = 300;
-// 40 = the workspace card's measured top (36px header strip + 4px inset), so
-// the hover preview's top edge rides the SAME line as the workspace card
-// beside it (Q 2026-07-16: "they aren't parallel to the workspace"). Was 35
-// (pill bottom 33 + 2px) — the 7px pill→overlay gap is still inside the
-// hover-close grace timer, unlike the old 11px dead zone at 44 (2026-05-28).
-// Uniform breathing on every open side (Q 2026-07-16 "however much it is
-// from the left side, do that to the top and bottom"): the 8px left gap is
-// the reference — top gap = 8 below the 36px header strip, bottom gap = 8
-// above the WINDOW bottom (the overlay stands in for the full-height sidebar
-// dock; the status bar only spans center+right now). Known trade-off: the
-// pill→overlay hover gap grows to ~11px again — the hover-close grace timer
-// covers crossing it; if the 2026-05-28 click-dead-zone complaint returns,
-// bridge it with an invisible hover extension, don't shrink the frame.
-const SIDEBAR_PREVIEW_INSET = 8;
-const SIDEBAR_PREVIEW_TOP = 36 + SIDEBAR_PREVIEW_INSET;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
-const O8_SPEC_PANEL_TARGET_WIDTH = 600;
-// The N-up compare matrix needs width — two candidate columns fit comfortably at
-// ~960px; 3+ horizontally scroll (see ComparisonMatrix).
-const O8_COMPARE_PANEL_TARGET_WIDTH = 960;
 const RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH = 1180;
 // Fold to the existing rail before a four-worker split loses readable width.
 const RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH = 1280;
@@ -276,329 +277,6 @@ const O8_ACTIVE_TAB_PREF_VERSION = '2';
  *  (source, config, docs, svg) opens in the 'file' viewer, which itself routes
  *  .html/.htm to HtmlPreview. */
 const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-
-/**
- * SidebarHoverPreviewBody — content shown inside the drop-from-top overlay
- * when the AgentPanel column is collapsed and the operator hovers the left
- * edge. Renders a condensed snapshot of the same data the full sidebar
- * surfaces — active project + repo list + live packets + sessions — so the
- * operator can scan and click through chats without expanding the panel.
- *
- * Kept intentionally lightweight (no useEffect-driven fetches, no expensive
- * memoization) since the parent `AnimatePresence` mounts/unmounts it on
- * every hover-enter. The data props are already-computed snapshots from
- * DashboardInner, so re-renders are cheap.
- */
-interface SidebarHoverPreviewBodyProps {
-  projects: ProjectRecord[];
-  activeProjectId: string | null;
-  repos: RepoRegistryEntry[];
-  packets: OrchestratorPacket[];
-  sessions: AgentSummary[];
-  activeSessionKey: string | null;
-  onOpenFullPanel: () => void;
-  onSelectSession: (sessionKey: string) => void;
-}
-
-function SidebarHoverPreviewBody({
-  projects,
-  activeProjectId,
-  repos,
-  packets,
-  sessions,
-  activeSessionKey,
-  onOpenFullPanel,
-  onSelectSession,
-}: SidebarHoverPreviewBodyProps) {
-  const activeProject = projects.find((p) => p.id === activeProjectId) ?? projects[0] ?? null;
-  const livePackets = packets.filter((p) => p.status !== 'released' && p.status !== 'archived');
-  const previewPackets = livePackets.slice(0, 5);
-  const previewSessions = sessions.slice(0, 6);
-
-  // Hurttlocker spec — system stack only, no Inter; chrome rows clamp at
-  // fontWeight 400, section labels at 300 and 10px tracked uppercase, row
-  // titles at 13.5/300/-0.1px.
-  const sectionLabelStyle: React.CSSProperties = {
-    display: 'block',
-    paddingLeft: 14,
-    paddingRight: 14,
-    paddingTop: 8,
-    paddingBottom: 4,
-    fontSize: 10,
-    fontWeight: 300,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    color: 'var(--t-text-muted)',
-  };
-  const rowTitleStyle: React.CSSProperties = {
-    fontSize: 13.5,
-    fontWeight: 300,
-    letterSpacing: -0.1,
-    color: 'var(--t-text)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  };
-  const rowMetaStyle: React.CSSProperties = {
-    fontSize: 11,
-    fontWeight: 300,
-    color: 'var(--t-text-muted)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-  };
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        flex: 1,
-        minHeight: 0,
-      }}
-    >
-      {/* Header — project name + open-full-panel affordance */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
-          paddingLeft: 14,
-          paddingRight: 12,
-          paddingTop: 12,
-          paddingBottom: 10,
-          borderBottom: '1px solid var(--t-divider-subtle)',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 300,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              color: 'var(--t-text-muted)',
-            }}
-          >
-            Project
-          </span>
-          <span
-            style={{
-              fontSize: 13.5,
-              fontWeight: 400,
-              letterSpacing: -0.1,
-              color: 'var(--t-text)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {activeProject?.name ?? 'No project'}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onOpenFullPanel}
-          aria-label="Open full sidebar"
-          title="Open full sidebar"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: 26,
-            minWidth: 26,
-            paddingLeft: 8,
-            paddingRight: 8,
-            borderWidth: 0,
-            borderRadius: 7,
-            background: 'transparent',
-            color: 'var(--t-text-secondary)',
-            cursor: 'pointer',
-            fontSize: 11,
-            fontWeight: 300,
-            letterSpacing: 0.2,
-            fontFamily: 'inherit',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
-        >
-          Open
-        </button>
-      </div>
-
-      {/* Scrollable body — repos / packets / sessions sections */}
-      <div
-        className="cortex-themed-scroll"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          paddingBottom: 8,
-        }}
-      >
-        {repos.length > 0 && (
-          <>
-            <span style={sectionLabelStyle}>Repos</span>
-            {repos.slice(0, 6).map((repo) => (
-              <div
-                key={repo.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  paddingLeft: 14,
-                  paddingRight: 14,
-                  paddingTop: 6,
-                  paddingBottom: 6,
-                  minHeight: 28,
-                }}
-              >
-                <span style={rowTitleStyle}>{repo.name}</span>
-                {repo.readiness?.currentBranch ? (
-                  <span style={{ ...rowMetaStyle, marginLeft: 'auto' }}>{repo.readiness.currentBranch}</span>
-                ) : null}
-              </div>
-            ))}
-            {repos.length > 6 ? (
-              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
-                +{repos.length - 6} more
-              </div>
-            ) : null}
-          </>
-        )}
-
-        {previewPackets.length > 0 && (
-          <>
-            <span style={sectionLabelStyle}>Active packets</span>
-            {previewPackets.map((packet) => (
-              <div
-                key={packet.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  paddingLeft: 14,
-                  paddingRight: 14,
-                  paddingTop: 6,
-                  paddingBottom: 6,
-                  minHeight: 32,
-                }}
-              >
-                <span style={rowTitleStyle}>{packet.title || packet.referenceLabel || packet.id}</span>
-                <span style={rowMetaStyle}>
-                  {packet.status}
-                  {packet.branchTarget ? ` · ${packet.branchTarget}` : ''}
-                </span>
-              </div>
-            ))}
-            {livePackets.length > previewPackets.length ? (
-              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
-                +{livePackets.length - previewPackets.length} more
-              </div>
-            ) : null}
-          </>
-        )}
-
-        {previewSessions.length > 0 && (
-          <>
-            <span style={sectionLabelStyle}>Chats</span>
-            {previewSessions.map((session) => {
-              const isActive = activeSessionKey === session.sessionKey;
-              const label = session.surfaceLabel || session.name || session.sessionKey;
-              return (
-                <button
-                  key={session.sessionKey}
-                  type="button"
-                  onClick={() => onSelectSession(session.sessionKey)}
-                  style={{
-                    display: 'flex',
-                    width: '100%',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingLeft: 14,
-                    paddingRight: 14,
-                    paddingTop: 8,
-                    paddingBottom: 8,
-                    minHeight: 36,
-                    background: isActive ? 'var(--t-input-bg)' : 'transparent',
-                    borderWidth: 0,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: 'inherit',
-                    color: 'inherit',
-                  }}
-                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
-                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-                    <span style={rowTitleStyle}>{label}</span>
-                    {session.currentTask ? (
-                      <span style={rowMetaStyle}>{session.currentTask}</span>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-            {sessions.length > previewSessions.length ? (
-              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
-                +{sessions.length - previewSessions.length} more
-              </div>
-            ) : null}
-          </>
-        )}
-
-        {repos.length === 0 && previewPackets.length === 0 && previewSessions.length === 0 && (
-          <div
-            style={{
-              paddingLeft: 14,
-              paddingRight: 14,
-              paddingTop: 16,
-              paddingBottom: 16,
-              fontSize: 12,
-              fontWeight: 300,
-              color: 'var(--t-text-muted)',
-            }}
-          >
-            No active work — open the full sidebar to start.
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
-  if (!raw) return null;
-  // Legacy migrations — 'diff' and 'changes' were old labels for what's
-  // now the Workspace tab. 'files' used to be the same, but is now a
-  // distinct surface in the launcher (see O8Panel RIGHT_UTILITY_TABS),
-  // so we let it pass through to the new kind instead of remapping.
-  if (raw === 'diff' || raw === 'changes') return 'workspace';
-  if (raw === 'prs') return 'activity';
-  if (
-    raw === 'workspace'
-    || raw === 'browser'
-    || raw === 'activity'
-    || raw === 'threads'
-    || raw === 'resources'
-    || raw === 'handoffs'
-    || raw === 'inbox'
-    || raw === 'spec'
-    || raw === 'launcher'
-    || raw === 'files'
-    || raw === 'side-chat'
-    || raw === 'review'
-    || raw === 'compare'
-    || raw === 'targets'
-    || raw === 'terminal'
-  ) {
-    return raw;
-  }
-  return null;
-}
 
 function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): SavedChatRepoContext | null {
   if (!thread.repoPath) return null;
@@ -649,7 +327,7 @@ function DashboardInner() {
   // mode the card paints --t-bg and lets the chrome flip own transparency +
   // light ink (matches the right O8Panel); in solid mode it keeps the opaque
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
-  const { surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
+  const { paletteId, surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
   // Mount gate for surface-dependent INLINE styles. SSR can't read the client's
   // localStorage surface preference, so it always renders the 'solid' default;
@@ -690,6 +368,7 @@ function DashboardInner() {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
     sidebarVisible, setSidebarVisible,
+    sidebarWidth: leftWidth, setSidebarWidth: setLeftWidth, sidebarManualIntentRef,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     thoughtsImageInjection, setThoughtsImageInjection,
@@ -731,7 +410,6 @@ function DashboardInner() {
     orchestratorRuntimeTruth,
   } = session;
 
-  const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
   // True while the operator is actively dragging any panel-resize handle.
   // Panel widths are framer-animated for open/close/focus transitions, but a
   // live drag must apply instantly — routing per-mousemove targets through an
@@ -756,18 +434,6 @@ function DashboardInner() {
     };
   }, [panelDragActive]);
 
-  // ── Sidebar hover-preview state ──
-  // When the AgentPanel is collapsed (sidebarVisible === false), hovering the
-  // left-edge rail drops a detail panel down from the top of the screen
-  // (Spotify mini-player ↔ full-player pattern). Click on the rail still
-  // performs the regular slide-out behavior; the hover-preview is a separate,
-  // overlay-only surface that auto-retracts on hover-leave (with a small
-  // dismiss delay so brief mouse-outs don't flicker) or any outside click.
-  const [sidebarPreviewOpen, setSidebarPreviewOpen] = useState(false);
-  const [sidebarPreviewMaxHeight, setSidebarPreviewMaxHeight] = useState(0);
-  const sidebarPreviewLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sidebarPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
-
   // Active-workspace map — each WorkspaceTerminalRoot broadcasts via
   // 'o8:workspace-active-label' with its stable workspaceId. We track
   // them all here so splits don't overwrite each other. The top header
@@ -780,6 +446,7 @@ function DashboardInner() {
     runtime: string | null;
     packetStatus: string | null;
     orchestratorThreadId: string | null;
+    repoPath?: string | null;
   };
   type WorkspaceActivePayload = {
     workspaceId: string | null;
@@ -841,7 +508,7 @@ function DashboardInner() {
             const next = payload.tabs[index];
             return tab.id === next?.id && tab.label === next.label && tab.kind === next.kind
               && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
-              && tab.orchestratorThreadId === next.orchestratorThreadId;
+              && tab.orchestratorThreadId === next.orchestratorThreadId && tab.repoPath === next.repoPath;
           });
         if (previous && previous.tileId === payload.tileId && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
@@ -1110,25 +777,24 @@ function DashboardInner() {
     return () => document.removeEventListener('scroll', resetBodyScroll, true);
   }, []);
   const compactShell = viewportBands?.compact ?? false;
+  const joinedWorkspaceFrame = !compactShell && !effectiveGlassSurface;
+  const rightColumnChrome = joinedWorkspaceFrame ? 1 : RIGHT_COLUMN_CHROME;
   const getResponsiveViewportWidth = useCallback(() => (
     viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
   ), []);
   const noteSidebarManualIntent = useCallback((nextVisible: boolean) => {
+    sidebarManualIntentRef.current = true;
     responsiveManualOpenRef.current.left = nextVisible
       && getResponsiveViewportWidth() < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
     setResponsiveAutoCollapsed((current) => (
       current.left ? { ...current, left: false } : current
     ));
-  }, [getResponsiveViewportWidth]);
+  }, [getResponsiveViewportWidth, sidebarManualIntentRef]);
   const toggleSidebarFromChrome = useCallback(() => {
-    const nextVisible = !sidebarVisible;
+    const nextVisible = !sidebarVisible || responsiveAutoCollapsed.left;
     noteSidebarManualIntent(nextVisible);
     setSidebarVisible(nextVisible);
-  }, [noteSidebarManualIntent, setSidebarVisible, sidebarVisible]);
-  const openSidebarFromChrome = useCallback(() => {
-    noteSidebarManualIntent(true);
-    setSidebarVisible(true);
-  }, [noteSidebarManualIntent, setSidebarVisible]);
+  }, [noteSidebarManualIntent, responsiveAutoCollapsed.left, setSidebarVisible, sidebarVisible]);
   const openRightPanelFromUser = useCallback(() => {
     if (getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) return;
     if (typeof window !== 'undefined') {
@@ -1140,41 +806,17 @@ function DashboardInner() {
   const closeRightPanelFromUser = useCallback(() => {
     setChatVisible(false);
   }, []);
-  // Fold side panels as the viewport narrows. The right panel stays closed
-  // after widening, so only an operator action reopens it.
+  // Responsive presentation never overwrites the operator's saved list preference.
   useEffect(() => {
     if (viewportBands === null) return;
-
-    if (viewportBands.belowRightCollapse) {
-      if (chatVisible) setChatVisible(false);
-    }
-
-    if (viewportBands.belowLeftCollapse) {
-      if (sidebarVisible && !responsiveManualOpenRef.current.left) {
-        setResponsiveAutoCollapsed((current) => (
-          current.left ? current : { ...current, left: true }
-        ));
-        setSidebarVisible(false);
-      }
-    } else {
-      responsiveManualOpenRef.current.left = false;
-      if (responsiveAutoCollapsed.left) {
-        setSidebarVisible(true);
-        setResponsiveAutoCollapsed((current) => (
-          current.left ? { ...current, left: false } : current
-        ));
-      }
-    }
-  }, [
-    responsiveAutoCollapsed.left,
-    chatVisible,
-    setSidebarVisible,
-    sidebarVisible,
-    viewportBands,
-  ]);
-  const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths();
+    if (viewportBands.belowRightCollapse && chatVisible) setChatVisible(false);
+    if (!viewportBands.belowLeftCollapse) responsiveManualOpenRef.current.left = false;
+    const autoCollapsed = viewportBands.belowLeftCollapse && !responsiveManualOpenRef.current.left;
+    setResponsiveAutoCollapsed((current) => current.left === autoCollapsed ? current : { left: autoCollapsed });
+  }, [chatVisible, viewportBands]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const [o8ActiveTabHydrated, setO8ActiveTabHydrated] = useState(false);
+  const { tabs: rightPrTabs, open: rememberRightPr, close: forgetRightPr } = useRightPrTabs();
   const [o8SplitEnabled, setO8SplitEnabled] = useState(false);
   const [o8SecondaryTab, setO8SecondaryTab] = useState<O8Tab>('spec');
   const [o8SplitPrefsHydrated, setO8SplitPrefsHydrated] = useState(false);
@@ -1194,31 +836,15 @@ function DashboardInner() {
     } catch { /* ignore */ }
   }, [o8SplitEnabled, o8SecondaryTab, o8SplitPrefsHydrated]);
   const visibleSecondaryTab = o8SplitEnabled
-    ? (o8SecondaryTab === o8ActiveTab ? (o8ActiveTab === 'browser' ? 'spec' : 'browser') : o8SecondaryTab)
+    ? (canonicalPanelTab(o8SecondaryTab) === canonicalPanelTab(o8ActiveTab) ? (o8ActiveTab === 'browser' ? 'spec' : 'browser') : o8SecondaryTab)
     : null;
+  const { rightWidth, setRightWidth, o8Width, setO8Width } = useRightPanelWidths(o8ActiveTab, visibleSecondaryTab);
+  const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } = useRightPanelMaximize(chatVisible && !compactShell && !viewportBands?.belowRightCollapse);
   const [o8ReviewLaneId, setO8ReviewLaneId] = useState<string | null>(null);
-  const o8SpecAutoWidenedRef = useRef(false);
-  const o8CompareAutoWidenedRef = useRef(false);
   const handleO8TabChange = useCallback((tab: O8Tab) => {
-    if (tab === 'spec' && !o8SpecAutoWidenedRef.current) {
-      o8SpecAutoWidenedRef.current = true;
-      setO8Width((current) => (
-        current < O8_SPEC_PANEL_TARGET_WIDTH
-          ? O8_SPEC_PANEL_TARGET_WIDTH
-          : current
-      ));
-    }
-    if (tab === 'compare' && !o8CompareAutoWidenedRef.current) {
-      o8CompareAutoWidenedRef.current = true;
-      setO8Width((current) => (
-        current < O8_COMPARE_PANEL_TARGET_WIDTH
-          ? O8_COMPARE_PANEL_TARGET_WIDTH
-          : current
-      ));
-    }
     if (tab !== 'review') setO8ReviewLaneId(null);
     setO8ActiveTab(tab);
-  }, [setO8Width]);
+  }, []);
   const handlePrimaryPanelTabChange = useCallback((tab: O8Tab) => {
     if (o8SplitEnabled && tab === visibleSecondaryTab) setO8SecondaryTab(o8ActiveTab);
     handleO8TabChange(tab);
@@ -1229,10 +855,8 @@ function DashboardInner() {
       handleO8TabChange(visibleSecondaryTab ?? (o8ActiveTab === 'browser' ? 'spec' : 'browser'));
       return;
     }
-    if (tab === 'spec') setO8Width((width) => Math.max(width, O8_SPEC_PANEL_TARGET_WIDTH));
-    if (tab === 'compare') setO8Width((width) => Math.max(width, O8_COMPARE_PANEL_TARGET_WIDTH));
     setO8SecondaryTab(tab);
-  }, [handleO8TabChange, o8ActiveTab, setO8Width, visibleSecondaryTab]);
+  }, [handleO8TabChange, o8ActiveTab, visibleSecondaryTab]);
   const toggleO8PanelSplit = useCallback(() => {
     if (!o8SplitEnabled && o8SecondaryTab === o8ActiveTab) {
       setO8SecondaryTab(o8ActiveTab === 'browser' ? 'spec' : 'browser');
@@ -1247,10 +871,8 @@ function DashboardInner() {
   // navigation request from the port popover etc.) — this is the live
   // current URL of whichever tab is selected inside the pane.
   const [o8BrowserHoverUrl, setO8BrowserHoverUrl] = useState<string | null>(null);
-  // Header-rail portal target for the browser's page tabs
-  // (Q 2026-07-12) — PanelHeaderStrip renders the walled slot; O8Panel hands
-  // the element to O8BrowserPane, which portals its pills in.
-  const [browserHeaderTabSlot, setBrowserHeaderTabSlot] = useState<HTMLElement | null>(null);
+  // Shared top-header target for right-panel utility tabs and browser pages.
+  const [panelHeaderTabSlot, setPanelHeaderTabSlot] = useState<HTMLElement | null>(null);
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
   const [o8SelectedFileRepoPath, setO8SelectedFileRepoPath] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
@@ -1385,6 +1007,7 @@ function DashboardInner() {
     sidebarVisible,
     setLeftWidth,
     setSidebarVisible,
+    sidebarManualIntentRef,
   });
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
@@ -1898,8 +1521,13 @@ function DashboardInner() {
       event.preventDefault();
       setShortcutsOpen((current) => !current);
     };
+    const openHelp = () => setShortcutsOpen(true);
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener(OPEN_KEYBOARD_SHORTCUTS_EVENT, openHelp);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener(OPEN_KEYBOARD_SHORTCUTS_EVENT, openHelp);
+    };
   }, []);
 
   // Active-workspace switch — clear the owned-session fleet cache so the next
@@ -1937,11 +1565,9 @@ function DashboardInner() {
     closeCanvasTab,
     ensureTileKind,
     getPreferredContextualPanelHandle,
-    handleClosePreviewTileItem,
     handleCloseTile,
     handlePreviewDetected,
     handleResizeSplit,
-    handleSelectPreviewTile,
     handleSplitTile,
     openCanvasTab,
     registerContextualPanelHandle,
@@ -2044,21 +1670,25 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:open-handoffs', handleOpenHandoffs);
   }, [handleOpenHandoffs]);
 
-  // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
-  // o8:open-automations when clicked. Flip the activeNavSection so the
-  // AutomationsPage takes the workspace center. Full page-takeover.
+  const openWorkspaceUtility = useCallback((kind: WorkspaceUtilityKind) => {
+    setActiveNavSection('agents');
+    openCanvasTab(workspaceUtilityTab(kind, (leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id));
+  }, [setActiveNavSection, openCanvasTab, leftPanelFocus.view?.project, dashboardProjects.activeProject]);
   useEffect(() => {
-    const handler = () => setActiveNavSection('automations');
-    window.addEventListener('o8:open-automations', handler);
-    return () => window.removeEventListener('o8:open-automations', handler);
-  }, [setActiveNavSection]);
+    const automations = () => openWorkspaceUtility('automations');
+    const customize = (event: Event) => openWorkspaceUtility((event as CustomEvent<{ tab?: string }>).detail?.tab === 'plugins' ? 'plugins' : 'customize');
+    window.addEventListener('o8:open-automations', automations);
+    window.addEventListener('o8:open-customize', customize);
+    return () => {
+      window.removeEventListener('o8:open-automations', automations);
+      window.removeEventListener('o8:open-customize', customize);
+    };
+  }, [openWorkspaceUtility]);
+  // Migrate older saved navigation destinations into resident workspace tabs.
+  useEffect(() => {
+    if (activeNavSection === 'automations' || activeNavSection === 'customize') openWorkspaceUtility(activeNavSection);
+  }, [activeNavSection, openWorkspaceUtility]);
 
-  // Customize — same page-takeover pattern as Automations (vid3 Cursor study).
-  useEffect(() => {
-    const handler = () => setActiveNavSection('customize');
-    window.addEventListener('o8:open-customize', handler);
-    return () => window.removeEventListener('o8:open-customize', handler);
-  }, [setActiveNavSection]);
 
   const handleRepoRemoved = useCallback((removedRepo: RepoRegistryEntry) => {
     const removedRepoPath = removedRepo.localPath;
@@ -2492,18 +2122,45 @@ function DashboardInner() {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
     const nextTab = normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB;
     setO8ReviewLaneId(nextTab === 'review' ? options.reviewLaneId ?? null : null);
-    if (nextTab === 'compare' && !o8CompareAutoWidenedRef.current) {
-      o8CompareAutoWidenedRef.current = true;
-      setO8Width((current) => (current < O8_COMPARE_PANEL_TARGET_WIDTH ? O8_COMPARE_PANEL_TARGET_WIDTH : current));
-    }
     setO8ActiveTab(nextTab);
     setRightPanelKind('o8');
     openRightPanelFromUser();
-  }, [openRightPanelFromUser, setO8Width]);
+  }, [openRightPanelFromUser]);
+
+  useThreadWorkspaceNavigation({
+    availability: () => threadPanelAvailability(
+      typeof window !== 'undefined' ? window.innerWidth : getResponsiveViewportWidth(),
+      RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH,
+    ),
+    resolve: (target) => {
+      const workspace = workspaceActiveMap.get(target.workspaceId);
+      if (!workspace?.tileId || !workspaceTerminalHandlesRef.current.has(workspace.tileId)
+        || !globalRepoEntries.some((repo) => repo.localPath === target.repoPath)) return null;
+      const project = resolveThreadProject(dashboardProjects.ledger?.projects ?? [], dashboardProjects.activeProject, target.repoPath, false);
+      return {
+        projectId: project?.id ?? null,
+        activate: () => {
+          setActiveTileId(workspace.tileId);
+          setO8AllRepos(false);
+          setO8CommitSha(null);
+          setO8CommitRepoPath(null);
+          setO8CommitRepoSlug(null);
+          handleOpenO8Panel({ repoPath: target.repoPath, tab: 'threads' });
+        },
+        isActive: () => workspaceHeaderActive.workspaceId === target.workspaceId,
+      };
+    },
+    readTasks: async () => {
+      const response = await fetch('/api/tasks?includeBrief=false&includeDone=true', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error('Unable to read threads.');
+      const body = await response.json();
+      return body.tasks ?? [];
+    },
+  });
 
   const handleToggleWorkspacePip = useCallback((surface: 'browser' | 'spec', repoPath?: string | null) => {
-    if (repoPath) setO8RepoPathOverride(repoPath);
-    closeRightPanelFromUser();
+    setO8RepoPathOverride(repoPath ?? null);
+    if (surface === 'browser') closeRightPanelFromUser();
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent(
       surface === 'browser' ? BROWSER_PIP_EVENT : O8_SPEC_PIP_EVENT,
@@ -2528,10 +2185,14 @@ function DashboardInner() {
         || session.sessionId === sessionKey
         || session.runtimeSurface?.id === sessionKey
       )) ?? parsedAgents.find((agent) => agent.sessionKey === sessionKey || agent.id === sessionKey);
-      const sessionScope = selectedSession?.workspace
-        ?? selectedSession?.runtimeSurface?.cwd
-        ?? hint?.repoPath
-        ?? null;
+      const runtime = runtimeFromSessionKeyId(sessionKey)
+        ?? (isOrchestratorRuntime(selectedSession?.runtime) ? selectedSession.runtime : hint?.runtime)
+        ?? 'codex';
+      const knownScope = selectedSession?.workspace ?? selectedSession?.runtimeSurface?.cwd ?? hint?.repoPath;
+      // Search can return a cloud session before the sidebar inventory catches up.
+      const resolvedLane = runtime === 'cloud' && !knownScope
+        ? await resolveFocusableLaneBinding({ sessionKey, runtime }) : null;
+      const sessionScope = knownScope ?? resolvedLane?.repoPath ?? null;
       const targetRepo = sessionScope
         ? workspaceScopeEntries.find((repo) => (
           pathBelongsToRepoScope(sessionScope, repo.localPath)
@@ -2581,15 +2242,6 @@ function DashboardInner() {
         attempts: 20,
       });
       if (!primaryHandle) return;
-      const runtime = hint?.runtime ?? (selectedSession?.runtime === 'claude-code'
-        || selectedSession?.runtime === 'gemini'
-        || selectedSession?.runtime === 'opencode'
-        || selectedSession?.runtime === 'codex'
-        ? selectedSession.runtime
-        : sessionKey.startsWith('claude-code:') || sessionKey.startsWith('claude-code-owned:') ? 'claude-code'
-        : sessionKey.startsWith('gemini-owned:') ? 'gemini'
-        : sessionKey.startsWith('opencode-owned:') ? 'opencode'
-        : 'codex');
       // Canonical label — never an id slice. agentDisplayLabel falls back to
       // the runtime's human name ("Codex") rather than a raw `codex-owned:...`
       // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
@@ -2610,6 +2262,9 @@ function DashboardInner() {
           registryRepoId: targetRepo.registryRepoId,
           isWorktree: targetRepo.isWorktree,
           worktreeStatus: targetRepo.worktreeStatus,
+        } : runtime === 'cloud' && sessionScope ? {
+          name: sessionScope.split(/[\\/]/).filter(Boolean).pop() ?? 'Repository',
+          localPath: sessionScope,
         } : undefined,
         targetSessionKey: sessionKey,
         label,
@@ -2664,6 +2319,17 @@ function DashboardInner() {
     if (!tabId) return;
     window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
   }, []);
+
+  const handleOpenPluginTerminal = useCallback(async (terminal: { sessionName: string; label: string; workspaceRoot: string | null }) => {
+    const target = await waitForWorkspaceTerminalTarget({ preferredTileId: activeTileId, fallbackToAnyExisting: true, activate: false });
+    const repo = globalRepoEntries.find((entry) => entry.localPath === terminal.workspaceRoot) ?? null;
+    const tabId = target.handle.openAttachedTerminalSession({ sessionKey: terminal.sessionName, tmuxSession: terminal.sessionName, label: terminal.label, readOnly: false }, repo ? { ...repo, remoteUrl: repo.remoteUrl ?? undefined } : null);
+    if (!tabId) throw new Error('Workspace terminal view unavailable.');
+    setActiveTileId(target.tileId);
+    setActiveNavSection('agents');
+    flashWorkspaceTab(tabId);
+  }, [waitForWorkspaceTerminalTarget, activeTileId, globalRepoEntries, setActiveTileId, setActiveNavSection, flashWorkspaceTab]);
+  const workspaceUtilityContext = useMemo(() => ({ projects: dashboardProjects.ledger?.projects ?? [], registeredRepos: globalRepoEntries, onOpenPluginTerminal: handleOpenPluginTerminal }), [dashboardProjects.ledger, globalRepoEntries, handleOpenPluginTerminal]);
 
   // Failed spawns must be VISIBLE, not ring-buffer-only — a swallowed failure
   // IS "the New session button does nothing" (report D3YPBP rounds 1-3, still
@@ -2776,6 +2442,8 @@ function DashboardInner() {
     });
   }, [openCanvasTab, openRightPanelFromUser]);
 
+  useVisualizationWorkspaceEvents(openCanvasTab);
+
   // Stable callbacks passed to CommandPalette — extracted to avoid defeating
   // memo boundaries with fresh inline arrows on every render (#809).
   const handlePaletteOpen = useCallback(() => {
@@ -2797,18 +2465,7 @@ function DashboardInner() {
     handleSelectIssue(issueNumber, repo);
   }, [handleSelectIssue]);
 
-  const handlePaletteSelectFile = useCallback((filePath: string, line?: number) => {
-    openCanvasTab({
-      id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-      kind: 'file',
-      label: filePath.split('/').pop() ?? filePath,
-      resourceId: filePath,
-      meta: {
-        ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-        ...(line ? { line: String(line) } : {}),
-      },
-    });
-  }, [activeWorkspace, openCanvasTab]);
+  const handlePaletteSelectFile = usePaletteFileSelection(activeWorkspace, openCanvasTab);
 
   const handlePaletteSelectAgent = useCallback((sessionKey: string) => {
     handleSelectSession(sessionKey);
@@ -2834,13 +2491,7 @@ function DashboardInner() {
         laneId: laneId ?? '',
         packetId: packetId ?? '',
         sessionKey: sessionKey ?? '',
-        runtime: sessionKey?.startsWith('claude-code')
-          ? 'claude-code'
-          : sessionKey?.startsWith('gemini')
-            ? 'gemini'
-            : sessionKey?.startsWith('opencode')
-              ? 'opencode'
-              : 'codex',
+        runtime: runtimeFromSessionKeyId(sessionKey) ?? 'codex',
       });
       if (resolved?.sessionKey) {
         handleSelectSession(resolved.sessionKey, {
@@ -2855,8 +2506,8 @@ function DashboardInner() {
   }, [focusOrchestrationPacketLane, handleSelectSession]);
 
   const handlePaletteSelectDirective = useCallback((_directiveId: string) => {
-    setActiveNavSection('customize');
-  }, [setActiveNavSection]);
+    openWorkspaceUtility('customize');
+  }, [openWorkspaceUtility]);
 
   // Opens a file path. Shared by (a) agent-chat file clicks routed through
   // O8Panel's `o8:open-file` → onOpenFile, and (b) Finder "Open With → o8"
@@ -2930,8 +2581,10 @@ function DashboardInner() {
     });
   }, [openCanvasTab, openRightPanelFromUser]);
 
-  const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
-    // PRs now live under Activity — prNumber 0 means show the Activity feed.
+  const handleReviewPR = useCallback((prNumber: number, repo?: string, repoPath?: string) => {
+    if (repoPath) setO8RepoPathOverride(repoPath);
+    if (prNumber > 0) rememberRightPr(prNumber, repo, repoPath || currentO8RepoPath);
+    if (prNumber > 0) window.dispatchEvent(new CustomEvent('o8:pr-selected', { detail: { prNumber, repo, repoPath: repoPath || currentO8RepoPath } }));
     setO8CommitSha(null);
     setO8CommitRepoPath(null);
     setO8CommitRepoSlug(null);
@@ -2940,7 +2593,30 @@ function DashboardInner() {
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
     openRightPanelFromUser();
-  }, [openRightPanelFromUser]);
+  }, [currentO8RepoPath, openRightPanelFromUser, rememberRightPr]);
+
+  const handleRightPrTabSelect = useCallback((tab: RightPrTab) => {
+    handleReviewPR(tab.number, tab.repo || undefined, tab.repoPath || undefined);
+  }, [handleReviewPR]);
+  const handleRightPrTabClose = useCallback((tab: RightPrTab) => {
+    const index = rightPrTabs.findIndex((entry) => entry.id === tab.id);
+    forgetRightPr(tab.id);
+    if (o8PrNumber === tab.number && rightPrTabId(o8PrNumber, o8PrRepo, currentO8RepoPath) === tab.id) {
+      const remaining = rightPrTabs.filter((entry) => entry.id !== tab.id);
+      const next = remaining[Math.min(index, remaining.length - 1)];
+      if (next) handleRightPrTabSelect(next);
+      else { setO8PrNumber(null); setO8PrRepo(null); }
+    }
+  }, [currentO8RepoPath, forgetRightPr, handleRightPrTabSelect, o8PrNumber, o8PrRepo, rightPrTabs]);
+  const handleCloseRightPr = useCallback((number: number, repo?: string | null) => {
+    const tab = rightPrTabs.find((entry) => entry.id === rightPrTabId(number, repo, currentO8RepoPath));
+    if (tab) handleRightPrTabClose(tab);
+    else { setO8PrNumber(null); setO8PrRepo(null); }
+  }, [currentO8RepoPath, handleRightPrTabClose, rightPrTabs]);
+  const handleHeaderPanelTabChange = useCallback((tab: O8Tab) => {
+    if (tab === 'activity') { setO8PrNumber(null); setO8PrRepo(null); }
+    handlePrimaryPanelTabChange(tab);
+  }, [handlePrimaryPanelTabChange]);
 
   const handleDeepReviewPR = useCallback((prNumber: number, repo?: string) => {
     handleSelectPR(prNumber, repo);
@@ -2953,9 +2629,9 @@ function DashboardInner() {
   // Activity with the inline PrPanel detail.
   useEffect(() => {
     const handleOpenPr = (event: Event) => {
-      const detail = (event as CustomEvent<{ prNumber?: number; repo?: string }>).detail;
+      const detail = (event as CustomEvent<{ prNumber?: number; repo?: string; repoPath?: string }>).detail;
       if (!detail || typeof detail.prNumber !== 'number') return;
-      handleReviewPR(detail.prNumber, detail.repo);
+      handleReviewPR(detail.prNumber, detail.repo, detail.repoPath);
     };
     window.addEventListener('o8:open-pr', handleOpenPr);
     return () => { window.removeEventListener('o8:open-pr', handleOpenPr); };
@@ -3097,15 +2773,14 @@ function DashboardInner() {
     openRightPanelFromUser();
   }, [chatVisible, closeRightPanelFromUser, openRightPanelFromUser, rightPanelKind]);
 
-  // Browser button on the TitleBar — opens (or focuses) the wide O8 panel
-  // and selects its Browser tab. The Browser tab itself is no longer in the
-  // O8 panel's tab strip; it lives in the title bar so we can hover-extend
-  // it with a quick port menu.
-  const handleOpenBrowser = useCallback(() => {
+  // Reveal Browser and carry the requested URL into its repository scope.
+  const handleOpenBrowser = useCallback((url?: string) => {
+    if (typeof url === 'string' && url) setO8BrowserUrl(url);
     setRightPanelKind('o8');
     openRightPanelFromUser();
     setO8ActiveTab('browser');
   }, [openRightPanelFromUser]);
+  useBrowserOpenRequests(handleOpenBrowser, o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
@@ -3758,194 +3433,16 @@ function DashboardInner() {
     setO8AllRepos(true);
   }, []);
 
-  // ── Left drag handle ──
-  // Live drags bypass React entirely: a dashboard commit costs ~40ms in dev
-  // (measured 2026-07-10, ~24fps webview during drag), so routing every
-  // mousemove through setState makes the content reflow in chunky steps
-  // behind the cursor (Q's retest recording). During the drag we write the
-  // width straight onto the column and footer DOM nodes — the browser reflows
-  // the flex layout natively at frame rate — and commit state ONCE on
-  // mouseup. The flag is released a frame after the commit so the framer
-  // transitions never see the width jump as something to animate.
-  const startLeftDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const startW = leftWidth;
-    const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
-    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
-    const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (colEl) colEl.style.width = `${w}px`;
-        if (footEl) footEl.style.width = `${w}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      setLeftWidth(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [leftWidth]);
-
-  // ── Sidebar hover-preview open/close ──
-  // Open immediately on hover-enter; close on hover-leave with a 220ms grace
-  // window so brief mouse-outs (cursor crossing a sub-element, scrollbar nudge)
-  // don't dismiss. Both the trigger zone and the overlay share these helpers
-  // so moving the cursor between them never flickers the panel away.
-  const cancelSidebarPreviewClose = useCallback(() => {
-    if (sidebarPreviewLeaveTimerRef.current) {
-      clearTimeout(sidebarPreviewLeaveTimerRef.current);
-      sidebarPreviewLeaveTimerRef.current = null;
-    }
-  }, []);
-  const syncSidebarPreviewMaxHeight = useCallback(() => {
-    const rootStyle = window.getComputedStyle(document.documentElement);
-    const parsedZoom = Number.parseFloat(rootStyle.getPropertyValue('--ui-zoom'));
-    const uiZoom = Number.isFinite(parsedZoom) && parsedZoom > 0 ? parsedZoom : 1;
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-    const layoutViewportHeight = viewportHeight / uiZoom;
-    // Bottom boundary is the STATUS-BAR line, not the window bottom — a
-    // window-bottom overlay read as over-extended next to the workspace card
-    // (Q 2026-07-16 round 2: "top looks good, bottom over-extended"). Same
-    // SIDEBAR_PREVIEW_INSET gap above the bar as on the left and top.
-    const statusBarTop = document
-      .querySelector<HTMLElement>('[data-mcp-scope="desktop-status-bar"]')
-      ?.getBoundingClientRect().top;
-    const bottomBoundary = typeof statusBarTop === 'number' && statusBarTop > 0
-      ? statusBarTop
-      : layoutViewportHeight - 36;
-    const nextHeight = Math.max(
-      0,
-      bottomBoundary - SIDEBAR_PREVIEW_TOP - SIDEBAR_PREVIEW_INSET,
-    );
-    setSidebarPreviewMaxHeight((current) => current === nextHeight ? current : nextHeight);
-  }, []);
-  const openSidebarPreview = useCallback(() => {
-    cancelSidebarPreviewClose();
-    syncSidebarPreviewMaxHeight();
-    setSidebarPreviewOpen(true);
-  }, [cancelSidebarPreviewClose, syncSidebarPreviewMaxHeight]);
-  const scheduleSidebarPreviewClose = useCallback(() => {
-    cancelSidebarPreviewClose();
-    sidebarPreviewLeaveTimerRef.current = setTimeout(() => {
-      setSidebarPreviewOpen(false);
-      sidebarPreviewLeaveTimerRef.current = null;
-    }, 220);
-  }, [cancelSidebarPreviewClose]);
-  // Outside-click dismiss + cleanup on unmount.
-  useEffect(() => {
-    if (!sidebarPreviewOpen) return;
-    const handleClick = (event: MouseEvent) => {
-      const overlay = sidebarPreviewOverlayRef.current;
-      if (!overlay) return;
-      if (event.target instanceof Node && overlay.contains(event.target)) return;
-      // Don't pre-empt clicks on the sidebar-toggle pill — its own onClick
-      // toggles `sidebarVisible` and the collapse-on-open effect at line
-      // 3047 dismisses the preview right after. If we close the preview
-      // here first, AnimatePresence starts an exit animation while React
-      // is still processing the click, which on real cursors lands the
-      // click target on the (still-animating) overlay subtree and the
-      // pill's onClick never fires. Symptom: "i have to double click"
-      // (operator 2026-05-28). Skipping the pill click lets the toggle
-      // own the dismiss path.
-      if (event.target instanceof Element) {
-        const togglePill = event.target.closest('[aria-label="Toggle sidebar"]');
-        if (togglePill) return;
-      }
-      setSidebarPreviewOpen(false);
-    };
-    // mousedown so the dismiss fires before any focus changes from the
-    // underlying click target — same pattern as the right-rail popovers.
-    window.addEventListener('mousedown', handleClick, true);
-    return () => window.removeEventListener('mousedown', handleClick, true);
-  }, [sidebarPreviewOpen]);
-  useEffect(() => {
-    if (!sidebarPreviewOpen) return;
-    const visualViewport = window.visualViewport;
-    const rootObserver = new MutationObserver(syncSidebarPreviewMaxHeight);
-    syncSidebarPreviewMaxHeight();
-    window.addEventListener('resize', syncSidebarPreviewMaxHeight);
-    visualViewport?.addEventListener('resize', syncSidebarPreviewMaxHeight);
-    rootObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
-    return () => {
-      window.removeEventListener('resize', syncSidebarPreviewMaxHeight);
-      visualViewport?.removeEventListener('resize', syncSidebarPreviewMaxHeight);
-      rootObserver.disconnect();
-    };
-  }, [sidebarPreviewOpen, syncSidebarPreviewMaxHeight]);
-  useEffect(() => () => {
-    if (sidebarPreviewLeaveTimerRef.current) {
-      clearTimeout(sidebarPreviewLeaveTimerRef.current);
-    }
-  }, []);
-  // When the sidebar re-expands (click on the toggle, ⌘B shortcut, etc.) the
-  // hover-preview becomes redundant — collapse it immediately so we don't end
-  // up with both surfaces visible at once.
-  useEffect(() => {
-    if (sidebarVisible && sidebarPreviewOpen) {
-      cancelSidebarPreviewClose();
-      setSidebarPreviewOpen(false);
-    }
-  }, [sidebarVisible, sidebarPreviewOpen, cancelSidebarPreviewClose]);
-
-  // ── Right drag handle ──
-  // Right/O8 drags share the left handle's direct-DOM pattern. The right
-  // column is two nested motion.divs — the inner (chat-panel) holds the
-  // panel width, its parent shell holds width+10 (drag handle + margin).
-  const startRightColumnDrag = useCallback((
-    e: React.MouseEvent,
-    startW: number,
-    min: number,
-    max: number,
-    commit: (w: number) => void,
-  ) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const innerEl = document.querySelector<HTMLElement>('[data-mcp-scope="chat-panel"]');
-    const shellEl = innerEl?.parentElement ?? null;
-    const widthAt = (x: number) => Math.min(Math.max(startW + (startX - x), min), max);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (innerEl) innerEl.style.width = `${w}px`;
-        if (shellEl) shellEl.style.width = `${w + 10}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      commit(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, []);
-  const startRightDrag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH, setRightWidth);
-  }, [rightWidth, setRightWidth, startRightColumnDrag]);
-
-  // ── O8 panel drag handle ──
-  const startO8Drag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, o8Width, MIN_O8_PANEL_WIDTH, MAX_O8_PANEL_WIDTH, setO8Width);
-  }, [o8Width, setO8Width, startRightColumnDrag]);
+  const startColumnResize = useColumnResize(setPanelDragActive);
+  const startLeftDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'left', min: 160, max: 500, commit: setLeftWidth });
+  }, [setLeftWidth, startColumnResize]);
+  const startRightDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_RIGHT_PANEL_WIDTH, max: MAX_RIGHT_PANEL_WIDTH, commit: setRightWidth });
+  }, [setRightWidth, startColumnResize, rightColumnChrome]);
+  const startO8Drag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_O8_PANEL_WIDTH, max: MAX_O8_PANEL_WIDTH, commit: setO8Width });
+  }, [setO8Width, startColumnResize, rightColumnChrome]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
@@ -4336,8 +3833,8 @@ function DashboardInner() {
     focusOrchestrationPacketLane,
     globalRepoEntries,
     handleAgentPanelChatInjection,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleOpenCI,
@@ -4345,7 +3842,6 @@ function DashboardInner() {
     handlePreviewDetected,
     handlePreviewSelection,
     handleSelectCommit,
-    handleSelectPreviewTile,
     handleSelectRegisteredRepo,
     handleSplitTile,
     handleThoughtsMissionStateChange,
@@ -4389,8 +3885,8 @@ function DashboardInner() {
     globalRepoEntries,
     workspaceTerminalPreferredRepo,
     workspaceTerminalHandlesRef,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleSplitTile,
     handleAgentPanelChatInjection,
     ensureWorkspaceTerminalTile,
@@ -4400,7 +3896,6 @@ function DashboardInner() {
     handleLaunchWorkspaceAgent,
     handleSelectCommit,
     handleSelectRegisteredRepo,
-    handleSelectPreviewTile,
     handleOpenCI,
     handleOpenGitLog,
     handleThoughtsMissionStateChange,
@@ -4476,12 +3971,14 @@ function DashboardInner() {
   });
 
   const settingsTakeoverActive = activeNavSection === 'settings';
-  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'automations' || activeNavSection === 'customize' || activeNavSection === 'projects';
+  const workspaceSurfaceHidden = settingsTakeoverActive || activeNavSection === 'projects';
   useEffect(() => {
     if (!settingsTakeoverActive) {
       if (settingsWasOpenRef.current) {
         requestAnimationFrame(() => {
-          workspaceSurfaceRef.current?.querySelector<HTMLTextAreaElement>('textarea:not([disabled])')?.focus();
+          const composer = Array.from(workspaceSurfaceRef.current?.querySelectorAll<HTMLTextAreaElement>('textarea:not([disabled])') ?? [])
+            .find((element) => element.getClientRects().length > 0 && !element.closest('[inert]'));
+          (composer ?? document.getElementById('o8-profile-menu-button'))?.focus();
         });
       }
       settingsWasOpenRef.current = false;
@@ -4708,10 +4205,14 @@ function DashboardInner() {
       });
   }, []);
 
-  const showSidebarColumn = sidebarVisible && !compactShell;
-  const showCompactNavigationRail = !showSidebarColumn
-    && !compactShell
-    && !settingsTakeoverActive;
+  const showSidebarColumn = sidebarVisible && !responsiveAutoCollapsed.left && !compactShell;
+  const showCompactNavigationRail = !compactShell;
+  const sidebarOverlay = Boolean(viewportBands?.belowLeftCollapse);
+  const closeChatList = () => {
+    noteSidebarManualIntent(false);
+    setSidebarVisible(false);
+    window.requestAnimationFrame(() => document.getElementById('o8-chat-list-toggle')?.focus());
+  };
   const showRightPanelColumn = chatVisible && !compactShell && !viewportBands?.belowRightCollapse;
   const workspaceInset = compactShell ? 2 : 4;
 
@@ -4726,6 +4227,7 @@ function DashboardInner() {
   const focusedWorkspaceTab = focusedWorkspaceSnapshot?.tabs.find(
     (tab) => tab.id === focusedWorkspaceSnapshot.activeTabId,
   );
+  const isPullRequestWorkspace = activeNavSection === 'agents' && focusedWorkspaceTab?.canvasKind === 'pull-requests';
   useEffect(() => {
     if (!pendingHistoryRailSessionKey) return;
     const pendingThreadId = pendingHistoryRailSessionKey.replace(/^llm-chat:/, '');
@@ -4740,13 +4242,11 @@ function DashboardInner() {
     pendingHistoryRailSessionKey,
   );
 
-  // Same AgentPanel element drives both the in-column mount AND the hover-
-  // preview overlay. Only one of the two ever renders at a time (in-column
-  // when sidebar is expanded, overlay when collapsed + hovered) so this is
-  // a single AgentPanel mount that relocates between trees on transition.
-  // Keeps the overlay's content 1:1 with the real panel — no condensed copy.
+  // One list instance survives collapse, navigation takeovers, and width changes.
   const agentPanelElement = (
     <AgentPanel
+      onOpenChatReview={(laneId, repoPath) => { leaveNavTakeover(); handleOpenO8Panel({ tab: 'review', reviewLaneId: laneId, repoPath }); }}
+      navigationRail={showCompactNavigationRail}
       activeSessionKey={railActiveSessionKey}
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
       selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
@@ -4789,7 +4289,7 @@ function DashboardInner() {
       onCreateWorkspaceChat={() => { leaveNavTakeover(); handleCreateWorkspaceChat(); }}
       onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
       onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
-      onOpenProjectManagement={(projectId) => { leftPanelFocus.clearFocus(); setProjectLibraryRequest((request) => ({ projectId: projectId ?? null, revision: request.revision + 1 })); setActiveNavSection('projects'); }}
+      onOpenProjectManagement={(projectId) => { setProjectLibraryRequest((request) => ({ projectId: projectId ?? null, revision: request.revision + 1 })); setActiveNavSection('projects'); }}
       onOpenSettings={toggleSettingsOverlay}
       onOpenMobilePairing={openMobilePairing}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
@@ -4802,7 +4302,6 @@ function DashboardInner() {
       onSelectCommit={handleSelectCommit}
       onSelectPR={handleSelectPR}
       onReviewPR={handleReviewPR}
-      onRepoAdded={handleRepoAddedFromPanel}
       onRepoRemoved={handleRepoRemoved}
       onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
       onExpandWorkspace={handleExpandWorkspace}
@@ -4816,7 +4315,7 @@ function DashboardInner() {
       lifecycleEvents={lifecycleEvents}
       orchestratorPackets={activePackets}
       orchestratorMissionState={thoughtsMissionState}
-      registeredRepos={activeProjectRepoEntries}
+      registeredRepos={globalRepoEntries}
       ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
       leftPanelFocus={leftPanelFocus}
     />
@@ -4834,6 +4333,7 @@ function DashboardInner() {
       <UiZoomLayer />
       <RealtimeVoiceHost />
       <SymonTextBridgeHost />
+      <VisualInstructionHost />
       <NarrationSpeakerHost />
       <ReportIssueHost />
       <TelemetryCrashCapture />
@@ -4845,9 +4345,15 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--t-bg-gradient)',
-      backdropFilter: 'blur(18px) saturate(1.02)',
-      WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
+      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      ...(!compactShell ? {
+        ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
+        ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
+        ['--o8-shell-header-bg' as string]: 'transparent',
+        ['--o8-shell-header-border' as string]: 'none',
+      } : {}),
+      backdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
+      WebkitBackdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
       color: 'var(--t-text)',
       fontFamily: 'var(--font-sans-system)',
       overflow: 'hidden',
@@ -4922,8 +4428,8 @@ function DashboardInner() {
         </div>
       ) : null}
 
-      {/* Keyboard-shortcuts reference. Opened on ⌘/ or `?`, and from the
-          status-bar `?` button. Only mounts the chunk once requested. */}
+      {/* Keyboard-shortcuts reference. Opened on ⌘/ or `?`, and from
+          Quick settings → Get help. Only mounts the chunk once requested. */}
       {shortcutsOpen ? (
         <Suspense fallback={null}>
           <LazyKeyboardShortcutsOverlay
@@ -5094,14 +4600,19 @@ function DashboardInner() {
       </AnimatePresence>
 
       {settingsTakeoverActive && (
-        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginLeft: compactShell ? 0 : NAVIGATION_RAIL_WIDTH, marginRight: compactShell ? 0 : SHELL_EDGE_INSET, marginBottom: compactShell ? 0 : SHELL_EDGE_INSET }}>
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings…</div>}>
             <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
           </Suspense>
         </div>
       )}
+      <AddRepoFlowHost
+        onRepoAdded={handleRepoAddedFromPanel}
+        onSelectRepo={(repoId) => { leaveNavTakeover(); handleAlignToRepo(repoId); }}
+      />
       <ConfirmToastHost />
       <DesktopCloseCoordinator />
+      <TerminalCloseDialog />
 
       {/* ── Main Layout (horizontal) ── */}
       <div data-mcp-scope="main-layout" aria-hidden={settingsTakeoverActive} inert={settingsTakeoverActive} style={{
@@ -5109,31 +4620,27 @@ function DashboardInner() {
         display: settingsTakeoverActive ? 'none' : 'flex',
         overflow: 'hidden',
         minHeight: 0, // critical: allow flex children to shrink for scroll
+        position: 'relative',
+        paddingRight: compactShell ? 0 : SHELL_EDGE_INSET,
+        paddingBottom: compactShell ? 0 : SHELL_EDGE_INSET,
       }}>
-      {/* NavRail retired — its Agents / Alerts buttons live in the TitleBar,
-          and Settings / Ports / Add-repo live in the
-          DesktopStatusBar at the bottom. The AgentPanel stays docked as the
-          left column below. */}
-
-      {showCompactNavigationRail ? <div aria-hidden="true" style={{ width: 68, flexShrink: 0 }} /> : null}
+      {/* Navigation retains its own column whether chats are open or closed. */}
+      {showCompactNavigationRail ? <div aria-hidden="true" style={{ width: NAVIGATION_RAIL_WIDTH, flexShrink: 0 }} /> : null}
 
       {/* ── Left: Agent Panel ── */}
-      {showSidebarColumn && (() => {
+      {(() => {
         // When a repo is focused, we want the column to behave like the
         // operator dragged the resizer wider — not an overlay sliding over
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
         const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
-        // Shared header + content — composed differently per surface (see below):
-        // glass floats the panel as a Lisse card with the header/footer
-        // transparent; solid keeps the paper card with the header inside.
+        // The header belongs to the outer frame; only the reading surface
+        // below it paints a card.
         const leftHeader = (
           <LeftHeaderStrip
-            sidebarVisible={sidebarVisible}
-            onToggleSidebar={toggleSidebarFromChrome}
-            // Solid: the strip renders inside the floating card and must be
-            // the same continuous tone (Claude-desktop float, Q 2026-07-17).
-            inCard={!effectiveGlassSurface}
+            sidebarVisible={showSidebarColumn} onToggleSidebar={toggleSidebarFromChrome}
+            windowControls={!showCompactNavigationRail} onSearch={handlePaletteOpen}
+            inCard
           />
         );
         const leftContent = (
@@ -5151,8 +4658,9 @@ function DashboardInner() {
           </div>
         );
         return (
+        <ChatListColumn visible={showSidebarColumn} width={effectiveLeftWidth} overlay={sidebarOverlay} onClose={closeChatList}>
         <motion.div
-          animate={{ width: effectiveLeftWidth }}
+          animate={{ opacity: 1 }}
           transition={
             leftPanelFocus.active
               ? { type: 'spring', stiffness: 360, damping: 32 }
@@ -5163,13 +4671,13 @@ function DashboardInner() {
                 // during drags and oscillated (jitter recording 2026-07-10).
                 : { type: false }
           }
-          data-mcp-scope="agent-panel"
           // No data-chrome-surface here anymore — the inner card paints a
           // SOLID surface over the vibrancy, so children use the regular
           // palette (dark text in light mode) rather than the chrome-flip
           // (white text on dark vibrancy bleed) overrides.
           style={{
-            width: effectiveLeftWidth,
+            width: '100%',
+            maxWidth: '100%',
             flexShrink: 0,
             height: '100%',
             display: 'flex',
@@ -5177,114 +4685,35 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-desktop float (Q ruling 2026-07-17, supersedes the 07-16
-            // flush dock): in SOLID surfaces the sidebar is a floating inset
-            // card — 4px of window-backdrop air on left, top, AND bottom, all
-            // four corners rounded — lights in its top, account row in its
-            // bottom, so everything right of it reads as the workspace. GLASS
-            // keeps the transparent-chrome treatment (chrome paints nothing;
-            // a floating opaque card would break glass-panel parity).
-            paddingTop: effectiveGlassSurface ? 5 : 4,
-            paddingLeft: effectiveGlassSurface ? 0 : 4,
-            paddingRight: 5,
-            paddingBottom: effectiveGlassSurface ? 0 : 4,
+            paddingTop: compactShell ? 4 : 0,
+            paddingLeft: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
           }}
         >
-          {effectiveGlassSurface ? (
-            // GLASS — mirror the center workspace + right O8Panel: the header
-            // strip and the footer below are transparent vibrancy, and the
-            // panel itself is a self-contained floating Lisse squircle card
-            // (all four corners). data-chrome-surface flips ink to light so the
-            // tinted --t-bg surface reads the same as the other glass panels.
-            <>
-              {leftHeader}
-              <SmoothCorners
-                data-chrome-surface="true"
-                // Dock corners (Q ruling 2026-07-16): flush left edge + flush
-                // bottom → left side and bottom-right are HARD; only the
-                // top-right keeps the card curve. The window's own 12px
-                // corner mask shapes the bottom-left.
-                corners={{ topLeft: 0, topRight: 14, bottomLeft: 0, bottomRight: 0, smoothing: 0.6 }}
-                autoEffects={false}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  background: 'var(--t-bg)',
-                }}
-              >
-                {leftContent}
-              </SmoothCorners>
-            </>
-          ) : (
-            // SOLID — self-contained paper card with the sidebar footer inside.
-            <div
-              data-chrome-surface="true"
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                // Claude-desktop float (Q 2026-07-17): the card never touches
-                // a window edge, so all four corners carry the same curve. The
-                // hairline is load-bearing — card and backdrop are near-equal
-                // tones, so without it the 4px air is invisible and the float
-                // reads flush.
-                borderTopLeftRadius: 14,
-                borderTopRightRadius: 14,
-                borderBottomLeftRadius: 14,
-                borderBottomRightRadius: 14,
-                border: '1px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel-solid)',
-                // Flat by operator ruling (2026-07-13) — the in-column rail is
-                // not a floating surface; a drop shadow read as a seam against
-                // the workspace. Elevation stays on true overlays only.
-              } as React.CSSProperties}
-            >
-              {leftHeader}
-              {leftContent}
-            </div>
-          )}
+          {leftHeader}
+          <SmoothCorners
+            data-chrome-surface="true"
+            corners={workspaceFrameCorners(joinedWorkspaceFrame, true, sidebarOverlay)}
+            autoEffects={false}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-sidebar-bg, var(--t-panel-solid))',
+            }}
+          >
+            {leftContent}
+          </SmoothCorners>
         </motion.div>
+        </ChatListColumn>
       );
       })()}
 
-      {/* ── Left drag handle ── */}
-      {showSidebarColumn && <div
-        onMouseDown={startLeftDrag}
-        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
-        onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
-        style={{
-          width: 6,
-          cursor: 'col-resize',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          zIndex: 10,
-        }}
-      >
-        {/* Divider pill is ALWAYS visible (Q ruling 2026-07-12) — a
-            hidden-until-hover handle reads as no affordance at all. Rest
-            paints the drag-handle token at full strength; hover glows by
-            swapping to the stronger drag-handle-hover color, NOT by opacity
-            (the token's low alpha over glass made any opacity dance
-            invisible). The translateX centers the pill in the VISIBLE gap:
-            the workspace card's marginLeft (workspaceInset) extends the gap
-            rightward past this 6px gutter, so a gutter-centered pill read
-            off-center (Q report 2026-07-14). */}
-        <div style={{
-          width: 3,
-          height: 40,
-          borderRadius: 2,
-          backgroundColor: 'var(--t-drag-handle)',
-          transition: 'background-color 150ms',
-          transform: `translateX(${workspaceInset / 2}px)`,
-        }} />
-      </div>}
+      {showSidebarColumn && !sidebarOverlay ? <ChatListResizeEdge width={leftWidth}
+        glass={effectiveGlassSurface} joined={joinedWorkspaceFrame} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
 
       {/* ── Center + right region ──
           Wrapped in its own column so the DesktopStatusBar renders at ITS
@@ -5293,39 +4722,31 @@ function DashboardInner() {
           status bar's old left band was an empty anchor after its utilities
           moved out. */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', minWidth: 0, overflow: 'hidden', containerType: 'inline-size' }}>
 
       {/* ── Center: Workspace Surface ── */}
-      <div data-mcp-scope="workspace" style={{
+      <div data-mcp-scope="workspace" aria-hidden={rightPanelMaximized} inert={rightPanelMaximized} style={{
         flex: 1,
-        display: 'flex',
+        display: rightPanelMaximized ? 'none' : 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         position: 'relative',
         minWidth: 0,
         background: 'transparent',
-        // The workspace floats inside the dashboard gradient with a small inset
-        // (workspaceInset). The Apple squircle now lives on the inner content
-        // card below (Lisse SmoothCorners — the same "list corners" the canvas
-        // uses) so the WHITE surface carries the curve on ALL four corners. A
-        // plain borderRadius here only rounded the transparent header strip's
-        // top + clipped the white bottom as a circle, never the white TOP.
-        // overflow:hidden stays to keep the header strip within these bounds.
+        // Content owns the perimeter curve; headers remain in the shared frame.
         borderRadius: 0,
-        marginTop: workspaceInset,
-        marginBottom: workspaceInset,
-        marginLeft: workspaceInset,
-        marginRight: workspaceInset,
+        marginTop: compactShell ? workspaceInset : 0,
+        marginBottom: compactShell ? workspaceInset : 0,
+        marginLeft: joinedWorkspaceFrame ? 0 : workspaceInset,
+        marginRight: !joinedWorkspaceFrame && showRightPanelColumn ? workspaceInset : 0,
       }}>
         {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
-          leadingInset={!showSidebarColumn}
-          sidebarVisible={sidebarVisible}
-          onToggleSidebar={!showSidebarColumn && !compactShell ? toggleSidebarFromChrome : undefined}
-          onSidebarHoverEnter={!showSidebarColumn && !compactShell && !showCompactNavigationRail ? openSidebarPreview : undefined}
-          onSidebarHoverLeave={!showSidebarColumn && !compactShell && !showCompactNavigationRail ? scheduleSidebarPreviewClose : undefined}
+          leadingInset={!showCompactNavigationRail}
+          sidebarVisible={showSidebarColumn}
+          onToggleSidebar={toggleSidebarFromChrome} onSearch={handlePaletteOpen}
           rightPanelOpen={showRightPanelColumn}
           rightPanelDisabled={viewportBands?.belowRightCollapse ?? false}
-          onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
+          onToggleRightPanel={compactShell || isPullRequestWorkspace ? undefined : handleToggleO8Panel}
           projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
           projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
           onToggleProjectContextRail={compactShell ? undefined : () => {
@@ -5345,10 +4766,8 @@ function DashboardInner() {
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
-        {/* The white workspace card. Lisse squircle ("list corners" from the
-            canvas) on all four corners so the TOP rounds too — not just the
-            bottom. autoEffects off = pure clip-path, no injected shadow. */}
-        <SmoothCorners corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Solid modes join adjacent panels; glass keeps each card curved. */}
+        <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, !showSidebarColumn || sidebarOverlay, !showRightPanelColumn, joinedWorkspaceFrame ? 14 : WORKSPACE_RAIL_CORNER_RADIUS)} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}
@@ -5366,34 +4785,8 @@ function DashboardInner() {
             },
           ] : []}
         />
-        {/* The full-page Analytics branch was here when NavSection was
-            'analytics'. Audit found that section is never set by any
-            code path (NavRail retired, no other setter calls
-            setActiveNavSection('analytics')). Analytics still reaches
-            the operator through Settings → Analytics tab. Dropped
-            2026-05-27. */}
-
-        {activeNavSection === 'automations' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading automations…</div>}>
-              <LazyAutomationsPage currentOwner="operator" onClose={() => setActiveNavSection('agents')} />
-            </Suspense>
-          </div>
-        )}
 
         {activeNavSection === 'projects' ? <ProjectsPage key={projectLibraryRequest.revision} initialProjectId={projectLibraryRequest.projectId} onClose={() => setActiveNavSection('agents')} /> : null}
-        <RetainedCustomizeView active={activeNavSection === 'customize'}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading customize…</div>}>
-              <LazyCustomizePage
-                key={(leftPanelFocus.view?.project ?? dashboardProjects.activeProject)?.id ?? 'personal'}
-                project={leftPanelFocus.view?.project ?? dashboardProjects.activeProject}
-                registeredRepos={globalRepoEntries}
-                onClose={() => setActiveNavSection('agents')}
-              />
-            </Suspense>
-        </RetainedCustomizeView>
-
-        {activeNavSection !== 'automations' && (
           <div
             ref={workspaceSurfaceRef}
             aria-hidden={workspaceSurfaceHidden}
@@ -5423,8 +4816,10 @@ function DashboardInner() {
             onToggleWorkspacePip={handleToggleWorkspacePip}
             o8PanelVisible={showRightPanelColumn && rightPanelKind === 'o8'}
           >
+            <WorkspaceUtilityProvider value={workspaceUtilityContext}>
             <TileContainer
               layout={tileLayout}
+              joined={joinedWorkspaceFrame}
               paneLabels={workspacePaneLabels}
               keepPrimarySessionAlive
               interactionDisabled={workspacePageSwitching}
@@ -5435,15 +4830,15 @@ function DashboardInner() {
               onResizeSplit={handleResizeSplit}
               onSplitTile={handleSplitTile}
             />
+            </WorkspaceUtilityProvider>
             <DashboardHydrationMarker />
           </OrchestratorDataProvider>
           </div>
-        )}
-
         </SmoothCorners>
       </div>
 
       <motion.div
+            data-right-panel-maximized={rightPanelMaximized}
             aria-hidden={!showRightPanelColumn}
             inert={!showRightPanelColumn}
             // Animate the LAYOUT WIDTH (not just opacity/x) so the center
@@ -5452,10 +4847,9 @@ function DashboardInner() {
             // fade/slide and then snapping the center when it unmounts.
             // overflow:hidden clips the fixed-width content during the
             // collapse; the inner keeps its own drag-resize width animation.
-            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
-            // + the inner's 4px right margin so nothing clips when open.
+            // The chrome allowance covers the divider and outer panel inset.
             initial={false}
-            animate={{ width: showRightPanelColumn ? 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
+            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : rightColumnChrome + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -5464,46 +4858,28 @@ function DashboardInner() {
               display: 'flex',
               height: '100%',
               flexShrink: 0,
-              overflow: 'hidden',
+              maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE}px))`,
+              overflow: showRightPanelColumn ? 'visible' : 'hidden',
             }}
           >
-            <div
-              onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle-hover, var(--t-text-faint))'; }}
-              onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.backgroundColor = 'var(--t-drag-handle)'; }}
-              style={{
-                width: 6,
-                cursor: 'col-resize',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                zIndex: 10,
-              }}
-            >
-              {/* Always-visible divider pill, color-glow on hover — same
-                  Q ruling as the left handle above. The translateX mirrors
-                  the left handle: the workspace card's marginRight
-                  (workspaceInset) extends the visible gap LEFTWARD past this
-                  gutter, so center the pill in the full gap. */}
-              <div style={{
-                width: 3,
-                height: 40,
-                borderRadius: 2,
-                backgroundColor: 'var(--t-drag-handle)',
-                transition: 'background-color 150ms',
-                transform: `translateX(-${workspaceInset / 2}px)`,
-              }} />
-            </div>
+            {!rightPanelMaximized ? <RightPanelResizeEdge
+              joined={joinedWorkspaceFrame}
+              width={rightPanelKind === 'o8' ? o8Width : rightWidth}
+              minimum={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
+              maximum={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
+              onStartDrag={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
+              onResize={rightPanelKind === 'o8' ? setO8Width : setRightWidth}
+            /> : null}
 
             <motion.div
               data-mcp-scope="chat-panel"
               initial={false}
-              animate={{ width: rightPanelKind === 'o8' ? o8Width : rightWidth }}
+              animate={{ width: rightPanelMaximized ? '100%' : rightPanelKind === 'o8' ? o8Width : rightWidth }}
               transition={panelDragActive ? { type: false } : { duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',
+                maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE + rightColumnChrome}px))`,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
@@ -5512,31 +4888,29 @@ function DashboardInner() {
                 // A plain rounded-rect clip here would shave the squircle's bulge
                 // at the 45° diagonal, breaking the continuity with everything else.
                 borderRadius: 0,
-                marginTop: 4,
-                marginBottom: 4,
-                marginRight: 4,
+                marginTop: compactShell ? 4 : 0,
+                marginBottom: compactShell ? 4 : 0,
+                marginRight: 0,
               }}
             >
-              {/* Lisse squircle on all four corners so the right panel's TOP
-                  edges match the center workspace + canvas "list corners". No
-                  fill: in glass the panel stays transparent so the dark window
-                  vibrancy shows through — the SAME glass as the left AgentPanel,
-                  which paints nothing. Solid mode's opaque children paint the
-                  squircle. */}
-              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Header stays outside the content clip on the shared frame. */}
               <PanelHeaderStrip
+                maximized={rightPanelMaximized}
+                onToggleMaximized={toggleRightPanelMaximized}
                 o8PanelVisible={rightPanelKind === 'o8'}
                 workspacePanelVisible={rightPanelKind === 'review'}
                 onToggleO8Panel={handleToggleO8Panel}
                 o8ActiveTab={o8ActiveTab}
-                onO8TabChange={rightPanelKind === 'o8' ? handlePrimaryPanelTabChange : undefined}
+                onO8TabChange={rightPanelKind === 'o8' ? handleHeaderPanelTabChange : undefined}
                 splitEnabled={o8SplitEnabled}
                 onToggleSplit={rightPanelKind === 'o8' ? toggleO8PanelSplit : undefined}
                 approvalCount={approvalCount}
                 onOpenInbox={handleOpenInbox}
-                browserTabsSlotRef={setBrowserHeaderTabSlot}
+                panelTabsSlotRef={setPanelHeaderTabSlot}
                 showBrowserTabs={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+                prTabsSlot={<RightPrTabs tabs={rightPrTabs} activeId={o8ActiveTab === 'activity' && o8PrNumber ? rightPrTabId(o8PrNumber, o8PrRepo, currentO8RepoPath) : null} onSelect={handleRightPrTabSelect} onClose={handleRightPrTabClose} />}
               />
+              <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, rightPanelMaximized && (!showSidebarColumn || sidebarOverlay), true)} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {mountedRightPanels.o8 && (
                   <motion.div
                     aria-hidden={rightPanelKind !== 'o8'}
@@ -5569,14 +4943,23 @@ function DashboardInner() {
                         onOpenO8Panel={handleOpenO8Panel}
                       >
                         <LazyO8Panel
+                          active={showRightPanelColumn && rightPanelKind === 'o8'}
                           repoPath={currentO8RepoPath}
                           registeredRepos={activeProjectRepoEntries}
+                          linkableRepos={globalRepoEntries}
+                          prContextTabId={workspaceHeaderActive.kind === 'orchestrator' ? workspaceHeaderActive.tabId : null}
+                          prContextId={workspaceHeaderActive.kind === 'orchestrator' && workspaceHeaderActive.tabId
+                            ? (() => {
+                              const threadId = workspaceHeaderActive.tabs.find((tab) => tab.id === workspaceHeaderActive.tabId)?.orchestratorThreadId;
+                              return threadId ? `thread:${threadId}` : `tab:${workspaceHeaderActive.tabId}`;
+                            })()
+                            : `worktree:${currentO8RepoPath ?? 'unbound'}`}
                           onRepoPathChange={handleSelectO8RepoPath}
                           allRepos={o8AllRepos}
                           onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
-                          onActiveTabChange={handlePrimaryPanelTabChange}
+                          onActiveTabChange={handleHeaderPanelTabChange}
                           secondaryTab={visibleSecondaryTab}
                           onSecondaryTabChange={handleSecondaryPanelTabChange}
                           selectedFile={scopedO8SelectedFile}
@@ -5588,13 +4971,29 @@ function DashboardInner() {
                           browserUrl={o8BrowserUrl}
                           browserStateKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
                           onBrowserActiveUrlChange={setO8BrowserHoverUrl}
-                          browserHeaderTabSlot={browserHeaderTabSlot}
+                          headerTabSlot={panelHeaderTabSlot}
                           commitSha={o8CommitSha}
                           onClearCommit={handleClearCommit}
                           onSelectCommit={handleSelectCommit}
                           onSelectPR={handleReviewPR}
+                          onClosePR={handleCloseRightPr}
                           onSelectIssue={handleSelectIssue}
                           onOpenFile={handleOpenFileInWorkspace}
+                          registerContextualPanelHandle={registerContextualPanelHandle}
+                          sendTerminalCreate={sendTerminalCreate}
+                          sendTerminalAttach={sendTerminalAttach}
+                          sendTerminalInput={sendTerminalInput}
+                          sendTerminalResize={sendTerminalResize}
+                          sendTerminalDetach={sendTerminalDetach}
+                          sendAgentKill={sendAgentKill}
+                          termWsConnected={termWsConnected}
+                          onOpenMainTerminal={(repoPath) => openMainTerminal({
+                            handles: workspaceTerminalHandlesRef.current,
+                            repoPath,
+                            repo: repoPath ? { localPath: repoPath, name: globalRepoEntries.find((repo) => repo.localPath === repoPath)?.name ?? 'Project' } : undefined,
+                            activate: setActiveTileId,
+                            waitForTarget: () => waitForWorkspaceTerminalTarget({ repoPath, fallbackToAnyExisting: !repoPath }),
+                          })}
                         />
                       </OrchestratorDataProvider>
                     </Suspense>
@@ -5645,10 +5044,13 @@ function DashboardInner() {
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
 
       {showCompactNavigationRail ? <CompactNavigationRail
-        onHoverReveal={openSidebarPreview}
-        onHoverLeave={scheduleSidebarPreviewClose}
-        onPinSidebar={openSidebarFromChrome}
-        onHome={() => {
+        glassSurface={chromeMounted && (isGlassSurface || (workspaceGlass && inTauri && !isNonMacShell()))}
+        workspacePage={isWorkspaceUtilityKind(focusedWorkspaceTab?.canvasKind) ? focusedWorkspaceTab.canvasKind : undefined}
+        activeDestination={activeNavSection}
+        onHome={leaveNavTakeover}
+        onOpenSettings={() => handleOpenSettingsTab('general')}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        onNewSession={() => {
           leaveNavTakeover();
           const repo = leftPanelFocus.view?.selectedRepo
             ?? activeProjectRepoEntries.find((entry) => entry.localPath === globalRepoEntry?.localPath)
@@ -5666,144 +5068,28 @@ function DashboardInner() {
           } : undefined);
         }}
         onCreateTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
-        onSearch={() => { leaveNavTakeover(); handlePaletteOpen(); }}
-        onOpenProjects={() => { leftPanelFocus.clearFocus(); setProjectLibraryRequest((request) => ({ projectId: null, revision: request.revision + 1 })); setActiveNavSection('projects'); }}
-        onOpenHistoryChat={(...args) => { leaveNavTakeover(); handleOpenHistoryChatFromPanel(...args); }}
-        repos={activeProjectRepoEntries}
-        activeSessionKey={railActiveSessionKey}
-        previewOpen={sidebarPreviewOpen}
+        onOpenUsage={() => {
+          leaveNavTakeover();
+          openCanvasTab({ id: 'usage', kind: 'usage', label: 'Usage', resourceId: 'usage' });
+        }}
+        onOpenPRs={() => {
+          leaveNavTakeover();
+          const repoPath = focusedWorkspaceTab?.repoPath ?? globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
+          openCanvasTab({
+            id: `pull-requests:${repoPath ?? 'unbound'}`,
+            kind: 'pull-requests',
+            label: 'Pull requests',
+            resourceId: repoPath ?? '',
+            meta: repoPath ? { workspace: repoPath } : undefined,
+          });
+          closeRightPanelFromUser();
+        }}
+        onOpenProjects={() => { setProjectLibraryRequest((request) => ({ projectId: null, revision: request.revision + 1 })); setActiveNavSection('projects'); }}
       /> : null}
 
-      {/* Collapsed rail hover reveals the same AgentPanel used by the open
-          sidebar. It floats over the workspace; a click pins the full column. */}
-      {!showSidebarColumn && !compactShell && (
-        <>
-          <AnimatePresence initial={false}>
-            {sidebarPreviewOpen && (
-              <motion.div
-                key="sidebar-hover-preview"
-                ref={sidebarPreviewOverlayRef}
-                // A short horizontal reveal keeps the panel anchored to the
-                // rail. Do not sweep it down over the header toggle: that
-                // previously stole hover and caused an open/close loop.
-                initial={{ opacity: 0, x: -4, scale: 0.997 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                exit={{ opacity: 0, x: -4, scale: 0.997 }}
-                transition={{ duration: 0.1, ease: [0.22, 1, 0.36, 1] }}
-                onMouseEnter={openSidebarPreview}
-                onMouseLeave={scheduleSidebarPreviewClose}
-                // Clicking ANYWHERE on the overlay pins it → expands the
-                // real sidebar. Without this, the overlay looks like the
-                // sidebar but a click on its chrome bounces off (the
-                // operator's complaint 2026-05-28 "can't click agent
-                // panel to keep it up"). Child rows (New session,
-                // Search, chat rows) have their own onClick handlers
-                // that fire first; this bubble-phase handler pins the
-                // sidebar after so the user keeps their context.
-                onClick={openSidebarFromChrome}
-                data-mcp-scope="agent-panel-hover-preview"
-                style={{
-                  position: 'fixed',
-                  // Sits just under the toggle pill (pill height 26, sits
-                  // at y=7 → bottom=33) with a 2 px breathing gap. The
-                  // old top:44 left an 11 px dead zone between pill and
-                  // overlay — clicking in that gap fired the window
-                  // mousedown listener (closing the preview) but no
-                  // onClick handler caught the press, so the operator
-                  // had to double-click to pin (2026-05-28). Traffic
-                  // lights end around y=30 — y=35 still clears them.
-                  top: SIDEBAR_PREVIEW_TOP,
-                  left: SIDEBAR_PREVIEW_INSET,
-                  // Match the actual AgentPanel column width so the
-                  // overlay is a 1:1 stand-in for the real panel — no
-                  // condensed copy. Default 300px (DEFAULT_LEFT_PANEL_WIDTH).
-                  width: leftWidth,
-                  // The live measurement ends five pixels above the status
-                  // rail, matching the expanded sidebar's bottom inset. Both
-                  // height and maxHeight update on window/visual-viewport
-                  // resize, so the inner AgentPanel list owns constrained
-                  // scrolling instead of the overlay escaping the window.
-                  height: sidebarPreviewMaxHeight,
-                  maxHeight: sidebarPreviewMaxHeight,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  // Tracks the inner squircle's curve — see the SmoothCorners
-                  // below (26/0.6, matching the workspace card).
-                  borderTopLeftRadius: WORKSPACE_RAIL_CORNER_RADIUS,
-                  borderTopRightRadius: WORKSPACE_RAIL_CORNER_RADIUS,
-                  borderBottomLeftRadius: WORKSPACE_RAIL_CORNER_RADIUS,
-                  borderBottomRightRadius: WORKSPACE_RAIL_CORNER_RADIUS,
-                  // Shadow + border live on this outer rounded rect, not the
-                  // squircle: clip-path clips box-shadows, and Lisse's traced
-                  // shadow (autoEffects) inserts an unconstrained wrapper div
-                  // that breaks the flex height chain — the list then paints
-                  // past the window bottom instead of scrolling internally.
-                  // The rounded-rect silhouette is invisible under the 48px
-                  // blur, and the 1px border tracks the squircle to sub-pixel.
-                  boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
-                  border: isGlassSurface
-                    ? '1px solid rgba(255, 255, 255, 0.08)'
-                    : '1px solid var(--t-divider-subtle)',
-                  zIndex: 200,
-                  fontFamily: 'var(--font-sans-system)',
-                  transformOrigin: 'left top',
-                  // Ink vars live on the positioned container so they cascade
-                  // to the SmoothCorners subtree below.
-                  ...(isGlassSurface ? {
-                    ['--t-text' as string]: '#e8ecf2',
-                    ['--t-text-strong' as string]: '#f5f8fc',
-                    ['--t-text-secondary' as string]: '#bcc5d0',
-                    ['--t-text-muted' as string]: '#8b95a3',
-                    ['--t-text-faint' as string]: '#5f6b7a',
-                    ['--t-hover' as string]: 'rgba(255, 255, 255, 0.06)',
-                    ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.06)',
-                    ['--t-divider-subtle' as string]: 'rgba(255, 255, 255, 0.08)',
-                  } : {}),
-                } as React.CSSProperties}
-              >
-                {/* Lisse squircle edges so the hover preview's corners overlay
-                    the SAME curve as the open AgentPanel / center workspace —
-                    not a plain rounded rect (operator OCD fix). autoEffects
-                    OFF, exactly like the expanded rail's card (line ~4838):
-                    pure clip-path with no wrapper div, so the style's flex
-                    constraints land on the real flex child and the AgentPanel
-                    list scrolls internally when the window is short.
-                    backdrop-filter is clipped to the squircle. */}
-                <SmoothCorners
-                  // Same curve as the workspace card (Q 2026-07-16: "the
-                  // edges don't match the workspace edges") — radius 14 read
-                  // as a different, tighter corner family next to the
-                  // center's 26/0.6 Lisse squircle.
-                  corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-                  autoEffects={false}
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                    background: isGlassSurface ? 'var(--t-bg)' : 'var(--t-panel-solid)',
-                    backdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
-                    WebkitBackdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
-                  } as React.CSSProperties}
-                >
-                  {agentPanelElement}
-                </SmoothCorners>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </>
-      )}
       </div>{/* end center+right row */}
 
-      {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ──
-          Lives INSIDE the center+right column (not page-wide) so the sidebar
-          column beside it runs full-height (Q ruling 2026-07-16). The pill
-          defaults to the project's HEAD branch. When the active
-          orchestrator tab has a worktree pick that targets the same repo,
-          the pill mirrors that branch so MergeActionCluster's PR + lane
-          state (ready / push / merge) tracks the operator's pick. */}
+      {/* Optional development indicator; the workspace uses the full height. */}
       <DesktopStatusBar
         branchName={(() => {
           const projectBranch = globalRepoEntry?.readiness?.currentBranch
@@ -5833,7 +5119,6 @@ function DashboardInner() {
         parkedLanes={parkedLanes}
         onOpenReviewLane={handleOpenReviewLane}
         onOpenAwaitingMerge={handleOpenAwaitingMerge}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
       />
       </div>{/* end center+right column */}
@@ -5904,11 +5189,15 @@ function DashboardInner() {
           Scope key MUST match the O8Panel browserStateKey above. */}
       <BrowserPipCard
         active={!showRightPanelColumn}
+        panelVisible={showRightPanelColumn}
+        browserVisible={showRightPanelColumn && rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
+        boundsRef={workspaceSurfaceRef}
         scopeKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
-        onOpenBrowser={() => handleOpenO8Panel({ tab: 'browser' })}
+        onOpenBrowser={(url) => { if (url) setO8BrowserUrl(url); handleOpenO8Panel({ tab: 'browser' }); }}
       />
       <O8SpecPipCard
-        active={!showRightPanelColumn}
+        active={!showRightPanelColumn || rightPanelKind !== 'o8' || o8ActiveTab !== 'spec'}
+        contextKey={`${workspaceHeaderActive.workspaceId ?? 'home'}:${workspaceHeaderActive.tabId ?? 'none'}`}
         repoPath={currentO8RepoPath}
         onOpenSpec={() => handleOpenO8Panel({ tab: 'spec' })}
       />

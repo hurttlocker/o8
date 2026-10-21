@@ -56,6 +56,7 @@ mod imp {
     /// Bumped on every `arm`; the 90s safety thread only fires if its generation
     /// still matches (so a re-arm cancels the previous timer).
     static ARM_GEN: AtomicU64 = AtomicU64::new(0);
+    static OVERLAY_CHANGE: Mutex<()> = Mutex::new(());
 
     /// Single-slot stash for the current (serial, push-to-talk) agent session:
     /// the full-res capture taken at first stroke + the normalized strokes the
@@ -67,6 +68,10 @@ mod imp {
         /// A capture subprocess is in flight (started on first stroke).
         capturing: bool,
         first_stroke_seen: bool,
+        instruction: String,
+        generation: u64,
+        visual_id: Option<String>,
+        monitor: Option<tauri::Monitor>,
     }
 
     impl Stash {
@@ -76,6 +81,10 @@ mod imp {
                 capture: None,
                 capturing: false,
                 first_stroke_seen: false,
+                instruction: String::new(),
+                generation: 0,
+                visual_id: None,
+                monitor: None,
             }
         }
     }
@@ -88,14 +97,16 @@ mod imp {
 
     // ── Payload types (JS → Rust events) ──
 
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, serde::Serialize)]
     struct InkPoint {
         x: f64,
         y: f64,
+        #[serde(default)]
+        t: f64,
         // `t` (timestamp) is reported but unused server-side.
     }
 
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, serde::Serialize)]
     struct InkStroke {
         #[serde(default)]
         points: Vec<InkPoint>,
@@ -103,8 +114,14 @@ mod imp {
 
     #[derive(serde::Deserialize)]
     struct StrokesPayload {
+        #[serde(default, rename = "visualCaptureId")]
+        visual_id: Option<String>,
+        #[serde(default, rename = "visualCaptureGeneration")]
+        visual_generation: Option<u64>,
         #[serde(default)]
         strokes: Vec<InkStroke>,
+        #[serde(default)]
+        instruction: String,
     }
 
     impl StrokesPayload {
@@ -142,19 +159,20 @@ mod imp {
             }
         };
 
-        let window = WebviewWindowBuilder::new(app, SPATIAL_INK_LABEL, WebviewUrl::External(parsed))
-            .title("o8 spatial ink")
-            .inner_size(PLACEHOLDER_W, PLACEHOLDER_H)
-            .resizable(false)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .shadow(false)
-            .skip_taskbar(true)
-            .focused(false)
-            .visible(true)
-            .disable_drag_drop_handler()
-            .build();
+        let window =
+            WebviewWindowBuilder::new(app, SPATIAL_INK_LABEL, WebviewUrl::External(parsed))
+                .title("o8 spatial ink")
+                .inner_size(PLACEHOLDER_W, PLACEHOLDER_H)
+                .resizable(false)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .shadow(false)
+                .skip_taskbar(true)
+                .focused(false)
+                .visible(true)
+                .disable_drag_drop_handler()
+                .build();
 
         let window = match window {
             Ok(w) => w,
@@ -222,33 +240,31 @@ mod imp {
         });
     }
 
-    /// Size + position the window to fully cover the monitor under the cursor.
-    /// Logical coordinates; runs on the main thread (NSScreen reads touch AppKit).
-    fn reposition_to_cursor(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    /// Freeze the target once; window positioning and pixels share this monitor.
+    pub fn cursor_monitor(app: &tauri::AppHandle) -> Option<tauri::Monitor> {
+        let cursor = app.cursor_position().ok();
+        let monitors = app.available_monitors().unwrap_or_default();
+        cursor
+            .and_then(|c| {
+                monitors
+                    .iter()
+                    .find(|m| {
+                        let p = m.position();
+                        let size = m.size();
+                        c.x >= p.x as f64
+                            && c.x < (p.x + size.width as i32) as f64
+                            && c.y >= p.y as f64
+                            && c.y < (p.y + size.height as i32) as f64
+                    })
+                    .cloned()
+            })
+            .or_else(|| app.primary_monitor().ok().flatten())
+            .or_else(|| monitors.first().cloned())
+    }
+
+    fn reposition_to_monitor(window: &tauri::WebviewWindow, monitor: tauri::Monitor) {
         let win = window.clone();
-        let app = app.clone();
         let _ = window.run_on_main_thread(move || {
-            let cursor = app.cursor_position().ok();
-            let monitors = app.available_monitors().unwrap_or_default();
-            let monitor = cursor
-                .and_then(|c| {
-                    monitors
-                        .iter()
-                        .find(|m| {
-                            let p = m.position();
-                            let s = m.size();
-                            c.x >= p.x as f64
-                                && c.x < (p.x + s.width as i32) as f64
-                                && c.y >= p.y as f64
-                                && c.y < (p.y + s.height as i32) as f64
-                        })
-                        .cloned()
-                })
-                .or_else(|| app.primary_monitor().ok().flatten())
-                .or_else(|| monitors.first().cloned());
-            let Some(monitor) = monitor else {
-                return;
-            };
             let scale = monitor.scale_factor();
             let mon_x = monitor.position().x as f64 / scale;
             let mon_y = monitor.position().y as f64 / scale;
@@ -264,18 +280,54 @@ mod imp {
     /// Begin an agent hold: reset the stash, cover the cursor's monitor, CAPTURE
     /// the mouse, order front nonactivating, and arm the 90s safety auto-disarm.
     pub fn arm(app: &tauri::AppHandle) {
-        use tauri::Manager;
+        let monitor = cursor_monitor(app);
+        let _ = arm_owned(app, None, monitor);
+    }
+
+    pub fn arm_visual(app: &tauri::AppHandle, id: String, monitor: tauri::Monitor) -> Option<u64> {
+        arm_owned(app, Some(id), Some(monitor))
+    }
+
+    fn arm_owned(
+        app: &tauri::AppHandle,
+        visual_id: Option<String>,
+        monitor: Option<tauri::Monitor>,
+    ) -> Option<u64> {
+        use tauri::{Emitter, Manager};
+        let _change = OVERLAY_CHANGE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         // #2147 — quiet mode owns overlay visibility for its duration. Arming
         // would cover the presenter's whole monitor with a capture layer.
         if crate::presentation::overlay_show_blocked() {
-            return;
+            return None;
         }
-        *lock_stash() = Stash::new();
-        ARMED.store(true, Ordering::SeqCst);
-        let generation = ARM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let (generation, superseded) = {
+            let mut stash = lock_stash();
+            if visual_id.is_some() && is_armed() {
+                return None;
+            }
+            let generation = ARM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+            let superseded = stash.visual_id.take();
+            *stash = Stash {
+                generation,
+                visual_id,
+                monitor: monitor.clone(),
+                ..Stash::new()
+            };
+            ARMED.store(true, Ordering::SeqCst);
+            (generation, superseded)
+        };
+        if let Some(id) = superseded {
+            let payload = serde_json::json!({ "id": id });
+            let _ = app.emit_to("main", "o8:visual-capture-superseded", &payload);
+            let _ = app.emit_to(SPATIAL_INK_LABEL, "o8:visual-capture-superseded", &payload);
+        }
 
         if let Some(win) = app.get_webview_window(SPATIAL_INK_LABEL) {
-            reposition_to_cursor(app, &win);
+            if let Some(monitor) = monitor {
+                reposition_to_monitor(&win, monitor);
+            }
             apply_macos_recipe(&win);
             // CAPTURE the mouse — pointer events now reach the ink page.
             let _ = win.set_ignore_cursor_events(false);
@@ -292,57 +344,151 @@ mod imp {
             std::thread::sleep(Duration::from_secs(SAFETY_DISARM_SECS));
             if ARMED.load(Ordering::SeqCst) && ARM_GEN.load(Ordering::SeqCst) == generation {
                 log::warn!("[spatial-ink] 90s safety auto-disarm (no teardown fired)");
-                disarm(&app2);
+                disarm_visual(&app2, generation);
             }
         });
+        Some(generation)
     }
 
     /// End the hold: restore click-through and tell the page to clear its canvas.
     /// Idempotent — safe to call from any teardown path, armed or not.
     pub fn disarm(app: &tauri::AppHandle) {
+        let _ = disarm_owned(app, None);
+    }
+
+    pub fn disarm_visual(app: &tauri::AppHandle, expected: u64) -> bool {
+        disarm_owned(app, Some(expected))
+    }
+
+    fn disarm_owned(app: &tauri::AppHandle, expected: Option<u64>) -> bool {
         use tauri::{Emitter, Manager};
+        let _change = OVERLAY_CHANGE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if expected.is_some_and(|generation| generation != ARM_GEN.load(Ordering::SeqCst)) {
+            return false;
+        }
         let was_armed = ARMED.swap(false, Ordering::SeqCst);
+        lock_stash().visual_id = None;
         if let Some(win) = app.get_webview_window(SPATIAL_INK_LABEL) {
             // RESTORE click-through — clicks pass through again.
             let _ = win.set_ignore_cursor_events(true);
         }
         // Clear the page canvas (also its belt for a missed terminal STT event).
-        let _ = app.emit_to(SPATIAL_INK_LABEL, "o8:spatial-ink-clear", serde_json::json!({}));
+        let _ = app.emit_to(
+            SPATIAL_INK_LABEL,
+            "o8:spatial-ink-clear",
+            serde_json::json!({}),
+        );
         if was_armed {
             log::info!("[spatial-ink] disarmed (mouse capture off)");
         }
+        true
+    }
+
+    pub fn is_armed() -> bool {
+        ARMED.load(Ordering::SeqCst)
+    }
+
+    pub fn set_visual_interaction(app: &tauri::AppHandle, expected: u64, interactive: bool) {
+        use tauri::Manager;
+        let _change = OVERLAY_CHANGE
+            .lock()
+            .unwrap_or_else(|value| value.into_inner());
+        if generation() != expected || !is_armed() {
+            return;
+        }
+        if let Some(window) = app.get_webview_window(SPATIAL_INK_LABEL) {
+            let _ = window.set_ignore_cursor_events(!interactive);
+        }
+    }
+
+    pub fn take_visual_instruction(expected: u64, id: &str) -> Result<String, String> {
+        let deadline = Instant::now() + Duration::from_millis(1500);
+        loop {
+            let stash = lock_stash();
+            if stash.generation != expected || stash.visual_id.as_deref() != Some(id) || !is_armed()
+            {
+                return Err("The drawing owner changed before the instruction was saved.".into());
+            }
+            if stash.strokes.is_some() {
+                return Ok(stash.instruction.clone());
+            }
+            drop(stash);
+            if Instant::now() >= deadline {
+                return Err("The drawing surface did not confirm its instruction.".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    pub fn generation() -> u64 {
+        ARM_GEN.load(Ordering::SeqCst)
     }
 
     // ── JS → Rust event handlers ──
 
-    fn on_first_stroke(app: &tauri::AppHandle) {
-        let mut do_capture = false;
+    fn on_first_stroke(app: &tauri::AppHandle, expected: Option<u64>) {
+        let mut capture_generation = None;
         {
             let mut s = lock_stash();
-            if !s.first_stroke_seen {
+            if is_armed()
+                && expected.map_or(true, |generation| generation == s.generation)
+                && !s.first_stroke_seen
+            {
                 s.first_stroke_seen = true;
                 s.capturing = true;
-                do_capture = true;
+                capture_generation = Some((s.generation, s.monitor.clone()));
             }
         }
-        if !do_capture {
+        let Some((generation, monitor)) = capture_generation else {
             return;
-        }
+        };
         // Capture the marked monitor NOW (before ink renders), off the main
         // thread — the ~300-600ms screencapture subprocess overlaps the operator
         // still drawing + talking, so finalize pays no extra latency.
         let app2 = app.clone();
         std::thread::spawn(move || {
-            let cap = screen::capture_full(&app2);
+            let cap = screen::capture_full(&app2, monitor);
             let mut s = lock_stash();
-            s.capture = cap;
-            s.capturing = false;
+            if s.generation == generation {
+                s.capture = cap;
+                s.capturing = false;
+            }
         });
     }
 
-    fn stash_strokes(strokes: Vec<Vec<(f64, f64)>>) {
+    fn stash_strokes(payload: StrokesPayload) {
         let mut s = lock_stash();
-        s.strokes = Some(strokes);
+        if !is_armed()
+            || s.visual_id != payload.visual_id
+            || (s.visual_id.is_some() && payload.visual_generation != Some(s.generation))
+        {
+            return;
+        }
+        let count: usize = payload
+            .strokes
+            .iter()
+            .map(|stroke| stroke.points.len())
+            .sum();
+        if payload.instruction.chars().count() > 16_000
+            || payload.strokes.len() > 128
+            || count > 8192
+            || payload.strokes.iter().any(|stroke| {
+                stroke.points.iter().any(|point| {
+                    !point.x.is_finite()
+                        || !point.y.is_finite()
+                        || !point.t.is_finite()
+                        || !(0.0..=1.0).contains(&point.x)
+                        || !(0.0..=1.0).contains(&point.y)
+                        || !(0.0..=3_600_000.0).contains(&point.t)
+                })
+            })
+        {
+            return;
+        }
+        s.instruction = payload.instruction.clone();
+        s.strokes = Some(payload.into_points());
     }
 
     /// Register the JS → Rust event listeners once, after windows exist.
@@ -351,16 +497,17 @@ mod imp {
         {
             let a = app.clone();
             app.listen("o8:spatial-ink-first-stroke", move |_event| {
-                on_first_stroke(&a);
+                on_first_stroke(&a, None);
             });
         }
         {
-            app.listen("o8:spatial-ink-strokes", move |event| {
-                match serde_json::from_str::<StrokesPayload>(event.payload()) {
-                    Ok(p) => stash_strokes(p.into_points()),
+            app.listen(
+                "o8:spatial-ink-strokes",
+                move |event| match serde_json::from_str::<StrokesPayload>(event.payload()) {
+                    Ok(p) => stash_strokes(p),
                     Err(e) => log::warn!("[spatial-ink] bad strokes payload: {e}"),
-                }
-            });
+                },
+            );
         }
         {
             let a = app.clone();
@@ -417,10 +564,48 @@ mod imp {
         };
         screen::composite_strokes(&capture, &strokes)
     }
+
+    #[cfg(test)]
+    mod visual_tests {
+        use super::*;
+        #[test]
+        fn notes_handoff_rejects_a_reused_identity_from_an_older_generation() {
+            let old_stash = std::mem::replace(
+                &mut *lock_stash(),
+                Stash {
+                    generation: 42,
+                    visual_id: Some("frame-owned".into()),
+                    ..Stash::new()
+                },
+            );
+            let old_armed = ARMED.swap(true, Ordering::SeqCst);
+            let payload = |generation, instruction| StrokesPayload {
+                visual_id: Some("frame-owned".into()),
+                visual_generation: Some(generation),
+                strokes: Vec::new(),
+                instruction,
+            };
+            stash_strokes(payload(41, "stale words".into()));
+            assert!(lock_stash().strokes.is_none());
+            assert!(take_visual_instruction(41, "frame-owned").is_err());
+            assert!(take_visual_instruction(42, "another-frame").is_err());
+            stash_strokes(payload(42, "Keep these exact words.".into()));
+            assert_eq!(
+                take_visual_instruction(42, "frame-owned").unwrap(),
+                "Keep these exact words."
+            );
+            assert_eq!(lock_stash().visual_id.as_deref(), Some("frame-owned"));
+            *lock_stash() = old_stash;
+            ARMED.store(old_armed, Ordering::SeqCst);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub use imp::{arm, create, disarm, register_listeners, take_spatial_context};
+pub use imp::{
+    arm, arm_visual, create, cursor_monitor, disarm, disarm_visual, generation, is_armed,
+    register_listeners, set_visual_interaction, take_spatial_context, take_visual_instruction,
+};
 
 // ── Non-macOS no-ops ──
 #[cfg(not(target_os = "macos"))]

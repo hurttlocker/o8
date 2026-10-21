@@ -27,6 +27,7 @@
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+import { resolveComposerBrainRoute, withComposerBrainRoute } from '@/lib/operator/composer-brain-route';
 import { NextRequest } from 'next/server';
 
 import { runAskPipeline } from '@/lib/cortex/qa/ask';
@@ -34,6 +35,8 @@ import { ManagedBrainUnavailableError } from '@/lib/cortex/qa/compose-class-a';
 import { withBrainRetrievalUsage } from '@/lib/cortex/qa/llm/brain-spend';
 
 interface AskBody {
+  conversation?: unknown;
+  preferredRuntime?: unknown;
   question?: unknown;
   repoPath?: unknown;
   projectId?: unknown;
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
   const force = request.nextUrl.searchParams.get('force') === '1' || body?.bypassCache === true;
   const terse = body?.terse === true;
 
+  const conversationRoute = body?.conversation === true ? await resolveComposerBrainRoute(typeof body.preferredRuntime === 'string' ? body.preferredRuntime : undefined) : undefined;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -87,16 +91,17 @@ export async function POST(request: NextRequest) {
           if (name === 'token') meteredAnswer += (payload as { text?: string }).text ?? '';
           emit(name, payload);
         };
-        await withBrainRetrievalUsage(
+        if (conversationRoute) emit('route', { runtime: conversationRoute.runtime, model: conversationRoute.model });
+        const answer = () => withBrainRetrievalUsage(
           question,
           { repoPath },
           () => runAskPipeline(question, repoPath, meteredEmit, force, projectId, { terse }),
           () => meteredAnswer,
         );
+        if (conversationRoute) await withComposerBrainRoute(conversationRoute, answer); else await answer();
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'pipeline error';
-        console.error('[qa][ask-route] pipeline error:', message);
-        emit('error', { message, ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
+        console.error('[qa][ask-route] pipeline error:', err);
+        emit('error', { message: conversationRoute?.runtime ? `The connected ${conversationRoute.runtime === 'codex' ? 'Codex' : 'Claude'} runtime could not answer. Check its connection and try again.` : 'Unable to answer cortex question.', ...(err instanceof ManagedBrainUnavailableError ? { code: err.code } : {}) });
         emit('done', {});
       } finally {
         try {

@@ -13,6 +13,9 @@ export interface QueuedComposerSend {
   id: number;
   text: string;
   images: ComposerSendImage[];
+  status?: 'queued' | 'dispatching' | 'applied' | 'held' | 'cancelled';
+  reason?: string | null;
+  cancellable?: boolean;
 }
 
 export interface ComposerSendBufferConfig<DispatchHandle> {

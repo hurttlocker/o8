@@ -1,4 +1,4 @@
-import { fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
+import { CorrelatedActionUnsettledError, fetchCorrelatedActionReceipt } from '@/lib/orchestrator/action-receipt';
 
 interface OwnedRuntimeActionPayload {
   ok?: boolean;
@@ -8,6 +8,11 @@ interface OwnedRuntimeActionPayload {
   error?: string;
   inProgress?: boolean;
   status?: string;
+  outcomeUnknown?: boolean;
+}
+
+export class OwnedRuntimeSteerUnconfirmedError extends CorrelatedActionUnsettledError {
+  constructor() { super(); this.message = 'Delivery could not be confirmed. Check the session transcript before sending again.'; }
 }
 
 interface OwnedRuntimeInventoryAgent {
@@ -43,11 +48,11 @@ export function shouldHoldOwnedRuntimeSteer(
     && payload.reason === 'surface_not_ready';
 }
 
-export function fetchOwnedRuntimeSteerReceipt(surfaceId: string, message: string) {
+export function fetchOwnedRuntimeSteerReceipt(surfaceId: string, message: string, clientMutationId = crypto.randomUUID()) {
   const requestBody = JSON.stringify({
     action: 'steer',
     surfaceId,
-    clientMutationId: crypto.randomUUID(),
+    clientMutationId,
     message,
   });
   return fetchCorrelatedActionReceipt<OwnedRuntimeActionPayload>('/api/runtime/action', {

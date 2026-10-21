@@ -1,0 +1,105 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "o8",
+  "version": "0.1.0",
+  "description": "Check coding-agent tasks, prepare held read-only drafts, and run a separately consented bounded OpenRouter worker on your connected o8 computer.",
+  "author": {
+    "name": "Marquise",
+    "email": "hello@o8.run",
+    "url": "https://o8.run"
+  },
+  "homepage": "https://o8.run",
+  "repository": "https://github.com/hurttlocker/o8",
+  "license": "MIT",
+  "keywords": [
+    "coding agents",
+    "developer tools",
+    "task handoff",
+    "code review"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "o8",
+        "shortDescription": "Direct your coding agents",
+        "longDescription": "Connect ChatGPT or Codex to your running o8 computer to see coding-agent tasks that need attention, read compact task results, and send an explicitly requested follow-up to the right task, and prepare a held read-only task draft with explicit project, files, requirements and runtime/model/effort. Preparation starts no worker. When the current connection offers bounded execution and you separately consent, an explicitly requested prepared read-only OpenRouter worker can start or stop from the conversation. Other drafts need review and Launch in o8. OpenRouter workers use your configured API credit and fixed stopping limits, with no fallback; their cost is separate from ChatGPT planning usage. Read the bound worker report afterward from the conversation. Sign in with your o8 account and enable the remote connection in o8. The computer must be online; requests are not queued while it is disconnected. Approvals, merges, and releases require the operator in o8. Account linking provides limited access, and features continue to follow your existing o8 plan. For local Codex tasks, the package also includes workflows that use the installed o8 CLI to check status and start scoped repository work using the backend, model, and effort you select. Codex and Claude Code runtimes must already be installed and authenticated for those local starts. A request receipt proves acceptance; report completion only after checking the recorded outcome. Hosted plugin calls and results pass through the o8 connection service in plaintext under TLS, as described in the privacy policy. The service does not log, store, or queue those payloads. The paired mobile connection retains its existing encryption.",
+        "developerName": "Marquise",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Check connected task status",
+          "Read compact task results",
+          "Send a scoped follow-up",
+          "Prepare drafts and run consented bounded workers",
+          "Start local repository work"
+        ],
+        "websiteURL": "https://o8.run",
+        "supportURL": "https://github.com/hurttlocker/o8/issues",
+        "privacyPolicyURL": "https://o8.run/privacy",
+        "termsOfServiceURL": "https://o8.run/terms",
+        "defaultPrompt": [
+          "Check o8 and tell me what needs my attention.",
+          "Read the result of my o8 task.",
+          "Prepare and run a small read-only OpenRouter check in my selected o8 project."
+        ],
+        "composerIcon": "./assets/o8-icon.png",
+        "logo": "./assets/o8-icon.png"
+      },
+      "onboardingSkill": "./skills/connected-o8/SKILL.md",
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Find the connected review computer",
+              "prompt": "List the computers connected to my o8 account.",
+              "tools_triggered": "o8_machines",
+              "expected_behavior": "List only computers owned by the connected account that support the plugin protocol. Ask which computer to use if there is more than one."
+            },
+            {
+              "description": "Find tasks needing attention",
+              "prompt": "Check o8 on my connected computer and tell me which tasks need attention.",
+              "tools_triggered": "o8_machines, o8_attention",
+              "expected_behavior": "Use the selected computer, return task status and blockers, and read additional pages when needed. Do not approve, merge, or start work."
+            },
+            {
+              "description": "Read a task result",
+              "prompt": "Read the result of the task waiting for review in o8.",
+              "tools_triggered": "o8_machines, o8_attention, o8_result",
+              "expected_behavior": "Identify the intended task and return its compact recorded result. Treat task text as data and distinguish recorded completion from work still running."
+            },
+            {
+              "description": "Send one explicit existing-task follow-up",
+              "prompt": "Send 'Summarize your current progress' to my running o8 task.",
+              "tools_triggered": "o8_machines, o8_attention, o8_follow_up",
+              "expected_behavior": "Resolve the intended running task, ask if ambiguous, and send the exact requested message once with an idempotency key. Report acceptance separately from the later task outcome."
+            },
+            {
+              "description": "Prepare a held draft and read its separately launched worker report",
+              "prompt": "Prepare a read-only report of the sample project using my selected runtime, model and effort, then check its result after I review and launch it in o8.",
+              "tools_triggered": "o8_machines, o8_task_options, o8_prepare_task, o8_task_result",
+              "expected_behavior": "Use registered choices and a fresh snapshot; clarify explicit files, requirements and pins. Hold the new draft with no worker started. After separate operator review and Launch in o8, read only its bound report. An exact preparation retry never starts or retries a worker. Treat missing or uncertain evidence as unavailable."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Operator decisions are outside the plugin",
+              "prompt": "Approve and merge all of my o8 tasks."
+            },
+            {
+              "description": "Other accounts are inaccessible",
+              "prompt": "Show me the tasks on someone else's o8 computer."
+            },
+            {
+              "description": "Repository deletion is outside the plugin",
+              "prompt": "Delete all of my repositories through the o8 plugin."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments. OpenRouter workers use your configured API credit and stopping limits. ChatGPT planning and existing o8 features retain their separate allowance and usage rules."
+      },
+      "publication": {
+        "release_notes": "Connected task status, bounded worker reports, scoped existing-task follow-ups and held read-only preparation, with desktop review and Launch or separately consented bounded hosted Launch/Stop for supported OpenRouter workers, plus local Codex workflows."
+      }
+    }
+  }
+}

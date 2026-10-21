@@ -1,3 +1,4 @@
+import { McpInputError } from '@/lib/mcp/api-error';
 import {
   apiFetch,
   errorText,
@@ -75,13 +76,13 @@ export const CORTEX_TOOLS: McpTool[] = [
 
 function parseKind(value: string): string {
   if (OBSERVATION_KINDS.has(value)) return value;
-  throw new Error('kind must be one of regression, pattern, gotcha, preference');
+  throw new McpInputError('kind must be one of regression, pattern, gotcha, preference');
 }
 
 function parseScope(value: string): string {
   if (!value) return 'packet';
   if (OBSERVATION_SCOPES.has(value)) return value;
-  throw new Error('scope must be one of packet, repo, global');
+  throw new McpInputError('scope must be one of packet, repo, global');
 }
 
 export async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> {
@@ -121,7 +122,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
     };
 
     if (!result?.ok) {
-      return jsonResult({ ok: false, error: result?.error ?? 'cortex_ask failed' });
+      return jsonResult({ ok: false, error: errorText(result) }, true);
     }
 
     return jsonResult({
@@ -137,7 +138,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       ...(result.classifier ? { classifier: result.classifier, classificationReceiptId: result.classificationReceiptId ?? null } : {}),
     });
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }
 
@@ -160,8 +161,8 @@ export async function handleProposeObservation(args: Record<string, unknown>): P
     }) as Record<string, unknown>;
 
     if (result.ok) return jsonResult(result);
-    return jsonResult({ ok: false, error: result.error ?? 'Unable to propose observation.' });
+    return jsonResult({ ok: false, error: errorText(result) }, true);
   } catch (error) {
-    return jsonResult({ ok: false, error: errorText(error) });
+    return jsonResult({ ok: false, error: errorText(error) }, true);
   }
 }

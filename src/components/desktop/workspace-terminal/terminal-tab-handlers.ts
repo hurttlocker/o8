@@ -1,6 +1,8 @@
 import { stripPersistedTabs, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { decodeTerminalBase64 } from './terminal-base64';
+import { isWorkspaceUtilityKind } from '../canvas/workspace-utility-navigation';
 import { retainTranscriptEntries } from '@/lib/transcripts/store';
 import {
   adHocLaneTitle,
@@ -10,7 +12,7 @@ import {
   updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 import type { OrchestratorStateApiResponse } from '@/lib/orchestrator/types';
-import { ANSI_RE, CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels, CLI_AGENTS, IGNORED_PORTS, LOCALHOST_RE } from '@/components/desktop/workspace-terminal/constants';
+import { ANSI_RE, CLAUDE_CLI_MODELS, CODEX_CLI_MODELS, GEMINI_CLI_MODELS, getOpenCodeModels, CLI_AGENTS, LOCALHOST_RE } from '@/components/desktop/workspace-terminal/constants';
 import type {
   LocalhostPreview,
   RegisteredRepo,
@@ -164,6 +166,12 @@ export function buildNewLlmChatTab(
 /* ------------------------------------------------------------------ */
 /*  handleUpdateChatMessages                                           */
 /* ------------------------------------------------------------------ */
+
+/** A plan text chat never inherits a repository, runtime, or worker defaults. */
+export function buildNewChatGPTPlanTab(): TerminalTab {
+  const now = Date.now();
+  return { id: createWorkspaceTabId('chatgpt-plan'), label: 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now };
+}
 
 export function computeUpdatedChatMessages(
   tab: TerminalTab,
@@ -362,6 +370,7 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       repoName: tab.repo?.name,
       repoPath: tab.repo?.localPath,
       tmuxSession: tab.tmuxSession ?? undefined,
+      terminalExit: tab.terminalExit,
       readOnly: tab.readOnly,
       remoteMachine: tab.remoteMachine,
       chatRuntime: tab.chatRuntime,
@@ -427,11 +436,11 @@ export interface RunCommandResult {
 }
 
 export function resolveRunCommandTarget(tabs: TerminalTab[]): RunCommandResult {
-  const shellTab = tabs.find((tab) => tab.kind === 'terminal' && tab.tmuxSession && !tab.readOnly);
+  const shellTab = tabs.find((tab) => tab.kind === 'terminal' && tab.tmuxSession && !tab.readOnly && !tab.terminalExit);
   if (shellTab?.tmuxSession) {
     return { kind: 'existing-shell', tmuxSession: shellTab.tmuxSession };
   }
-  const pendingShell = tabs.find((tab) => tab.kind === 'terminal' && !tab.tmuxSession && !tab.readOnly);
+  const pendingShell = tabs.find((tab) => tab.kind === 'terminal' && !tab.tmuxSession && !tab.readOnly && !tab.terminalExit);
   if (pendingShell) {
     return { kind: 'pending-shell', pendingTabId: pendingShell.id };
   }
@@ -470,7 +479,7 @@ export function detectLocalhostPreviews(
     const now = Date.now();
     for (const match of clean.matchAll(LOCALHOST_RE)) {
       const port = parseInt(match[1], 10);
-      if (IGNORED_PORTS.has(port) || detectedPorts.has(port)) continue;
+      if (port === getBrowserWsPort() || (typeof window !== 'undefined' && port === Number(window.location.port)) || detectedPorts.has(port)) continue;
       detectedPorts.add(port);
       const tab = tabs.find((entry) => entry.tmuxSession === sessionName);
       let url = match[0].replace('0.0.0.0', 'localhost');
@@ -522,7 +531,9 @@ export function computeCloseTab(
     // Prefer the Orchestrator tab as the fallback so closing a CLI/chat session
     // returns the user to the brain rather than skipping into the Assistant.
     const orchestrator = remaining.find((entry) => entry.kind === 'orchestrator');
-    nextActiveId = orchestrator
+    const returnTab = tab.kind === 'canvas' && isWorkspaceUtilityKind(tab.canvasTab?.kind)
+      ? remaining.find((entry) => entry.id === tab.canvasTab?.meta?.returnTabId) : undefined;
+    nextActiveId = returnTab ? returnTab.id : orchestrator
       ? orchestrator.id
       : remaining[Math.min(index, remaining.length - 1)].id;
   } else if (tabId === activeTabId) {

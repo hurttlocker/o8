@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface, useFloatingSurfaceMaterial } from '../../FloatingSurface';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -16,51 +17,16 @@ import { CircleSpark } from 'iconoir-react';
 import { MarkdownRender, proseWithoutBrainCitationMarkers } from '../markdown-render';
 import { useOrchestratorData } from '../../orchestrator-data-context';
 import { track } from '@/lib/analytics/track';
+import { readPanelContext, type ScratchSurface } from './scratch-panel-context';
+import { useScratchDialog } from './useScratchDialog';
+import { scratchSurfaceTokens } from './o8-scratch-surface';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
-const SCRATCH_LOCAL_TOKENS: CSSProperties = {
-  ['--o8-scratch-surface' as string]: 'var(--t-chat-surface-bg, #f4f2ed)',
-  ['--o8-scratch-card' as string]: 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
-  ['--o8-scratch-input' as string]: 'var(--t-chat-surface-input-bg, #f4f2ed)',
-  ['--o8-scratch-border' as string]: 'var(--t-chat-surface-border, rgba(15, 23, 42, 0.1))',
-  ['--o8-scratch-input-border' as string]: 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))',
-  ['--o8-scratch-text' as string]: 'var(--t-chat-surface-text, #0f172a)',
-  ['--o8-scratch-muted' as string]: 'var(--t-chat-surface-text-secondary, #64748b)',
-  ['--o8-scratch-faint' as string]: 'var(--t-chat-surface-text-muted, #94a3b8)',
-  ['--o8-scratch-action' as string]: 'var(--t-chat-surface-text-secondary, #475569)',
-  ['--t-panel' as string]: 'var(--o8-scratch-surface)',
-  ['--t-panel-solid' as string]: 'var(--o8-scratch-surface)',
-  ['--t-bg-subtle' as string]: 'var(--o8-scratch-card)',
-  ['--t-input-bg' as string]: 'var(--o8-scratch-input)',
-  ['--t-input-border' as string]: 'var(--o8-scratch-input-border)',
-  ['--t-panel-border' as string]: 'var(--o8-scratch-border)',
-  ['--t-divider-subtle' as string]: 'var(--o8-scratch-border)',
-  ['--t-text' as string]: 'var(--o8-scratch-text)',
-  ['--t-text-muted' as string]: 'var(--o8-scratch-muted)',
-  ['--t-text-faint' as string]: 'var(--o8-scratch-faint)',
-};
-const BINARY_EXTENSIONS = new Set([
-  'avif',
-  'bmp',
-  'gif',
-  'ico',
-  'jpg',
-  'jpeg',
-  'pdf',
-  'png',
-  'webp',
-  'woff',
-  'woff2',
-  'ttf',
-  'otf',
-  'zip',
-]);
 
 type ScratchRole = 'user' | 'assistant';
-type ScratchSurface = 'file' | 'diff';
 type ScratchTriggerPlacement = 'floating' | 'review-toolbar';
 
 interface ScratchCitation {
@@ -94,26 +60,10 @@ interface ScratchMessage {
   sources?: ScratchSources;
 }
 
-interface ScratchContext {
-  repoPath?: string;
-  filePath?: string;
-  surface: ScratchSurface;
-  selection?: string;
-  content?: string;
-}
-
 type StreamEvent =
   | { type: 'content'; text: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
-
-function extensionForPath(path: string) {
-  return path.split('.').pop()?.toLowerCase() ?? '';
-}
-
-function canLoadFileContext(path: string) {
-  return !BINARY_EXTENSIONS.has(extensionForPath(path));
-}
 
 function selectedTextFromActiveElement() {
   if (typeof document === 'undefined') return '';
@@ -190,104 +140,6 @@ function buildHandoffDraft({
     '',
     transcript,
   ].join('\n');
-}
-
-async function readPanelContext({
-  repoPath,
-  selectedFile,
-  surface,
-  selection,
-}: {
-  repoPath?: string | null;
-  selectedFile: string | null;
-  surface: ScratchSurface;
-  selection: string;
-}): Promise<ScratchContext> {
-  if (!repoPath) {
-    return { surface, selection };
-  }
-
-  // No file selected → fall back to a workspace-wide change digest so the
-  // cheap model isn't flying blind. Pulls the same snapshot ReviewPanel
-  // renders (branch, ahead/behind, diffstat, changed-file list, recent
-  // commits). Tools available in the scratch-chat API let the model drill
-  // into individual file diffs if it needs the actual hunks.
-  if (!selectedFile) {
-    try {
-      const params = new URLSearchParams({ workspace: repoPath });
-      const response = await fetch(`/api/review/workspace?${params.toString()}`);
-      const snap = await response.json().catch(() => ({})) as {
-        branch?: string;
-        ahead?: number;
-        behind?: number;
-        dirty?: boolean;
-        diffStat?: string;
-        changedFiles?: Array<{ path?: string; status?: string; additions?: number; deletions?: number }>;
-        recentCommits?: string[];
-        error?: string;
-      };
-      if (snap.error) {
-        return { repoPath, surface, selection, content: `Workspace snapshot unavailable: ${snap.error}` };
-      }
-      const fileSummary = (snap.changedFiles ?? [])
-        .slice(0, 60)
-        .map((f) => {
-          const stat = f.additions !== undefined && f.deletions !== undefined
-            ? ` +${f.additions} -${f.deletions}`
-            : '';
-          return `  ${f.status ?? '?'} ${f.path ?? '?'}${stat}`;
-        })
-        .join('\n');
-      const commits = (snap.recentCommits ?? []).slice(0, 8).join('\n');
-      const lines = [
-        `Branch: ${snap.branch ?? '(unknown)'}`,
-        `Ahead/behind: ${snap.ahead ?? 0} / ${snap.behind ?? 0}${snap.dirty ? ' · dirty' : ''}`,
-        '',
-        `Diffstat:\n${snap.diffStat || '(no changes)'}`,
-        '',
-        fileSummary ? `Changed files (${snap.changedFiles?.length ?? 0}):\n${fileSummary}` : 'No changed files.',
-        commits ? `\nRecent commits:\n${commits}` : '',
-      ].filter(Boolean).join('\n');
-      return { repoPath, surface, selection, content: lines };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : 'Workspace snapshot fetch failed.';
-      return { repoPath, surface, selection, content: reason };
-    }
-  }
-
-  if (surface === 'diff') {
-    const params = new URLSearchParams({ path: selectedFile, workspace: repoPath });
-    const response = await fetch(`/api/panel/file-diff?${params.toString()}`);
-    const data = await response.json().catch(() => ({})) as { diff?: string; stagedDiff?: string; error?: string };
-    return {
-      repoPath,
-      filePath: selectedFile,
-      surface,
-      selection,
-      content: data.error ? `Diff unavailable: ${data.error}` : data.diff ?? data.stagedDiff ?? '',
-    };
-  }
-
-  if (!canLoadFileContext(selectedFile)) {
-    return {
-      repoPath,
-      filePath: selectedFile,
-      surface,
-      selection,
-      content: `${extensionForPath(selectedFile).toUpperCase() || 'Binary'} file selected. No text source was sent.`,
-    };
-  }
-
-  const params = new URLSearchParams({ path: selectedFile, workspace: repoPath });
-  const response = await fetch(`/api/v2/files?${params.toString()}`);
-  const data = await response.json().catch(() => ({})) as { content?: string; error?: string };
-  return {
-    repoPath,
-    filePath: selectedFile,
-    surface,
-    selection,
-    content: data.error ? `File unavailable: ${data.error}` : data.content ?? '',
-  };
 }
 
 function HeaderButton({
@@ -368,9 +220,14 @@ export function O8ScratchChat({
   const data = useOrchestratorData();
   const buttonRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const material = useFloatingSurfaceMaterial();
+
   const [open, setOpen] = useState(false);
+  const closePanel = useCallback(() => setOpen(false), []);
+  useScratchDialog(open, dialogRef, buttonRef, closePanel);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ScratchMessage[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -391,9 +248,9 @@ export function O8ScratchChat({
 
   const scopeLabel = useMemo(() => {
     if (selectedFile) return compactPath(selectedFile);
-    if (repoPath) return 'All changes';
+    if (repoPath) return surfaceLabel || 'All changes';
     return 'No repo';
-  }, [repoPath, selectedFile]);
+  }, [repoPath, selectedFile, surfaceLabel]);
 
   const syncPanelPosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -454,6 +311,8 @@ export function O8ScratchChat({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, sending]);
 
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
+
   const clearConversation = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -468,7 +327,7 @@ export function O8ScratchChat({
 
   const send = useCallback(async () => {
     const question = input.trim();
-    if (!question || sending) return;
+    if (!question || sending || askLoading || abortRef.current) return;
 
     const userMessage: ScratchMessage = {
       id: `o8-scratch-user-${Date.now()}`,
@@ -555,7 +414,7 @@ export function O8ScratchChat({
       }
       setSending(false);
     }
-  }, [input, messages, repoPath, selectedFile, selectionSnapshot, sending, surface]);
+  }, [input, messages, repoPath, selectedFile, selectionSnapshot, sending, askLoading, surface]);
 
   const addToOrchestrator = useCallback(() => {
     if (!data?.onAcceptDirectiveProposal || messages.length === 0) return;
@@ -617,7 +476,7 @@ export function O8ScratchChat({
     // pass) so Class B answers paint as Sonnet generates instead of arriving
     // as one blob after the full pipeline; citation pills land underneath.
     const question = input.trim();
-    if (!question || askLoading) return;
+    if (!question || askLoading || abortRef.current) return;
 
     track('brain.asked'); // coarse usage signal (analytics epic #1249) — no content
 
@@ -642,6 +501,7 @@ export function O8ScratchChat({
     // Whole-ask ceiling so a hung backend doesn't leave the bubble in a
     // silent Thinking… state. Streaming usually paints well before this.
     const controller = new AbortController();
+    abortRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 90_000);
 
     try {
@@ -726,36 +586,32 @@ export function O8ScratchChat({
       setError(reason);
     } finally {
       clearTimeout(timeoutId);
+      if (abortRef.current === controller) abortRef.current = null;
       setAskLoading(false);
     }
   }, [askLoading, input, repoPath]);
 
   return (
     <>
-      <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
+      <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0, width: undefined }}>
         <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} placement={placement} surfaceLabel={surfaceLabel} />
       </div>
-      {/* Body portal — position:fixed breaks inside transformed ancestors
-          (framer-motion cards on the canvas), so the panel escapes to body
-          where viewport coords are real. */}
+      {/* Portal escapes transformed ancestors so viewport coordinates are real. */}
       {open ? createPortal(
-        <div
+        <FloatingSurface
+          ref={dialogRef}
           role="dialog"
+          aria-modal="true"
           aria-label={surfaceLabel ? `Ask o8 — ${surfaceLabel}` : 'Ask o8'}
+          contentStyle={{ display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: expanded ? 'min(780px, calc(100vh - 72px))' : 'min(590px, calc(100vh - 96px))', overflow: 'hidden' }}
           style={{
-            ...SCRATCH_LOCAL_TOKENS,
+            ...scratchSurfaceTokens(material.isGlass),
             position: 'fixed',
             top: panelPosition.top,
             right: panelPosition.right,
             width: expanded ? 'min(760px, calc(100vw - 32px))' : 'min(420px, calc(100vw - 24px))',
             maxHeight: expanded ? 'min(780px, calc(100vh - 72px))' : 'min(590px, calc(100vh - 96px))',
-            borderRadius: 18,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--o8-scratch-border)',
-            background: 'var(--o8-scratch-surface)',
             color: 'var(--o8-scratch-text)',
-            boxShadow: 'var(--t-panel-shadow), 0 22px 70px rgba(15, 23, 42, 0.18)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -969,10 +825,11 @@ export function O8ScratchChat({
             <textarea
               ref={inputRef}
               data-o8-scratch-input="true"
+              aria-label={surfaceLabel ? `Follow-up about ${surfaceLabel}` : 'Question for o8'}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   void send();
                 }
@@ -1114,7 +971,7 @@ export function O8ScratchChat({
               <button
                 type="button"
                 onClick={() => void send()}
-                disabled={!input.trim() || sending}
+                disabled={!input.trim() || sending || askLoading}
                 style={{
                   // Primary CTA — keeps the accent fill since it's the
                   // composer's primary action. Geometry matched to the
@@ -1142,7 +999,7 @@ export function O8ScratchChat({
               </button>
             </div>
           </div>
-        </div>,
+        </FloatingSurface>,
         document.body,
       ) : null}
     </>

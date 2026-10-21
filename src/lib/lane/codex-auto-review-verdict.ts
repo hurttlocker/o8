@@ -250,7 +250,7 @@ async function captureReviewedHeadSha(lane: Lane): Promise<string | undefined> {
   if (!cwd) return undefined;
   try {
     const { normalizeHeadSha, readHeadSha } = await import('@/lib/lane/head-sha-lock');
-    return normalizeHeadSha(await readHeadSha(cwd));
+    return normalizeHeadSha(await readHeadSha(cwd, lane.repoPath));
   } catch (error) {
     console.warn(`[auto-review] Failed to capture reviewed HEAD for Codex verdict on lane ${lane.id}:`, error);
     return undefined;

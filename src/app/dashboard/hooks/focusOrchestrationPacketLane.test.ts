@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchLaneBinding, resolveFocusableLaneBinding } from './focusOrchestrationPacketLane';
+import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { fetchLaneBinding, focusOrchestrationPacketLaneInWorkspace, resolveFocusableLaneBinding } from './focusOrchestrationPacketLane';
 
 function mockLaneFetch(lanes: unknown[]) {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -98,6 +100,13 @@ describe('resolveFocusableLaneBinding', () => {
     });
   });
 
+  it('resolves a cloud Search result to its project instead of the remote checkout', async () => {
+    mockLaneFetch([{ id: 'lane-cloud', sessionKey: 'cloud:job', runtime: 'cloud', repoPath: '/project', worktreePath: '/remote/checkout' }]);
+    await expect(resolveFocusableLaneBinding({ sessionKey: 'cloud:job', runtime: 'cloud' })).resolves.toMatchObject({
+      repoPath: '/project', worktreePath: '/remote/checkout', sessionKey: 'cloud:job', runtime: 'cloud',
+    });
+  });
+
   it('returns null when no lane matches', async () => {
     mockLaneFetch([
       {
@@ -129,5 +138,31 @@ describe('fetchLaneBinding', () => {
       laneId: 'lane-target',
       fallbackRuntime: 'codex',
     })).resolves.toBeNull();
+  });
+});
+
+
+describe('opening cloud packet sessions', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([false, true])('keeps the packet repository when an existing tab is %s', async (existing) => {
+    const packet = {
+      id: 'packet-cloud', title: 'Review task', runtime: 'cloud',
+      workspaceTargetPath: '/project',
+      lane: { laneId: 'lane-cloud', tileId: 'tile-root', tabId: 'cloud-tab', sessionKey: 'cloud:job', runtime: 'cloud', repoPath: '/project' },
+    } as OrchestratorPacket;
+    mockLaneFetch([{ id: 'lane-cloud', sessionKey: 'cloud:job', runtime: 'cloud', repoPath: '/project', worktreePath: '/remote/checkout' }]);
+    const openCliChatSession = vi.fn().mockReturnValue('cloud-tab');
+    const handle = {
+      focusTab: vi.fn().mockReturnValue(existing), getChatTabSnapshots: vi.fn().mockReturnValue([]), openCliChatSession,
+    } as unknown as TerminalTabHandle;
+    focusOrchestrationPacketLaneInWorkspace({
+      packet, setActiveTileId: vi.fn(),
+      waitForWorkspaceTerminalTarget: vi.fn().mockResolvedValue({ tileId: 'tile-root', handle }),
+      workspaceTerminalHandlesRef: { current: new Map([['tile-root', handle]]) },
+    });
+    await vi.waitFor(() => expect(openCliChatSession).toHaveBeenCalledWith(expect.objectContaining({
+      runtime: 'cloud', targetSessionKey: 'cloud:job', repo: { name: 'project', localPath: '/project' },
+    })));
   });
 });

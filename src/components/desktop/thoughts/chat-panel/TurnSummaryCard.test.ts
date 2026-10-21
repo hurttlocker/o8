@@ -2,9 +2,20 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
+import { resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import { buildTurnSummaryStats, TurnSummaryCard } from './TurnSummaryCard';
 
 describe('TurnSummaryCard', () => {
+  it('keeps Shared in the persisted receipt instead of reporting a fleet-engine mode change', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'shared-return', role: 'assistant', text: 'Worker returned.',
+      receipt: { leadModel: 'o8-free', effort: 'low', pickedMode: 'fast',
+        mode: resolveTurnReceiptMode('o8', 'fleet', 'fast') },
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+    expect(html).toContain('o8 · Shared');
+    expect(html).not.toContain('ran as');
+  });
   it('shows billable cost separately from parent context tokens', () => {
     const summary = {
         assistantMessageId: 'assistant-one',
@@ -81,6 +92,19 @@ describe('TurnSummaryCard', () => {
     expect(html).toContain('extra');
     expect(html).toContain('ran as Fusion, picked Solo');
     expect(html).toContain('Codex · GPT-5.6 Terra');
+  });
+
+  it('leaves the effort out of an o8 lead receipt, which has one setting (#3660)', () => {
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'assistant-o8',
+      role: 'assistant',
+      text: 'Done.',
+      receipt: { leadModel: 'o8-free', effort: 'low', mode: 'solo' },
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+
+    expect(html).toContain('o8 · Solo');
+    expect(html).not.toMatch(/\bLow\b|\blow\b/);
   });
 
   it('renders no receipt line and does not crash for a legacy persisted entry', () => {

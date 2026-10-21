@@ -9,6 +9,7 @@ import { resolveOrchestratorMessageRepoPath } from '../orchestrator/repo-path';
 import {
   orchestratorModeAllowsBackendFallback,
   resolveOrchestratorExecutionBackendId,
+  resolveTurnReceiptMode,
   sendOrchestratorBackendTurn,
 } from './orchestrator-send-entry';
 import { resolveOrchestratorExecutionMode } from './orchestrator-backends/orchestration-mode';
@@ -68,6 +69,25 @@ const COMPACTION_PRELUDE = [
 ].join('\n');
 
 describe('orchestrator-send backend entry', () => {
+  it('records Shared fleet turns without hiding actual execution overrides', () => {
+    for (const backend of ['codex', 'claude', 'pi', 'o8'] as const) {
+      expect(resolveTurnReceiptMode(backend, 'fleet', 'fast')).toBe('fast');
+      expect(resolveTurnReceiptMode(backend, 'single', 'fast')).toBe('solo');
+      expect(resolveTurnReceiptMode(backend, 'fusion', 'fast')).toBe('fusion');
+      expect(resolveTurnReceiptMode(backend, 'fleet')).toBe('multitask');
+    }
+    expect(resolveTurnReceiptMode('collide', 'fleet', 'fast')).toBe('moa');
+  });
+  it.each(['openclaw', 'hermes', 'acp', 'opencode'] as const)('teaches %s the same visualization tools and current transcript without changing the selected turn', async id => {
+    const send = vi.fn<OrchestratorBackend['sendTurn']>(async () => {});
+    const backend = withOrchestrationMode(fakeBackend(id, send));
+    const options = { threadId: 'thoughts-current', model: 'selected-model', thinkingEffort: 'high' as const };
+    await backend.sendTurn('/repo', 'I want to see how this works', () => {}, options);
+    expect(send.mock.calls[0][1]).toContain('o8_html_preview and o8_html_render');
+    expect(send.mock.calls[0][1]).toContain('"threadId":"thoughts-current"');
+    expect(send.mock.calls[0][1]).toContain('I want to see how this works');
+    expect(send.mock.calls[0][3]).toEqual(options);
+  });
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -97,6 +117,8 @@ describe('orchestrator-send backend entry', () => {
     expect(resolveOrchestratorExecutionBackendId('claude', undefined)).toBe('claude');
     expect(orchestratorModeAllowsBackendFallback('single')).toBe(false);
     expect(orchestratorModeAllowsBackendFallback('fusion')).toBe(true);
+    expect(orchestratorModeAllowsBackendFallback('fleet', true)).toBe(false);
+    expect(orchestratorModeAllowsBackendFallback('fusion', true)).toBe(false);
     expect(orchestratorModeAllowsBackendFallback(undefined)).toBe(true);
   });
 

@@ -93,6 +93,8 @@ export interface CreateWorktreeOptions {
   managed?: boolean;
   /** Skip auto-setup (npm install, etc.) */
   skipSetup?: boolean;
+  /** Review-only materialization: no repository code, setup, environment copying or rebase. */
+  materializationOnly?: boolean;
   /** How env files should be bootstrapped into the worktree */
   envMode?: RepoSetupEnvMode;
   /** Env files to copy/symlink when bootstrapping */
@@ -159,6 +161,9 @@ export interface WorktreeMetaStore {
 }
 
 export interface WorktreeMetaEntry {
+  /** Creation-time association for bounded terminal discovery, including collision slots. */
+  packetId?: string;
+  laneId?: string;
   id: string;
   agentType: AgentType;
   sessionKey?: string;

@@ -8,16 +8,14 @@ import {
   clampEffortToLead,
   composerSupportsFastMode,
   cycleComposerSelectorMode,
-  composerEffortConsequence,
+  defaultComposerMode,
   isHotComposerEffort,
   providerMarkForLead,
   providerMarkForRuntime,
   resolveEffectiveComposerLeadModelId,
   resolveComposerSelectorState,
-  resolveSupportedEffortChange,
   readComposerEffortMaps,
   setModelEffort,
-  stepComposerEffort,
   supportedEffortsForLead,
   type ComposerSelectorMode,
 } from './state';
@@ -29,6 +27,12 @@ const EFFORTS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh',
 
 describe('composer selector state', () => {
   beforeEach(() => localStorage.clear());
+
+  it('preserves explicit model choices while retaining the fallback for absent choices', () => {
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '' }).model).toBe('');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp', model: '  agent-model  ' }).model).toBe('agent-model');
+    expect(prepareOrchestratorTurn('fixture', { backend: 'acp' }).model).toBe(MODEL_IDS.orchestratorDefault);
+  });
 
   it('keeps mode, wire directive, execution mode, and effort in one resolved state', () => {
     for (const mode of MODES) {
@@ -58,8 +62,10 @@ describe('composer selector state', () => {
         expect(turn.wireMessage, mode).toContain(resolved.modeDirective);
         expect(route.orchestrationMode, mode).toBe(resolved.orchestrationMode);
         expect(route.wireMessage, mode).toContain(resolved.modeDirective);
-        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(effort);
-        expect(resolved.effort, `${mode}:${effort}`).toBe(effort);
+        const expected = effort === 'adaptive' ? 'high' : effort;
+        expect(route.thinkingEffort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effort, `${mode}:${effort}`).toBe(expected);
+        expect(resolved.effortOptions).not.toContain('adaptive');
       }
     }
   });
@@ -126,7 +132,7 @@ describe('composer selector state', () => {
     expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
-  it.each([true, false])('keeps o8 on Low without locked efforts (free plan: %s)', (isFreePlan) => {
+  it.each([true, false])('keeps o8 on Low with no effort options, ignoring a saved High (free plan: %s)', (isFreePlan) => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -141,10 +147,9 @@ describe('composer selector state', () => {
     });
 
     expect(resolved.effort).toBe('low');
-    expect(resolved.effortOptions).toEqual(['low']);
+    expect(resolved.effortOptions).toEqual([]);
     expect(resolved.lockedEffortOptions).toEqual([]);
-    expect(composerEffortConsequence('o8', 'low')).toBe('Low · free');
-    expect(resolved.effortClampedFrom).toBe('high');
+    expect(resolved.atRestText).toBe('o8 / workers Codex');
   });
 
   it.each([true, false])('defaults o8 to Low without a saved preference (free plan: %s)', (isFreePlan) => {
@@ -164,13 +169,8 @@ describe('composer selector state', () => {
     expect(resolved.lockedEffortOptions).toEqual([]);
   });
 
-  it('clamps a free o8 effort change before it reaches persistence callbacks', () => {
-    const supported = supportedEffortsForLead('o8', 'o8-free', true, true);
-
-    expect(clampEffortToLead('high', supported)).toEqual({ effort: 'low', clampedFrom: 'high' });
-    expect(resolveSupportedEffortChange('high', 'low', supported))
-      .toEqual({ effort: 'low', accepted: false });
-    expect(stepComposerEffort('low', supported, 1)).toBe('low');
+  it.each([true, false])('offers the o8 lead no effort options (free plan: %s)', (isFreePlan) => {
+    expect(supportedEffortsForLead('o8', 'o8-free', true, isFreePlan)).toEqual([]);
   });
 
   it('maps lead families and worker runtimes to provider marks', () => {
@@ -179,6 +179,7 @@ describe('composer selector state', () => {
     expect(providerMarkForLead('opencode', 'google/gemini-3-pro')).toBe('gemini');
     expect(providerMarkForRuntime('claude-code')).toBe('anthropic');
     expect(providerMarkForRuntime('deepseek-harness')).toBe('deepseek');
+    expect(providerMarkForRuntime('hermes')).toBe('terminal');
   });
 
   it('resolves in-session over thread over operator default', () => {
@@ -225,24 +226,32 @@ describe('composer selector state', () => {
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'high',
       adaptiveEnabled: true, workerRuntimeLabel: runtime, workerModelLabel: workerModel,
     });
-    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Multitask', fast: 'Fast · shared checkout', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
+    expect(resolved.modeLabel).toBe({ solo: 'Solo', multitask: 'Worktrees', fast: 'Shared', moa: 'Compare plans', fusion: 'Fusion' }[mode]);
     expect(resolved.orchestrationMode).toBe(execution);
     expect(resolved.workerRuntimeLabel).toBe(runtime);
     expect(resolved.workerModelLabel).toBe(workerModel);
   });
 
-  it('offers Fast only for leads with the orchestrator delegation tool', () => {
+  it('offers Shared only for compatible leads and cycles the two checkout choices', () => {
     expect(composerSupportsFastMode('codex')).toBe(true);
     expect(composerSupportsFastMode('claude')).toBe(true);
     expect(composerSupportsFastMode('fable')).toBe(true);
+    expect(composerSupportsFastMode('pi')).toBe(true);
+    expect(composerSupportsFastMode('o8')).toBe(true);
     expect(composerSupportsFastMode('openclaw')).toBe(false);
-    expect(cycleComposerSelectorMode('multitask', 1, 'openclaw')).toBe('moa');
+    expect(cycleComposerSelectorMode('solo', 1, 'openclaw')).toBe('multitask');
+    expect(cycleComposerSelectorMode('solo', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('fast', 1, 'codex')).toBe('multitask');
     expect(cycleComposerSelectorMode('multitask', 1, 'codex')).toBe('fast');
+    expect(cycleComposerSelectorMode('fusion', 1, 'codex')).toBe('fast');
     const state = resolveComposerSelectorState({
       mode: 'fast', leadModelId: 'external', leadModelLabel: 'External', leadBackend: 'openclaw',
       inSessionEffortByModel: {}, threadEffortByModel: {}, operatorDefaultEffort: 'medium', adaptiveEnabled: false,
     });
-    expect(state.mode).toBe('multitask');
+    expect(state.mode).toBe('solo');
+    expect(defaultComposerMode('codex')).toBe('fast');
+    expect(defaultComposerMode('claude')).toBe('fast');
+    expect(defaultComposerMode('acp')).toBe('solo');
   });
 
   it('resolves mode and worker settings by session, thread, then operator default', () => {

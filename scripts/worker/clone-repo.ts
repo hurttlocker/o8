@@ -3,6 +3,8 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { preserveRepositoryObjects, restoreRepositoryObjects } from './repository-cache';
+
 const execFileAsync = promisify(execFile);
 const EXEC_OPTIONS = { maxBuffer: 10 * 1024 * 1024, timeout: 120_000 };
 
@@ -11,6 +13,8 @@ export interface CloneOptions {
   baseRef: string;
   remoteBranch: string;
   workDir: string;
+  cacheDir?: string;
+  onCheckout?: (receipt: { cacheHit: boolean; durationMs: number }) => void;
   signal?: AbortSignal;
 }
 
@@ -77,6 +81,7 @@ async function runGit(args: string[], cwd?: string, signal?: AbortSignal): Promi
 }
 
 export async function cloneRepoForRun(opts: CloneOptions): Promise<string> {
+  const started = performance.now();
   if (opts.signal?.aborted) throw new Error('[worker/clone-repo] operation aborted');
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(opts.baseRef)) {
     throw new Error('[worker/clone-repo] baseRef must be a full pinned commit ID');
@@ -102,12 +107,24 @@ export async function cloneRepoForRun(opts: CloneOptions): Promise<string> {
   const objectFormat = baseSha.length === 64 ? 'sha256' : 'sha1';
   await runGit(['init', '--quiet', `--object-format=${objectFormat}`, cloneTarget], undefined, opts.signal);
   await runGit(['remote', 'add', 'origin', opts.repoUrl], cloneTarget, opts.signal);
+  const cache = opts.cacheDir ? { cacheDir: opts.cacheDir, repoUrl: opts.repoUrl, baseSha, cloneDir: cloneTarget, signal: opts.signal } : null;
+  const cacheHit = cache ? await restoreRepositoryObjects(cache) : false;
+  if (cacheHit) {
+    // Cached bytes are untrusted. Check every object before contacting upstream.
+    await runGit(['fsck', '--strict', '--no-reflogs', '--no-dangling'], cloneTarget, opts.signal);
+    const cached = await runGit(['rev-parse', '--verify', `${baseSha}^{commit}`], cloneTarget, opts.signal);
+    if (cached.stdout.trim() !== baseSha) throw new Error('[worker/clone-repo] repository cache base mismatch');
+  }
   // Fetch only the reviewed commit and its checkout; never expand to unrelated history.
-  await runGit(['fetch', '--depth=1', '--no-tags', 'origin', baseSha], cloneTarget, opts.signal);
+  // A hit still fetches upstream: cached data never substitutes for current access.
+  await runGit(['fetch', '--depth=1', '--no-tags', ...(cacheHit ? [`--negotiation-tip=${baseSha}`] : []), 'origin', baseSha], cloneTarget, opts.signal);
   const { stdout } = await runGit(['rev-parse', '--verify', 'FETCH_HEAD^{commit}'], cloneTarget, opts.signal);
   if (stdout.trim() !== baseSha) throw new Error('[worker/clone-repo] fetched commit does not match the pinned base');
+  if (cache && !cacheHit) await preserveRepositoryObjects(cache);
   await runGit(['checkout', '--detach', baseSha], cloneTarget, opts.signal);
   await runGit(['checkout', '-b', opts.remoteBranch, baseSha], cloneTarget, opts.signal);
+
+  opts.onCheckout?.({ cacheHit, durationMs: Math.round(performance.now() - started) });
 
   return cloneTarget;
 }

@@ -12,6 +12,7 @@ export interface BuildOrchestratorArgsOptions {
   model: string;
   claudeSessionId: string | null;
   systemPrompt: string;
+  fastMode?: boolean;
 }
 
 /** CLI settings override only hooks; auth and the operator's other settings remain available. */
@@ -40,7 +41,7 @@ export function buildOrchestratorArgs(options: BuildOrchestratorArgsOptions): st
     '--verbose',
     ...strictMcpArgs,
     '--mcp-config', options.mcpConfigPath,
-    '--settings', MANAGED_ORCHESTRATOR_SETTINGS,
+    '--settings', options.fastMode === undefined ? MANAGED_ORCHESTRATOR_SETTINGS : JSON.stringify({ disableAllHooks: true, fastMode: options.fastMode }),
     '--model', options.model,
   ];
 

@@ -222,6 +222,7 @@ async function stopPacketInner(
     scope: {
       laneIds: lanes.map((lane) => lane.id),
       skipHoldIfStateMoved: true,
+      preserveOperatorStopped: true,
       expectedReleaseSource: stopGuard?.source,
     },
   }).then((reset) => {

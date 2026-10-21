@@ -33,11 +33,14 @@ import {
   resetLocalInferenceProbeCacheForTests,
   resolveEmbedRoute,
   resolveOpenRouterRoute,
+  resolveTranscribeRoute,
 } from '@/lib/cortex/qa/llm/inference-route';
 import {
   resolveLocalChatModelSync,
   resolveLocalInferenceBaseUrlSync,
 } from '@/lib/operator/defaults';
+
+const FREE_TOKEN = 'eyJhbGciOiJFZERTQSJ9.eyJwbGFuIjoiZnJlZSJ9.fixture';
 
 const mockKey = vi.mocked(resolveOpenRouterKey);
 const mockEnt = vi.mocked(readCachedEntitlement);
@@ -250,14 +253,14 @@ describe('inference-route', () => {
       mockKey.mockResolvedValue(null);
       setEnt(null);
       mockEnsureFreeEntitlement.mockImplementationOnce(async () => {
-        setEnt({ plan: 'free', licenseKey: 'fresh.install.token' });
+        setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       });
 
       const route = await resolveOpenRouterRoute({ provisionInstallAllowance: true });
 
       expect(mockEnsureFreeEntitlement).toHaveBeenCalledOnce();
       expect(route?.via).toBe('proxy');
-      expect(route?.headers.Authorization).toBe('Bearer fresh.install.token');
+      expect(route?.headers.Authorization).toBe(`Bearer ${FREE_TOKEN}`);
     });
 
     it('routes plan-token users to PROXY before a local OpenRouter key', async () => {
@@ -340,16 +343,16 @@ describe('inference-route', () => {
       // — the /issue-free token rides the relay (which enforces the free-chain
       // model policy + daily cap server-side).
       mockKey.mockResolvedValue(null);
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('proxy');
       expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/inference`);
-      expect(route?.headers.Authorization).toBe('Bearer fff.eee.ttt');
+      expect(route?.headers.Authorization).toBe(`Bearer ${FREE_TOKEN}`);
     });
 
     it('free allowance is the LAST resort — a live local endpoint still wins', async () => {
       mockKey.mockResolvedValue(null);
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       mockLocalBaseUrl.mockReturnValue('http://localhost:11434');
       mockLocalChatModel.mockReturnValue('qwen2.5-coder:7b');
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {
@@ -362,7 +365,7 @@ describe('inference-route', () => {
 
     it('free allowance is the LAST resort — a BYO OpenRouter key still wins', async () => {
       mockKey.mockResolvedValue('sk-local-key');
-      setEnt({ plan: 'free', licenseKey: 'fff.eee.ttt' });
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
       const route = await resolveOpenRouterRoute();
       expect(route?.via).toBe('direct');
       expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
@@ -424,6 +427,33 @@ describe('inference-route', () => {
     it('returns null when neither a Gemini key nor a token is present', () => {
       setEnt(null);
       expect(resolveEmbedRoute('gemini-embedding-001')).toBeNull();
+    });
+  });
+
+  describe('resolveTranscribeRoute', () => {
+    it('lets a paid plan pay for dictation even when an OpenRouter key is connected', async () => {
+      mockKey.mockResolvedValue('sk-local-key');
+      setEnt({ plan: 'pro', licenseKey: 'aaa.bbb.ccc' });
+      const route = await resolveTranscribeRoute();
+      expect(route?.via).toBe('proxy');
+      expect(route?.url).toBe(`${DEFAULT_O8_API_BASE_URL}/v1/transcribe`);
+      expect(route?.headers.Authorization).toBe('Bearer aaa.bbb.ccc');
+      expect(mockKey).not.toHaveBeenCalled();
+    });
+
+    it('uses the connected key when no paid plan covers dictation', async () => {
+      mockKey.mockResolvedValue('sk-local-key');
+      setEnt({ plan: 'free', licenseKey: FREE_TOKEN });
+      const route = await resolveTranscribeRoute();
+      expect(route?.via).toBe('direct');
+      expect(route?.url).toBe('https://openrouter.ai/api/v1/audio/transcriptions');
+      expect(route?.headers.Authorization).toBe('Bearer sk-local-key');
+    });
+
+    it('returns null without a paid plan or a usable key', async () => {
+      mockKey.mockResolvedValue(null);
+      setEnt(null);
+      expect(await resolveTranscribeRoute()).toBeNull();
     });
   });
 });

@@ -294,6 +294,55 @@ describe('merge truth by git ancestry', () => {
     expect(getLane(lane.id)?.status).toBe('awaiting_orchestrator');
   });
 
+  it('skips a lane whose patch-id exits before reading a large diff without crashing the sweep (#3627)', async () => {
+    const repo = makeRepo('o8-merge-truth-patch-id-epipe-');
+    git(repo, ['checkout', '-b', 'inline/large-diff']);
+    // Larger than the OS pipe buffer, so the stdin write is still pending
+    // when patch-id exits.
+    writeFileSync(join(repo, 'large.txt'), `${'large diff line\n'.repeat(200_000)}`);
+    commitAll(repo, 'large feature');
+    git(repo, ['checkout', 'main']);
+    writeFileSync(join(repo, 'other.txt'), 'other\n');
+    commitAll(repo, 'advance main');
+
+    const lane = createLane({
+      repoPath: repo,
+      worktreePath: missingWorktree(repo, 'missing-large-diff'),
+      branch: 'inline/large-diff',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-patch-id-epipe',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+
+    // A git shim that exits without reading stdin for patch-id, as a killed
+    // or failing patch-id does, and runs real git for everything else.
+    const shimDir = mkdtempSync(join(os.tmpdir(), 'o8-git-shim-'));
+    roots.push(shimDir);
+    const realGit = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(shimDir, 'git'),
+      `#!/bin/sh\nif [ "$1" = "patch-id" ]; then exit 1; fi\nexec "${realGit}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => { uncaught.push(error); };
+    process.prependListener('uncaughtException', onUncaught);
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${originalPath ?? ''}`;
+    try {
+      const result = await sweepPacketsMergedByAncestry();
+      // Let a late stdin error surface before checking.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(uncaught).toEqual([]);
+      expect(result.skipped).toBeGreaterThanOrEqual(1);
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+    } finally {
+      process.env.PATH = originalPath;
+      process.removeListener('uncaughtException', onUncaught);
+    }
+  });
+
   it.each(['parked', 'hibernating', 'restoring'] as const)(
     'does not reinterpret an intentionally %s workspace as an orphaned lane',
     async (state) => {

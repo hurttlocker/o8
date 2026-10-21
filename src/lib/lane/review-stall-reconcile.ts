@@ -106,7 +106,7 @@ async function reconcileLane(
   const durable = await assessDurableApprovedReview(lane);
   if (durable.approved && durable.approvalId && await isAgreedSecondPassApproval(durable.approvalId)) {
     const { normalizeHeadSha, readHeadSha } = await import('@/lib/lane/head-sha-lock');
-    const headSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
+    const headSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath, lane.repoPath));
     if (!headSha) return;
     const dispatch = await dispatchSecondPassMerge({
       lane,

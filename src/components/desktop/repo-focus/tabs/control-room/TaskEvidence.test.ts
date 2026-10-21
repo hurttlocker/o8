@@ -47,7 +47,8 @@ describe('Control Room remote evidence action', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/packet-a/evidence?jobId=job-a&attempt=2', expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }));
     expect(container.textContent).toContain('worker output');
     expect(container.textContent).toContain('src/app.ts');
-    expect(container.textContent).toContain('Remote editor and preview are unavailable.');
+    expect(container.textContent).toContain('Remote editor is unavailable.');
+    expect(container.textContent).toContain('Preview is unavailable for this attempt.');
   });
 
   it('uses the latest claim attempt after the task list refreshes', async () => {

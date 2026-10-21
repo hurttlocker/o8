@@ -1,6 +1,9 @@
+import type { RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { MODEL_IDS } from '@/lib/models';
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import { getRuntimeCapability, type OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { builtInAgentFromInventory } from './built-in-agent';
+import type { PiUserSetup } from '@/lib/pi/user-setup';
 
 export interface SetupRuntime {
   id: OrchestratorRuntime;
@@ -10,6 +13,9 @@ export interface SetupRuntime {
   unavailableReason: string | null;
   detail: string;
   fix: string;
+  builtIn?: { backend: Exclude<OrchestratorBackendSetting, 'auto'>; planDetail: string };
+  piSetup?: PiUserSetup;
+  connection?: RuntimeConnectionEvidence;
 }
 
 export interface RuntimeActivity {
@@ -43,14 +49,16 @@ export interface RuntimeSetupRecommendation {
 export function visibleRuntimeInventory<T extends SetupRuntime>(
   inventory: readonly T[], selected: readonly string[] = [],
 ): T[] {
-  return inventory.filter((item) => item.available || item.installed
+  return inventory.filter((item) => item.available || item.installed || item.builtIn
     || item.unavailableReason === 'needs_auth' || item.unavailableReason === 'needs_restart'
     || selected.includes(item.id));
 }
 
-export function runtimeForLead(backend: OrchestratorBackendSetting | null): OrchestratorRuntime | null {
+export function runtimeForLead(backend: OrchestratorBackendSetting | null, inventory: readonly SetupRuntime[] = []): OrchestratorRuntime | null {
+  const builtIn = builtInAgentFromInventory(inventory);
+  if (builtIn?.builtIn?.backend === backend) return builtIn.id;
   if (backend === 'claude' || backend === 'fable') return 'claude-code';
-  if (backend === 'codex' || backend === 'opencode') return backend;
+  if (backend === 'codex' || backend === 'opencode' || backend === 'muse') return backend;
   return null;
 }
 
@@ -76,6 +84,7 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
 }): RuntimeSetupRecommendation {
   const explicit = (key: keyof SetupValues) => Boolean(sources[key] && sources[key] !== 'default');
   const ready = (id: string) => inventory.some((item) => item.id === id && item.available);
+  const builtIn = builtInAgentFromInventory(inventory);
   const preserved = explicit('orchestratorBackend') || explicit('inAppOrchestratorEnabled');
   let backend: OrchestratorBackendSetting | null = null;
   let reason = 'Connect Codex or Claude Code to start, or customize your lead.';
@@ -90,8 +99,11 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
   } else if (ready('codex') || ready('claude-code')) {
     backend = ready('codex') ? 'codex' : 'claude';
     reason = `${backend === 'codex' ? 'Codex' : 'Claude Code'} is your ready primary tool.`;
+  } else if (builtIn?.available && builtIn.builtIn && !inventory.some((item) => item.available && !item.builtIn)) {
+    backend = builtIn.builtIn.backend;
+    reason = 'The built-in agent is ready. You can add other coding tools later.';
   }
-  const primary = runtimeForLead(backend);
+  const primary = runtimeForLead(backend, inventory);
   const workerRuntimes = explicit('workerRuntimes') && values.workerRuntimes?.length
     ? [...values.workerRuntimes]
     : explicit('defaultDispatchRuntime') && values.defaultDispatchRuntime
@@ -115,6 +127,7 @@ export function recommendRuntimeSetup({ inventory, activity, values = {}, source
     opencodeModel: values.opencodeWorkerModel ?? opencodeModel,
     workerModel: workerRuntimes[0] === 'opencode'
       ? values.opencodeWorkerModel ?? opencodeModel ?? workerModelPreset('opencode')
+      : workerRuntimes[0] === builtIn?.id ? ''
       : explicit('defaultDispatchModel') && values.defaultDispatchModel
       ? values.defaultDispatchModel : workerModelPreset(workerRuntimes[0]),
     reason, activity, preserved,

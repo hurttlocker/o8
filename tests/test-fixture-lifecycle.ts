@@ -426,7 +426,10 @@ export function writeTestRunOwner(runRoot: string): void {
   });
 }
 
-export function retainTestRunAfterTimeout(runRoot: string): void {
+export function retainTestRunAfterTimeout(
+  runRoot: string,
+  reason: 'test_timeout_or_cancellation' | 'failed_test_evidence' = 'test_timeout_or_cancellation',
+): void {
   const resolvedRoot = path.resolve(runRoot);
   if (!RUN_FIXTURE_NAME.test(path.basename(resolvedRoot))) {
     throw new Error('Vitest retained run root does not have an owned run name.');
@@ -434,7 +437,7 @@ export function retainTestRunAfterTimeout(runRoot: string): void {
   try {
     writeFileSync(path.join(resolvedRoot, TEST_RUN_RETAIN_FILE), `${JSON.stringify({
       retainedAt: new Date().toISOString(),
-      reason: 'test_timeout_or_cancellation',
+      reason,
     })}\n`, { flag: 'wx' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;

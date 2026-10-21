@@ -13,6 +13,7 @@ import { exportTauriSafetyHookResources } from './tauri-hook-resources.mjs';
 import { resolveReleaseConfig } from './lib/release-config.mjs';
 import { canonicalizeServerOnlyStubEnv } from './run-lib.mjs';
 import { assertTauriExportInputsSafe } from './lib/tauri-export-safety.mjs';
+import { prunePackagedBuildInputs } from './lib/packaged-build-inputs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -671,7 +672,26 @@ compileServerBundle('terminal-host', 'src/lib/ws-server/terminal-host-entry.ts',
 compileServerBundle('operator-mcp-server-main', 'src/lib/mcp/operator-mcp-server.ts', NATIVE_EXTERNALS);
 compileServerBundle('operator-mcp-server', 'src/lib/mcp/operator-mcp-server-bundle-entry.ts', NATIVE_EXTERNALS);
 compilePureNodeBundle('operator-mcp-proxy', 'src/lib/mcp/operator-mcp-proxy.ts');
+// Codex app-server bridge (#3573): runs Codex orchestrator turns in the operator's
+// Codex home when "Show chats in the Codex app" is on. Node built-ins only.
+compilePureNodeBundle('codex-app-bridge', 'src/lib/codex/app-server-exec-bridge.ts');
 compileServerBundle('cortex-mcp-server', 'src/lib/mcp/cortex-mcp-server.ts', NATIVE_EXTERNALS);
+
+// ── Bundle the Pi SDK worker (#3255) ──
+// The packaged server runs from Resources/server; piSdkScriptPath() looks for
+// the worker in pi-sdk/ there. One file, so the Pi packages' node_modules never
+// ship. Loaded here, like esbuild above, so the input guards run before any
+// build tooling is resolved. The approved-write helper is native and ships as
+// an externalBin (#3289).
+try {
+  const { bundlePiSdk } = await import('./lib/pi-sdk-bundle.mjs');
+  bundlePiSdk({ root, outDir: join(server, 'pi-sdk') });
+  console.log('📦 Bundled pi-sdk/worker.mjs');
+} catch (e) {
+  console.error('❌ Pi SDK bundle failed — refusing to ship a broken bundle');
+  console.error(`   ${e.message}`);
+  process.exit(1);
+}
 
 // ── Copy runtime-read prompt templates next to the bundles ──
 // orchestrator-session.ts resolves orchestrator.md via `import.meta.url`, so
@@ -805,6 +825,7 @@ if (/\b(?:import|require)\s*\(\s*['\"]@sentry\/node['\"]\s*\)/.test(wsImplementa
 }
 
 let size = '';
+console.log('📦 Removed packaged build inputs', prunePackagedBuildInputs(server));
 try { size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\t')[0]; } catch { size = '(size n/a on this platform)'; }
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);

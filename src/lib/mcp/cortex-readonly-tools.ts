@@ -9,6 +9,8 @@ export const CORTEX_READONLY_TOOLS: ReadonlySet<string> = new Set<string>([
   'cortex_read_packets',
   'cortex_read_transcript',
   'cortex_fleet_status',
+  'cortex_worker_catalog',
+  'cortex_wait_workers',
   'cortex_list_approvals',
   'cortex_list_issues',
   'cortex_list_prs',

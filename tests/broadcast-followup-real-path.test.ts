@@ -12,7 +12,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-broadcast-followup-'));
-const SPECTATOR_TOKEN = 'broadcast-followup-spectator-token-0123456789';
 const OPERATOR_TOKEN = 'operator-broadcast-followup-token-0123456789';
 const SHORT_DEVICE_TOKEN = 'dv!43y';
 writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf8');
@@ -21,14 +20,12 @@ writeFileSync(
   `${createHash('sha256').update(SHORT_DEVICE_TOKEN).digest('hex')}\n`,
   'utf8',
 );
-writeFileSync(
-  join(dataDir, 'broadcast-spectator-tokens'),
-  `${createHash('sha256').update(SPECTATOR_TOKEN).digest('hex')}\n`,
-  'utf8',
-);
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
+// A spectator is a minted token record, not a bare hash in the projection file.
+const { getSpectatorTokenStore } = await import('@/lib/broadcast/spectator-token-store');
+const SPECTATOR_TOKEN = getSpectatorTokenStore().mint({ label: 'broadcast follow-up' }).bearer;
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
 const broadcastPost = await import('@/app/api/broadcast/post/route');
 const broadcastSnapshot = await import('@/app/api/broadcast/snapshot/route');

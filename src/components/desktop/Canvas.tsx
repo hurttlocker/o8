@@ -25,7 +25,9 @@ import {
   Clock,
   FileText,
   GitCommit,
+  GitPullRequest,
   Globe,
+  Gauge,
   Hexagon,
   Plus,
   Smartphone,
@@ -41,6 +43,9 @@ const IssueCreator = retryingLazy(() => import('@/components/desktop/IssueCreato
 const IssueViewer = retryingLazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })), { label: 'Issue viewer' });
 const MobilePairingView = retryingLazy(() => import('@/components/desktop/canvas/MobilePairingView').then(m => ({ default: m.MobilePairingView })), { label: 'Mobile pairing' });
 const PRViewer = retryingLazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })), { label: 'PR viewer' });
+const RepositoryPullRequests = retryingLazy(() => import('@/components/desktop/RepositoryPullRequests').then(m => ({ default: m.RepositoryPullRequests })), { label: 'Pull requests' });
+const UsageWorkspace = retryingLazy(() => import('@/components/desktop/analytics/UsageWorkspace').then(m => ({ default: m.UsageWorkspace })), { label: 'Usage' });
+const VisualizationWorkspace = retryingLazy(() => import('@/components/desktop/visualizations/VisualizationWorkspace').then(m => ({ default: m.VisualizationWorkspace })), { label: 'Visualization' });
 import {
   CanvasEmpty,
   CIViewer,
@@ -55,6 +60,7 @@ import {
 } from './canvas/index';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { CanvasRepoTaskLaunchRequest } from './canvas-utils';
+import { WorkspaceUtilityPage } from './canvas/WorkspaceUtilityPage';
 
 export { type CanvasRepoTaskLaunchRequest } from './canvas-utils';
 
@@ -65,6 +71,12 @@ export type CanvasTabKind =
   | 'diff'
   | 'commit'
   | 'pr'
+  | 'pull-requests'
+  | 'usage'
+  | 'automations'
+  | 'plugins'
+  | 'customize'
+  | 'visualization'
   | 'readme'
   | 'ci'
   | 'new-issue'
@@ -96,6 +108,7 @@ export interface CanvasProps {
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   embedded?: boolean;
+  active?: boolean;
 }
 
 export const Canvas = memo(function Canvas({
@@ -108,6 +121,7 @@ export const Canvas = memo(function Canvas({
   onInjectChatContext,
   onLaunchWorkspaceTask,
   embedded,
+  active = true,
 }: CanvasProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null;
   const tabScrollRef = useRef<HTMLDivElement>(null);
@@ -320,6 +334,8 @@ export const Canvas = memo(function Canvas({
             >
               <TabContent
                 tab={activeTab}
+                onClose={() => onCloseTab(activeTab.id)}
+                active={active}
                 selectedRepo={selectedRepo}
                 onSelectCommit={onSelectCommit}
                 onInjectChatContext={onInjectChatContext}
@@ -358,6 +374,17 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
       return <GitCommit size={size} />;
     case 'pr':
       return <GitCommit size={size} />;
+    case 'pull-requests':
+      return <GitPullRequest size={size} />;
+    case 'usage':
+      return <Gauge size={size} />;
+    case 'automations':
+      return <Clock size={size} />;
+    case 'plugins':
+    case 'customize':
+      return <Hexagon size={size} />;
+    case 'visualization':
+      return <FileText size={size} />;
     case 'readme':
       return <BookOpen size={size} />;
     case 'ci':
@@ -387,12 +414,16 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
 
 const TabContent = memo(function TabContent({
   tab,
+  onClose,
+  active,
   selectedRepo,
   onSelectCommit,
   onInjectChatContext,
   onLaunchWorkspaceTask,
 }: {
   tab: CanvasTab;
+  onClose: () => void;
+  active: boolean;
   selectedRepo?: string | null;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
@@ -450,6 +481,16 @@ const TabContent = memo(function TabContent({
             return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
           case 'pr':
             return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
+          case 'pull-requests':
+            return <RepositoryPullRequests active={active} repoPath={tab.meta?.workspace || tab.resourceId || null} />;
+          case 'usage':
+            return <UsageWorkspace active={active} />;
+          case 'automations':
+          case 'plugins':
+          case 'customize':
+            return <WorkspaceUtilityPage kind={tab.kind} projectId={tab.meta?.projectId} onClose={onClose} />;
+          case 'visualization':
+            return <VisualizationWorkspace id={tab.resourceId} />;
           case 'readme':
             return <ReadmeViewer workspace={tab.resourceId} />;
           case 'ci':

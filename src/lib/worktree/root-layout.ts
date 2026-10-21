@@ -56,6 +56,24 @@ export function canonicalRepoRoot(repoRoot: string): string {
   }
 }
 
+/** Resolve a workspace namespace through surviving ancestors without creating it. */
+export function canonicalWorktreeNamespace(workspacePath: string): string {
+  const resolved = path.resolve(workspacePath);
+  let ancestor = path.dirname(resolved);
+  const suffix = [path.basename(resolved)];
+  for (;;) {
+    try {
+      return path.join(realpathSync.native(ancestor), ...suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) throw error;
+      suffix.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
 /** Stable, human-readable key that prevents same-named repos from colliding. */
 export function worktreeRepoKey(repoRoot: string): string {
   const canonical = canonicalRepoRoot(repoRoot);

@@ -32,6 +32,8 @@ export type ExistingBranchPolicy = 'auto' | 'reset' | 'continue' | 'error';
 export interface CreateMissionInput {
   issues: LoadedIssue[];
   repoPath: string;
+  /** Exact project identity captured before preparation; omission resolves the creation context. */
+  projectId?: string | null;
   runtime: OrchestratorRuntime;
   /** Durable packet origin for Design Mode follow-up routing. */
   origin?: 'design-mode';
@@ -65,6 +67,8 @@ export interface CreateMissionInput {
    * `useBrain`. Omit to inherit the operator `workersUseBrain` setting.
    */
   useBrain?: boolean;
+  /** #3740: stamp every packet's `mergeHold`, so approved reviews wait for the operator's merge. */
+  holdMerges?: boolean;
   /**
    * Originating orchestrator thread id (#1329). When set, every packet in the
    * mission inherits the thread's active session rules (via `buildPacketPrompt`)
@@ -86,6 +90,7 @@ export interface CreateMissionInput {
   huddle?: boolean;
   /** Disable the pre-edit task contract for every packet in this mission. */
   taskContract?: 'off';
+  sealedTaskContract?: PacketTaskContract;
   /**
    * Best-of-N — stamps the seed packet's
    * `comparisonModels` so the scheduler fans it into N sibling candidates (one
@@ -167,6 +172,8 @@ export interface ResetPacketInput {
   scope?: {
     laneIds: string[];
     skipHoldIfStateMoved?: boolean;
+    /** Stop cleanup retains its dispatch barrier; explicit Reset clears it. */
+    preserveOperatorStopped?: boolean;
     expectedReleaseSource?: string;
   };
   /**

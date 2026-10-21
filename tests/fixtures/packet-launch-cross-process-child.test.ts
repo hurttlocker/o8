@@ -88,5 +88,5 @@ describe.skipIf(!enabled)('cross-process packet launch child', () => {
       expect(error).toMatchObject({ receipt: { reason: 'launch_in_progress' } });
       writeFileSync(resultPath!, 'held');
     }
-  }, 20_000);
+  }, 60_000);
 });

@@ -17,6 +17,15 @@ import { requirePanelAuth } from '@/lib/panel/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+class ProviderSelectionConflict extends Error {}
+
+function isExpectedSelection(value: unknown): value is { source: string; model: string | null; codexModel: string | null } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const selection = value as Record<string, unknown>;
+  return isClaudeCodeModelSource(selection.source)
+    && (selection.model === null || (typeof selection.model === 'string' && normalizeClaudeCodeGatewayModel(selection.model) === selection.model))
+    && (selection.codexModel === null || (typeof selection.codexModel === 'string' && normalizeClaudeCodeGatewayModel(selection.codexModel) === selection.codexModel));
+}
 
 async function responseBody() {
   const profile = readClaudeCodeWorkerProfileSync();
@@ -53,6 +62,10 @@ export async function POST(request: NextRequest) {
   if (!body || !isClaudeCodeModelSource(body.source)) {
     return NextResponse.json({ ok: false, error: 'source must be "native", "openrouter", or "codex-subscription".' }, { status: 400 });
   }
+  const expected = body.expectedProfile;
+  if (expected !== undefined && !isExpectedSelection(expected)) {
+    return NextResponse.json({ ok: false, error: 'expectedProfile must contain the previous provider and model selection.' }, { status: 400 });
+  }
   const model = normalizeClaudeCodeGatewayModel(body.model);
   if (body.model !== null && body.model !== undefined && body.model !== '' && !model) {
     return NextResponse.json({ ok: false, error: 'model must be a provider-qualified model id.' }, { status: 400 });
@@ -70,14 +83,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await updateClaudeCodeWorkerProfile((profile) => ({
-      source: body.source as typeof profile.source,
-      model,
-      codexModel,
-      repoSkillAllowlist: body.repoSkillAllowlist === undefined
-        ? profile.repoSkillAllowlist
-        : repoSkillAllowlist,
-    }));
+    await updateClaudeCodeWorkerProfile((profile) => {
+      // Check inside the serialized mutation so recovery never overwrites a
+      // newer provider choice. Skill-only updates remain independent.
+      if (expected && (expected.source !== profile.source || expected.model !== profile.model || expected.codexModel !== profile.codexModel)) {
+        throw new ProviderSelectionConflict('The Claude Code provider changed elsewhere. Reopen its house to check the current provider.');
+      }
+      return {
+        source: body.source as typeof profile.source,
+        model,
+        codexModel,
+        repoSkillAllowlist: body.repoSkillAllowlist === undefined
+          ? profile.repoSkillAllowlist
+          : repoSkillAllowlist,
+      };
+    });
     // Claude readiness is derived from the stored carrier and cached for 60s. Without
     // this drop, switching carriers leaves dispatch judged against the previous one —
     // a native-to-gateway switch stays refused, and the reverse stays wrongly allowed.
@@ -89,7 +109,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: false,
       error: error instanceof Error ? error.message : 'Claude Code worker settings could not be saved.',
-    }, { status: 500 });
+    }, { status: error instanceof ProviderSelectionConflict ? 409 : 500 });
   }
 }
 

@@ -24,10 +24,11 @@
  */
 export async function commitCrashedWorkerWork(
   worktreePath: string,
+  repoPath: string,
   label?: string | null,
 ): Promise<boolean> {
   const { autoCommitCompletionWorktree } = await import('@/lib/supervisor/completion-verification');
-  return autoCommitCompletionWorktree(worktreePath, label);
+  return autoCommitCompletionWorktree(worktreePath, repoPath, label);
 }
 
 export interface RunningLaneSalvage {
@@ -47,10 +48,11 @@ export interface RunningLaneSalvage {
 export async function decideRunningLaneSalvage(
   worktreePath: string,
   baseRef: string,
+  repoPath: string,
   options: { label?: string | null; preCommitted?: boolean } = {},
 ): Promise<RunningLaneSalvage> {
   const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
-  const autoCommitted = options.preCommitted ?? await commitCrashedWorkerWork(worktreePath, options.label);
-  const reviewable = autoCommitted || (await hasReviewableCompletionDiff(worktreePath, baseRef));
+  const autoCommitted = options.preCommitted ?? await commitCrashedWorkerWork(worktreePath, repoPath, options.label);
+  const reviewable = autoCommitted || (await hasReviewableCompletionDiff(worktreePath, baseRef, repoPath));
   return { autoCommitted, reviewable };
 }

@@ -27,6 +27,7 @@ export interface SessionRuleRecord {
   text: string;
   active: boolean;
   createdAt: string;
+  constraint: 'no_merge' | null;
 }
 
 interface SessionRuleRow {
@@ -35,6 +36,7 @@ interface SessionRuleRow {
   text: string;
   active: number;
   created_at: string;
+  constraint_kind: 'no_merge' | null;
 }
 
 function rowToRecord(row: SessionRuleRow): SessionRuleRecord {
@@ -44,6 +46,7 @@ function rowToRecord(row: SessionRuleRow): SessionRuleRecord {
     text: row.text,
     active: row.active === 1,
     createdAt: row.created_at,
+    constraint: row.constraint_kind ?? null,
   };
 }
 
@@ -60,7 +63,7 @@ function normalizeThreadId(threadId: string | null | undefined): string {
  * on text; this always inserts a fresh row (a thread can hold repeats if the
  * operator really wants them — cheap, ephemeral).
  */
-export function addSessionRule(threadId: string, text: string): SessionRuleRecord | null {
+export function addSessionRule(threadId: string, text: string, constraint: 'no_merge' | null = null): SessionRuleRecord | null {
   const thread = normalizeThreadId(threadId);
   const body = text.trim().slice(0, SESSION_RULE_MAX_LEN);
   if (!thread || !body) return null;
@@ -68,9 +71,9 @@ export function addSessionRule(threadId: string, text: string): SessionRuleRecor
   const id = randomUUID();
   const db = getSqlite();
   db.prepare(`
-    INSERT INTO session_rules (id, thread_id, text, active, created_at)
-    VALUES (?, ?, ?, 1, datetime('now'))
-  `).run(id, thread, body);
+    INSERT INTO session_rules (id, thread_id, text, active, created_at, constraint_kind)
+    VALUES (?, ?, ?, 1, datetime('now'), ?)
+  `).run(id, thread, body, constraint);
 
   return getSessionRule(id);
 }
@@ -110,5 +113,6 @@ export function listSessionRules(threadId: string): SessionRuleRecord[] {
 
 /** Just the rule strings for a thread (prompt injection convenience). */
 export function listSessionRuleTexts(threadId: string): string[] {
-  return listSessionRules(threadId).map((rule) => rule.text);
+  return listSessionRules(threadId).map((rule) => rule.constraint === 'no_merge'
+    ? `Do not merge. Merge is blocked until the operator removes this session rule. ${rule.text}` : rule.text);
 }

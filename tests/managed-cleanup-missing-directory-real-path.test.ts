@@ -7,6 +7,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
@@ -94,12 +95,19 @@ function makeRepo(label: string): string {
 
 async function setupTrackedWorkspace(
   label: string,
-  options: { gitWorktree?: boolean; dependencyImage?: boolean } = {},
+  options: { gitWorktree?: boolean; dependencyImage?: boolean; aliasedRoot?: boolean } = {},
 ) {
   const repoPath = makeRepo(label);
   const worktreeRoot = mkdtempSync(path.join(os.tmpdir(), `o8-${label}-root-`));
   roots.push(worktreeRoot);
   process.env.O8_WORKTREE_ROOT = worktreeRoot;
+  if (options.aliasedRoot) {
+    const actual = path.join(worktreeRoot, 'actual');
+    const alias = path.join(worktreeRoot, 'alias');
+    mkdirSync(path.join(actual, 'container', 'worktrees'), { recursive: true });
+    symlinkSync(actual, alias, 'dir');
+    process.env.O8_WORKTREE_ROOT = path.join(alias, 'container', 'worktrees');
+  }
   const { addRepo } = await import('@/lib/repos/registry');
   const { createLane } = await import('@/lib/lane/registry');
   const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
@@ -223,8 +231,8 @@ async function cleanupOutcome(
   }
 }
 
-it('converges a confirmed-missing tracked directory once, then stays silent', async () => {
-  const fixture = await setupTrackedWorkspace(`absent-${Date.now()}`);
+it.each([false, true])('converges a confirmed-missing tracked directory once, then stays silent (aliased root: %s)', async (aliasedRoot) => {
+  const fixture = await setupTrackedWorkspace(`absent-${Date.now()}`, { aliasedRoot });
   const { WorktreeManager } = await import('@/lib/worktree/manager');
   const { getWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
   const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
@@ -383,8 +391,8 @@ it('preserves durable metadata when the parent directory was replaced', async ()
   }
 }, 60_000);
 
-it('preserves durable metadata when the parent directory is missing', async () => {
-  const fixture = await setupTrackedWorkspace(`parent-missing-${Date.now()}`);
+it.each([false, true])('preserves durable metadata when the parent directory is missing (aliased root: %s)', async (aliasedRoot) => {
+  const fixture = await setupTrackedWorkspace(`parent-missing-${Date.now()}`, { aliasedRoot });
   const { closeDb } = await import('@/lib/db');
   rmSync(fixture.worktreePath, { recursive: true, force: true });
   rmSync(fixture.layout.primaryBase, { recursive: true, force: true });
@@ -395,6 +403,7 @@ it('preserves durable metadata when the parent directory is missing', async () =
 
     expect(outcome).not.toBe('retired');
     expect(await readDurableEntry(fixture.repoPath, fixture.id)).toBeDefined();
+    expect(existsSync(fixture.layout.primaryBase)).toBe(false);
     expect(getWorkspaceSnapshot(fixture.repo.id, fixture.id)).toBeNull();
   } finally {
     errorSpy.mockRestore();
@@ -425,6 +434,10 @@ it('retires an existing snapshot with its durable cleanup reason and removes onl
       version: before!.version + 2,
     });
     expect(retiredTransition?.receipt?.terminalAction).toBe('cleanup');
+    expect(retiredTransition?.receipt).toMatchObject({
+      sourceMissingAtAdmission: true, preservationUnavailable: 'source-already-absent',
+    });
+    expect(retiredTransition?.receipt?.preservationId).toBeUndefined();
     expect(await readDurableEntry(fixture.repoPath, fixture.id)).toBeUndefined();
     expect(await readDurableEntry(fixture.repoPath, fixture.unrelatedId)).toBeDefined();
     expect(existsSync(fixture.unrelatedPath)).toBe(true);
@@ -438,10 +451,10 @@ it('preserves a conflicting durable retirement action instead of bypassing the s
   const fixture = await setupTrackedWorkspace(`conflict-${Date.now()}`, { gitWorktree: true });
   const { closeDb } = await import('@/lib/db');
   await seedSnapshot(fixture);
-  const { beginWorkspaceMaterializationRetirement, getWorkspaceRetirementAction } = await import(
+  const { prepareWorkspaceMaterializationRetirement, getWorkspaceRetirementAction } = await import(
     '@/lib/workspace/workspace-materialization-retirement'
   );
-  beginWorkspaceMaterializationRetirement(fixture.worktreePath, 'discard');
+  await prepareWorkspaceMaterializationRetirement(fixture.repoPath, fixture.worktreePath, 'discard');
   rmSync(fixture.worktreePath, { recursive: true, force: true });
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {
@@ -496,10 +509,10 @@ it('replays a legitimate non-cleanup retirement from preexisting verified snapsh
   const fixture = await setupTrackedWorkspace(`replay-${Date.now()}`, { gitWorktree: true });
   const { closeDb } = await import('@/lib/db');
   await seedSnapshot(fixture);
-  const { beginWorkspaceMaterializationRetirement } = await import(
+  const { prepareWorkspaceMaterializationRetirement } = await import(
     '@/lib/workspace/workspace-materialization-retirement'
   );
-  beginWorkspaceMaterializationRetirement(fixture.worktreePath, 'discard');
+  await prepareWorkspaceMaterializationRetirement(fixture.repoPath, fixture.worktreePath, 'discard');
   rmSync(fixture.worktreePath, { recursive: true, force: true });
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   try {

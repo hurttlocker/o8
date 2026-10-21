@@ -8,6 +8,13 @@ const roots: string[] = [];
 const fixturePids = new Set<number>();
 const fixturePidFiles: string[] = [];
 
+function fixtureGateEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.O8_INTEGRATION_SHARD;
+  delete env.O8_INTEGRATION_BASELINE;
+  return env;
+}
+
 function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -94,7 +101,7 @@ it('integration fails second', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_TEST_GATE_TEST_MODE: '1',
         O8_TEST_GATE_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',
@@ -152,7 +159,7 @@ it('starts clean after the failure', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',
@@ -222,7 +229,7 @@ it('runs third through the canonical path and records it ran', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',
@@ -285,7 +292,7 @@ it('runs after the missing selection is reported', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',
@@ -353,7 +360,7 @@ it('runs after the timed-out file', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
         O8_TEST_GATE_FILE_TIMEOUT_MS: '3000',
@@ -429,7 +436,7 @@ if (mode === 'fail') {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         PATH: `${stubDir}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
@@ -524,7 +531,7 @@ it('passes and exits immediately', () => {
       encoding: 'utf8',
       timeout: 30_000,
       env: {
-        ...process.env,
+        ...fixtureGateEnv(),
         O8_INTEGRATION_TEST_MODE: '1',
         O8_INTEGRATION_TEST_PLAN: planPath,
         O8_TEST_GATE_HEARTBEAT_MS: '100000',

@@ -7,6 +7,7 @@ import {
   type ProjectColor,
   PROJECT_COLOR_PALETTE,
 } from '@/lib/repos/projects';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+async function handlePATCH(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const body = (await request.json().catch(() => null)) as
     | { name?: string; repoPaths?: string[]; color?: string }
@@ -44,18 +45,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update project.';
+    console.error('[api] panel/projects/[id] failed:', error);
+    const message = 'Failed to update project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }
 
-export async function DELETE(_request: NextRequest, context: RouteContext) {
+async function handleDELETE(_request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   try {
     const ledger = await deleteProject(id);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to delete project.';
+    console.error('[api] panel/projects/[id] failed:', error);
+    const message = 'Failed to delete project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }
+
+export const PATCH = withRepoInventoryChange('project-update', handlePATCH);
+
+export const DELETE = withRepoInventoryChange('project-delete', handleDELETE);

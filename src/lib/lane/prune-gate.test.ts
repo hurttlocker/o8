@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,7 +40,7 @@ describe('prune gate — real temp git repo (mktemp, no mocks)', () => {
     return wt;
   }
 
-  it('refuses a worktree with uncommitted work (no lane); operatorForce deletes it', async () => {
+  it('retains unmanaged uncommitted work even when the prune gate is forced', async () => {
     const wt = addWorktree('packet-dirty', 'inline/gate-dirty');
     writeFileSync(join(wt, 'scratch.txt'), 'agent mid-edit\n'); // uncommitted
 
@@ -53,15 +53,16 @@ describe('prune gate — real temp git repo (mktemp, no mocks)', () => {
     expect(await removeCortexWorktreePath({ repoRoot, worktreePath: wt, logPrefix: 'prune-gate-test' })).toBe(false);
     expect(existsSync(wt)).toBe(true);
 
-    // operatorForce overrides — decision reports forced, and the real path deletes.
+    // A prune override is not exact manager or preservation authority.
     const forced = await checkPruneGate({ repoRoot, worktreePath: wt, operatorForce: true });
     expect(forced).toMatchObject({ ok: true, forced: true });
     expect(forced.reason).toContain('uncommitted_work');
 
     expect(
       await removeCortexWorktreePath({ repoRoot, worktreePath: wt, logPrefix: 'prune-gate-test', operatorForce: true }),
-    ).toBe(true);
-    expect(existsSync(wt)).toBe(false);
+    ).toBe(false);
+    expect(existsSync(wt)).toBe(true);
+    expect(readFileSync(join(wt, 'scratch.txt'), 'utf8')).toBe('agent mid-edit\n');
   });
 
   it('refuses while the owning lane is non-terminal, allows once terminal', async () => {

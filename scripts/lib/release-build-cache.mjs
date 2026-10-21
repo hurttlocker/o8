@@ -2,21 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
+  existsSync, lstatSync, readFileSync, readdirSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
+import { beginCacheStaging, cacheDestinationOccupied, finalizeCacheReceipt, ensurePrivateDirectory, tarArguments } from './release-build-cache-staging.mjs';
 import { normalizeReleaseBuildCacheRecipeInput } from './release-build-cache-version-normalizer.mjs';
 
 export const RELEASE_BUILD_CACHE_SCHEMA = 'o8/release-build-cache-entry/v1';
@@ -60,8 +53,21 @@ const PHASE_CONFIG = Object.freeze({
       'scripts/bust-stale-patch-cache.mjs',
       'scripts/tauri-export.mjs',
       'scripts/tauri-prebuild.mjs',
+      'scripts/lib/prebuild-continuation.mjs',
+      'scripts/lib/registered-build.mjs',
+      'scripts/lib/release-build-profile.mjs',
+      'scripts/lib/generated-output-launch.mjs',
+      'scripts/generated-output-run.ts',
+      'src/lib/workspace/generated-output-producer.ts',
+      'src/lib/workspace/generated-output-state.ts',
+      'src/lib/workspace/generated-output-validation.ts',
+      'src/lib/workspace/generated-output-disposal.ts',
+      'scripts/postship-cleanup.mjs',
+      'scripts/preship-cleanup.mjs',
       'scripts/lib/release-config.mjs',
-      'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/release-build-cache.mjs', 'scripts/lib/release-build-cache-staging.mjs',
+      'src/lib/workspace/exact-parent-operation.ts', 'src/lib/workspace/exact-directory-purge.ts',
+      'src/lib/worktree/materialization-execution.ts', 'src/lib/worktree/metadata-lock-process-identity.ts',
       'scripts/lib/release-build-cache-version-normalizer.mjs',
       'patches',
     ],
@@ -75,7 +81,20 @@ const PHASE_CONFIG = Object.freeze({
       'src-tauri/sidecars/speech-local/Package.resolved',
       'scripts/build-speech-local.mjs',
       'scripts/tauri-prebuild.mjs',
-      'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/prebuild-continuation.mjs',
+      'scripts/lib/registered-build.mjs',
+      'scripts/lib/release-build-profile.mjs',
+      'scripts/lib/generated-output-launch.mjs',
+      'scripts/generated-output-run.ts',
+      'src/lib/workspace/generated-output-producer.ts',
+      'src/lib/workspace/generated-output-state.ts',
+      'src/lib/workspace/generated-output-validation.ts',
+      'src/lib/workspace/generated-output-disposal.ts',
+      'scripts/postship-cleanup.mjs',
+      'scripts/preship-cleanup.mjs',
+      'scripts/lib/release-build-cache.mjs', 'scripts/lib/release-build-cache-staging.mjs',
+      'src/lib/workspace/exact-parent-operation.ts', 'src/lib/workspace/exact-directory-purge.ts',
+      'src/lib/worktree/materialization-execution.ts', 'src/lib/worktree/metadata-lock-process-identity.ts',
       'scripts/lib/release-build-cache-version-normalizer.mjs',
     ],
     toolchains: [['swift', 'swift', ['--version']]],
@@ -96,7 +115,20 @@ const PHASE_CONFIG = Object.freeze({
       'package.json',
       'scripts/tauri-build.mjs',
       'scripts/tauri-prebuild.mjs',
-      'scripts/lib/release-build-cache.mjs',
+      'scripts/lib/prebuild-continuation.mjs',
+      'scripts/lib/registered-build.mjs',
+      'scripts/lib/release-build-profile.mjs',
+      'scripts/lib/generated-output-launch.mjs',
+      'scripts/generated-output-run.ts',
+      'src/lib/workspace/generated-output-producer.ts',
+      'src/lib/workspace/generated-output-state.ts',
+      'src/lib/workspace/generated-output-validation.ts',
+      'src/lib/workspace/generated-output-disposal.ts',
+      'scripts/postship-cleanup.mjs',
+      'scripts/preship-cleanup.mjs',
+      'scripts/lib/release-build-cache.mjs', 'scripts/lib/release-build-cache-staging.mjs',
+      'src/lib/workspace/exact-parent-operation.ts', 'src/lib/workspace/exact-directory-purge.ts',
+      'src/lib/worktree/materialization-execution.ts', 'src/lib/worktree/metadata-lock-process-identity.ts',
       'scripts/lib/release-build-cache-version-normalizer.mjs',
     ],
     toolchains: [
@@ -333,13 +365,6 @@ export function collectReleaseBuildCacheIdentity(root, phase, options = {}) {
   };
 }
 
-function ensurePrivateDirectory(path) {
-  mkdirSync(path, { recursive: true, mode: 0o700 });
-  try {
-    chmodSync(path, 0o700);
-  } catch {}
-}
-
 function entriesDirectory(cacheRoot, identity) {
   return join(cacheRoot, 'entries', identity.phase, identity.compatibilitySha256);
 }
@@ -401,12 +426,6 @@ function assertOutsideProjectNodeModules(target, projectRoot) {
 function removeCachePath(target, options, projectRoot) {
   assertOutsideProjectNodeModules(target, projectRoot);
   rmSync(target, options);
-}
-
-function renameCachePath(source, destination, projectRoot) {
-  assertOutsideProjectNodeModules(source, projectRoot);
-  assertOutsideProjectNodeModules(destination, projectRoot);
-  renameSync(source, destination);
 }
 
 export function isReleaseBuildCacheSafetyError(error) {
@@ -530,13 +549,14 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
       continue;
     }
     assertOutsideProjectNodeModules(cacheRoot, root);
-    const restoreRoot = mkdtempSync(join(cacheRoot, '.restore-'));
+    const destinations = verified.manifest.targets.map(target => join(root, target));
+    destinations.forEach(target => assertOutsideProjectNodeModules(target, root));
+    if (cacheDestinationOccupied(destinations)) return { phase, status: 'miss', reason: 'destination_occupied', durationMs: Date.now() - started };
+    const staging = await beginCacheStaging(cacheRoot, root, phase, identity, { ...options, action: 'restore' });
+    const restoreRoot = staging.path;
     try {
-      execFileSync('tar', ['-xf', verified.archivePath, '-C', restoreRoot], {
-        cwd: root,
-        stdio: 'pipe',
-        timeout: 10 * 60_000,
-      });
+      await staging.destinations(destinations);
+      await staging.populate(['-xf', verified.archivePath]);
       for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         if (!existsSync(extracted)) throw new Error(`cache target missing after extraction: ${target}`);
@@ -545,10 +565,10 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
       for (const target of verified.manifest.targets) {
         const extracted = join(restoreRoot, target);
         const destination = join(root, target);
-        removeCachePath(destination, { recursive: true, force: true }, root);
-        mkdirSync(dirname(destination), { recursive: true });
-        renameCachePath(extracted, destination, root);
+        assertOutsideProjectNodeModules(destination, root);
+        await staging.promote(extracted, destination);
       }
+      await staging.clean();
       return {
         phase,
         status: verified.manifest.entrySha256 === identity.entrySha256 ? 'hit_exact' : 'hit_compatible',
@@ -560,20 +580,12 @@ export async function restoreReleaseBuildCache(root, phase, options = {}) {
         durationMs: Date.now() - started,
       };
     } catch (error) {
+      await staging.hold(error);
       if (isReleaseBuildCacheSafetyError(error)) throw error;
-      lastReason = `restore_failed:${error instanceof Error ? error.message : String(error)}`;
-    } finally {
-      removeCachePath(restoreRoot, { recursive: true, force: true }, root);
+      lastReason = `restore_failed:${error instanceof Error ? error.message : String(error)}; staging=${staging.runId}/${staging.operationId}`;
     }
   }
   return { phase, status: 'miss', reason: lastReason, durationMs: Date.now() - started };
-}
-
-function tarArguments(root, config, archivePath) {
-  const args = ['-cf', archivePath, '-C', root];
-  for (const excluded of config.excludes) args.push('--exclude', excluded);
-  args.push(...config.targets);
-  return args;
 }
 
 function pruneEntries(directory, keepEntry, projectRoot) {
@@ -714,15 +726,11 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       };
     }
   }
-  const temporaryArchive = `${finalArchivePath}.${process.pid}.tmp`;
-  const temporaryManifest = `${finalManifestPath}.${process.pid}.tmp`;
+  const staging = await beginCacheStaging(cacheRoot, root, phase, identity, { ...options, action: 'capture' });
+  const temporaryArchive = join(staging.path, 'archive.tar');
   try {
-    execFileSync('tar', tarArguments(root, config, temporaryArchive), {
-      cwd: root,
-      stdio: 'pipe',
-      timeout: 20 * 60_000,
-    });
-    chmodSync(temporaryArchive, 0o600);
+    await staging.destinations([finalArchivePath, finalManifestPath]);
+    await staging.populate(tarArguments(root, config, '-'), 'archive.tar');
     const archive = {
       name: basename(finalArchivePath),
       size: statSync(temporaryArchive).size,
@@ -743,9 +751,10 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       buildDurationMs: options.buildDurationMs ?? null,
       archive,
     };
-    writeFileSync(temporaryManifest, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-    renameCachePath(temporaryArchive, finalArchivePath, root);
-    renameCachePath(temporaryManifest, finalManifestPath, root);
+    await staging.write('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+    await staging.promote(temporaryArchive, finalArchivePath, 'file');
+    await staging.promote(join(staging.path, 'manifest.json'), finalManifestPath, 'file');
+    await staging.clean();
     pruneEntries(directory, identity.entrySha256, root);
     pruneCompatibilityDirectories(cacheRoot, phase, identity.compatibilitySha256, root);
     const pruned = pruneCacheToBudget(
@@ -764,60 +773,20 @@ export async function captureReleaseBuildCache(root, phase, options = {}) {
       archiveBytes: archive.size,
       durationMs: Date.now() - started,
     };
-  } finally {
-    removeCachePath(temporaryArchive, { force: true }, root);
-    removeCachePath(temporaryManifest, { force: true }, root);
+  } catch (error) {
+    await staging.hold(error);
+    if (isReleaseBuildCacheSafetyError(error)) throw error;
+    return { phase, status: 'miss', reason: `capture_held:${error.message}; staging=${staging.runId}/${staging.operationId}`, durationMs: Date.now() - started };
   }
 }
 
-export function createReleaseBuildCacheRunId() {
-  return `${Date.now()}-${process.pid}`;
-}
+export { createReleaseBuildCacheRunId, writeReleaseBuildCachePhaseReceipt } from './release-build-cache-staging.mjs';
 
-function runDirectory(cacheRoot, runId) {
-  return join(cacheRoot, 'runs', runId);
-}
-
-export function writeReleaseBuildCachePhaseReceipt(cacheRoot, runId, receipt) {
-  const directory = runDirectory(cacheRoot, runId);
-  ensurePrivateDirectory(directory);
-  writeFileSync(join(directory, `${receipt.phase}.json`), `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-}
-
-export function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, options = {}) {
-  const projectRoot = options.projectRoot ?? process.cwd();
-  const directory = runDirectory(cacheRoot, runId);
-  const phases = {};
-  if (existsSync(directory)) {
-    for (const name of readdirSync(directory).filter((entry) => isReleaseBuildCachePhaseReceiptName(entry)).sort()) {
-      const receipt = JSON.parse(readFileSync(join(directory, name), 'utf8'));
-      phases[receipt.phase] = receipt;
-    }
-  }
-  const restores = Object.values(phases).map((phase) => phase.restore).filter(Boolean);
-  const receipt = {
-    schema: RELEASE_BUILD_CACHE_RECEIPT_SCHEMA,
-    runId,
-    createdAt: new Date().toISOString(),
-    outcome: summary.outcome,
-    source: summary.source,
-    platform: process.platform,
-    arch: process.arch,
-    buildDurationMs: summary.buildDurationMs,
-    phases,
-    totals: {
-      archiveBytesRestored: restores.reduce((sum, restore) => sum + (restore.archiveBytes ?? 0), 0),
-      estimatedSavedMs: restores.reduce((sum, restore) => sum + (restore.estimatedSavedMs ?? 0), 0),
-      hits: restores.filter((restore) => restore.status === 'hit_exact' || restore.status === 'hit_compatible').length,
-      misses: restores.filter((restore) => restore.status === 'miss').length,
-    },
-  };
-  const receiptsDirectory = join(cacheRoot, 'receipts');
-  ensurePrivateDirectory(receiptsDirectory);
-  const receiptPath = join(receiptsDirectory, `${runId}.json`);
-  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-  removeCachePath(directory, { recursive: true, force: true }, projectRoot);
-  return { receipt, receiptPath };
+export async function finalizeReleaseBuildCacheReceipt(cacheRoot, runId, summary, options = {}) {
+  assertOutsideProjectNodeModules(cacheRoot, options.projectRoot ?? process.cwd());
+  return finalizeCacheReceipt(cacheRoot, runId, summary, options, {
+    isReleaseBuildCachePhaseReceiptName, ensurePrivateDirectory,
+  });
 }
 
 export const releaseBuildCacheInternals = {

@@ -13,6 +13,10 @@ export const reviewWorkerHelper = `
     approved: true,
     findings: [],
     reviewedHeadSha: head,
+    contractCoverageEvidence: {
+      contractVersion: 1, headSha: head,
+      entries: [{ requirementId: 'R1', productionPath: 'lead-worker-proof.txt' }],
+    },
   });
   writeFileSync(process.env.O8_TEST_REVIEW_FILE, JSON.stringify({ packetId, review }));
 `;
@@ -24,6 +28,22 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.145.0'); process.exit(0); }
 if (args[0] === 'login' && args[1] === 'status') { console.log('Logged in'); process.exit(0); }
 if (args.includes('--input-format')) process.exit(0);
+if (args[0] === 'app-server') {
+  const { createInterface } = await import('node:readline');
+  const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of input) {
+    const message = JSON.parse(line);
+    if (message.method === 'initialize') {
+      console.log(JSON.stringify({ id: message.id, result: {} }));
+    } else if (message.method === 'account/rateLimits/read') {
+      console.log(JSON.stringify({ id: message.id, result: {
+        rateLimits: { primary: { usedPercent: 0, windowDurationMins: 10_080, resetsAt: 2_000_000_000 }, secondary: null },
+        planType: 'pro',
+      } }));
+    }
+  }
+  process.exit(0);
+}
 appendFileSync(process.env.O8_TEST_LEAD_ARGS, JSON.stringify(args) + '\\n');
 const prompt = args.at(-1) || '';
 const resumeIndex = args.indexOf('resume');

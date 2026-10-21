@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,7 @@ function git(cwd: string, ...args: string[]): string {
   }).trim();
 }
 
-function fixture() {
+function fixture(largeBase = false) {
   const dir = mkdtempSync(path.join(root, 'fixture-'));
   const source = path.join(dir, 'source');
   const bare = path.join(dir, 'origin.git');
@@ -29,6 +30,10 @@ function fixture() {
   git(source, 'commit', '--quiet', '-m', 'ancestor');
   const ancestor = git(source, 'rev-parse', 'HEAD');
   writeFileSync(path.join(source, 'base.txt'), 'reviewed\n');
+  if (largeBase) {
+    writeFileSync(path.join(source, 'payload.bin'), randomBytes(1024 * 1024));
+    git(source, 'add', 'payload.bin');
+  }
   git(source, 'commit', '--quiet', '-am', 'reviewed base');
   const baseSha = git(source, 'rev-parse', 'HEAD');
   git(source, 'tag', 'reviewed');
@@ -92,6 +97,131 @@ describe('remote worker pinned checkout through real Git', () => {
     await expect(cloneRepoForRun(options)).rejects.toThrow('fresh --workspace-dir');
     expect(readFileSync(path.join(clone, 'uncommitted.txt'), 'utf8')).toBe('preserve me');
     expect(git(clone, 'rev-parse', 'HEAD')).toBe(remote.baseSha);
+  });
+
+  it('reuses only base objects in independent attempts that survive cache deletion and push', async () => {
+    const remote = fixture();
+    const cacheDir = path.join(remote.dir, 'cache');
+    const receipts: Array<{ cacheHit: boolean; durationMs: number }> = [];
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir,
+      onCheckout: (receipt: { cacheHit: boolean; durationMs: number }) => { receipts.push(receipt); } };
+    const first = await cloneRepoForRun({ ...options, remoteBranch: 'o8/cold', workDir: path.join(remote.dir, 'cold') });
+    expect(existsSync(cacheDir)).toBe(true);
+    expect(readdirSync(cacheDir)).toHaveLength(1);
+    writeFileSync(path.join(first, 'previous-task.txt'), 'must stay in the first attempt');
+    await commitWorkerChanges(first, remote.baseSha);
+    const second = await cloneRepoForRun({ ...options, remoteBranch: 'o8/warm', workDir: path.join(remote.dir, 'warm') });
+    expect(receipts.map((receipt) => receipt.cacheHit)).toEqual([false, true]);
+    expect(receipts.every((receipt) => receipt.durationMs >= 0)).toBe(true);
+    expect(git(second, 'rev-parse', 'HEAD')).toBe(remote.baseSha);
+    expect(git(second, 'rev-list', '--all', '--count')).toBe('1');
+    expect(git(second, 'for-each-ref', '--format=%(refname)')).toBe('refs/heads/o8/warm');
+    expect(existsSync(path.join(second, 'previous-task.txt'))).toBe(false);
+    expect(existsSync(path.join(second, '.git/objects/info/alternates'))).toBe(false);
+    rmSync(cacheDir, { recursive: true });
+    git(second, 'fsck', '--strict');
+    writeFileSync(path.join(second, 'warm-result.txt'), 'done\n');
+    await commitWorkerChanges(second, remote.baseSha);
+    const resultSha = await pushRemoteBranch(second, 'o8/warm');
+    expect(git(remote.bare, 'rev-parse', 'refs/heads/o8/warm')).toBe(resultSha);
+    console.log('[worker/checkout] checkout timing fixture', JSON.stringify(receipts));
+  });
+
+  it('still contacts the exact upstream on a cache hit and refuses unavailable access', async () => {
+    const remote = fixture();
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir: path.join(remote.dir, 'cache') };
+    await cloneRepoForRun({ ...options, remoteBranch: 'o8/first', workDir: path.join(remote.dir, 'first') });
+    renameSync(remote.bare, `${remote.bare}.unavailable`);
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/denied', workDir: path.join(remote.dir, 'denied') }))
+      .rejects.toThrow('git fetch failed');
+    expect(() => git(path.join(remote.dir, 'denied/repo'), 'rev-parse', '--verify', 'HEAD')).toThrow();
+  });
+
+  it('actually avoids transferring the pinned pack again while retaining a fresh upstream fetch', async () => {
+    const remote = fixture(true);
+    const cacheDir = path.join(remote.dir, 'cache');
+    const previousTrace = process.env.GIT_TRACE_PACKFILE;
+    const bytes: number[] = [];
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        const trace = path.join(remote.dir, `transfer-${i}.bin`);
+        process.env.GIT_TRACE_PACKFILE = trace;
+        await cloneRepoForRun({ repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir,
+          remoteBranch: `o8/transfer-${i}`, workDir: path.join(remote.dir, `transfer-${i}`) });
+        bytes.push(statSync(trace).size);
+      }
+      expect(bytes[0]).toBeGreaterThan(1024 * 1024);
+      expect(bytes[1]).toBeLessThan(bytes[0]! / 10);
+      console.log('[worker/checkout] actual upstream pack bytes', JSON.stringify(bytes));
+    } finally {
+      if (previousTrace === undefined) delete process.env.GIT_TRACE_PACKFILE;
+      else process.env.GIT_TRACE_PACKFILE = previousTrace;
+    }
+  });
+
+  it('refuses a previously cached commit that the upstream no longer has', async () => {
+    const remote = fixture();
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir: path.join(remote.dir, 'cache') };
+    await cloneRepoForRun({ ...options, remoteBranch: 'o8/before-removal', workDir: path.join(remote.dir, 'before-removal') });
+    for (const ref of git(remote.bare, 'for-each-ref', '--format=%(refname)').split('\n')) {
+      git(remote.bare, 'update-ref', '-d', ref);
+    }
+    git(remote.bare, 'reflog', 'expire', '--expire=now', '--all');
+    git(remote.bare, 'gc', '--prune=now');
+    expect(() => git(remote.bare, 'cat-file', '-e', remote.baseSha)).toThrow();
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/removed', workDir: path.join(remote.dir, 'removed') }))
+      .rejects.toThrow('git fetch failed');
+  });
+
+  it('checks cached object integrity and refuses object alternates', async () => {
+    const remote = fixture();
+    const cacheDir = path.join(remote.dir, 'cache');
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir };
+    await cloneRepoForRun({ ...options, remoteBranch: 'o8/intact', workDir: path.join(remote.dir, 'intact') });
+    const entry = path.join(cacheDir, readdirSync(cacheDir)[0]!);
+    const packDir = path.join(entry, 'objects/pack');
+    const loose = path.join(entry, 'objects', remote.baseSha.slice(0, 2), remote.baseSha.slice(2));
+    const pack = existsSync(loose) ? loose : path.join(packDir, readdirSync(packDir).find((name) => name.endsWith('.pack'))!);
+    const original = readFileSync(pack);
+    chmodSync(pack, 0o600);
+    writeFileSync(pack, Buffer.alloc(original.length));
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/corrupt-object', workDir: path.join(remote.dir, 'corrupt-object') }))
+      .rejects.toThrow('git fsck failed');
+    writeFileSync(pack, original);
+    writeFileSync(path.join(entry, 'objects/info/alternates'), '/untrusted-object-dependency');
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/alternates', workDir: path.join(remote.dir, 'alternates') }))
+      .rejects.toThrow(/[Rr]epository cache object/);
+  });
+
+  it('publishes one complete cache under concurrent cold attempts and scopes it to the source', async () => {
+    const remote = fixture();
+    const cacheDir = path.join(remote.dir, 'cache');
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir };
+    const results = await Promise.all([0, 1].map((i) => cloneRepoForRun({ ...options,
+      remoteBranch: `o8/parallel-${i}`, workDir: path.join(remote.dir, `parallel-${i}`) })));
+    expect(readdirSync(cacheDir)).toHaveLength(1);
+    for (const clone of results) expect(git(clone, 'rev-parse', 'HEAD')).toBe(remote.baseSha);
+    const another = fixture();
+    await cloneRepoForRun({ ...options, repoUrl: another.bare, baseRef: another.baseSha,
+      remoteBranch: 'o8/other-source', workDir: path.join(remote.dir, 'other-source') });
+    expect(readdirSync(cacheDir)).toHaveLength(2);
+  });
+
+  it('rejects a corrupted cache manifest and a symlink cache without touching their target', async () => {
+    const remote = fixture();
+    const cacheDir = path.join(remote.dir, 'cache');
+    const options = { repoUrl: remote.bare, baseRef: remote.baseSha, cacheDir };
+    await cloneRepoForRun({ ...options, remoteBranch: 'o8/create-cache', workDir: path.join(remote.dir, 'first') });
+    const entry = path.join(cacheDir, readdirSync(cacheDir)[0]!);
+    writeFileSync(path.join(entry, 'manifest.json'), '{}');
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/corrupt', workDir: path.join(remote.dir, 'corrupt') }))
+      .rejects.toThrow(/[Rr]epository cache/);
+    const saved = `${entry}.preserved`;
+    renameSync(entry, saved);
+    symlinkSync(saved, entry, 'dir');
+    await expect(cloneRepoForRun({ ...options, remoteBranch: 'o8/symlink', workDir: path.join(remote.dir, 'symlink') }))
+      .rejects.toThrow(/[Rr]epository cache/);
+    expect(readFileSync(path.join(saved, 'manifest.json'), 'utf8')).toBe('{}');
   });
 
   it('fails a missing pinned revision without broadening history and retries in a new attempt', async () => {

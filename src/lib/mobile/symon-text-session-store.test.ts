@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   SYMON_TEXT_SESSION_STALE_MS,
   appendSymonTextTranscript,
+  bindSymonTextEffectiveModel,
   createSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
+  touchSymonTextAttachment,
 } from './symon-text-session-store';
 
 let dataDir = '';
@@ -50,9 +52,35 @@ describe('Symon text session store', () => {
     expect(formatSymonTextPlannerPrompt(updated!, 'next question')).toContain('User: next question');
   });
 
+  it('keeps an attached identity alive, preserves turn uncertainty and expires after detach grace', () => {
+    const session = create(1000);
+    touchSymonTextAttachment(session.sessionId, 'pending', false, 2000);
+    expect(loadSymonTextSession(session.sessionId, 2000)?.pendingTurnIds).toEqual(['pending']);
+    touchSymonTextAttachment(session.sessionId, undefined, false, 500000);
+    expect(loadSymonTextSession(session.sessionId, 700000)?.sessionId).toBe(session.sessionId);
+    touchSymonTextAttachment(session.sessionId, 'pending', true, 700000, { status: 'done', text: 'answer' });
+    expect(loadSymonTextSession(session.sessionId, 700000)?.completedTurns).toEqual([{ turnId: 'pending', status: 'done', text: 'answer' }]);
+    expect(loadSymonTextSession(session.sessionId, 700001 + SYMON_TEXT_SESSION_STALE_MS)).toBeNull();
+  });
+
   it('drops a session after ten minutes without a turn', () => {
     const session = create();
     expect(loadSymonTextSession(session.sessionId, 1_000 + SYMON_TEXT_SESSION_STALE_MS)).not.toBeNull();
     expect(loadSymonTextSession(session.sessionId, 1_001 + SYMON_TEXT_SESSION_STALE_MS)).toBeNull();
   });
+});
+
+it.each([
+  [true, 'gpt-5.6-sol', 'medium', 'gpt-5.6-sol'],
+  [true, 'gpt-5.6-sol', 'xhigh', 'gpt-6.1-sol'],
+  [true, 'some-model', 'medium', 'gpt-6.1-sol'],
+  [false, 'gpt-5.6-sol', 'medium', 'gpt-6.1-sol'],
+] as const)('binds only an eligible same-effort compatibility result (%s, %s, %s)', (allowed, model, effort, expected) => {
+  const session = createSymonTextSession({ ...create(),
+    model: 'gpt-6.1-sol', allowDefaultFallback: allowed,
+  }, 1_000);
+  bindSymonTextEffectiveModel(session.sessionId, model, effort, 2_000);
+  expect(loadSymonTextSession(session.sessionId, 2_000)).toMatchObject({ model: expected, effort: 'medium', allowDefaultFallback: false });
+  bindSymonTextEffectiveModel(session.sessionId, 'gpt-5.6-sol', 'medium', 3_000);
+  expect(loadSymonTextSession(session.sessionId, 3_000)?.model).toBe(expected);
 });

@@ -4,6 +4,7 @@ import {
   formatPersistedRuntimeSessionKey,
   loadLiveRuntimeSessionKeys,
   loadTabState,
+  persistedTabStateSavedAt,
   sanitizePersistedTabState,
   stripPersistedRuntimeSessionKey,
   type PersistedRuntimeSessionKey,
@@ -18,13 +19,14 @@ import {
   runtimeFromOwnedSessionKey,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { parseTerminalExitState, terminalExitState } from '@/lib/terminal/exit-state';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
 
 export interface ApplyPersistedStateOptions {
   preferredRepo: RegisteredRepo | null;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   createDefaultChatTab: () => TerminalTab;
 }
 
@@ -39,11 +41,12 @@ export interface ApplyPersistedStateResult {
 export type RestoreValidationMode = 'optimistic' | 'validated';
 
 function unwrapRuntimeSessionKey(rawSessionKey: string): string {
-  for (const stalePrefix of ['codex:', 'claude-code:']) {
+  for (const stalePrefix of ['codex:', 'claude-code:', 'cloud-owned:']) {
     if (!rawSessionKey.startsWith(stalePrefix)) continue;
     const inner = rawSessionKey.slice(stalePrefix.length);
     if (
-      isOwnedOrchestratorSessionKey(inner)
+      inner.startsWith('cloud:')
+      || isOwnedOrchestratorSessionKey(inner)
       || inner.startsWith('codex-discovered:')
       || inner.startsWith('codex-live:')
     ) {
@@ -290,6 +293,13 @@ export async function computeRestoredTabs(
       continue;
     }
 
+    if (tabKind === 'chatgpt-plan') {
+      const tabId = claimWorkspaceTabId('chatgpt-plan', seenTabIds, savedTab.id);
+      restoredTabs.push({ id: tabId, label: savedTab.label || 'ChatGPT plan', kind: 'chatgpt-plan', tmuxSession: null, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
+
     if (tabKind === 'llm-chat') {
       const tabId = claimWorkspaceTabId('llm-chat', seenTabIds, savedTab.id);
       restoredTabs.push({
@@ -346,7 +356,10 @@ export async function computeRestoredTabs(
       if (ownedRuntime && effectiveRuntime !== ownedRuntime) {
         effectiveRuntime = ownedRuntime;
       }
-      if (ownedRuntime === 'gemini') {
+      if (unwrappedSessionKey.startsWith('cloud:')) {
+        effectiveRuntime = 'cloud';
+        effectiveModel = undefined;
+      } else if (ownedRuntime === 'gemini') {
         effectiveModel = 'gemini-3.1-pro-preview';
       } else if (ownedRuntime === 'opencode') {
         effectiveModel = 'opencode/deepseek-v4-flash-free';
@@ -378,7 +391,8 @@ export async function computeRestoredTabs(
       if (prefixedSessionKey) {
         seenRuntimeChats.add(`${prefixedSessionKey}:${savedTab.repoPath ?? ''}`);
       }
-      const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
+      const liveSessionKey = effectiveSessionKey.startsWith('cloud:') ? effectiveSessionKey
+        : prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
         ? stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey)
         : isOwnedOrchestratorSessionKey(effectiveSessionKey)
           ? effectiveSessionKey
@@ -441,6 +455,19 @@ export async function computeRestoredTabs(
     }
 
     const tabId = claimWorkspaceTabId('terminal', seenTabIds, savedTab.id);
+    // A missing known process is an ended session, never permission to run a
+    // different program under its label. Only tabs without a prior session may
+    // bootstrap a shell; the ended view offers an explicit New shell action.
+    const terminalExit = parseTerminalExitState(savedTab.terminalExit)
+      ?? (savedTab.tmuxSession && !savedTab.remoteMachine && !alive.has(savedTab.tmuxSession)
+        ? terminalExitState(null) : undefined);
+    if (terminalExit) {
+      restoredTabs.push({ id: tabId, label: savedTab.label, kind: 'terminal', tmuxSession: savedTab.tmuxSession ?? `ended:${tabId}`, terminalExit,
+        readOnly: savedTab.readOnly, remoteMachine: savedTab.remoteMachine, cliAgent: savedTab.cliAgent,
+        repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : undefined, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
     if (savedTab.tmuxSession && alive.has(savedTab.tmuxSession) && !seenTerminalSessions.has(savedTab.tmuxSession)) {
       seenTerminalSessions.add(savedTab.tmuxSession);
       restoredTabs.push({
@@ -490,7 +517,7 @@ export async function computeRestoredTabs(
   let finalTabs: TerminalTab[];
   let nextActiveId: string;
 
-  if (options.defaultTab === 'llm-chat') {
+  if (options.defaultTab !== 'terminal') {
     const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
     if (restoredChat) {
       nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
@@ -529,7 +556,7 @@ export async function computeRestoredTabs(
 
 export interface LoadInitialTabStateOptions {
   stateScope: string;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   splitCreated: boolean;
   preferredRepoPath: string | null;
 }
@@ -573,12 +600,16 @@ export function mergeUserSpawnedTabs(
 export function reconcileValidatedTabs(
   validatedTabs: TerminalTab[],
   currentTabs: TerminalTab[],
+  acknowledgedDuringRestore: ReadonlySet<string>,
 ): TerminalTab[] {
   const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
   return validatedTabs.map((validatedTab) => {
-    if (validatedTab.kind !== 'terminal' || validatedTab.tmuxSession !== null) return validatedTab;
+    if (validatedTab.kind !== 'terminal') return validatedTab;
+    const current = currentById.get(validatedTab.id);
+    if (current?.terminalExit) return { ...validatedTab, tmuxSession: current.tmuxSession, terminalExit: current.terminalExit };
     const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
-    return currentSession ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
+    return currentSession && acknowledgedDuringRestore.has(validatedTab.id)
+      ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
   });
 }
 
@@ -601,7 +632,6 @@ export function applyCreatedTerminalSession(
 export function resetControllerRefs(refs: {
   restoredRef: React.MutableRefObject<boolean>;
   restoreSettledRef: React.MutableRefObject<boolean>;
-  previousWsConnectedRef: React.MutableRefObject<boolean>;
   initialTerminalBootstrapRef: React.MutableRefObject<boolean>;
   reportedRepoScopeRef: React.MutableRefObject<string | null | undefined>;
   reportedChatSessionsSignatureRef: React.MutableRefObject<string>;
@@ -614,7 +644,6 @@ export function resetControllerRefs(refs: {
 }): void {
   refs.restoredRef.current = false;
   refs.restoreSettledRef.current = false;
-  refs.previousWsConnectedRef.current = false;
   refs.initialTerminalBootstrapRef.current = false;
   refs.reportedRepoScopeRef.current = undefined;
   refs.reportedChatSessionsSignatureRef.current = '';
@@ -663,7 +692,7 @@ export function canPreserveScopedTabs(
   // reconstruction (the badge "doesn't survive" per WorkspaceChatPane). Without
   // this, a scope oscillation cleared the tab and the transcript vanished into
   // the empty picker.
-  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
+  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat' || tab.kind === 'chatgpt-plan');
   if (hasChatSessionTabs) return true;
   // Same doctrine for the operator's OWN conversations (GQXEZD, 2026-07-16):
   // an orchestrator tab bound to a thread — or one the user JUST spawned
@@ -722,9 +751,21 @@ export async function loadInitialTabState(
     || savedRepoPaths.length === 0
     || savedRepoPaths.includes(options.preferredRepoPath);
 
+  const selectedTabId = saved?.activeTabId;
+  const selectedTab = saved?.tabs.find((tab) => tab.id === selectedTabId);
+  const selectedConversation = selectedTab?.kind === 'orchestrator'
+    ? Boolean(selectedTab.orchestratorThreadId || selectedTab.id.startsWith('thoughts-'))
+    : selectedTab?.kind === 'chat' && Boolean(selectedTab.chatSessionKey || selectedTab.claudeSessionId);
+  // The primary conversation follows sidebar selection independently of the
+  // global repo preference. Keep a newer, explicitly bound selection; other
+  // workspace scopes retain their repo-specific restore behavior.
+  const newerPrimaryConversation = options.stateScope === 'tile-root'
+    && selectedConversation && persistedTabStateSavedAt(saved) > 0
+    && persistedTabStateSavedAt(saved) >= persistedTabStateSavedAt(repoSaved);
+
   if (
     !options.splitCreated
-    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+    && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs && !newerPrimaryConversation))
     && currentStableRepoScope
   ) {
     saved = repoSaved;

@@ -96,7 +96,7 @@ export async function terminatePacketManagedRuns(
   return withPacketManagedRunLifecycleLock(packetId, async () => {
     const deps = { ...defaultDependencies, ...dependencies };
     const targets = (await deps.listRuns()).filter((run) => (
-      run.packetId === packetId && (run.status === 'running' || run.status === 'gone')
+      run.packetId === packetId && (run.status === 'running' || run.status === 'settling' || run.status === 'gone')
     ));
     const failures: PacketManagedRunStopFailure[] = [];
     let confirmed = 0;

@@ -42,7 +42,7 @@ export function TaskRow({
     : remote?.leaseState === 'active' ? `worker ${remote.workerId ?? 'unknown'}`
       : remote?.status ?? null;
   const detail = remote
-    ? [taskSignal(task), `Remote attempt ${remote.attempt} · ${remoteState}`, 'Editor and preview unavailable'].filter(Boolean).join(' · ')
+    ? [taskSignal(task), `Remote attempt ${remote.attempt} · ${remoteState}`, remote.previewAccess === 'requestable' ? 'Preview on request · editor unavailable' : 'Editor and preview unavailable'].filter(Boolean).join(' · ')
     : taskSignal(task) || task.summary;
   const stale = isStaleTask(task);
   const metaParts = [

@@ -312,10 +312,13 @@ export function createStoragePressureAdmissionCoordinator(
   const readReclaimed = overrides.readParkedReclaimedBytes ?? defaultReadParkedReclaimedBytes;
 
   return {
-    async reserveForLaunch(packet) {
+    ...(base.prepareCreationBase ? {
+      prepareCreationBase: base.prepareCreationBase.bind(base),
+    } : {}),
+    async reserveForLaunch(packet, _pressureRetryOrdinal, context) {
       let held: PacketStorageAdmissionError;
       try {
-        return await base.reserveForLaunch(packet, 0);
+        return await base.reserveForLaunch(packet, 0, context);
       } catch (error) {
         if (!pressureOnly(error)) throw error;
         held = error;
@@ -410,7 +413,7 @@ export function createStoragePressureAdmissionCoordinator(
         receipts.push(candidateReceipt(candidate, outcome, 'verified_park_receipt', reclaimed));
 
         try {
-          const lease = await base.reserveForLaunch(packet, candidate.ordinal);
+          const lease = await base.reserveForLaunch(packet, candidate.ordinal, context);
           lease.receipt = withPressure(
             lease.receipt,
             pressureReceipt(

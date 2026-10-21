@@ -1,3 +1,4 @@
+import type { ReviewPayer } from '@/lib/lane/review-payer';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged-shared';
 
 export const PACKET_RECEIPT_SCHEMA = 'o8/packet-receipt/v1' as const;
@@ -24,6 +25,12 @@ export interface PacketReceiptReview {
   backend: string;
   outcome: 'active' | 'completed' | 'failed' | 'quota_discarded';
   at: string;
+  /** The model the backend reported running the review on; null when it reported none (#3742). */
+  model?: string | null;
+  /** The reviewer surface: auto-review, merge-gate-review, packet-explainer or buyin-doc; null when unrecorded (#3742). */
+  surface?: string | null;
+  /** Who paid for the review turn (#3742). */
+  payer?: ReviewPayer;
 }
 
 export interface PacketReceiptApproval {

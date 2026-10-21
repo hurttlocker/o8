@@ -9,6 +9,7 @@ import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
 import { SymonMachineControl, SymonOrbStatusLine, useSymonOrbMinimized } from '../dictation/SymonMachineControl';
+import { SymonMark } from '../dictation/SymonVisuals';
 
 interface AccountBlockProps {
   onOpenSettings?: () => void;
@@ -74,15 +75,7 @@ function SymonVoiceEntry() {
           background: active ? 'var(--t-hover)' : 'transparent',
         }}
       >
-        <span
-          style={{
-            width: 17,
-            height: 17,
-            borderRadius: '50%',
-            background: 'radial-gradient(circle at 64% 28%, color-mix(in srgb, var(--t-text) 90%, transparent), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
-            boxShadow: active ? '0 0 0 2px var(--t-accent), 0 0 9px rgba(136, 209, 241, 0.45)' : '0 0 9px rgba(136, 209, 241, 0.45)',
-          }}
-        />
+        <SymonMark active={active} />
       </span>
     </button>
   );

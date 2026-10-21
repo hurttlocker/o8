@@ -56,6 +56,30 @@ const CONSOLE_ERROR_HOOK_JS: &str = r#"
   if (typeof window === 'undefined' || window.__o8ConsoleErrorHookInstalled) return;
   window.__o8ConsoleErrorHookInstalled = true;
 
+  // Captured text reaches native log files. Redact credential-shaped values
+  // before truncation so SDK errors, URLs and serialized objects cannot carry
+  // session tokens, tickets, device tokens or authorization headers there.
+  // Mirrors redactSecrets in src/lib/telemetry/scrub.ts; keep them identical.
+  var SECRET_PATTERNS = [
+    [/eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, '[redacted]'],
+    [/\b(Bearer|Basic)\s+[^\s"'\\,;]+/gi, '$1 [redacted]'],
+    [/\bo8d_[A-Za-z0-9_-]+/g, 'o8d_[redacted]'],
+    [/\b(sk|rk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_[redacted]'],
+    [/([?&#;]code=)[^&#\s"'\\]+/gi, '$1[redacted]'],
+    [/([A-Za-z0-9_-]*(?:token|ticket|jwt|session|secret|passw(?:or)?d|authorization|cookie|api[_-]?key|credential)[A-Za-z0-9_-]*)(\\*["']?\s*[:=]\s*\\*["']?)([^"'\\\s&#,;{}()[\]]+)/gi, '$1$2[redacted]']
+  ];
+  function percentDecode(text) {
+    return text.replace(/%([0-9A-Fa-f]{2})/g, function (_, hex) { return String.fromCharCode(parseInt(hex, 16)); });
+  }
+  function redact(text) {
+    try {
+      var out = text;
+      for (var pass = 0; pass < 3 && /%[0-9A-Fa-f]{2}/.test(out); pass++) out = percentDecode(out);
+      for (var i = 0; i < SECRET_PATTERNS.length; i++) out = out.replace(SECRET_PATTERNS[i][0], SECRET_PATTERNS[i][1]);
+      return out;
+    } catch (e) { return '[redacted]'; }
+  }
+
   function safeInvoke(message, source, lineno) {
     try {
       if (
@@ -66,8 +90,8 @@ const CONSOLE_ERROR_HOOK_JS: &str = r#"
         return;
       }
       var payload = {
-        message: String(message == null ? '' : message).slice(0, 4000),
-        source: String(source == null ? '' : source).slice(0, 1000),
+        message: redact(String(message == null ? '' : message)).slice(0, 4000),
+        source: redact(String(source == null ? '' : source)).slice(0, 1000),
         lineno: typeof lineno === 'number' && isFinite(lineno) ? Math.floor(lineno) : 0,
       };
       var p = window.__TAURI_INTERNALS__.invoke('record_console_error', payload);

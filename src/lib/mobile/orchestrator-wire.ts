@@ -87,7 +87,7 @@ export function buildMobileOrchestratorSend(
     ...routeFields(route),
     ...(route.projectId ? { projectId: route.projectId } : {}),
     message,
-    permissionMode: 'full',
+    surface: 'mobile',
     ...(clientMutationId ? { clientMutationId } : {}),
   };
 }

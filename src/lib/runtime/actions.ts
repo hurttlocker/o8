@@ -1,3 +1,4 @@
+import { AutomaticRecoveryRefusedError, withAutomaticRecoveryRequest, withOwnedAutomaticRecovery } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes, updateLane } from '@/lib/lane/registry';
@@ -33,10 +34,14 @@ import {
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import { confirmDiscoveredInterrupt } from '@/lib/runtime/confirmed-interrupt';
 import { settleRuntimeLaunchGovernance } from '@/lib/runtime/launch-governance';
+import { holdPendingOwnedCorrections } from '@/lib/runtimes/shared/owned-session/action-admission';
+import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
 export interface RuntimeActionRequest {
+  /** Restricts automated steering to this uninterrupted owned run. */
+  automaticRecoveryRunId?: string;
   action: RuntimeActionKind;
   surfaceId: string;
   clientMutationId?: string;
@@ -71,6 +76,11 @@ export interface RuntimeActionResult {
 }
 
 export interface RuntimeLaunchRequest {
+  controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
+  executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
+  automaticRecoverySurfaceId?: string;
+  automaticRecoveryRunId?: string;
   runtime: RuntimeId;
   prompt: string;
   model?: string;
@@ -154,6 +164,24 @@ function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): v
 }
 
 export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+  if (payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId) {
+    if (!payload.automaticRecoverySurfaceId?.startsWith(`${payload.runtime}-owned:`) || !payload.automaticRecoveryRunId) {
+      throw new Error('Automatic retry requires the original owned runtime and generation.');
+    }
+    try {
+      return await withOwnedAutomaticRecovery(payload.automaticRecoverySurfaceId, payload.automaticRecoveryRunId,
+        () => launchRuntimeSurfaceInner(payload));
+    } catch (error) {
+      if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
+      return { ok: false, runtime: payload.runtime, surfaceId: '', note: error.message,
+        clientMutationId: payload.clientMutationId, cwd: payload.cwd ?? '', repoPath: payload.repoPath ?? payload.cwd ?? '',
+        worktree: null, laneId: payload.existingLaneId ?? null };
+    }
+  }
+  return launchRuntimeSurfaceInner(payload);
+}
+
+async function launchRuntimeSurfaceInner(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
   const runtimeId = payload.runtime;
   const prompt = payload.prompt?.trim();
   const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
@@ -195,9 +223,14 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     };
   }
 
+  assertSingleAttemptLaunch(payload, workModeResolution.workMode);
+  if (payload.controlledTask && (payload.executionPolicy !== 'single-attempt' || payload.isolate !== false
+    || payload.skipSetup !== true || payload.automaticRecoverySurfaceId || payload.automaticRecoveryRunId)) {
+    throw new Error('Controlled task launch requires its pre-admitted isolated workspace and no recovery.');
+  }
   const { prompt: launchPrompt, projectContext } = await buildLaunchPromptWithProjectBrief(payload, prompt, repoPath);
   const remoteManagedWorktree = runtimeId === 'cloud';
-  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'deepseek-harness'].includes(runtimeId)
+  const supportsWorktrees = remoteManagedWorktree || ['codex', 'claude-code', 'gemini', 'opencode', 'pi', 'pi-builtin', 'hermes', 'deepseek-harness', 'muse'].includes(runtimeId)
     || listDeclarativeRuntimes().includes(runtimeId as OrchestratorRuntime);
   const packetNeedsWorktree = packetRequiresWorktree(payload);
 
@@ -403,6 +436,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     packetId: payload.packetId,
     spendCap: payload.spendCap,
     workMode: workModeResolution.workMode,
+    executionPolicy: payload.executionPolicy,
+    controlledTask: payload.controlledTask,
+    controlledProvider: payload.controlledProvider,
   });
 
   return settleRuntimeLaunchGovernance({
@@ -480,11 +516,29 @@ function actionUnavailable(
 }
 
 export async function performRuntimeAction(payload: RuntimeActionRequest): Promise<RuntimeActionResult> {
+  if (payload.automaticRecoveryRunId !== undefined) {
+    if ((payload.action !== 'steer' && payload.action !== 'send_input') || !payload.automaticRecoveryRunId.trim()) {
+      return actionUnavailable(payload, payload.surfaceId, '', 'Invalid automatic recovery action or generation.');
+    }
+    try {
+      return await withAutomaticRecoveryRequest(payload.surfaceId, payload.automaticRecoveryRunId,
+        () => performRuntimeActionInner(payload));
+    } catch (error) {
+      if (!(error instanceof AutomaticRecoveryRefusedError)) throw error;
+      return actionUnavailable(payload, payload.surfaceId, '', error.message);
+    }
+  }
+  return performRuntimeActionInner(payload);
+}
+
+async function performRuntimeActionInner(payload: RuntimeActionRequest): Promise<RuntimeActionResult> {
   const surfaceId = payload.surfaceId?.trim();
   // Fix #3: return structured error instead of throwing across the API boundary (CLAUDE.md rule)
   if (!surfaceId) {
     return actionUnavailable(payload, '', '', 'surfaceId is required');
   }
+
+  if (payload.action === 'stop' || payload.action === 'interrupt') holdPendingOwnedCorrections(surfaceId);
 
   // Try cached snapshot first to avoid expensive full re-discovery on every action.
   // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
@@ -576,9 +630,8 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         if (!message) {
           return unavailable(agent, payload.action, 'message is required to resume an owned Codex session', payload.clientMutationId);
         }
-        if (!runtimeSurface.capabilities.sendInput) {
-          return ownedCodexSurfaceNotReady(agent, payload.action, payload.clientMutationId);
-        }
+        // Inventory can lag a confirmed Stop. The owned store rechecks the
+        // durable run and process under its lock; cached capabilities are not admission.
         let result: Awaited<ReturnType<typeof continueOwnedCodexSession>>;
         try {
           result = await continueOwnedCodexSession(runtimeSurface.id, message);

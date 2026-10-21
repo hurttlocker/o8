@@ -96,6 +96,11 @@ function readArgvCalls(): string[][] {
     .map((line) => JSON.parse(line) as string[]);
 }
 
+async function launchFailureDetails() {
+  const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+  return JSON.stringify(currentMissionState().packets.map(({ id, status, blockedReason }) => ({ id, status, blockedReason })));
+}
+
 async function waitForArgvCalls(count: number): Promise<string[][]> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 5_000) {
@@ -103,7 +108,7 @@ async function waitForArgvCalls(count: number): Promise<string[][]> {
     if (calls.length >= count) return calls;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for ${count} Codex launches.`);
+  throw new Error(`Timed out waiting for ${count} Codex launches: ${await launchFailureDetails()}`);
 }
 
 async function createAndDispatchWorker(repoPath: string, id: string, requestedModel?: string) {
@@ -119,6 +124,9 @@ async function createAndDispatchWorker(repoPath: string, id: string, requestedMo
   const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
   expect(currentMissionState().missionId).toBe(created.missionId);
   await dispatchMission({ missionId: created.missionId });
+  if (!currentMissionState().packets[0]?.lane) {
+    await dispatchMission({ missionId: created.missionId });
+  }
   return currentMissionState();
 }
 
@@ -130,6 +138,7 @@ if (args.includes('--version')) {
   process.stdout.write('codex-cli 0.145.0\\n');
   process.exit(0);
 }
+if (args[0] !== 'exec') process.exit(0);
 appendFileSync(process.env.O8_TEST_CODEX_ARGS_FILE, JSON.stringify(args) + '\\n');
 const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex >= 0 && args[outputIndex + 1]) {
@@ -262,4 +271,21 @@ describe('worker model routing real path', () => {
       workerRouting: { selectedModel: 'gpt-5.6-terra', selectedEffort: 'high' },
     });
   }, 30_000);
+  it('honors a persisted adaptive reset when the scheduler launches a packet with saved high effort', async () => {
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ subscriptionProfile: 'both', defaultDispatchRuntime: 'codex', defaultDispatchModel: 'gpt-5.6-sol', codexWorkerEffort: 'high', parallelCap: 4 });
+    const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    const repoPath = makeRepo();
+    const created = await createMission({ issues: [{ number: 90005, title: 'adaptive packet', body: 'Inspect only', url: '' }], repoPath,
+      runtime: 'codex', requestedRuntime: 'codex', requestedModel: 'gpt-5.6-sol', constraints: '' });
+    // Delegate persists this reset; restart/scheduler must consume durable state.
+    await withLockedState(state => { state.packets[0]!.workerRouting!.requestedEffort = 'adaptive'; state.packets[0]!.workerRouting!.selectedEffort = null; });
+    await dispatchMission({ missionId: created.missionId });
+    const calls = await waitForArgvCalls(5);
+    expect(calls[4]?.some(arg => arg.startsWith('model_reasoning_effort='))).toBe(false);
+    const { currentMissionState } = await import('@/lib/orchestrator/operator-mission-service/shared');
+    expect(currentMissionState().packets[0]?.workerRouting).toMatchObject({ requestedEffort: 'adaptive', selectedEffort: null });
+  });
+
 });

@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 
 interface SessionRule {
+  constraint?: 'no_merge' | null;
   id: string;
   threadId: string;
   text: string;
@@ -415,7 +416,7 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
             </div>
           ) : sessionRules.map((rule) => (
             <div key={rule.id} style={ruleRowStyle}>
-              <TierBadge label="Session" />
+              <TierBadge label={rule.constraint === 'no_merge' ? 'Merge blocked' : 'Session'} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.35, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
                 {rule.text}
               </span>

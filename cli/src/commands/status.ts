@@ -9,6 +9,7 @@
 
 import { apiFetch } from '../api.js';
 import { resolveConfig } from '../config.js';
+import { runtimeConnectionRows, connectionDetail, connectionLabel } from '../../../src/lib/runtimes/shared/connection-evidence.js';
 import {
   color,
   printHumanHeading,
@@ -119,6 +120,9 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   ]);
 
   const activeLanes = activeRes.data?.lanes ?? [];
+  const connectionResponse = await Promise.resolve(apiFetch(cfg, '/api/panel/operator-defaults', { timeoutMs: 15_000 }))
+    .catch(() => null);
+  const runtimeConnections = runtimeConnectionRows(connectionResponse?.data);
   const allLanes = allRes.data?.lanes ?? [];
   const approvals = approvalsRes.data?.approvals ?? [];
   const storageHolds = (missionRes.data?.result?.packets ?? [])
@@ -166,6 +170,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
   const LANE_CAP = 50;
   const payload = {
     schema: 'o8/cli/status/v1',
+    runtimeConnections,
     counts: {
       runningPackets: running.length,
       awaitingReview: awaitingReview.length,
@@ -198,6 +203,13 @@ export async function runStatus(mode: OutputMode): Promise<number> {
 
   if (mode.human) {
     printHumanHeading(`o8 status (${cfg.apiBase})`);
+    printHumanHeading('runtime connections');
+    for (const runtime of runtimeConnections.runtimes) {
+      const evidence = runtime.connection;
+      process.stdout.write(`  ${runtime.label}: ${evidence ? connectionLabel(evidence) : 'Connection unknown'}\n`);
+      if (evidence) process.stdout.write(`    ${connectionDetail(evidence)} Checked ${evidence.checkedAt ? new Date(evidence.checkedAt).toISOString() : 'time not reported'}. Account identity not reported; external tools not inspected.\n`);
+    }
+    if (runtimeConnections.status === 'unavailable') process.stdout.write('  Connection evidence unavailable.\n');
     process.stdout.write(
         `  running ${color(String(running.length), 'green')}` +
         `   review ${color(String(awaitingReview.length), 'yellow')}` +

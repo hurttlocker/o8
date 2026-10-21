@@ -72,9 +72,10 @@ async function broadcastReloadNotice(body: {
   } catch (error) {
     // Best-effort — the next orchestrator turn will pick up the new MCP
     // config regardless, so this isn't a hard failure.
+    console.error('[orchestrator-reload] Notice broadcast failed:', error);
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'ws-server unreachable',
+      error: 'Unable to broadcast reload notice.',
     };
   }
 }

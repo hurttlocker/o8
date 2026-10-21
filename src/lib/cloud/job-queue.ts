@@ -65,8 +65,9 @@ export function claimNextJob(
   cursor: number,
   workerId: string,
   leaseMs: number = cloudJobLeaseMs(),
+  workerKeyId?: string,
 ): CloudJob | null {
-  return store.claimNext({ teamId, cursor, workerId, bootId: CLOUD_JOB_BOOT_ID, leaseMs });
+  return store.claimNext({ teamId, cursor, workerId, bootId: CLOUD_JOB_BOOT_ID, leaseMs, workerKeyId });
 }
 
 /**
@@ -81,6 +82,7 @@ export function waitForJob(
   timeoutMs: number,
   leaseMs: number = cloudJobLeaseMs(),
   canClaim?: () => boolean,
+  workerKeyId?: string,
 ): { promise: Promise<CloudJob | null>; cancel: () => void } {
   let settled = false;
   let finish: (job: CloudJob | null) => void = () => {};
@@ -109,7 +111,7 @@ export function waitForJob(
     if (settled) return;
     try {
       if (canClaim && !canClaim()) { settle(null); return; }
-      const job = claimNextJob(teamId, cursor, workerId, leaseMs);
+      const job = claimNextJob(teamId, cursor, workerId, leaseMs, workerKeyId);
       if (job) settle(job);
     } catch (error) {
       console.error('[cloud-job-queue] durable poll failed:', error);

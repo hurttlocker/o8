@@ -18,10 +18,11 @@
 import { useRef, useState } from 'react';
 import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
 import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
+import { FloatingSurface } from '../FloatingSurface';
 import { visibleRuntimeInventory } from '@/lib/setup/runtime-recommendation';
 
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
-import { composerRuntimeLabel } from './composer-selector/state';
+import { composerRuntimeLabel, VISIBLE_COMPOSER_SELECTOR_MODES } from './composer-selector/state';
 import { AcpModelPicker } from './AcpModelPicker';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import {
@@ -36,7 +37,7 @@ import {
   type ComposerWorkerDefaults,
 } from './composer-selector/worker-settings';
 
-type FleetPickerView = 'runtimes' | 'opencode-model' | 'threecode-model';
+type FleetPickerView = 'runtimes' | 'opencode-model' | 'threecode-model' | 'muse-model';
 
 export type DispatchDefaults = ComposerWorkerDefaults;
 export const FALLBACK_DISPATCH_DEFAULTS = FALLBACK_COMPOSER_WORKER_DEFAULTS;
@@ -121,27 +122,25 @@ export function ComposerModeChip({
       </button>
 
       <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="end">
-        <div
+        <FloatingSurface role="menu" aria-label="Work mode"
           style={{
             width: 240,
             maxWidth: 'min(240px, calc(100vw - 32px))',
-            borderRadius: 14,
-            border: '1px solid var(--t-panel-border)',
-            background: 'var(--t-popover-surface)',
-            boxShadow: 'var(--t-panel-shadow)',
-            overflow: 'hidden',
+          }} contentStyle={{
             paddingTop: 6,
             paddingRight: 5,
             paddingBottom: 5,
             paddingLeft: 5,
           }}
         >
-          {COMPOSER_MODES.map((spec) => {
+          {VISIBLE_COMPOSER_SELECTOR_MODES.map(id => COMPOSER_MODES.find(spec => spec.id === id)!).map((spec) => {
             const active = spec.id === mode;
             return (
               <button
                 key={spec.id}
                 type="button"
+                role="menuitemradio"
+                aria-checked={active}
                 onClick={() => { onModeChange(spec.id); setOpen(false); }}
                 onMouseEnter={(event) => { setHoveredMode(spec.id); event.currentTarget.style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(event) => { setHoveredMode(null); event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
@@ -189,7 +188,7 @@ export function ComposerModeChip({
           }}>
             {captionSpec.sublabel}
           </div>
-        </div>
+        </FloatingSurface>
       </ComposerPopover>
     </>
   );
@@ -226,11 +225,13 @@ export function FleetWorkerChip({
     onRuntimeChange?.(runtime);
     if (runtime === 'opencode') setView('opencode-model');
     else if (runtime === '3code') setView('threecode-model');
+    else if (runtime === 'muse') setView('muse-model');
     else setOpen(false);
   };
   const selectWorkerModel = (modelId: string | null) => {
     if (workerModelLocked) return;
     if (view === 'threecode-model') onWorkerModelChange?.(modelId, '3code');
+    else if (view === 'muse-model') onWorkerModelChange?.(modelId, 'muse');
     else onWorkerModelChange?.(modelId);
     setOpen(false);
   };
@@ -470,9 +471,9 @@ export function FleetWorkerChip({
                   <BackGlyph />
                 </button>
                 <div style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans-system)', fontSize: 11.5, color: 'var(--t-text)' }}>
-                  {view === 'threecode-model' ? '3code worker model' : 'OpenCode worker model'}
+                  {view === 'threecode-model' ? '3code worker model' : view === 'muse-model' ? 'Muse worker model' : 'OpenCode worker model'}
                 </div>
-                {(view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel) ? (
+                {(view === 'threecode-model' ? defaults.threecodeWorkerModel : view === 'muse-model' ? defaults.defaultDispatchModel : defaults.opencodeWorkerModel) ? (
                   <button
                     type="button"
                     disabled={workerModelLocked || saving}
@@ -500,9 +501,9 @@ export function FleetWorkerChip({
                 </div>
               ) : (
                 <AcpModelPicker
-                  backend={view === 'threecode-model' ? '3code' : 'opencode'}
+                  backend={view === 'threecode-model' ? '3code' : view === 'muse-model' ? 'muse' : 'opencode'}
                   catalogueUrl={view === 'threecode-model' ? '/api/runtime/threecode-models' : undefined}
-                  value={view === 'threecode-model' ? defaults.threecodeWorkerModel : defaults.opencodeWorkerModel}
+                  value={view === 'threecode-model' ? defaults.threecodeWorkerModel : view === 'muse-model' ? defaults.defaultDispatchModel : defaults.opencodeWorkerModel}
                   width={258}
                   onSelect={(modelId) => { void selectWorkerModel(modelId); }}
                 />

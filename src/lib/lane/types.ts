@@ -290,6 +290,11 @@ export type LaneEventVerb =
   | 'explainer_failed'
   | 'runtime_drift'
   | 'execution_carrier_preflight'
+  // A packet-scoped worker attempted an input mutation against an o8-owned
+  // terminal. Persisted before the PTY write so no agent terminal mutation can
+  // occur without a durable trace. Payload: { packetId, sessionId, byteCount,
+  // reason, principal: 'worker', result: 'attempted' }.
+  | 'terminal_action'
   | 'capacity_snapshot'
   | 'pr_merged_reconciled'
   | 'merged_by_ancestry_reconciled'

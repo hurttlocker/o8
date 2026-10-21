@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ComponentProps, type ReactNode } from 'react';
+import { act, createElement, type ComponentProps, type ReactNode, type HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HoverPipCard } from './HoverPipCard';
@@ -10,6 +10,8 @@ vi.mock('framer-motion', () => ({
   motion: { div: 'div' },
   useReducedMotion: () => false,
 }));
+vi.mock('@lisse/react', () => ({ SmoothCorners: ({ children, style }: HTMLAttributes<HTMLDivElement>) => createElement('div', { style }, children) }));
+vi.mock('@/lib/theme/context', () => ({ useTheme: () => ({ workspaceGlass: true, surface: 'glass', paletteId: 'dark' }) }));
 
 const ACT_ENV = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 ACT_ENV.IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,10 +20,12 @@ function Preview({
   eventName,
   title,
   onOpen,
+  contextKey,
 }: {
   eventName: string;
   title: string;
   onOpen?: () => void;
+  contextKey?: string;
 }) {
   const props: ComponentProps<typeof HoverPipCard> = {
     active: true,
@@ -30,6 +34,7 @@ function Preview({
     storageKey: `${eventName}:orientation`,
     title,
     onOpen,
+    contextKey,
     children: () => createElement('div', null, `${title} body`),
   };
   return createElement(HoverPipCard, props);
@@ -91,5 +96,45 @@ describe('HoverPipCard', () => {
     act(() => open?.click());
     expect(onOpen).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain('Openable body');
+  });
+
+  it('closes an old workspace preview on focus change and preserves its position', async () => {
+    localStorage.setItem('test:context:orientation:position', JSON.stringify({ x: 100, y: 80 }));
+    const render = (contextKey: string) => act(async () => root.render(createElement(Preview, { eventName: 'test:context', title: 'Notes', contextKey })));
+    await render('workspace-a');
+    act(() => window.dispatchEvent(new CustomEvent('test:context', { detail: { toggle: true } })));
+    const card = container.querySelector<HTMLElement>('[data-hover-pip]')!;
+    expect(card.style.left).toBe('100px');
+    expect(card.querySelector('[style*="var(--t-glass-elevated)"]')).not.toBeNull();
+    expect(card.querySelector('[style*="var(--t-popover-surface)"]')).toBeNull();
+    await render('workspace-b');
+    expect(container.textContent).not.toContain('Notes body');
+    act(() => window.dispatchEvent(new CustomEvent('test:context', { detail: { toggle: true } })));
+    expect(container.textContent).toContain('Notes body');
+    expect(container.querySelector<HTMLElement>('[data-hover-pip]')?.style.left).toBe('100px');
+  });
+
+  it('drags the complete glass card and persists the position from its header', () => {
+    act(() => root.render(createElement(Preview, { eventName: 'test:drag', title: 'Draggable' })));
+    act(() => window.dispatchEvent(new CustomEvent('test:drag', { detail: { toggle: true } })));
+    const card = container.querySelector<HTMLElement>('[data-hover-pip]')!;
+    vi.spyOn(card, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 80, width: 440, height: 294 } as DOMRect);
+    const header = card.querySelector<HTMLElement>('[style*="cursor: grab"]')!;
+    header.setPointerCapture = vi.fn();
+    header.hasPointerCapture = () => true;
+    header.releasePointerCapture = vi.fn();
+    const pointer = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { button: { value: 0 }, pointerId: { value: 1 }, clientX: { value: x }, clientY: { value: y } });
+      act(() => header.dispatchEvent(event));
+    };
+    pointer('pointerdown', 110, 90);
+    pointer('pointermove', 190, 140);
+    pointer('pointerup', 190, 140);
+    expect(card.style.left).toBe('180px');
+    expect(card.style.top).toBe('130px');
+    expect(header.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(header.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(JSON.parse(localStorage.getItem('test:drag:orientation:position')!)).toEqual({ x: 180, y: 130 });
   });
 });

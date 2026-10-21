@@ -4,13 +4,14 @@ import type { SettingsTab } from './shared';
 // Once a tab is active, the menu reads its rendered section markers instead.
 const SECTIONS: Partial<Record<SettingsTab, string[]>> = {
   general: ['Plan', 'Presentation', 'Privacy'],
+  account: ['Profile'],
   appearance: ['Theme'],
   'api-keys': ['Provider keys', 'Symon & voice keys', 'Key storage'],
   'local-models': ['Local models'],
   voice: ['Voice shortcuts', 'Symon', 'Permissions', 'Dictation', 'Transcription', 'Voice brain', 'Proactive attention'],
   permissions: ['macOS permissions'],
   'operator-defaults': ['Fleet', 'Supervision', 'Change reports', 'Task spending limits', 'Related settings', 'Advanced', 'Task limits & setup'],
-  models: ['Orchestrator', 'Workers', 'Engineering Brain', 'Connected tools', 'Claude Code settings', 'Claude Code connection', 'Claude fallback model', 'Advanced orchestrator options', 'Advanced worker setup', 'Thinking & task models', 'Brain advanced', 'Routing details', 'Runtime routing', 'More setup'],
+  models: ['Codex connection', 'Claude Code connection', 'ChatGPT plan', 'Provider keys', 'Local models', 'Local ACP', 'Symon & voice keys', 'Model defaults'],
   worktrees: ['Storage usage', 'Automatic cleanup', 'Advanced', 'Workspace parking', 'Minimum free space', 'Storage categories'],
   projects: ['Overview', 'Active project context'],
   'git-prs': ['GitHub', 'Branches', 'Commits', 'Pull requests'],
@@ -31,5 +32,5 @@ export function settingsSectionPreview(tab: SettingsTab, desktop: boolean): stri
 
 export function renderedSettingsSections(root: ParentNode): string[] {
   return [...new Set(Array.from(root.querySelectorAll<HTMLElement>('[data-settings-section]'))
-    .map((element) => element.dataset.settingsSection).filter((label): label is string => Boolean(label)))];
+    .filter(element => !element.closest('[hidden]')).map((element) => element.dataset.settingsSection).filter((label): label is string => Boolean(label)))];
 }

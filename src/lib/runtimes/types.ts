@@ -270,6 +270,9 @@ export interface RuntimeSessionTransformProviderResult {
  */
 export interface LaunchOptions {
   cwd: string;
+  controlledTask?: import('@/lib/mcp/task-execution-store').ControlledTaskBinding;
+  executionPolicy?: 'single-attempt';
+  controlledProvider?: import('@/lib/runtimes/shared/owned-session/controlled-provider').ControlledOpenRouterPolicy;
   prompt: string;
   /** Coordinator-side registered repository root; never sent to an external worker. */
   sourceRepoPath?: string;
@@ -280,6 +283,10 @@ export interface LaunchOptions {
   remoteSource?: { repoUrl: string; baseSha: string; branch: string };
   /** SHA-256 of operator-authorized manifest bytes at the dispatched base revision. */
   remoteManifestHash?: string;
+  /** Resolved exclusively from the reviewed immutable workspace manifest. */
+  remotePreview?: import('@/lib/cloud/preview-contract').RemotePreviewService;
+  /** Coordinator-created service-only child; never supplied by a worker. */
+  remoteServiceSession?: import('@/lib/cloud/review-service-contract').RemoteServiceSession;
   /** Operator-facing task name for an owned worker surface. */
   taskName?: string;
   /** Stable caller correlation persisted before an owned process is spawned. */
@@ -400,7 +407,7 @@ export interface AgentRuntime {
   getTelemetry?(sessionKey: string): Promise<RuntimeTelemetry | undefined>;
 
   /** Read one normalized, credential-free capacity snapshot. */
-  getCapacity?(identityId?: string | null): Promise<RuntimeCapacitySnapshot> | RuntimeCapacitySnapshot;
+  getCapacity?(identityId?: string | null, options?: { fresh?: boolean }): Promise<RuntimeCapacitySnapshot> | RuntimeCapacitySnapshot;
 
   /** Read only the opaque launch identity ID for a session. */
   getSessionIdentityId?(sessionKey: string): Promise<string | null> | string | null;

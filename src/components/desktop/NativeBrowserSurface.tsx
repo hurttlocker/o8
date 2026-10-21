@@ -189,7 +189,21 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     // instead of keeping the last state (reviewer hardening, 2026-07-16).
     // Geometry returning >4px un-occludes through the normal probe below.
     if (r.width < 4 || r.height < 4) { setOccluded(true); return; }
+    const permitsPainting = (node: Element): boolean => {
+      let opacity = 1;
+      for (let n: Element | null = node; n; n = n.parentElement) {
+        const style = getComputedStyle(n);
+        if (style.display === 'none') return false;
+        opacity *= Number(style.opacity || 1);
+        if (opacity <= 0.02) return false;
+      }
+      return true;
+    };
     const paintsVisibly = (hit: Element): boolean => {
+      // A cached portal can retain its blur/background while its ancestor is
+      // transparent. Those styles cannot paint through zero effective opacity.
+      // Inert/aria-hidden alone do not suppress paint, so visible covers still win.
+      if (!permitsPainting(hit) || getComputedStyle(hit).visibility !== 'visible') return false;
       let n: Element | null = hit;
       for (let i = 0; i < 6 && n && n !== document.body; i++) {
         if (n === el || el.contains(n)) return false; // reached the placeholder — not an occluder
@@ -227,6 +241,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     const paintedRectIntersects = (root: Element): boolean => {
       if (root === el || el.contains(root) || root.contains(el)) return false;
       if (root.getAttribute('data-design-mode-overlay') === 'true') return false;
+      if (!permitsPainting(root)) return false;
       const queue: Element[] = [root];
       let budget = 40;
       while (queue.length && budget-- > 0) {
@@ -357,6 +372,11 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     if (!el) return;
     const ro = new ResizeObserver(() => syncRect());
     ro.observe(el);
+    // A floating preview moves without resizing. Follow its position/motion
+    // so the native page stays inside the dragged shell on every frame.
+    const pip = el.closest('[data-hover-pip]');
+    const pipPositionObserver = pip ? new MutationObserver(() => syncRect()) : null;
+    if (pip) pipPositionObserver?.observe(pip, { attributes: true, attributeFilter: ['style'] });
     // A window resize is also where page-zoom changes surface — remeasure the
     // zoom before repositioning. Scroll and panel-divider drags (ResizeObserver)
     // don't change zoom, so they skip it.
@@ -371,6 +391,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     return () => {
       ro.disconnect();
+      pipPositionObserver?.disconnect();
       htmlObserver.disconnect();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);

@@ -9,6 +9,7 @@ import { handleRecallSlashCommand } from './recall';
 import { handleRuleSlashCommand, handleRulesSlashCommand } from './rules';
 import { parseOrchestratorSlashCommand } from './shared';
 import { handleStatusSlashCommand } from './status';
+import { handleVisualizationSlashCommand } from './visualization';
 import type { ParsedOrchestratorSlashCommand, SlashCommandContext, SlashCommandExecutionResult } from './types';
 
 export type {
@@ -44,6 +45,7 @@ const HANDLERS: Record<ParsedOrchestratorSlashCommand['command']['name'], (
   rule: handleRuleSlashCommand,
   rules: handleRulesSlashCommand,
   status: handleStatusSlashCommand,
+  visualization: handleVisualizationSlashCommand,
 };
 
 export async function executeOrchestratorSlashCommand(

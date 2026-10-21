@@ -1,3 +1,4 @@
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
@@ -6,6 +7,7 @@ import { resolveGovernedMergeHistoryPlan } from '@/lib/lane/governed-merge-histo
 import { getLane, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { fetchWorkerRun } from '@/lib/worker/runs';
+import { SessionMergeRestrictionError, withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
@@ -57,35 +59,29 @@ export async function performRemoteCustomerMerge(
       : undefined;
     if (attributedCommitMessage) {
       try {
-        await execFileAsync('git', ['add', '-A'], { windowsHide: true, cwd: fetched.tempWorktreePath });
-        const { stdout: porcelain } = await execFileAsync(
-          'git', ['status', '--porcelain'],
-          { windowsHide: true, cwd: fetched.tempWorktreePath, timeout: 5000 },
-        );
+        await laneGit(fetched.tempWorktreePath, lane.repoPath, ['add', '-A']);
+        const { stdout: porcelain } = await laneGit(fetched.tempWorktreePath, lane.repoPath, ['status', '--porcelain'], { timeout: 5000 });
         if (porcelain.trim()) {
-          await execFileAsync('git', ['commit', '-m', attributedCommitMessage], {
-            windowsHide: true,
-            cwd: fetched.tempWorktreePath,
-          });
+          await laneGit(fetched.tempWorktreePath, lane.repoPath, ['commit', '-m', attributedCommitMessage]);
         }
-      } catch { /* nothing to commit */ }
+      } catch (error) {
+        if (error instanceof LaneGitMetadataError) throw error;
+        /* nothing to commit */
+      }
     }
 
-    const actualBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      windowsHide: true,
-      cwd: fetched.tempWorktreePath,
-      maxBuffer: 1024 * 1024,
-    })).stdout.trim();
+    const actualBranch = (await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'], { maxBuffer: 1024 * 1024 })).stdout.trim();
     console.log(`[remote-merge] Actual worktree branch: ${actualBranch} (base ref: ${fetched.baseRef})`);
 
     let rebaseFailed = false;
     let typecheckSkipped: string | null = null;
     try {
-      await execFileAsync('git', ['rebase', lane.baseBranch], { windowsHide: true, cwd: fetched.tempWorktreePath });
+      await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rebase', lane.baseBranch]);
       console.log(`[remote-merge] Rebased ${actualBranch} onto ${lane.baseBranch}`);
-    } catch {
+    } catch (error) {
+      if (error instanceof LaneGitMetadataError) throw error;
       try {
-        await execFileAsync('git', ['rebase', '--abort'], { windowsHide: true, cwd: fetched.tempWorktreePath });
+        await laneGit(fetched.tempWorktreePath, lane.repoPath, ['rebase', '--abort']);
       } catch {
         // already clean
       }
@@ -124,6 +120,7 @@ export async function performRemoteCustomerMerge(
 
     const historyPlan = await resolveGovernedMergeHistoryPlan({
       cwd: fetched.tempWorktreePath,
+      runGit: (cwd, args, options) => laneGit(cwd, lane.repoPath, args, options),
       baseRef: lane.baseBranch,
       candidateRef: actualBranch,
       commitMessage: command.commitMessage,
@@ -148,14 +145,17 @@ export async function performRemoteCustomerMerge(
         mergeArgs.push('-X', command.strategy);
       }
       mergeArgs.push(actualBranch);
-      await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
-      if (historyPlan.kind === 'squash') {
-        await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], {
-          windowsHide: true,
-          cwd: lane.repoPath,
-        });
-      }
+      await withSessionMergePublication(lane.packetId, async () => {
+        await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
+        if (historyPlan.kind === 'squash') {
+          await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], { windowsHide: true, cwd: lane.repoPath });
+        }
+      });
     } catch (mergeErr) {
+      if (mergeErr instanceof SessionMergeRestrictionError) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'session_merge_restricted');
+        return { ok: false, laneId: lane.id, note: mergeErr.message };
+      }
       let conflictFiles: string[] = [];
       try {
         const { stdout: unmerged } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
@@ -203,11 +203,11 @@ export async function performRemoteCustomerMerge(
     let pushedToOrigin = false;
     let pushError: string | undefined;
     try {
-      await execFileAsync('git', ['push', 'origin', lane.baseBranch], {
+      await withSessionMergePublication(lane.packetId, () => execFileAsync('git', ['push', 'origin', lane.baseBranch], {
         windowsHide: true,
         cwd: lane.repoPath,
         timeout: 60_000,
-      });
+      }));
       pushedToOrigin = true;
       console.log(`[remote-merge] Pushed ${lane.baseBranch} to origin after merging ${actualBranch}`);
     } catch (pushErr) {
@@ -253,7 +253,7 @@ export async function performRemoteCustomerMerge(
     const skipNote = typecheckSkipped ? ` Typecheck did not run: ${typecheckSkipped}` : '';
     const mergeNote = pushedToOrigin
       ? `Merged ${lane.branch} into ${lane.baseBranch} and pushed to origin.${skipNote}${decompositionNote}`
-      : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${skipNote}${decompositionNote}`;
+      : `Merged ${lane.branch} into ${lane.baseBranch} LOCALLY, push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${skipNote}${decompositionNote}`;
     return {
       ok: true,
       laneId: command.laneId,

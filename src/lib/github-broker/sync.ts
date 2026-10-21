@@ -22,7 +22,7 @@ import {
   type GitHubThreadSyncState,
   type GitHubThreadAttentionSnapshot,
 } from './store';
-import { githubInstallationFetch } from './auth';
+import { githubInstallationFetch as installationFetch } from './auth';
 import { hasGitHubBrokerAccess } from './auth';
 import {
   isGitHubBotLogin,
@@ -37,7 +37,9 @@ import {
 import { resolveVerifiedClosedOutsideHumanWaitingThread } from '@/lib/supervisor/outsider-inbox-builder';
 
 const GITHUB_SNAPSHOT_TTL_MS = 120_000; // 2 min — balance freshness with rate limit budget
+const githubInstallationFetch: typeof installationFetch = (repo, endpoint, init) => installationFetch(repo, endpoint, init, { priority: 'background' });
 
+const MAX_PULL_REQUEST_PAGES = 5;
 const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
 const MAX_ATTENTION_COMMENT_PAGES = 5;
 const MAX_RECENTLY_CLOSED_PAGES = 5;
@@ -46,7 +48,7 @@ function resourcePath(repoFullName: string, resource: GitHubSyncResource, page =
   if (resource === 'issues') {
     return `/repos/${repoFullName}/issues?state=open&per_page=100&sort=updated&direction=desc&page=${page}`;
   }
-  return `/repos/${repoFullName}/pulls?state=open&per_page=20&sort=updated&direction=desc`;
+  return `/repos/${repoFullName}/pulls?state=open&per_page=100&sort=updated&direction=desc&page=${page}`;
 }
 
 function recentlyClosedPath(
@@ -516,14 +518,40 @@ async function syncPullRequests(repoFullName: string) {
     permissions: installation.permissions ?? null,
   });
 
-  let openPairs: Array<{ item: GitHubPullRequestPayload; detail: GitHubPullRequestPayload }> | null = null;
+  let openPulls: GitHubPullRequestSnapshot[] | null = null;
+  const openPairs: Array<{ item: GitHubPullRequestPayload; detail: GitHubPullRequestPayload }> = [];
   if (response.status !== 304) {
-    const bodyText = await response.text();
-    if (!response.ok) throw buildGitHubError(response, bodyText);
-    const listPayload = JSON.parse(bodyText) as GitHubPullRequestPayload[];
-    openPairs = [];
-    for (const item of listPayload) {
-      openPairs.push({ item, detail: await fetchPullRequestDetail(repoFullName, item) });
+    // Finish the bounded listing before detail calls or replacing any stored PRs.
+    // A partial listing must never close rows that merely fell on a later page.
+    const items = new Map<number, GitHubPullRequestPayload>();
+    for (let page = 1; page <= MAX_PULL_REQUEST_PAGES; page += 1) {
+      const pageResponse = page === 1 ? response : (await githubInstallationFetch(
+        repoFullName, resourcePath(repoFullName, 'pull_requests', page),
+      )).response;
+      const bodyText = await pageResponse.text();
+      if (!pageResponse.ok) throw buildGitHubError(pageResponse, bodyText);
+      const pageItems = JSON.parse(bodyText) as GitHubPullRequestPayload[];
+      if (!Array.isArray(pageItems)) throw new Error('GitHub returned an invalid pull request listing.');
+      // Updated-desc pages can overlap while GitHub changes; keep the first copy.
+      for (const item of pageItems) if (!items.has(item.number)) items.set(item.number, item);
+      const hasNext = /;\s*rel="next"/.test(pageResponse.headers.get('link') ?? '');
+      if (page === MAX_PULL_REQUEST_PAGES && hasNext) {
+        throw new Error('GitHub pull request sync exceeded the 500-PR (5-page) limit; previous snapshot retained.');
+      }
+      if (pageItems.length < 100 && !hasNext) break;
+    }
+    openPulls = [];
+    for (const item of items.values()) {
+      const stored = getGitHubPullRequestByNumber(repoFullName, item.number);
+      // Retry unassessed attention using the detail's authoritative comment count.
+      if (item.updated_at && stored?.state === 'open' && stored.updatedAt === item.updated_at
+        && previousState.get(item.number)?.attentionAssessed) {
+        openPulls.push(stored);
+        continue;
+      }
+      const detail = await fetchPullRequestDetail(repoFullName, item);
+      openPairs.push({ item, detail });
+      openPulls.push(mapPullRequestSnapshot(repoFullName, item, detail));
     }
   }
 
@@ -544,7 +572,7 @@ async function syncPullRequests(repoFullName: string) {
     }
   }
 
-  const changedPairs = [...(openPairs ?? []), ...closedPairs];
+  const changedPairs = [...openPairs, ...closedPairs];
   const attention = await fetchMovedThreadAttention(
     changedPairs.map(({ detail }) => attentionSource(
       repoFullName,
@@ -556,11 +584,8 @@ async function syncPullRequests(repoFullName: string) {
   );
   const closedPulls = closedPairs.map(({ item, detail }) => mapPullRequestSnapshot(repoFullName, item, detail));
 
-  if (openPairs) {
-    replaceGitHubPullRequests(repoFullName, [
-      ...openPairs.map(({ item, detail }) => mapPullRequestSnapshot(repoFullName, item, detail)),
-      ...closedPulls,
-    ]);
+  if (openPulls) {
+    replaceGitHubPullRequests(repoFullName, [...openPulls, ...closedPulls]);
   } else {
     for (const pull of closedPulls) upsertGitHubPullRequest(pull);
   }
@@ -675,7 +700,7 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
   }
 
   if (current.length > 0 && isFresh(syncState?.lastSuccessfulAt)) {
-    return { prs: current, error: syncState?.lastError ?? null, stale: false };
+    return { prs: current, error: syncState?.lastError ?? null, stale: Boolean(syncState?.lastError) };
   }
 
   try {
@@ -689,7 +714,7 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
   return {
     prs: refreshed,
     error: nextState?.lastError ?? null,
-    stale: !isFresh(nextState?.lastSuccessfulAt),
+    stale: Boolean(nextState?.lastError) || !isFresh(nextState?.lastSuccessfulAt),
   };
 }
 
@@ -708,8 +733,9 @@ export async function ensureGitHubPullRequest(repoFullName: string, prNumber: nu
     const pr = await syncPullRequest(repoFullName, prNumber);
     return { pr, error: null, stale: false };
   } catch (error) {
+    // A single-PR failure is returned to its caller; it must not mark the
+    // complete open-PR listing stale or errored.
     const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request';
-    markGitHubSyncError(repoFullName, 'pull_requests', message);
     return { pr: current, error: message, stale: true };
   }
 }
@@ -729,8 +755,9 @@ export async function ensureGitHubPullRequestByHead(repoFullName: string, headRe
     const pr = await syncPullRequestByHead(repoFullName, headRefName);
     return { pr: pr ?? current, error: null, stale: false };
   } catch (error) {
+    // A single-PR failure is returned to its caller; it must not mark the
+    // complete open-PR listing stale or errored.
     const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request by head branch';
-    markGitHubSyncError(repoFullName, 'pull_requests', message);
     return { pr: current, error: message, stale: true };
   }
 }

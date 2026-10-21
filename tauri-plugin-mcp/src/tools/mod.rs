@@ -10,6 +10,7 @@ pub mod app_info;
 pub mod cookies;
 #[cfg(feature = "devtools")]
 pub mod devtools;
+pub mod directory_dialog;
 pub mod events;
 pub mod execute_js;
 pub mod list_windows;
@@ -64,6 +65,8 @@ pub async fn handle_command<R: Runtime>(
     );
 
     let result = match command {
+        commands::INSPECT_DIRECTORY_DIALOG => directory_dialog::handle(app, command, payload).await,
+        commands::RESOLVE_DIRECTORY_DIALOG => directory_dialog::handle(app, command, payload).await,
         commands::PING => handle_ping(app, payload),
         commands::TAKE_SCREENSHOT => handle_take_screenshot(app, payload).await,
         commands::GET_DOM => handle_get_dom(app, payload).await,
@@ -152,6 +155,8 @@ mod tests {
     #[test]
     fn test_command_constants_are_unique() {
         let all_commands = [
+            commands::INSPECT_DIRECTORY_DIALOG,
+            commands::RESOLVE_DIRECTORY_DIALOG,
             commands::PING,
             commands::TAKE_SCREENSHOT,
             commands::GET_DOM,
@@ -184,6 +189,189 @@ mod tests {
         for cmd in &all_commands {
             assert!(seen.insert(*cmd), "Duplicate command constant: {}", cmd);
         }
-        assert_eq!(seen.len(), 26, "Expected 26 unique commands");
+        assert_eq!(seen.len(), 28, "Expected 28 unique commands");
+    }
+
+    #[tokio::test]
+    async fn directory_commands_use_the_shared_dispatcher() {
+        let _serial = super::directory_dialog::fixture::SERIAL.lock().await;
+        let app = tauri::test::mock_app();
+        for (command, payload, code) in [
+            (
+                commands::INSPECT_DIRECTORY_DIALOG,
+                serde_json::json!({"operation":"select"}),
+                "invalid_schema",
+            ),
+            (
+                commands::INSPECT_DIRECTORY_DIALOG,
+                serde_json::json!({"window_label":"dock"}),
+                "wrong_window",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"id", "operation":"select", "path":"relative"}),
+                "invalid_path",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"id", "operation":"select", "path":"/missing-directory-3138"}),
+                "invalid_path",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"id", "operation":"select", "path":"/tmp/\0bad"}),
+                "invalid_path",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"id", "operation":"cancel", "path":"/tmp"}),
+                "invalid_operation",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":42, "operation":"cancel"}),
+                "invalid_schema",
+            ),
+            (
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"id", "operation":"click"}),
+                "invalid_schema",
+            ),
+        ] {
+            let result = super::handle_command(app.handle(), command, payload)
+                .await
+                .unwrap();
+            assert!(!result.success);
+            assert_eq!(result.data.unwrap()["code"], code);
+        }
+        #[cfg(not(target_os = "macos"))]
+        for command in [
+            commands::INSPECT_DIRECTORY_DIALOG,
+            commands::RESOLVE_DIRECTORY_DIALOG,
+        ] {
+            let payload = if command == commands::INSPECT_DIRECTORY_DIALOG {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({"dialog_id":"id", "operation":"cancel"})
+            };
+            let result = super::handle_command(app.handle(), command, payload)
+                .await
+                .unwrap();
+            assert_eq!(result.data.unwrap()["code"], "unsupported_os");
+        }
+        let file = super::handle_command(app.handle(), commands::RESOLVE_DIRECTORY_DIALOG,
+            serde_json::json!({"dialog_id":"id", "operation":"select", "path":std::env::current_exe().unwrap()})).await.unwrap();
+        assert_eq!(file.data.unwrap()["code"], "invalid_path");
+        use super::directory_dialog::fixture::{PANEL, Panel};
+        let valid = [true, true, true, true, false, false];
+        for index in 0..6 {
+            let mut flags = valid;
+            flags[index] = !flags[index];
+            *PANEL.lock().unwrap() = Some(Panel {
+                identity: "current",
+                claimed: false,
+                dispatched: false,
+                flags,
+            });
+            for command in [
+                commands::INSPECT_DIRECTORY_DIALOG,
+                commands::RESOLVE_DIRECTORY_DIALOG,
+            ] {
+                let payload = if command == commands::INSPECT_DIRECTORY_DIALOG {
+                    serde_json::json!({})
+                } else {
+                    serde_json::json!({"dialog_id":"current", "operation":"cancel"})
+                };
+                let result = super::handle_command(app.handle(), command, payload)
+                    .await
+                    .unwrap();
+                assert_eq!(result.data.unwrap()["code"], "wrong_dialog_type");
+                assert!(!PANEL.lock().unwrap().as_ref().unwrap().claimed);
+            }
+        }
+        *PANEL.lock().unwrap() = Some(Panel {
+            identity: "replacement",
+            claimed: false,
+            dispatched: false,
+            flags: valid,
+        });
+        let stale = super::handle_command(
+            app.handle(),
+            commands::RESOLVE_DIRECTORY_DIALOG,
+            serde_json::json!({"dialog_id":"previous", "operation":"cancel"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stale.data.unwrap()["code"], "stale_dialog");
+        for _ in 0..2 {
+            let inspection = super::handle_command(
+                app.handle(),
+                commands::INSPECT_DIRECTORY_DIALOG,
+                serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(inspection.data.unwrap()["status"], "live");
+            assert!(!PANEL.lock().unwrap().as_ref().unwrap().claimed);
+        }
+        let payload = serde_json::json!({"dialog_id":"replacement", "operation":"select", "path":std::env::temp_dir()});
+        let accepted = super::handle_command(
+            app.handle(),
+            commands::RESOLVE_DIRECTORY_DIALOG,
+            payload.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(accepted.data.unwrap()["code"], "selection_not_supported");
+        assert!(!PANEL.lock().unwrap().as_ref().unwrap().claimed);
+        let retry =
+            super::handle_command(app.handle(), commands::RESOLVE_DIRECTORY_DIALOG, payload)
+                .await
+                .unwrap();
+        assert_eq!(retry.data.unwrap()["code"], "selection_not_supported");
+        let cancel = serde_json::json!({"dialog_id":"replacement", "operation":"cancel"});
+        let recovery = super::handle_command(
+            app.handle(),
+            commands::RESOLVE_DIRECTORY_DIALOG,
+            cancel.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recovery.data.unwrap()["status"], "pending");
+        let cancel_retry =
+            super::handle_command(app.handle(), commands::RESOLVE_DIRECTORY_DIALOG, cancel)
+                .await
+                .unwrap();
+        assert_eq!(cancel_retry.data.unwrap()["code"], "already_accepted");
+        *PANEL.lock().unwrap() = None;
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn directory_dispatch_refuses_a_missing_main_window() {
+        let _serial = super::directory_dialog::fixture::SERIAL.lock().await;
+        let mut app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let task = tokio::spawn(async move {
+            super::handle_command(
+                &handle,
+                commands::RESOLVE_DIRECTORY_DIALOG,
+                serde_json::json!({"dialog_id":"previous", "operation":"cancel"}),
+            )
+            .await
+            .unwrap()
+        });
+        tokio::task::yield_now().await;
+        for _ in 0..400 {
+            #[allow(deprecated)]
+            app.run_iteration(|_, _| {});
+            if task.is_finished() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let result = task.await.unwrap();
+        assert!(!result.success);
+        assert_eq!(result.data.unwrap()["code"], "missing_window");
     }
 }

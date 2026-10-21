@@ -1,9 +1,17 @@
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
+import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   isWorkerStartMode,
   type WorkerStartMode,
 } from '@/lib/operator/worker-start-mode';
+
+/** Apply the shared provider only after runtime locks are checked; undo on failure. */
+export type WorkerModelChange = (
+  model: string | null,
+  runtime?: OrchestratorRuntime,
+  applyProvider?: () => Promise<(() => Promise<void>) | undefined>,
+) => void | Promise<boolean>;
 
 export interface ComposerWorkerDefaults {
   defaultDispatchRuntime: OrchestratorRuntime;
@@ -11,6 +19,10 @@ export interface ComposerWorkerDefaults {
   opencodeWorkerModel: string | null;
   threecodeWorkerModel: string | null;
   workerStartMode: WorkerStartMode;
+  codexWorkerEffort?: ThinkingEffort;
+  claudeWorkerEffort?: ThinkingEffort;
+  /** Read-only model supplied by the shared Claude Code provider profile. */
+  claudeCodeProviderModel?: string | null;
 }
 
 export const FALLBACK_COMPOSER_WORKER_DEFAULTS: ComposerWorkerDefaults = {
@@ -38,6 +50,8 @@ export function normalizeComposerWorkerDefaults(
     workerStartMode: isWorkerStartMode(values.workerStartMode)
       ? values.workerStartMode
       : 'autonomous',
+    codexWorkerEffort: isThinkingEffort(values.codexWorkerEffort) ? values.codexWorkerEffort : 'adaptive',
+    claudeWorkerEffort: isThinkingEffort(values.claudeWorkerEffort) ? values.claudeWorkerEffort : 'adaptive',
   };
 }
 
@@ -59,5 +73,6 @@ export function workerModelForDisplay(
   if (defaults.defaultDispatchModel && runtime === defaults.defaultDispatchRuntime) {
     return defaults.defaultDispatchModel;
   }
+  if (runtime === 'claude-code' && defaults.claudeCodeProviderModel) return defaults.claudeCodeProviderModel;
   return getRuntimeCapability(runtime).defaultModel ?? '';
 }

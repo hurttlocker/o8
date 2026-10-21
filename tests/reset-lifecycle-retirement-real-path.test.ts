@@ -4,6 +4,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { createManagedOpenCodeWorktree } from './helpers/managed-opencode-worktree';
 import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture';
 
 const h = vi.hoisted(() => ({
@@ -82,6 +83,7 @@ const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-reset-lifecycle-'));
 const operatorToken = 'operator-reset-lifecycle-0123456789abcdef';
 writeFileSync(join(dataDir, 'ws-token'), `${operatorToken}\n`, 'utf8');
 process.env.O8_DATA_DIR = dataDir;
+process.env.O8_OWNED_OPENCODE_ROOT = join(dataDir, 'owned-opencode');
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
 const route = await import('@/app/api/orchestrator/reset-packet/route');
@@ -248,16 +250,19 @@ describe('packet lifecycle retirement through the operator route', () => {
     expect(readOrchestratorControlPlaneState().packets[0]?.claudeCodeCarrier).toBe('openrouter');
   }, 20_000);
 
-  it('releases the OpenCode service location before reset removes the worktree', { timeout: 20_000 }, async () => {
+  it('releases the OpenCode service location before reset removes the worktree', { timeout: 90_000 }, async () => {
     const packetId = 'packet-reset-opencode-release';
     const branch = 'issue/reset-opencode-release';
-    const { root, repoPath, worktreePath } = createLinkedWorktree('reset-opencode-', branch);
+    const { root, repoPath, worktreePath, sessionKey } = await createManagedOpenCodeWorktree({
+      parent: dataDir, prefix: 'reset-opencode-', branch, packetId, ownedRoot: join(dataDir, 'owned-opencode') });
     const lane = createLane({
       repoPath,
       branch,
       runtime: 'opencode',
       packetId,
       worktreePath,
+      sessionKey,
+      ownership: 'managed',
     });
     setLaneStatus(lane.id, 'failed', 'system', 'worker_completed');
     const fixture = createOpenCodeServiceFixture(root, worktreePath);

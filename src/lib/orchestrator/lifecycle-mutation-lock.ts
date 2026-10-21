@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import {
   acquireWorkspaceLifecycleLease,
@@ -7,6 +8,8 @@ import {
 const packetLifecycleChains = new Map<string, Promise<unknown>>();
 const packetLifecycleDepth = new Map<string, number>();
 const missionHandoffChains = new Map<string, Promise<unknown>>();
+interface LifecycleAuthority { active: boolean }
+const heldLifecyclePackets = new AsyncLocalStorage<ReadonlyMap<string, LifecycleAuthority>>();
 
 export interface PacketLifecycleMutationContext {
   /** Another lifecycle mutation for this packet was already queued or running. */
@@ -36,12 +39,14 @@ export async function withPacketLifecycleMutationLock<T>(
   try {
     return await chainOnKey(packetLifecycleChains, key, async () => {
       const lease = await acquireWorkspaceLifecycleLease(key);
+      const authority: LifecycleAuthority = { active: true };
       try {
-        return await mutation({
+        return await heldLifecyclePackets.run(new Map([...(heldLifecyclePackets.getStore() ?? []), [key, authority]]), () => mutation({
           contended: contended || lease.contended,
           contendedByLiveIntent: contended || lease.contendedByLiveOwner,
-        });
+        }));
       } finally {
+        authority.active = false;
         releaseWorkspaceLifecycleLease(lease);
       }
     });
@@ -49,6 +54,20 @@ export async function withPacketLifecycleMutationLock<T>(
     const remaining = (packetLifecycleDepth.get(key) ?? 1) - 1;
     if (remaining > 0) packetLifecycleDepth.set(key, remaining);
     else packetLifecycleDepth.delete(key);
+  }
+}
+
+/** A surface-locked spawn must refuse a competing lifecycle owner without waiting for its surface lock. */
+export async function withPacketLifecycleSpawnLock<T>(packetId: string | null, operation: () => Promise<T>): Promise<T> {
+  const key = packetId?.trim();
+  if (!key || heldLifecyclePackets.getStore()?.get(key)?.active) return operation();
+  const lease = await acquireWorkspaceLifecycleLease(key, { waitForLiveOwner: false });
+  const authority: LifecycleAuthority = { active: true };
+  try {
+    return await heldLifecyclePackets.run(new Map([...(heldLifecyclePackets.getStore() ?? []), [key, authority]]), operation);
+  } finally {
+    authority.active = false;
+    releaseWorkspaceLifecycleLease(lease);
   }
 }
 

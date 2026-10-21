@@ -1,0 +1,132 @@
+// @vitest-environment jsdom
+import { act, createElement, useRef } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { LiveCaptions } from '@/lib/voice/managed-live/captions';
+import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
+import { dedupeDisplayMessages } from './dedupe-display-messages';
+import { useTranscriptAutoScroll } from './useTranscriptAutoScroll';
+import { voiceContinuityReplay } from './voice-continuity-replay.fixture';
+
+let root: Root; let host: HTMLDivElement; let scroller: HTMLDivElement;
+let height: number; let top: number; let resize: () => void;
+let observed: Set<Element>;
+const suppress = { current: false };
+const scrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop');
+const scrollToDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
+function Harness({ messages, scope = 'chat' }: { messages: MobileTranscriptEntry[]; scope?: string; status?: string }) {
+  const end = useRef<HTMLDivElement>(null);
+  useTranscriptAutoScroll({ endRef: end, suppressRef: suppress, scope });
+  return createElement('div', { className: 'thoughts-scroll' }, createElement('div', null,
+    messages.map(m => createElement('div', { key: m.id, 'data-o8-message-id': m.id }, m.text)), createElement('div', { ref: end })));
+}
+async function render(messages: MobileTranscriptEntry[], scope = 'chat', status = 'idle') {
+  await act(async () => root.render(createElement(Harness, { messages, scope, status })));
+}
+async function frame() { await act(async () => vi.advanceTimersByTimeAsync(32)); }
+function scrollTo(value: number) { top = value; scroller.dispatchEvent(new Event('scroll')); }
+beforeEach(async () => {
+  vi.useFakeTimers(); height = 18853; top = 18161; suppress.current = false; observed = new Set();
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(0), 16));
+  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(fn: () => void) { resize = fn; }
+    observe(element: Element) { observed.add(element); }
+    disconnect() { observed.clear(); }
+  });
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => height);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(692);
+  Object.defineProperty(HTMLElement.prototype, 'scrollTop', { configurable: true, get: () => top,
+    set: (value: number) => { top = Math.min(height - 692, Math.max(0, value)); } });
+  HTMLElement.prototype.scrollTo = function(options?: ScrollToOptions | number, y?: number) {
+    this.scrollTop = typeof options === 'number' ? y ?? top : options?.top ?? top;
+  };
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  await render([]); scroller = host.querySelector('.thoughts-scroll')!; await frame();
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  vi.restoreAllMocks();
+  for (const [name, descriptor] of [['scrollTop', scrollTopDescriptor], ['scrollTo', scrollToDescriptor]] as const) {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, name);
+  }
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+it('replays live captions without taking the reader away from history, then follows after returning to the bottom', async () => {
+  let messages: MobileTranscriptEntry[] = []; const captions = new LiveCaptions('replay', entries => { messages = dedupeDisplayMessages([...messages, ...entries]); });
+  let reading = false; let resumed = false; let anchor = 0;
+  const nodes = new Map<string, Element>();
+  for (const item of voiceContinuityReplay) {
+    if (!reading && item.at >= 8007) {
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -650 })); scrollTo(top - 650); anchor = top; reading = true;
+    }
+    if (!resumed && item.at >= 27000) { scrollTo(height - 692); resumed = true; }
+    captions.observe(item.event);
+    const count = messages.length; captions.observe(item.event); expect(messages).toHaveLength(count);
+    const visible = visibleVoiceTranscript(messages);
+    height += 2; await render(visible); resize?.(); await frame();
+    if (reading && !resumed) expect(top).toBe(anchor);
+    else expect(height - top - 692).toBe(0);
+    for (const node of host.querySelectorAll('[data-o8-message-id]')) {
+      const id = node.getAttribute('data-o8-message-id')!;
+      if (nodes.has(id)) expect(node).toBe(nodes.get(id));
+      nodes.set(id, node);
+    }
+    expect([...host.querySelectorAll('[data-o8-message-id]')].map(n => n.textContent)).toEqual(visible.map(m => m.text));
+  }
+  expect(nodes.size).toBeGreaterThan(1);
+});
+
+it('cancels a pending follow when the reader scrolls before the next frame, including within the old 120px threshold', async () => {
+  await render([{ id: 'one', role: 'user', text: 'New speech' }]);
+  scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -50 })); scrollTo(top - 50); const anchor = top;
+  await frame(); expect(top).toBe(anchor);
+  await render([{ id: 'one', role: 'user', text: 'New speech grows' }], 'chat', 'busy');
+  height += 300; resize?.(); await frame(); expect(top).toBe(anchor);
+});
+
+it('follows text reveal and viewport resize only while attached to the bottom', async () => {
+  height += 400; resize(); await frame(); expect(top).toBe(height - 692);
+  scrollTo(top - 300); const anchor = top; height += 400; resize(); await frame(); expect(top).toBe(anchor);
+  scrollTo(height - 692); height += 30; resize(); await frame(); expect(top).toBe(height - 692);
+});
+
+it('preserves backfill compensation, resets following for a different chat and cancels work on unmount', async () => {
+  scrollTo(top - 650); const anchor = top; suppress.current = true;
+  height += 200; await render([{ id: 'old', role: 'user', text: 'Older history' }]);
+  scrollTo(anchor + 200); resize?.(); await frame(); expect(top).toBe(anchor + 200);
+  await render([{ id: 'new', role: 'user', text: 'Different chat' }], 'other'); await frame(); expect(top).toBe(height - 692);
+  height += 30; resize?.(); await act(async () => root.unmount()); const after = top; await frame(); expect(top).toBe(after);
+  root = createRoot(host);
+});
+
+it('observes overflowing bubble sizes and refreshes them when direct transcript children change', async () => {
+  const content = scroller.firstElementChild!;
+  const bubble = document.createElement('div');
+  await act(async () => { content.insertBefore(bubble, content.lastElementChild); });
+  expect(observed.has(bubble)).toBe(true);
+  height += 100;
+  if (observed.has(bubble)) resize();
+  await frame();
+  expect(top).toBe(height - 692);
+  scrollTo(top - 650); const anchor = top;
+  height += 100; resize(); await frame(); expect(top).toBe(anchor);
+  await act(async () => bubble.remove());
+  expect(observed.has(bubble)).toBe(false);
+});
+
+it('keeps following when backfill adds no visible height and therefore emits no scroll event', async () => {
+  suppress.current = true;
+  await render([{ id: 'folded', role: 'assistant', text: 'Older folded work' }]);
+  await frame();
+  height += 100;
+  resize();
+  await frame();
+  expect(top).toBe(height - 692);
+});

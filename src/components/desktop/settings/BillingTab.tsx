@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useEntitlement } from '@/lib/entitlement/context';
 import { PLAN_LABELS } from '@/lib/entitlement/display';
 import type { Plan } from '@/lib/entitlement/types';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 import {
   APP_FONT_STACK,
@@ -34,6 +35,7 @@ import {
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
 const UPGRADE_URL = 'https://o8.run/pricing';
+const ACCOUNT_URL = 'https://o8.run/account';
 
 type EntitlementSource = 'env' | 'file' | 'default';
 
@@ -294,6 +296,11 @@ export function BillingTab() {
               ) : null}
             </div>
             <div style={{ flexShrink: 0 }}>
+              {displayPlan === 'pro' ? (
+                <RamsButton variant="ghost" onClick={() => openExternalUrl(ACCOUNT_URL)}>
+                  Manage subscription
+                </RamsButton>
+              ) : null}
               {!isPaid ? (
                 <RamsButton
                   variant="ghost"

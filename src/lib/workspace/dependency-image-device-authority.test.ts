@@ -59,8 +59,12 @@ function liveDevice(imagePath: string, shadowPath: string, mountPath: string): H
   };
 }
 
+// Dependency images are macOS hdiutil disk images, and their attach plist is
+// decoded by macOS /usr/bin/plutil, so only the plist parse is macOS-only.
+const macOnly = it.skipIf(process.platform !== 'darwin');
+
 describe('dependency image device authority', () => {
-  it('retains every attach entity before deciding whether the mount is usable', async () => {
+  macOnly('retains every attach entity before deciding whether the mount is usable', async () => {
     await expect(parseDependencyAttachInfo(plist([
       entity('/dev/disk60', undefined, 'GUID_partition_scheme'),
       entity('/dev/disk61s1', '/tmp/expected'),
@@ -77,7 +81,7 @@ describe('dependency image device authority', () => {
     });
   });
 
-  it('identifies the image root when attach entities arrive out of order', async () => {
+  macOnly('identifies the image root when attach entities arrive out of order', async () => {
     await expect(parseDependencyAttachInfo(plist([
       entity('/dev/disk60s1', undefined, 'Apple_APFS'),
       entity('/dev/disk60', undefined, 'GUID_partition_scheme'),

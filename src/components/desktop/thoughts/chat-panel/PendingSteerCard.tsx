@@ -19,6 +19,8 @@ export type PendingSteer = {
 
 type Props = {
   steers: PendingSteer[];
+  lockedIds?: string[];
+  busyIds?: string[];
   /** Index of the steer focused via keyboard nav (null = composer has focus). Highlights the row. */
   focusedIndex?: number | null;
   /** When set, begin inline-editing this steer (keyboard E from the composer). */
@@ -38,6 +40,8 @@ type Props = {
 
 export function PendingSteerCard({
   steers,
+  lockedIds = [],
+  busyIds = [],
   focusedIndex,
   autoEditId,
   onSteerNow,
@@ -52,11 +56,11 @@ export function PendingSteerCard({
   useEffect(() => {
     if (!autoEditId || editingId === autoEditId) return;
     const target = steers.find((s) => s.id === autoEditId);
-    if (!target) return;
+    if (!target || lockedIds.includes(target.id)) return;
     setEditingId(autoEditId);
     setDraft(target.text);
     onEditingChange?.(autoEditId);
-  }, [autoEditId, editingId, steers, onEditingChange]);
+  }, [autoEditId, editingId, lockedIds, steers, onEditingChange]);
 
   if (steers.length === 0) return null;
 
@@ -106,6 +110,8 @@ export function PendingSteerCard({
             isEditing={isEditing}
             isFirst={isFirst}
             isFocused={isFocused}
+            locked={lockedIds.includes(steer.id)}
+            busy={busyIds.includes(steer.id)}
             draft={draft}
             setDraft={setDraft}
             onBeginEdit={() => beginEdit(steer.id, steer.text)}
@@ -125,6 +131,8 @@ type RowProps = {
   isEditing: boolean;
   isFirst: boolean;
   isFocused: boolean;
+  locked: boolean;
+  busy: boolean;
   draft: string;
   setDraft: (v: string) => void;
   onBeginEdit: () => void;
@@ -139,6 +147,8 @@ function SteerRow({
   isEditing,
   isFirst,
   isFocused,
+  locked,
+  busy,
   draft,
   setDraft,
   onBeginEdit,
@@ -257,14 +267,14 @@ function SteerRow({
           </>
         ) : (
           <>
-            <ActionButton label="Edit" onClick={onBeginEdit}>
+            <ActionButton label="Edit" onClick={onBeginEdit} disabled={locked}>
               <PencilIcon />
             </ActionButton>
-            <ActionButton label="Steer" onClick={onSteerNow} labeled>
+            <ActionButton label="Steer" onClick={onSteerNow} labeled disabled={locked}>
               <SteerArrowIcon />
               <span style={{ fontSize: 12, marginLeft: 5 }}>Steer</span>
             </ActionButton>
-            <ActionButton label="Delete" onClick={onDelete}>
+            <ActionButton label="Delete" onClick={onDelete} disabled={busy}>
               <TrashIcon />
             </ActionButton>
           </>
@@ -280,18 +290,21 @@ function ActionButton({
   children,
   accent,
   labeled,
+  disabled,
 }: {
   label: string;
   onClick: () => void;
   children: React.ReactNode;
   accent?: boolean;
   labeled?: boolean;
+  disabled?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       title={label}
@@ -310,7 +323,8 @@ function ActionButton({
         borderRadius: 7,
         background: hover ? 'var(--t-hover)' : 'transparent',
         color: accent ? 'var(--t-accent)' : 'var(--t-text-muted)',
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
         transition: 'background 120ms ease, color 120ms ease',
       }}
     >

@@ -1,25 +1,16 @@
 'use client';
 
-/**
- * SwarmStatusCard — live, inline crew monitor.
- *
- * When the orchestrator fans a turn out to a parallel crew, this card surfaces
- * the live crew directly in the chat transcript at the live edge and updates as
- * work moves through its lifecycle. It reads `missionState.packets` (handed
- * down through ThoughtsChatPanel) for the o8 Codex workers, and an explicit
- * `scouts` list for the native Claude sub-agents the orchestrator spawns via its
- * Task tool (research fan-out). Native scouts run inside the orchestrator's own
- * process and aren't packets — without this they'd vanish into the collapsed
- * tool-call cluster, which is exactly the "5 scouts fired but nothing's shown"
- * gap. No modal — the crew lives in the conversation, matching the operator's
- * "beautiful cards, inline" direction.
- */
-
-import { orchestratorRuntimeTone, orchestratorStatusTone, packetRuntimeModelDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
+import { useId, useState } from 'react';
+import { AgentStatusDot, agentStatusToDotState, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { packetRuntimeModelDisplayLabel, resolveDisplayRuntime, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { runtimeFromWorkerSessionKey } from '@/lib/orchestrator/worker-launch-context';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
-import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { projectWorkerParticipants } from '@/lib/orchestrator/participant-projection';
+import type { OrchestratorPacket, OrchestratorPacketStatus } from '@/lib/orchestrator/types';
+import { useWorkerDisclosure } from './WorkerDisclosure';
+import { ProviderMarkGlyph } from '../composer-selector/provider-marks';
+import { providerMarkForRuntime } from '../composer-selector/state';
 
-const SWARM_ACCENT = '#FF5A1F';
 const FOCUS_LANE_EVENT = 'o8:focus-spawned-agent-lane';
 export const SWARM_CREW_SCROLL_STYLE = {
   display: 'flex',
@@ -28,48 +19,55 @@ export const SWARM_CREW_SCROLL_STYLE = {
   overflowY: 'auto',
   overflowX: 'hidden',
   overscrollBehavior: 'contain',
+  scrollbarWidth: 'none',
 } as const;
 
-/** A native Claude sub-agent (Task-tool scout) surfaced in the live crew. */
+/** Native child evidence, without implying a separately controllable session. */
 export interface SwarmScoutView {
   id: string;
-  /** Human label — the sub-agent's task description, falling back to its type. */
   label: string;
-  status: 'running' | 'done';
+  status: 'running' | 'done' | 'failed' | 'stopped' | 'unknown';
 }
 
-// A mission's crew remains truthful at the live edge after it settles. Idle
-// and draft packets are not dispatched crew, but terminal packets stay visible
-// with the existing Failed / Completed / Archived vocabulary instead of
-// disappearing while a stale Running row remains in the transcript.
+/** Exact session membership from a saved Shared-team receipt. */
+export interface SwarmSessionView {
+  parentTurnId?: string | null;
+  returnStatus?: 'pending' | 'running' | 'delivered' | 'held' | null;
+  returnReason?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  sessionKey: string;
+  name: string;
+  runtime: string;
+  status: string;
+}
+
+function sessionReturnState(session: SwarmSessionView) {
+  const label = session.returnStatus === 'pending' ? 'Result queued'
+    : session.returnStatus === 'running' ? 'Returning result'
+      : session.returnStatus === 'held' ? 'Result needs attention' : null;
+  if (!label) return null;
+  const reason = session.returnReason?.replace(/\s+/g, ' ').trim();
+  const detail = reason ? `${label}: ${reason}` : label;
+  return { label, detail };
+}
+
+export function swarmSessionStatus(status: string): StatusTone {
+  if (status === 'waiting' || status === 'awaiting_input' || status === 'needs-input') return { label: 'Waiting for input', state: 'review' };
+  if (status === 'finished' || status === 'completed') return { label: 'Completed', state: 'idle' };
+  if (status === 'interrupted') return { label: 'Stopped', state: 'idle' };
+  if (status === 'idle') return { label: 'Idle', state: 'idle' };
+  if (status === 'running') return { label: 'Running', state: 'running' };
+  if (status === 'failed') return { label: 'Failed', state: 'failed' };
+  return { label: 'Unconfirmed', state: 'idle' };
+}
+
 const VISIBLE_STATUSES = new Set<OrchestratorPacketStatus>([
-  'queued',
-  'launching',
-  'running',
-  'recovering',
-  'awaiting_review',
-  'blocked',
-  'failed',
-  'released',
-  'archived',
+  'queued', 'launching', 'running', 'recovering', 'awaiting_review',
+  'blocked', 'failed', 'released', 'archived',
 ]);
 
-type StatusTone = { label: string; color: string; pulse: boolean };
-
-function statusTone(status: OrchestratorPacketStatus): StatusTone {
-  const tone = orchestratorStatusTone(status);
-  return {
-    label: tone.label,
-    color: tone.dot,
-    pulse: status === 'running' || status === 'launching' || status === 'recovering',
-  };
-}
-
-function scoutStatusTone(status: SwarmScoutView['status']): StatusTone {
-  return status === 'running'
-    ? { label: 'Running', color: '#16a34a', pulse: true }
-    : { label: 'Done', color: 'var(--t-text-faint)', pulse: false };
-}
+type StatusTone = { label: string; state: AgentDotState };
 
 function packetCardStatus(packet: OrchestratorPacket): OrchestratorPacketStatus {
   const terminal = packetTerminalState(packet);
@@ -79,271 +77,195 @@ function packetCardStatus(packet: OrchestratorPacket): OrchestratorPacketStatus 
   return packet.status;
 }
 
-function SwarmGlyph({ size = 13, color = SWARM_ACCENT }: { size?: number; color?: string }) {
-  return (
-    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="3.4" r="2" fill={color} />
-        <circle cx="3.4" cy="11.6" r="2" fill={color} />
-        <circle cx="12.6" cy="11.6" r="2" fill={color} />
-      </svg>
-    </span>
-  );
+export function visibleSwarmPackets(packets: OrchestratorPacket[]): OrchestratorPacket[] {
+  return [...new Map(packets.map(packet => [packet.id, packet])).values()].filter(packet => {
+    const status = packetCardStatus(packet);
+    if (!VISIBLE_STATUSES.has(status)) return false;
+    return !((status === 'queued' || status === 'launching') && !packet.lane?.laneId);
+  });
 }
 
-/** One crew row — shared geometry for both scouts and Codex packets. */
-function CrewRow({
-  dotColor,
-  dotGlow,
-  title,
-  sub,
-  status,
-  showTopBorder,
-  onClick,
-}: {
-  dotColor: string;
-  dotGlow?: string;
-  title: string;
-  sub: string;
-  status: StatusTone;
-  showTopBorder: boolean;
-  onClick?: () => void;
+export function swarmPacketStatus(packet: OrchestratorPacket): StatusTone {
+  const status = packetCardStatus(packet);
+  if (packet.operatorStopped && status !== 'released' && status !== 'archived') {
+    return { label: 'Stopped', state: 'idle' };
+  }
+  if (status === 'released') {
+    return packet.releaseState === 'released' && packet.releaseStatePayload?.mergeCommit?.trim()
+      ? { label: 'Merged', state: 'merged' }
+      : { label: 'Completed', state: 'idle' };
+  }
+  const labels: Record<OrchestratorPacketStatus, string> = {
+    draft: 'Draft', queued: 'Queued', launching: 'Launching', idle: 'Waiting', running: 'Running',
+    awaiting_review: 'Awaiting review', recovering: 'Recovering', failed: 'Failed', blocked: 'Blocked',
+    released: 'Completed', archived: 'Archived',
+  };
+  return { label: labels[status], state: agentStatusToDotState(status) };
+}
+
+function scoutTone(status: SwarmScoutView['status']): StatusTone {
+  switch (status) {
+    case 'running': return { label: 'Running', state: 'running' };
+    case 'done': return { label: 'Done', state: 'idle' };
+    case 'failed': return { label: 'Failed', state: 'failed' };
+    case 'stopped': return { label: 'Stopped', state: 'idle' };
+    default: return { label: 'Unconfirmed', state: 'idle' };
+  }
+}
+
+export interface WorkerCardSelection {
+  available: string[];
+  selected: string[];
+  disabled: boolean;
+  onToggle: (sessionKey: string) => void;
+}
+
+function CrewRow({ title, sub, status, onClick, detail, selection }: {
+  title: string; sub: string; status: StatusTone; onClick?: () => void; detail?: string;
+  selection?: { checked: boolean; disabled: boolean; onChange: () => void };
 }) {
-  const rowStyle = {
-    width: '100%',
-    display: 'grid',
-    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-    alignItems: 'center',
-    gap: 10,
-    paddingTop: 7,
-    paddingRight: 12,
-    paddingBottom: 7,
-    paddingLeft: 12,
-    borderTopWidth: showTopBorder ? 1 : 0,
-    borderTopStyle: 'solid',
-    borderTopColor: 'var(--t-divider-subtle)',
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-    borderLeftWidth: 0,
-    background: 'transparent',
-    textAlign: 'left',
-    cursor: onClick ? 'pointer' : 'default',
+  const style = {
+    width: '100%', display: 'grid', gridTemplateColumns: '14px minmax(0, 1fr) auto',
+    alignItems: 'center', gap: 10, minHeight: 44,
+    paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12,
+    borderWidth: 0, borderTopWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider-subtle)',
+    background: 'transparent', textAlign: 'left', cursor: onClick ? 'pointer' : 'default',
     fontFamily: 'var(--font-sans-system)',
   } as const;
-  const content = (
-    <>
-      {/* Role dot */}
-      <span
-        aria-hidden="true"
-        style={{ width: 7, height: 7, borderRadius: 999, background: dotColor, flexShrink: 0, boxShadow: dotGlow ? `0 0 0 3px ${dotGlow}` : undefined }}
-      />
-
-      {/* Title + sub */}
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-        <span style={{ color: 'var(--t-text)', fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {title}
-        </span>
-        <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {sub}
-        </span>
-      </span>
-
-      {/* Status chip */}
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <span
-          aria-hidden="true"
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: 999,
-            background: status.color,
-            flexShrink: 0,
-            animation: status.pulse ? 'swarmDotPulse 1.6s ease-in-out infinite' : 'none',
-          }}
-        />
-        <span style={{ color: status.color, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, whiteSpace: 'nowrap' }}>
-          {status.label}
-        </span>
-      </span>
-    </>
-  );
-
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        title={`Open ${title}`}
-        style={rowStyle}
-        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  return <div style={rowStyle}>{content}</div>;
+  const content = <>
+    <AgentStatusDot state={status.state} label={status.label} />
+    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <span style={{ color: 'var(--t-text)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+      <span style={{ marginTop: 4, color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{sub}</span>
+      {detail ? <span style={{ marginTop: 4, color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflowWrap: 'anywhere' }}>{detail.length > 180 ? `${detail.slice(0, 177)}…` : detail}</span> : null}
+    </span>
+    <span style={{ color: 'var(--t-text-muted)', fontSize: 10, fontWeight: 300, lineHeight: 1.25, textAlign: 'right', maxWidth: 82 }}>{status.label}</span>
+  </>;
+  const row = onClick
+    ? <button type="button" onClick={onClick} title={detail ? `Open ${title}\n${detail}` : `Open ${title}`} style={style}
+      onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+      onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}>{content}</button>
+    : <div style={style}>{content}</div>;
+  return selection ? <div style={{ display: 'grid', gridTemplateColumns: '28px minmax(0, 1fr)', alignItems: 'center' }}>
+    <input type="checkbox" aria-label={`Select ${title}`} checked={selection.checked} disabled={selection.disabled}
+      onChange={selection.onChange} style={{ marginLeft: 12, accentColor: 'var(--t-accent)', cursor: selection.disabled ? 'default' : 'pointer' }} />
+    {row}
+  </div> : row;
 }
 
-interface SwarmStatusCardProps {
-  packets: OrchestratorPacket[];
-  scouts?: SwarmScoutView[];
-  onFocusPacket?: (packet: OrchestratorPacket) => void;
-}
-
-/**
- * The mission store is global, but a Swarm card belongs to one persisted
- * orchestrator chat. Only packets stamped by that chat may appear in its live
- * edge; otherwise a fresh chat inherits the previous mission's crew.
- */
+/** Only recorded parent identity associates a worker with this conversation. */
 export function packetsForOrchestratorThread(
-  packets: OrchestratorPacket[],
-  threadId: string | null | undefined,
+  packets: OrchestratorPacket[], threadId: string | null | undefined,
 ): OrchestratorPacket[] {
-  const normalizedThreadId = threadId?.trim();
-  if (!normalizedThreadId) return [];
-  return packets.filter((packet) => {
-    const stampedThreadId = packet.orchestratorThreadId?.trim();
-    if (stampedThreadId) return stampedThreadId === normalizedThreadId;
-    return packet.dispatcher?.surface === 'orchestrator'
-      && packet.dispatcher.id.trim() === normalizedThreadId;
+  const normalized = threadId?.trim();
+  if (!normalized) return [];
+  return packets.filter(packet => {
+    const stamped = packet.orchestratorThreadId?.trim();
+    return stamped ? stamped === normalized
+      : packet.dispatcher?.surface === 'orchestrator' && packet.dispatcher.id.trim() === normalized;
   });
 }
 
 export function focusSwarmPacket(packet: OrchestratorPacket, onFocusPacket?: (packet: OrchestratorPacket) => void) {
-  if (onFocusPacket) {
-    onFocusPacket(packet);
-    return;
-  }
+  if (onFocusPacket) { onFocusPacket(packet); return; }
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, {
-    detail: {
-      packetId: packet.id,
-      laneId: packet.lane?.laneId ?? null,
-      sessionKey: packet.lane?.sessionKey ?? packet.lane?.tabId ?? null,
-      title: packet.title,
-    },
-  }));
+  window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: {
+    packetId: packet.id, laneId: packet.lane?.laneId ?? null,
+    sessionKey: packet.lane?.sessionKey ?? packet.lane?.tabId ?? null, title: packet.title,
+  } }));
 }
 
-export function SwarmStatusCard({ packets, scouts = [], onFocusPacket }: SwarmStatusCardProps) {
-  const active = packets.flatMap((packet) => {
-    const status = packetCardStatus(packet);
-    if (!VISIBLE_STATUSES.has(status)) return [];
-    // Pre-dispatch packets only belong to the live crew once a lane is bound.
-    // Otherwise an archived lane hidden from the client's active-lane reconcile
-    // can revive an orphaned packet as a phantom "Queued" swarm card.
-    if ((status === 'queued' || status === 'launching') && !packet.lane?.laneId) {
-      return [];
-    }
-    return [{ packet, status }];
-  });
-  if (active.length === 0 && scouts.length === 0) return null;
-
-  const crewCount = active.length + scouts.length;
-
-  // Runtime breakdown for the header ("Scouts 5 · Codex 3").
-  const byRuntime = new Map<OrchestratorRuntime, number>();
-  for (const { packet } of active) {
-    const runtime = resolveDisplayRuntime(packet);
-    byRuntime.set(runtime, (byRuntime.get(runtime) ?? 0) + 1);
+/** Shared membership and state for the compact dock and its expanded worker list. */
+export function projectSwarmView({ packets, scouts = [], sessions = [] }: {
+  packets: OrchestratorPacket[]; scouts?: SwarmScoutView[]; sessions?: SwarmSessionView[];
+}) {
+  const active = visibleSwarmPackets(packets);
+  const byId = new Map(active.map(packet => [packet.id, packet]));
+  const participants = projectWorkerParticipants({ packets: active });
+  const native = [...new Map(scouts.map(scout => [scout.id, scout])).values()];
+  const packetSessions = new Set(participants.map(participant => participant.sessionKey));
+  const shared = [...new Map(sessions.map(session => [session.sessionKey, session])).values()].filter(session => !packetSessions.has(session.sessionKey));
+  const count = participants.length + native.length + shared.length;
+  const statuses = [...participants.map(participant => swarmPacketStatus(byId.get(participant.id)!)), ...native.map(scout => scoutTone(scout.status)), ...shared.map(session => swarmSessionStatus(session.status))];
+  const totals = new Map<string, number>();
+  for (const { label } of statuses) totals.set(label.toLowerCase(), (totals.get(label.toLowerCase()) ?? 0) + 1);
+  for (const session of shared) {
+    const label = sessionReturnState(session)?.label;
+    if (label) totals.set(label, (totals.get(label) ?? 0) + 1);
   }
-  const breakdown = [
-    scouts.length > 0 ? `Scouts ${scouts.length}` : null,
-    ...Array.from(byRuntime.entries()).map(([runtime, count]) => `${orchestratorRuntimeTone(runtime).label} ${count}`),
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const summary = [...totals].map(([label, total]) => `${total} ${label}`).join(' · ');
+  const state: AgentDotState = statuses.some(status => status.state === 'failed') ? 'failed'
+    : statuses.some(status => status.state === 'review') || shared.some(session => session.returnStatus === 'held') ? 'review'
+      : statuses.some(status => status.state === 'running') ? 'running'
+        : count > 0 && statuses.every(status => status.state === 'merged') ? 'merged' : 'idle';
+  return { byId, participants, native, shared, count, summary, state };
+}
 
-  // Native scouts ARE claude-code sub-agents — color their dot with the same
-  // tone the app already uses for claude-code so the role reads consistently.
-  const scoutTone = orchestratorRuntimeTone('claude-code');
+export function SwarmStatusCard({ packets, scouts = [], sessions = [], onFocusSession, onFocusPacket, defaultExpanded = false, selection, coordinated = false, crewMaxHeight }: {
+  packets: OrchestratorPacket[]; scouts?: SwarmScoutView[];
+  sessions?: SwarmSessionView[];
+  onFocusSession?: (sessionKey: string) => void;
+  onFocusPacket?: (packet: OrchestratorPacket) => void;
+  defaultExpanded?: boolean;
+  selection?: WorkerCardSelection;
+  coordinated?: boolean;
+  crewMaxHeight?: number | string;
+}) {
+  const [localExpanded, setExpanded] = useState(defaultExpanded);
+  const panelId = useId();
+  const disclosure = useWorkerDisclosure();
+  const expanded = coordinated && disclosure ? disclosure.activeId === panelId : localExpanded;
+  const toggle = () => {
+    if (coordinated && disclosure) {
+      if (expanded) disclosure.deactivate(panelId); else disclosure.activate(panelId);
+    } else setExpanded(value => !value);
+  };
+  const { byId, participants, native, shared, count, summary } = projectSwarmView({ packets, scouts, sessions });
+  const runtimes = [...participants.map(participant => resolveDisplayRuntime(byId.get(participant.id)!)), ...native.map(() => 'claude-code' as const), ...shared.map(session => runtimeFromWorkerSessionKey(session.sessionKey))];
+  const selectionFor = (key: string | null | undefined) => key && selection?.available.includes(key) ? {
+    checked: selection.selected.includes(key), disabled: selection.disabled, onChange: () => selection.onToggle(key),
+  } : undefined;
+  if (!count) return null;
 
-  return (
-    <div
-      role="group"
-      aria-label={`Swarm — ${crewCount} ${crewCount === 1 ? 'agent' : 'agents'}`}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'rgba(255, 90, 31, 0.22)',
-        background: 'var(--t-input-bg)',
-        overflow: 'hidden',
-        animation: 'swarmCardIn 280ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-    >
-      <style>{`@keyframes swarmCardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 9,
-          paddingTop: 9,
-          paddingRight: 12,
-          paddingBottom: 9,
-          paddingLeft: 12,
-          borderBottomWidth: 1,
-          borderBottomStyle: 'solid',
-          borderBottomColor: 'var(--t-divider-subtle)',
-        }}
-      >
-        <SwarmGlyph size={14} />
-        <span style={{ color: 'var(--t-text)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>
-          Swarm
-        </span>
-        <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
-          {crewCount} {crewCount === 1 ? 'agent' : 'agents'}
-        </span>
-        <div style={{ flex: 1 }} />
-        {breakdown ? (
-          <span style={{ color: 'var(--t-text-muted)', fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.25, whiteSpace: 'nowrap', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
-            {breakdown}
-          </span>
-        ) : null}
-      </div>
-
-      {/* Crew rows — native scouts first (research fan-out), then Codex workers. */}
-      <div data-swarm-crew="scrollable" style={SWARM_CREW_SCROLL_STYLE}>
-        {scouts.map((scout, index) => (
-          <CrewRow
-            key={scout.id}
-            dotColor={scoutTone.color}
-            dotGlow={scoutTone.background}
-            title={scout.label}
-            sub={`${scoutTone.label} · scout`}
-            status={scoutStatusTone(scout.status)}
-            showTopBorder={index > 0}
-          />
-        ))}
-        {active.map(({ packet, status }, index) => {
-          const runtime = resolveDisplayRuntime(packet);
-          const tone = orchestratorRuntimeTone(runtime);
-          const eventLabel = packet.blockedReason === 'runtime_process_exit'
-            || packet.blockedReason?.startsWith('Codex sign-in expired')
-            ? packet.blockedReason
-            : packet.lane?.lastEventLabel?.trim() || packet.lastEventLabel?.trim() || null;
-          const title = packet.title?.trim() || packet.referenceLabel?.trim() || 'Agent';
-          return (
-            <CrewRow
-              key={packet.id}
-              dotColor={tone.color}
-              dotGlow={tone.background}
-              title={title}
-              sub={`${packetRuntimeModelDisplayLabel(packet)}${eventLabel ? ` · ${eventLabel}` : ''}`}
-              status={statusTone(status)}
-              showTopBorder={index > 0 || scouts.length > 0}
-              onClick={() => focusSwarmPacket(packet, onFocusPacket)}
-            />
-          );
-        })}
-        <style>{`@keyframes swarmDotPulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
-      </div>
-    </div>
-  );
+  return <div role="group" aria-label={`Subagents: ${count}`} style={{
+    display: 'flex', flexDirection: 'column', flexShrink: 0, borderRadius: 12, borderWidth: 1,
+    borderStyle: 'solid', borderColor: 'var(--t-border)', background: 'var(--t-input-bg)', overflow: 'hidden',
+  }}>
+    <button type="button" aria-expanded={expanded} aria-controls={panelId}
+      onClick={toggle} style={{
+        display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, width: '100%',
+        paddingTop: 10, paddingRight: 12, paddingBottom: 10, paddingLeft: 12,
+        borderWidth: 0, background: 'transparent', color: 'var(--t-text)', textAlign: 'left',
+        fontFamily: 'var(--font-sans-system)', cursor: 'pointer',
+      }}>
+      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+        {runtimes.slice(0, 3).map((runtime, index) => <span key={`${runtime}:${index}`} style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
+          marginLeft: index ? -7 : 0, borderRadius: 999, border: '1px solid var(--t-border)',
+          background: 'var(--t-popover-surface)',
+        }}><ProviderMarkGlyph mark={providerMarkForRuntime(runtime)} size={14} /></span>)}
+        {count > 3 ? <span style={{ marginLeft: 5, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)' }}>+{count - 3}</span> : null}
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{count} {count === 1 ? 'subagent' : 'subagents'}</span>
+        <span style={{ display: 'block', marginTop: 4, fontSize: 10, fontWeight: 300, color: 'var(--t-text-muted)', lineHeight: 1.4 }}>{summary}</span>
+      </span>
+      <svg aria-hidden width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, transform: expanded ? 'rotate(180deg)' : undefined }}><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </button>
+    {expanded ? <div id={panelId} data-swarm-crew="scrollable" style={{ ...SWARM_CREW_SCROLL_STYLE, ...(crewMaxHeight ? { maxHeight: crewMaxHeight } : {}) }}>
+      {participants.map(participant => {
+        const packet = byId.get(participant.id)!;
+        const detail = packet.blockedReason?.trim() || participant.lifecycle.lastEventLabel;
+        return <CrewRow key={participant.id} title={packet.title?.trim() || 'Worker'}
+          sub={`${packetRuntimeModelDisplayLabel(packet)}${detail ? ` · ${detail}` : ''}`}
+          status={swarmPacketStatus(packet)} selection={selectionFor(participant.sessionKey)} onClick={() => focusSwarmPacket(packet, onFocusPacket)} />;
+      })}
+      {native.map(scout => <CrewRow key={`native:${scout.id}`} title={scout.label}
+        sub="Claude Code · Native subagent · Managed by this conversation"
+        status={scoutTone(scout.status)} />)}
+      {shared.map(session => <CrewRow key={session.sessionKey} title={session.name}
+        sub={`${runtimeModelDisplayLabel(session.runtime || runtimeFromWorkerSessionKey(session.sessionKey), session.model)} · Shared checkout`} status={swarmSessionStatus(session.status)} selection={selectionFor(session.sessionKey)} detail={sessionReturnState(session)?.detail}
+        onClick={() => onFocusSession ? onFocusSession(session.sessionKey) : window.dispatchEvent(new CustomEvent(FOCUS_LANE_EVENT, { detail: { sessionKey: session.sessionKey, title: session.name } }))} />)}
+    </div> : null}
+  </div>;
 }

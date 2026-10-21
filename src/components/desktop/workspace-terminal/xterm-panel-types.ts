@@ -1,3 +1,5 @@
+import type { TerminalExitState } from '@/lib/terminal/exit-state';
+
 export interface InlineImage {
   id: string;
   dataUrl: string;
@@ -6,9 +8,14 @@ export interface InlineImage {
 
 export interface XtermPanelProps {
   tmuxSession: string;
+  exitState?: TerminalExitState;
+  onNewShell?: () => void;
+  onClose?: () => void;
   /** Observe an existing run without writing keystrokes into its PTY. */
   readOnly?: boolean;
   inputLocked?: boolean;
+  /** Enable readable terminal output for setup and other assistive surfaces. */
+  screenReaderMode?: boolean;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number, readOnly?: boolean) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -49,7 +56,7 @@ export interface XtermPanelHandle {
   fit: () => void;
   setSourceDimensions?: (cols: number, rows: number) => void;
   focus: () => void;
-  writeData: (data: string) => void;
+  writeData: (data: string, historical?: boolean) => void;
   writeRaw: (data: string) => void;
   readText: (lines?: number) => string;
   visibilityReady?: (epoch: number) => void;
@@ -57,5 +64,5 @@ export interface XtermPanelHandle {
   recordDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
-  setExited: () => void;
+  setExited: (exitCode?: number | null, onSnapshot?: (state: TerminalExitState) => void) => void;
 }

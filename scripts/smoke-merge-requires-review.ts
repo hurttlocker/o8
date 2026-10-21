@@ -293,14 +293,14 @@ async function caseD(): Promise<void> {
   const repo = await createCaseRepo('case-d');
   try {
     await submitReview(repo, true);
-    const reviewedHead = await api.readHeadSha(repo.worktreePath);
+    const reviewedHead = await api.readHeadSha(repo.worktreePath, repo.lane.repoPath);
     await writeFile(
       join(repo.worktreePath, 'src', 'case-d-rerun.ts'),
       'export const case_d_rerun = "new-head";\n',
     );
     await git(repo.worktreePath, ['add', '-A']);
     await git(repo.worktreePath, ['commit', '-m', 'rerun new head']);
-    const currentHead = await api.readHeadSha(repo.worktreePath);
+    const currentHead = await api.readHeadSha(repo.worktreePath, repo.lane.repoPath);
     expectNotEqual('CASE D', currentHead, reviewedHead, 'worktree HEAD should move after review');
 
     const result = await api.dispatch({ verb: 'merge', laneId: repo.lane.id, actor: 'orchestrator' });

@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   computeSessionTileLayout,
+  findThreadLeafByThreadId,
   isSessionTileLeaf,
   type SessionTileLayout,
   type SessionTileLeaf,
@@ -138,6 +139,7 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
           width: (visibleRight - visibleLeft) / rect.width,
           height: (visibleBottom - visibleTop) / rect.height,
         };
+        if (leaf.threadId && leaf.threadId === payloadRef.current?.threadId) return null;
         const withinLeafYPx = clientY - top;
         if (withinLeafYPx <= HEADER_BAND_PX) {
           return { leafId: leaf.id, leafKind: leaf.kind, leafRect: visibleRect, zone: 'replace' };
@@ -171,7 +173,7 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
 
     const handleStart = (event: Event) => {
       const detail = (event as CustomEvent<ThreadDragStartDetail>).detail;
-      if (!detail?.payload) return;
+      if (!detail?.payload || detail.payload.navigationOnly) return;
       payloadRef.current = detail.payload;
       setDragPayload(detail.payload);
       applyHover(resolveTarget(detail.clientX, detail.clientY));
@@ -222,7 +224,7 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
     // "Add split"/"Open here" overlay re-renders on switch-back.
     const inFlight = getActiveThreadDrag();
     let adoptTimer: number | null = null;
-    if (inFlight) {
+    if (inFlight && !inFlight.navigationOnly) {
       payloadRef.current = inFlight;
       adoptTimer = window.setTimeout(() => setDragPayload(inFlight), 0);
     } else {
@@ -255,9 +257,9 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
   // with dragPayload set. Children only paint during a drag.
   const dragging = active && dragPayload !== null;
   const preview = dragging && hover ? computePreviewRect(hover) : null;
-  const pillLabel = dragging && hover
-    ? hover.zone === 'replace' ? 'Open here' : 'Add split'
-    : null;
+  const moving = dragPayload ? Boolean(findThreadLeafByThreadId(layout.root, dragPayload.threadId)) : false;
+  const pillLabel = dragging && hover ? hover.zone === 'replace' ? moving ? 'Swap panes' : 'Open here'
+    : `${moving ? 'Move' : 'Open'} ${hover.zone === 'split-below' ? 'below' : 'beside'}` : null;
 
   return (
     <div
@@ -286,8 +288,8 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
             width: `${preview.width * 100}%`,
             height: `${preview.height * 100}%`,
             borderRadius: 10,
-            background: 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.18))',
-            borderWidth: 2,
+            background: 'var(--t-accent-soft)',
+            borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-accent, #2563eb)',
             boxSizing: 'border-box',
@@ -304,10 +306,11 @@ export function ThreadDropLayer({ active, layout, onDrop, useRenderedLeafRects =
                 paddingLeft: 14,
                 paddingRight: 14,
                 borderRadius: 999,
-                background: 'var(--t-accent, #2563eb)',
-                color: '#ffffff',
+                background: 'var(--t-panel-solid)',
+                border: '1px solid var(--t-border)',
+                color: 'var(--t-text)',
                 fontSize: 12,
-                fontWeight: 600,
+                fontWeight: 300,
                 boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
                 whiteSpace: 'nowrap',
               }}

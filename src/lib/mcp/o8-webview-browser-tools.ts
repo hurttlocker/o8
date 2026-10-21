@@ -1,3 +1,4 @@
+import { McpInputError, safeErrorText } from '@/lib/mcp/api-error';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_API_PORT } from '@/lib/panel/api-port';
@@ -48,7 +49,7 @@ function capText(raw: string): McpToolResult {
 function requiredString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${key} is required`);
+    throw new McpInputError(`${key} is required`);
   }
   return value.trim();
 }
@@ -70,7 +71,7 @@ async function withStructuredErrors(action: () => Promise<McpToolResult>): Promi
   try {
     return await action();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = safeErrorText(error);
     const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
       ? error.code
       : undefined;
@@ -175,7 +176,7 @@ export const O8_WEBVIEW_BROWSER_TOOLS: McpTool[] = [
       type: 'object',
       properties: {
         selector: { type: 'string', description: 'CSS selector of the input or textarea.' },
-        text: { type: 'string', description: 'Text to type.' },
+        text: { type: 'string', description: 'Replacement text. Empty text clears the field; whitespace is preserved.' },
         submit: { type: 'boolean', description: 'Press Enter / requestSubmit after typing.' },
         surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
       },
@@ -233,9 +234,10 @@ export function createO8WebviewBrowserHandlers(): Record<string, ToolHandler> {
       return browserAgentPost('rect', agentArgs);
     }),
     o8_browser_type: async (args) => withStructuredErrors(async () => {
+      if (typeof args.text !== 'string') throw new McpInputError('text must be a string');
       const agentArgs: Record<string, unknown> = {
         selector: requiredString(args, 'selector'),
-        text: requiredString(args, 'text'),
+        text: args.text,
       };
       if (args.submit === true) agentArgs.submit = true;
       if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;

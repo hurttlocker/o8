@@ -1,3 +1,5 @@
+import { FloatingSurface } from '../../FloatingSurface';
+import { useReducedMotion } from 'framer-motion';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 import { UI_FONT, MONO_FONT, REVIEW_DRAWER_WIDTH } from './constants';
 import { IconSearch, DiffStatBadge } from './icons';
@@ -20,10 +22,13 @@ function FilesDrawer({
   onSelectFile: (path: string) => void;
   onClose: () => void;
 }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <aside
+    <FloatingSurface role="complementary"
       aria-label="Review files"
       aria-hidden={!open}
+      inert={!open}
+      contentStyle={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       style={{
         position: 'absolute',
         top: 41,
@@ -34,10 +39,9 @@ function FilesDrawer({
         display: 'flex',
         flexDirection: 'column',
         borderLeft: '1px solid var(--t-divider-subtle)',
-        background: 'var(--t-bg)',
-        boxShadow: open ? '-18px 0 42px rgba(15, 23, 42, 0.08)' : 'none',
+        borderRadius: 0,
         transform: open ? 'translateX(0)' : 'translateX(102%)',
-        transition: 'transform 170ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: reducedMotion ? 'none' : 'transform 170ms cubic-bezier(0.22, 1, 0.36, 1)',
         pointerEvents: open ? 'auto' : 'none',
         zIndex: 30,
       }}
@@ -149,7 +153,7 @@ function FilesDrawer({
           );
         })}
       </div>
-    </aside>
+    </FloatingSurface>
   );
 }
 

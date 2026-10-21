@@ -13,6 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider, useTheme } from './context';
+import { getPalette, resolveTheme } from './registry';
 
 type ThemeSnapshot = ReturnType<typeof useTheme>;
 
@@ -106,6 +107,19 @@ describe('ThemeProvider on a non-macOS shell', () => {
     expect(document.documentElement.style.getPropertyValue('--t-terminal-bg')).not.toBe('transparent');
   });
 
+  it.each(['light', 'dark'] as const)('restores %s prompt material when leaving All Glass and reapplies it on reentry', (palette) => {
+    stampHostPlatform('macos');
+    localStorage.setItem('cortex-theme-palette', palette);
+    const theme = render();
+    const promptBackground = () => document.documentElement.style.getPropertyValue('--t-chat-user-bg');
+    expect(promptBackground()).toBe('var(--t-glass-muted-strong)');
+
+    act(() => theme?.setWorkspaceGlass(false));
+    expect(promptBackground()).toBe(resolveTheme(getPalette(palette), 'glass').cssVars['--t-chat-user-bg']);
+    act(() => theme?.setWorkspaceGlass(true));
+    expect(promptBackground()).toBe('var(--t-glass-muted-strong)');
+  });
+
   it('treats an unstamped host (browser, pre-#1743 shell) as macOS', () => {
     expect(render()?.surface).toBe('glass');
   });
@@ -143,4 +157,18 @@ describe('ThemeProvider on a non-macOS shell', () => {
     expect(document.documentElement.dataset.surface).toBe('solid');
     expect(localStorage.getItem('cortex-workspace-glass')).toBeNull();
   });
+  it('reports the displayed All Glass surface while preserving the saved solid preference', () => {
+    stampHostPlatform('macos');
+    localStorage.setItem('cortex-reduce-transparency', 'on');
+    const snapshots: ThemeSnapshot[] = [];
+    act(() => root.render(createElement(ThemeProvider, null,
+      createElement(Harness, { onTheme: value => { snapshots.push(value); } }))));
+    expect(snapshots.at(-1)?.surface).toBe('glass');
+    expect(document.documentElement.dataset.surface).toBe('glass');
+    expect(localStorage.getItem('cortex-reduce-transparency')).toBe('on');
+    act(() => snapshots.at(-1)?.setWorkspaceGlass(false));
+    expect(snapshots.at(-1)?.surface).toBe('solid');
+    expect(document.documentElement.dataset.surface).toBe('solid');
+  });
+
 });

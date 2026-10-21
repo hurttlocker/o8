@@ -66,7 +66,7 @@ function MobileAssistantThreadSurface({
   }, []);
 
   // Drain the assistant pending queue on reconnect (packet #646).
-  useDrainAssistantQueueOnline(tabId);
+  useDrainAssistantQueueOnline(tabId, repoPath);
 
   const persistConversation = useCallback(async (messages: PersistedMobileChatMessage[], signature: string) => {
     if (!tabId || messages.length === 0) return;
@@ -162,7 +162,7 @@ function MobileAssistantThreadSurface({
       </ThreadPrimitive.Viewport>
 
       <div style={{ marginTop: 12 }}>
-        <ComposerBar palette={palette} selectedModel={selectedModel} />
+        <ComposerBar palette={palette} selectedModel={selectedModel} repoPath={repoPath} threadId={tabId} />
       </div>
 
       <ThreadPrimitive.ScrollToBottom
@@ -212,7 +212,7 @@ export function MobileAssistantChatThread({
   palette: MobilePalette;
 }) {
   const chatModel = useMemo(
-    () => wrapWithOfflineQueue(createMobileChatModel(selectedModel, repoPath), tabId),
+    () => wrapWithOfflineQueue(createMobileChatModel(selectedModel, repoPath, undefined, tabId), tabId, repoPath),
     [repoPath, selectedModel, tabId],
   );
   const runtime = useLocalRuntime(chatModel, {

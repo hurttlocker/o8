@@ -1,4 +1,4 @@
-import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
+import { normalizeClaudeCodePacketPins, normalizeDecompositionMetadata, normalizePacketDispatcher, normalizePacketExecutionCarrier, normalizePacketLaunchContext, normalizePacketTaskContractFields, normalizePacketType, normalizePacketWorkspaceIdentity } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { normalizePacketRecovery } from '@/lib/lane/recovery-info';
@@ -323,7 +323,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     referenceLabel,
     title: typeof packet.title === 'string' && packet.title.trim() ? packet.title : `Packet ${index + 1}`,
     summary: typeof packet.summary === 'string' ? packet.summary : '', origin: packet.origin === 'design-mode' ? 'design-mode' : undefined,
-    workspaceTargetPath: typeof packet.workspaceTargetPath === 'string' && packet.workspaceTargetPath.trim() ? packet.workspaceTargetPath : null,
+    ...normalizePacketWorkspaceIdentity(packet),
     branchTarget: branchTarget || (queueState === 'draft' ? '' : 'main'),
     runtime: workerRouting.selectedRuntime, model: typeof packet.model === 'string' && packet.model.trim() ? packet.model.trim() : null,
     dependencyLabels: Array.isArray(packet.dependencyLabels)
@@ -393,7 +393,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
       : undefined,
     workerIntent,
-    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined,
+    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined, mergeHold: packet.mergeHold === true ? true : undefined,
     workerRouting,
     // Nullable on purpose: an absent pin must stay null — normalizeRuntime()'s
     // 'codex' default would re-manufacture the #1460 always-truthy boot pin.
@@ -653,7 +653,7 @@ export function queueOrchestratorSessionPrelude(
 ) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = text.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   const nextItem = {
     id: `prelude-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     text: trimmed,
@@ -706,13 +706,13 @@ export function readStoredOrchestratorModel(repoPath: string | null | undefined)
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return null;
   const stored = window.localStorage.getItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`)?.trim();
-  return stored ? stored : null;
+  return stored ?? null;
 }
 
 export function writeStoredOrchestratorModel(repoPath: string | null | undefined, model: string) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = model.trim();
-  if (!normalizedRepoPath || !trimmed || typeof window === 'undefined') return;
+  if (!normalizedRepoPath || typeof window === 'undefined') return;
   window.localStorage.setItem(`${ORCHESTRATOR_MODEL_STORAGE_PREFIX}${normalizedRepoPath}`, trimmed);
 }
 

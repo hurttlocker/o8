@@ -9,6 +9,7 @@ export interface O8BrowserTab {
   title: string;
   /** Host shown as the row's trailing detail, e.g. `127.0.0.1:58929`. */
   host: string;
+  surface?: BrowserTab['surface'];
 }
 
 function hostOf(url: string): string | null {
@@ -37,7 +38,7 @@ export function o8OwnedTabs(tabs: readonly BrowserTab[], o8Host: string | null):
     if (!host || (o8Host && host === o8Host)) continue;
     if (seen.has(tab.url)) continue;
     seen.add(tab.url);
-    out.push({ id: tab.id, url: tab.url, title: tab.title?.trim() || host, host });
+    out.push({ id: tab.id, url: tab.url, title: tab.title?.trim() || host, host, surface: tab.surface });
   }
   return out;
 }

@@ -284,7 +284,7 @@ export async function assessDurableApprovedReview(
 
     let currentHead: string | undefined;
     try {
-      currentHead = normalizeHeadSha(await readHeadSha(cwd));
+      currentHead = normalizeHeadSha(await readHeadSha(cwd, lane.repoPath));
     } catch {
       return { approved: false, diffBudgetWaived: false, highConfidence: false, approvalId: null, reason: 'Current HEAD could not be verified against the AI review.' };
     }

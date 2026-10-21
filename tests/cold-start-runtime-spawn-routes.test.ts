@@ -92,7 +92,7 @@ describe('cold-start runtime spawn routes', () => {
     expect(response.status).toBe(400);
     expect(payload.code).toBe('repo_unavailable');
     expect(payload.error).toContain(missingPath);
-    expect(payload.error).toContain('no longer exists');
+    expect(payload.error).toContain('Repository folder not found');
     expect(payload.error).not.toContain('ENOENT');
     expect(resolveCliMock).not.toHaveBeenCalled();
     expect(spawnMock).not.toHaveBeenCalled();

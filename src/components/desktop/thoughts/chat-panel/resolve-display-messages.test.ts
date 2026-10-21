@@ -98,3 +98,20 @@ describe('resolveDisplayMessages', () => {
     expect(resolveDisplayMessages({ historyEntries: [], chatMessages: [], streamMessages: [] })).toEqual([]);
   });
 });
+
+it('keeps delivery confirmation against a stale stream and removes only its warning', () => {
+  const user: MobileTranscriptEntry = {
+    id: 'orch-user-orch-send-a', role: 'user', text: 'same', timestamp: 100, deliveryConfirmed: true,
+  };
+  const warning: MobileTranscriptEntry = {
+    id: 'orch-delivery-error-orch-send-a', role: 'system', text: 'warning', timestamp: 104,
+  };
+  const other: MobileTranscriptEntry = { ...warning, id: 'orch-delivery-error-orch-send-b' };
+  const output = resolveDisplayMessages({
+    historyEntries: [warning, other], chatMessages: [user],
+    streamMessages: [{ ...user, deliveryConfirmed: false }, warning],
+  });
+  expect(output.find((entry) => entry.id === user.id)?.deliveryConfirmed).toBe(true);
+  expect(output.map((entry) => entry.id)).not.toContain(warning.id);
+  expect(output.map((entry) => entry.id)).toContain(other.id);
+});

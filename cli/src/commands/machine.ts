@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir, resolveConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
+import { REMOTE_NODE_COMMAND } from '../../../src/lib/usage/remote-node-command.js';
 
 interface MachineProfile {
   id: string;
@@ -15,6 +16,7 @@ interface MachineProfile {
   remoteCli: string;
   sshConfig: string | null;
   enabled: boolean;
+  usageOnly?: boolean;
 }
 
 interface MachineCatalog {
@@ -59,7 +61,8 @@ function isMachine(value: unknown): value is MachineProfile {
     && (profile.sshConfig === null || (typeof profile.sshConfig === 'string'
       && profile.sshConfig.startsWith('/') && !/[\r\n\0]/.test(profile.sshConfig)))
     && Number.isSafeInteger(profile.port) && Number(profile.port) >= 1
-    && Number(profile.port) <= 65_535 && typeof profile.enabled === 'boolean';
+    && Number(profile.port) <= 65_535 && typeof profile.enabled === 'boolean'
+    && (profile.usageOnly === undefined || typeof profile.usageOnly === 'boolean');
 }
 
 function saveCatalog(catalog: MachineCatalog): void {
@@ -133,12 +136,13 @@ function sshArgs(profile: MachineProfile, command: string[], interactive = false
 }
 
 function remoteCommand(profile: MachineProfile, sub: string, rest: string[], mode: OutputMode): string[] {
+  if (profile.usageOnly) throw new CliError('machine_usage_only', 'This machine is connected for usage history only.', EXIT.CONFLICT);
   return [profile.remoteCli, 'terminal', sub, ...rest,
     ...(sub === 'control' && mode.human ? ['--filter-probe-replies'] : []),
     ...(mode.human ? ['--human'] : [])];
 }
 
-async function sshRun(profile: MachineProfile, command: string[], stream = false, timeoutMs = 15_000, interactive = false): Promise<{ code: number; output: string; error: string }> {
+async function sshRun(profile: MachineProfile, command: string[], stream = false, timeoutMs = 15_000, interactive = false, input?: string): Promise<{ code: number; output: string; error: string }> {
   return new Promise((resolve, reject) => {
     // Let OpenSSH own the local PTY for human control. It propagates the
     // terminal size and SIGWINCH to the remote PTY; piping it through Node
@@ -188,9 +192,19 @@ async function sshRun(profile: MachineProfile, command: string[], stream = false
     });
     if (stream) {
       if (!interactive && child.stdin) process.stdin.pipe(child.stdin);
-    } else child.stdin?.end();
+    } else child.stdin?.end(input);
     if (!stream) timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, timeoutMs);
   });
+}
+
+async function checkMachine(profile: MachineProfile, mode: OutputMode) {
+  if (!profile.usageOnly) return sshRun(profile, remoteCommand(profile, 'list', [], { ...mode, human: false }));
+  const result = await sshRun(profile, ['sh', '-c', REMOTE_NODE_COMMAND], false, 15_000, false,
+    'const [major, minor] = process.versions.node.split(".").map(Number); if (major !== 22 || minor < 13) process.exitCode = 1; else process.stdout.write("Node 22 ready");\n');
+  if (result.code === 0 && result.output !== 'Node 22 ready') {
+    throw new CliError('machine_not_ready', 'Remote machine did not confirm Node 22 readiness.', EXIT.CONFLICT);
+  }
+  return result;
 }
 
 function assertTerminalInventory(output: string): void {
@@ -215,10 +229,12 @@ function parseAdd(rest: string[]): Omit<MachineProfile, 'id' | 'enabled'> {
   let port = 22;
   let remoteCli = 'o8';
   let sshConfig: string | null = null;
+  let usageOnly = false;
   if (!target) throw new CliError('invalid_args', 'Use `machine add <ssh-target> --label <name> [--port n] [--remote-cli path]`.', EXIT.INVALID_ARGS);
   validateTarget(target);
   for (let i = 1; i < rest.length; i += 2) {
     const flag = rest[i];
+    if (flag === '--usage-only') { usageOnly = true; i -= 1; continue; }
     const value = rest[i + 1];
     if (!value || !['--label', '--port', '--remote-cli', '--ssh-config'].includes(flag)) {
       throw new CliError('invalid_args', 'Unknown or incomplete machine add option.', EXIT.INVALID_ARGS);
@@ -236,7 +252,7 @@ function parseAdd(rest: string[]): Omit<MachineProfile, 'id' | 'enabled'> {
   if (sshConfig && (!sshConfig.startsWith('/') || !existsSync(sshConfig) || !lstatSync(sshConfig).isFile())) {
     throw new CliError('invalid_args', '--ssh-config must name an existing absolute SSH config file.', EXIT.INVALID_ARGS);
   }
-  return { label, target, port, remoteCli, sshConfig };
+  return { label, target, port, remoteCli, sshConfig, ...(usageOnly ? { usageOnly: true } : {}) };
 }
 
 export async function runMachine(mode: OutputMode, sub: string | undefined, rest: string[]): Promise<number> {
@@ -261,9 +277,9 @@ async function runMachineUnlocked(mode: OutputMode, sub: string | undefined, res
       throw new CliError('machine_exists', `Machine label ${details.label} already exists.`, EXIT.CONFLICT);
     }
     const profile: MachineProfile = { id: randomUUID(), ...details, enabled: true };
-    const checked = await sshRun(profile, remoteCommand(profile, 'list', [], { ...mode, human: false }));
+    const checked = await checkMachine(profile, mode);
     if (checked.code !== 0) throw new CliError('machine_not_ready', `Remote o8 terminal host is not ready (${checked.code}).`, EXIT.CONFLICT);
-    assertTerminalInventory(checked.output);
+    if (!profile.usageOnly) assertTerminalInventory(checked.output);
     catalog.machines.push(profile);
     saveCatalog(catalog);
     if (mode.human) process.stdout.write(`Saved ${profile.label} (${profile.id}).\n`);
@@ -277,9 +293,9 @@ async function runMachineUnlocked(mode: OutputMode, sub: string | undefined, res
   if (sub === 'check') {
     if (rest.length !== 1) throw new CliError('invalid_args', 'machine check takes one ID or label.', EXIT.INVALID_ARGS);
     if (!profile.enabled) throw new CliError('machine_disabled', 'That SSH machine is disabled.', EXIT.CONFLICT);
-    const result = await sshRun(profile, remoteCommand(profile, 'list', [], { ...mode, human: false }));
+    const result = await checkMachine(profile, mode);
     if (result.code !== 0) throw new CliError('machine_not_ready', `Remote o8 terminal host returned ${result.code}.`, EXIT.CONFLICT);
-    assertTerminalInventory(result.output);
+    if (!profile.usageOnly) assertTerminalInventory(result.output);
     if (mode.human) process.stdout.write(`${profile.label} is reachable.\n`);
     else printJson({ schema: 'o8/cli/machine.check/v1', machineId: profile.id, reachable: true });
     return EXIT.OK;
