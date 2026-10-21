@@ -240,6 +240,8 @@ function aggregateReport() {
 }
 
 beforeAll(async () => {
+  const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+  await updateOperatorDefaults({ workerRuntimes: ['qoder'], defaultDispatchRuntime: 'qoder', defaultDispatchModel: '' });
   provider = createServer((req, res) => {
     const reply = (status: number, payload: unknown) => {
       res.writeHead(status, { 'content-type': 'application/json' });
