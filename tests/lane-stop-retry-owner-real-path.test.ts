@@ -3,12 +3,58 @@ import { createServer } from 'node:http';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 import { NextRequest } from 'next/server';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { MODEL_IDS } from '@/lib/models';
 import type { McpToolResult } from '@/lib/mcp/operator-handlers/shared';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
+import type { OwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 
+// vi.waitFor advances fake Date even when timers stay real. Observe metadata
+// with real timers so byte-preservation checks retain their frozen clock.
+async function observe(check: () => void | Promise<void>) {
+  const deadline = performance.now() + 5000;
+  while (true) {
+    try { await check(); return; }
+    catch (error) { if (performance.now() >= deadline) throw error; }
+    await wait(10);
+  }
+}
+
+const exitWindow = vi.hoisted(() => ({ surfaceId: '', observeLookup: false, blocked: false,
+  released: false, release: null as (() => void) | null, captured: null as OwnedActiveRun | null }));
+vi.mock('@/lib/runtimes/shared/owned-session/session-io', async (original) => {
+  const actual = await original<typeof import('@/lib/runtimes/shared/owned-session/session-io')>();
+  return { ...actual, createOwnedSessionIo: (...args: Parameters<typeof actual.createOwnedSessionIo>) => {
+    const io = actual.createOwnedSessionIo(...args);
+    return { ...io, saveSession: async (session: Parameters<typeof io.saveSession>[0]) => {
+      if (session.surfaceId === exitWindow.surfaceId && !session.activeRun && !exitWindow.released) {
+        exitWindow.blocked = true;
+        await new Promise<void>(resolve => { exitWindow.release = resolve; });
+      }
+      return io.saveSession(session);
+    } };
+  } };
+});
+vi.mock('@/lib/runtimes/shared/owned-session-index', async (original) => {
+  const actual = await original<typeof import('@/lib/runtimes/shared/owned-session-index')>();
+  return { ...actual, lookupOwnedActiveRunFresh: async (surfaceId: string) => {
+    const run = await actual.lookupOwnedActiveRunFresh(surfaceId);
+    if (surfaceId === exitWindow.surfaceId && exitWindow.observeLookup) {
+      exitWindow.captured = run;
+      await observe(() => expect(exitWindow.blocked).toBe(true));
+      expect(run?.id).toBeTruthy();
+      exitWindow.observeLookup = false;
+      exitWindow.released = true;
+      exitWindow.release?.();
+      await observe(async () => {
+        expect((await actual.readOwnedSessionRecord(surfaceId))?.activeRun).toBeFalsy();
+      });
+    }
+    return run;
+  } };
+});
 const publicationSeam = vi.hoisted(() => ({ beforePublish: null as (() => void) | null }));
 vi.mock('@/lib/orchestrator/mission-registry', async (original) => {
   const actual = await original<typeof import('@/lib/orchestrator/mission-registry')>();
@@ -89,6 +135,7 @@ const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const mcpRoute = await import('@/app/api/mcp/route');
 const runsRoute = await import('@/app/api/panel/managed-runs/route');
 const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
+const { readOwnedSessionRecord } = await import('@/lib/runtimes/shared/owned-session-index');
 const { panelGateMiddleware } = await import('@/middleware');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
@@ -223,6 +270,10 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
+  exitWindow.surfaceId = '';
+  exitWindow.observeLookup = false;
+  exitWindow.released = true;
+  exitWindow.release?.();
   publicationSeam.beforePublish = null;
   vi.useRealTimers();
   const { getOwnedCodexFleetAdditions, interruptOwnedCodexSession } = await import('@/lib/codex/owned');
@@ -256,6 +307,17 @@ async function dispatched(name: string, managed = false, committed = false) {
     expect(capture.stdout).toContain('managed-test-ran');
   }
   return { created, packet, laneId, owned, capturePath, sessionKey: current.lane!.sessionKey! };
+}
+
+async function observeInterruptedExit(f: Awaited<ReturnType<typeof dispatched>>) {
+  await observe(async () => {
+    const session = await readOwnedSessionRecord(f.sessionKey);
+    expect(session?.activeRun).toBeFalsy();
+    expect(session?.recentRuns).toContainEqual(expect.objectContaining({
+      id: f.owned.activeRun.id, outcome: 'interrupted', finishedAt: expect.any(String),
+      childExit: expect.objectContaining({ classification: expect.any(String) }),
+    }));
+  });
 }
 
 it.each([false, true])('preserves dispatched managed work through Stop and Retry (committed=%s)', async committed => {
@@ -387,6 +449,7 @@ it('stops and salvages the exact registered owner after another mission becomes 
   expect(stopped.body.ok, JSON.stringify(stopped.body)).toBe(true);
   expect(rawCurrent()).toBe(currentBefore);
   expect(readMissionRegistryEntry(f.created.missionId)!.mission.packets[0].operatorStopped).toBe(true);
+  await observeInterruptedExit(f);
   const retry = await post('/api/orchestrator/reset-packet', { packetId: f.packet.id, clearWorktree: false,
     idempotencyKey: 'registered-stop-preserve-work-retry' });
   expect(retry.status, JSON.stringify(retry.body)).toBe(200);
@@ -394,4 +457,46 @@ it('stops and salvages the exact registered owner after another mission becomes 
   expect(readFileSync(join(f.owned.cwd, 'worker-result.txt'), 'utf8')).toBe(savedWork);
   expect(rawCurrent()).toBe(currentBefore);
   expect(readMissionRegistryEntry(f.created.missionId)!.mission.packets[0].lane!.worktreePath).toBe(f.owned.cwd);
+}, 90000);
+
+it('preserves registered work when Retry races exit finalization, then salvages on a fresh explicit retry', async () => {
+  const startsBefore = starts();
+  const f = await dispatched('registered-exit-finalization-retry', true, true);
+  const savedWork = readFileSync(join(f.owned.cwd, 'worker-result.txt'), 'utf8');
+  vi.useFakeTimers({ toFake: ['Date'] });
+  payload(await create({ issues_inline: [{ title: 'Unrelated current mission', body: 'Preserve this state.' }] }));
+  const currentBefore = rawCurrent();
+  const laneBefore = readMissionRegistryEntry(f.created.missionId)!.mission.packets[0].lane;
+  Object.assign(exitWindow, { surfaceId: f.sessionKey, observeLookup: false, blocked: false,
+    released: false, release: null, captured: null });
+  const stopped = await post('/api/lanes', { verb: 'stop', laneId: f.laneId });
+  expect(stopped.body.ok, JSON.stringify(stopped.body)).toBe(true);
+  exitWindow.observeLookup = true;
+  const request = { packetId: f.packet.id, clearWorktree: false, idempotencyKey: 'registered-exit-pending-retry' };
+  const early = await post('/api/orchestrator/reset-packet', request);
+  expect(early.status, JSON.stringify(early.body)).toBe(409);
+  expect(early.body.error.code).toBe('kill_unconfirmed');
+  expect(exitWindow.captured?.id).toBe(f.owned.activeRun.id);
+  expect(exitWindow.blocked).toBe(true);
+  expect(exitWindow.released).toBe(true);
+  expect(rawCurrent()).toBe(currentBefore);
+  expect(readMissionRegistryEntry(f.created.missionId)!.mission.packets[0]).toMatchObject({
+    operatorStopped: true, queueState: 'held', blockedReason: 'kill_unconfirmed', lane: laneBefore,
+  });
+  expect(readFileSync(join(f.owned.cwd, 'worker-result.txt'), 'utf8')).toBe(savedWork);
+  expect(starts()).toBe(startsBefore + 1);
+  const held = rawRegistry(f.created.missionId);
+  const replay = await post('/api/orchestrator/reset-packet', request);
+  expect(replay.status).toBe(409);
+  expect(replay.body.error.code).toBe('kill_unconfirmed');
+  expect(rawRegistry(f.created.missionId)).toEqual(held);
+  await observeInterruptedExit(f);
+  const retry = await post('/api/orchestrator/reset-packet', { ...request, idempotencyKey: 'registered-exit-complete-retry' });
+  expect(retry.status, JSON.stringify(retry.body)).toBe(200);
+  expect(retry.body.result).toMatchObject({ reset: false, salvaged: true, packetId: f.packet.id,
+    worktreePruned: false, branchDeleted: false });
+  expect(readFileSync(join(f.owned.cwd, 'worker-result.txt'), 'utf8')).toBe(savedWork);
+  expect(rawCurrent()).toBe(currentBefore);
+  expect(readMissionRegistryEntry(f.created.missionId)!.mission.packets[0].lane!.worktreePath).toBe(f.owned.cwd);
+  expect(starts()).toBe(startsBefore + 1);
 }, 90000);

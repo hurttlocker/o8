@@ -55,6 +55,22 @@ describe('owned Stop outcome transaction', () => {
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
+  it('refuses a captured run that settles before the stop lock without signaling', async () => {
+    const exitWriter = lock(surfaceId, async () => {
+      saved.activeRun = undefined;
+      Object.assign(saved.recentRuns[0], { outcome: 'interrupted', finishedAt: '2026-09-10T00:00:00.000Z',
+        childExit: { code: null, signal: 'SIGINT', classification: 'signal-kill' } });
+    });
+    const operation = vi.fn(async () => delivered);
+    const pending = withOwnedStopOutcome(surfaceId, expected, operation);
+    await exitWriter;
+    const terminal = structuredClone(saved);
+    expect(await pending).toMatchObject({ attempted: false, confirmedDead: false, alreadyDead: false });
+    expect(operation).not.toHaveBeenCalled();
+    expect(io.saveSession).not.toHaveBeenCalled();
+    expect(saved).toEqual(terminal);
+  });
+
   it.each([
     { id: 'successor' }, { id: undefined }, { pid: 43 }, { processGroupId: 43 },
     { processMarker: 'successor-marker' }, { tmuxSession: 'successor-bridge' },
