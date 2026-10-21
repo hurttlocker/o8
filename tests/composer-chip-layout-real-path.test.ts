@@ -1,7 +1,7 @@
 // Real-path regression test for the composer selector chip row (issue #2358, phase 1).
 //
-// Reported failure: in Multitask mode the Lead chip and Workers chip collide near
-// ~400px, the Lead label shrinks to nothing, and controls become unreachable.
+// Regression: near 400px the lead label must remain visible and the current
+// footer controls must remain reachable without painted collisions.
 // This renders the REAL footer through InputButtons in headless Chromium and
 // asserts on browser boxes, clip-aware painted unions, and hit-test reachability.
 // Only unrelated persistence/store, entitlement context, and fetch are stubbed.
@@ -35,9 +35,6 @@ const selectorStateHookPath = path.join(
 // Generic public fixtures — no real provider ids, no session keys.
 const LONG_MODEL_LABEL = 'Probe Specimen 4F2A9C7E';
 const LONG_MODEL_ID = 'codex-probe-orchestrator-specimen-4f2a9c7e';
-// Real registry label for the `claude-code` dispatch runtime (a longer Workers
-// chip than the terse "Codex" default).
-const WORKER_RUNTIME_LABEL = 'Claude Code';
 const THREAD_ID = 'fixture-thread';
 const REPO_LABEL = 'Fixture Repo';
 const proofDir = process.env.O8_COMPOSER_PROOF_DIR?.trim() || null;
@@ -82,15 +79,13 @@ interface ComposerMetrics {
   leadLabelPaintedWidth: number;
   leadLabelTextWidth: number;
   leadLabelFull: boolean;
-  modeHintVisible: boolean;
   meterPaintedWidth: number;
   meterFullWidth: number;
   effortWordText: string;
-  workersLabelText: string;
 }
 
-const CONTROL_KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'] as const;
-const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'] as const;
+const CONTROL_KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'thinking', 'mic', 'send'] as const;
+const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'thinking', 'mic', 'send'] as const;
 
 // Evaluated inside the page (serialized by Playwright — it must not reference
 // any outer-scope binding). Finds the real footer controls by their production
@@ -99,7 +94,7 @@ const REQUIRED_CONTROLS = ['mode', 'attach', 'meter', 'lead', 'workers', 'thinki
 // interactive center. Text clipped to nothing contributes nothing; text painted
 // over a sibling is measured.
 function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
-  const KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'workers', 'thinking', 'mic', 'send'];
+  const KEYS = ['mode', 'attach', 'leading', 'meter', 'lead', 'thinking', 'mic', 'send'];
 
   function withSize(box: { left: number; top: number; right: number; bottom: number }): Box {
     return { ...box, width: box.right - box.left, height: box.bottom - box.top };
@@ -229,7 +224,6 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
   const meterWrapper = query('[data-testid="composer-selector-meter"]');
   const meterButton = query('[data-context-meter]');
   const lead = query('[data-testid="composer-selector-lead"]');
-  const workers = query('[data-testid="composer-selector-workers"]');
   const thinking = query('[data-testid="composer-selector-thinking"]');
   const micWrapper = query('[data-testid="composer-selector-mic"]');
   const micButton = micWrapper?.querySelector('button') ?? null;
@@ -242,7 +236,6 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
     leading: metricsFor(leading, null),
     meter: metricsFor(meterWrapper, meterButton),
     lead: metricsFor(lead, lead),
-    workers: metricsFor(workers, workers),
     thinking: metricsFor(thinking, thinking),
     mic: metricsFor(micWrapper, micButton),
     send: metricsFor(sendWrapper, sendButton),
@@ -258,14 +251,15 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
     }
   }
 
-  // The chip-vs-chip collision: painted content of one chip reaching into the
-  // sibling chip's border box.
   const contentOverlaps: string[] = [];
-  if (controls.lead.painted && controls.workers.box && overlapArea(controls.lead.painted, controls.workers.box) > 1) {
-    contentOverlaps.push('lead>workers');
-  }
-  if (controls.workers.painted && controls.lead.box && overlapArea(controls.workers.painted, controls.lead.box) > 1) {
-    contentOverlaps.push('workers>lead');
+  for (const key of KEYS) {
+    for (const sibling of KEYS) {
+      const painted = controls[key].painted;
+      const box = controls[sibling].box;
+      if (key !== sibling && painted && box && overlapArea(painted, box) > 1) {
+        contentOverlaps.push(`${key}>${sibling}`);
+      }
+    }
   }
 
   const escapes = KEYS.filter((key) => controls[key].escapes);
@@ -296,11 +290,6 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
   const identityPainted = identitySpan ? paintedUnion(identitySpan) : null;
   const leadIdentityPaintedWidth = identityPainted ? identityPainted.width : 0;
 
-  // Compact-only collapse: the mode shortcut hint disappears and the effort
-  // meter stays fully visible. Resolve existing elements on both base and fix.
-  const modeHintPainted = Array.from(mode?.querySelectorAll('span') ?? []).find((span) => span.textContent?.trim() === '⇧⇥') ?? null;
-  const modeHintUnion = modeHintPainted ? paintedUnion(modeHintPainted) : null;
-  const modeHintVisible = Boolean(modeHintUnion && modeHintUnion.width > 1);
   const effortMeter = query('[data-testid="composer-selector-meter-bar"]')?.parentElement ?? null;
   const effortMeterUnion = effortMeter ? paintedUnion(effortMeter) : null;
   const meterPaintedWidth = effortMeterUnion ? effortMeterUnion.width : 0;
@@ -317,11 +306,9 @@ function measureComposerInPage(probe: { modelLabel: string }): ComposerMetrics {
     leadLabelPaintedWidth: leadIdentityPaintedWidth,
     leadLabelTextWidth,
     leadLabelFull: leadLabelTextWidth <= 0 ? false : leadIdentityPaintedWidth >= leadLabelTextWidth - 0.5,
-    modeHintVisible,
     meterPaintedWidth,
     meterFullWidth: effortMeter?.getBoundingClientRect().width ?? 0,
     effortWordText: (query('[data-testid="composer-selector-effort-word"]')?.textContent ?? '').trim(),
-    workersLabelText: (query('[data-testid="composer-selector-workers-label"]')?.textContent ?? '').trim(),
   };
 }
 
@@ -432,7 +419,6 @@ import { DictationHost } from ${JSON.stringify(path.join(repoRoot, 'src/componen
 
 const MODEL_ID = ${JSON.stringify(LONG_MODEL_ID)};
 const MODEL_LABEL = ${JSON.stringify(LONG_MODEL_LABEL)};
-const RUNTIME_LABEL = ${JSON.stringify(WORKER_RUNTIME_LABEL)};
 const THREAD_ID = ${JSON.stringify(THREAD_ID)};
 const REPO_LABEL = ${JSON.stringify(REPO_LABEL)};
 
@@ -607,15 +593,10 @@ window.__o8ComposerHarness = (() => {
       }).__o8ComposerHarness;
       harness.mount(width);
     }, widthPx);
-    // Wait for the fetched operator default (claude-code) to reach the Workers
-    // chip, so the measured runtime label is the real, longer one.
-    await page.waitForFunction((runtimeLabel) => {
-      const label = document.querySelector('[data-testid="composer-selector-workers-label"]');
-      return Boolean(document.querySelector('[data-testid="composer-selector-lead"]'))
-        && Boolean(document.querySelector('[data-testid="composer-selector-workers"]'))
-        && Boolean(document.querySelector('[data-testid="composer-selector-send"] button'))
-        && Boolean(label && (label.textContent ?? '').includes(runtimeLabel));
-    }, WORKER_RUNTIME_LABEL, { timeout: 20_000 });
+    // Measure the current production footer; worker selection lives outside it.
+    await page.waitForFunction(() => Boolean(document.querySelector('[data-testid="composer-selector-lead"]'))
+      && Boolean(document.querySelector('[data-testid="composer-selector-send"] button')), undefined, { timeout: 20_000 });
+    expect(await page.locator('[data-testid="composer-selector-workers"]').count()).toBe(0);
     await settleLayout();
     return await page.evaluate(
       measureComposerInPage,
@@ -698,10 +679,9 @@ window.__o8ComposerHarness = (() => {
 
   // Accessible identity + reachable full value survive at every width, and the
   // lead model identity stays VISIBLY painted (not merely present in textContent
-  // or aria-label). Effort/Workers labels may collapse at narrow widths.
+  // or aria-label). Effort text may collapse at narrow widths.
   function assertAccessibleIdentity(metrics: ComposerMetrics): void {
     const lead = control(metrics, 'lead');
-    const workers = control(metrics, 'workers');
     const mode = control(metrics, 'mode');
 
     expect(lead.ariaLabel ?? '', 'Lead chip lost its accessible name').toContain('Lead:');
@@ -714,30 +694,24 @@ window.__o8ComposerHarness = (() => {
       'lead model identity is not a meaningful visible prefix (need ~40px at narrow widths)',
     ).toBeGreaterThanOrEqual(40 - 0.5);
 
-    expect(workers.ariaLabel ?? '', 'Workers chip lost its accessible name').toContain('Workers:');
-    expect(workers.ariaLabel ?? '', 'Workers chip accessible name dropped the runtime').toContain(WORKER_RUNTIME_LABEL);
-    expect(workers.title ?? '', 'Workers chip tooltip dropped the runtime').toContain(WORKER_RUNTIME_LABEL);
-
     expect(mode.ariaLabel ?? '', 'Mode chip lost its accessible name').toContain('Mode:');
   }
 
-  // Narrow width: the decorative shortcut hint and the text labels collapse, but
+  // Narrow width: the effort text label collapses, but
   // the model identity and a meaningful effort meter remain.
   function assertCompactCollapse(metrics: ComposerMetrics): void {
-    expect(metrics.modeHintVisible, 'mode Shift+Tab hint did not collapse at narrow width').toBe(false);
+    expect(metrics.effortWordText, 'effort text did not collapse at narrow width').toBe('');
     expect(metrics.meterPaintedWidth, 'effort meter is partially clipped at narrow width').toBeGreaterThanOrEqual(metrics.meterFullWidth - 0.5);
   }
 
-  // Roomy width: the visible labels + hint are fully present, not collapsed.
+  // Roomy width: the visible labels are fully present, not collapsed.
   function assertRoomVisibleLabels(metrics: ComposerMetrics): void {
     expect(metrics.leadLabelFull, 'roomy lead model label is truncated despite available width').toBe(true);
-    expect(metrics.workersLabelText, 'roomy Workers label does not carry the runtime').toContain(WORKER_RUNTIME_LABEL);
     expect(metrics.effortWordText, 'roomy effort label rendered with no visible text').not.toBe('');
-    expect(metrics.modeHintVisible, 'roomy mode Shift+Tab hint did not restore').toBe(true);
     expect(metrics.meterPaintedWidth, 'roomy effort meter is not fully visible').toBeGreaterThanOrEqual(14);
   }
 
-  it('keeps the Multitask chip row collision-free at ~380px', async () => {
+  it('keeps the Worktrees chip row collision-free at ~380px', async () => {
     const metrics = await mountAndMeasure(NARROW_COMPOSER_WIDTH_PX);
     await maybeCaptureProof('narrow-380');
     assertRealComposer(metrics, NARROW_COMPOSER_WIDTH_PX);
@@ -748,7 +722,7 @@ window.__o8ComposerHarness = (() => {
     assertNoChipCollision(metrics);
   });
 
-  it('keeps the Multitask chip row collision-free at the narrower nearby width', async () => {
+  it('keeps the Worktrees chip row collision-free at the narrower nearby width', async () => {
     const metrics = await mountAndMeasure(NARROWER_COMPOSER_WIDTH_PX);
     await maybeCaptureProof('narrow-340');
     assertRealComposer(metrics, NARROWER_COMPOSER_WIDTH_PX);
