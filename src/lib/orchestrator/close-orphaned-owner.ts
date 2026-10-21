@@ -15,6 +15,7 @@ import { archivedSessionPathForSurfaceId, assertArchivedWorkspaceSessionRestorab
 import { readOwnedSessionMetadata } from '@/lib/runtimes/shared/owned-session/metadata-read';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 import { readWorkspacePreservation } from '@/lib/workspace/preservation-store';
+import { readCapturedPurgeCwdSnapshot, type CapturedPurgeProcessWitness } from '@/lib/workspace/exact-directory-purge';
 import { readExactManagedFinalization } from '@/lib/workspace/exact-managed-finalization-state';
 import { completeExactManagedDirectoryRetirement } from '@/lib/workspace/exact-managed-directory-retirement';
 import { exactSnapshot, getWorkspaceRetirementPreservationId, getWorkspaceRetirementAction } from '@/lib/workspace/workspace-materialization-retirement';
@@ -98,15 +99,15 @@ function missingSessionRuns(lane: Lane, sessionKey: string | null): OrphanRunIde
   return rows;
 }
 
-async function inspectOwner(laneId: string, candidatePath: string): Promise<OrphanCloseOwner | null> {
-  try { return await inspectOwnerEvidence(laneId, candidatePath); }
+async function inspectOwner(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
+  try { return await inspectOwnerEvidence(laneId, candidatePath, capturedPurge); }
   catch (error) {
     if (error instanceof OrphanCloseRefusal) throw error;
     refuse('persisted session or workspace ownership could not be read');
   }
 }
 
-async function inspectOwnerEvidence(laneId: string, candidatePath: string): Promise<OrphanCloseOwner | null> {
+async function inspectOwnerEvidence(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
   const lane = getLane(laneId);
   if (!lane?.packetId || !lane.worktreePath || lane.ownership !== 'managed') return null;
   const repoPath = canonicalRepoRoot(lane.repoPath);
@@ -162,10 +163,13 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string): Prom
   if (runs.some((run) => !Number.isSafeInteger(run.pid) || run.pid <= 0
     || !Number.isSafeInteger(run.processGroupId) || run.processGroupId <= 0
     || !/^[A-Za-z0-9._-]{1,160}$/.test(run.runId))) refuse('retained process identity is incomplete');
-  await assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath });
+  await assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath, capturedPurge });
   if (state === 'archived' && sessionKey) {
     // Native evidence names live holders before the aggregate owned-session proof.
-    const process = await probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, { allowArchivedRetirement: true });
+    const process = await probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, {
+      allowArchivedRetirement: true,
+      ...(capturedPurge ? { readCwdSnapshot: () => readCapturedPurgeCwdSnapshot(capturedPurge, candidatePath) } : {}),
+    });
     if (process.state !== 'quiescent') refuse(`archived run process proof is ${process.state}: ${process.reasons.slice(0, 3).join('; ')}`);
   }
   return { packetId: lane.packetId, laneId: lane.id, repositoryUuid: repo.id, sourcePath,
@@ -282,11 +286,11 @@ async function prepareOwners(targets: Lane[]): Promise<Set<string>> {
   return admitted;
 }
 
-export async function assertOrphanCloseOwner(laneId: string, candidatePath: string): Promise<OrphanCloseOwner | null> {
+export async function assertOrphanCloseOwner(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
   const expected = orphanCloseOwner(laneId);
   if (!expected) return null;
   try {
-    const observed = await inspectOwner(laneId, candidatePath);
+    const observed = await inspectOwner(laneId, candidatePath, capturedPurge);
     if (!observed || JSON.stringify(expected) !== JSON.stringify(observed)) refuse('orphan close owner or persisted run evidence changed');
     return observed;
   } catch (error) {

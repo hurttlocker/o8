@@ -278,7 +278,15 @@ async function finishClaimUnlocked(
     if (!manifest?.fingerprint || !Array.isArray(manifest.entries) || manifest.entries.length === 0) {
       throw new Error('Exact retirement has no durable pre-purge descendant manifest.');
     }
-    await purgeExactDirectory(claim.claimPath, expected, undefined, undefined, async (candidatePath) => {
+    await purgeExactDirectory(claim.claimPath, expected, undefined,
+      claim.authority?.orphanCloseOwner === undefined ? undefined : async (candidatePath, capturedPurge) => {
+        // Nonempty orphan verification includes source and ignored artifacts,
+        // even in replay mode. Empty finalization needs no readable Git tree.
+        await verifyRetirementAuthority({
+          authority: claim.authority, sourcePath: claim.sourcePath, candidatePath,
+          identity: expected, verifyContents: false, capturedPurge,
+        });
+      }, async (candidatePath) => {
       await verifyFinalRemovalAuthority(claim);
       const emptyClaim = await directoryIdentity(candidatePath);
       if (!emptyClaim || !sameIdentity(emptyClaim, expected)) {

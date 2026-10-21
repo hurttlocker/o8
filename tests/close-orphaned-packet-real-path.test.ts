@@ -346,6 +346,26 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
     }
   }, 120_000);
 
+  it('refuses a forged purge helper witness without releasing captured bytes', async () => {
+    const source = await fixture('missing');
+    const purge = exactPurge.purgeExactDirectory;
+    const interception = vi.spyOn(exactPurge, 'purgeExactDirectory').mockImplementation((candidate, identity, before, after, ...rest) =>
+      purge(candidate, identity, before, async (capturedPath, witness) => {
+        expect(after).toBeTypeOf('function');
+        await after!(capturedPath, Object.create(witness) as typeof witness);
+      }, ...rest));
+    try {
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toMatch(/paused purge helper.*(unavailable|inconclusive)/);
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+      expect(readFileSync(path.join(claim.claimPath, 'source.txt'), 'utf8')).toBe('completed work\n');
+      expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+    } finally { interception.mockRestore(); }
+  }, 120_000);
+
   it('refuses a same-inode unique ignored-file edit before purging replay (P1-b)', async () => {
     const source = await fixture('missing');
     const relative = '.orphan-note';

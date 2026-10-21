@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
+import { withCapturedPurgeProcessExclusion, type CapturedPurgeProcessWitness } from '@/lib/workspace/exact-directory-purge';
 
 const execFileAsync = promisify(execFile);
 export class OrphanCloseRefusal extends Error {
@@ -36,11 +37,25 @@ function processName(commandLine: string): string {
 
 /** No cached inventory: inspect retained PID/group/marker identities and every open descriptor. */
 export async function assertOrphanProcessesAbsent(input: {
+  capturedPurge?: CapturedPurgeProcessWitness;
   runtime: string;
   runs: OrphanRunIdentity[];
   sourcePath: string;
   candidatePath: string;
 }): Promise<void> {
+  if (!input.capturedPurge) return inspectOrphanProcesses(input);
+  try {
+    await withCapturedPurgeProcessExclusion(input.capturedPurge, input.candidatePath,
+      (isHelper) => inspectOrphanProcesses(input, isHelper));
+  } catch (error) {
+    if (error instanceof OrphanCloseRefusal) throw error;
+    throw new OrphanCloseRefusal('paused purge helper process attestation is unavailable or inconclusive');
+  }
+}
+
+async function inspectOrphanProcesses(input: {
+  runtime: string; runs: OrphanRunIdentity[]; sourcePath: string; candidatePath: string;
+}, isHelper?: (pid: number) => boolean): Promise<void> {
   const raw = await command('ps', ['axeww', '-o', 'pid=,pgid=,ppid=,command=']);
   if (!raw?.trim()) throw new OrphanCloseRefusal('ps returned no process identity snapshot');
   const processes = raw.trim().split('\n').map((line) => {
@@ -63,6 +78,7 @@ export async function assertOrphanProcessesAbsent(input: {
   const files = await command('lsof', ['-nP', '-Fpcftn']);
   if (!files?.trim()) throw new OrphanCloseRefusal('lsof returned no open-file snapshot');
   const targets = [input.sourcePath, input.candidatePath].map((target) => path.resolve(target));
+  let helperObserved = false;
   let pid: number | null = null;
   let name = 'process';
   let hasCommand = false;
@@ -102,7 +118,8 @@ export async function assertOrphanProcessesAbsent(input: {
       // regular/unknown file name still refuses rather than hiding a holder.
       const file = line.slice(1).replace(/ \(deleted\)$/, '');
       if (targets.some((target) => file === target || file.startsWith(target + path.sep))) {
-        throw new OrphanCloseRefusal(`live process PID ${pid} (${name}) has an open file or cwd in the worktree`);
+        if (isHelper?.(pid)) helperObserved = true;
+        else throw new OrphanCloseRefusal(`live process PID ${pid} (${name}) has an open file or cwd in the worktree`);
       }
     } else {
       throw new OrphanCloseRefusal('lsof returned unexpected open-file protocol');
@@ -110,4 +127,5 @@ export async function assertOrphanProcessesAbsent(input: {
   }
   checkComplete();
   if (pid === null) throw new OrphanCloseRefusal('lsof open-file coverage is uncertain');
+  if (isHelper && !helperObserved) throw new OrphanCloseRefusal('lsof did not cover the attested purge helper');
 }

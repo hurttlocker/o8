@@ -65,10 +65,10 @@ export async function assertManagedRetirementQuiescence(input: {
     return { repositoryUuid: null, packetId: null, laneId: null, sessionKey: null };
   }
   const lane = lanes.length === 1 ? lanes[0] : null;
-  const orphan = lane ? await assertOrphanCloseOwner(lane.id, input.candidatePath) : null;
+  const orphan = lane ? await assertOrphanCloseOwner(lane.id, input.candidatePath, input.capturedPurge) : null;
   if (orphan && lane) {
-    if (input.capturedPurge || orphan.device !== input.identity.device || orphan.inode !== input.identity.inode) {
-      throw new Error('Orphan close cannot prove the captured purge or materialization identity.');
+    if (orphan.device !== input.identity.device || orphan.inode !== input.identity.inode) {
+      throw new Error('Orphan close cannot prove the exact materialization identity.');
     }
     return { repositoryUuid: orphan.repositoryUuid, packetId: orphan.packetId, laneId: lane.id,
       sessionKey: lane.sessionKey?.trim() || null, orphanedClose: true };

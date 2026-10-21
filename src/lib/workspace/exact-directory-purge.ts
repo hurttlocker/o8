@@ -128,6 +128,26 @@ export async function readCapturedPurgeCwdSnapshot(
   return { ...snapshot, rows: snapshot.rows.filter(row => row.pid !== captured.pid) };
 }
 
+/** Scoped exclusion for this exact live, paused helper, never a PID allowlist. */
+export async function withCapturedPurgeProcessExclusion<T>(
+  witness: CapturedPurgeProcessWitness,
+  candidatePath: string,
+  operation: (isHelper: (pid: number) => boolean) => Promise<T>,
+): Promise<T> {
+  const captured = capturedPurgeProcesses.get(witness);
+  if (!captured || path.resolve(candidatePath) !== captured.candidatePath) {
+    throw new Error('Purge helper exclusion has no exact candidate authority.');
+  }
+  await readCapturedPurgeCwdSnapshot(witness, candidatePath);
+  let active = true;
+  try {
+    const result = await operation((pid) => active
+      && capturedPurgeProcesses.get(witness) === captured && pid === captured.pid);
+    await readCapturedPurgeCwdSnapshot(witness, candidatePath);
+    return result;
+  } finally { active = false; }
+}
+
 export interface ExactDirectoryManifestEntry {
   relative: string;
   device: number;

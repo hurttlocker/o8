@@ -14,6 +14,7 @@ import { admitStandaloneRetirement, verifyStandaloneRetirement } from './standal
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { assertManagedRetirementQuiescence } from './retirement-process-authority';
 import { inspectArtifactRestoreRevision } from './ignored-artifact-io';
+import type { CapturedPurgeProcessWitness } from './exact-directory-purge';
 
 export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'empty-orphan';
 
@@ -101,6 +102,7 @@ export async function verifyRetirementAuthority(input: {
   candidatePath: string;
   identity: WorktreeMaterializationIdentity;
   verifyContents: boolean;
+  capturedPurge?: CapturedPurgeProcessWitness;
 }): Promise<void> {
   const reason = input.authority?.retirementReason;
   if (reason === 'standalone-clean') {
@@ -128,6 +130,7 @@ export async function verifyRetirementAuthority(input: {
   const owner = await assertManagedRetirementQuiescence({
     repositoryPath: payload.repositoryPath, worktreeId: payload.worktreeId,
     sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
+    capturedPurge: input.capturedPurge,
   });
   if (owner.repositoryUuid !== payload.repositoryUuid || owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
     || !(owner.orphanedClose && owner.sessionKey === null && payload.handoff.sessionIdentities.length === 0
@@ -169,5 +172,13 @@ export async function verifyRetirementAuthority(input: {
       }
       throw error;
     }
+  }
+  // Artifact subprocesses have exited. Repeat native proof at continuation.
+  if (input.capturedPurge && owner.orphanedClose) {
+    await assertManagedRetirementQuiescence({
+      repositoryPath: payload.repositoryPath, worktreeId: payload.worktreeId,
+      sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
+      capturedPurge: input.capturedPurge,
+    });
   }
 }
