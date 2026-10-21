@@ -17,6 +17,7 @@ fn main() {
   // build step validates that all externalBin sidecar files exist on disk.
   // We need the triple-suffixed copies in place before that validation runs.
   build_speech_recognizer();
+  build_visual_capture_media();
 
   // #932: tauri-plugin-mcp permissions are only registered when the
   // `dev-mcp-plugin` Cargo feature is on. Tauri's compile-time capability
@@ -62,6 +63,28 @@ fn main() {
   bake_sentry_dsn();
 
   tauri_build::build()
+}
+
+fn build_visual_capture_media() {
+  #[cfg(target_os = "macos")]
+  {
+    // The screen capture bridge links Swift. Resolve the OS runtime for both
+    // installed apps and Rust tests without requiring an Xcode runtime path.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    let source = Path::new("helpers/visual_capture_media.swift");
+    println!("cargo:rerun-if-changed={}", source.display());
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+      .join("visual-capture-media");
+    let target = std::env::var("TARGET").expect("TARGET");
+    let arch = if target.starts_with("x86_64") { "x86_64" } else { "arm64" };
+    let status = std::process::Command::new("swiftc")
+      .args(["-O", "-parse-as-library", "-target", &format!("{arch}-apple-macosx14.0"), "-o"])
+      .arg(&output).arg(source)
+      .args(["-framework", "Speech", "-framework", "AVFoundation", "-framework", "ImageIO"])
+      .status().expect("compile visual capture media helper");
+    assert!(status.success(), "Visual capture media helper failed to compile");
+    println!("cargo:rustc-env=O8_VISUAL_CAPTURE_MEDIA={}", output.display());
+  }
 }
 
 fn generate_app_ipc_permission() {
