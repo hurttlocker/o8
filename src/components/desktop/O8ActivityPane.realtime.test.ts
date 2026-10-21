@@ -75,9 +75,13 @@ describe('Activity realtime refresh boundary', () => {
   it('keeps the real feed while transcript-only batches make no additional list reads', async () => {
     await render();
     expect(host.textContent).toContain('Retain input revision 1');
-    expect(['prs', 'issues', 'ci', 'commits'].map(count)).toEqual([1, 1, 1, 1]);
+    expect(['prs', 'issues', 'ci', 'commits'].map(count)).toEqual([1, 1, 1, 2]);
+    expect(requests.filter(url => url.startsWith('/api/panel/commits?repo='))).toHaveLength(1);
+    expect(requests.filter(url => url.startsWith('/api/panel/commits?workspace='))).toHaveLength(1);
+    const initialRequests = [...requests];
     for (let seq = 1; seq <= 10; seq++) await signal([{ ...history, seq }]);
-    expect(['prs', 'issues', 'ci', 'commits'].map(count)).toEqual([1, 1, 1, 1]);
+    expect(requests).toEqual(initialRequests);
+    expect(['prs', 'issues', 'ci', 'commits'].map(count)).toEqual([1, 1, 1, 2]);
     expect(host.textContent).toContain('Retain input revision 1');
   });
 
