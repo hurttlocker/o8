@@ -70,6 +70,8 @@ Verification support: Browser-open real-path fixtures advance their clock and po
 
 Verification support: the prepared-dispatch publication-conflict fixture requires Stop to refuse mismatched ownership without changing either store, relaunching or interrupting its worker. The fixture teardown remains separate; production dispatch and Stop guards are unchanged. [#4048](https://github.com/hurttlocker/o8/issues/4048)
 
+Verification support: registered-owner Retry observes its exact persisted interruption before requiring salvage. A controlled exit-finalization race must refuse safely, preserve ownership and committed work, and recover through a fresh explicit Retry after completion; production stop guards are unchanged. [#4050](https://github.com/hurttlocker/o8/issues/4050)
+
 ## What we need to prove
 
 Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.
