@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BracketLabel, RamsButton } from './shared';
 import { OpenRouterModelsSection } from './OpenRouterModelsSection';
+import { OpenRouterWorkSection } from './OpenRouterWorkSection';
 
 type ConnectionState = 'disconnected' | 'configured-unverified' | 'connected' | 'degraded' | 'disabled';
 
@@ -108,7 +109,7 @@ export function OpenRouterConnectionCard({ state }: { state: ReturnType<typeof u
       ? <p style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>o8, Symon and voice make no OpenRouter calls while this is off. Your key stays saved.</p>
       : null}
     {figures.length ? <p style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
-      {figures.join(' · ')}. These figures cover this key everywhere, including use outside o8.
+      This OpenRouter key: {figures.join(' · ')}. These figures cover this key everywhere, including use outside o8.
     </p> : null}
     {connection.lastError && connection.state !== 'disabled' ? <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)' }}>{connection.lastError}</p> : null}
     {error ? <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--t-text-secondary)' }}>{error}</p> : null}
@@ -127,6 +128,7 @@ export function OpenRouterProviderPanel() {
   const usable = state.connection && state.connection.state !== 'disabled' && state.connection.state !== 'disconnected';
   return <>
     <OpenRouterConnectionCard state={state} />
+    {state.connection && state.connection.state !== 'disconnected' ? <OpenRouterWorkSection /> : null}
     {usable ? <OpenRouterModelsSection /> : null}
   </>;
 }

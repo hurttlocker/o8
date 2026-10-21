@@ -7,12 +7,13 @@ import { buildTurnSummaryStats, type TurnSummary } from '../thoughts/chat-panel/
 import { TurnChevron } from '../thoughts/chat-panel/turn-line';
 import { transcriptTurns, transcriptTurnFiles } from './turns';
 
-export function TranscriptTurns({ entries, nodes, busy, repoPath, summary }: {
+export function TranscriptTurns({ entries, nodes, busy, repoPath, summary, turnContent }: {
   entries: MobileTranscriptEntry[];
   nodes: ReactNode[];
   busy: boolean;
   repoPath?: string | null;
   summary?: TurnSummary | null;
+  turnContent?: ReadonlyMap<string, ReactNode>;
 }) {
   return transcriptTurns(entries, busy).map(turn => {
     const finalEntry = turn.final === null ? null : entries[turn.final];
@@ -36,6 +37,7 @@ export function TranscriptTurns({ entries, nodes, busy, repoPath, summary }: {
           /> : null}
         </Fragment>;
       })}
+      {turnContent?.get(entries[turn.start].id)}
     </Fragment>;
   });
 }

@@ -4,6 +4,7 @@
  */
 
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import type { TerminalExitState } from '@/lib/terminal/exit-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
 import {
@@ -29,6 +30,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
+  terminalExit?: TerminalExitState;
   readOnly?: boolean; // live run view: never send input to an attached PTY
   remoteMachine?: { id: string; label: string; sessionId: string };
   chatRuntime?: OrchestratorRuntime; // for kind='chat' (CLI Session)
@@ -570,11 +572,13 @@ export async function loadTabState(scope = 'tile-root', repoPath?: string | null
 export async function checkAliveSessions(sessionNames: string[]): Promise<Set<string>> {
   try {
     const res = await fetchOnce('/api/panel/terminal-sessions');
-    if (!res.ok) return new Set();
+    if (!res.ok) return new Set(sessionNames);
     const data = await res.json();
-    const alive = new Set<string>(data.sessions as string[]);
+    if (!Array.isArray(data.sessions) || data.sessions.some((session: unknown) => typeof session !== 'string')) return new Set(sessionNames);
+    const alive = new Set<string>(data.sessions);
     return new Set(sessionNames.filter(s => alive.has(s)));
   } catch {
-    return new Set();
+    // Unavailable evidence cannot prove a saved process has ended.
+    return new Set(sessionNames);
   }
 }

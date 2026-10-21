@@ -14,12 +14,12 @@ import { O8ActivityPane } from './O8ActivityPane';
 import { O8ThreadTools } from './o8-panel/O8ThreadTools';
 import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
+import { TerminalUnavailableState } from './o8-panel/TerminalUnavailableState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { DevicePanel } from './o8-panel/devices/DevicePanel';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
-import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ComparisonMatrix } from './comparison/ComparisonMatrix';
 import { useComparisonGroups } from './comparison/useComparisonGroups';
 import { useOrchestratorData } from './orchestrator-data-context';
@@ -31,8 +31,9 @@ import { LinkedPullRequests } from './pr-panel/LinkedPullRequests';
 import { WorkspaceFilesPane } from './o8-panel/workspace-rail/WorkspaceFilesPane';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
 import { canonicalPanelTab, isRightUtilityTab, type O8Tab } from './o8-panel/types';
+import { usePersistedUtilityTabs } from './o8-panel/use-persisted-utility-tabs';
 import { O8PanelSplitDivider, panelPaneStyle, panelPaneVisible } from './o8-panel/O8PanelSplit';
-import { ChatIcon, ReviewIcon, TerminalIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
+import { ChatIcon, ReviewIcon, RightUtilityTabStrip, RightUtilityLauncher, type RightUtilityTab } from './o8-panel/O8PanelUtilityTabs';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
@@ -83,6 +84,7 @@ interface O8PanelProps {
   sendTerminalDetach?: ContextualPanelProps['sendTerminalDetach'];
   sendAgentKill?: ContextualPanelProps['sendAgentKill'];
   termWsConnected?: boolean;
+  onOpenMainTerminal?: (repoPath: string | null) => Promise<void>;
 }
 
 // ── Main Component ──
@@ -125,6 +127,7 @@ export function O8Panel({
   sendTerminalDetach,
   sendAgentKill,
   termWsConnected = false,
+  onOpenMainTerminal,
 }: O8PanelProps) {
   const activeTab = canonicalPanelTab(externalTab ?? 'activity');
   const requestedSecondary = externalSecondaryTab ? canonicalPanelTab(externalSecondaryTab) : null;
@@ -155,7 +158,7 @@ export function O8Panel({
   const orchestratorData = useOrchestratorData();
   const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
   const compareGroup = compareReadyGroups[0] ?? null;
-  const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
+  const [utilityTabs, setUtilityTabs] = usePersistedUtilityTabs(browserStateKey);
   const rightContextualPanelRef = useRef<ContextualPanelHandle | null>(null);
   const [localSelectedFile, setLocalSelectedFile] = useState<{ repoPath: string | null; path: string } | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
@@ -190,7 +193,7 @@ export function O8Panel({
     queueMicrotask(() => {
       setUtilityTabs((prev) => [...new Set([...prev, ...[activeUtilityTab, secondaryUtilityTab].filter((tab) => tab !== null)])]);
     });
-  }, [activeUtilityTab, secondaryUtilityTab]);
+  }, [activeUtilityTab, secondaryUtilityTab, setUtilityTabs]);
 
   const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
     // Browser is a first-class drawer state now (Q ruling 2026-07-12: "the
@@ -203,7 +206,7 @@ export function O8Panel({
     }
     setUtilityTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
     onActiveTabChange?.(tab);
-  }, [onActiveTabChange]);
+  }, [onActiveTabChange, setUtilityTabs]);
 
   const closeRightUtilityTab = useCallback(async (tab: RightUtilityTab) => {
     if (tab === 'terminal' && rightContextualPanelRef.current?.confirmClose && !await rightContextualPanelRef.current.confirmClose()) return false;
@@ -214,7 +217,7 @@ export function O8Panel({
       onActiveTabChange?.(remaining[Math.min(currentIndex, remaining.length - 1)] ?? 'launcher');
     }
     return true;
-  }, [activeTab, onActiveTabChange, utilityTabs]);
+  }, [activeTab, onActiveTabChange, setUtilityTabs, utilityTabs]);
 
   const handleSelectUtilityFile = useCallback((path: string) => {
     setLocalSelectedFile({ repoPath: repoPath ?? null, path });
@@ -274,13 +277,15 @@ export function O8Panel({
   // action instead of the snapshot/click hunt that cost the orchestrator ~5 min.
   useEffect(() => {
     const handler = (event: Event) => {
-      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url;
+      const detail = (event as CustomEvent<{ url?: string | null; scopeKey?: string }>).detail;
+      if (detail?.scopeKey && detail.scopeKey !== browserStateKey) return;
+      const url = detail?.url;
       onActiveTabChange?.('browser');
       if (typeof url === 'string' && url.trim()) setPendingBrowserNavigation({ baseUrl: browserUrl, url: url.trim() });
     };
     window.addEventListener('o8:open-browser', handler);
     return () => window.removeEventListener('o8:open-browser', handler);
-  }, [browserUrl, onActiveTabChange]);
+  }, [browserStateKey, browserUrl, onActiveTabChange]);
 
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'device') return <DevicePanel active={active} />;
@@ -345,7 +350,7 @@ export function O8Panel({
     if (tab === 'activity') return <O8ActivityPane active={active} repoPath={repoPath} repoSlug={prRepo ?? repoSlug} registeredRepos={registeredRepos} allRepos={allRepos} onSelectAllRepos={onSelectAllRepos} onSelectRepoPath={onRepoPathChange} onSelectCommit={onSelectCommit} onSelectIssue={onSelectIssue} onSelectPR={onSelectPR} onClosePR={onClosePR} selectedPrNumber={prNumber ?? null} selectedPrRepo={prRepo ?? null} />;
     if (tab === 'resources') return <O8ResourcesPane active={active} />;
     if (tab === 'targets') return <TargetsPanel repoPath={repoPath} active={active} />;
-    if (tab === 'spec') return <O8SpecPane repoPath={repoPath} active={active} toolbarSlot={(specRepoPath) => <O8ScratchChat repoPath={specRepoPath} selectedFile={specRepoPath === repoPath ? selectedFile ?? null : null} surface="diff" surfaceLabel="o8.md" />} />;
+    if (tab === 'spec') return <O8SpecPane repoPath={repoPath} active={active} />;
 
     if (tab === 'inbox') {
       // Incident Queue is a closeable contextual surface now (report RVKTQV):
@@ -378,17 +383,15 @@ export function O8Panel({
     }
 
     return (
-      <SurfaceEmptyState
-        icon={<TerminalIcon size={18} />}
-        title="Terminal unavailable"
-        detail="The terminal bridge is not connected for this right panel."
-      />
+      <TerminalUnavailableState onOpenMainTerminal={onOpenMainTerminal ? () => onOpenMainTerminal(repoPath ?? null) : undefined} />
     );
   };
 
   return (
     <div
       ref={splitContainerRef}
+      data-o8-browser-host={browserStateKey}
+      data-o8-browser-visible={paneVisible('browser') ? 'true' : 'false'}
       data-chrome-surface="true"
       style={{
         position: 'relative',
@@ -407,29 +410,6 @@ export function O8Panel({
         // so light never showed it) — operator fix 2026-07-14.
       }}
     >
-      {/* Scratch chat — floating Ask-o8 button + dialog, sits across tabs where
-          it does not compete with local document/review controls.
-          Operator restored post-#1089 (same restore-after-rework pattern). Mounts once per panel;
-          internal Cmd+E hotkey + button click open the floating dialog. The
-          review/workspace tab owns its compact toolbar trigger inside
-          ReviewPanel; Activity/PR detail suppress it to keep local toolbars
-          clear. o8.md/spec also suppresses the floating overlay — the
-          Ask-o8 chat trigger renders inline in the spec pane's own
-          toolbar (passed via toolbarSlot below) so all three buttons
-          (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
-      {/* No Brain chat on the browser — it's a real browser now (Q ruling
-          2026-07-12); its header/toolbar carry browser tools instead. */}
-      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'threads' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' && activeTab !== 'browser' && activeTab !== 'resources' && activeTab !== 'inbox' && activeTab !== 'device' && activeTab !== 'review' ? (
-        <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
-          <O8ScratchChat
-            repoPath={repoPath}
-            selectedFile={selectedFile ?? null}
-            surface="diff"
-            surfaceLabel="panel"
-          />
-        </div>
-      ) : null}
-
       {/* Open tools retain their state when another tab is selected. */}
       {secondaryTab && onSecondaryTabChange ? (
         <O8PanelSplitDivider

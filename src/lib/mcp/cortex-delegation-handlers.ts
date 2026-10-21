@@ -1,7 +1,7 @@
 import { apiError, safeErrorText } from '@/lib/mcp/api-error';
 import { DEFAULT_WS_PORT } from '@/lib/panel/api-port';
 import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
-import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { finishSharedCheckoutTeam, inspectSharedCheckoutTeam, reconcileSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { findOwnedLaunchByMutationId, lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean };
@@ -15,6 +15,7 @@ function jsonResult(value: unknown): ToolResult {
 }
 
 export function createCortexDelegationHandlers(config: {
+  apiFetch: (path: string, options?: RequestInit) => Promise<unknown>;
   apiBase: string;
   repoPath: string;
   parentThreadId: string;
@@ -46,6 +47,9 @@ export function createCortexDelegationHandlers(config: {
           taskName: args.taskName || undefined,
           isolate: args.isolate !== false,
           checkoutMode,
+          ...(config.parentThreadId ? { parentThreadId: config.parentThreadId } : {}),
+          requestedEffort: args.requestedEffort,
+          thinkingEffort: args.thinkingEffort,
           ...(checkoutMode === 'shared' ? {
             parentThreadId: config.parentThreadId,
             fastCapability: config.fastCapability,
@@ -101,6 +105,18 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
+  const handleWorkerCatalog = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const params = new URLSearchParams({ repoPath: config.repoPath });
+    if (typeof args.runtime === 'string' && args.runtime) params.set('runtime', args.runtime);
+    try {
+      const response = await fetch(`${config.apiBase}/api/orchestrator/delegate?${params}`, {
+        headers: { Authorization: `Bearer ${config.wsToken}` }, signal: AbortSignal.timeout(45_000),
+      });
+      const payload = await response.json();
+      return response.ok ? jsonResult(payload) : textResult(safeErrorText(payload), true);
+    } catch (error) { return textResult(`Worker catalog unavailable: ${safeErrorText(error)}`, true); }
+  };
+
   const handleSharedTeamStatus = async (): Promise<ToolResult> => {
     if (!config.repoPath || !config.parentThreadId) {
       return textResult('This tool requires a persisted o8 orchestrator chat.', true);
@@ -145,5 +161,55 @@ export function createCortexDelegationHandlers(config: {
     }
   };
 
-  return { handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam };
+  const handleReconcileSharedTeam = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    if (!config.repoPath || !config.parentThreadId) {
+      return textResult('This tool requires a persisted o8 orchestrator chat.', true);
+    }
+    if (typeof args.reviewId !== 'string' || typeof args.reviewedHead !== 'string'
+      || typeof args.reviewSummary !== 'string' || !Array.isArray(args.acknowledgedPaths)
+      || !args.acknowledgedPaths.every((path) => typeof path === 'string')) {
+      return textResult('Provide the exact status review ID, HEAD, paths, and an explicit review summary.', true);
+    }
+    try {
+      const receipt = await reconcileSharedCheckoutTeam({ repoPath: config.repoPath, parentThreadId: config.parentThreadId,
+        reviewId: args.reviewId, reviewedHead: args.reviewedHead, acknowledgedPaths: args.acknowledgedPaths,
+        reviewSummary: args.reviewSummary });
+      return jsonResult({ ok: true, receipt, note: 'Reviewed checkout state recorded. Source is unchanged; Finish must still verify settled workers and this exact state.' });
+    } catch (error) { return textResult(`Shared team reconciliation refused: ${safeErrorText(error)}`, true); }
+  };
+
+  async function handleCorrectWorkers(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      if (!config.repoPath || !config.parentThreadId) return textResult('Worker corrections require a persisted parent conversation.', true);
+      const path = '/api/orchestrator/worker-corrections';
+      if (args.targets === undefined) return jsonResult(await config.apiFetch(`${path}?${new URLSearchParams({ repoPath: config.repoPath, threadId: config.parentThreadId })}`));
+      return jsonResult(await config.apiFetch(path, { method: 'POST', body: JSON.stringify({ repoPath: config.repoPath,
+        threadId: config.parentThreadId, id: args.idempotencyKey, payload: { targets: args.targets, message: args.message,
+          mode: args.mode, holdMerges: args.holdMerges === true } }) }));
+    } catch (error) { return textResult(`Worker correction failed: ${safeErrorText(error)}`, true); }
+  }
+
+  async function handleInterruptAgent(args: Record<string, unknown>): Promise<ToolResult> {
+    try {
+      const surfaceId = args.surfaceId as string;
+      if (!surfaceId) return textResult('surfaceId is required', true);
+
+      const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
+        url: `${config.apiBase}/api/runtime/action`,
+        authorization: `Bearer ${config.wsToken}`,
+        body: { action: 'interrupt', surfaceId },
+        parseError: (response, payload) => apiError('/api/runtime/action', response.status, JSON.stringify(payload)),
+        correlationField: 'clientMutationId',
+      });
+
+      if (result.ok) {
+        return jsonResult({ ok: true, note: result.note });
+      }
+      return textResult(`Interrupt failed: ${safeErrorText(result)}`, true);
+    } catch (err) {
+      return textResult(`Failed to interrupt agent: ${safeErrorText(err)}`, true);
+    }
+  }
+
+  return { handleWorkerCatalog, handleLaunchAgent, handleSharedTeamStatus, handleFinishSharedTeam, handleReconcileSharedTeam, handleCorrectWorkers, handleInterruptAgent };
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -171,6 +171,8 @@ const operatorToken = 'operator-reset-stop-registry-0123456789abcdef';
 writeFileSync(join(dataDir, 'ws-token'), `${operatorToken}\n`, 'utf8');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+const ownedRoot = join(dataDir, 'owned-codex');
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
 
 const resetRoute = await import('@/app/api/orchestrator/reset-packet/route');
 const rerunRoute = await import('@/app/api/orchestrator/rerun-with-feedback/route');
@@ -178,10 +180,12 @@ const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
 const controlRoute = await import('@/app/api/agent-control/action/route');
 const dispatchRoute = await import('@/app/api/orchestrator/dispatch/route');
 const stopMissionRoute = await import('@/app/api/orchestrator/stop-mission/route');
-const { closeDb } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { createLane, deleteLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
-const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+const { persistMissionRegistryState, readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
+await import('@/lib/runtimes');
 const { createMission, resetPacket } = await import('@/lib/orchestrator/operator-mission-service');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const {
@@ -308,19 +312,40 @@ async function createCurrentPacket(label: string) {
     constraints: '',
   });
   const packetId = mission.packets[0]!.id;
+  const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+  const worktree = await createManagedPacketWorktree(switchRepo, { packetId, branch: `packet/${label}` });
   const lane = createLane({
     repoPath: switchRepo,
-    worktreePath: join(switchRepo, `.worktree-${label}`),
+    worktreePath: worktree.path,
     branch: `packet/${label}`,
     runtime: 'codex',
     packetId,
-    sessionKey: `codex-owned:${label}`,
+    sessionKey: worktree.sessionKey,
   });
   setLaneStatus(lane.id, 'running', 'system', 'test_running');
   await withLockedState((state) => {
     state.packets[0] = packetFixture(packetId, lane);
   });
+  await persistMissionRegistryState(readOrchestratorControlPlaneState());
   return { lane, missionId: mission.missionId, packetId };
+}
+
+function seedOwnedSession(packet: ReturnType<typeof packetWithoutLaneRow>) {
+  const surfaceId = packet.lane.sessionKey;
+  const sessionDir = join(ownedRoot, surfaceId.slice('codex-owned:'.length));
+  mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+  const sessionPath = join(sessionDir, 'session.json');
+  const now = new Date().toISOString();
+  writeFileSync(sessionPath, JSON.stringify({
+    surfaceId, sessionDir, packetId: packet.id, cwd: packet.lane.worktreePath,
+    repoPath: packet.lane.worktreePath, title: 'Detached recovery fixture',
+    createdAt: now, updatedAt: now, recentRuns: [],
+    runIdentityLedger: { version: 1, totalRuns: 0, complete: true },
+    workspaceBinding: { logicalWorkspaceId: `packet:${packet.id}`, repositoryUuid: null,
+      packetId: packet.id, cwd: packet.lane.worktreePath, version: 1, verifiedAt: now },
+  }), { mode: 0o600 });
+  resetOwnedSessionIndex();
+  return sessionPath;
 }
 
 async function switchCurrentMission(label: string) {
@@ -427,7 +452,7 @@ describe('reset and stop preserve runtime truth', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(next.missionId);
     await vi.waitFor(() => expect(
       readMissionRegistryEntry(current.missionId, { includeArchived: true })?.mission.packets[0],
-    ).toMatchObject({ status: 'draft', queueState: 'held', lane: null }));
+    ).toMatchObject({ status: 'draft', queueState: 'held', lane: null }), { timeout: 30_000 });
   });
 
   it('finishes a reset in the outgoing registry mission after a mission switch', async () => {
@@ -538,6 +563,10 @@ describe('reset and stop preserve runtime truth', () => {
       result: { closed: true, note: expect.stringContaining('Kill unconfirmed') },
     });
     expect(readOrchestratorControlPlaneState().missionId).toBe(next.missionId);
+    const sessionPath = join(ownedRoot, current.lane.sessionKey!.slice('codex-owned:'.length), 'session.json');
+    expect(JSON.parse(readFileSync(sessionPath, 'utf8'))).toMatchObject({
+      detachedAt: expect.any(String), detachedReason: expect.stringContaining(current.packetId),
+    });
     expect(readMissionRegistryEntry(current.missionId, { includeArchived: true })?.mission.packets[0])
       .toMatchObject({ status: 'archived', queueState: 'held', blockedReason: null });
   });
@@ -600,7 +629,7 @@ describe('reset and stop preserve runtime truth', () => {
       ok: false,
       error: { code: 'reset_state_changed' },
     });
-    await vi.waitFor(() => expect(getLane(current.lane.id)?.status).toBe('archived'));
+    await vi.waitFor(() => expect(getLane(current.lane.id)?.status).toBe('archived'), { timeout: 30_000 });
     await vi.waitFor(() => expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       status: 'blocked',
       queueState: 'held',
@@ -622,7 +651,7 @@ describe('reset and stop preserve runtime truth', () => {
 
     expect(response.status).toBe(200);
     expect(h.managedRunStopCalls).toEqual([current.packetId]);
-    await vi.waitFor(() => expect(getLane(current.lane.id)?.status).toBe('archived'));
+    await vi.waitFor(() => expect(getLane(current.lane.id)?.status).toBe('archived'), { timeout: 30_000 });
   });
 
   it('keeps the packet held when a packet-managed run cannot be confirmed dead', async () => {
@@ -897,7 +926,7 @@ describe('reset and stop preserve runtime truth', () => {
     const packetId = 'packet-stop-kill-window';
     const missionId = 'mission-stop-kill-window';
     const lane = createLane({
-      repoPath: '/tmp/o8-stop-kill-window',
+      repoPath: switchRepo,
       worktreePath: '/tmp/o8-stop-kill-window-worktree',
       branch: 'packet/stop-kill-window',
       runtime: 'codex',
@@ -1089,7 +1118,7 @@ describe('reset and stop preserve runtime truth', () => {
     const missionId = 'mission-stop-admission-race';
     const packet = packetWithoutLaneRow({
       packetId,
-      repoPath: '/tmp/o8-mission-stop-admission-race',
+      repoPath: switchRepo,
       worktreePath: '/tmp/o8-mission-stop-admission-race-worktree',
       branch: 'packet/mission-stop-admission-race',
       sessionKey: 'codex-owned:mission-stop-admission-race',
@@ -1151,7 +1180,7 @@ describe('reset and stop preserve runtime truth', () => {
     const missionId = 'mission-registry-stop-admission-race';
     const packet = packetWithoutLaneRow({
       packetId,
-      repoPath: '/tmp/o8-registry-mission-stop-admission-race',
+      repoPath: switchRepo,
       worktreePath: '/tmp/o8-registry-mission-stop-admission-race-worktree',
       branch: 'packet/registry-mission-stop-admission-race',
       sessionKey: 'codex-owned:registry-mission-stop-admission-race',
@@ -1269,7 +1298,7 @@ describe('reset and stop preserve runtime truth', () => {
     const missionId = 'mission-rerun-kill-window';
     const packet = packetWithoutLaneRow({
       packetId,
-      repoPath: '/tmp/o8-rerun-kill-window',
+      repoPath: switchRepo,
       worktreePath: '/tmp/o8-rerun-kill-window-worktree',
       branch: 'packet/rerun-kill-window',
       sessionKey: 'codex-owned:rerun-kill-window',
@@ -1469,12 +1498,13 @@ describe('reset and stop preserve runtime truth', () => {
     const missionId = 'mission-close-kill-window';
     const packet = packetWithoutLaneRow({
       packetId,
-      repoPath: '/tmp/o8-close-kill-window',
+      repoPath: switchRepo,
       worktreePath: '/tmp/o8-close-kill-window-worktree',
       branch: 'packet/close-kill-window',
       sessionKey: 'codex-owned:close-kill-window',
       status: 'awaiting_review',
     });
+    const sessionPath = seedOwnedSession(packet);
     writeOrchestratorControlPlaneState({
       ...createEmptyOrchestratorMissionState(),
       missionId,
@@ -1515,6 +1545,12 @@ describe('reset and stop preserve runtime truth', () => {
       blockedReason: null,
       lane: null,
     });
+    expect(JSON.parse(readFileSync(sessionPath, 'utf8'))).toMatchObject({
+      detachedAt: expect.any(String), detachedReason: expect.stringContaining(packetId),
+    });
+    expect(getLane(packet.lane.laneId)).toBeNull();
+    expect(getSqlite().prepare('SELECT packet_id, session_key, outcome FROM session_outcomes WHERE packet_id = ?')
+      .get(packetId)).toMatchObject({ packet_id: packetId, session_key: packet.lane.sessionKey, outcome: 'wontfix' });
   });
 
   it('keeps a durable failure reason when the persisted lane disappears during close', async () => {

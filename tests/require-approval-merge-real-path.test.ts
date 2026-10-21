@@ -1394,13 +1394,11 @@ describe('requireApproval merge governance through the real command path', () =>
       },
     ));
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (listApprovalsForContext({ laneId: lane.id })
-        .find((candidate) => candidate.id === approval.id)?.status === 'approved') break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(listApprovalsForContext({ laneId: lane.id })
-      .find((candidate) => candidate.id === approval.id)?.status).toBe('approved');
+    // The approval resolves while publication still waits on the lock; under load that takes seconds (#3747).
+    let settled = false;
+    void responsePromise.then(() => { settled = true; }, () => { settled = true; });
+    await vi.waitFor(() => expect([settled, listApprovalsForContext({ laneId: lane.id })
+      .find((candidate) => candidate.id === approval.id)?.status]).toEqual([false, 'approved']), { timeout: 20_000, interval: 10 });
     recordOrchestratorReview(lane.packetId!, {
       approved: false,
       findings: [{
@@ -1422,7 +1420,7 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(listApprovalsForContext({ laneId: lane.id })
       .find((candidate) => candidate.id === approval.id)?.status).toBe('pending');
     expect(git(repo, ['rev-parse', 'HEAD'])).toBe(baseHeadSha);
-  }, 30_000);
+  }, 60_000);
 
   it('rejects late diff drift again at the final user merge boundary', async () => {
     const { lane, repo, baseHeadSha, reviewedHeadSha } = await createStandardLane('late-spoken-drift');

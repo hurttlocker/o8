@@ -91,6 +91,8 @@ interface ChatMessageListProps {
   /** Rendered at the live edge of the transcript — after the last message,
    *  before the thinking indicator. Used for the inline swarm crew card. */
   bottomContent?: React.ReactNode;
+  /** Stable transcript-turn slots, keyed by the original turn-start entry. */
+  turnContent?: ReadonlyMap<string, React.ReactNode>;
   // Orchestrator has its own sticky ComposerStatusBar above the textarea
   // that already surfaces "working" state + elapsed time + running tools.
   // Duplicating the inline "is thinking…" bubble here makes the chat feel
@@ -138,6 +140,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   composeFirst = false,
   topContent,
   bottomContent,
+  turnContent,
   isOrchestratorMode = false,
   suggestedReplyMessageId,
   suggestedReplies,
@@ -200,7 +203,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   // map below renders the chip row right after that bubble.
   let lastAssistantIndex = -1;
   for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
-    if (displayMessages[i]?.role === 'assistant') {
+    if (displayMessages[i]?.role === 'assistant' && !displayMessages[i]?.voice) {
       lastAssistantIndex = i;
       break;
     }
@@ -271,7 +274,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
         {topContent}
         {renderVisualizations(-1)}
 
-        <TranscriptTurns busy={displayWaiting} repoPath={repoPath} summary={turnSummary}
+        <TranscriptTurns busy={displayWaiting} repoPath={repoPath} summary={turnSummary} turnContent={turnContent}
           entries={items.map(item => item.kind === 'msg' ? item.msg : item.entries[0])}
           nodes={items.map((item) => {
           if (item.kind === 'mission-group') {

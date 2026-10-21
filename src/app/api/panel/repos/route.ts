@@ -39,6 +39,7 @@ import type {
   RepoRegistryDeleteBody,
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 const RUNTIME_CLEANUP_TIMEOUT_MS = 3_500;
 const execFileAsync = promisify(execFile);
@@ -353,7 +354,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   let body: RepoRegistryPostBody;
   try {
     body = (await request.json()) as RepoRegistryPostBody;
@@ -558,3 +559,5 @@ export async function DELETE(request: Request) {
     );
   }
 }
+
+export const POST = withRepoInventoryChange('repo-register', handlePOST);

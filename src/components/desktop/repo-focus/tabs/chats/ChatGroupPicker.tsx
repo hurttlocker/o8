@@ -6,15 +6,18 @@ import { REPO_FOCUS_FONT } from '../../utils';
 import { FloatingSurface } from '../../../FloatingSurface';
 
 import { CHAT_VIEW_LABELS, type ChatGroupMode } from './sidebar-view';
+import type { ChatViewAction } from './sidebar-agent-navigation';
 export type { ChatGroupMode } from './sidebar-view';
 
 /** Compact chat view menu; the glyph and hover target share one center. */
 export function ChatGroupPicker({
   mode,
   onChange,
+  actions,
 }: {
   mode: ChatGroupMode;
   onChange: (next: ChatGroupMode) => void;
+  actions?: readonly ChatViewAction[];
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -92,11 +95,11 @@ export function ChatGroupPicker({
 
       </button>
       {/* Portal keeps the glass blur and menu outside the scrolling chat panel. */}
-      {typeof document !== 'undefined' ? createPortal(<FloatingSurface
+      {open && typeof document !== 'undefined' ? createPortal(<FloatingSurface
         ref={menuRef}
         id={menuId}
         onKeyDown={(event) => {
-          const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+          const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []);
           const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
           const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length
             : event.key === 'ArrowUp' ? (index - 1 + buttons.length) % buttons.length
@@ -119,13 +122,18 @@ export function ChatGroupPicker({
             letterSpacing: 0,
           }}
         >
-          {(['flat', 'chronological', 'working', 'scheduled'] as const).map((value) => (
+          {(['flat', 'chronological', 'manual', 'working', 'scheduled'] as const).map((value) => (
             <ChatGroupPickerItem key={value} label={CHAT_VIEW_LABELS[value]} selected={mode === value} onClick={() => choose(value)} />
           ))}
           <div role="separator" style={{ height: 1, marginTop: 4, marginBottom: 4, background: 'var(--t-divider)' }} />
           {(['repo', 'date'] as const).map((value) => (
             <ChatGroupPickerItem key={value} label={`Group ${CHAT_VIEW_LABELS[value].toLowerCase()}`} selected={mode === value} onClick={() => choose(value)} />
           ))}
+          {actions?.length ? <>
+            <div role="separator" style={{ height: 1, marginTop: 4, marginBottom: 4, background: 'var(--t-divider)' }} />
+            {actions.map(action => <ChatGroupPickerItem key={action.label} label={action.label} disabled={action.disabled}
+              selected={false} action onClick={() => { action.onSelect(); setOpen(false); triggerRef.current?.focus(); }} />)}
+          </> : null}
       </FloatingSurface>, document.body) : null}
     </div>
   );
@@ -135,18 +143,23 @@ function ChatGroupPickerItem({
   label,
   selected,
   onClick,
+  disabled = false,
+  action = false,
 }: {
   label: string;
   selected: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  action?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   return (
     <button
       type="button"
-      role="menuitemradio"
-      aria-checked={selected}
+      role={action ? 'menuitem' : 'menuitemradio'}
+      aria-checked={action ? undefined : selected}
+      disabled={disabled}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
       onClick={onClick}

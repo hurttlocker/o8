@@ -405,7 +405,7 @@ export function OrchestratorDock({
                   {undoArmed ? <UndoSendPill key="undo" onUndo={onUndoSend} graceMs={SEND_UNDO_GRACE_MS} /> : null}
                 </AnimatePresence>
               </div>
-              <CardComposer
+              <CardComposer scopeKey={activeLane}
                 value={draft}
                 onChange={setDraft}
                 busy={false}

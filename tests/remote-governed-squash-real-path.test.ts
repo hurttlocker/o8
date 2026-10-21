@@ -23,6 +23,10 @@ const { AGENT_COMMIT_TRAILER } = await import('@/lib/lane/commit-attribution');
 const { performRemoteCustomerMerge } = await import('@/lib/lane/commands-remote-merge');
 const { createLane } = await import('@/lib/lane/registry');
 const { CustomerWorkerTransport } = await import('@/lib/runtimes/remote/customer-worker-transport');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { addSessionRule } = await import('@/lib/db/session-rules-store');
+const { withSessionRuleMutation } = await import('@/lib/orchestrator/session-merge-restriction');
 const { createToken } = await import('@/lib/worker/tokens');
 
 const roots: string[] = [];
@@ -175,3 +179,22 @@ describe('remote governed squash with real repositories', () => {
       .toBe(git(fixture.repo, ['rev-parse', 'refs/heads/main']));
   }, 30_000);
 });
+
+it('checks a newly persisted session restriction at the remote publication boundary', async () => {
+  const fixture = await createFixture('restricted', false);
+  const threadId = 'thoughts-remote-restriction';
+  writeOrchestratorControlPlaneState({ ...createEmptyOrchestratorMissionState(), repoPath: fixture.repo,
+    packets: [{ id: fixture.lane.packetId!, referenceLabel: 'restricted', title: 'restricted', summary: '',
+      workspaceTargetPath: fixture.repo, branchTarget: 'main', runtime: 'codex', orchestratorThreadId: threadId,
+      dependencyLabels: [], dependencyPacketIds: [], queueState: 'queued', releaseState: 'pending',
+      status: 'queued', blockedReason: null, lane: null, review: null }],
+  });
+  await withSessionRuleMutation(threadId, () => addSessionRule(threadId, 'Keep the changes for review.', 'no_merge'));
+  const result = await performRemoteCustomerMerge(fixture.lane, { verb: 'merge', laneId: fixture.lane.id,
+    commitMessage: 'fix: restricted remote packet' }, 'user');
+  expect(result.ok).toBe(false); expect(result.note).toContain('Merge blocked');
+  expect(git(fixture.repo, ['rev-parse', 'main'])).toBe(fixture.preMergeMainSha);
+  expect(git(fixture.origin, ['rev-parse', 'main'])).toBe(fixture.preMergeMainSha);
+  expect(git(fixture.repo, ['status', '--porcelain'])).toBe('');
+  expect(git(fixture.repo, ['branch', '--show-current'])).toBe(fixture.savedBranch);
+}, 30_000);

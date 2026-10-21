@@ -18,6 +18,7 @@ import {
 import { getSqlite } from '@/lib/db';
 import {
   assertManagedWorktreeMaterializationBoundary,
+  canonicalWorktreeNamespace,
   observeManagedWorktreeRootIdentity,
   resolveWorktreeRootLayout,
 } from '@/lib/worktree/root-layout';
@@ -242,6 +243,8 @@ export async function readWorktreeMetaSnapshot(
     if (!rootCandidates.includes(canonicalRoot)) rootCandidates.unshift(canonicalRoot);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const canonicalRoot = canonicalWorktreeNamespace(metadataRoot);
+    if (!rootCandidates.includes(canonicalRoot)) rootCandidates.unshift(canonicalRoot);
   }
   for (const root of rootCandidates) {
     const durableState = readMetadataTransactionStateSnapshot(root, sqlite);

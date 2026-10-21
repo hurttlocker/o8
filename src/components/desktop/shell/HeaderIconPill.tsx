@@ -31,6 +31,8 @@ interface HeaderIconPillProps {
   title?: string;
   onClick?: () => void;
   pressed?: boolean;
+  expanded?: boolean;
+  popup?: 'dialog' | 'menu';
   disabled?: boolean;
   /**
    * Per-context vertical nudge (px). -2 fits LeftHeaderStrip (32px strip,
@@ -46,6 +48,8 @@ export function HeaderIconPill({
   title,
   onClick,
   pressed,
+  expanded,
+  popup,
   disabled = false,
   yNudge = -2,
 }: HeaderIconPillProps) {
@@ -56,6 +60,8 @@ export function HeaderIconPill({
       disabled={disabled}
       aria-label={label}
       aria-pressed={pressed}
+      aria-expanded={expanded}
+      aria-haspopup={popup}
       title={title ?? label}
       data-no-drag
       initial={false}

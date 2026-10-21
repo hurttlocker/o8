@@ -7,15 +7,12 @@ import { createHash } from 'node:crypto';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { computePredictedFiles } from '@/lib/orchestrator/preservation-envelope';
-import { normalizeRequestedRuntime, resolveWorkerRouting } from '@/lib/agents/routing';
 import { codename } from '@/lib/agents/codename';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
-import { resolveSubscriptionProfileRouting } from '@/lib/operator/subscription-profile';
 import { resolveWorkerHuddle } from '@/lib/operator/worker-start-mode';
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { buildProjectBriefPromptV1 } from '@/lib/prompts/v1';
-import { MODEL_IDS } from '@/lib/models';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -25,6 +22,10 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import { listLanes } from '@/lib/lane/registry';
 import { launchSharedCheckoutWorker } from '@/lib/orchestrator/shared-checkout-launch';
 import { findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
+import { DelegationSelectionError, resolveDelegationSelection } from '@/lib/orchestrator/delegation-selection';
+import { getWorkerCatalog } from '@/lib/orchestrator/worker-catalog';
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { requirePanelAuth } from '@/lib/panel/auth';
 import { authorizeFastDelegation } from '@/lib/orchestrator/fast-delegation-auth';
 import {
   buildPacketSelfReviewInstructions,
@@ -110,37 +111,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     const packetId = `pkt-delegate-${createHash('sha256').update(clientMutationId).digest('hex').slice(0, 16)}`;
     const now = new Date().toISOString();
     const defaults = getOperatorDefaultsSync().values;
-    const runtimeWasProvided = body.runtime !== undefined && body.runtime !== null && body.runtime !== '';
-    const explicitRuntime = normalizeRequestedRuntime(body.runtime);
-    if (runtimeWasProvided && !explicitRuntime) {
-      return NextResponse.json({ ok: false, error: `Unsupported worker runtime: ${String(body.runtime)}` }, { status: 400 });
-    }
-    const defaultRuntime = defaults.subscriptionProfile === 'both'
-      ? defaults.defaultDispatchRuntime
-      : null;
-    const requestedRuntime = runtimeWasProvided ? explicitRuntime : defaultRuntime;
-    const explicitModel = typeof body.model === 'string' && body.model.trim()
-      ? body.model.trim()
-      : null;
-    const runtimePinnedModel = requestedRuntime === 'opencode'
-      ? defaults.opencodeWorkerModel ?? MODEL_IDS.opencodeDefault
-      : null;
-    const profileRouting = resolveSubscriptionProfileRouting({
-      profile: defaults.subscriptionProfile,
-      requestedRuntime,
-      requestedModel: explicitModel ?? runtimePinnedModel,
-      defaultDispatchModel: defaults.defaultDispatchModel,
-    });
-    if (!profileRouting.ok) {
-      return NextResponse.json({ ok: false, error: profileRouting.message, code: profileRouting.code }, { status: 400 });
-    }
-    const workerRouting = resolveWorkerRouting({
-      workerIntent: body.workerIntent,
-      requestedProvider: body.requestedProvider,
-      requestedRuntime: profileRouting.requestedRuntime,
-      requestedModel: profileRouting.requestedModel,
-      source: 'delegate-api',
-    });
+    const { routing: workerRouting, carrier, launchEffort, executionCarrier } = await resolveDelegationSelection(body, repoPath);
     const huddle = resolveWorkerHuddle({
       mode: defaults.workerStartMode,
       explicitHuddle: typeof body.huddle === 'boolean' ? body.huddle : undefined,
@@ -191,6 +162,10 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
         taskName,
         runtime: workerRouting.selectedRuntime,
         model: workerRouting.selectedModel,
+        effort: launchEffort,
+        carrier,
+        executionCarrier,
+        workerRouting,
         readOnly,
         clientMutationId,
         repoInProject: projectContext.repoInProject,
@@ -226,10 +201,16 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       repoContext: projectContext.repoInProject ? 'registered' as const : 'transient' as const,
       workMode: readOnly ? 'read-only' as const : 'edit' as const,
       caller: 'orchestrator',
+      ...(executionCarrier ? { executionCarrier } : {}),
+      ...(parentThreadId ? { parentThreadId } : {}),
+      checkoutMode: 'isolated' as const,
     };
 
     const packet: OrchestratorPacket = {
       id: packetId,
+      ...(executionCarrier ? { executionCarrier } : {}),
+      ...(parentThreadId ? { orchestratorThreadId: parentThreadId } : {}),
+      ...(carrier ? { claudeCodeCarrier: carrier, claudeCodeModel: workerRouting.selectedModel } : {}),
       referenceLabel: `D${Date.now().toString(36).slice(-4).toUpperCase()}`,
       title: taskName,
       summary: prompt,
@@ -319,6 +300,9 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       laneId,
       prompt: governedLaunchPrompt,
       model: workerRouting.selectedModel ?? undefined,
+      effort: launchEffort,
+      ...(executionCarrier ? { executionCarrier } : {}),
+      ...(carrier ? { claudeCodeCarrier: carrier, claudeCodeModel: workerRouting.selectedModel ?? undefined } : {}),
       clientMutationId,
       launchContext,
       actor: 'orchestrator',
@@ -383,6 +367,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
       note: launchResult.note,
     });
   } catch (err) {
+    if (err instanceof DelegationSelectionError) return NextResponse.json({ ok: false, code: err.code, error: err.message }, { status: 400 });
     console.error('[orchestrator-delegate]', err);
     return NextResponse.json({
       ok: false,
@@ -420,6 +405,8 @@ export async function POST(request: NextRequest) {
     baseBranch: typeof body?.baseBranch === 'string' ? body.baseBranch.trim() : '',
     runtime: body?.runtime ?? null,
     model: body?.model ?? null,
+    requestedEffort: body?.requestedEffort ?? null,
+    thinkingEffort: body?.thinkingEffort ?? null,
     workerIntent: body?.workerIntent ?? null,
     requestedProvider: body?.requestedProvider ?? null,
     huddle: body?.huddle ?? null,
@@ -464,6 +451,7 @@ export async function POST(request: NextRequest) {
           payload: {
             ok: true,
             teamId: team.id,
+            workerRouting: member.workerRouting ?? null,
             laneId: null,
             packetId: null,
             surfaceId: member.surfaceId,
@@ -498,6 +486,8 @@ export async function POST(request: NextRequest) {
           worktreePath: lane.worktreePath,
           branch: lane.branch,
           baseBranch: lane.baseBranch,
+          workerRouting: packet.workerRouting ?? null,
+          launchContext: packet.launchContext,
           note: 'Recovered the delegated worker from its durable packet and lane binding.',
         },
       };
@@ -518,4 +508,17 @@ export async function POST(request: NextRequest) {
     ...outcome.result.payload,
     replayed: outcome.replayed || undefined,
   }, { status: outcome.result.status });
+}
+
+/** Authenticated, read-only worker discovery. No provider turn or settings mutation. */
+export async function GET(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+  const runtime = request.nextUrl.searchParams.get('runtime');
+  if (runtime && !isOrchestratorRuntime(runtime)) return NextResponse.json({ ok: false, error: 'Unknown worker runtime.' }, { status: 400 });
+  try {
+    return NextResponse.json(await getWorkerCatalog(request.nextUrl.searchParams.get('repoPath') || process.cwd(), runtime && isOrchestratorRuntime(runtime) ? runtime : undefined), { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Worker catalog unavailable.' }, { status: 400 });
+  }
 }

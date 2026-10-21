@@ -14,6 +14,7 @@ export interface ParsedCodexLine {
 }
 
 export interface CodexLineHandlerState {
+  terminalOutcome?: 'completed' | 'failed';
   threadId: string | null;
   cost: number | null;
   usage?: OrchestratorTurnUsage;
@@ -80,6 +81,7 @@ export function handleCodexJsonLine(
     }
 
     if (type === 'error' || type === 'turn.failed' || type === 'run.failed') {
+      state.terminalOutcome = 'failed';
       const nestedError = safeObject(parsed.error);
       const message = typeof parsed.message === 'string'
         ? parsed.message
@@ -226,6 +228,7 @@ export function handleCodexJsonLine(
       return true;
     }
 
+    if (type === 'turn.completed' && state.terminalOutcome !== 'failed') state.terminalOutcome = 'completed';
     if (type === 'turn.completed' && parsed.usage) {
       state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage, options.model);
       state.usage = normalizeUsage(parsed.usage);

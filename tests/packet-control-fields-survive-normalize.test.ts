@@ -165,6 +165,7 @@ function fullPacketFixture() {
     predictedFiles: ['src/a.ts', 'src/b.ts'],
     workerIntent: 'reviewer',
     useBrain: true,
+    mergeHold: true,
     huddle: true,
     alignmentResolvedAt: '2026-01-01T00:07:30.000Z',
     workerRouting: resolveWorkerRouting({

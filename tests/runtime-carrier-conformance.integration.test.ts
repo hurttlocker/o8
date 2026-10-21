@@ -4,7 +4,13 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+// Stop at server readiness so installed CLI checks cannot execute a provider turn.
+vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>(),
+  ensureDispatchBackendReady: vi.fn(async () => { throw new Error('Fixture reached the pre-spawn dispatch boundary.'); }),
+}));
 
 const execFileAsync = promisify(execFile);
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-runtime-carrier-conformance-'));
@@ -160,18 +166,22 @@ describe('registered runtime carrier conformance', () => {
 
       if (!preflightReady) return;
 
-      // Reach the actual adapter launch entry point without contacting a
-      // provider: an impossible cwd must fail before child exec/provider I/O.
+      // Reach the actual adapter launch entry point and stop at its readiness
+      // boundary before a worker can execute or contact a provider.
       const impossibleCwd = join(dataDir, 'does-not-exist', runtime);
       const launch = await adapter.launch({
         cwd: impossibleCwd,
         prompt: 'o8 runtime carrier conformance dry-run: do not contact a provider',
+        ...(runtime === 'claude-code' ? { claudeCodeCarrier: 'native' as const } : {}),
         ...(model ? { model } : {}),
-      });
+      }).catch((error: Error) => ({ ok: false, note: error.message, sideEffect: 'none' as const }));
       requireContract(runtime, 'dispatch-adapter-entry', launch.ok === false,
         'adapter unexpectedly accepted an impossible cwd during the pre-effect smoke');
-      requireContract(runtime, 'dispatch-adapter-pre-effect', launch.sideEffect !== 'unknown',
-        'impossible-cwd smoke could not prove it stayed pre-effect');
+      const nativeCredentialRefusal = runtime === 'claude-code' && launch.sideEffect === 'none'
+        && launch.note.startsWith('worker_not_authenticated:');
+      requireContract(runtime, 'dispatch-adapter-pre-effect', nativeCredentialRefusal
+        || launch.note.includes('Fixture reached the pre-spawn dispatch boundary.'),
+        `impossible-cwd smoke could not prove it stayed pre-effect: ${launch.note}`);
     }, 30_000);
   }
 });

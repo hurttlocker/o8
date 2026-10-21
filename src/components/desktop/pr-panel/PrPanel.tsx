@@ -5,7 +5,8 @@ import { PrPanelHeader } from './PrPanelHeader';
 import { PrPanelTabs } from './PrPanelTabs';
 import { PrChangesToolbar } from './PrChangesToolbar';
 import { PrSummary } from './PrSummary';
-import { PrBrainComposer } from './PrBrainComposer';
+import { PrBrainComposer, prBrainContext } from './PrBrainComposer';
+import { openComposerBrain } from '../brain/brain-events';
 import { usePrViewState } from './usePrViewState';
 import { ChangesTab } from './tabs/ChangesTab';
 import { ChecksTab } from './tabs/ChecksTab';
@@ -33,7 +34,6 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
     update({ activeTab: 'changes', openFiles: view.openFiles.includes(path) ? view.openFiles : [...view.openFiles, path] });
   }, [selectionKey, update, view.openFiles]);
   const toggleDescription = useCallback(() => update({ descriptionOpen: !view.descriptionOpen }), [update, view.descriptionOpen]);
-  const changeQuestionDraft = useCallback((questionDraft: string) => update({ questionDraft }), [update]);
   const changeCommentDraft = useCallback((commentDraft: string) => update({ commentDraft }), [update]);
   const changeReviewDraft = useCallback((reviewDraft: string) => update({ reviewDraft }), [update]);
   const changeReviewAction = useCallback((reviewAction: PrReviewAction) => update({ reviewAction }), [update]);
@@ -126,9 +126,8 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
 
   return (
     <div id={id || panelId} data-pr-detail={detail.number} style={containerStyle} onKeyDown={onKeyDown}>
-      <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
-        update({ composerMode: 'brain', ...(prompt ? { questionDraft: view.questionDraft ? view.questionDraft + '\n\n' + prompt : prompt } : {}) });
-        window.requestAnimationFrame(() => document.getElementById(id || panelId)?.querySelector<HTMLTextAreaElement>('[data-pr-brain-chat] textarea')?.focus({ preventScroll: true }));
+      <PrPanelHeader detail={detail} repoSlug={repoSlug} repoPath={repoPath} showDiffStats={active && view.activeTab !== 'changes'} onRefresh={refresh} onComposerMode={changeComposerMode} onAsk={(prompt) => {
+        if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) });
       }} />
       {error ? <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, fontSize: 11, color: 'var(--t-danger)' }}>{error}<button type="button" onClick={refresh} style={{ border: 0, borderRadius: 6, padding: 6, background: 'var(--t-hover)', color: 'var(--t-text)', font: 'inherit', cursor: 'pointer' }}>Retry</button></div> : null}
       <PrPanelTabs
@@ -139,9 +138,9 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
         reviewsCount={detail.reviewComments.length + detail.issueComments.length}
         idBase={panelId}
       />
-      <PrReviewGuide key={selectionKey} selection={selectionKey} detail={detail} onNavigate={(activeTab, file) => { if (file) openFile(file); else update({ activeTab }); }} onAsk={prompt => update({ composerMode: 'brain', questionDraft: view.questionDraft.includes(prompt) ? view.questionDraft : [view.questionDraft.trim(), prompt].filter(Boolean).join('\n\n') })} />
+      <PrReviewGuide key={selectionKey} selection={selectionKey} detail={detail} onNavigate={(activeTab, file) => { if (file) openFile(file); else update({ activeTab }); }} onAsk={prompt => { if (repoPath) openComposerBrain({ repoPath, prompt, context: prBrainContext(detail, repoSlug) }); }} />
       {(['summary', 'timeline', 'changes', 'checks', 'reviews'] as const).map((tab) => <div key={tab} id={`${panelId}-${tab}-panel`} role="tabpanel" aria-labelledby={`${panelId}-${tab}`} hidden={view.activeTab !== tab} inert={view.activeTab !== tab} style={{ display: view.activeTab === tab ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, containerType: 'size', maskImage: 'linear-gradient(to bottom, #000 calc(100% - var(--pr-composer-occlusion, 60px) - 12px), transparent calc(100% - var(--pr-composer-occlusion, 60px)))', WebkitMaskImage: 'linear-gradient(to bottom, #000 calc(100% - var(--pr-composer-occlusion, 60px) - 12px), transparent calc(100% - var(--pr-composer-occlusion, 60px)))' }}>
-        {tab === 'changes' && detail.files.length > 0 ? <PrChangesToolbar files={detail.files} totalFiles={detail.changedFiles} additions={detail.additions} deletions={detail.deletions} allOpen={detail.files.every((file) => view.openFiles.includes(file.path))} onSetOpenFiles={changeOpenFiles} diffStyle={view.diffStyle || 'unified'} onDiffStyleChange={changeDiffStyle} treeOpen={Boolean(view.fileTreeOpen)} onTreeOpenChange={changeTreeOpen} collapsedFolders={view.collapsedFolders || []} onToggleFolder={toggleFolder} onNavigate={openFile} /> : null}
+        {tab === 'changes' && detail.files.length > 0 ? <PrChangesToolbar statsActive={active && view.activeTab === tab} files={detail.files} totalFiles={detail.changedFiles} additions={detail.additions} deletions={detail.deletions} allOpen={detail.files.every((file) => view.openFiles.includes(file.path))} onSetOpenFiles={changeOpenFiles} diffStyle={view.diffStyle || 'unified'} onDiffStyleChange={changeDiffStyle} treeOpen={Boolean(view.fileTreeOpen)} onTreeOpenChange={changeTreeOpen} collapsedFolders={view.collapsedFolders || []} onToggleFolder={toggleFolder} onNavigate={openFile} /> : null}
         <div data-pr-detail-scroll={tab} ref={view.activeTab === tab ? scrollRef : undefined} role="region" aria-labelledby={`${panelId}-${tab}`} tabIndex={0} onScroll={(event) => { if (view.activeTab === tab) recordScroll(tab, event.currentTarget.scrollTop); }} style={{ flex: 1, overflowY: 'auto', minHeight: 0, overscrollBehavior: 'contain', scrollbarWidth: 'none', paddingBottom: 76 }}>
         {tab === 'summary' ? <PrSummary detail={detail} descriptionOpen={view.descriptionOpen} onToggleDescription={toggleDescription} onOpenFile={openFile} /> : null}
         {tab === 'timeline' ? <TimelineTab detail={detail} repoSlug={repoSlug} active={active && view.activeTab === 'timeline'} newestFirst={view.timelineNewestFirst} onToggleOrder={() => update({ timelineNewestFirst: !view.timelineNewestFirst })} onOpenFile={openFile} /> : null}
@@ -173,7 +172,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
         ) : null}
         </div>
       </div>)}
-      <PrBrainComposer key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={changeQuestionDraft} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} />
+      {view.composerMode !== 'brain' ? <PrBrainComposer allowBrain={false} key={`${selectionKey}:${repoPath || ''}`} detail={detail} repoSlug={repoSlug} repoPath={repoPath} draft={view.questionDraft} onDraftChange={() => {}} mode={view.composerMode} onModeChange={changeComposerMode} commentDraft={view.commentDraft} onCommentDraftChange={changeCommentDraft} reviewDraft={view.reviewDraft} onReviewDraftChange={changeReviewDraft} reviewAction={view.reviewAction} onReviewActionChange={changeReviewAction} reviewHeadSha={view.reviewHeadSha} onReviewHeadChange={changeReviewHead} onCommentPosted={refresh} /> : null}
     </div>
   );
 });

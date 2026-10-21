@@ -281,7 +281,7 @@ describe('seam B — a dispatched worker approve_and_merge raises an operator ca
 
   it('worker principal → merged:false, pending_operator_approval, and a real card is persisted', async () => {
     const packetId = 'pkt-seam-B-worker';
-    const lane = createLane({ repoPath: '/tmp/o8-seam-repo', branch: 'inline/seam-b', runtime: 'codex', packetId });
+    const lane = createLane({ repoPath: makeMergeRepo('o8-seam-B-repo-'), branch: 'inline/seam-b', runtime: 'codex', packetId });
     expect(findLaneByPacket(packetId)?.id).toBe(lane.id);
 
     const res = await mergeRoute.POST(workerReq(url, { packetId }, mintPacketWorkerToken(packetId)));
@@ -491,7 +491,7 @@ describe('seam E — create-mission fails loudly when dispatch holds the mission
         ok: false,
         error: {
           code: 'mission_store_busy',
-          message: 'Mission store is busy dispatching — retry in a moment.',
+          message: 'o8 API error (503)', // #3434 keeps the code and hides 5xx messages.
         },
       });
       expect(readOrchestratorControlPlaneState().missionId).toBe(beforeMissionId);

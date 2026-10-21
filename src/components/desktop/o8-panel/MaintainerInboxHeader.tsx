@@ -24,7 +24,7 @@ export function MaintainerInboxHeader({ lane, onLaneChange, scope, onScopeChange
         const i = LANES.findIndex((item) => item.id === lane);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? LANES.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + LANES.length) % LANES.length;
         onLaneChange(LANES[next].id); event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
-      }} style={{ height: 26, paddingLeft: 8, paddingRight: 8, border: 0, borderRadius: 7, background: lane === entry.id ? 'var(--t-input-bg)' : 'transparent', color: lane === entry.id ? 'var(--t-text)' : 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{entry.label}{counts[entry.id] ? <span style={{ marginLeft: 5, color: 'var(--t-text-faint)', fontSize: 9.5 }}>{counts[entry.id]}</span> : null}</button>)}
+      }} style={{ height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, lineHeight: 1, border: 0, borderRadius: 7, background: lane === entry.id ? 'var(--t-input-bg)' : 'transparent', color: lane === entry.id ? 'var(--t-text)' : 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer', whiteSpace: 'nowrap' }}>{entry.label}{counts[entry.id] ? <span style={{ marginLeft: 5, color: 'var(--t-text-faint)', fontSize: 9.5 }}>{counts[entry.id]}</span> : null}</button>)}
     </div>
   </header>;
 }

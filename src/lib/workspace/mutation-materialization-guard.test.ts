@@ -251,9 +251,13 @@ describe('parked workspace publication guard', () => {
       writeFileSync(path.join(workspacePath, 'tracked.txt'), 'unrelated dirty bytes\n');
     };
     const retainedForMerge = path.join(root, 'publication-manager-owned-retained-merge');
+    // The exec-time proof can refuse inside the merge gate's base resolution,
+    // which throws, or at the later branch probe, which returns a refusal.
+    // Either way the refusal must name the ownership proof.
+    const refused = (error: Error) => ({ ok: false, note: error.message });
     const merge = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'user' }, {
       afterWorkspaceMaterializationProof: () => swapAfterProof(retainedForMerge),
-    });
+    }).catch(refused);
     expect(merge).toMatchObject({ ok: false });
     // The refusal must come from the exec-time ownership proof, not from some
     // later incidental failure: without it, `git rebase` runs inside the
@@ -268,7 +272,7 @@ describe('parked workspace publication guard', () => {
     const retainedForPr = path.join(root, 'publication-manager-owned-retained-pr');
     const createPr = await dispatch({ verb: 'create_pr', laneId: lane.id, actor: 'user' }, {
       afterWorkspaceMaterializationProof: () => swapAfterProof(retainedForPr),
-    });
+    }).catch(refused);
     expect(createPr).toMatchObject({ ok: false });
     expect(createPr.note).toContain(OWNERSHIP_REFUSAL);
     expect(readFileSync(path.join(workspacePath, 'tracked.txt'), 'utf8')).toBe('unrelated dirty bytes\n');

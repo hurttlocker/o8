@@ -232,6 +232,9 @@ function createRetiredSnapshotFixture(
   laneStatus: Lane['status'],
 ): RetiredFixture {
   const sessionKey = `test-owned:${packetId}`;
+  // The workspace is absent, but its managed parent still exists: retirement
+  // canonicalizes the parent before matching durable truth.
+  mkdirSync(path.join(dataDir, 'retire-workspaces'), { recursive: true });
   const workspacePath = path.join(dataDir, 'retire-workspaces', packetId);
   const branch = `inline/${packetId}`;
   const lane = createLane({

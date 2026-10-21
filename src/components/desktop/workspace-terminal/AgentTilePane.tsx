@@ -1,5 +1,6 @@
 'use client';
 
+import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   memo,
@@ -9,9 +10,10 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type UIEvent as ReactUIEvent,
 } from 'react';
+import { ComposerArea } from '@/components/desktop/thoughts/chat-panel/ComposerArea';
+import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import {
   TerminalStatusEvidenceDisclosure,
@@ -39,6 +41,7 @@ import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
 import { SessionTransformMenu } from './SessionTransformMenu';
 import { WorkerPaneSummary } from './WorkerPaneSummary';
+import { hasWorkerReviewAction, WorkerReviewAction } from './WorkerReviewAction';
 import type { TerminalStatusState } from '@/lib/terminal-status/resolve';
 
 interface AgentTilePaneProps {
@@ -177,6 +180,7 @@ export function normalizeAgentTileTranscript(
 
 // Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
 // composer reveal animation when a lane flips to running/awaiting_input.
+const noop = () => undefined;
 const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
 const STICK_TO_BOTTOM_THRESHOLD_PX = 120;
@@ -238,6 +242,7 @@ function useAgentTileStickToBottom(active: boolean, changeKey: string, hasConten
 export function canSteerAgentState(
   agent: Pick<FleetAgent, 'status'> | null,
   packet: Pick<OrchestratorPacket, 'status' | 'blockedReason'> | null | undefined,
+  sessionKey?: string,
 ): boolean {
   const agentStatus = (agent?.status ?? '').toLowerCase();
   const packetStatus = (packet?.status ?? '').toLowerCase();
@@ -251,6 +256,8 @@ export function canSteerAgentState(
   // showed no composer at all (#1846). `recovering` is the retry-pending pause
   // between escalation layers, and is steerable for the same reason.
   if (packetStatus === 'idle' || packetStatus === 'recovering') return true;
+  if (/^(codex-owned|claude-code-owned):.+/.test(sessionKey ?? '') && !packet
+    && ['completed', 'finished', 'idle'].includes(agentStatus)) return true;
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 
@@ -313,7 +320,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       : resolveAgentTileStatus(agent?.status, packet?.status, packet?.blockedReason),
     [agent?.status, packet?.blockedReason, packet?.status, statusEvidence],
   );
-  const canSteer = canSteerAgentState(agent, packet);
+  const canSteer = canSteerAgentState(agent, packet, sessionKey);
   const trimmedDraft = draft.trim();
   const canSend = canSteer && !sending && steerReceipt !== 'unknown' && trimmedDraft.length > 0;
   const lastEntryKey = displayEntries.length > 0
@@ -393,7 +400,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const submitSteer = useCallback(() => {
     const message = trimmedDraft;
     // Re-derive the latest lane state and synchronously guard duplicate submits.
-    if (!message || !canSteerAgentState(agentRef.current, packetRef.current)
+    if (!message || !canSteerAgentState(agentRef.current, packetRef.current, sessionKey)
       || sendingRef.current || pendingSteerRef.current) return;
     sendingRef.current = true;
     const request = { body: JSON.stringify({
@@ -410,17 +417,6 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     sendingRef.current = true;
     void resolveSteer(request);
   }, [resolveSteer]);
-
-  const handleTextareaKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.key !== 'Enter') return;
-      if (event.shiftKey) return;
-      // Cmd/Ctrl+Enter or plain Enter both submit; Shift+Enter inserts newline.
-      event.preventDefault();
-      void submitSteer();
-    },
-    [submitSteer],
-  );
 
   const handleFormSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -458,14 +454,16 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
       onMouseDown={() => onFocus(sessionKey)}
       style={{
         flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
-        borderRadius: 14, borderWidth: 1, borderStyle: 'solid',
-        borderColor: focused ? 'var(--t-border-hover, var(--t-border))' : 'var(--t-border)',
+        // Paint the frame inside the pane without shifting the shared composer baseline.
+        borderRadius: 14, outlineWidth: 1, outlineStyle: 'solid', outlineOffset: -1,
+        outlineColor: focused ? 'var(--t-border-hover, var(--t-border))' : 'var(--t-border)',
         background: 'var(--t-chat-surface-bg, var(--t-panel))',
         boxShadow: 'none',
         overflow: 'hidden',
       }}
     >
       <div
+        data-worker-pane-header
         style={{
           height: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
           paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 10,
@@ -501,11 +499,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
                   color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300,
                 }}
               >
-                <span
-                  style={{
-                    width: 5, height: 5, borderRadius: 999, background: STATUS_META[status].color, flexShrink: 0,
-                  }}
-                />
+                <AgentStatusDot state={agentStatusToDotState(status)} label={STATUS_META[status].label} />
                 <span
                   style={{
                     minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -520,11 +514,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} />
           <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
           <button
             type="button"
-            aria-label={`Close ${name} tile`}
-            title="Close tile"
+            aria-label={`Hide ${name} pane`}
+            title="Hide pane · worker stays available in Agents"
             onClick={(event) => { event.stopPropagation(); onClose(sessionKey); }}
             style={{
               width: 44, height: 44, marginTop: -4, marginRight: -4, marginBottom: -4, marginLeft: 0,
@@ -552,7 +547,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
       ) : null}
 
-      <WorkerPaneSummary packet={packet} onOpenReview={onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
+      <WorkerPaneSummary packet={packet} onOpenReview={hasWorkerReviewAction(packet) ? undefined : onOpenReview} onReply={canSteer ? () => textareaRef.current?.focus() : undefined} />
 
       <div
         ref={scrollRef}
@@ -609,132 +604,54 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={COMPOSER_SPRING}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              paddingTop: 10,
-              paddingRight: 10,
-              paddingBottom: 10,
-              paddingLeft: 10,
-              borderTopWidth: 1,
-              borderTopStyle: 'solid',
-              borderTopColor: focused ? 'var(--t-accent-border)' : 'var(--t-border)',
-              background: 'var(--t-bg-card)',
-              flexShrink: 0,
-            }}
+            style={{ flexShrink: 0, background: 'transparent' }}
           >
-            <div style={{ color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 400, paddingLeft: 2 }}>
-              To {recipientLabel} · {status === 'waiting' ? 'Reply' : 'Steer'}
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'flex-end',
-                gap: 8,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'var(--t-border)',
-                background: 'var(--t-input-bg)',
-                paddingTop: 6,
-                paddingRight: 6,
-                paddingBottom: 6,
-                paddingLeft: 10,
-              }}
-            >
-              <textarea
+            <div inert={!canSteer || sending || steerReceipt === 'unknown'}>
+              <ComposerArea key={sessionKey}
                 ref={textareaRef}
-                value={draft}
-                onChange={(event) => {
-                  setDraft(event.target.value);
+                activeComposer={focused && canSteer && !sending && steerReceipt !== 'unknown'}
+                showBrain={false}
+                inputLabel={`Message ${name}`}
+                placeholder={`Message ${recipientLabel}…`}
+                literalInput
+                input={draft}
+                onInputChange={next => {
+                  setDraft(next);
                   if (steerReceipt === 'accepted' || steerReceipt === 'failed') {
                     setSteerReceipt(null);
                     setSendError(null);
                   }
                 }}
-                onKeyDown={handleTextareaKeyDown}
-                placeholder={status === 'waiting' ? `Reply to ${recipientLabel}…` : `Message ${recipientLabel}…`}
-                rows={1}
-                disabled={!canSteer || sending || steerReceipt === 'unknown'}
-                aria-label={`Steer ${name}`}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  minHeight: 32,
-                  maxHeight: 140,
-                  resize: 'none',
-                  borderWidth: 0,
-                  background: 'transparent',
-                  color: 'var(--t-text)',
-                  fontSize: 12.5,
-                  lineHeight: 1.5,
-                  fontFamily: 'var(--font-sans-system)',
-                  outline: 'none',
-                  paddingTop: 6,
-                  paddingRight: 0,
-                  paddingBottom: 6,
-                  paddingLeft: 0,
-                }}
+                isOrchestratorMode={false}
+                displayWaiting={false}
+                chatMessages={displayEntries}
+                activeTargetLabel={name}
+                targetAgentExists={canSteer && !sending && steerReceipt !== 'unknown'}
+                thoughtsBodyBackground="transparent"
+                enhancing={false}
+                preEnhanceInput={null}
+                onEnhance={noop}
+                onUndoEnhance={noop}
+                onSubmit={submitSteer}
+                onSteer={submitSteer}
+                onSlashCommand={noop}
+                modelLabel={runtimeModelLabel}
+                effort="adaptive"
+                onEffortChange={noop}
+                adaptiveEnabled={false}
+                displayMessagesCount={displayEntries.length}
+                hasAssistantActivity={false}
+                footerOverride={<InputButtons input={canSend ? draft : ''} onSubmit={submitSteer}
+                  modelLabel={runtimeModelLabel} enhancing={false} preEnhanceInput={null}
+                  onEnhance={noop} onUndoEnhance={noop} adaptiveEnabled={false} />}
               />
-              <button
-                type="submit"
-                disabled={!canSend}
-                aria-label={`Send steer to ${name}`}
-                title={canSend ? 'Send (Enter)' : 'Type a steer to send'}
-                style={{
-                  width: 44,
-                  height: 44,
-                  flexShrink: 0,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: canSend ? 'var(--t-accent-border)' : 'var(--t-border)',
-                  background: canSend ? 'var(--t-accent)' : 'var(--t-panel)',
-                  color: canSend ? '#ffffff' : 'var(--t-text-secondary)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: canSend ? 'pointer' : 'default',
-                  opacity: canSend ? 1 : 0.7,
-                  transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
-              >
-                {sending ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 3a9 9 0 1 0 9 9" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden="true">
-                    <path
-                      d="M223.87,114l-168-95.89A16,16,0,0,0,32.93,37.32L57.85,128,32.93,218.7A16,16,0,0,0,48,240a16.13,16.13,0,0,0,7.92-2.1l167.95-96A16,16,0,0,0,223.87,114Zm-168,110L78.07,144H136a8,8,0,0,0,0-16H78.07L55.85,32l.06,0L216,128Z"
-                      fill="currentColor"
-                    />
-                  </svg>
-                )}
-              </button>
             </div>
-            {steerReceipt ? (
+            {steerReceipt === 'failed' || steerReceipt === 'unknown' ? (
               <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? '#ef4444' : 'var(--t-text-secondary)', fontSize: 10.5, paddingLeft: 4, paddingRight: 4 }}>
-                <span>{steerReceipt === 'sending' ? 'Checking steer receipt…' : steerReceipt === 'accepted' ? 'Steer accepted' : steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
+                <span>{steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
                 {steerReceipt === 'unknown' ? <button type="button" onClick={checkSteerReceipt} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 500 }}>Check receipt</button> : null}
               </div>
-            ) : (
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 300,
-                  color: 'var(--t-text-secondary)',
-                  paddingTop: 0,
-                  paddingRight: 4,
-                  paddingBottom: 0,
-                  paddingLeft: 4,
-                  letterSpacing: '-0.005em',
-                }}
-              >
-                Enter to send · Shift+Enter for newline
-              </div>
-            )}
+            ) : null}
           </motion.form>
         ) : null}
       </AnimatePresence>

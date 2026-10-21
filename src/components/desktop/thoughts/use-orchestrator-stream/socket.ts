@@ -1,7 +1,7 @@
+import { parseSnapshotTurn } from './snapshot-turn';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
-import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { isPaneOwnedThread } from '@/lib/orchestrator/pane-thread-registry';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
@@ -10,6 +10,7 @@ import {
 } from './shared';
 import { parseTerminalTurnReceipt, parseTerminalUsage } from './terminal-receipt';
 import { parseHandoffEventData } from './handoff-socket';
+import { createAssistantState, continuationUserMessage } from './continuation-start';
 
 interface RefLike<T> {
   current: T;
@@ -19,7 +20,7 @@ export interface OrchestratorSnapshotTurn {
   id: string;
   startedAt: number;
   settledAt: number | null;
-  outcome: 'completed' | 'failed' | 'interrupted' | null;
+  outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' | null;
   assistantMessageId: string | null;
 }
 
@@ -86,6 +87,7 @@ interface CreateOrchestratorMessageHandlerOptions {
     data?: Record<string, unknown>;
     observedAt: number;
   }) => void;
+  onVoiceTerminal?: (receipt: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }) => void;
   onSnapshotTurnTerminal?: (turn: OrchestratorSnapshotTurn | null, wasRunning: boolean) => void;
   onSettledAssistantMissing?: (turn: OrchestratorSnapshotTurn) => void;
   resetEpochRef: RefLike<number>;
@@ -94,9 +96,6 @@ interface CreateOrchestratorMessageHandlerOptions {
   statusRef: RefLike<OrchestratorStreamStatus>;
   wsRef: RefLike<WebSocket | null>;
 }
-
-/** ACP message/thought chunks and proxy deltas are verbatim text slices. */
-const VERBATIM_STREAM_BACKENDS = new Set(['o8', 'acp', 'hermes', 'opencode']);
 
 // RC1 seam 3 — stale-busy reconcile window. A subscribe/reconnect snapshot must
 // NOT downgrade a genuinely live 'busy' (the first-turn re-subscribe race: a
@@ -109,46 +108,6 @@ const VERBATIM_STREAM_BACKENDS = new Set(['o8', 'acp', 'hermes', 'opencode']);
 // guard; only a truly silent turn heals.
 const ORCH_SNAPSHOT_BUSY_RECONCILE_MS = 6000;
 
-function parseSnapshotTurn(value: unknown): OrchestratorSnapshotTurn | null | undefined {
-  if (value === null) return null;
-  if (!value || typeof value !== 'object') return undefined;
-  const turn = value as Record<string, unknown>;
-  if (typeof turn.id !== 'string' || typeof turn.startedAt !== 'number') return undefined;
-  if (turn.settledAt !== null && typeof turn.settledAt !== 'number') return undefined;
-  if (
-    turn.outcome !== null
-    && turn.outcome !== 'completed'
-    && turn.outcome !== 'failed'
-    && turn.outcome !== 'interrupted'
-  ) return undefined;
-  if (turn.assistantMessageId !== null && typeof turn.assistantMessageId !== 'string') return undefined;
-  return {
-    id: turn.id,
-    startedAt: turn.startedAt,
-    settledAt: turn.settledAt,
-    outcome: turn.outcome,
-    assistantMessageId: turn.assistantMessageId,
-  };
-}
-
-function createAssistantState(
-  resetEpochRef: RefLike<number>,
-  assistantMessageId?: unknown,
-  backend?: unknown,
-  model?: unknown,
-): CurrentAssistantStreamState {
-  return {
-    id: typeof assistantMessageId === 'string' && assistantMessageId.trim()
-      ? assistantMessageId.trim()
-      : `assistant-${Date.now()}`,
-    chunks: [],
-    thinkingChunks: [],
-    epoch: resetEpochRef.current,
-    backend: isOrchestratorBackendId(backend) ? backend : undefined,
-    model: typeof model === 'string' && model.trim() ? model.trim() : undefined,
-    verbatimStream: typeof backend === 'string' && VERBATIM_STREAM_BACKENDS.has(backend),
-  };
-}
 
 export function createOrchestratorMessageHandler(
   options: CreateOrchestratorMessageHandlerOptions,
@@ -214,6 +173,12 @@ export function createOrchestratorMessageHandler(
       const ownThreadId = options.threadIdRef?.current ?? null;
       if (ownThreadId && evtThreadId !== ownThreadId) return;
       if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
+    }
+
+    const terminal = msg.data?.voiceTerminal as Record<string, unknown> | undefined;
+    if (terminal && typeof terminal.userMessageId === 'string' && typeof terminal.text === 'string'
+      && (terminal.outcome === 'completed' || terminal.outcome === 'failed' || terminal.outcome === 'interrupted' || terminal.outcome === 'unconfirmed')) {
+      options.onVoiceTerminal?.({ userMessageId: terminal.userMessageId, outcome: terminal.outcome, text: terminal.text });
     }
 
     if (options.suppressTurnEventsRef?.current) {
@@ -291,6 +256,15 @@ export function createOrchestratorMessageHandler(
     }
 
     switch (msg.event) {
+      case 'turn-start': {
+        const entry = continuationUserMessage(msg.data);
+        if (!entry || options.currentAssistantRef.current?.id === msg.data?.assistantMessageId
+          || options.messagesRef.current.some(message => message.id === entry.id)) break;
+        if (options.currentAssistantRef.current) options.flushCurrentAssistant();
+        options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId, msg.data?.backend, msg.data?.model);
+        setTranscriptMessages(previous => previous.some(message => message.id === entry.id) ? previous : [...previous, entry]);
+        break;
+      }
       case 'handoff': {
         const handoff = parseHandoffEventData(msg.data);
         if (!handoff) break;

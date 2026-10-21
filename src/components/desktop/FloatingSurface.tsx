@@ -21,7 +21,7 @@ export function useFloatingSurfaceMaterial(glass?: boolean) {
     isGlass,
     isAllGlass: allGlass,
     borderColor: isGlass ? 'var(--t-border)' : 'var(--t-divider-subtle)',
-    shadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
+    shadow: isGlass ? '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)' : 'none',
     textStyle: {
       color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)',
       ...(allGlass ? { '--t-text': 'var(--t-chat-surface-text)', '--t-text-secondary': 'var(--t-chat-surface-text-secondary)' } : isGlass && paletteId === 'dark' ? { '--t-text': '#e8ecf2', '--t-text-secondary': '#bcc5d0', '--t-text-muted': '#8b95a3' } : {}),
@@ -35,7 +35,9 @@ export function useFloatingSurfaceMaterial(glass?: boolean) {
   };
 }
 
-/** Shared floating treatment for the rail's usage hover, menus and drawers. */
+/** Shared floating treatment for the rail's usage hover, menus and drawers.
+ * Animate ancestor transforms rather than opacity so WebKit can sample the workspace backdrop.
+ */
 export const FloatingSurface = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement> & {
   glass?: boolean;
   contentStyle?: CSSProperties;

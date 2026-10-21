@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } 
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { ScheduledTaskMark } from './ScheduledTaskMark';
+import { SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { WorkerReviewAction } from './workspace-terminal/WorkerReviewAction';
 
 export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
 export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
@@ -159,9 +161,13 @@ export function ExtraAgentRowView({
   repoLabel,
   link,
   roomy = false,
+  showPreview = true,
+  onOpenReview,
 }: {
   row: ExtraAgentRow;
+  onOpenReview?: (laneId: string, repoPath: string | null) => void;
   roomy?: boolean;
+  showPreview?: boolean;
   active: boolean;
   onSelectSession?: (sessionKey: string) => void;
   onFocusRow?: (row: ExtraAgentRow) => void;
@@ -177,6 +183,7 @@ export function ExtraAgentRowView({
    *  wash suppressed). null/undefined = no link active. */
   link?: 'linked' | 'dimmed' | null;
 }) {
+  const reviewReady = row.laneStatus === 'reviewing' && !row.outcome && Boolean(row.laneId);
   const dotState = rowDotState(row);
   const dotLabel = rowStatusLabel(row);
   const preview = row.outcomeNote || (row.outcome || row.laneStatus === 'completed' || row.laneStatus === 'awaiting_input' ? dotLabel : null);
@@ -198,13 +205,18 @@ export function ExtraAgentRowView({
   }, [onFocusRow, onSelectSession, row]);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
       // Stable handle for AT/automation (#2146): row.key is `lane:<id>` /
       // `agent:<sessionKey>`, so it survives a rename of row.name.
       data-o8-agent-row={row.key}
-      disabled={!canInteract}
-      onClick={handleClick}
+      aria-disabled={!canInteract}
+      tabIndex={canInteract ? 0 : -1}
+      onClick={() => { if (canInteract) handleClick(); }}
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget || !canInteract || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault(); handleClick();
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         onOpenMenu?.(event, row);
@@ -212,7 +224,7 @@ export function ExtraAgentRowView({
       aria-current={active ? 'true' : undefined}
       title={[row.name, dotLabel, row.repoPath, row.statusEvidence?.summary].filter(Boolean).join(' · ')}
       style={{
-        width: '100%',
+        width: '100%', boxSizing: 'border-box',
         minHeight: roomy ? 52 : 31,
         paddingTop: roomy ? 10 : 5,
         paddingBottom: roomy ? 10 : 5,
@@ -224,7 +236,7 @@ export function ExtraAgentRowView({
         // HISTORY_ROW_TONES.active in chats/constants.ts — revert both together.
         background: 'transparent',
         display: 'flex',
-        alignItems: 'flex-start',
+        alignItems: showPreview && preview ? 'flex-start' : 'center',
         gap: 9,
         textAlign: 'left',
         cursor: canInteract ? 'pointer' : 'default',
@@ -280,13 +292,13 @@ export function ExtraAgentRowView({
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, height: 17, minWidth: 0 }}>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap' }}>{row.name}</span>
+          <span style={{ minWidth: 0, maxWidth: SIDEBAR_TITLE_MAX_WIDTH, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
           {repoLabel && dotState !== 'running' ? (
-            <span style={{ minWidth: 0, flexShrink: 1, overflow: 'hidden', whiteSpace: 'nowrap',
+            <span style={{ minWidth: 0, maxWidth: SIDEBAR_REPO_MAX_WIDTH, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               fontSize: 11.5, color: 'var(--t-text-faint)', fontWeight: 260 }}>{repoLabel}</span>
           ) : null}
         </span>
-        {preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+        {showPreview && preview ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           overflow: 'hidden', whiteSpace: 'normal', marginTop: roomy ? 6 : 4, fontSize: 11.5,
           lineHeight: 1.45, color: 'var(--t-text-muted)' }}>{preview}</span> : null}
       </span>
@@ -339,6 +351,9 @@ export function ExtraAgentRowView({
           rows above (Q ruling 2026-07-12: spawned agents carry the time
           too). Hidden while hovered so it never fights the Retry action. */}
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 17, flexShrink: 0, position: 'relative' }}>
+      {reviewReady && onOpenReview ? <WorkerReviewAction size={20}
+        packet={{ title: row.name, status: 'awaiting_review' }}
+        onOpenReview={() => { if (row.laneId) onOpenReview(row.laneId, row.repoPath); }} /> : null}
       {row.scheduled ? <ScheduledTaskMark /> : null}
       {row.lastActivityAt > 0 && !(canRetry && hovered) ? (
         <span
@@ -356,7 +371,7 @@ export function ExtraAgentRowView({
       ) : null}
         <AgentStatusDot state={dotState} label={dotLabel} />
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -367,6 +382,8 @@ export function ExtraAgentActionMenu({
   onClose,
   onFocus,
   onArchive,
+  pinned = false,
+  onTogglePin,
 }: {
   state: ExtraAgentActionMenuState;
   busy: boolean;
@@ -374,6 +391,8 @@ export function ExtraAgentActionMenu({
   onClose: () => void;
   onFocus: () => void;
   onArchive: () => void;
+  pinned?: boolean;
+  onTogglePin?: () => void;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -384,7 +403,7 @@ export function ExtraAgentActionMenu({
   }, [onClose]);
 
   const menuWidth = 190;
-  const menuHeight = 130;
+  const menuHeight = onTogglePin ? 159 : 130;
   const panelRect = typeof document === 'undefined'
     ? null
     : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
@@ -451,6 +470,7 @@ export function ExtraAgentActionMenu({
         </div>
         <div style={{ display: 'grid', gap: 2 }}>
           <ExtraAgentMenuRow label="Open" disabled={!canFocus || busy} onClick={onFocus} />
+          {onTogglePin ? <ExtraAgentMenuRow label={pinned ? 'Unpin' : 'Pin'} disabled={busy} onClick={onTogglePin} /> : null}
           <ExtraAgentMenuRow label="Archive" disabled={busy || !canArchiveExtraAgent(state.row)} onClick={onArchive} />
         </div>
       </div>

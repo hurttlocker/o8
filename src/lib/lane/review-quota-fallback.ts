@@ -19,11 +19,11 @@ import {
   recordReviewTurnRuntimeReceipt,
 } from '@/lib/lane/review-turn-state';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
-import {
-  getActiveReviewerBackend,
-  getOrchestratorBackend,
-} from './orchestrator-backends/registry';
+import { getOrchestratorBackend } from './orchestrator-backends/registry';
 import type { OrchestratorBackend, OrchestratorBackendId } from './orchestrator-backends/types';
+import { getLane } from './registry';
+import { recordReviewTurnUsage } from './review-payer';
+import { resolveReviewRoute } from './review-route';
 import {
   isReviewerSessionBusyMessage,
   type ReviewUnavailableReason,
@@ -67,6 +67,7 @@ async function runAttempt(input: {
   formatRetryRejecting?: boolean;
   model?: string;
   thinkingEffort?: ThinkingEffort;
+  freshSession?: boolean;
   signal?: AbortSignal;
   onEvent?: (backend: OrchestratorBackend, event: OrchestratorEvent) => void;
 }): Promise<ReviewAttemptResult> {
@@ -107,7 +108,10 @@ async function runAttempt(input: {
   let quotaError: string | null = null;
   let unavailableReason: ReviewUnavailableReason | null = null;
   let approximateCost: number | null = null;
+  let observedModel: string | null = null;
   const errors: string[] = [];
+  const lane = getLane(input.laneId);
+  const reviewUsage = { reviewTurnId, laneId: input.laneId, packetId: lane?.packetId ?? null, surface: input.surface };
   try {
     await input.backend.sendTurn(input.repoPath, input.prompt, (event) => {
       if (event.type === 'turn_receipt') {
@@ -116,6 +120,7 @@ async function runAttempt(input: {
           expectedHeadSha: input.expectedHeadSha ?? null, model: event.leadModel, effort: event.effort });
         observedRoute = status === 'observed' ? createBackendRoleRouteChoice(input.backend.id, event.leadModel, event.effort) : null;
         if (status !== 'observed') errors.push(`Review runtime receipt ${status}; execution route is not proven.`);
+        else observedModel = event.leadModel;
       }
       if (event.type === 'text') text += event.text;
       if (event.type === 'done' && typeof event.cost === 'number') approximateCost = event.cost;
@@ -128,6 +133,8 @@ async function runAttempt(input: {
       threadId: sessionThreadId,
       ...(input.model ? { model: input.model } : {}),
       ...(input.thinkingEffort ? { thinkingEffort: input.thinkingEffort } : {}),
+      reviewUsage,
+      ...(input.freshSession ? { freshSession: true } : {}),
       signal: turnController.signal,
     });
   } catch (error) {
@@ -158,6 +165,10 @@ async function runAttempt(input: {
   } catch (error) {
     errors.push(`Review turn finalization failed: ${message(error)}`);
   }
+  // Every review turn is recorded in usage with its payer and cost basis (#3742). A turn whose calls
+  // wrote their own rows is recorded by those; one that ended before any call gets a turn row.
+  recordReviewTurnUsage({ ...reviewUsage, repoPath: lane?.repoPath ?? input.repoPath, backend: input.backend.id,
+    model: observedModel ?? input.model ?? null, reportedCostUsd: approximateCost });
   return { text, errors, quotaError, reviewTurnId, unavailableReason, approximateCost, observedRoute };
 }
 
@@ -178,14 +189,17 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   backendResolver?: (backend: OrchestratorBackendId) => OrchestratorBackend;
   signal?: AbortSignal;
 }): Promise<ReviewFallbackTurnResult> {
-  const initialBackend = input.initialBackend ?? getActiveReviewerBackend();
   const backendResolver = input.backendResolver ?? getOrchestratorBackend;
+  // #3742: a CLI reviewer that is not installed hands the review to o8's own Pi.
+  const route = input.initialBackend ? null : resolveReviewRoute(input.laneId);
+  const initialBackend = input.initialBackend ?? backendResolver(route!.backend);
   const defaults = getOperatorDefaultsSync();
   const override = process.env.O8_REVIEW_MODEL?.trim();
   const modelForBackend = (backend: OrchestratorBackendId) => {
     if (backend === 'claude') return defaults.values.orchestratorModel;
     if (backend === 'codex') return resolveOrchestratorModelSync();
     if (backend === 'opencode') return defaults.values.opencodeOrchestratorModel;
+    if (backend === 'pi') return route?.model ?? null;
     return null;
   };
   const requestedRoute = createBackendRoleRouteChoice(
@@ -238,9 +252,9 @@ export async function runReviewerTurnWithQuotaFallback(input: {
           ? 'env' : effectiveRoute?.model ? 'derived' : 'runtime-default',
         effort: effectiveRoute?.effort === defaults.values.thinkingEffort ? defaults.sources.thinkingEffort : 'derived',
       },
-      reason: result.ok
+      reason: `${route?.reason ? `${route.reason} ` : ''}${result.ok
         ? `${input.surface} completed on ${result.backend}. ${effectiveRoute ? 'Backend turn receipt observed.' : 'No unambiguous backend turn receipt observed.'}`
-        : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`,
+        : `${input.surface} did not complete on ${result.backend}: ${result.errors.join('; ') || result.unavailableReason || 'unknown failure'}`}`,
       fallbackReason,
       status: result.ok
         ? result.fallback ? 'fallback' : 'selected'
@@ -251,11 +265,15 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   const promptFor = (backend: OrchestratorBackendId) => (
     typeof input.prompt === 'function' ? input.prompt(backend) : input.prompt
   );
+  // Pi works only inside its workspace, so a Pi review runs in the lane worktree it reviews.
+  // The buy-in doc runs after the merge and writes into the repository itself.
+  const piWorkspace = input.surface === 'buyin-doc' ? input.repoPath
+    : getLane(input.laneId)?.worktreePath || input.repoPath;
   const first = await runAttempt({
     backend: initialBackend,
     laneId: input.laneId,
     surface: input.surface,
-    repoPath: input.repoPath,
+    repoPath: initialBackend.id === 'pi' ? piWorkspace : input.repoPath,
     threadId: input.threadId,
     sessionThreadId: input.sessionThreadId,
     prompt: promptFor(initialBackend.id),
@@ -264,6 +282,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
     ...(initialBackend.id === 'codex' ? {
       model: requestedRoute.model ?? undefined, thinkingEffort: defaults.values.thinkingEffort,
     } : {}),
+    ...(initialBackend.id === 'pi' ? { model: route?.model, freshSession: true } : {}),
     onEvent: input.onEvent,
     signal: input.signal,
   });

@@ -72,9 +72,8 @@ export function WorkersChip({
     );
   }, [buttonRef]);
   const runtimes = availableRuntimes?.length ? availableRuntimes : [runtime];
-  const selectedIndex = Math.max(0, runtimes.indexOf(runtime));
   const stack = mode === 'fusion'
-    ? [0, 1, 2].map((offset) => runtimes[(selectedIndex + offset) % runtimes.length])
+    ? [...new Set([runtime, ...runtimes])].slice(0, 3)
     : [runtime];
   const label = mode === 'fusion'
     ? availableRuntimes ? `${availableRuntimes.length} ready` : 'Workers'
@@ -87,8 +86,8 @@ export function WorkersChip({
       ref={buttonRef}
       data-testid="composer-selector-workers"
       type="button"
-      title={`Workers: ${selectionLabel}`}
-      aria-label={`Workers: ${selectionLabel}`}
+      title={`Default worker: ${selectionLabel}. Tasks can explicitly select another available runtime.`}
+      aria-label={`Default worker: ${selectionLabel}`}
       aria-expanded={open}
       disabled={saving}
       onClick={onClick}
@@ -100,7 +99,7 @@ export function WorkersChip({
         color: 'var(--t-text-secondary)',
         cursor: saving ? 'default' : 'pointer',
         fontSize: 11,
-        fontWeight: 450,
+        fontWeight: 300,
         flexShrink: 0,
         maxWidth: 180,
         overflow: 'hidden',

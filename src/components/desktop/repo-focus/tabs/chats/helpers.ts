@@ -55,7 +55,7 @@ export function pathDisplayName(path: string | null | undefined): string {
   return normalizeRepoPath(path).split('/').filter(Boolean).pop() ?? '';
 }
 
-export function historyRepoLabel(item: ChatHistoryItem): string {
+export function historyRepoLabel(item: HistoryRepoIdentity): string {
   const savedName = (item.repoName ?? '').trim();
   if (savedName && savedName.toLowerCase() !== 'current project') return savedName;
   return pathDisplayName(item.repoPath) || savedName || 'project';
@@ -70,7 +70,7 @@ export function historyRepoLabel(item: ChatHistoryItem): string {
  */
 export const CONVERSATIONS_GROUP_KEY = '__conversations__';
 
-export function historyRepoGroupLabel(item: ChatHistoryItem, repos: RepoFocusRepo[]): string {
+export function historyRepoGroupLabel(item: HistoryRepoIdentity, repos: RepoFocusRepo[]): string {
   const matchedRepo = repos.find((repo) => historyBelongsToRepo(item, repo));
   if (matchedRepo) return matchedRepo.name;
   const repoPath = (item.repoPath ?? '').trim();
@@ -85,7 +85,9 @@ export function normalizeRemoteUrl(value: string | null | undefined): string {
   return (value ?? '').trim().replace(/\.git$/i, '').toLowerCase();
 }
 
-export function historyBelongsToRepo(item: ChatHistoryItem, repo: RepoFocusRepo): boolean {
+export type HistoryRepoIdentity = Pick<ChatHistoryItem, 'repoName' | 'repoPath' | 'remoteUrl'>;
+
+export function historyBelongsToRepo(item: HistoryRepoIdentity, repo: RepoFocusRepo): boolean {
   if (repoOwnsCandidate(repo.localPath, item.repoPath)) return true;
   const repoName = repo.name.toLowerCase();
   const repoBase = pathBasename(repo.localPath);
@@ -201,7 +203,7 @@ export function packetSortTime(packet: OrchestratorPacket): number {
 
 export function formatElapsedAgo(timestamp: string): string {
   const elapsed = formatElapsed(timestamp);
-  return elapsed === 'now' ? 'just now' : `${elapsed} ago`;
+  return elapsed === 'now' ? '0m' : elapsed;
 }
 
 export function packetMatchScore(item: ChatHistoryItem, packet: OrchestratorPacket): number {

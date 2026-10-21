@@ -9,24 +9,34 @@ import { CHAT_GROUP_BY_KEY, staysInWorkingView } from './sidebar-view';
 import type { ChatHistoryItem } from './types';
 import type { IdeWorkspaceSession } from '../../types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { SidebarAgentEntry } from './sidebar-agent-navigation';
 
 vi.mock('@/components/desktop/OrchestratorHoverCard', () => ({ OrchestratorHoverCard: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
+const fixtureNow = new Date(2026, 9, 19, 12).getTime();
 const repo = { id: 'test', name: 'project', localPath: '/tmp/sidebar-project', remoteUrl: null, defaultBranch: 'main' };
 const history = ['Idle', 'Running', 'Decision', 'Pinned'].map((title, index): ChatHistoryItem => ({
   tabId: `thoughts-${title}`, title, preview: `Latest update for ${title}`, empty: false, messageCount: 1, model: 'codex',
-  savedAt: new Date(Date.now() - index * 60_000).toISOString(),
-  modifiedAt: new Date(Date.now() - index * 60_000).toISOString(),
+  savedAt: new Date(fixtureNow - index * 60_000).toISOString(),
+  modifiedAt: new Date(fixtureNow - index * 60_000).toISOString(),
   starred: false, pinned: title === 'Pinned', repoPath: repo.localPath, repoName: repo.name, repoBranch: 'main',
 }));
 const packets = ['Running', 'Decision'].map((title) => ({
   id: `packet-${title}`, title, workspaceTargetPath: repo.localPath, branchTarget: 'main',
   orchestratorThreadId: `thoughts-${title}`, status: title === 'Running' ? 'running' : 'awaiting_review',
-  lastEventAt: new Date().toISOString(), runtime: 'codex',
+  lastEventAt: new Date(fixtureNow).toISOString(), runtime: 'codex',
   referenceLabel: title, summary: title, dependencyLabels: [], dependencyPacketIds: [],
   queueState: 'queued', releaseState: 'pending',
 }) satisfies OrchestratorPacket);
+
+const workerEntry: SidebarAgentEntry = {
+  row: { key: 'lane:worker', origin: 'CLI', status: 'running', runtime: 'codex', model: null,
+    name: 'Worker task', subtitle: '', lastActivityAt: fixtureNow, sessionKey: 'worker-session', repoPath: repo.localPath,
+    packetId: 'worker-packet', laneId: 'worker', laneStatus: 'running', outcome: null, outcomeNote: null, lastEventLabel: null },
+  pinned: false, active: false, attention: { status: 'running' },
+  render: () => createElement('span', { 'data-worker': 'true' }, 'Worker task'),
+};
 
 describe('compact sidebar view through the chat panel', () => {
   let container: HTMLDivElement;
@@ -37,7 +47,7 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => root.render(createElement(Fragment, null, createElement(SidebarHeaderActions, { onSearch }), createElement(ChatsTab, {
       repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
       activeSessionKey: active, onOpenHistoryChat: onOpen, packets,
-      agentsSection: (workingOnly) => createElement('span', { 'data-workers': String(workingOnly) }, 'Workers'),
+      agentEntries: [workerEntry],
     }))));
   };
   const rows = () => Array.from(container.querySelectorAll('[role="button"][title]:not([aria-expanded])')).map((row) => row.getAttribute('title')?.split(' · ')[0]);
@@ -48,11 +58,41 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => item.click());
   };
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(fixtureNow);
     window.localStorage.clear(); onOpen.mockClear(); onSearch.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url) => ({ ok: true, json: async () => String(url).includes('chat-history/list') ? { conversations: history } : { lanes: [] } })));
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  afterEach(async () => {
+    await act(async () => root.unmount()); container.remove();
+    vi.useRealTimers(); vi.unstubAllGlobals();
+  });
+  it('shows creation actions only after confirmed empty history and recovers an unavailable read', async () => {
+    const createOrchestrator = vi.fn(); const createTerminal = vi.fn();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(async url => String(url).includes('chat-history/list')
+      ? new Promise<Response>(resolve => { finish = resolve; }) : Response.json({ lanes: [] }));
+    await act(async () => root.render(createElement(ChatsTab, { repos: [repo], variant: 'mini', groupMode: 'flat', showLiveSessions: false,
+      emptyActions: createElement(Fragment, null,
+        createElement('button', { onClick: createOrchestrator }, 'New orchestrator'),
+        createElement('button', { onClick: createTerminal }, 'New terminal')) })));
+    expect(container.textContent).toContain('Loading project chats');
+    expect(container.textContent).not.toContain('New orchestrator');
+    await act(async () => finish(Response.json({ error: 'Unavailable' }, { status: 503 })));
+    expect(container.textContent).toContain('Project chats unavailable');
+    expect(container.textContent).not.toContain('New orchestrator');
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).includes('chat-history/list') ? { conversations: [] } : { lanes: [] }));
+    const button = (label: string) => [...container.querySelectorAll('button')].find(item => item.textContent === label)!;
+    await act(async () => button('Try again').click());
+    expect(createOrchestrator).not.toHaveBeenCalled(); expect(createTerminal).not.toHaveBeenCalled();
+    await act(async () => button('New orchestrator').click());
+    await act(async () => button('New terminal').click());
+    expect(createOrchestrator).toHaveBeenCalledOnce(); expect(createTerminal).toHaveBeenCalledOnce();
+    vi.mocked(fetch).mockImplementation(async url => Response.json(String(url).includes('chat-history/list') ? { conversations: history } : { lanes: [] }));
+    await act(async () => window.dispatchEvent(new Event('o8:chat-history-updated')));
+    expect(container.textContent).not.toContain('New orchestrator');
+  });
   it('toggles priority from the header, shows previews and restores the normal view without opening a chat', async () => {
     await render();
     const bell = container.querySelector<HTMLButtonElement>('[aria-label="Priority chats"]')!;
@@ -72,15 +112,15 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search chats"]')!.click());
     expect(onSearch).toHaveBeenCalledOnce();
   });
-  it('persists working shelves, keeps pins and decisions, and forwards the worker filter', async () => {
+  it('persists working shelves and keeps pins, decisions and workers in the normal groups', async () => {
     await render(); await choose('Working');
     expect(rows()).toEqual(expect.arrayContaining(['Idle', 'Running', 'Decision']));
     expect(rows()).toContain('Pinned');
-    expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Working conversations"] [data-worker]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('working');
     await render('thoughts-Running'); expect(rows()).not.toContain('Idle');
     await act(async () => root.unmount()); root = createRoot(container); await render('thoughts-Running');
-    expect(container.querySelector('[data-workers="true"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Working conversations"] [data-worker]')).not.toBeNull();
     expect(rows()).not.toContain('Idle');
   });
   it('orders Priority, Pinned and dated history without duplicates and remembers date folds', async () => {
@@ -131,6 +171,27 @@ describe('compact sidebar view through the chat panel', () => {
     await choose('Group by repo'); expect(container.textContent).toContain('project');
     await choose('Group by date'); expect(container.textContent).toContain('Today');
   });
+  it('groups ordinary chronological chats by day after pins and remembers date folds', async () => {
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(12, 0, 0, 0);
+    const older = new Date(); older.setDate(older.getDate() - 3); older.setHours(12, 0, 0, 0);
+    const dated = history.map(item => ({ ...item, messageCount: 2,
+      modifiedAt: item.title === 'Idle' ? yesterday.toISOString()
+        : item.title === 'Decision' ? older.toISOString() : item.modifiedAt }));
+    vi.mocked(fetch).mockImplementation(async url => ({ ok: true, json: async () => String(url).includes('chat-history/list')
+      ? { conversations: dated } : { lanes: [] } }) as Response);
+    await render(); await choose('Chronological');
+    const shelves = [...container.querySelectorAll('[aria-label$=" conversations"]')].map(node => node.getAttribute('aria-label'));
+    expect(shelves).toEqual(['Pinned conversations', 'Recents conversations', 'Today conversations', 'Yesterday conversations', 'Previous 7 days conversations']);
+    expect(rows()).toEqual(['Pinned', 'Running', 'Idle', 'Decision']);
+    expect(container.textContent).not.toContain('Latest update for');
+    const yesterdayToggle = () => container.querySelector<HTMLButtonElement>('[aria-label="Yesterday conversations"] button[aria-expanded]')!;
+    await act(async () => yesterdayToggle().click());
+    expect(rows()).toEqual(['Pinned', 'Running', 'Decision']);
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); root = createRoot(container); await render();
+    expect(yesterdayToggle().getAttribute('aria-expanded')).toBe('false');
+    expect(rows()).toEqual(['Pinned', 'Running', 'Decision']);
+  });
   it('folds each chat section in every view and retains attention while a section is closed', async () => {
     await render();
     const shelfButton = (label: string) => container.querySelector<HTMLButtonElement>(`[aria-label="${label} conversations"] button[aria-expanded]`)!;
@@ -161,6 +222,28 @@ describe('compact sidebar view through the chat panel', () => {
     await act(async () => group.click());
     expect(rows()).toContain('Idle');
   });
+  it('keeps previous-day chats visible when only Today is folded just after midnight', async () => {
+    const midnight = new Date(2026, 9, 20, 0, 1, 28).getTime();
+    vi.setSystemTime(midnight);
+    const dated = history.map((item, index) => ({ ...item,
+      savedAt: new Date(midnight - index * 60_000).toISOString(),
+      modifiedAt: new Date(midnight - index * 60_000).toISOString(),
+    }));
+    vi.mocked(fetch).mockImplementation(async url => ({ ok: true, json: async () => String(url).includes('chat-history/list')
+      ? { conversations: dated } : { lanes: [] } }) as Response);
+    await render(); await choose('Group by date');
+    const shelf = (label: string) => container.querySelector<HTMLElement>(`[aria-label="${label} conversations"]`)!;
+    expect(shelf('Today').textContent).toContain('Idle');
+    expect(shelf('Today').textContent).toContain('Running');
+    expect(shelf('Yesterday').textContent).toContain('Decision');
+    expect(shelf('Yesterday').textContent).toContain('Pinned');
+    expect(rows()).toHaveLength(4);
+    await act(async () => shelf('Today').querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+    expect(rows()).toEqual(['Pinned', 'Decision']);
+    expect(shelf('Yesterday').querySelector('button')?.getAttribute('aria-expanded')).toBe('true');
+    await act(async () => shelf('Yesterday').querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+    expect(rows()).toEqual([]);
+  });
   it('shows only scheduled chats owned here, retains notifications and restores the selected view', async () => {
     const sessions = [
       { sessionKey: 'llm-chat:thoughts-Pinned', sessionKind: 'automation', workspace: repo.localPath,
@@ -176,11 +259,11 @@ describe('compact sidebar view through the chat panel', () => {
     const show = async () => act(async () => root.render(createElement(Fragment, null,
       createElement(SidebarHeaderActions), createElement(ChatsTab, { repos: [repo], variant: 'mini',
         groupMode: 'flat', showLiveSessions: false, packets, ideWorkspaceSessions: sessions,
-        onOpenHistoryChat: onOpen, agentsSection: createElement('span', null, 'Worker section') }))));
+        onOpenHistoryChat: onOpen, agentEntries: [workerEntry] }))));
     await show(); await choose('Scheduled');
     expect(rows()).toContain('Pinned'); expect(rows()).not.toContain('Idle'); expect(rows()).not.toContain('Running');
     expect(container.textContent).toContain('Owned scheduled run');
-    expect(container.querySelector<HTMLElement>('[data-sidebar-workers]')?.style.display).toBe('none');
+    expect(container.querySelector('[data-worker]')).toBeNull();
     expect(container.querySelector('[data-attention-dot]')).not.toBeNull();
     expect(window.localStorage.getItem(CHAT_GROUP_BY_KEY)).toBe('scheduled');
     const scheduled = container.querySelector<HTMLButtonElement>('[aria-label="Scheduled conversations"] button[aria-expanded]')!;

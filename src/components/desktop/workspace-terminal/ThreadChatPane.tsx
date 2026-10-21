@@ -10,6 +10,8 @@
  * workspace-thread events.
  */
 
+import { useThreadPaneDrag } from './useThreadPaneDrag';
+import { SessionPaneFrame } from './SessionPaneFrame';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { registerPaneThread, unregisterPaneThread } from '@/lib/orchestrator/pane-thread-registry';
@@ -34,6 +36,8 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
   const [chrome, setChrome] = useState<ThoughtsChatPanelChromeState | null>(null);
   const chromeRef = useRef<ThoughtsChatPanelChromeState | null>(null);
   const [closeHover, setCloseHover] = useState(false);
+
+  const startPaneDrag = useThreadPaneDrag({ threadId, title, mode, repoPath });
 
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const sessionTargets = useMemo(
@@ -92,24 +96,13 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
   const headerTitle = title || chrome?.activeTargetLabel || 'Chat';
 
   return (
-    <div
-      style={{
-        flex: 1,
-        minWidth: 0,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 10,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        background: 'var(--t-chat-surface-bg, var(--t-panel))',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Pane header — title + close, matching the reference's per-pane bar. */}
+    <SessionPaneFrame>
+      {/* The pane header moves the existing chat; its close button stays independent. */}
       <div
+        onPointerDown={startPaneDrag}
+        title="Drag to move this chat"
         style={{
+          cursor: 'grab', touchAction: 'none', userSelect: 'none',
           height: 32,
           flexShrink: 0,
           display: 'flex',
@@ -180,13 +173,15 @@ export function ThreadChatPane({ threadId, title, mode, repoPath, onClose }: Thr
           thoughtsMutedGlass="var(--t-glass-muted-strong)"
           showInlineExport={false}
           suppressAutoRestore
+          scopeTabId={`thread-pane:${threadId}`}
+          expectsThreadLoad
+          draftConversationId={threadId}
           lockedMode={mode === 'chat' ? 'chat' : undefined}
           initialMode={mode === 'chat' ? 'chat' : 'fleet'}
           onMissionStateChange={data.onMissionStateChange}
-          onLaunchPacket={data.onLaunchPacket}
           onChromeChange={handleChromeChange}
         />
       </div>
-    </div>
+    </SessionPaneFrame>
   );
 }

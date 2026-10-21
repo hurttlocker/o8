@@ -77,17 +77,17 @@ export const MISSION_TOOLS: McpTool[] = [
         runtime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
-          description: 'Worker runtime for all mission packets. Codex remains the default; configured local CLI adapters are selected explicitly.',
+          description: 'Worker runtime for this mission. Omit to use the saved default worker; explicitly select another available dispatchable runtime for this task. Check current runtime availability before choosing.',
         },
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with runtime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with runtime.',
         },
         ...MISSION_WORKER_PIN_PROPERTIES,
         constraints: {
@@ -107,10 +107,8 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'When true (default), immediately dispatches all packets after creation. Set false to prepare without launching; then call dispatch_mission with the returned missionId when ready.',
         },
-        useBrain: {
-          type: 'boolean',
-          description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).',
-        },
+        useBrain: { type: 'boolean', description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).' },
+        holdMerges: { type: 'boolean', description: 'Hold merges. When true, every packet stops at an approved review and waits for the operator: a merge from the reviewer or from you routes to an operator approval card instead of merging. Set it whenever the operator says not to merge, or wants to merge themselves. Omit (default off) to keep the usual merge after an approved review.' },
         huddle: {
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
@@ -280,12 +278,12 @@ export const MISSION_TOOLS: McpTool[] = [
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with requestedRuntime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with requestedRuntime.',
         },
         requestedRuntime: {
           type: 'string',
@@ -377,12 +375,12 @@ export const MISSION_TOOLS: McpTool[] = [
         workerIntent: {
           type: 'string',
           enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
-          description: 'Desired worker type. Production still selects Codex as the runtime.',
+          description: 'Desired worker role. Select its runtime independently with requestedRuntime.',
         },
         requestedProvider: {
           type: 'string',
           enum: WORKER_PROVIDER_OPTIONS,
-          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+          description: 'Provider hint recorded in routing metadata. Select the execution runtime explicitly with requestedRuntime.',
         },
         requestedRuntime: {
           type: 'string',

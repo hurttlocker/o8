@@ -408,12 +408,9 @@ export async function requestMicAccess(): Promise<boolean | null> {
  * grant lands mid-session. No-op outside Tauri.
  */
 export async function restartApp(): Promise<void> {
-  await fetch('/api/panel/cloud-jobs/drain', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ finalize: true }),
-  }).catch(() => { /* lease expiry is the fallback when the server is already unavailable */ });
-  await invoke('restart_app');
+  if (!isTauri()) return;
+  const { relaunchInstalledUpdate } = await import('@/lib/app-update/client-restart');
+  if (!(await relaunchInstalledUpdate())) throw new Error('Restart is waiting for CLI update ownership to be resolved. No sessions were stopped.');
 }
 
 /**

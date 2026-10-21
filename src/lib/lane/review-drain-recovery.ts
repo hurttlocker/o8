@@ -11,6 +11,7 @@
 
 import { getSqlite } from '@/lib/db';
 import { recordLaneEvent } from './events';
+import { LaneGitMetadataError } from './lane-git';
 import {
   laneReviewHeadSha,
   normalizeAttemptHeadSha,
@@ -46,6 +47,17 @@ export interface QueuedReview {
  * the claiming process could settle is exactly how a row sat `in_progress`
  * forever while every later enqueue bounced off it.
  */
+function unkeyedHeadSha(row: Pick<QueuedReview, 'lane_id' | 'repo_path'>): string | undefined {
+  const lane = getLane(row.lane_id);
+  try {
+    return laneReviewHeadSha(lane ?? { worktreePath: null, repoPath: row.repo_path });
+  } catch (error) {
+    if (!(error instanceof LaneGitMetadataError)) throw error;
+    console.warn(`[auto-review] Lane ${row.lane_id} Git metadata is not trusted; claiming its review unkeyed.`);
+    return undefined;
+  }
+}
+
 export function claimNextReview(): QueuedReview | null {
   const db = getDb();
   const row = db.prepare(
@@ -57,11 +69,9 @@ export function claimNextReview(): QueuedReview | null {
 
   // A row enqueued before v46 (or on a lane whose HEAD was unreadable then) is
   // keyed at claim time instead, so drift from here on is still detectable.
-  const lane = getLane(row.lane_id);
-  const currentHeadSha = lane
-    ? laneReviewHeadSha(lane)
-    : laneReviewHeadSha({ worktreePath: null, repoPath: row.repo_path });
-  const headSha = normalizeAttemptHeadSha(row.head_sha) ?? currentHeadSha ?? null;
+  // A keyed row needs no Git read, and a lane whose Git metadata cannot be
+  // trusted stays unkeyed, so one broken lane cannot stop every later review.
+  const headSha = normalizeAttemptHeadSha(row.head_sha) ?? unkeyedHeadSha(row) ?? null;
 
   const claimOwner = reviewAttemptOwnerId();
   const claimed = db.prepare(

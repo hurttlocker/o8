@@ -28,6 +28,11 @@ export const SERVE_SUPERVISOR_BACKOFF_CAP_MS = 30_000;
 const SERVE_SUPERVISOR_BACKOFF_BASE_MS = 1_000;
 const SERVE_SUPERVISOR_READY_POLL_MS = 100;
 
+/** Source development can compile routes on the first readiness request. */
+export function serveStartupTimeoutMs(mode: 'development' | 'packaged'): number {
+  return mode === 'development' ? 300_000 : 60_000;
+}
+
 export function sourceServeApiLaunch(projectRoot: string): { command: string; args: string[] } {
   return {
     command: process.execPath,

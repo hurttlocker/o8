@@ -33,7 +33,7 @@ const model = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/pi/sdk/transport')>(),
-  createManagedPiTransport: (options: { model: { id: string } }) => {
+  createManagedPiTransport: (options: { model: { id: string }; observeRawUsage?: (usage: unknown) => void }) => {
     model.managedModels.push(options.model.id);
     return async function* (context: { messages: unknown[] }, signal: AbortSignal) {
       const system = (context.messages as Array<{ role?: string; toolsAdded?: Array<{ name: string }> }>)
@@ -49,6 +49,7 @@ vi.mock('@/lib/pi/sdk/transport', async (importOriginal) => ({
       const answer = model.answers.shift() as AssistantMessage | undefined;
       if (!answer) throw new Error('No scripted answer left');
       yield* events(answer);
+      options.observeRawUsage?.({ prompt_tokens: 120, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 20 } });
     };
   },
 }));
@@ -84,6 +85,7 @@ const seams = vi.hoisted(() => ({
   laneAnswers: [] as Array<{ laneId: string; name: string; allowed: boolean }>,
   startGate: null as null | Promise<void>,
   startReached: null as null | (() => void),
+  started: null as null | { running: boolean },
 }));
 vi.mock('@/lib/pi/sdk/lane-approval', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/pi/sdk/lane-approval')>();
@@ -105,7 +107,7 @@ vi.mock('@/lib/pi/sdk/session', async (importOriginal) => {
       seams.startReached?.();
       await gate;
     }
-    return actual.createPiSdkSession(options);
+    return (seams.started = await actual.createPiSdkSession(options));
   } };
 });
 // Makes command confinement unavailable, as on a kernel without Landlock.
@@ -172,6 +174,16 @@ process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
 // here and never reaches another o8 on this machine.
 const pushes: Array<{ url?: string; authorization?: string; body: string }> = [];
 const host: Server = createServer((req, res) => {
+  // #3666: the operator command reads packet transcripts through the real route.
+  if (req.method === 'GET' && req.url?.startsWith('/api/orchestrator/packet-transcript')) {
+    void import('@/app/api/orchestrator/packet-transcript/route').then(async ({ GET }) => {
+      const headers = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) if (typeof value === 'string') headers.set(key, value);
+      const response = await GET(new NextRequest(`http://127.0.0.1${req.url}`, { headers }));
+      res.writeHead(response.status, { 'Content-Type': 'application/json' }).end(await response.text());
+    });
+    return;
+  }
   const chunks: Buffer[] = [];
   req.on('data', (chunk: Buffer) => chunks.push(chunk));
   req.on('end', () => {
@@ -196,7 +208,9 @@ const { hasCurrentCleanWorkerExit } = await import('@/lib/lane/worker-session-st
 const { createPiLaneApproval } = await import('@/lib/pi/sdk/lane-approval');
 const { getRuntime } = await import('@/lib/runtimes');
 const capabilities = await import('@/lib/orchestrator/runtime-capabilities');
-const { getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
+const { archiveOwnedPiBuiltinSession, getOwnedPiBuiltinReviewPacket } = await import('@/lib/pi-builtin/owned');
+const { handleTranscript } = await import('@/lib/mcp/operator-handlers/status');
+const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const { getOrCreateWsToken, WS_TOKEN_PATH } = await import('@/lib/ws-auth');
 const { setLaneStatus } = await import('@/lib/lane/registry');
 const { withPiExclusive } = await import('@/lib/pi/sdk/command');
@@ -337,6 +351,14 @@ describe('bundled Pi worker (#3258)', () => {
     // Only the managed transport, for the managed model, ever served this worker.
     expect(new Set(model.managedModels)).toEqual(new Set(['openai/gpt-6-luna']));
     expect(model.seen[0].tools).toEqual(['read_file', 'write_file', 'run_command']);
+    // Each managed call is recorded with its tokens, at no per-call charge to the operator (#3742).
+    const { getDb } = await import('@/lib/db');
+    const { usageLogs } = await import('@/lib/db/schema');
+    const usage = getDb()!.select().from(usageLogs).all().filter((row) => row.agentName === 'pi-builtin' && row.laneId === laneId);
+    expect(usage.length).toBeGreaterThan(0);
+    expect(usage[0]).toMatchObject({ role: 'worker', provider: 'runtime', model: 'openai/gpt-6-luna', inputTokens: 120,
+      outputTokens: 30, cacheReadTokens: 20, costUsd: 0, packetId });
+    expect(JSON.parse(usage[0].metadataJson!)).toMatchObject({ payer: 'o8-managed', status: 'completed', usageReported: true });
 
     // The work happened in the lane worktree and nowhere else, with no inbox approval, and is not committed yet.
     expect(git(workspacePath, ['rev-parse', 'HEAD'])).toBe(target.baseSha);
@@ -384,6 +406,43 @@ describe('bundled Pi worker (#3258)', () => {
     // Lane rules end with the lane: a merged lane's worktree gets no further writes or commands.
     const approve = createPiLaneApproval(realpathSync(workspacePath), laneId);
     expect(await approve({ name: 'run_command', args: { command: 'true' } }, new AbortController().signal)).toBe(false);
+  }, 240_000);
+
+  it('reads a dispatched packet\'s transcript through the operator command, before and after archive (#3666)', async () => {
+    const target = await makeRepo('transcript');
+    model.answers.push(
+      call('t1', 'write_file', { path: 'notes.md', content: 'pi transcript\n' }),
+      call('t2', 'run_command', { command: 'cat notes.md' }),
+      message([{ type: 'text', text: 'Wrote notes.md.' }]),
+    );
+    const worker = await delegate(target.repoPath, 'Add notes.md.');
+    await lastRunOutcome(worker.sessionKey, 'finished');
+    setApiBase(`http://127.0.0.1:${(host.address() as AddressInfo).port}`);
+    const read = async () => {
+      const result = await handleTranscript({ packetId: worker.packetId });
+      expect(result.isError).toBeFalsy();
+      return (JSON.parse((result.content[0] as { text: string }).text) as { data: { sessionKey: string;
+        events: Array<{ type: string; tool?: string; ok?: boolean; text?: string; summary?: string }> } }).data;
+    };
+    const live = await read();
+    expect(live.sessionKey).toBe(worker.sessionKey);
+    const shape = (events: typeof live.events) => events.map((event) => [event.type, event.tool ?? event.text ?? '']);
+    expect(shape(live.events)).toEqual([
+      ['tool_call', 'write_file'], ['tool_result', 'write_file'],
+      ['tool_call', 'run_command'], ['tool_result', 'run_command'],
+      ['assistant', 'Wrote notes.md.'], ['done', ''],
+    ]);
+    expect(live.events[3]).toMatchObject({ ok: true });
+    expect(live.events[3].summary).toContain('pi transcript');
+
+    // A merged packet's session is archived; its transcript stays readable.
+    expect((await dispatch({ verb: 'request_review', laneId: worker.laneId, actor: 'system' })).ok).toBe(true);
+    const reviewedHeadSha = git(worker.workspacePath, ['rev-parse', 'HEAD']);
+    await submitPacketReview({ packetId: worker.packetId, approved: true, findings: [], reviewedHeadSha });
+    expect((await approveAndMergePacket({ packetId: worker.packetId, expectedHeadSha: reviewedHeadSha, actor: 'user' })).merged).toBe(true);
+    await archiveOwnedPiBuiltinSession(worker.sessionKey);
+    expect(existsSync(join(process.env.O8_OWNED_PI_BUILTIN_ROOT!, worker.sessionKey.slice('pi-builtin-owned:'.length)))).toBe(false);
+    expect(shape((await read()).events)).toEqual(shape(live.events));
   }, 240_000);
 
   it('runs two packets pinned to an OpenRouter model in separate worktrees, records each call and lands both (#3584)', async () => {
@@ -660,6 +719,34 @@ describe('bundled Pi worker (#3258)', () => {
     await expect(launching).resolves.toMatchObject({ ok: true });
     const packet = await lastRunOutcome(sessionKey, 'finished');
     expect(packet.summary).toBe('Started fine.');
+  }, 120_000);
+
+  it('fails a packet whose Pi start never finishes, and closes a start that finishes late (#3741)', async () => {
+    const repo = await makeRepo('start-hang');
+    vi.stubEnv('O8_PI_WORKER_START_TIMEOUT_MS', '2000');
+    let open!: () => void;
+    seams.startGate = new Promise<void>((resolve) => { open = resolve; });
+    try {
+      const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clientMutationId: `pi-builtin-${randomUUID()}`, prompt: 'Start and hang.', taskName: 'start hang',
+          repoPath: repo.repoPath, runtime: 'pi-builtin' }),
+      }));
+      // The launch settles at the deadline and says why; the lane leaves `launching` with that reason.
+      const reason = 'Pi did not start within 2 seconds, so the turn was not run.';
+      const body = await response.json() as { ok: boolean; laneId: string; error?: string };
+      expect({ status: response.status, ok: body.ok, error: body.error }).toEqual({ status: 422, ok: false, error: reason });
+      expect(getLane(body.laneId)?.status).toBe('idle');
+      const events = getLaneEvents(body.laneId, 200);
+      expect(events.findLast((event) => event.verb === 'status_change')?.payload).toMatchObject({ eventLabel: 'launch_failed', reason });
+      const exit = events.find((event) => event.verb === 'runtime_process_exit')!.payload as { surfaceId: string };
+      expect((await getOwnedPiBuiltinReviewPacket(exit.surfaceId)).lastRun).toMatchObject({ outcome: 'failed' });
+      open();
+      await waitFor(() => (seams.started && !seams.started.running ? true : null), 'late Pi start closed');
+    } finally {
+      open?.();
+      vi.unstubAllEnvs();
+    }
   }, 120_000);
 
   it('runs a read-only packet with read_file only', async () => {

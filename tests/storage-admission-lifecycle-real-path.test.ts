@@ -43,7 +43,7 @@ function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
-function makeRepo(packetId: string) {
+async function makeRepo(packetId: string) {
   const repoPath = mkdtempSync(join(tmpdir(), `o8-storage-lifecycle-${packetId}-`));
   roots.push(repoPath);
   git(repoPath, ['init', '-q', '-b', 'main']);
@@ -53,9 +53,9 @@ function makeRepo(packetId: string) {
   git(repoPath, ['add', 'base.txt']);
   git(repoPath, ['commit', '-q', '-m', 'base']);
   const branch = `inline/${packetId}`;
-  const worktreePath = join(repoPath, '.cortex-worktrees', `packet-${packetId}`);
-  git(repoPath, ['worktree', 'add', '-q', '-b', branch, worktreePath, 'main']);
-  return { repoPath, branch, worktreePath };
+  const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+  const { path: worktreePath, sessionKey } = await createManagedPacketWorktree(repoPath, { packetId, branch });
+  return { repoPath, branch, worktreePath, sessionKey };
 }
 
 function observed(targetPath: string, observedAt: number): StorageVolumeObservation {
@@ -142,7 +142,7 @@ afterAll(() => {
 describe('storage reservation lifecycle real paths', () => {
   it('drops reservedBeforeBytes after a lane reaches completed through the registry cleanup path', async () => {
     const packetId = 'terminal-release';
-    const { repoPath, branch, worktreePath } = makeRepo(packetId);
+    const { repoPath, branch, worktreePath, sessionKey } = await makeRepo(packetId);
     const now = Date.now();
     const store = new StorageAdmissionStore(getSqlite(), {
       now: () => now,
@@ -164,6 +164,7 @@ describe('storage reservation lifecycle real paths', () => {
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     recordLaneEvent(lane.id, 'update', 'orchestrator', {
       storageAdmissionOwnerGeneration: 1,
@@ -190,7 +191,7 @@ describe('storage reservation lifecycle real paths', () => {
 
   it('carries the exact owner generation through lane deletion until removal completes', async () => {
     const packetId = 'delete-after-removal';
-    const { repoPath, branch, worktreePath } = makeRepo(packetId);
+    const { repoPath, branch, worktreePath, sessionKey } = await makeRepo(packetId);
     const now = Date.now();
     const store = new StorageAdmissionStore(getSqlite(), {
       now: () => now,
@@ -215,6 +216,7 @@ describe('storage reservation lifecycle real paths', () => {
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     for (const generation of [1, 2]) {
       recordLaneEvent(lane.id, 'update', 'orchestrator', {
@@ -238,7 +240,7 @@ describe('storage reservation lifecycle real paths', () => {
   it('prunes a done task only after its checkout and reservation are settled', async () => {
     const packetId = 'task-prune-after-removal';
     const reservationId = `packet-storage:${packetId}:1`;
-    const { repoPath, branch, worktreePath } = makeRepo(packetId);
+    const { repoPath, branch, worktreePath, sessionKey } = await makeRepo(packetId);
     const now = Date.now();
     const store = new StorageAdmissionStore(getSqlite(), {
       now: () => now,
@@ -254,7 +256,7 @@ describe('storage reservation lifecycle real paths', () => {
       leaseExpiresAt: now + 60_000,
       policy: { reserveRatio: 0.1, absoluteFloorBytes: 1_000 },
     });
-    const lane = createLane({ repoPath, branch, runtime: 'codex', packetId, worktreePath });
+    const lane = createLane({ repoPath, branch, runtime: 'codex', packetId, worktreePath, sessionKey });
     recordLaneEvent(lane.id, 'update', 'orchestrator', {
       storageAdmissionOwnerGeneration: 1,
       storageAdmissionReservationId: reservationId,
@@ -287,7 +289,7 @@ describe('storage reservation lifecycle real paths', () => {
     const packetId = 'task-prune-legacy-generation';
     const firstReservationId = `packet-storage:${packetId}:1`;
     const secondReservationId = `packet-storage:${packetId}:2`;
-    const { repoPath, branch, worktreePath } = makeRepo(packetId);
+    const { repoPath, branch, worktreePath } = await makeRepo(packetId);
     git(repoPath, ['worktree', 'remove', '--force', worktreePath]);
     const now = Date.now();
     const store = new StorageAdmissionStore(getSqlite(), {

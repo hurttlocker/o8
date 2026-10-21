@@ -281,7 +281,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)' }}>{workerRuntimes[0] === builtIn?.id ? builtIn?.builtIn?.planDetail : workerModel ? formatModelLabel(workerModel) : 'Uses each tool’s configured model'}</div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Choose the tools allowed to receive work. The first selected tool is the default worker. OpenCode starts with its detected configuration or a supported preset; choose another model in the composer.</div>
+            <div style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Choose the tools allowed to receive work. The first selected tool is the default worker. OpenCode starts with its detected configuration or a supported preset; choose a model in Settings or name it in your task.</div>
             {shownWorkers.map((item) => <RuntimeInventoryRow key={item.id} runtime={item} selected={workerRuntimes.includes(item.id)} isDefault={workerRuntimes[0] === item.id} disabled={saving || workersLocked || loading} onToggle={() => {
               choiceMade.current = true;
               if (!saving && !workersLocked) setWorkerRuntimes((current) => toggleOnboardingWorkerRuntime(current, item.id, inventory));

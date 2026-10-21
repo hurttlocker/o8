@@ -43,6 +43,7 @@ const { createLane, getLane } = await import('@/lib/lane/registry');
 const { performWorktreeSideMerge } = await import('@/lib/lane/worktree-side-merge');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
+const { addRepo } = await import('@/lib/repos/registry');
 const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { createApproval, listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
@@ -65,41 +66,7 @@ function commitAll(cwd: string, message: string): string {
   return git(cwd, ['rev-parse', 'HEAD']);
 }
 
-interface RegisteredRepo {
-  id: string;
-  localPath: string;
-}
-
-const registeredRepos: RegisteredRepo[] = [];
-
-function writeRepoRegistry() {
-  writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({
-    version: 1,
-    repos: registeredRepos.map((repo) => ({
-      id: repo.id,
-      name: repo.id,
-      localPath: repo.localPath,
-      remoteUrl: null,
-      defaultBranch: 'main',
-      isGitRepo: true,
-      addedAt: '2026-08-18T00:00:00.000Z',
-      lastOpenedAt: null,
-      setup: {
-        envMode: 'skip',
-        envFiles: [],
-        installCommand: null,
-        installOnCreateWorkspace: false,
-        buildCommand: null,
-        runBuildOnCreateWorkspace: false,
-        devCommand: null,
-        defaultPort: null,
-        workspaceIsolationPreference: 'auto',
-      },
-    })),
-  }));
-}
-
-function makeRepo(name: string) {
+async function makeRepo(name: string) {
   const root = mkdtempSync(join(os.tmpdir(), `${name}-root-`));
   tempDirs.push(root);
   const origin = join(root, 'origin.git');
@@ -113,10 +80,8 @@ function makeRepo(name: string) {
   const baseCommit = commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
   const resolved = { root: realpathSync(root), origin: realpathSync(origin), repo: realpathSync(repo), baseCommit };
-  const repositoryUuid = `repo-uuid-${name}`;
-  registeredRepos.push({ id: repositoryUuid, localPath: resolved.repo });
-  writeRepoRegistry();
-  return { ...resolved, repositoryUuid };
+  const registered = await addRepo(resolved.repo);
+  return { ...resolved, repositoryUuid: registered.id };
 }
 
 async function makeWorktree(repo: string, packetId: string, branch: string) {
@@ -245,7 +210,7 @@ describe('thin workspace review matrix — merge conflict against an advanced ba
   it('a restored parked workspace whose branch conflicts with advanced main fails closed with no partial merge', async () => {
     const packetId = 'pkt-tw-restored-conflict';
     const branch = 'inline/tw-restored-conflict';
-    const { repo, repositoryUuid, baseCommit } = makeRepo('o8-tw-restored-conflict');
+    const { repo, repositoryUuid, baseCommit } = await makeRepo('o8-tw-restored-conflict');
     const worktree = await makeWorktree(repo, packetId, branch);
 
     writeFileSync(join(worktree.path, 'file.txt'), 'worker\n');
@@ -326,7 +291,7 @@ describe('thin workspace review matrix — post-restore approval re-validation',
   it('an approval pinned to the parked diff does not authorize a merge after the restored tree changes', async () => {
     const packetId = 'pkt-tw-post-restore-approval';
     const branch = 'inline/tw-post-restore-approval';
-    const { repo, repositoryUuid, baseCommit } = makeRepo('o8-tw-post-restore-approval');
+    const { repo, repositoryUuid, baseCommit } = await makeRepo('o8-tw-post-restore-approval');
     const worktree = await makeWorktree(repo, packetId, branch);
 
     writeFileSync(join(worktree.path, 'feature.txt'), 'reviewed\n');
@@ -404,7 +369,7 @@ describe('thin workspace review matrix — post-restore approval re-validation',
   it('spoken-review pins captured while parked are refused once the restored workspace diverges', async () => {
     const packetId = 'pkt-tw-post-restore-spoken';
     const branch = 'inline/tw-post-restore-spoken';
-    const { repo, repositoryUuid, baseCommit } = makeRepo('o8-tw-post-restore-spoken');
+    const { repo, repositoryUuid, baseCommit } = await makeRepo('o8-tw-post-restore-spoken');
     const worktree = await makeWorktree(repo, packetId, branch);
 
     writeFileSync(join(worktree.path, 'spoken.txt'), 'reviewed\n');

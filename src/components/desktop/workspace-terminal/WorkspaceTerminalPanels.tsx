@@ -17,6 +17,7 @@ import { updateResidentTabIds } from '@/components/desktop/workspace-terminal/re
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { OUTSIDE_WORKER_HOST_EMPTY_EVENT } from './use-session-tiles';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
+import { useWsConnectionEpoch } from '@/components/desktop/hooks/DesktopWebSocketContext';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -43,6 +44,7 @@ interface WorkspaceTerminalPanelsProps {
   termWsConnected: boolean;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   onCloseTab: (tabId: string) => void;
+  onNewTerminal?: (repo?: RegisteredRepo) => void;
   onRunInTerminal: (command: string) => void;
   onOpenWorkspaceCommitTab: (hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => void;
   onUpdateLlmSummary: (tabId: string, summary: string | null) => void;
@@ -75,6 +77,7 @@ function WorkspaceTerminalPanelsBase({
   termWsConnected,
   panelRefs,
   onCloseTab,
+  onNewTerminal,
   onRunInTerminal,
   onOpenWorkspaceCommitTab,
   onUpdateLlmSummary,
@@ -247,6 +250,9 @@ function WorkspaceTerminalPanelsBase({
             tmuxSession={tab.tmuxSession}
             readOnly={tab.readOnly}
             inputLocked={tab.remoteLaunchPending}
+            exitState={tab.terminalExit}
+            onNewShell={!tab.readOnly && !tab.remoteMachine && onNewTerminal ? () => onNewTerminal(tab.repo) : undefined}
+            onClose={() => onCloseTab(tab.id)}
             panelRefs={panelRefs}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
@@ -548,6 +554,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession,
   readOnly,
   inputLocked,
+  exitState,
+  onNewShell,
+  onClose,
   panelRefs,
   sendTerminalAttach,
   sendTerminalInput,
@@ -561,6 +570,9 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   tmuxSession: string;
   readOnly?: boolean;
   inputLocked?: boolean;
+  exitState?: TerminalTab['terminalExit'];
+  onNewShell?: () => void;
+  onClose?: () => void;
   panelRefs: MutableRefObject<Map<string, XtermPanelHandle>>;
   sendTerminalAttach: WorkspaceTerminalPanelsProps['sendTerminalAttach'];
   sendTerminalInput: WorkspaceTerminalPanelsProps['sendTerminalInput'];
@@ -571,6 +583,7 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
   active: boolean;
 }) {
   const { workspaceGlass } = useTheme();
+  const connectionEpoch = useWsConnectionEpoch();
   const transparentTerminal = workspaceGlass && !isWebMachineBrowserSurface() && !isNonMacShell();
   useEffect(() => {
     if (window.__o8TerminalBenchEnabled !== true) return;
@@ -612,8 +625,12 @@ const TerminalResidentPanel = memo(function TerminalResidentPanel({
             else panelRefs.current.delete(tmuxSession);
           }}
           tmuxSession={tmuxSession}
+          exitState={exitState}
+          onNewShell={onNewShell}
+          onClose={onClose}
           readOnly={readOnly}
           inputLocked={inputLocked}
+          connectionEpoch={connectionEpoch}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
           sendTerminalResize={sendTerminalResize}

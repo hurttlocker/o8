@@ -5,7 +5,7 @@ import { collectPacketLifecycleLanes } from '@/lib/orchestrator/packet-lifecycle
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 import { managedPacketWorktreeId, resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
-import { ResetCleanupFailedError } from './reset-errors';
+import { ResetCleanupFailedError, ResetPacketNotFoundError } from './reset-errors';
 import { archiveResetLaneSessions, confirmedKilledLaneIds } from './reset-lifecycle-retirement';
 import { log } from './shared';
 import type { ResetPacketInput } from './types';
@@ -35,7 +35,7 @@ export async function resetPacketViaLaneFallback(
   const referenceLabel = authoritative?.packet.referenceLabel ?? input.packetId;
 
   if (allBound.length === 0) {
-    throw new Error(`Packet ${input.packetId} not found — no mission packet and no lane.`);
+    throw new ResetPacketNotFoundError(`Packet ${input.packetId} not found — no mission packet and no lane.`);
   }
   await supersedeDurableApprovedReviews(input.packetId, 'Superseded by reset_packet.');
 

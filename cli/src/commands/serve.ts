@@ -17,16 +17,18 @@ import {
   readServeSupervisorPid,
   runServeAgentCommand,
   sourceServeApiLaunch,
+  serveStartupTimeoutMs,
   superviseServeDaemon,
   waitForSupervisorRestart,
 } from './serve-lifecycle.js';
 import { readOrCreateServeId as readOrCreateId, acquireServeOperation, withServeOperation, withServeStateMutation, sameServeGeneration, mergeServeClaims, serveProcessClaim, stopServeProcesses, type ServeProcessClaim } from './serve-processes.js';
+import { validateReviewMode } from '../../../src/lib/lane/review-mode.js';
+import { renewServeToken } from './serve-token.js';
 import { CLI_VERSION } from './version.js';
 import { outputServeNotRunning, outputServeState, outputServeStopped } from './serve-output.js';
 
 const PROD_API_PORT_BLOCK = [47100, 47101, 47102, 47103, 47104] as const;
 const PROD_WS_PORT_BLOCK = [47105, 47106, 47107, 47108, 47109] as const;
-const START_TIMEOUT_MS = 60_000;
 const POLL_MS = 100;
 
 type ServeMode = 'development' | 'packaged';
@@ -49,6 +51,7 @@ interface ServeState {
   apiPort: number;
   wsPort: number;
   mode: ServeMode;
+  reviewMode?: 'automatic' | 'manual';
   root: string;
   startedAt: string;
   status: ServeStatus;
@@ -376,8 +379,8 @@ function spawnService(
   });
 }
 
-async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<ServeState> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
+async function waitForDaemonReady(paths: ServePaths, pid: number, timeoutMs: number): Promise<ServeState> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = readState(paths);
     if (state?.pid === pid && state.status === 'failed') {
@@ -403,9 +406,10 @@ async function waitForDaemonReady(paths: ServePaths, pid: number): Promise<Serve
 }
 
 async function startServe(mode: OutputMode): Promise<number> {
+  validateReviewMode();
   const paths = servePaths();
   mkdirSync(dirname(paths.logFile), { recursive: true });
-  const child = await withServeOperation(paths.dataDir, async () => {
+  const { child, timeoutMs } = await withServeOperation(paths.dataDir, async () => {
     cleanStaleOwner(paths);
     const existingPid = readOwnerPid(paths);
     const supervisorPid = readServeSupervisorPid(paths.stateFile);
@@ -459,9 +463,9 @@ async function startServe(mode: OutputMode): Promise<number> {
       throw error;
     }
     child.unref();
-    return child;
+    return { child, timeoutMs: serveStartupTimeoutMs(plan.mode) };
   });
-  const state = await waitForDaemonReady(paths, child.pid!);
+  const state = await waitForDaemonReady(paths, child.pid!, timeoutMs);
   outputServeState(mode, state, true, true);
   return EXIT.OK;
 }
@@ -537,26 +541,41 @@ async function stopServe(mode: OutputMode, report = true): Promise<number> {
 }
 
 async function restartServe(mode: OutputMode): Promise<number> {
+  const requestedMode = validateReviewMode();
   const paths = servePaths();
   const state = readState(paths);
   const supervisorPid = readServeSupervisorPid(paths.stateFile);
   if (supervisorPid && processAlive(supervisorPid)) {
-    const previousPid = readOwnerPid(paths) ?? state?.pid ?? null;
-    process.kill(supervisorPid, 'SIGHUP');
+    const admitted = await withServeOperation(paths.dataDir, async () => withServeStateMutation(paths.stateFile, () => {
+      const current = readState(paths);
+      if (!state || !sameServeGeneration(state, current) || current?.supervisorPid !== supervisorPid || current.shutdownOwner) {
+        throw new CliError('serve_restart_conflict', 'Runtime ownership changed before restart admission.', EXIT.CONFLICT);
+      }
+      const reviewMode = current.reviewMode ?? 'automatic';
+      if (process.env.O8_REVIEW_MODE !== undefined && requestedMode !== reviewMode) {
+        throw new CliError('serve_review_mode_change_requires_stop', 'Stop the supervised profile before starting it with a different review mode.', EXIT.CONFLICT);
+      }
+      const previousPid = readOwnerPid(paths) ?? current.pid;
+      process.kill(supervisorPid, 'SIGHUP');
+      return { previousPid, reviewMode };
+    }));
     const restarted = await waitForSupervisorRestart({
       supervisorPid,
-      timeoutMs: START_TIMEOUT_MS,
+      timeoutMs: serveStartupTimeoutMs(state?.mode ?? 'packaged'),
       pollMs: POLL_MS,
       logPath: paths.logFile,
       processAlive,
       readReadyState: async () => {
         const pid = readOwnerPid(paths);
         const current = readState(paths);
-        if (!pid || pid === previousPid || current?.pid !== pid) return null;
+        if (!pid || pid === admitted.previousPid || current?.pid !== pid) return null;
         if (current.supervisorPid !== supervisorPid || current.status !== 'ready') return null;
         return await apiIsReady(current.apiPort) && await portAcceptsConnections(current.wsPort) ? current : null;
       },
     });
+    if ((restarted.reviewMode ?? 'automatic') !== admitted.reviewMode) {
+      throw new CliError('serve_review_mode_mismatch', 'The restarted profile did not retain its admitted review mode.', EXIT.CONFLICT);
+    }
     outputServeState(mode, restarted, true, true);
     return EXIT.OK;
   }
@@ -609,6 +628,12 @@ async function runDaemon(): Promise<number> {
     WS_TOKEN: token,
     NODE_ENV: plan.mode === 'packaged' ? 'production' : 'development',
   };
+  if (validateReviewMode() === 'manual') {
+    env.O8_HEAL_BOT_ENABLED = '0';
+    env.O8_SUPERVISOR_AUTO_ESCALATE = '0';
+    env.O8_EXPLAINER = '0';
+    env.O8_BRAIN_WARMUP = '0';
+  }
   if (plan.mode === 'packaged') {
     env.O8_PACKAGED_APP = '1';
     env.NODE_COMPILE_CACHE = join(paths.dataDir, 'compile-cache');
@@ -629,6 +654,7 @@ async function runDaemon(): Promise<number> {
     apiPort,
     wsPort,
     mode: plan.mode,
+    reviewMode: validateReviewMode(),
     root: plan.root,
     startedAt,
     status: 'starting',
@@ -716,7 +742,7 @@ async function runDaemon(): Promise<number> {
     return EXIT.CONNECTION_REFUSED;
   }
 
-  const readyDeadline = Date.now() + START_TIMEOUT_MS;
+  const readyDeadline = Date.now() + serveStartupTimeoutMs(plan.mode);
   while (Date.now() < readyDeadline) {
     if (await apiIsReady(apiPort) && await portAcceptsConnections(wsPort)) {
       state.status = 'ready';
@@ -752,6 +778,7 @@ export async function runServe(
   }
   if (!subcommand) return startServe(mode);
   if (subcommand === 'status') return statusServe(mode);
+  if (subcommand === 'renew-token') return renewServeToken(mode);
   if (subcommand === 'stop') return stopServe(mode);
   if (subcommand === 'restart') return restartServe(mode);
   if (subcommand === '__launch_agent') return runLaunchAgent();

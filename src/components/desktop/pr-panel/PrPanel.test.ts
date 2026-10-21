@@ -33,6 +33,27 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
 
 describe('pull request selection', () => {
+  it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
+    const files = [{ path: 'src/a.ts', status: 'modified', additions: 10, deletions: 2, patch: '' }, { path: 'tests/b.ts', status: 'modified', additions: 4, deletions: 0, patch: '' }];
+    fetchMock.mockResolvedValue(Response.json({ pr: { ...detail(9805), files, changedFiles: 2, additions: 14, deletions: 2 } }));
+    await render(9805);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Tests');
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][id$="-changes"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-pr-changes-toolbar] [aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Tests');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const changesTab = host.querySelector<HTMLButtonElement>('[role="tab"][id$="-changes"]')!;
+    await act(async () => { changesTab.focus(); changesTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); });
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    const readsAfterTabChange = fetchMock.mock.calls.length;
+    await act(async () => host.querySelector<HTMLButtonElement>('header [aria-label="Change breakdown: 14 additions, 2 deletions"]')!.click());
+    await render(9805, 'example/repo', false);
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(readsAfterTabChange);
+  });
+
   it('backs off a quota refusal while retaining the current view and labels scheduled reads as background', async () => {
     vi.useFakeTimers();
     try {
@@ -116,32 +137,35 @@ describe('pull request selection', () => {
     expect(host.textContent).toContain('Change 9401');
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
-  it('retains an unsent Brain question for each repository and PR through switching and close/reopen', async () => {
-    fetchMock.mockImplementation(async (url: string) => Response.json({ pr: detail(Number(url.match(/prs\/(\d+)/)?.[1])) }));
-    const show = (prNumber: number, repoSlug = 'example/repo') => act(async () => root.render(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose })));
-    await show(9501);
-    await act(async () => { const input = host.querySelector<HTMLTextAreaElement>('[data-pr-question]')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Keep this question'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-    await show(9502); expect(host.querySelector<HTMLTextAreaElement>('[data-pr-question]')?.value).toBe('');
-    await show(9501); expect(host.querySelector<HTMLTextAreaElement>('[data-pr-question]')?.value).toBe('Keep this question');
-    await show(9501, 'example/other'); expect(host.querySelector<HTMLTextAreaElement>('[data-pr-question]')?.value).toBe('');
-    await act(async () => root.render(null)); await show(9501);
-    expect(host.querySelector<HTMLTextAreaElement>('[data-pr-question]')?.value).toBe('Keep this question');
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/cortex/ask'))).toBe(false);
+  it('opens the composer Brain with the selected PR context without adding a second right-panel Brain', async () => {
+    fetchMock.mockResolvedValue(Response.json({ pr: detail(9501) }));
+    const receive = vi.fn(); window.addEventListener('o8:open-composer-brain', receive);
+    try {
+      await act(async () => root.render(createElement(PrPanel, { prNumber: 9501, repoSlug: 'example/repo', repoPath: '/workspace/repo', onClose })));
+      expect(host.querySelector('[data-pr-brain-chat]')).toBeNull();
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
+      await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === 'Ask Brain')!.click());
+      expect(receive).toHaveBeenCalledOnce();
+      const request = (receive.mock.calls[0][0] as CustomEvent).detail;
+      expect(request.repoPath).toBe('/workspace/repo'); expect(JSON.parse(request.context).number).toBe(9501);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/cortex/ask'))).toBe(false);
+    } finally { window.removeEventListener('o8:open-composer-brain', receive); }
   });
   it('retains a separate comment draft and mode through PR switching without posting', async () => {
     fetchMock.mockImplementation(async (url: string) => Response.json({ pr: detail(Number(url.match(/prs\/(\d+)/)?.[1])) }));
     const show = (prNumber: number, repoSlug = 'example/repo') => act(async () => root.render(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose })));
     const type = async (selector: string, text: string) => act(async () => { const input = host.querySelector<HTMLTextAreaElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
-    await show(9601); await type('[data-pr-question]', 'Keep the Brain question');
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Open Brain conversation for PR #9601"]')!.click());
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Write a GitHub comment"]')!.click());
+    await show(9601);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === 'Write a comment')!.click());
     await type('[data-pr-comment="9601"]', 'Keep the comment draft');
     await show(9602); expect(host.querySelector('[data-pr-comment="9602"]')).toBeNull();
     await show(9601); expect(host.querySelector<HTMLTextAreaElement>('[data-pr-comment="9601"]')?.value).toBe('Keep the comment draft');
     await act(async () => root.render(null)); await show(9601);
     expect(host.querySelector<HTMLTextAreaElement>('[data-pr-comment="9601"]')?.value).toBe('Keep the comment draft');
-    await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === 'Brain')!.click());
-    expect(host.querySelector<HTMLTextAreaElement>('[data-pr-question]')?.value).toBe('Keep the Brain question');
+    expect(host.querySelector('[aria-label="Switch to Brain"]')).toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Collapse comment composer"]')!.click());
+    expect(host.querySelector('[data-pr-question]')).toBeNull();
     await show(9601, 'example/other'); expect(host.querySelector('[data-pr-comment="9601"]')).toBeNull();
     expect(fetchMock.mock.calls.every(([, init]) => !init || init.method !== 'POST')).toBe(true);
   });

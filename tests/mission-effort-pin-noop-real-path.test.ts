@@ -118,7 +118,9 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000) {
   }
 }
 
-afterAll(() => {
+afterAll(async () => {
+  const { closeDb } = await import('@/lib/db');
+  closeDb();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   for (const dir of tempDirs.splice(0)) {
@@ -137,7 +139,7 @@ describe('targeting/legacy no-op effort dispatch', () => {
     const repoPath = createTempRepo();
     const { createMission, dispatchMission } = await import('@/lib/orchestrator/operator-mission-service');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
-    const { findLaneByPacket } = await import('@/lib/lane/registry');
+    const { findLaneByPacket, getLaneEvents } = await import('@/lib/lane/registry');
 
     // Exactly what POST /api/panel/targets/dispatch does for an OpenCode tier.
     const created = await createMission({
@@ -169,5 +171,10 @@ describe('targeting/legacy no-op effort dispatch', () => {
       sessionKey: expect.stringMatching(/^opencode-owned:/),
     });
     expect(spawnMock).toHaveBeenCalled();
+    // Launch intentionally detaches the capacity probe. Keep the fixture alive
+    // until it records its result rather than restoring mocks during the probe.
+    await waitUntil(() => getLaneEvents(findLaneByPacket(packetId)!.id, 100).some((event) => (
+      event.verb === 'capacity_snapshot' && event.payload.phase === 'start'
+    )), 15_000);
   }, 30_000);
 });

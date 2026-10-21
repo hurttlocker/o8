@@ -6,7 +6,8 @@ import { useChromeTooltip } from '../title-bar/chrome-tooltip';
 /** A steady target, a quiet icon glow and a readable label beside the rail. */
 export const RailActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & {
   tooltipLabel?: string | null;
-}>(function RailActionButton({ tooltipLabel, children, style, onMouseEnter, onMouseLeave, onFocus, onBlur, onClick, onDragStart, ...props }, forwardedRef) {
+  iconGlow?: boolean;
+}>(function RailActionButton({ tooltipLabel, iconGlow = true, children, style, onMouseEnter, onMouseLeave, onFocus, onBlur, onClick, onDragStart, onPointerDown, ...props }, forwardedRef) {
   const [highlighted, setHighlighted] = useState(false);
   const label = tooltipLabel === null ? '' : tooltipLabel ?? props['aria-label'] ?? '';
   const { ref, handlers, tooltip, close } = useChromeTooltip({ label, side: 'right' });
@@ -21,11 +22,12 @@ export const RailActionButton = forwardRef<HTMLButtonElement, ButtonHTMLAttribut
       onFocus={event => { setHighlighted(true); if (label) handlers.onFocus(); onFocus?.(event); }}
       onBlur={event => { setHighlighted(false); close(); onBlur?.(event); }}
       onClick={event => { close(); onClick?.(event); }}
+      onPointerDown={event => { setHighlighted(false); close(); onPointerDown?.(event); }}
       onDragStart={event => { setHighlighted(false); close(); onDragStart?.(event); }}
       style={{ ...style, background: highlighted ? 'var(--t-hover)' : style?.background,
         transition: 'background-color 160ms ease-out' }}>
       <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-        filter: highlighted ? 'drop-shadow(0 0 5px color-mix(in srgb, var(--t-accent) 55%, transparent))' : 'none',
+        filter: highlighted && iconGlow ? 'drop-shadow(0 0 5px color-mix(in srgb, var(--t-accent) 55%, transparent))' : 'none',
         transition: 'filter 160ms ease-out' }}>{children}</span>
     </button>
     {tooltip}

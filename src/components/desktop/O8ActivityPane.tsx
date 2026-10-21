@@ -14,7 +14,9 @@
  * Activity is the single mission-control surface.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RamsButton } from './settings/RamsButton';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useTheme } from '@/lib/theme/context';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -49,11 +51,12 @@ import { O8ActivityMissionControls } from './o8-panel/O8ActivityMissionControls'
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { O8ProblemDossiers } from './o8-panel/O8ProblemDossiers';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
-import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { PrPanel } from './pr-panel/PrPanel';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+
+const EMPTY_REPO_ENTRIES: RepoRegistryEntry[] = [];
 
 const FILTER_TABS_WITH_PACKETS = [
   ...FILTER_TABS,
@@ -71,6 +74,19 @@ function parseTs(value?: string | null): number | null {
   if (!value) return null;
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+// Transcript delivery cannot change the remote repository activity lists.
+// Keep unknown or mixed batches conservative so review and attention updates
+// still refresh immediately through the existing single-flight scheduler.
+function isTranscriptOnlyBatch(event: Event): boolean {
+  const detail = (event as CustomEvent<{ data?: { events?: unknown } }>).detail;
+  const events = detail?.data?.events;
+  return Array.isArray(events) && events.length > 0 && events.every((entry: unknown) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const envelope = entry as { channel?: unknown; event?: unknown };
+    return envelope.channel === 'history' && envelope.event === 'history.snapshot';
+  });
 }
 
 // ── Component ──
@@ -95,7 +111,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   active = true,
   repoPath,
   repoSlug,
-  registeredRepos: registeredRepoEntries = [],
+  registeredRepos: registeredRepoEntries = EMPTY_REPO_ENTRIES,
   allRepos = false,
   onSelectAllRepos,
   onSelectRepoPath,
@@ -106,6 +122,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   onSelectPR,
   onClosePR,
 }: O8ActivityPaneProps) {
+  const { workspaceGlass } = useTheme();
   const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<O8FeedFilter>('all');
@@ -140,7 +157,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   }, []);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
-  const activityHydratedRef = useRef(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const orchestratorData = useOrchestratorData();
   const missionPackets = orchestratorData?.missionState?.packets;
   const activeMissionId = orchestratorData?.missionState?.missionId?.trim() ?? '';
@@ -236,16 +253,17 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     if (!repoPath) return null;
     const entry = registeredRepoEntries.find((e) => e.localPath === repoPath);
     if (!entry) return null;
-    return repoSlugFromRemote(entry.remoteUrl) ?? normalizeRepoSlug(entry.name);
+    return repoSlugFromRemote(entry.remoteUrl);
   }, [repoPath, registeredRepoEntries]);
 
   const effectiveRepo = useMemo(() => {
+    if (repoPath && registeredRepoEntries.some((entry) => entry.localPath === repoPath)) return selectedSlug;
     if (selectedSlug) return selectedSlug;
     const normalized = normalizeRepoSlug(repoSlug);
     if (normalized) return normalized;
-    if (repoOptions.length > 0) return repoOptions[0];
+    if (!repoPath && repoOptions.length > 0) return repoOptions[0];
     return null;
-  }, [selectedSlug, repoSlug, repoOptions]);
+  }, [selectedSlug, repoSlug, repoOptions, repoPath, registeredRepoEntries]);
 
   // Slug → on-disk path, so the local-git commit fallback (#1341) can resolve
   // a workspace path in all-repos mode too (not just the focused repo).
@@ -277,8 +295,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   // Fetch activity data
   useEffect(() => {
     if (!active) return;
-    const showInitialSpinner = !activityHydratedRef.current;
-    activityHydratedRef.current = true;
+    const showInitialSpinner = true;
     let cancelled = false;
     let inFlight: Promise<void> | null = null;
     let trailingRefresh = false;
@@ -288,7 +305,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       try {
         if (isAllRepos) {
           const results = await Promise.all(
-            repoOptions.map((slug) => fetchRepoActivity(slug, pathForSlug.get(slug) ?? null).catch(() => EMPTY_DATA))
+            registeredRepoEntries.length > 0
+              ? registeredRepoEntries.map((entry) => fetchRepoActivity(repoSlugFromRemote(entry.remoteUrl), entry.localPath).catch(() => ({ ...EMPTY_DATA, workspaceError: 'Could not load activity for this folder.' })))
+              : repoOptions.map((slug) => fetchRepoActivity(slug, pathForSlug.get(slug) ?? null).catch(() => ({ ...EMPTY_DATA, workspaceError: 'Could not load activity for this repository.' })))
           );
           if (cancelled) return;
           const merged: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -298,9 +317,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             merged.issues.push(...r.issues);
             merged.ciRuns.push(...r.ciRuns);
           }
+          if (results.some((result) => result.workspaceError)) merged.workspaceError = 'Some folders could not be read. Select a folder to inspect its activity and recovery options.';
           setData(merged);
-        } else if (effectiveRepo) {
-          const result = await fetchRepoActivity(effectiveRepo, repoPath ?? pathForSlug.get(effectiveRepo) ?? null);
+        } else if (effectiveRepo || repoPath) {
+          const result = await fetchRepoActivity(effectiveRepo, repoPath ?? (effectiveRepo ? pathForSlug.get(effectiveRepo) : null) ?? null);
           if (cancelled) return;
           setData(result);
         } else {
@@ -334,17 +354,20 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
     // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
     const handler = () => { scheduleLoad(); };
-    window.addEventListener('o8:realtime', handler);
+    const handleRealtime = (event: Event) => {
+      if (!isTranscriptOnlyBatch(event)) scheduleLoad();
+    };
+    window.addEventListener('o8:realtime', handleRealtime);
     window.addEventListener('o8:lifecycle-reconcile', handler);
     const fallbackId = setInterval(handler, 300_000);
 
     return () => {
       cancelled = true;
-      window.removeEventListener('o8:realtime', handler);
+      window.removeEventListener('o8:realtime', handleRealtime);
       window.removeEventListener('o8:lifecycle-reconcile', handler);
       clearInterval(fallbackId);
     };
-  }, [active, effectiveRepo, isAllRepos, repoOptions, repoPath, pathForSlug]);
+  }, [active, effectiveRepo, isAllRepos, repoOptions, repoPath, pathForSlug, registeredRepoEntries, retryNonce]);
 
   // Packet items are derived from orchestrator missionState (not the
   // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
@@ -441,11 +464,17 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   return (
     <div style={{
+      ...(workspaceGlass ? {
+        '--o8-activity-label-fg': 'var(--t-text-secondary)',
+        '--o8-activity-label-bg': 'var(--t-input-bg)',
+        '--o8-activity-issue-fg': 'var(--t-text-muted)',
+        '--o8-activity-issue-bg': 'var(--t-hover)',
+      } : {}),
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
       overflow: 'hidden',
-    }}>
+    } as CSSProperties}>
       {/* Header: repo selector + filter pills */}
       <div style={{
         paddingTop: 10,
@@ -466,13 +495,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             onSelectRepo={(path) => onSelectRepoPath?.(path)}
             style={{ flex: 1, minWidth: 0 }}
           />
-          <O8ScratchChat
-            surfaceLabel="activity"
-            repoPath={repoPath ?? null}
-            selectedFile={null}
-            surface="diff"
-            placement="review-toolbar"
-          />
+
           <O8ActivityMissionControls
             missionId={activeMissionId}
           />
@@ -566,6 +589,12 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           onAccept={handleAcceptProposal}
           onDismiss={handleDismissProposal}
         />
+        {!loading && data.workspaceError ? (
+          <div role="status" style={{ paddingTop: 16, paddingRight: 14, paddingBottom: 16, paddingLeft: 14, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+            <div>{data.workspaceError}</div>
+            <div style={{ marginTop: 8 }}><RamsButton variant="ghost" onClick={() => setRetryNonce((n) => n + 1)}>Retry</RamsButton></div>
+          </div>
+        ) : null}
         {loading ? (
           <div style={{
             paddingTop: 32,
@@ -579,7 +608,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           }}>
             Loading activity...
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && data.workspaceError ? null : filtered.length === 0 ? (
           <div style={{
             paddingTop: 32,
             paddingBottom: 32,
@@ -591,8 +620,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             letterSpacing: '-0.1px',
           }}>
             {(() => {
-              if (!effectiveRepo) return 'Attach a repo to see activity here.';
-              const label = shortRepoLabel(effectiveRepo);
+              if (!effectiveRepo && !repoPath) return 'Choose a folder to see activity here.';
+              const label = effectiveRepo ? shortRepoLabel(effectiveRepo) : repoPath?.split(/[\\/]/).filter(Boolean).pop() ?? 'this folder';
               // PRs / Issues / CI cannot exist without GitHub — say so plainly
               // for a repo with no remote instead of the misleading "No activity
               // yet" (#1341). Do not build the connect flow here (#1338).

@@ -18,6 +18,7 @@ import { SidebarHeaderActions } from './SidebarHeaderActions';
 import { useSidebarAttention } from '../repo-focus/tabs/chats/sidebar-view-store';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { TrafficLightsOrSpacer } from './TrafficLights';
+import { WorkspaceToolsButton } from './WorkspaceToolsButton';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
@@ -26,13 +27,8 @@ import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
+import { useHeaderTabDrag } from './useHeaderTabDrag';
 import { revealHeaderTab, scrollTabStripFromWheel } from './tab-scroll';
-
-/** Right-edge inset that lands the header's rightmost control on the branch rail
- *  capsule's centre, one row below. Measured, not guessed.
- *
- *  The panel toggle is 30px wide; the margin positions its centre. */
-const RAIL_COLUMN_ALIGN_NUDGE = 4;
 
 export function WorkspaceHeaderStrip({
   leadingInset = false,
@@ -46,6 +42,7 @@ export function WorkspaceHeaderStrip({
   rightPanelDisabled = false,
   onToggleRightPanel,
   approvalCount = 0,
+  projectContextRailAvailable = false,
   onOpenInbox,
   headerLabel,
   headerTabs,
@@ -67,7 +64,7 @@ export function WorkspaceHeaderStrip({
       // columns' hairlines lined up into one faint line across the whole
       // app. The side strips keep theirs.
       bottomHairline={false}
-      style={!sidebarVisible && !leadingInset ? { paddingLeft: 3.5 } : undefined}
+      style={!sidebarVisible && !leadingInset ? { paddingLeft: 10 } : undefined}
       left={
         <>
           {/* When this strip is leftmost (sidebar collapsed) it carries the
@@ -87,7 +84,7 @@ export function WorkspaceHeaderStrip({
         </>
       }
       center={usePillStrip || headerLabel || paneCount ? (
-        <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, width: '100%' }}>
           {usePillStrip ? (
             <HeaderPillStrip
               tabs={tabs}
@@ -107,6 +104,7 @@ export function WorkspaceHeaderStrip({
               <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
             ) : null}
             {workspaceId ? <WorkspaceAddTabButton workspaceId={workspaceId} /> : null}
+            {projectContextRailAvailable ? <WorkspaceToolsButton workspaceId={tabWorkspaceId ?? workspaceId} /> : null}
             {onSplitWorkspacePanel ? (
               <HeaderIconPill
                 icon={<IconColumns />}
@@ -116,8 +114,9 @@ export function WorkspaceHeaderStrip({
               />
             ) : null}
             {showRightPanelFallbackToggle ? (
-              <div style={{ display: 'inline-flex', marginRight: RAIL_COLUMN_ALIGN_NUDGE }}>
+              <div style={{ display: 'inline-flex' }}>
                 <RightPanelMorphButton
+                  yNudge={1.3}
                   workspacePanelVisible={false}
                   o8PanelVisible={false}
                   onToggleO8Panel={onToggleRightPanel}
@@ -149,6 +148,8 @@ export function HeaderPillStrip({
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   }>;
   activeTabId: string | null;
   /** When set, pill events include this id so the matching
@@ -160,6 +161,7 @@ export function HeaderPillStrip({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
+  const drag = useHeaderTabDrag(scrollRef, tabs, workspaceId);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
   // tabs each pill compacts to just its first significant word. Sibling
   // packets often share a verb ("Add …" × 3), so when the one-word form
@@ -311,6 +313,8 @@ export function HeaderPillStrip({
     >
       <div
         ref={scrollRef}
+        onPointerDownCapture={drag.onPointerDownCapture}
+        onClickCapture={drag.onClickCapture}
         role="tablist"
         aria-label={ariaLabel}
         aria-orientation="horizontal"
@@ -350,8 +354,11 @@ export function HeaderPillStrip({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            style={{ display: 'inline-flex', flexShrink: 0 }}
+            style={{ display: 'inline-flex', flexShrink: 0, position: 'relative' }}
           >
+            {drag.insertion?.id === tab.id ? <span aria-hidden data-tab-insertion={drag.insertion.after ? 'after' : 'before'}
+              style={{ position: 'absolute', top: 3, bottom: 3, width: 1, left: drag.insertion.after ? undefined : -1,
+                right: drag.insertion.after ? -1 : undefined, background: 'var(--t-accent)', pointerEvents: 'none' }} /> : null}
             <HeaderPill
               tab={tab}
               active={tab.id === activeTabId}
@@ -407,6 +414,8 @@ function HeaderPill({
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId?: string | null;
+    repoPath?: string | null;
   };
   active: boolean;
   /** This pill owns the tablist's single Tab stop (roving tabindex). */

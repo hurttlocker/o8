@@ -6,7 +6,6 @@ import { useWorkspaceChanges } from '../o8-panel/workspace-rail/ChangesList';
 import { useLaneReviewChanges } from './useLaneReviewChanges';
 import { useLaneReviewSummary } from './useLaneReviewSummary';
 import { LaneReviewSummaryHeader } from './panel/LaneReviewSummaryHeader';
-import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewGitActions } from './ReviewGitActions';
 import { useArtifacts } from '../artifacts/useArtifacts';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -14,7 +13,6 @@ import type { DiffMode, CollapseSignal, ReviewScope } from './panel/types';
 import {
   SCOPE_LABELS,
   SCOPE_ORDER,
-  BIG_CHANGESET,
   UI_FONT,
   REVIEW_CONTROL_BG,
   REVIEW_CONTROL_BG_ACTIVE,
@@ -66,7 +64,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [wordDiff, setWordDiff] = useState(false);
   const [hideWhitespace, setHideWhitespace] = useState(false);
   const [richPreview, setRichPreview] = useState(false);
-  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
+  const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: false, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [scope, setScope] = useState<ReviewScope>('all');
@@ -218,7 +216,6 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
     [visible],
   );
   const hasFiles = changes.files.length > 0;
-  const denseChangeset = visible.length > BIG_CHANGESET;
 
   useEffect(() => {
     if (!selectedFile || changes.loading) return;
@@ -347,13 +344,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             </span>
           ) : null}
           <div style={{ flex: 1, minWidth: 8 }} />
-          <O8ScratchChat
-            surfaceLabel="review"
-            repoPath={repoPath}
-            selectedFile={selectedFile ?? null}
-            surface="diff"
-            placement="review-toolbar"
-          />
+
           <ToolbarButton
             title={filesDrawerOpen ? 'Hide files' : 'Show files'}
             active={filesDrawerOpen}
@@ -471,7 +462,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               wordDiff={wordDiff}
               hideWhitespace={hideWhitespace}
               richPreview={richPreview}
-              initialOpen={!denseChangeset}
+              initialOpen={collapseSignal.open}
               collapseSignal={collapseSignal}
               focusSignal={focusSignal}
               selected={focusSignal.path === file.path}

@@ -18,7 +18,11 @@ it('journals postship disposal and reuses the verified artifact across later pre
   mkdirSync(scripts, { recursive: true });
   mkdirSync(home);
   mkdirSync(path.join(repo, '.fixture'));
-  writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\n');
+  writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\no8.release.json\n');
+  const publicClientKey = 'pk_test_release_config_only';
+  const releaseConfigPath = path.join(repo, 'o8.release.json');
+  const releaseConfig = JSON.stringify({ clerkPublishableKey: publicClientKey });
+  writeFileSync(releaseConfigPath, releaseConfig);
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'o8', version: '0.0.0',
     scripts: { build: `${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(source, 'scripts/build.mjs'))}` } }));
   // Real callers, guard, recipe, manifest, cache and native producer; only expensive
@@ -45,7 +49,7 @@ it('journals postship disposal and reuses the verified artifact across later pre
       }
     }
     fs.writeFileSync('.fixture/profile.json', JSON.stringify({ modern: process.env.O8_DATA_DIR,
-      legacy: process.env.CORTEX_IDE_DATA_DIR }));
+      legacy: process.env.CORTEX_IDE_DATA_DIR, publicClientKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }));
   `);
   const next = path.join(repo, 'node_modules/next/dist/bin');
   mkdirSync(next, { recursive: true });
@@ -68,7 +72,8 @@ it('journals postship disposal and reuses the verified artifact across later pre
     O8_RELEASE_BUILD_CACHE_MAX_BYTES: '10485760', O8_RELEASE_LOCK_PATH: path.join(root, 'release.lock'),
     O8_RELEASE_BROADCAST_CLI: 'true', TSX_TSCONFIG_PATH: path.join(source, 'tsconfig.json') };
   for (const key of ['O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'CORTEX_IDE_DB_PATH', 'O8_OPERATOR_DATA_DIR',
-    'O8_RELEASE_BUILD_DATA_DIR', 'O8_RELEASE_CACHE_RUN_ID', 'O8_RELEASE_CACHE_PREBUILD_MARKER']) {
+    'O8_RELEASE_BUILD_DATA_DIR', 'O8_RELEASE_CACHE_RUN_ID', 'O8_RELEASE_CACHE_PREBUILD_MARKER',
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY']) {
     delete (env as NodeJS.ProcessEnv)[key];
   }
   let invocation = 0;
@@ -82,7 +87,9 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
   const first = run(prebuild);
   expect(first.status, first.stderr + first.stdout).toBe(0);
-  const profile = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8')).modern as string;
+  const smoke = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8'));
+  expect(smoke.publicClientKey).toBe(publicClientKey);
+  const profile = smoke.modern as string;
   const databasePath = path.join(profile, 'cortex-ide.db');
   function resources() {
     const db = new Database(databasePath, { readonly: true, fileMustExist: true });
@@ -98,10 +105,33 @@ it('journals postship disposal and reuses the verified artifact across later pre
   function stateCommand(body: string) {
     return run(['--import', path.join(source, 'scripts/register-server-only-stub.mjs'),
       '--import', require.resolve('tsx'), '--input-type=module', '-e', body],
-    { O8_DATA_DIR: profile, CORTEX_IDE_DATA_DIR: profile });
+    // These direct lifecycle hook probes supply the original build environment.
+    // The real postship caller above must resolve it itself from release config.
+    { O8_DATA_DIR: profile, CORTEX_IDE_DATA_DIR: profile, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: publicClientKey });
   }
   const outputPath = path.join(repo, '.next');
   const outputSaved = path.join(repo, '.fixture/original-next');
+  const manifestPath = path.join(repo, 'out/.o8-release-artifact-manifest.json');
+  const originalManifest = readFileSync(manifestPath, 'utf8');
+  const artifactPath = path.join(repo, 'out/server.js');
+  const originalArtifact = readFileSync(artifactPath, 'utf8');
+  // Real configuration or artifact drift must still refuse deletion without
+  // rewriting the original recipe or lifecycle evidence to manufacture a match.
+  writeFileSync(releaseConfigPath, JSON.stringify({ clerkPublishableKey: 'pk_test_changed_file' }));
+  const changedConfig = run(postship);
+  expect(changedConfig.status).not.toBe(0);
+  expect(changedConfig.stderr).toContain('requires a preserved verified release artifact');
+  writeFileSync(releaseConfigPath, releaseConfig);
+  const changedEnvironment = run(postship, { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_changed_env' });
+  expect(changedEnvironment.status).not.toBe(0);
+  expect(changedEnvironment.stderr).toContain('requires a preserved verified release artifact');
+  writeFileSync(artifactPath, 'corrupted artifact');
+  expect(run(postship).status).not.toBe(0);
+  expect(readFileSync(artifactPath, 'utf8')).toBe('corrupted artifact');
+  writeFileSync(artifactPath, originalArtifact);
+  expect(existsSync(outputPath)).toBe(true);
+  expect(readFileSync(manifestPath, 'utf8')).toBe(originalManifest);
+  expect(resources()).toEqual([original]);
   // Neither unreceipted absence nor a replacement directory confers disposal authority.
   for (const replacement of [false, true]) {
     renameSync(outputPath, outputSaved);
@@ -161,6 +191,10 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const cleaned = run(postship);
   expect(cleaned.status, cleaned.stderr + cleaned.stdout).toBe(0);
   expect(existsSync(path.join(repo, '.next'))).toBe(false);
+  expect(readFileSync(manifestPath, 'utf8')).toBe(originalManifest);
+  expect(readFileSync(artifactPath, 'utf8')).toBe(originalArtifact);
+  expect(readFileSync(releaseConfigPath, 'utf8')).toBe(releaseConfig);
+  expect(readFileSync(path.join(repo, 'package.json'), 'utf8')).toContain('"name":"o8"');
   const reused = run(prebuild);
   expect(reused.status, reused.stderr + reused.stdout).toBe(0);
   expect(reused.stdout).toContain('reused verified artifact');

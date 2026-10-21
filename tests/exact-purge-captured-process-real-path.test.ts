@@ -27,6 +27,8 @@ describe('native purge process capability', () => {
       expect(snapshot.rows.some(row => row.cwd === candidate)).toBe(false);
       await expect(readCapturedPurgeCwdSnapshot({} as CapturedPurgeProcessWitness, root))
         .rejects.toThrow('not live authority');
+      // A real sibling scope, so the refusal comes from the authority check.
+      await mkdir(path.join(root, 'other'));
       await expect(readCapturedPurgeCwdSnapshot(witness, path.join(root, 'other')))
         .rejects.toThrow('not live authority');
     });

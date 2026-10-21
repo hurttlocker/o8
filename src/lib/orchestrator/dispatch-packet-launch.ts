@@ -102,7 +102,7 @@ function resolveLaunchWorkerRouting(workerRouting: WorkerRouting): WorkerRouting
     ?? null;
   const defaultEffort = resolveDefaultWorkerEffortSync(
     workerRouting.selectedRuntime,
-    workerRouting.selectedEffort,
+    workerRouting.requestedEffort === 'adaptive' ? 'adaptive' : workerRouting.selectedEffort,
   );
   const concreteEffort = defaultEffort === 'adaptive' ? undefined : defaultEffort;
   const selectedEffort = concreteEffort
@@ -392,7 +392,7 @@ export async function launchPacketWithStorageAdmission(input: {
         claudeCodeCarrier: packet.claudeCodeCarrier ?? undefined,
         executionCarrier: packet.executionCarrier ?? undefined,
         spendCap,
-        effort: workerRouting.selectedEffort ?? undefined,
+        effort: workerRouting.requestedEffort === 'adaptive' ? 'adaptive' : workerRouting.selectedEffort ?? undefined,
         clientMutationId: `packet-launch:${packet.id}:${launchGeneration}`,
         storageAdmissionReservationId: admissionLease.receipt.reservationId,
         launchContext,

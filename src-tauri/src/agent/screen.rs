@@ -386,28 +386,33 @@ pub struct SpatialContext {
 /// returning the raw PNG bytes + geometry (NOT base64 — the strokes get burned
 /// in first). Blocking subprocess; call off the main thread. Mirrors `capture`'s
 /// multi-display pick, but keeps more resolution for the crop.
-pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
+pub fn capture_full(
+    app: &tauri::AppHandle,
+    marked_monitor: Option<tauri::Monitor>,
+) -> Option<RawCapture> {
     let monitors = app.available_monitors().ok()?;
     if monitors.is_empty() {
         return None;
     }
     let cursor = app.cursor_position().ok();
-    let monitor = cursor
-        .and_then(|c| {
-            monitors
-                .iter()
-                .find(|m| {
-                    let p = m.position();
-                    let s = m.size();
-                    c.x >= p.x as f64
-                        && c.x < (p.x + s.width as i32) as f64
-                        && c.y >= p.y as f64
-                        && c.y < (p.y + s.height as i32) as f64
-                })
-                .cloned()
-        })
-        .or_else(|| app.primary_monitor().ok().flatten())
-        .or_else(|| monitors.first().cloned())?;
+    let monitor = marked_monitor.or_else(|| {
+        cursor
+            .and_then(|c| {
+                monitors
+                    .iter()
+                    .find(|m| {
+                        let p = m.position();
+                        let s = m.size();
+                        c.x >= p.x as f64
+                            && c.x < (p.x + s.width as i32) as f64
+                            && c.y >= p.y as f64
+                            && c.y < (p.y + s.height as i32) as f64
+                    })
+                    .cloned()
+            })
+            .or_else(|| app.primary_monitor().ok().flatten())
+            .or_else(|| monitors.first().cloned())
+    })?;
     let trace_id = crate::screen_localization::next_trace_id();
     let capture_started = std::time::Instant::now();
     let scale = monitor.scale_factor();
@@ -422,7 +427,7 @@ pub fn capture_full(app: &tauri::AppHandle) -> Option<RawCapture> {
     let tmp = std::env::temp_dir();
     let stamp = std::process::id();
     let files: Vec<std::path::PathBuf> = (0..monitors.len())
-        .map(|i| tmp.join(format!("o8-spatial-{stamp}-{i}.png")))
+        .map(|i| tmp.join(format!("o8-spatial-{stamp}-{trace_id}-{i}.png")))
         .collect();
 
     let mut cmd = std::process::Command::new("screencapture");
@@ -610,7 +615,11 @@ pub fn composite_strokes(raw: &RawCapture, strokes: &[Vec<(f64, f64)>]) -> Optio
     };
     log::info!(
         "[spatial-context] composited {stroke_count} stroke(s): composite {cw}x{ch}, crop={}",
-        if crop_png_base64.is_some() { "yes" } else { "no" }
+        if crop_png_base64.is_some() {
+            "yes"
+        } else {
+            "no"
+        }
     );
     Some(SpatialContext {
         screen,
@@ -751,7 +760,10 @@ fn vision_model() -> String {
 /// the screenshot already captured for this task (intent-gated), else grabs one
 /// on demand. ReadOnly in `safety` — observation only; capture is permission-
 /// gated by macOS Screen Recording.
-pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Result<serde_json::Value, String> {
+pub async fn read_screen(
+    ctx: &super::TaskCtx,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let focus = args
         .get("focus")
         .and_then(|v| v.as_str())
@@ -769,9 +781,11 @@ pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Resul
         match captured {
             Some(s) => s.png_base64,
             None => {
-                return Err("I couldn't capture the screen — turn on Screen Recording for o8 in \
+                return Err(
+                    "I couldn't capture the screen — turn on Screen Recording for o8 in \
                             System Settings → Privacy & Security."
-                    .to_string())
+                        .to_string(),
+                )
             }
         }
     };

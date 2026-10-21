@@ -3,6 +3,12 @@
   "generatedBy": "node scripts/classify-tests.mjs --write",
   "resourceOwning": [
     {
+      "path": "cli/src/commands/packet/info-surface.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "cli/src/commands/team.test.ts",
       "reasons": [
         "child-process",
@@ -169,6 +175,27 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/byok-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "src/app/api/voice/live/personal-pilot-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "src/app/api/voice/live/route.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/app/api/worktrees/batch/route.test.ts",
       "reasons": [
         "worktree-api"
@@ -237,6 +264,18 @@
       ]
     },
     {
+      "path": "src/components/desktop/repo-focus/tabs/chats/sections.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "src/components/desktop/repo-focus/tabs/chats/sidebar-agent-integration.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
       "reasons": [
         "apfs-tool"
@@ -256,6 +295,12 @@
     },
     {
       "path": "src/components/desktop/workspace-terminal/XtermPanel.bench.test.ts",
+      "reasons": [
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/components/desktop/workspace-terminal/terminal-exit-buffer.test.ts",
       "reasons": [
         "terminal-tool"
       ]
@@ -327,6 +372,7 @@
       "path": "src/lib/codex/read-only-worker-launch.test.ts",
       "reasons": [
         "child-process",
+        "executable-fixture",
         "git-cli"
       ]
     },
@@ -808,6 +854,13 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/connection-evidence-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/opencode-service-skew.test.ts",
       "reasons": [
         "child-process",
@@ -1209,6 +1262,13 @@
       ]
     },
     {
+      "path": "src/lib/worktree/storage-volume-id.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/dash-terminal-persistence.test.ts",
       "reasons": [
         "terminal-tool"
@@ -1221,6 +1281,12 @@
       ]
     },
     {
+      "path": "src/lib/ws-server/pty-support.test.ts",
+      "reasons": [
+        "terminal-host"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/terminal-host.test.ts",
       "reasons": [
         "terminal-host"
@@ -1230,6 +1296,12 @@
       "path": "src/lib/ws-server/terminal-resync-snapshot.test.ts",
       "reasons": [
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/acp-ended-after-tools-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -1260,6 +1332,14 @@
       ]
     },
     {
+      "path": "tests/activity-folder-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/activity-local-commits.test.ts",
       "reasons": [
         "child-process",
@@ -1277,6 +1357,14 @@
     {
       "path": "tests/agent-control-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/agent-inbox-wake-reservation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },
@@ -1704,6 +1792,14 @@
       ]
     },
     {
+      "path": "tests/cli-chat-terminal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-connect-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1721,6 +1817,15 @@
     {
       "path": "tests/cli-huddle-report-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cli-installer-restart-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
         "real-path"
       ]
     },
@@ -1970,6 +2075,13 @@
       ]
     },
     {
+      "path": "tests/composer-brain-runtime-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/composer-chip-layout-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -1979,6 +2091,24 @@
       "path": "tests/composer-image-operator-real-path.test.ts",
       "reasons": [
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-queue-retry-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/composer-session-storage-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -2057,8 +2187,27 @@
       ]
     },
     {
+      "path": "tests/cortex-launch-agent-runtime-errors-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-worker-observation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
@@ -2108,9 +2257,18 @@
       ]
     },
     {
+      "path": "tests/dash-terminal-profile-gc-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/dash-terminal-restart-real-path.test.ts",
       "reasons": [
         "child-process",
+        "git-cli",
         "network-listener",
         "process-signal",
         "real-path",
@@ -2287,6 +2445,14 @@
       ]
     },
     {
+      "path": "tests/fetch-cache-cancellation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/file-save-conflict-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -2297,6 +2463,14 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/fixture-child-lifetime-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
       ]
     },
     {
@@ -2459,6 +2633,12 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/github-pr-sync-pagination-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -2639,6 +2819,15 @@
       ]
     },
     {
+      "path": "tests/lane-git-event-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/lane-git-guard.test.ts",
       "reasons": [
         "child-process",
@@ -2688,6 +2877,18 @@
       ]
     },
     {
+      "path": "tests/lane-stop-retry-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/launch-failure-truth-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2704,6 +2905,16 @@
         "network-listener",
         "process-signal",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/legacy-output-parking-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -3035,6 +3246,14 @@
       ]
     },
     {
+      "path": "tests/metadata-lock-probe-busy-loop-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/metadata-store-root-boundary-real-path.test.ts",
       "reasons": [
         "real-path",
@@ -3046,6 +3265,7 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "fixture-lifecycle",
         "git-cli",
         "network-listener",
         "process-signal",
@@ -3080,6 +3300,16 @@
       "path": "tests/mission-funnel-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-merge-hold-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -3252,6 +3482,21 @@
       ]
     },
     {
+      "path": "tests/o8-serve-review-mode.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
+      "path": "tests/o8-serve-token-renewal.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal"
+      ]
+    },
+    {
       "path": "tests/onboarding-runtime-picker-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -3280,10 +3525,23 @@
       ]
     },
     {
+      "path": "tests/opencode-cli-update-report-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/opencode-standalone-resume.test.ts",
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/openrouter-work-usage-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -3326,6 +3584,12 @@
       ]
     },
     {
+      "path": "tests/orchestrator-late-ack-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-mcp-owned-root-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3336,6 +3600,23 @@
     },
     {
       "path": "tests/orchestrator-model-attribution-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-pending-image-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-replay-restart-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",
@@ -3358,6 +3639,17 @@
         "child-process",
         "network-listener",
         "process-signal"
+      ]
+    },
+    {
+      "path": "tests/orchestrator-stop-turn-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
       ]
     },
     {
@@ -3529,6 +3821,7 @@
     {
       "path": "tests/pi-orchestrator-real-path.test.ts",
       "reasons": [
+        "git-cli",
         "network-listener",
         "real-path"
       ]
@@ -3600,6 +3893,13 @@
       "path": "tests/pi-sdk-worker-real-path.test.ts",
       "reasons": [
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-transport-host-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
@@ -3679,7 +3979,8 @@
         "git-cli",
         "network-listener",
         "process-signal",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -3751,6 +4052,14 @@
       "path": "tests/push-gate-real-path.test.ts",
       "reasons": [
         "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/queued-composer-execution-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -3833,6 +4142,13 @@
         "child-process",
         "executable-fixture",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/release-build-cache-environment.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture"
       ]
     },
     {
@@ -3942,6 +4258,16 @@
       "reasons": [
         "child-process",
         "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/repo-inventory-realtime-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "git-cli",
         "network-listener",
         "process-signal",
@@ -4163,6 +4489,12 @@
       ]
     },
     {
+      "path": "tests/review-continuation-unbound-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/review-file-previews.test.ts",
       "reasons": [
         "child-process",
@@ -4323,6 +4655,12 @@
       ]
     },
     {
+      "path": "tests/session-merge-restriction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/session-transform-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4338,6 +4676,15 @@
       ]
     },
     {
+      "path": "tests/shared-worker-return-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/ship-intake-credential-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -4347,6 +4694,14 @@
     {
       "path": "tests/ship-ledger-operator-dir-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/ship-preflight-benchmark-cleanup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
         "real-path"
       ]
     },
@@ -4493,8 +4848,7 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "real-path",
-        "worktree-api"
+        "real-path"
       ]
     },
     {
@@ -4611,7 +4965,8 @@
       "path": "tests/tauri-prebuild-profile.test.ts",
       "reasons": [
         "child-process",
-        "git-cli"
+        "git-cli",
+        "worktree-api"
       ]
     },
     {
@@ -4800,11 +5155,24 @@
       ]
     },
     {
+      "path": "tests/update-apply-failure-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-check-state-real-path.test.ts",
       "reasons": [
         "child-process",
         "network-listener",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-restart-parked-real-path.test.ts",
+      "reasons": [
+        "network-listener",
         "real-path"
       ]
     },
@@ -4819,6 +5187,18 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/visual-inspection-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/visual-instruction-delivery-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
@@ -4848,6 +5228,15 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worker-corrections-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -4914,6 +5303,14 @@
         "process-signal",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/workspace-github-polling-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
       ]
     },
     {
@@ -5028,6 +5425,15 @@
         "child-process",
         "git-cli",
         "terminal-tool",
+        "worktree",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-reaper-snapshot-lifecycle.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "worktree",
         "worktree-api"
       ]

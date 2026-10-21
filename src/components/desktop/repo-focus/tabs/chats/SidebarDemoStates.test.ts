@@ -57,7 +57,7 @@ describe('seeded states through the actual compact chat panel', () => {
   });
   it('opens the saved sample in its repo context and keeps its state visible after reading', async () => {
     await render(); await act(async () => setSidebarView('flat'));
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="merged"] button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="merged"] [data-o8-agent-row]')!.click());
     expect(open).toHaveBeenCalledWith('thoughts-sidebar-demo-test-merged', 'Demo · merged', {
       name: repo.name, localPath: repo.localPath, branch: 'demo/merged',
     });
@@ -73,16 +73,44 @@ describe('seeded states through the actual compact chat panel', () => {
     expect(stateNames()).toHaveLength(states.length);
     expect(container.querySelector('[data-o8-sidebar-demo]')?.textContent).toContain('Demo states');
   });
+  it('keeps chronological samples compact under dated history after pinned chats', async () => {
+    const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(12, 0, 0, 0);
+    const older = new Date(); older.setDate(older.getDate() - 3); older.setHours(12, 0, 0, 0);
+    const dated = fixtures.map((sample) => ({ ...sample, updatedAt: sample.state === 'finished' ? yesterday.toISOString()
+      : sample.state === 'idle' ? older.toISOString() : sample.updatedAt }));
+    fetchMock.mockImplementation(async (url) => ({ ok: true, json: async () => String(url).includes('sidebar-fixtures')
+      ? { schema: 'o8/ui-sidebar-fixtures/v1', synthetic: true, fixtures: dated }
+      : String(url).includes('chat-history/list') ? { conversations: [
+        { tabId: 'thoughts-pinned', title: 'Pinned chat', preview: 'Pinned preview', modifiedAt: older.toISOString(),
+          savedAt: older.toISOString(), model: 'codex', backend: 'codex', messageCount: 2, empty: false,
+          pinned: true, starred: false, repoPath: repo.localPath, repoName: repo.name },
+        ...dated.map((sample) => ({ ...sample, modifiedAt: sample.updatedAt, savedAt: sample.updatedAt,
+          model: 'codex', backend: 'codex', messageCount: 3, empty: false, pinned: false, starred: false })),
+      ] } : { lanes: [] } }));
+    await render(); await act(async () => setSidebarView('chronological'));
+    expect(stateNames()).toHaveLength(states.length);
+    expect(container.textContent).not.toContain('Synthetic');
+    expect(container.textContent).not.toContain('Pinned preview');
+    expect(container.textContent).not.toContain('Demo states');
+    const shelves = [...container.querySelectorAll('[aria-label$=" conversations"]')].map((node) => node.getAttribute('aria-label'));
+    expect(shelves).toEqual(['Pinned conversations', 'Recents conversations', 'Today conversations', 'Yesterday conversations', 'Previous 7 days conversations']);
+    expect(container.querySelector('[aria-label="Pinned conversations"]')?.textContent).toContain('Pinned chat');
+    expect(container.querySelector('[aria-label="Yesterday conversations"]')?.textContent).toContain('Demo · finished');
+    expect(container.querySelector('[aria-label="Previous 7 days conversations"]')?.textContent).toContain('Demo · idle');
+    expect(container.querySelectorAll('[data-o8-demo-state] .o8-fam')).toHaveLength(states.length);
+    await act(async () => setSidebarView('flat'));
+    expect(container.textContent).toContain('Synthetic waiting update');
+  });
   it('retains unread completed samples in Working until read, with notifications even when folded', async () => {
     await render(); await act(async () => setSidebarView('working'));
     expect(stateNames()).toContain('finished');
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-o8-demo-state="finished"] [data-o8-agent-row]')!.click());
     expect(stateNames()).not.toContain('finished');
     expect(container.querySelector('[aria-label="Settled conversations"]')?.textContent).toContain('Settled');
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] > div button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Working conversations"] button[aria-expanded="true"]')!.click());
     expect(stateNames()).toEqual([]);
     expect(container.querySelector('[aria-label="Priority chats"] [data-attention-dot]')).not.toBeNull();
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settled conversations"] > button')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Settled conversations"] button[aria-expanded="false"]')!.click());
     expect(stateNames()).toEqual(expect.arrayContaining(['finished', 'idle']));
     expect(stateNames()).not.toContain('running');
   });

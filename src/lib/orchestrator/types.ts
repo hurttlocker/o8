@@ -440,6 +440,11 @@ export interface OrchestratorPacket {
    */
   useBrain?: boolean;
   /**
+   * Merge hold (#3740). When true, an approved review does not merge this
+   * packet: any merge not made by the operator routes to an approval card.
+   */
+  mergeHold?: boolean;
+  /**
    * Huddle mode (per-packet, armed by the orchestrator). When true,
    * `buildPacketPrompt` instructs the worker to read the repo, post its plan +
    * any pushback via `o8 packet report --event huddle`, and STOP before

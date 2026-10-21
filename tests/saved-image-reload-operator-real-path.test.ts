@@ -30,6 +30,8 @@ vi.stubEnv('CORTEX_IDE_DATA_DIR', directory);
 vi.stubEnv('O8_DATA_DIR', directory);
 vi.stubEnv('O8_TAURI_MCP_SOCKET', socketPath);
 vi.stubEnv('TAURI_MCP_AUTH_TOKEN', 'fixture-native-auth');
+// jsdom has no layout observer; the transcript navigator only measures with it.
+vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 const { panelGateMiddleware } = await import('@/middleware');
 const { POST } = await import('@/app/api/mcp/route');
 const { closeDb } = await import('@/lib/db');

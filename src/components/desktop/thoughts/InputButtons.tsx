@@ -3,7 +3,7 @@ import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { useRepoTargetMenu } from './useRepoTargetMenu';
 import { AttachFilesButton } from './AttachFilesButton';
-import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
+import { ComposerModeChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
 import { SessionRulesChip } from './SessionRulesChip';
@@ -442,6 +442,7 @@ export function InputButtons({
   onSelectRepoPath,
   inlineLeadingExtras,
   permissionControl,
+  managedVoiceControl,
   inlineMeterSlot,
   onBrowsePrompts,
   onSavePrompt,
@@ -493,6 +494,7 @@ export function InputButtons({
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
   permissionControl?: ReactNode;
+  managedVoiceControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
@@ -585,6 +587,7 @@ export function InputButtons({
           )}
           meterControl={inlineMeterSlot}
           micControl={<MicButton />}
+          voiceControl={managedVoiceControl}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -608,7 +611,7 @@ export function InputButtons({
       gap: 6,
       paddingTop: 4,
       paddingRight: 8,
-      paddingBottom: 6,
+      paddingBottom: 8,
       paddingLeft: 10,
     }}>
       {/* Left controls — the flexible group. As the composer narrows this
@@ -665,6 +668,7 @@ export function InputButtons({
         onSavePrompt={onSavePrompt}
       />
       <MicButton />
+      {managedVoiceControl}
 
       </div>
 
@@ -702,17 +706,7 @@ export function InputButtons({
           composerMode={selectorControls?.state.mode ?? composerMode}
         />
       ) : null}
-      {composerMode && (selectorControls?.state.mode ?? composerMode) !== 'solo' ? (
-        <FleetWorkerChip
-          compact={compact}
-          defaults={selectorControls?.defaults}
-          workerModelLocked={selectorControls?.workerModelLocked}
-          saving={selectorControls?.savingWorkerDefaults}
-          onRuntimeChange={selectorControls?.onRuntimeChange}
-          onWorkerModelChange={selectorControls?.onWorkerModelChange}
-          onWorkerStartModeChange={selectorControls?.onWorkerStartModeChange}
-        />
-      ) : null}
+
 
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}

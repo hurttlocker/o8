@@ -1,14 +1,14 @@
 'use client';
 
 import type React from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSplitResize } from './hooks/useSplitResize';
 import { ResizeEdge } from './shell/ResizeEdge';
 import { TileHeader } from '@/components/desktop/TileHeader';
 import { SplitPaneCloseButton } from '@/components/desktop/shell/SplitPaneCloseButton';
 import {
   collectLeafNodes,
   computeTileLayout,
-  type TileRect,
   type TileSplitFrame,
 } from '@/lib/tiles/operations';
 import type {
@@ -18,6 +18,7 @@ import type {
   TileSplitDirection,
 } from '@/lib/tiles/types';
 import { WORKSPACE_TAB_DRAG_TYPE, workspaceTabDropZone, type WorkspaceTabDragKind, type WorkspaceTabDropZone } from '@/lib/tiles/workspace-tab-drag';
+import { getActiveWorkspacePaneDrag, WORKSPACE_PANE_DRAG_EVENT, type WorkspacePaneDrag } from '@/lib/tiles/workspace-pane-drag';
 
 export interface TileContentRenderProps<TContent extends TileContent = TileContent> {
   active: boolean;
@@ -39,6 +40,8 @@ export interface TileContentDefinition<TContent extends TileContent = TileConten
 export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>;
 
 interface TileContainerProps {
+  /** Solid workspace surfaces share straight seams; glass keeps separate cards. */
+  joined?: boolean;
   activeTileId: string | null;
   paneLabels?: ReadonlyMap<string, string>;
   keepPrimarySessionAlive?: boolean;
@@ -51,13 +54,13 @@ interface TileContainerProps {
   onSplitTile: (tileId: string, direction: TileSplitDirection, initialTab?: WorkspaceTabDragKind, placeBefore?: boolean, exactPlacement?: boolean) => void;
 }
 
-const HANDLE_SIZE = 12;
+const HANDLE_SIZE = 8;
 // Per-leaf gap + squircle. Each leaf gets HALF the gap as inner padding on
 // every edge that faces a sibling, so the sum of two adjacent paddings
 // equals LEAF_GAP. Corners that face a gap get rounded; corners flush
 // against the workspace edge stay square so the leaves align with the
 // surrounding chrome.
-const LEAF_GAP = 10;
+const LEAF_GAP = 8;
 const LEAF_RADIUS = 14;
 
 /**
@@ -72,6 +75,7 @@ const LEAF_RADIUS = 14;
  * panel no longer remounts the workspace terminal above it.
  */
 export function TileContainer({
+  joined = false,
   activeTileId,
   paneLabels,
   keepPrimarySessionAlive = false,
@@ -83,6 +87,8 @@ export function TileContainer({
   onResizeSplit,
   onSplitTile,
 }: TileContainerProps) {
+  const leafGap = joined ? 1 : LEAF_GAP;
+  const leafRadius = joined ? 0 : LEAF_RADIUS;
   const containerRef = useRef<HTMLDivElement>(null);
   const [tabDrop, setTabDrop] = useState<{ tileId: string; zone: WorkspaceTabDropZone } | null>(null);
   const [paneDragging, setPaneDragging] = useState(false);
@@ -109,21 +115,51 @@ export function TileContainer({
     return { leaves, leafRects, splitFrames };
   }, [layout.root]);
 
-  const totalLeaves = leaves.length;
+  const visibleLeaves = leaves.filter((leaf) => leaf.content.kind !== 'contextual-panel' || leaf.content.hidden !== true);
+  const totalLeaves = visibleLeaves.length;
   const leafSignature = leaves.map((leaf) => leaf.id).join('|');
   const focusedPaneId = paneFocus?.leaves === leafSignature && leaves.some((leaf) => leaf.id === paneFocus.tileId)
     ? paneFocus.tileId : null;
-  const allTerminalPanes = leaves.every((leaf) => leaf.content.kind === 'terminal');
+  const allTerminalPanes = visibleLeaves.every((leaf) => leaf.content.kind === 'terminal');
   const showPaneHeader = allTerminalPanes && totalLeaves > 1;
   const primaryLeaf = leaves.find((leaf) => leaf.id === 'tile-root' && leaf.content.kind === 'terminal');
   const primaryRect = focusedPaneId && focusedPaneId !== 'tile-root'
     ? null : focusedPaneId === 'tile-root'
       ? { left: 0, top: 0, width: 1, height: 1 }
       : leafRects.get('tile-root');
-  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? LEAF_GAP / 2 : 0;
-  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? LEAF_GAP / 2 : 0;
-  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? LEAF_GAP / 2 : 0;
+  const primaryPadLeft = primaryRect && primaryRect.left > 0.001 ? leafGap / 2 : 0;
+  const primaryPadRight = primaryRect && primaryRect.left + primaryRect.width < 0.999 ? leafGap / 2 : 0;
+  const primaryPadTop = primaryRect && primaryRect.top > 0.001 ? leafGap / 2 : 0;
+  const primaryPadBottom = primaryRect && primaryRect.top + primaryRect.height < 0.999 ? leafGap / 2 : 0;
+
+  useEffect(() => {
+    const update = (drag: WorkspacePaneDrag) => {
+      const container = containerRef.current;
+      const target = drag.phase === 'cancel' || interactionDisabled || !container ? null
+        : Array.from(container.querySelectorAll<HTMLElement>(':scope > [data-tile-kind="terminal"]')).find((element) => {
+          if (element.style.visibility === 'hidden') return false;
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && drag.clientX >= rect.left && drag.clientX <= rect.right
+            && drag.clientY >= rect.top && drag.clientY <= rect.bottom;
+        });
+      const drop = target ? {
+        tileId: target.dataset.tileId!,
+        zone: workspaceTabDropZone(target.getBoundingClientRect(), drag.clientX, drag.clientY),
+      } : null;
+      setPaneDragging(drag.phase === 'move');
+      setTabDrop(current => drag.phase !== 'move' ? null
+        : current?.tileId === drop?.tileId && current?.zone === drop?.zone ? current : drop);
+      if (drag.phase !== 'drop' || !drop) return;
+      const { tileId, zone } = drop;
+      onSplitTile(tileId, zone === 'above' || zone === 'below' ? 'horizontal' : 'vertical', drag.kind,
+        zone === 'left' || zone === 'above', true);
+    };
+    const handler = (event: Event) => update((event as CustomEvent<WorkspacePaneDrag>).detail);
+    window.addEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+    const active = getActiveWorkspacePaneDrag();
+    if (active) update(active);
+    return () => window.removeEventListener(WORKSPACE_PANE_DRAG_EVENT, handler);
+  }, [interactionDisabled, onSplitTile, layout.root, focusedPaneId]);
 
   const handlePaneDragOver = (event: React.DragEvent<HTMLDivElement>, tileId: string) => {
     if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_TAB_DRAG_TYPE)) return;
@@ -149,43 +185,7 @@ export function TileContainer({
     onSplitTile(tileId, zone === 'left' || zone === 'right' ? 'vertical' : 'horizontal', kind, zone === 'left' || zone === 'above', true);
   };
 
-  const makeResizeStart = useCallback(
-    (splitId: string, direction: TileSplitDirection, containerRect: TileRect) =>
-      (event: React.MouseEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        const tileContainer = containerRef.current;
-        if (!tileContainer) return;
-        const outerRect = tileContainer.getBoundingClientRect();
-        // Convert the split's percent-space container rect to pixels.
-        // Drag positions are then interpreted as ratios within this pixel rect.
-        const splitPixelRect = {
-          left: outerRect.left + outerRect.width * containerRect.left,
-          top: outerRect.top + outerRect.height * containerRect.top,
-          width: outerRect.width * containerRect.width,
-          height: outerRect.height * containerRect.height,
-        };
-
-        const handleMove = (moveEvent: MouseEvent) => {
-          const ratio = direction === 'vertical'
-            ? (moveEvent.clientX - splitPixelRect.left) / splitPixelRect.width
-            : (moveEvent.clientY - splitPixelRect.top) / splitPixelRect.height;
-          onResizeSplit(splitId, ratio);
-        };
-
-        const handleUp = () => {
-          document.removeEventListener('mousemove', handleMove);
-          document.removeEventListener('mouseup', handleUp);
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-        };
-
-        document.body.style.cursor = direction === 'vertical' ? 'col-resize' : 'row-resize';
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMove);
-        document.addEventListener('mouseup', handleUp);
-      },
-    [onResizeSplit],
-  );
+  const makeResizeStart = useSplitResize(containerRef, onResizeSplit);
 
   return (
     <div
@@ -215,29 +215,30 @@ export function TileContainer({
       }}
     >
       {leaves.map((leaf, index) => {
+        const hiddenPanel = leaf.content.kind === 'contextual-panel' && leaf.content.hidden === true;
         const hiddenByFocus = Boolean(focusedPaneId && focusedPaneId !== leaf.id);
         const rect = focusedPaneId === leaf.id
           ? { left: 0, top: 0, width: 1, height: 1 }
           : leafRects.get(leaf.id);
         if (!rect) return null;
         const definition = registry[leaf.content.kind];
-        const isActive = !hiddenByFocus && leaf.id === activeTileId;
+        const isActive = !hiddenPanel && !hiddenByFocus && leaf.id === activeTileId;
         // Per-edge: half the gap on edges facing siblings; zero on edges
         // flush with the workspace boundary. Adjacent leaves contribute
         // half + half = LEAF_GAP visible in the middle, fully transparent
         // so the chrome shows through.
         const epsilon = 0.001;
-        const halfGap = LEAF_GAP / 2;
+        const halfGap = leafGap / 2;
         const padLeft = rect.left > epsilon ? halfGap : 0;
         const padRight = rect.left + rect.width < 1 - epsilon ? halfGap : 0;
         const padTop = rect.top > epsilon ? halfGap : 0;
         const padBottom = rect.top + rect.height < 1 - epsilon ? halfGap : 0;
         // Round only corners adjacent to a gap so the leaves keep the
         // workspace boundary crisp.
-        const radiusTL = (padTop || padLeft) ? LEAF_RADIUS : 0;
-        const radiusTR = (padTop || padRight) ? LEAF_RADIUS : 0;
-        const radiusBL = (padBottom || padLeft) ? LEAF_RADIUS : 0;
-        const radiusBR = (padBottom || padRight) ? LEAF_RADIUS : 0;
+        const radiusTL = (padTop || padLeft) ? leafRadius : 0;
+        const radiusTR = (padTop || padRight) ? leafRadius : 0;
+        const radiusBL = (padBottom || padLeft) ? leafRadius : 0;
+        const radiusBR = (padBottom || padRight) ? leafRadius : 0;
         return (
           <div
             key={leaf.id}
@@ -245,12 +246,15 @@ export function TileContainer({
             data-tile-id={leaf.id}
             data-tile-kind={leaf.content.kind}
             data-tile-active={isActive ? 'true' : 'false'}
+            aria-hidden={hiddenPanel || hiddenByFocus}
+            inert={hiddenPanel || hiddenByFocus}
             onMouseDown={() => onActivateTile(leaf.id)}
             onFocusCapture={() => onActivateTile(leaf.id)}
             onDragOver={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDragOver(event, leaf.id) : undefined}
             onDropCapture={leaf.content.kind === 'terminal' && (!keepPrimarySessionAlive || leaf.id !== 'tile-root') ? (event) => handlePaneDrop(event, leaf.id) : undefined}
             style={{
               position: 'absolute',
+              display: hiddenPanel ? 'none' : undefined,
               left: `${rect.left * 100}%`,
               top: `${rect.top * 100}%`,
               width: `${rect.width * 100}%`,
@@ -393,7 +397,9 @@ export function TileContainer({
         <ResizeHandle
           key={frame.id}
           frame={frame}
-          onMouseDown={makeResizeStart(frame.id, frame.direction, frame.container)}
+          onPointerDown={makeResizeStart(frame.id, frame.direction, frame.container, frame.direction === 'vertical'
+            ? (frame.boundary.left - frame.container.left) / frame.container.width
+            : (frame.boundary.top - frame.container.top) / frame.container.height)}
           onResize={(ratio) => onResizeSplit(frame.id, ratio)}
         />
       ))}
@@ -403,11 +409,11 @@ export function TileContainer({
 
 function ResizeHandle({
   frame,
-  onMouseDown,
+  onPointerDown,
   onResize,
 }: {
   frame: TileSplitFrame;
-  onMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
   onResize: (ratio: number) => void;
 }) {
   const isVertical = frame.direction === 'vertical';
@@ -435,12 +441,13 @@ function ResizeHandle({
   return (
     <ResizeEdge
       orientation={isVertical ? 'vertical' : 'horizontal'}
+      hitSlop={8}
       aria-label="Resize terminal panes"
       aria-valuemin={20}
       aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
       tabIndex={0}
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       onKeyDown={(event) => {
         const step = isVertical
           ? (event.key === 'ArrowLeft' ? -0.05 : event.key === 'ArrowRight' ? 0.05 : 0)

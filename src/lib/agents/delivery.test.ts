@@ -127,14 +127,14 @@ describe('buildClaudeTerminalUserTurn', () => {
           && inboxCursor < wake.throughSequence
           && now - wake.sentAt < AGENT_NATIVE_WAKE_TTL_MS) {
           wake.throughSequence = Math.max(wake.throughSequence, throughSequence);
-          return false;
+          return null;
         }
         wake = {
           sessionKey: wakeTarget.sessionKey ?? '',
           throughSequence,
           sentAt: now,
         };
-        return true;
+        return `reservation-${throughSequence}`;
       },
       releaseCodexInboxWake: () => {
         wake = null;

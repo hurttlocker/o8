@@ -42,6 +42,8 @@ import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
+import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -279,7 +281,7 @@ async function dispatchUnlocked(
       //    interrupt can race a re-dispatch in. (2026-06-22)
       if (lane.packetId) {
         try {
-          if (!await persistLanePacketHold(lane.packetId)) {
+          if (!await persistLanePacketHold(lane.packetId, lane)) {
             return {
               ok: false,
               laneId: command.laneId,
@@ -893,6 +895,26 @@ async function dispatchUnlocked(
 
       if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (merge)`);
+      }
+
+      try { assertSessionMergeAllowed(lane.packetId); }
+      catch (error) { return { ok: false, laneId: lane.id, note: error instanceof Error ? error.message : 'Session restriction unavailable; merge held.' }; }
+
+      // #3740 — a held mission merges only by the operator's hand. Checked after
+      // every other gate, so the card means "ready to merge, held by the mission".
+      if (actor !== 'user' && isPacketMergeHeld(lane.packetId)) {
+        return createLaneActionApproval(lane, actor, {
+          verb: 'merge',
+          commitMessage: command.commitMessage,
+          expectedHeadSha: command.expectedHeadSha,
+          reviewSummary: command.reviewSummary,
+          title: 'Merge held by mission',
+          description: `This packet's mission was created with merges held. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
+          summary: `Merge held: ${lane.branch} → ${lane.baseBranch}`,
+          risk: 'medium',
+          policyRuleId: MERGE_HOLD_POLICY_RULE_ID,
+          note: 'Merge held: the mission was created with merges held, so the operator decides. An approval card is waiting.',
+        });
       }
 
       if (isRemoteCustomerLane) {

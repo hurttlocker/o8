@@ -1,7 +1,10 @@
 const MAX_ERROR_LENGTH = 200;
+// A 4xx `error` is text a route wrote for its caller, such as a storage hold
+// with the space to free. It gets more room; a 5xx never passes through (#3657).
+const MAX_ROUTE_ERROR_LENGTH = 500;
 
-function singleLineMessage(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > MAX_ERROR_LENGTH || /[\r\n\u2028\u2029]/u.test(value)) return null;
+function singleLineMessage(value: unknown, maxLength = MAX_ERROR_LENGTH): string | null {
+  if (typeof value !== 'string' || value.length > maxLength || /[\r\n\u2028\u2029]/u.test(value)) return null;
   const message = value.replace(/[\p{Cc}\p{Cf}]/gu, '').trim();
   return message || null;
 }
@@ -34,7 +37,7 @@ export function apiError(path: string, status: number | null, body: string, deta
   if (status !== null && status >= 400 && status < 500) {
     try {
       const payload = JSON.parse(body) as { error?: unknown } | null;
-      summary = singleLineMessage(payload?.error) ?? summary;
+      summary = singleLineMessage(payload?.error, MAX_ROUTE_ERROR_LENGTH) ?? summary;
     } catch { /* use the fixed summary */ }
   }
   return new O8ApiError(status, summary);

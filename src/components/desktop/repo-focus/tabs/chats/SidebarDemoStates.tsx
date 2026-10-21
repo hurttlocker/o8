@@ -84,6 +84,7 @@ export function SidebarDemoStates({ fixtures, mode, shelf, publishAttention = tr
         <motion.div key={sample.tabId} layout="position" transition={{ type: 'spring', stiffness: 400, damping: 30 }}
           data-o8-demo-state={sample.state} data-o8-demo-scheduled={sample.scheduled}>
           <ExtraAgentRowView row={row} active={active} busy={!onOpenHistoryChat} band={attentionBand(subject)}
+            showPreview={mode !== 'chronological' && mode !== 'manual'}
             roomy={mode === 'flat' || (mode === 'working' && shelf !== 'settled')} repoLabel={mode === 'repo' ? null : sample.repoName}
             onFocusRow={() => {
               clearHoverTimer();

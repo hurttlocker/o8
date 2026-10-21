@@ -106,7 +106,7 @@ interface HeaderMetrics {
 // so they are measured by their full clickable element boxes.
 function measureHeaderInPage(probe: { expectedName: string; expectedModel: string }) {
   const allButtons = Array.from(document.querySelectorAll('button'));
-  const closeButton = allButtons.find((button) => (button.getAttribute('aria-label') ?? '').startsWith('Close ')) ?? null;
+  const closeButton = allButtons.find((button) => (button.getAttribute('aria-label') ?? '').startsWith('Hide ')) ?? null;
   const transformButton = allButtons.find((button) => (button.getAttribute('aria-label') ?? '') === 'Session history controls') ?? null;
   const nameElement = Array.from(document.querySelectorAll('div')).find((el) => (
     el.getAttribute('title') === probe.expectedName
@@ -511,7 +511,7 @@ window.__o8TileHarness = (() => {
     // not required, since dropping it is an accepted narrow-width behavior.
     await page.waitForFunction(() => {
       const buttons = Array.from(document.querySelectorAll('button'));
-      const closeButton = buttons.find((button) => (button.getAttribute('aria-label') ?? '').startsWith('Close '));
+      const closeButton = buttons.find((button) => (button.getAttribute('aria-label') ?? '').startsWith('Hide '));
       const transformButton = buttons.find((button) => (button.getAttribute('aria-label') ?? '') === 'Session history controls');
       return Boolean(closeButton && transformButton);
     }, undefined, { timeout: 20_000 });

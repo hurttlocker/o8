@@ -9,7 +9,7 @@ import { subscribeTauriEvent } from '@/lib/tauri/events';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { WORKSPACE_RAIL_CORNER_RADIUS, WORKSPACE_RAIL_CORNER_SMOOTHING } from '@/components/desktop/branch-rail-geometry';
+import { WORKSPACE_RAIL_CORNER_RADIUS } from '@/components/desktop/branch-rail-geometry';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
@@ -20,7 +20,10 @@ import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { CompactNavigationRail } from '@/components/desktop/shell/CompactNavigationRail';
 import { ChatListColumn, NAVIGATION_RAIL_WIDTH } from '@/components/desktop/shell/ChatListColumn';
-import { ResizeEdge } from '@/components/desktop/shell/ResizeEdge';
+import { DARK_FRAME_GLASS_TINT } from '@/lib/theme/glass-material';
+import { SHELL_EDGE_INSET, SHELL_HEADER_HEIGHT, workspaceFrameCorners } from '@/components/desktop/shell/shell-geometry';
+import { RightPanelResizeEdge } from '@/components/desktop/shell/RightPanelResizeEdge';
+import { useColumnResize, RIGHT_COLUMN_CHROME, WORKSPACE_RESERVE } from '@/components/desktop/hooks/useColumnResize';
 import { ChatListResizeEdge } from '@/components/desktop/shell/ChatListResizeEdge';
 import { ProjectsPage } from '@/components/desktop/ProjectsPage';
 import { WorkspaceUtilityProvider } from '@/components/desktop/canvas/WorkspaceUtilityContext';
@@ -69,6 +72,7 @@ import { captureAnomaly } from '@/lib/telemetry/sentry-browser';
 import { recordSpawnEvent } from '@/lib/feedback/workspace-introspect';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { SymonTextBridgeHost } from '@/components/desktop/dictation/SymonTextBridgeHost';
+import { VisualInstructionHost } from '@/components/desktop/visual-instructions/VisualInstructionHost';
 import { NarrationSpeakerHost } from '@/components/desktop/dictation/NarrationSpeakerHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
@@ -86,7 +90,7 @@ import {
 // ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
 // AnalyticsPage lazy-loaded below
 import type { WorkspaceSidePanelRepo } from './types';
-import { canonicalPanelTab, type O8Tab } from '@/components/desktop/o8-panel/types';
+import { canonicalPanelTab, normalizePanelTab as normalizeO8ActiveTab, type O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   logDashboardBootTiming,
   markDashboardScriptStart,
@@ -167,6 +171,7 @@ import { useSettingsOverlayDismiss } from './hooks/useSettingsOverlayDismiss';
 import { shouldPresentWorkerInSplit } from '@/lib/orchestrator/worker-launch-context';
 import { useSetupWizard } from './hooks/useSetupWizard';
 import { useRightPanelPersistence } from './hooks/useRightPanelPersistence';
+import { useBrowserOpenRequests } from './hooks/useBrowserOpenRequests';
 import {
   MAX_O8_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
@@ -189,6 +194,7 @@ import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
 import { createDashboardChromeKeydownHandler } from './dashboard-chrome-shortcuts';
+import { openMainTerminal } from '@/app/dashboard/open-main-terminal';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -272,35 +278,6 @@ const O8_ACTIVE_TAB_PREF_VERSION = '2';
  *  .html/.htm to HtmlPreview. */
 const WORKSPACE_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
 
-function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
-  if (!raw) return null;
-  // Legacy migrations — 'diff' and 'changes' were old labels for what's
-  // now the Workspace tab. 'files' used to be the same, but is now a
-  // distinct surface in the launcher (see O8Panel RIGHT_UTILITY_TABS),
-  // so we let it pass through to the new kind instead of remapping.
-  if (raw === 'diff' || raw === 'changes' || raw === 'workspace') return 'review';
-  if (raw === 'prs') return 'activity';
-  if (
-    raw === 'browser'
-    || raw === 'activity'
-    || raw === 'threads'
-    || raw === 'resources'
-    || raw === 'handoffs'
-    || raw === 'inbox'
-    || raw === 'spec'
-    || raw === 'launcher'
-    || raw === 'files'
-    || raw === 'side-chat'
-    || raw === 'review'
-    || raw === 'compare'
-    || raw === 'targets'
-    || raw === 'terminal'
-  ) {
-    return raw;
-  }
-  return null;
-}
-
 function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): SavedChatRepoContext | null {
   if (!thread.repoPath) return null;
   return {
@@ -350,7 +327,7 @@ function DashboardInner() {
   // mode the card paints --t-bg and lets the chrome flip own transparency +
   // light ink (matches the right O8Panel); in solid mode it keeps the opaque
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
-  const { surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
+  const { paletteId, surface: themeSurface, setPalette, setReduceTransparency, workspaceGlass, setWorkspaceGlass } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
   // Mount gate for surface-dependent INLINE styles. SSR can't read the client's
   // localStorage surface preference, so it always renders the 'solid' default;
@@ -469,6 +446,7 @@ function DashboardInner() {
     runtime: string | null;
     packetStatus: string | null;
     orchestratorThreadId: string | null;
+    repoPath?: string | null;
   };
   type WorkspaceActivePayload = {
     workspaceId: string | null;
@@ -530,7 +508,7 @@ function DashboardInner() {
             const next = payload.tabs[index];
             return tab.id === next?.id && tab.label === next.label && tab.kind === next.kind
               && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
-              && tab.orchestratorThreadId === next.orchestratorThreadId;
+              && tab.orchestratorThreadId === next.orchestratorThreadId && tab.repoPath === next.repoPath;
           });
         if (previous && previous.tileId === payload.tileId && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
@@ -799,6 +777,8 @@ function DashboardInner() {
     return () => document.removeEventListener('scroll', resetBodyScroll, true);
   }, []);
   const compactShell = viewportBands?.compact ?? false;
+  const joinedWorkspaceFrame = !compactShell && !effectiveGlassSurface;
+  const rightColumnChrome = joinedWorkspaceFrame ? 1 : RIGHT_COLUMN_CHROME;
   const getResponsiveViewportWidth = useCallback(() => (
     viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
   ), []);
@@ -1585,11 +1565,9 @@ function DashboardInner() {
     closeCanvasTab,
     ensureTileKind,
     getPreferredContextualPanelHandle,
-    handleClosePreviewTileItem,
     handleCloseTile,
     handlePreviewDetected,
     handleResizeSplit,
-    handleSelectPreviewTile,
     handleSplitTile,
     openCanvasTab,
     registerContextualPanelHandle,
@@ -2795,15 +2773,14 @@ function DashboardInner() {
     openRightPanelFromUser();
   }, [chatVisible, closeRightPanelFromUser, openRightPanelFromUser, rightPanelKind]);
 
-  // Browser button on the TitleBar — opens (or focuses) the wide O8 panel
-  // and selects its Browser tab. The Browser tab itself is no longer in the
-  // O8 panel's tab strip; it lives in the title bar so we can hover-extend
-  // it with a quick port menu.
-  const handleOpenBrowser = useCallback(() => {
+  // Reveal Browser and carry the requested URL into its repository scope.
+  const handleOpenBrowser = useCallback((url?: string) => {
+    if (typeof url === 'string' && url) setO8BrowserUrl(url);
     setRightPanelKind('o8');
     openRightPanelFromUser();
     setO8ActiveTab('browser');
   }, [openRightPanelFromUser]);
+  useBrowserOpenRequests(handleOpenBrowser, o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
@@ -3456,93 +3433,16 @@ function DashboardInner() {
     setO8AllRepos(true);
   }, []);
 
-  // ── Left drag handle ──
-  // Live drags bypass React entirely: a dashboard commit costs ~40ms in dev
-  // (measured 2026-07-10, ~24fps webview during drag), so routing every
-  // mousemove through setState makes the content reflow in chunky steps
-  // behind the cursor (Q's retest recording). During the drag we write the
-  // width straight onto the column and footer DOM nodes — the browser reflows
-  // the flex layout natively at frame rate — and commit state ONCE on
-  // mouseup. The flag is released a frame after the commit so the framer
-  // transitions never see the width jump as something to animate.
-  const startLeftDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const startW = leftWidth;
-    const colEl = document.querySelector<HTMLElement>('[data-mcp-scope="agent-panel"]');
-    const footEl = document.querySelector<HTMLElement>('[data-o8-left-footer]');
-    const widthAt = (x: number) => Math.min(Math.max(startW + (x - startX), 160), 500);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (colEl) colEl.style.width = `${w}px`;
-        if (footEl) footEl.style.width = `${w}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      setLeftWidth(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [leftWidth, setLeftWidth]);
-
-  // ── Right drag handle ──
-  // Right/O8 drags share the left handle's direct-DOM pattern. The right
-  // column is two nested motion.divs — the inner (chat-panel) holds the
-  // panel width, its parent shell holds width+10 (drag handle + margin).
-  const startRightColumnDrag = useCallback((
-    e: React.MouseEvent,
-    startW: number,
-    min: number,
-    max: number,
-    commit: (w: number) => void,
-  ) => {
-    e.preventDefault();
-    setPanelDragActive(true);
-    const startX = e.clientX;
-    const innerEl = document.querySelector<HTMLElement>('[data-mcp-scope="chat-panel"]');
-    const shellEl = innerEl?.parentElement ?? null;
-    const widthAt = (x: number) => Math.min(Math.max(startW + (startX - x), min), max);
-    let frame = 0;
-    let lastX = startX;
-    const onMove = (ev: MouseEvent) => {
-      lastX = ev.clientX;
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const w = widthAt(lastX);
-        if (innerEl) innerEl.style.width = `${w}px`;
-        if (shellEl) shellEl.style.width = `${w + 10}px`;
-      });
-    };
-    const onUp = () => {
-      if (frame) { window.cancelAnimationFrame(frame); frame = 0; }
-      commit(widthAt(lastX));
-      window.requestAnimationFrame(() => setPanelDragActive(false));
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, []);
-  const startRightDrag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, rightWidth, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH, setRightWidth);
-  }, [rightWidth, setRightWidth, startRightColumnDrag]);
-
-  // ── O8 panel drag handle ──
-  const startO8Drag = useCallback((e: React.MouseEvent) => {
-    startRightColumnDrag(e, o8Width, MIN_O8_PANEL_WIDTH, MAX_O8_PANEL_WIDTH, setO8Width);
-  }, [o8Width, setO8Width, startRightColumnDrag]);
+  const startColumnResize = useColumnResize(setPanelDragActive);
+  const startLeftDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'left', min: 160, max: 500, commit: setLeftWidth });
+  }, [setLeftWidth, startColumnResize]);
+  const startRightDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_RIGHT_PANEL_WIDTH, max: MAX_RIGHT_PANEL_WIDTH, commit: setRightWidth });
+  }, [setRightWidth, startColumnResize, rightColumnChrome]);
+  const startO8Drag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    startColumnResize(event, { side: 'right', chrome: rightColumnChrome, min: MIN_O8_PANEL_WIDTH, max: MAX_O8_PANEL_WIDTH, commit: setO8Width });
+  }, [setO8Width, startColumnResize, rightColumnChrome]);
 
   const firstFileChangeCandidate = useMemo(() => {
     const source = parsedAgents.find((agent) => (
@@ -3933,8 +3833,8 @@ function DashboardInner() {
     focusOrchestrationPacketLane,
     globalRepoEntries,
     handleAgentPanelChatInjection,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
     handleOpenCI,
@@ -3942,7 +3842,6 @@ function DashboardInner() {
     handlePreviewDetected,
     handlePreviewSelection,
     handleSelectCommit,
-    handleSelectPreviewTile,
     handleSelectRegisteredRepo,
     handleSplitTile,
     handleThoughtsMissionStateChange,
@@ -3986,8 +3885,8 @@ function DashboardInner() {
     globalRepoEntries,
     workspaceTerminalPreferredRepo,
     workspaceTerminalHandlesRef,
-    handleClosePreviewTileItem,
     handleCloseTile,
+    handleOpenBrowser,
     handleSplitTile,
     handleAgentPanelChatInjection,
     ensureWorkspaceTerminalTile,
@@ -3997,7 +3896,6 @@ function DashboardInner() {
     handleLaunchWorkspaceAgent,
     handleSelectCommit,
     handleSelectRegisteredRepo,
-    handleSelectPreviewTile,
     handleOpenCI,
     handleOpenGitLog,
     handleThoughtsMissionStateChange,
@@ -4347,6 +4245,7 @@ function DashboardInner() {
   // One list instance survives collapse, navigation takeovers, and width changes.
   const agentPanelElement = (
     <AgentPanel
+      onOpenChatReview={(laneId, repoPath) => { leaveNavTakeover(); handleOpenO8Panel({ tab: 'review', reviewLaneId: laneId, repoPath }); }}
       navigationRail={showCompactNavigationRail}
       activeSessionKey={railActiveSessionKey}
       selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
@@ -4434,6 +4333,7 @@ function DashboardInner() {
       <UiZoomLayer />
       <RealtimeVoiceHost />
       <SymonTextBridgeHost />
+      <VisualInstructionHost />
       <NarrationSpeakerHost />
       <ReportIssueHost />
       <TelemetryCrashCapture />
@@ -4445,9 +4345,15 @@ function DashboardInner() {
       height: 'calc(100vh / var(--ui-zoom, 1))',
       display: 'flex',
       flexDirection: 'column',
-      background: 'var(--t-bg-gradient)',
-      backdropFilter: 'blur(18px) saturate(1.02)',
-      WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
+      background: inTauri && !isNonMacShell() && paletteId === 'dark' ? DARK_FRAME_GLASS_TINT : effectiveGlassSurface ? 'var(--t-bg-gradient)' : 'var(--t-shell-frame-bg, var(--t-bg-gradient))',
+      ...(!compactShell ? {
+        ['--o8-shell-header-height' as string]: `${SHELL_HEADER_HEIGHT}px`,
+        ['--o8-shell-edge-inset' as string]: `${SHELL_EDGE_INSET}px`,
+        ['--o8-shell-header-bg' as string]: 'transparent',
+        ['--o8-shell-header-border' as string]: 'none',
+      } : {}),
+      backdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
+      WebkitBackdropFilter: inTauri ? 'none' : 'blur(18px) saturate(1.02)',
       color: 'var(--t-text)',
       fontFamily: 'var(--font-sans-system)',
       overflow: 'hidden',
@@ -4694,7 +4600,7 @@ function DashboardInner() {
       </AnimatePresence>
 
       {settingsTakeoverActive && (
-        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginLeft: compactShell ? 0 : NAVIGATION_RAIL_WIDTH }}>
+        <div ref={settingsPanelRef} data-mcp-scope="settings" style={{ flex: 1, minHeight: 0, overflow: 'hidden', marginLeft: compactShell ? 0 : NAVIGATION_RAIL_WIDTH, marginRight: compactShell ? 0 : SHELL_EDGE_INSET, marginBottom: compactShell ? 0 : SHELL_EDGE_INSET }}>
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings…</div>}>
             <LazySettingsPage initialTab={settingsInitialTab} onClose={closeSettingsOverlay} />
           </Suspense>
@@ -4715,6 +4621,8 @@ function DashboardInner() {
         overflow: 'hidden',
         minHeight: 0, // critical: allow flex children to shrink for scroll
         position: 'relative',
+        paddingRight: compactShell ? 0 : SHELL_EDGE_INSET,
+        paddingBottom: compactShell ? 0 : SHELL_EDGE_INSET,
       }}>
       {/* Navigation retains its own column whether chats are open or closed. */}
       {showCompactNavigationRail ? <div aria-hidden="true" style={{ width: NAVIGATION_RAIL_WIDTH, flexShrink: 0 }} /> : null}
@@ -4726,16 +4634,13 @@ function DashboardInner() {
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
         const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
-        // Shared header + content — composed differently per surface (see below):
-        // glass floats the panel as a Lisse card with the header/footer
-        // transparent; solid keeps the paper card with the header inside.
+        // The header belongs to the outer frame; only the reading surface
+        // below it paints a card.
         const leftHeader = (
           <LeftHeaderStrip
             sidebarVisible={showSidebarColumn} onToggleSidebar={toggleSidebarFromChrome}
             windowControls={!showCompactNavigationRail} onSearch={handlePaletteOpen}
-            // Solid: the strip renders inside the floating card and must be
-            // the same continuous tone (Claude-desktop float, Q 2026-07-17).
-            inCard={!effectiveGlassSurface}
+            inCard
           />
         );
         const leftContent = (
@@ -4780,84 +4685,35 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-desktop float (Q ruling 2026-07-17, supersedes the 07-16
-            // flush dock): in SOLID surfaces the sidebar is a floating inset
-            // card — 4px of window-backdrop air on left, top, AND bottom, all
-            // four corners rounded — lights in its top, account row in its
-            // bottom, so everything right of it reads as the workspace. GLASS
-            // keeps the transparent-chrome treatment (chrome paints nothing;
-            // a floating opaque card would break glass-panel parity).
-            paddingTop: effectiveGlassSurface ? 5 : 4,
-            paddingLeft: effectiveGlassSurface ? 0 : 4,
-            paddingRight: 5,
-            paddingBottom: effectiveGlassSurface ? 0 : 4,
+            paddingTop: compactShell ? 4 : 0,
+            paddingLeft: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
           }}
         >
-          {effectiveGlassSurface ? (
-            // GLASS — mirror the center workspace + right O8Panel: the header
-            // strip and the footer below are transparent vibrancy, and the
-            // panel itself is a self-contained floating Lisse squircle card
-            // (all four corners). data-chrome-surface flips ink to light so the
-            // tinted --t-bg surface reads the same as the other glass panels.
-            <>
-              {leftHeader}
-              <SmoothCorners
-                data-chrome-surface="true"
-                // Dock corners (Q ruling 2026-07-16): flush left edge + flush
-                // bottom → left side and bottom-right are HARD; only the
-                // top-right keeps the card curve. The window's own 12px
-                // corner mask shapes the bottom-left.
-                corners={{ topLeft: 0, topRight: 14, bottomLeft: 0, bottomRight: 0, smoothing: 0.6 }}
-                autoEffects={false}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  background: 'var(--t-bg)',
-                }}
-              >
-                {leftContent}
-              </SmoothCorners>
-            </>
-          ) : (
-            // SOLID — self-contained paper card with the sidebar footer inside.
-            <div
-              data-chrome-surface="true"
-              style={{
-                flex: 1,
-                minHeight: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                // Claude-desktop float (Q 2026-07-17): the card never touches
-                // a window edge, so all four corners carry the same curve. The
-                // hairline is load-bearing — card and backdrop are near-equal
-                // tones, so without it the 4px air is invisible and the float
-                // reads flush.
-                borderTopLeftRadius: 14,
-                borderTopRightRadius: 14,
-                borderBottomLeftRadius: 14,
-                borderBottomRightRadius: 14,
-                border: '1px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel-solid)',
-                // Flat by operator ruling (2026-07-13) — the in-column rail is
-                // not a floating surface; a drop shadow read as a seam against
-                // the workspace. Elevation stays on true overlays only.
-              } as React.CSSProperties}
-            >
-              {leftHeader}
-              {leftContent}
-            </div>
-          )}
+          {leftHeader}
+          <SmoothCorners
+            data-chrome-surface="true"
+            corners={workspaceFrameCorners(joinedWorkspaceFrame, true, sidebarOverlay)}
+            autoEffects={false}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-sidebar-bg, var(--t-panel-solid))',
+            }}
+          >
+            {leftContent}
+          </SmoothCorners>
         </motion.div>
         </ChatListColumn>
       );
       })()}
 
       {showSidebarColumn && !sidebarOverlay ? <ChatListResizeEdge width={leftWidth}
-        glass={effectiveGlassSurface} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
+        glass={effectiveGlassSurface} joined={joinedWorkspaceFrame} onStartDrag={startLeftDrag} setWidth={setLeftWidth} /> : null}
 
       {/* ── Center + right region ──
           Wrapped in its own column so the DesktopStatusBar renders at ITS
@@ -4866,7 +4722,7 @@ function DashboardInner() {
           status bar's old left band was an empty anchor after its utilities
           moved out. */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden', containerType: 'inline-size' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', minWidth: 0, overflow: 'hidden', containerType: 'inline-size' }}>
 
       {/* ── Center: Workspace Surface ── */}
       <div data-mcp-scope="workspace" aria-hidden={rightPanelMaximized} inert={rightPanelMaximized} style={{
@@ -4877,18 +4733,12 @@ function DashboardInner() {
         position: 'relative',
         minWidth: 0,
         background: 'transparent',
-        // The workspace floats inside the dashboard gradient with a small inset
-        // (workspaceInset). The Apple squircle now lives on the inner content
-        // card below (Lisse SmoothCorners — the same "list corners" the canvas
-        // uses) so the WHITE surface carries the curve on ALL four corners. A
-        // plain borderRadius here only rounded the transparent header strip's
-        // top + clipped the white bottom as a circle, never the white TOP.
-        // overflow:hidden stays to keep the header strip within these bounds.
+        // Content owns the perimeter curve; headers remain in the shared frame.
         borderRadius: 0,
-        marginTop: workspaceInset,
-        marginBottom: workspaceInset,
-        marginLeft: workspaceInset,
-        marginRight: workspaceInset,
+        marginTop: compactShell ? workspaceInset : 0,
+        marginBottom: compactShell ? workspaceInset : 0,
+        marginLeft: joinedWorkspaceFrame ? 0 : workspaceInset,
+        marginRight: !joinedWorkspaceFrame && showRightPanelColumn ? workspaceInset : 0,
       }}>
         {(!workspaceSurfaceHidden || !showSidebarColumn) && <WorkspaceHeaderStrip
           leadingInset={!showCompactNavigationRail}
@@ -4916,10 +4766,8 @@ function DashboardInner() {
           approvalCount={showRightPanelColumn ? 0 : approvalCount}
           onOpenInbox={handleOpenInbox}
         />}
-        {/* The white workspace card. Lisse squircle ("list corners" from the
-            canvas) on all four corners so the TOP rounds too — not just the
-            bottom. autoEffects off = pure clip-path, no injected shadow. */}
-        <SmoothCorners corners={{ radius: WORKSPACE_RAIL_CORNER_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Solid modes join adjacent panels; glass keeps each card curved. */}
+        <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, !showSidebarColumn || sidebarOverlay, !showRightPanelColumn, joinedWorkspaceFrame ? 14 : WORKSPACE_RAIL_CORNER_RADIUS)} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}
@@ -4971,6 +4819,7 @@ function DashboardInner() {
             <WorkspaceUtilityProvider value={workspaceUtilityContext}>
             <TileContainer
               layout={tileLayout}
+              joined={joinedWorkspaceFrame}
               paneLabels={workspacePaneLabels}
               keepPrimarySessionAlive
               interactionDisabled={workspacePageSwitching}
@@ -4998,10 +4847,9 @@ function DashboardInner() {
             // fade/slide and then snapping the center when it unmounts.
             // overflow:hidden clips the fixed-width content during the
             // collapse; the inner keeps its own drag-resize width animation.
-            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
-            // + the inner's 4px right margin so nothing clips when open.
+            // The chrome allowance covers the divider and outer panel inset.
             initial={false}
-            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
+            animate={{ width: showRightPanelColumn ? rightPanelMaximized ? '100%' : rightColumnChrome + (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0, opacity: showRightPanelColumn ? 1 : 0 }}
             // Instant while the operator drags the resize handle — easing a
             // per-mousemove target makes the panel rubber-band behind the
             // cursor. The 260ms ease stays for open/close mount/unmount.
@@ -5010,24 +4858,17 @@ function DashboardInner() {
               display: 'flex',
               height: '100%',
               flexShrink: 0,
-              maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 420px))',
-              overflow: 'hidden',
+              maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE}px))`,
+              overflow: showRightPanelColumn ? 'visible' : 'hidden',
             }}
           >
-            {!rightPanelMaximized ? <ResizeEdge aria-label="Right panel width"
-              aria-valuemin={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
-              aria-valuemax={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
-              aria-valuenow={rightPanelKind === 'o8' ? o8Width : rightWidth}
-              onMouseDown={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-                event.preventDefault();
-                const delta = event.key === 'ArrowLeft' ? 16 : -16;
-                if (rightPanelKind === 'o8') setO8Width((width) => Math.max(MIN_O8_PANEL_WIDTH, Math.min(MAX_O8_PANEL_WIDTH, width + delta)));
-                else setRightWidth((width) => Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, width + delta)));
-              }}
-              style={{ width: 6 }}
-              glowStyle={{ top: 22, bottom: 22, left: 6, transform: 'none' }}
+            {!rightPanelMaximized ? <RightPanelResizeEdge
+              joined={joinedWorkspaceFrame}
+              width={rightPanelKind === 'o8' ? o8Width : rightWidth}
+              minimum={rightPanelKind === 'o8' ? MIN_O8_PANEL_WIDTH : MIN_RIGHT_PANEL_WIDTH}
+              maximum={rightPanelKind === 'o8' ? MAX_O8_PANEL_WIDTH : MAX_RIGHT_PANEL_WIDTH}
+              onStartDrag={rightPanelKind === 'o8' ? startO8Drag : startRightDrag}
+              onResize={rightPanelKind === 'o8' ? setO8Width : setRightWidth}
             /> : null}
 
             <motion.div
@@ -5038,7 +4879,7 @@ function DashboardInner() {
               style={{
                 flexShrink: 0,
                 alignSelf: 'stretch',
-                maxWidth: rightPanelMaximized ? '100%' : 'max(0px, calc(100cqw - 430px))',
+                maxWidth: rightPanelMaximized ? '100%' : `max(0px, calc(100cqw - ${WORKSPACE_RESERVE + rightColumnChrome}px))`,
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
@@ -5047,18 +4888,12 @@ function DashboardInner() {
                 // A plain rounded-rect clip here would shave the squircle's bulge
                 // at the 45° diagonal, breaking the continuity with everything else.
                 borderRadius: 0,
-                marginTop: 4,
-                marginBottom: 4,
-                marginRight: 4,
+                marginTop: compactShell ? 4 : 0,
+                marginBottom: compactShell ? 4 : 0,
+                marginRight: 0,
               }}
             >
-              {/* Lisse squircle on all four corners so the right panel's TOP
-                  edges match the center workspace + canvas "list corners". No
-                  fill: in glass the panel stays transparent so the dark window
-                  vibrancy shows through — the SAME glass as the left AgentPanel,
-                  which paints nothing. Solid mode's opaque children paint the
-                  squircle. */}
-              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {/* Header stays outside the content clip on the shared frame. */}
               <PanelHeaderStrip
                 maximized={rightPanelMaximized}
                 onToggleMaximized={toggleRightPanelMaximized}
@@ -5075,6 +4910,7 @@ function DashboardInner() {
                 showBrowserTabs={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
                 prTabsSlot={<RightPrTabs tabs={rightPrTabs} activeId={o8ActiveTab === 'activity' && o8PrNumber ? rightPrTabId(o8PrNumber, o8PrRepo, currentO8RepoPath) : null} onSelect={handleRightPrTabSelect} onClose={handleRightPrTabClose} />}
               />
+              <SmoothCorners corners={workspaceFrameCorners(joinedWorkspaceFrame, rightPanelMaximized && (!showSidebarColumn || sidebarOverlay), true)} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {mountedRightPanels.o8 && (
                   <motion.div
                     aria-hidden={rightPanelKind !== 'o8'}
@@ -5151,6 +4987,13 @@ function DashboardInner() {
                           sendTerminalDetach={sendTerminalDetach}
                           sendAgentKill={sendAgentKill}
                           termWsConnected={termWsConnected}
+                          onOpenMainTerminal={(repoPath) => openMainTerminal({
+                            handles: workspaceTerminalHandlesRef.current,
+                            repoPath,
+                            repo: repoPath ? { localPath: repoPath, name: globalRepoEntries.find((repo) => repo.localPath === repoPath)?.name ?? 'Project' } : undefined,
+                            activate: setActiveTileId,
+                            waitForTarget: () => waitForWorkspaceTerminalTarget({ repoPath, fallbackToAnyExisting: !repoPath }),
+                          })}
                         />
                       </OrchestratorDataProvider>
                     </Suspense>

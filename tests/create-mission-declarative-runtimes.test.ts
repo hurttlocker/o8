@@ -254,6 +254,19 @@ describe('create_mission runtime reachability', () => {
         '--no-remote-export',
       ],
       crush: ['run', '--quiet', 'fix the bug'],
+      antigravity: [
+        '--print',
+        `Workspace directory: ${repoPath}\n\nfix the bug`,
+        '--add-dir',
+        repoPath,
+        '--output-format',
+        'stream-json',
+        '--sandbox',
+        '--print-timeout',
+        '15m',
+        '--model',
+        'gemini-3.8-flash-low',
+      ],
     });
   });
 

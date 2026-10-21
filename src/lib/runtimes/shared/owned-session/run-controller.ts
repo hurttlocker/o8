@@ -4,8 +4,10 @@ import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/r
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
 import { assertControlledLaunchGrantCurrent, withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
 import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
+import { assertOwnedActionAdmission } from './action-admission';
+import { withOwnedArtifactAdmission } from './artifact-admission';
 import { createFailureRetry } from './failure-retry';
-import { assertOwnedSingleAttemptSpawn } from './execution-policy';
+import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
@@ -81,6 +83,7 @@ export interface OwnedRunController {
 }
 
 export function createOwnedRunController({
+  root,
   adapter,
   runtimeId,
   humanLabel,
@@ -91,6 +94,7 @@ export function createOwnedRunController({
   workspaceSpawnGuard,
   invalidateFleetCache,
 }: {
+  root: string;
   adapter: OwnedRuntimeAdapter;
   runtimeId: string;
   humanLabel: string;
@@ -459,8 +463,10 @@ export function createOwnedRunController({
   }
 
   async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
-    return withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
-      spawnOwnedRunInner(session, prompt, mode)
+    return withOwnedArtifactAdmission(root, () => (
+      withPacketLifecycleSpawnLock(session.packetId ?? session.workspaceBinding?.packetId ?? null, () => (
+        spawnOwnedRunInner(session, prompt, mode)
+      ))
     ));
   }
 
@@ -541,6 +547,7 @@ export function createOwnedRunController({
           args: spawnArgs,
           extraReadPaths: executionCarrierSandboxReadPaths(workerMcp.sandboxReadPaths, carrierLaunch),
           readBackingProjectConfig: runtimeId === 'codex',
+          readOwnerInstructions: !controlledSandbox,
           finalAllowReadPaths: [...(controlledSandbox?.finalAllowReadPaths ?? []), ...(workerMcp.configPath ? [workerMcp.configPath] : [])],
           // Read-only: repo stays readable, kernel refuses every write. Deny
           // paths come from the SAME git probe prepareWorkerSandbox uses to
@@ -619,14 +626,8 @@ export function createOwnedRunController({
     try {
       await ensureDispatchBackendReady(runtimeId, mode);
       const durableSession = await io.findSession(session.surfaceId);
-      if (!durableSession) throw new Error('Owned session disappeared before its run could start.');
-      if (JSON.stringify(durableSession.executionPolicy) !== JSON.stringify(session.executionPolicy)) {
-        throw new Error('Single-attempt worker policy changed before spawn.');
-      }
-      if (JSON.stringify(durableSession.controlledTask) !== JSON.stringify(session.controlledTask)) {
-        throw new Error('Controlled task binding changed before spawn.');
-      }
-      assertOwnedSingleAttemptSpawn(durableSession, runtimeId, mode);
+      assertOwnedActionAdmission(durableSession);
+      assertDurableOwnedSpawn(durableSession, session, runtimeId, mode);
       Object.assign(session, durableSession);
       return await withControlledTaskSpawn(session, runtimeId, runId, async () => {
         const spawnDecision = await assertOwnedWorkspaceSpawnAvailable({
@@ -634,6 +635,7 @@ export function createOwnedRunController({
           runtimeId, mode, binding: session.workspaceBinding ?? null, repoPath: session.repoPath,
         }, workspaceSpawnGuard);
         const materializationIdentity = spawnDecision.materializationIdentity ?? null;
+        assertOwnedActionAdmission(await io.findSession(session.surfaceId));
         const bridgeLaunch = guardedWorkspaceInvocation(spawnBinary, spawnArgs, materializationIdentity);
         const cliCmd = [bridgeLaunch.command, ...bridgeLaunch.args].map(quoteShellArg).join(' ');
         const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
@@ -661,6 +663,7 @@ export function createOwnedRunController({
         await io.saveSession(session);
 
         try {
+          assertOwnedActionAdmission(session, runId);
           if (session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
@@ -696,6 +699,7 @@ export function createOwnedRunController({
                     materializationIdentity,
                   );
               assertControlledLaunchGrantCurrent(session);
+              assertOwnedActionAdmission(session, runId);
               const child = process.platform === 'win32'
                 ? spawn(directLaunch.command, directLaunch.args, {
                     windowsHide: true,

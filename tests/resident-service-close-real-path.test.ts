@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -39,6 +40,12 @@ const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
 const { closeDb } = await import('@/lib/db');
 const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { getOwnedOpencodeFleetAdditions, sweepOrphanedOpencodeSessions } = await import('@/lib/opencode/owned');
+// This fixture drives fresh inventory explicitly; keep its background refresh
+// from starting new tool processes while the fixture's files are removed.
+const refreshTimer = (globalThis as unknown as Record<symbol, NodeJS.Timeout | undefined>)[
+  Symbol.for('o8.ownedSession.refreshTimer.opencode')
+];
+if (refreshTimer) clearInterval(refreshTimer);
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
@@ -196,15 +203,17 @@ async function closeWithFixture(fixture: ReturnType<typeof createFixture>) {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const child of children.splice(0)) {
-    if (child.pid) {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
       try {
         process.kill(child.pid, 'SIGKILL');
       } catch {
         // The production path must not stop this fixture, but cleanup tolerates
         // an already-exited child so a failed assertion does not mask the test.
       }
+      await closed;
     }
   }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });

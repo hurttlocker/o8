@@ -19,6 +19,7 @@ import {
   runtimeFromOwnedSessionKey,
 } from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { parseTerminalExitState, terminalExitState } from '@/lib/terminal/exit-state';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
@@ -454,6 +455,19 @@ export async function computeRestoredTabs(
     }
 
     const tabId = claimWorkspaceTabId('terminal', seenTabIds, savedTab.id);
+    // A missing known process is an ended session, never permission to run a
+    // different program under its label. Only tabs without a prior session may
+    // bootstrap a shell; the ended view offers an explicit New shell action.
+    const terminalExit = parseTerminalExitState(savedTab.terminalExit)
+      ?? (savedTab.tmuxSession && !savedTab.remoteMachine && !alive.has(savedTab.tmuxSession)
+        ? terminalExitState(null) : undefined);
+    if (terminalExit) {
+      restoredTabs.push({ id: tabId, label: savedTab.label, kind: 'terminal', tmuxSession: savedTab.tmuxSession ?? `ended:${tabId}`, terminalExit,
+        readOnly: savedTab.readOnly, remoteMachine: savedTab.remoteMachine, cliAgent: savedTab.cliAgent,
+        repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : undefined, createdAt: now, lastActivity: now });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
     if (savedTab.tmuxSession && alive.has(savedTab.tmuxSession) && !seenTerminalSessions.has(savedTab.tmuxSession)) {
       seenTerminalSessions.add(savedTab.tmuxSession);
       restoredTabs.push({
@@ -586,12 +600,16 @@ export function mergeUserSpawnedTabs(
 export function reconcileValidatedTabs(
   validatedTabs: TerminalTab[],
   currentTabs: TerminalTab[],
+  acknowledgedDuringRestore: ReadonlySet<string>,
 ): TerminalTab[] {
   const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
   return validatedTabs.map((validatedTab) => {
-    if (validatedTab.kind !== 'terminal' || validatedTab.tmuxSession !== null) return validatedTab;
+    if (validatedTab.kind !== 'terminal') return validatedTab;
+    const current = currentById.get(validatedTab.id);
+    if (current?.terminalExit) return { ...validatedTab, tmuxSession: current.tmuxSession, terminalExit: current.terminalExit };
     const currentSession = currentById.get(validatedTab.id)?.tmuxSession;
-    return currentSession ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
+    return currentSession && acknowledgedDuringRestore.has(validatedTab.id)
+      ? { ...validatedTab, tmuxSession: currentSession } : validatedTab;
   });
 }
 
@@ -614,7 +632,6 @@ export function applyCreatedTerminalSession(
 export function resetControllerRefs(refs: {
   restoredRef: React.MutableRefObject<boolean>;
   restoreSettledRef: React.MutableRefObject<boolean>;
-  previousWsConnectedRef: React.MutableRefObject<boolean>;
   initialTerminalBootstrapRef: React.MutableRefObject<boolean>;
   reportedRepoScopeRef: React.MutableRefObject<string | null | undefined>;
   reportedChatSessionsSignatureRef: React.MutableRefObject<string>;
@@ -627,7 +644,6 @@ export function resetControllerRefs(refs: {
 }): void {
   refs.restoredRef.current = false;
   refs.restoreSettledRef.current = false;
-  refs.previousWsConnectedRef.current = false;
   refs.initialTerminalBootstrapRef.current = false;
   refs.reportedRepoScopeRef.current = undefined;
   refs.reportedChatSessionsSignatureRef.current = '';

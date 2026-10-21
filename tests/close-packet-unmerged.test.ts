@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -9,12 +9,18 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { createManagedOpenCodeWorktree } from './helpers/managed-opencode-worktree';
 import { createOpenCodeServiceFixture } from './helpers/opencode-service-fixture';
 
-const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-close-unmerged-'));
+const realDataDir = mkdtempSync(join(os.tmpdir(), 'o8-close-unmerged-'));
+// Reached through a symlink, as /tmp is on macOS, so a path-spelling mismatch fails on every platform.
+const dataDir = `${realDataDir}-link`;
+symlinkSync(realDataDir, dataDir);
 const wsToken = 'operator-close-unmerged-token-0123456789';
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
+const ownedRoot = join(dataDir, 'owned-opencode');
+process.env.O8_OWNED_OPENCODE_ROOT = ownedRoot;
 writeFileSync(join(dataDir, 'ws-token'), `${wsToken}\n`, 'utf-8');
 
 const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
@@ -30,7 +36,8 @@ const { listInboxItems } = await import('@/lib/supervisor/inbox');
 
 afterAll(() => {
   closeDb();
-  rmSync(dataDir, { recursive: true, force: true });
+  rmSync(dataDir, { force: true });
+  rmSync(realDataDir, { recursive: true, force: true });
 });
 
 function operatorRequest(body: Record<string, unknown>) {
@@ -45,27 +52,12 @@ function operatorRequest(body: Record<string, unknown>) {
   });
 }
 
-function createLinkedWorktree(prefix: string, branch: string) {
-  const root = mkdtempSync(join(dataDir, prefix));
-  const repoPath = join(root, 'repo');
-  const worktreePath = join(root, 'worktree');
-  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    stdio: 'pipe',
-  });
-  git(root, 'init', '--initial-branch=main', repoPath);
-  git(repoPath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
-    'commit', '--allow-empty', '-m', 'init');
-  git(repoPath, 'worktree', 'add', '-b', branch, worktreePath);
-  return { root, repoPath, worktreePath };
-}
-
 function persistOpenCodeClosePacket(input: {
   packetId: string;
   repoPath: string;
   worktreePath: string;
   branch: string;
+  sessionKey: string;
 }) {
   const lane = createLane({
     repoPath: input.repoPath,
@@ -75,6 +67,8 @@ function persistOpenCodeClosePacket(input: {
     runtime: 'opencode',
     label: 'OpenCode service cleanup',
     packetId: input.packetId,
+    sessionKey: input.sessionKey,
+    ownership: 'managed',
   });
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
   writeOrchestratorControlPlaneState({
@@ -591,7 +585,7 @@ process.exit(run.status ?? 1);
     });
   });
 
-  it('keeps a dirty checkout visible and holds the packet when close cleanup is refused', async () => {
+  it('keeps a checkout o8 does not own visible, with its uncommitted work, and holds the packet', async () => {
     const packetId = 'pkt-close-dirty-worktree';
     const branch = 'issue/close-dirty-worktree';
     const repoPath = mkdtempSync(join(dataDir, 'dirty-close-repo-'));
@@ -663,8 +657,9 @@ process.exit(run.status ?? 1);
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       ok: false,
-      error: { code: 'close_failed', message: expect.stringContaining('(dirty)') },
+      error: { code: 'close_failed', message: expect.stringContaining('(ownership-unavailable)') },
     });
+    expect(existsSync(join(worktreePath, 'dirty.ts'))).toBe(true);
     expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', worktreePath });
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({
       status: 'blocked',
@@ -674,11 +669,11 @@ process.exit(run.status ?? 1);
     });
   });
 
-  it('releases the OpenCode service location before close removes the worktree', { timeout: 20_000 }, async () => {
+  it('releases the OpenCode service location before close removes the worktree', { timeout: 90_000 }, async () => {
     const packetId = 'pkt-opencode-close-release';
     const branch = 'issue/opencode-close-release';
-    const { root, repoPath, worktreePath } = createLinkedWorktree('opencode-close-', branch);
-    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch });
+    const { root, repoPath, worktreePath, sessionKey } = await createManagedOpenCodeWorktree({ parent: dataDir, prefix: 'opencode-close-', branch, packetId, ownedRoot });
+    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch, sessionKey });
     const fixture = createOpenCodeServiceFixture(root, worktreePath);
     const originalPath = process.env.PATH;
     const originalBinary = process.env.O8_OPENCODE_BIN;
@@ -705,11 +700,11 @@ process.exit(run.status ?? 1);
     expect(calls.filter((call) => call.startsWith('opencode api delete /api/debug/location?'))).toHaveLength(1);
   });
 
-  it('retries OpenCode cleanup once and names the remaining holder PID', { timeout: 20_000 }, async () => {
+  it('retries OpenCode cleanup once and names the remaining holder PID', { timeout: 90_000 }, async () => {
     const packetId = 'pkt-opencode-close-held';
     const branch = 'issue/opencode-close-held';
-    const { root, repoPath, worktreePath } = createLinkedWorktree('opencode-held-', branch);
-    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch });
+    const { root, repoPath, worktreePath, sessionKey } = await createManagedOpenCodeWorktree({ parent: dataDir, prefix: 'opencode-held-', branch, packetId, ownedRoot });
+    const lane = persistOpenCodeClosePacket({ packetId, repoPath, worktreePath, branch, sessionKey });
     const fixture = createOpenCodeServiceFixture(root, worktreePath, {
       stickyLocation: true,
       holderPid: 54321,

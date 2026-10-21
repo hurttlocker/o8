@@ -11,6 +11,8 @@
 
 'use client';
 
+import { terminalProcessExitCode } from '@/lib/terminal/exit-state';
+
 import {
   createContext,
   useContext,
@@ -71,6 +73,7 @@ interface SharedWsCommands {
 interface SharedWsState {
   connectionState: WsConnectionState;
   isConnected: boolean;
+  connectionEpoch: number;
 }
 
 type ListenerId = number;
@@ -130,10 +133,16 @@ export function useWsConnectionState(): WsConnectionState {
   return ctx?.connectionState ?? 'disconnected';
 }
 
+/** Changes once for each opened transport, including recovery after an offline mount. */
+export function useWsConnectionEpoch(): number {
+  return useContext(SharedWsContext)?.connectionEpoch ?? 0;
+}
+
 // ── Provider ──
 
 export function DesktopWebSocketProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -401,7 +410,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           break;
         case 'terminal':
           if (eventType === 'created' && data) dispatch('onTerminalCreated', data.sessionName as string, data.requestId as string | undefined);
-          else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string);
+          else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string, data.historical === true);
           else if (eventType === 'attached' && data) {
             dispatch('onTerminalAttached', data.sessionName as string);
             if (typeof data.cols === 'number' && typeof data.rows === 'number') {
@@ -419,7 +428,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
             data.source === 'tmux' ? 'tmux' : 'scrollback',
           );
           else if (eventType === 'diagnostic' && data) dispatch('onTerminalDiagnostic', data);
-          else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, (data.exitCode as number) ?? 0);
+          else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, terminalProcessExitCode(data.exitCode, data.exitCodeSource));
           else if (eventType === 'error' && data) dispatch('onTerminalError', data.sessionName as string, (data.error as string) ?? 'Unknown error');
           else if (eventType === 'image' && data) dispatch('onTerminalImage', data.sessionName as string, data.imageB64 as string, (data.filename as string) ?? 'image.png');
           break;
@@ -458,6 +467,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
         const isReconnect = hasOpenedRef.current;
         hasOpenedRef.current = true;
         wsRef.current = ws;
+        setConnectionEpoch((epoch) => epoch + 1);
         // Keep durable inbox/transcript streams connected while a hidden
         // dashboard stops requesting background Git review scans.
         lastReviewVisible = undefined;
@@ -523,6 +533,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
   const value = useMemo<SharedWsContextValue>(() => ({
     connectionState,
+    connectionEpoch,
     isConnected: connectionState === 'connected',
     addListener,
     addLegacySessionSubscription,
@@ -536,7 +547,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     sendTerminalDetach,
     sendAgentKill,
   }), [
-    connectionState, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
+    connectionState, connectionEpoch, addListener, addLegacySessionSubscription, addRealtimeSessionSubscription,
     switchSession, sendTerminalCreate, sendTerminalAttach,
     sendTerminalInput, sendTerminalResize, sendTerminalVisibility, sendTerminalDetach,
     sendAgentKill,

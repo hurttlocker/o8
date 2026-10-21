@@ -19,6 +19,7 @@ import { packetReleaseGeneration, packetReleaseIdentityIsCurrent, verifyCurrentL
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
 import { autoResolveMergedPacketVerificationIncidents } from '@/lib/supervisor/merged-incident-resolution';
+import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconciliation } from '@/lib/workspace/automatic-reconciliation-guard';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_BASE_BRANCH = 'main';
@@ -438,10 +439,16 @@ function buildCandidates(): Candidate[] {
   const laneById = new Map(lanes.map((lane) => [lane.id, lane]));
   const laneByPacket = new Map(lanes.filter((lane) => lane.packetId).map((lane) => [lane.packetId!, lane]));
 
-  const packetCandidates = readOrchestratorControlPlaneState().packets
+  const packets = readOrchestratorControlPlaneState().packets;
+  const remotePackets = packets.filter((packet) => packet.runtime === 'cloud' || packet.lane?.runtime === 'cloud');
+  const remotePacketIds = new Set(remotePackets.map((packet) => packet.id));
+  const remoteLaneIds = new Set(remotePackets.map((packet) => packet.lane?.laneId).filter(Boolean));
+  const packetCandidates = packets
     .filter((packet) => {
       const terminal = packetTerminalState(packet);
-      return terminal !== 'released'
+      return packet.runtime !== 'cloud'
+        && packet.lane?.runtime !== 'cloud'
+        && terminal !== 'released'
         && terminal !== 'archived'
         && PACKET_SWEEPABLE_STATUSES.has(packet.status);
     })
@@ -469,7 +476,9 @@ function buildCandidates(): Candidate[] {
         laneId: lane?.id ?? laneId,
       };
     })
-    .filter((candidate) => Boolean(candidate.repoPath && candidate.branch));
+    // A coordinator checkout cannot prove a remote worker's branch or diff.
+    .filter((candidate) => candidate.lane?.runtime !== 'cloud'
+      && Boolean(candidate.repoPath && candidate.branch));
 
   // Lane-only pass: non-archived settled lanes with no packet in live mission
   // state. Prefer the worktree clone as the git cwd — dispatched branches
@@ -477,7 +486,10 @@ function buildCandidates(): Candidate[] {
   const coveredLaneIds = new Set(packetCandidates.map((c) => c.laneId).filter(Boolean));
   const laneOnlyCandidates: Candidate[] = lanes
     .filter((lane) => (
-      !coveredLaneIds.has(lane.id)
+      lane.runtime !== 'cloud'
+      && !remotePacketIds.has(lane.packetId ?? '')
+      && !remoteLaneIds.has(lane.id)
+      && !coveredLaneIds.has(lane.id)
       && LANE_ONLY_SWEEPABLE_STATUSES.has(lane.status)
       && Boolean(lane.branch)
       && (lane.branch !== lane.baseBranch || Boolean(lane.packetId))
@@ -704,6 +716,11 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
 
   for (const candidate of candidates) {
     const key = candidateKey(candidate);
+    const packetId = candidate.packet?.id ?? candidate.lane?.packetId ?? null;
+    if (!workspaceAllowsAutomaticReconciliation(packetId)) {
+      skipped += 1;
+      continue;
+    }
     if (
       candidate.packet
       && candidate.lane
@@ -740,9 +757,13 @@ export async function sweepPacketsMergedByAncestry(): Promise<MergedByAncestrySw
           continue;
         }
       }
-      const settled = evidence.kind === 'no-changes'
-        ? await finishWithoutChanges(candidate, evidence, generation)
-        : await releasePacket(candidate, evidence, generation);
+      const settled = await withAutomaticWorkspaceReconciliation(packetId, async () => {
+        const currentLane = candidate.laneId ? getLane(candidate.laneId) : null;
+        if (candidate.lane && (!currentLane || currentLane.packetId !== candidate.lane.packetId)) return false;
+        return evidence.kind === 'no-changes'
+          ? finishWithoutChanges(candidate, evidence, generation)
+          : releasePacket(candidate, evidence, generation);
+      });
       if (settled) merged += 1;
       else skipped += 1;
     } catch (error) {

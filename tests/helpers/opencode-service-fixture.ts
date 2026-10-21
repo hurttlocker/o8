@@ -105,10 +105,11 @@ import { spawnSync } from 'node:child_process';
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, \`git \${args.join(' ')}\\n\`);
 if (args[0] === 'fetch' && args[1] === ${JSON.stringify(worktreePath)}) process.exit(0);
+// Raw bytes: git writes binary pack data on stdout, which a text decode corrupts.
 const result = spawnSync(${JSON.stringify(realGit)}, args, {
   cwd: process.cwd(),
-  encoding: 'utf8',
   stdio: ['inherit', 'pipe', 'pipe'],
+  maxBuffer: 1024 * 1024 * 1024,
 });
 if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);

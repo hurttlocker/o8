@@ -8,7 +8,8 @@
  * every o8 command is reachable without sending every schema on every call. In
  * Full access its own file writes and commands in the repo run without asking,
  * as the Claude orchestrator's do (#3555); policy-blocked commands, workspace
- * path checks and command limits still apply. A plan-mode turn gets the
+ * path checks and command limits still apply, and commands write only in the
+ * workspace and a private temp dir (#3658). A plan-mode turn gets the
  * proposer projection and only `read_file`.
  *
  * One turn at a time per repo and thread, and one resident Pi process for it.
@@ -25,18 +26,21 @@ import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
-import type { PiModelRoute } from '@/lib/pi/openrouter-choice';
+import type { PiModelRoute, PiUsageAttribution } from '@/lib/pi/openrouter-choice';
+import type { ManagedPiTransportOptions } from '@/lib/pi/sdk/transport';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
-import { newestPiSessionFile } from '@/lib/pi/sdk/session-files';
+import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
 export const PI_ORCHESTRATOR_LIMITS = { maxModelCalls: 40, maxToolCalls: 80, runTimeoutMs: 30 * 60_000 } as const;
 /** An idle thread's Pi and cortex processes close after this; the next message resumes from the session file. */
 export const PI_ORCHESTRATOR_IDLE_MS = 15 * 60_000;
+/** Earlier session files a fresh-conversation thread (a review slot) keeps for inspection. */
+const PI_FRESH_SESSION_KEEP = 2;
 
 type PiSession = Awaited<ReturnType<typeof createPiSdkSession>>;
 
@@ -52,11 +56,20 @@ interface ResidentPi extends PiSurface {
   routeId: string;
   /** This turn's OpenRouter call receipts (#3584). Empty on the managed route. */
   receipts: OpenRouterPiReceipt[];
+  /** Who this turn's calls are recorded for; refreshed every turn, since a review session can be reused (#3742). */
+  attribution: PiUsageAttribution;
   ceiling?: OpenRouterSpendCeiling;
   session: PiSession;
   servers: O8ServerSet;
   emit?: (event: OrchestratorEvent) => void;
   idle?: ReturnType<typeof setTimeout>;
+}
+
+function piUsageAttribution(name: string, repoPath: string, options: OrchestratorTurnOptions): PiUsageAttribution {
+  return options.reviewUsage
+    ? { role: 'reviewer', agentName: 'pi-reviewer', sessionKey: name, repoPath, laneId: options.reviewUsage.laneId,
+      packetId: options.reviewUsage.packetId, runId: options.reviewUsage.reviewTurnId, surface: options.reviewUsage.surface }
+    : { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath };
 }
 
 /** Plan mode is read-only, like Claude's plan mode: proposer servers and no repo writes or commands. */
@@ -66,7 +79,10 @@ export function piSurfaceForTurn(options: OrchestratorTurnOptions): PiSurface {
   return { profile, readOnly: plan || profile === 'propose' };
 }
 
-/** Full access: the operator chose "can edit files and run actions" for this turn. */
+/**
+ * Full access: the operator chose "can edit files and run actions" for this turn.
+ * Commands still run confined to the workspace and a private temp dir (#3658).
+ */
 const fullAccess: NonNullable<PiSdkSessionOptions['approve']> = async () => true;
 
 /** Start failures o8 itself explains; anything else stays in the host log. */
@@ -85,6 +101,8 @@ export interface PiOrchestratorDeps {
   openRouterTurnCeilingUsd?: () => number;
   /** Network seam for the OpenRouter route in tests. */
   openRouterFetch?: typeof fetch;
+  /** Relay seam for the managed route in tests. */
+  managedInference?: Pick<ManagedPiTransportOptions, 'resolveRoute' | 'fetch'>;
 }
 
 const MANAGED_ROUTE: PiModelRoute = { carrier: 'managed', model: O8_MANAGED_PI_MODEL, label: O8_MANAGED_PI_MODEL.name };
@@ -178,28 +196,38 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         commands.length ? o8CommandPrompt(commands) : '',
       ].filter(Boolean).join('\n\n');
       const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
-      const pi = { name, servers, routeId, receipts: [], ...surface } as unknown as ResidentPi;
+      // The transports read this object on every call, so each turn's calls go to that turn.
+      const attribution = piUsageAttribution(name, repoPath, options);
+      const pi = { name, servers, routeId, receipts: [], attribution, ...surface } as unknown as ResidentPi;
       let transport = deps.transport;
       if (!transport && route.carrier === 'openrouter') {
         const { createPiOpenRouterRouteTransport } = await import('@/lib/pi/openrouter-choice');
         const routed = createPiOpenRouterRouteTransport(route, {
           ceilingUsd: await leadTurnCeilingUsd(deps),
-          attribution: { role: 'orchestrator', agentName: 'pi-orchestrator', sessionKey: name, repoPath },
+          attribution,
           onReceipt: (receipt) => { pi.receipts.push(receipt); },
           fetch: deps.openRouterFetch,
         });
         transport = routed.transport;
         pi.ceiling = routed.ceiling;
+      } else if (!transport) {
+        // Managed calls are metered by the relay; each is also recorded locally with its tokens (#3742).
+        const { createPiManagedUsageTransport } = await import('@/lib/pi/managed-usage');
+        transport = createPiManagedUsageTransport(route.model, attribution, deps.managedInference);
       }
+      // A fresh conversation never resumes the old ones, so only the latest few are kept (#3742).
+      if (options.freshSession) await prunePiSessionFiles(join(stateDir, 'sessions'), PI_FRESH_SESSION_KEEP);
       // Loaded on the first Pi turn, so ws-server startup never evaluates the Pi SDK.
       const { createPiSdkSession } = await import('@/lib/pi/sdk/session');
       pi.session = await createPiSdkSession({
         workspace: repoPath,
         stateDir,
         model: route.model,
-        sessionFile: await newestPiSessionFile(join(stateDir, 'sessions')),
+        sessionFile: options.freshSession ? undefined : await newestPiSessionFile(join(stateDir, 'sessions')),
         transport,
         approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
+        // Writes outside the workspace need a setting beyond Full access (#3677).
+        confineCommands: 'workspace',
         hostTools: commands.length ? createO8CommandTools(commands) : [],
         systemPrompt,
         readOnly: surface.readOnly,
@@ -234,7 +262,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
     let pi = resident.get(name);
     // A different tool surface or model route needs a different process; the session file keeps the conversation.
-    if (pi && (pi.profile !== surface.profile || pi.readOnly !== surface.readOnly || pi.routeId !== routeId || !pi.session.running)) {
+    if (pi && (options.freshSession || pi.profile !== surface.profile || pi.readOnly !== surface.readOnly
+      || pi.routeId !== routeId || !pi.session.running)) {
       await close(pi);
       pi = undefined;
     }
@@ -263,6 +292,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     current.emit = onEvent;
     current.receipts = [];
     turnReceipts = current.receipts;
+    for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
+    Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
     current.ceiling?.reset();
     onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium' });
     const stop = () => { void current.session.abort(); };

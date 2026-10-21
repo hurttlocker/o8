@@ -1,43 +1,21 @@
 'use client';
 
 /**
- * /dictation-pill — the SCREEN-LEVEL dock pill (system-wide Symon fold P3).
- *
- * This route is the body of a SECOND, always-on-top, transparent Tauri window
- * labeled `dock` (NEVER `main` — see the label-discipline note in
- * system-wide dictation surface. The Rust side creates that window after the
- * bundled Next server is confirmed up, navigates it here, and applies the
- * top-center / level-25 / clearColor / nonactivating recipe. This page only
- * has to:
- *
- *   1. Subscribe to `o8:stt-event` (same payload shape as `useNativeDictation`)
- *      and reduce it into a `DictationSnapshot`.
- *   2. Filter to SYSTEM-origin sessions only (`origin === 'system'`), so the
- *      global-Fn pill never mirrors an in-window mic session and vice-versa.
- *      The broadcast `o8:stt-event` reaches BOTH windows — the discriminator is
- *      what keeps them from double-rendering.
- *   3. Render the ONE morphing notch pill via `DockNotchSurface` — a faithful
- *      port of Symon's NotchSurface: a SINGLE element that morphs in place
- *      (idle sliver ⇄ listening capsule ⇄ thinking squiggle ⇄ done flash),
- *      CENTERED in the window (the WINDOW provides the position — no
- *      `createPortal`, no fixed-bottom anchor). This is distinct from the
- *      in-window floating pill (`DictationPill`), which is UNCHANGED.
- *
- * The dock window is ALWAYS-ON: Rust creates it visible at boot and never hides
- * it on the normal flow. This route therefore ALWAYS paints — at minimum the
- * compact Symon idle sliver — and MORPHS idle → recording (`system-start`) →
- * polishing → success → idle, all on the SAME element. A discarded Fn brush or
- * a start error emits `system-idle` to morph back to the idle sliver.
+ * The always-on top dock retains agent, Ask, TTS and legacy surface-off flows.
+ * Plain Fn with a visible caret/HUD modal leaves this dock idle; that modal
+ * owns recording, processing, delivered text and dismissal.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
+import { SystemDictationSession } from '@/lib/dictation/system-dictation-session';
 import {
   PARKED_LANES_STALE_AFTER_MS,
   parkedSnapshotIsStale,
   parkedSnapshotIsUsable,
   type ParkedLanesStatusPayload,
 } from '@/lib/presentation/parked-lanes-snapshot';
+import { useMicLevel } from '@/components/desktop/dictation/useMicLevel';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
 import { formatPlanProgressGlint, type PlanProgressEvent, type PlanProgressGlint } from '@/components/desktop/dictation/planPresentation';
 import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
@@ -120,7 +98,10 @@ interface SttEventPayload {
    * begins mid-conversation can render INSIDE the open panel as a pending
    * chat turn instead of collapsing the panel to the listening capsule. */
   lane?: string;
+  hud?: boolean;
+  surface?: 'caret' | 'hud' | 'off';
   sessionId?: number;
+  startId?: string;
   text?: string;
   level?: number;
   chars?: number;
@@ -130,91 +111,6 @@ interface SttEventPayload {
  * handoff (final transcript on its way to the agent). */
 type PanelPending = { phase: 'listening' | 'polishing' | 'handoff'; text: string };
 
-/**
- * Live mic level for the dock's waveform + glow, read DIRECTLY from the mic in
- * the dock webview via Web Audio. The native STT `level` events don't drive the
- * dock (audio capture + transcription work fine, but the live level never lands
- * here — "something's not connected"), so we compute it locally while recording.
- * Truly voice-reactive, no native dependency. Torn down when not recording.
- */
-function useMicLevel(
-  active: boolean,
-  onLevel: (level: number) => void,
-  onStatus?: (msg: string) => void,
-): void {
-  const onLevelRef = useRef(onLevel);
-  const onStatusRef = useRef(onStatus);
-  useEffect(() => { onLevelRef.current = onLevel; }, [onLevel]);
-  useEffect(() => { onStatusRef.current = onStatus; }, [onStatus]);
-  useEffect(() => {
-    if (!active) { onLevelRef.current(0); return; }
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices) {
-      onStatusRef.current?.('no navigator.mediaDevices');
-      return;
-    }
-    let stream: MediaStream | null = null;
-    let ctx: AudioContext | null = null;
-    let raf = 0;
-    let disposed = false;
-    let last = 0;
-    let statusAt = 0;
-    onStatusRef.current?.('requesting mic…');
-    navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .then((s) => {
-        if (disposed) { s.getTracks().forEach((t) => t.stop()); return; }
-        stream = s;
-        const trackLabel = s.getAudioTracks()[0]?.label ?? '?';
-        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        ctx = new AC();
-        // WebKit starts the context SUSPENDED without a user gesture → the
-        // analyser reads silence. Resume so it actually processes the mic.
-        void ctx.resume();
-        const source = ctx.createMediaStreamSource(s);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        source.connect(analyser);
-        const buf = new Uint8Array(analyser.fftSize);
-        onStatusRef.current?.(`mic ok · ctx ${ctx.state} · ${trackLabel.slice(0, 18)}`);
-        const tick = (now: number) => {
-          analyser.getByteTimeDomainData(buf);
-          let sum = 0;
-          for (let i = 0; i < buf.length; i += 1) {
-            const v = (buf[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / buf.length);
-          // Speech RMS is TINY (~0.005–0.03 at normal talking volume). Subtract a
-          // small noise floor so silence reads flat, then apply a high-gain sqrt
-          // curve so NORMAL talking (not yelling) drives a strong waveform + glow.
-          const adj = Math.max(0, rms - 0.003);
-          const level = Math.min(1, Math.sqrt(adj * 34));
-          if (now - last > 32) { // ~30fps into React — smooth, no re-render thrash
-            last = now;
-            onLevelRef.current(level);
-          }
-          if (now - statusAt > 400) {
-            statusAt = now;
-            onStatusRef.current?.(`lvl ${level.toFixed(2)} rms ${rms.toFixed(3)} ${ctx?.state}`);
-          }
-          raf = requestAnimationFrame(tick);
-        };
-        raf = requestAnimationFrame(tick);
-      })
-      .catch((err) => {
-        const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        onStatusRef.current?.(`ERR ${msg}`);
-        dockLog(`mic-level getUserMedia failed: ${msg}`);
-      });
-    return () => {
-      disposed = true;
-      if (raf) cancelAnimationFrame(raf);
-      if (ctx) { try { void ctx.close(); } catch { /* noop */ } }
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      onLevelRef.current(0);
-    };
-  }, [active]);
-}
 
 export default function DictationPillPage() {
   const [snapshot, setSnapshot] = useState<DictationSnapshot>(IDLE_SNAPSHOT);
@@ -223,7 +119,7 @@ export default function DictationPillPage() {
   const applyMicLevel = useCallback((level: number) => {
     setSnapshot((prev) => (prev.state === 'recording' ? { ...prev, audioLevel: level } : prev));
   }, []);
-  useMicLevel(snapshot.state === 'recording', applyMicLevel);
+  useMicLevel(snapshot.state === 'recording', applyMicLevel, dockLog);
   const [ttsState, setTtsState] = useState<TtsControlState>('idle');
   // Realtime voice-to-voice presence (Track B) — mirrored from the session via
   // `o8:realtime-status`, so the dock pill shows "voice live" up where Symon
@@ -274,6 +170,8 @@ export default function DictationPillPage() {
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const polishWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  const sessionRef = useRef(new SystemDictationSession());
+  const modalOwnsDictationRef = useRef(false);
 
   const setState = useCallback((next: DictationState, patch?: Partial<DictationSnapshot>) => {
     stateRef.current = next;
@@ -312,6 +210,23 @@ export default function DictationPillPage() {
     if (payload.type !== 'system-pasted' && payload.origin !== 'system') {
       return;
     }
+    if (!sessionRef.current.accepts(payload)) return;
+    if (payload.type === 'system-start') {
+      // Plain Fn feedback belongs at the caret, away from the screen notch.
+      // Agent/Ask sessions and the explicit surface-off preference retain the dock.
+      modalOwnsDictationRef.current = !payload.lane && payload.hud === true
+        && (payload.surface === 'caret' || payload.surface === 'hud');
+      if (modalOwnsDictationRef.current) {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        if (polishWatchdogRef.current) clearTimeout(polishWatchdogRef.current);
+        stateRef.current = 'idle';
+        setSnapshot(IDLE_SNAPSHOT);
+      }
+    }
+    if (payload.type === 'system-pasted' || payload.type === 'error' || payload.type === 'system-idle') {
+      sessionRef.current.finish();
+    }
+    if (modalOwnsDictationRef.current) return;
 
     // Trace the morph path: confirms the dock webview is RECEIVING system events
     // (the prior bug was the broadcast not reaching this second window — now
@@ -586,16 +501,33 @@ export default function DictationPillPage() {
   // reading_speed pref so the slider shows the real default on first paint;
   // a change applies live AND persists via tts_set_speed.
   const [speechSpeed, setSpeechSpeed] = useState(1);
+  const [topPillEnabled, setTopPillEnabled] = useState(false);
+  const topPillRevisionRef = useRef(0);
   useEffect(() => {
     if (!isTauri()) return;
+    const revision = topPillRevisionRef.current;
     import('@tauri-apps/api/core')
       .then(({ invoke }) => invoke<Record<string, unknown>>('voice_prefs_get'))
       .then((prefs) => {
+        if (topPillRevisionRef.current === revision) setTopPillEnabled(prefs?.dictation_top_pill === true);
         const raw = prefs?.reading_speed;
         const n = typeof raw === 'number' ? raw : Number(raw);
         if (Number.isFinite(n) && n > 0) setSpeechSpeed(Math.min(1.2, Math.max(0.7, n)));
       })
       .catch(() => { /* default 1× */ });
+  }, []);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let off: (() => void) | undefined;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ enabled?: boolean }>('o8:top-pill-preference', e => {
+        topPillRevisionRef.current += 1;
+        setTopPillEnabled(e.payload?.enabled === true);
+      }))
+      .then(unlisten => { if (disposed) unlisten(); else off = unlisten; })
+      .catch(err => dockLog(`top-pill preference subscribe failed: ${String(err)}`));
+    return () => { disposed = true; off?.(); };
   }, []);
   const handleSpeechSpeed = useCallback((rate: number) => {
     setSpeechSpeed(rate);
@@ -929,8 +861,15 @@ export default function DictationPillPage() {
   // content wrapper's rect on every morph (ResizeObserver fires through the
   // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
   const hitRectHostRef = useRef<HTMLDivElement | null>(null);
+  const dockVisible = topPillEnabled || snapshot.state !== 'idle' || ttsState !== 'idle'
+    || askOpen || agentWorking || !!agentConfirm || realtimeVoice !== 'off';
   useEffect(() => {
     if (!isTauri()) return;
+    if (!dockVisible) {
+      // Invisible overlays must never retain a click-accepting strip.
+      invokeCmd('dock_set_hit_rect', { x: 0, y: 0, w: 0, h: 0 });
+      return;
+    }
     const host = hitRectHostRef.current;
     if (!host) return;
     let raf = 0;
@@ -949,7 +888,7 @@ export default function DictationPillPage() {
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, []);
+  }, [dockVisible]);
 
   // The dock window is transparent at the OS level (clearColor + setOpaque
   // false). The page's html/body must NOT paint a background or the window
@@ -983,7 +922,7 @@ export default function DictationPillPage() {
       style={{
         position: 'fixed',
         inset: 0,
-        display: 'flex',
+        display: dockVisible ? 'flex' : 'none',
         alignItems: 'flex-start',
         justifyContent: 'center',
         // Keep a small internal inset so the rounded top corners are visible

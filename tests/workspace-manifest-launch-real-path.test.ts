@@ -136,6 +136,7 @@ describe.sequential('workspace manifest packet launch real path', () => {
       '@/lib/lane/registry'
     );
     const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
+    const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
     const {
       allocateWorkspaceServicePorts,
       readWorkspacePortLeases,
@@ -163,7 +164,9 @@ describe.sequential('workspace manifest packet launch real path', () => {
         laneId: lane.id,
       });
       if (!prepared) throw new Error(`Worktree launch returned no workspace for ${packetId}.`);
-      updateLane(lane.id, { worktreePath: prepared.cwd }, 'system');
+      // Terminal cleanup retires only a worktree whose lane names its owned session.
+      const sessionKey = await bindOwnedPacketSession(repoPath, prepared.worktree, { packetId, branch });
+      updateLane(lane.id, { worktreePath: prepared.cwd, sessionKey }, 'system');
       return { lane, prepared };
     };
 
@@ -220,7 +223,9 @@ describe.sequential('workspace manifest packet launch real path', () => {
     });
 
     setLaneStatus(second.lane.id, 'completed', 'system', 'completed');
-    await vi.waitFor(() => {
+    const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
+    await vi.waitFor(async () => {
+      await runWorktreeMaintenanceTick();
       expect(getLane(first.lane.id)?.worktreePath).toBeNull();
       expect(getLane(second.lane.id)?.worktreePath).toBeNull();
     }, { timeout: 60_000 });

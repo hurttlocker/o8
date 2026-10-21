@@ -31,6 +31,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
+    const holdMerges = args.holdMerges === true;
     const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
     const orchestratorTurnId = optionalString(args, 'orchestratorTurnId') || undefined;
     const parentWorkspaceId = optionalString(args, 'parentWorkspaceId') || undefined;
@@ -65,7 +66,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         dispatchOnCreate: shouldDispatch,
         sequential,
         existingBranchPolicy,
-        useBrain,
+        useBrain, holdMerges,
         huddle, taskContract: parseTaskContractSetting(args.taskContract),
         comparisonModels,
         qualitySearch, sealedTaskContract,
@@ -103,7 +104,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       dispatchOnCreate: shouldDispatch,
       sequential,
       existingBranchPolicy,
-      useBrain,
+      useBrain, holdMerges,
       huddle, taskContract: parseTaskContractSetting(args.taskContract),
       comparisonModels,
       qualitySearch,

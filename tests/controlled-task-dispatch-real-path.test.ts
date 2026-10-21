@@ -12,6 +12,16 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 const ready = vi.hoisted(() => vi.fn(async () => {}));
 const sync = vi.hoisted(() => vi.fn());
 const ruleHome = vi.hoisted(() => ({ path: '' }));
+const fixtureChildren = vi.hoisted(() => ({
+  lifetime: null as ReturnType<typeof import('./fixtures/fixture-child-lifetime.fixture').createFixtureChildLifetime> | null,
+}));
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  const { createFixtureChildLifetime } = await import('./fixtures/fixture-child-lifetime.fixture');
+  const lifetime = createFixtureChildLifetime();
+  fixtureChildren.lifetime = lifetime;
+  return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => lifetime.track(actual.spawn(...args)) };
+});
 vi.mock('node:os', async (original) => {
   const actual = await original<typeof import('node:os')>();
   return { ...actual, homedir: () => ruleHome.path || actual.homedir() };
@@ -24,7 +34,10 @@ vi.mock('node:fs', async (original) => {
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: ready }));
 vi.mock('@/lib/runtimes/shared/owned-session/sandbox', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/owned-session/sandbox')>(),
-  prepareWorkerSandbox: async (input: { binary: string; args: string[] }) => input,
+  prepareWorkerSandbox: async (input: { binary: string; args: string[]; finalDenyPaths?: string[]; readOwnerInstructions?: boolean }) => {
+    if (input.finalDenyPaths?.length) expect(input.readOwnerInstructions).toBe(false);
+    return input;
+  },
 }));
 
 import { POST } from '@/app/api/plugins/mcp/route';
@@ -58,9 +71,12 @@ const oldFixtureBinary = process.env.O8_TASK_DISPATCH_FIXTURE_BIN;
 let fixtureRoot: string;
 let output: string;
 let persistent = true;
+let journalDelayMs = 0;
 let fixtureRuntime: 'codex' | 'claude-code' = 'codex';
 let store: ReturnType<typeof createOwnedSessionStore>;
 const accountId = 'user_fixture_task_draft';
+// Reconciliation can await a three-second process scan before returning its snapshot.
+const completionPoll = { timeout: 10_000 };
 
 async function account(subject = accountId, expiry = 3600) {
   await withAccountStateLease(() => {
@@ -114,11 +130,13 @@ function contract(snapshotId: string) {
 function git(...args: string[]) { return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' }); }
 
 beforeEach(async () => {
+  fixtureChildren.lifetime!.begin();
   vi.restoreAllMocks();
   ready.mockReset().mockResolvedValue(undefined);
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   sync.mockImplementation(actual.fsyncSync);
   persistent = true;
+  journalDelayMs = 0;
   fixtureRuntime = 'codex';
   ruleHome.path = realpathSync(mkdtempSync(join(tmpdir(), 'o8-task-rules-fixture-')));
   dirs.push(ruleHome.path);
@@ -169,8 +187,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   sync.mockImplementation(actual.fsyncSync);
-  for (const row of runs()) { try { process.kill(row.pid, 'SIGKILL'); } catch { /* Already gone. */ } }
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await fixtureChildren.lifetime!.close();
+  expect(fixtureChildren.lifetime!.activeCount(), 'fixture-owned children must exit after teardown').toBe(0);
   process.env.CORTEX_IDE_OWNED_CODEX_ROOT = oldOwnedRoot;
   if (oldOwnedRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
   if (oldClaudeRoot === undefined) delete process.env.CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT;
@@ -178,7 +196,8 @@ afterEach(async () => {
   if (oldFixtureBinary === undefined) delete process.env.O8_TASK_DISPATCH_FIXTURE_BIN;
   else process.env.O8_TASK_DISPATCH_FIXTURE_BIN = oldFixtureBinary;
 });
-afterAll(() => {
+afterAll(async () => {
+  await fixtureChildren.lifetime!.close();
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   if (oldKey === undefined) delete process.env.O8_LICENSE_PUBKEY; else process.env.O8_LICENSE_PUBKEY = oldKey;
 });
@@ -203,8 +222,10 @@ function adapter(): OwnedRuntimeAdapter {
     rootEnvVar: fixtureRuntime === 'codex' ? 'CORTEX_IDE_OWNED_CODEX_ROOT' : 'CORTEX_IDE_OWNED_CLAUDE_CODE_ROOT',
     rootDefault: join(fixtureRoot, 'sessions'), binaryName: 'node', binaryEnvOverride: 'O8_TASK_DISPATCH_FIXTURE_BIN',
     humanLabel: 'Fixture', squadShortName: 'Fixture', workerMcpInjection: 'config-override',
-    launchArgs: ({ model, effort, prompt }) => ['-e',
-      `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)},prompt:${JSON.stringify(prompt)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : `process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join('\n') + '\n')}); process.exit(0)`}`],
+    launchArgs: ({ model, effort, prompt }) => {
+      const script = `require('node:fs').appendFileSync(${JSON.stringify(output)}, JSON.stringify({ pid:process.pid,cwd:process.cwd(),model:${JSON.stringify(model)},effort:${JSON.stringify(effort)},prompt:${JSON.stringify(prompt)} })+${JSON.stringify('\n')}); ${persistent ? 'setInterval(()=>{},1000)' : `process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join('\n') + '\n')}); process.exit(0)`}`;
+      return ['-e', journalDelayMs ? `setTimeout(() => { ${script} }, ${journalDelayMs}); setInterval(()=>{},1000);` : script];
+    },
     resumeArgs: () => [], parseRunLog: () => ({ entries: [], outcome: persistent ? 'running' : 'finished', completedTurn: !persistent }) };
 }
 async function prepare() {
@@ -237,6 +258,15 @@ describe('controlled tasks through the operator route, durable intent and owned 
   const taskResult = (taskId: string, bearer = token(accountId, ['o8:read'])) => call('o8_task_result', {
     machineId: 'draft-machine', taskId,
   }, bearer);
+
+  it('owns a dispatched worker before its journal row exists', async () => {
+    journalDelayMs = 60_000;
+    const draft = await prepare();
+    expect((await decision(draft)).status).toBe(200);
+    expect(fixtureChildren.lifetime!.activeCount()).toBeGreaterThan(0);
+    expect(runs()).toHaveLength(0);
+    // afterEach must stop this real child even though runs.jsonl has no PID.
+  });
 
   it('delivers admitted applicable rules to the actual child without adding them to hosted receipts', async () => {
     mkdirSync(join(repo, 'unrelated'));
@@ -310,7 +340,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
     expect((await taskResult(draft.taskId)).result).toMatchObject({ state: 'held', completed: false,
       completion: { available: false, reason: 'not_launched' } });
     await decision(draft);
-    await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+    await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
     const before = readFileSync(executionFile(draft), 'utf8');
     const result = await taskResult(draft.taskId);
     expect(result.status).toBe(200);
@@ -360,7 +390,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
       persistent = false;
       const draft = await prepare();
       await decision(draft);
-      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
       const session = savedSession();
       const run = session.recentRuns[0]!;
       if (kind === 'binding') session.controlledTask!.attemptId = randomUUID();
@@ -390,7 +420,7 @@ describe('controlled tasks through the operator route, durable intent and owned 
     await decision(draft);
     await vi.waitFor(() => expect(runs()).toHaveLength(1));
     if (state === 'completed') {
-      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'));
+      await vi.waitFor(async () => expect((await decision(draft, 'inspect')).body.execution.state).toBe('completed'), completionPoll);
     }
     const execution = readTaskExecution(draft)!;
     const replay = await call('o8_prepare_task', args);

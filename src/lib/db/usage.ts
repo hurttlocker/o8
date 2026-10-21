@@ -6,7 +6,8 @@
  */
 
 import { eq, and, sql, desc } from 'drizzle-orm';
-import { getDb, usageLogs } from './index';
+import { getDb, getSqlite, usageLogs } from './index';
+import { OPENROUTER_GENERATION_ID_SQL } from './usage-log-migration';
 import { randomUUID } from 'node:crypto';
 
 // ── Types ──
@@ -84,6 +85,13 @@ export function logUsage(input: LogUsageInput): void {
     requestType: input.requestType ?? 'chat',
     billingPeriod: currentBillingPeriod(),
   }).run();
+}
+
+/** True when a usage row already records this OpenRouter generation. */
+export function hasOpenRouterGenerationUsage(generationId: string): boolean {
+  return Boolean(getSqlite().prepare(
+    `SELECT 1 FROM usage_logs WHERE provider = 'openrouter' AND ${OPENROUTER_GENERATION_ID_SQL} = ? LIMIT 1`,
+  ).get(generationId));
 }
 
 /**

@@ -50,10 +50,9 @@ export interface ResolveWorkerRoutingInput {
 }
 
 function normalizeEffort(value: unknown): ThinkingEffort | null {
-  // 'adaptive' means "let the runtime decide" — treat as no explicit effort so
-  // the launch stays at the runtime default (parity). Only a concrete tier is
-  // carried.
-  return isThinkingEffort(value) && value !== 'adaptive' ? value : null;
+  // Preserve an explicit runtime-default reset across persistence and retries.
+  // It is not a concrete selected tier, but differs from inheriting settings.
+  return isThinkingEffort(value) ? value : null;
 }
 
 export function normalizeWorkerIntent(value: unknown): WorkerIntent {
@@ -189,7 +188,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
 
   // Effort applies only when the selected runtime has a reasoning-effort surface;
   // on opencode it's a clean no-op (null → no launch flag).
-  const selectedEffort = requestedEffort && getRuntimeCapability(selectedRuntime).reasoningEffort
+  const selectedEffort = requestedEffort && requestedEffort !== 'adaptive' && getRuntimeCapability(selectedRuntime).reasoningEffort
     ? requestedEffort
     : null;
   const modelDisposition = requestedModel

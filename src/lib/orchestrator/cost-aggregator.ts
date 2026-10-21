@@ -1,6 +1,7 @@
 import { getRuntime } from '@/lib/runtimes';
 import { readPersistedSessionCosts } from '@/lib/orchestrator/cost-persistence';
 import type { UsageRole } from '@/lib/db/usage';
+import { listReviewCosts, type MissionReviewCost } from '@/lib/lane/review-payer';
 import { resolveRuntimeSessionIdentityId } from '@/lib/runtime/session-identity';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
 import {
@@ -42,6 +43,8 @@ export interface MissionCostSummary {
   packetCosts: PacketCostSummary[];
   tokensByRuntime: Record<OrchestratorRuntime, RuntimeTokenSummary>;
   costByRole: Record<UsageRole, RoleCostSummary>;
+  /** Each review turn on the mission's packets, with its model, payer and cost basis (#3742). */
+  reviews: MissionReviewCost[];
   /** Usage from a session shared by multiple packets; never guessed onto one packet. */
   unattributed: {
     sessionCount: number;
@@ -467,11 +470,20 @@ export async function aggregateMissionCost(
     }
   }
 
+  // Review turns run outside the packets' worker sessions, so their usage rows are counted here, once.
+  const reviews = listReviewCosts(state.packets.map((packet) => packet.id));
+  for (const review of reviews) {
+    totalCostUsd += review.costUsd;
+    costByRole.reviewer.totalCostUsd = roundUsd(costByRole.reviewer.totalCostUsd + review.costUsd);
+    costByRole.reviewer.requestCount += Math.max(review.calls, 1);
+  }
+
   return {
     totalCostUsd: roundUsd(totalCostUsd),
     packetCosts,
     tokensByRuntime,
     costByRole,
+    reviews,
     unattributed,
   };
 }

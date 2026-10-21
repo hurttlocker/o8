@@ -1,3 +1,4 @@
+import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 /**
  * Unified WebSocket server for o8 mobile.
  *
@@ -109,6 +110,7 @@ import {
   dropSymonTextSession,
   formatSymonTextPlannerPrompt,
   loadSymonTextSession,
+  touchSymonTextAttachment,
   updateSymonTextMachine,
   type SymonTextSessionRecord,
 } from '@/lib/mobile/symon-text-session-store';
@@ -144,19 +146,20 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { OrchestratorThreadProjectError } from './lib/mobile/orchestrator-thread-project';
 import { persistOrchestratorThreadUserMessageFromWire } from './lib/ws-server/orchestrator-thread-send';
+import { resolveMobileTurnSelection } from './lib/ws-server/mobile-turn-selection';
 import {
   composerBackendSupportsImages,
   validateComposerImageAttachments,
   type ComposerImageAttachment,
 } from './lib/mobile/composer-image-validation';
-import { createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
+import { appendOperatorStopNote, createAssistantTextBuffer } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { deriveIdempotencyKey, withIdempotency } from './lib/orchestrator/idempotency-store';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
-import { normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
+import { normalizeObservedOrchestratorTurnModel, normalizeOrchestratorTurnModel } from './lib/orchestrator/turn-model-selection';
 import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { withOrchestratorTurnReceiptContext } from './lib/orchestrator/turn-receipt-context';
 import { resolveOrchestratorExecutionMode } from './lib/lane/orchestrator-backends/orchestration-mode';
@@ -165,7 +168,7 @@ import {
   prepareBackendSwitchHandoff,
   recordBackendSwitchHandoffAudit,
 } from './lib/orchestrator/backend-switch-carry';
-import { isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
+import { composeComposerWireMessage, isComposerWireMode, modelFacingComposerMessage, resolveOrchestratorTranscriptMessage } from './lib/orchestrator/composer-wire';
 import {
   resolveOrchestratorMessageRepoPath,
   resolveOrchestratorRepoPath,
@@ -242,6 +245,12 @@ import { routeReviewContinuation, type ReviewContinuationLane } from './lib/orch
 import type { ReviewChatOrigin } from './lib/orchestrator/review-continuation-origin';
 import { queueReviewContinuation as queueChatReviewMessage } from './lib/orchestrator/review-continuation';
 import { runReviewChatContinuation } from './lib/ws-server/review-chat-continuation';
+import { createChatContinuationHeartbeat, publishComposerQueueChange } from './lib/ws-server/composer-queue-heartbeat';
+import { withImmediateComposerSend, orchestratorContinuationAbortKey as orchestratorAbortKey } from './lib/ws-server/composer-send-admission';
+import { sendLeadTerminalStatus } from './lib/ws-server/lead-terminal-status';
+import { holdComposerSends } from './lib/orchestrator/composer-queue';
+import { holdWorkerCorrections } from './lib/orchestrator/worker-corrections';
+import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
   findLeadThreadBinding,
   getLeadStatus,
@@ -250,14 +259,13 @@ import {
   queueLeadWorkerReturn,
   sendLeadThreadMessage,
   stopLead,
-  waitForLead,
 } from './lib/orchestrator/lead-lifecycle';
 import { resolveLeadRepoPath, validateLeadAttachments } from './lib/orchestrator/lead-contract';
+import { manualReviewRequested } from './lib/lane/review-mode';
 import { queueOrchestratorEscalation as queueSupervisorEscalationTurn } from './lib/orchestrator/supervisor-escalation';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
-import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
-import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
+import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions } from './lib/ws-server/dash-terminal-gc';
 import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
 import {
@@ -504,6 +512,7 @@ async function fetchRuntimeTranscript(sessionKey: string, limit: number) {
 }
 
 async function triggerHeadlessSprintTick() {
+  if (manualReviewRequested()) return { ok: true };
   return fetchNextJson<{ ok: boolean }>('/api/orchestrator/headless-tick', {
     method: 'POST',
     body: {},
@@ -1075,11 +1084,6 @@ function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, ag
   return `${clientId}::${backend}::${agent}`;
 }
 
-/** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
-function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string, threadId: string | null): string {
-  return `${repoPath}::${backend}::${agent}::${threadId ?? ''}`;
-}
-
 function readTaskArtifactActionStamp(raw: unknown): TaskArtifactActionStamp | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
@@ -1380,12 +1384,13 @@ function enqueueOrchestratorAutoMessage(
 }
 
 function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  if (manualReviewRequested()) return;
   if (queueLeadSupervisorReturn(repoPath, message)) return;
   queueSupervisorEscalationTurn(repoPath, message, enqueueOrchestratorAutoMessage);
 }
 
 function queueReviewContinuation(lane: ReviewContinuationLane): void {
-  routeReviewContinuation(lane, enqueueOrchestratorAutoMessage, (reviewLane) => queueLeadReviewContinuation({
+  routeReviewContinuation(lane, (reviewLane) => queueLeadReviewContinuation({
     repoPath: reviewLane.repoPath,
     packetId: reviewLane.packetId,
     laneId: reviewLane.id,
@@ -1575,27 +1580,6 @@ const DASH_GC_MIN_AGE_MS = 5 * 60 * 1000;
 const DASH_GC_MAX_SESSIONS = 64;
 let dashGcTimer: ReturnType<typeof setInterval> | null = null;
 
-/** One `tmux list-sessions` → live `cortex-dash-*` sessions with creation age. */
-function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
-  try {
-    const out = execFileSync(
-      resolveTmuxBinary(),
-      dashTmuxArgs('list-sessions', '-F', '#{session_name} #{session_created}'),
-      { windowsHide: true, timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
-    );
-    const rows: DashSessionInfo[] = [];
-    for (const line of out.split('\n')) {
-      const [name, created] = line.trim().split(/\s+/);
-      if (!name || !name.startsWith('cortex-dash-')) continue;
-      const sec = Number(created);
-      rows.push({ name, createdMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : 0 });
-    }
-    return rows;
-  } catch {
-    return [];
-  }
-}
-
 /**
  * #6 persistent terminals — capture a dash session's scrollback history so a
  * re-attach after a restart/crash restores what scrolled off-screen (a bare
@@ -1651,48 +1635,27 @@ function captureTmuxPane(sessionName: string): string {
 
 function reapOrphanDashSessions() {
   if (!dashPersistentTerminalsEnabled()) return;
-  const sessions = listDashTmuxSessionsWithAge();
-  if (sessions.length === 0) return;
-
-  // Durable reference set FIRST — never reap on a failed read of persisted tabs
-  // (after a crash the in-memory map is empty; persisted tabs are the only
-  // owner record, so a read failure must abort the sweep, not reap survivors).
-  let referenced: Set<string>;
-  try {
-    referenced = collectPersistedTmuxSessions();
-    for (const sessionName of pluginTerminalSessionReferences()) referenced.add(sessionName);
-  } catch {
-    return;
-  }
-  // A session with live clients is referenced too — covers the brief
-  // create→persist window before the tab file is flushed.
-  for (const [name, att] of terminalAttachments) {
-    if (att.clientIds.size > 0) referenced.add(name);
-  }
-
-  const toKill = selectOrphanDashSessions(sessions, referenced, {
+  const liveSessionNames = [...terminalAttachments]
+    .filter(([, attachment]) => attachment.clientIds.size > 0)
+    .map(([name]) => name);
+  const killed = reapOrphanDashTmuxSessions({
+    liveSessionNames,
+    collectAdditionalReferences: pluginTerminalSessionReferences,
     nowMs: Date.now(),
     minAgeMs: DASH_GC_MIN_AGE_MS,
     maxSessions: DASH_GC_MAX_SESSIONS,
-  });
-  if (toKill.length === 0) return;
-
-  const tmuxBin = resolveTmuxBinary();
-  for (const name of toKill) {
-    // Tear down any warm-but-detached local PTY view first (0-client survivors
-    // from the reaper's persistence path), then kill the tmux session.
-    const att = terminalAttachments.get(name);
-    if (att) {
-      if (att.orphanTimer) clearTimeout(att.orphanTimer);
-      if (att.batchTimer) clearTimeout(att.batchTimer);
-      try { att.ptyProcess.kill(); } catch { /* already gone */ }
+    beforeKill(name) {
+      const attachment = terminalAttachments.get(name);
+      if (!attachment) return;
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      if (attachment.batchTimer) clearTimeout(attachment.batchTimer);
+      try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
       terminalAttachments.delete(name);
-    }
-    try {
-      execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', name), { windowsHide: true, timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
-    } catch { /* already gone */ }
+    },
+  });
+  if (killed > 0) {
+    console.log(`[ws-server] [persistent-terminals] GC reaped ${killed} orphan dash tmux session(s)`);
   }
-  console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
 }
 
 function startDashSessionGc() {
@@ -1925,7 +1888,7 @@ function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachm
   sendRaw(client, JSON.stringify({
     channel: 'terminal',
     event: 'data',
-    data: { sessionName: attachment.sessionName, data: encoded },
+    data: { sessionName: attachment.sessionName, data: encoded, historical: true },
   }));
   ensureTerminalClientView(attachment, client.id).lastGoodOffset = attachment.streamEndOffset;
 }
@@ -1975,7 +1938,7 @@ function registerTerminalAttachment(attachment: TerminalAttachment, recordClient
     }
 
     const exitMsg = JSON.stringify({
-      channel: 'terminal', event: 'exited', data: { sessionName, exitCode },
+      channel: 'terminal', event: 'exited', data: { sessionName, exitCode, exitCodeSource: att.snapshotSource === 'tmux' ? 'transport' : 'process' },
     });
     for (const cid of att.clientIds) {
       const c = clients.get(cid);
@@ -3834,6 +3797,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'symon-tool-call':
       void handleSymonToolCall(client, msg);
       break;
+    case 'symon-text-attach':
+      handleSymonTextAttach(client, msg);
+      break;
     case 'symon-text-turn':
       handleSymonTextTurn(client, msg);
       break;
@@ -3877,6 +3843,7 @@ type SymonTextTurnState = {
   turnId: string;
   terminal: boolean;
   interruptRequested?: boolean;
+  resultStatus?: string; resultText?: string;
 };
 
 /** sessionId → socket, immutable scope, and negotiated additive protocol. */
@@ -3995,13 +3962,14 @@ function textTurnKey(sessionId: string, turnId: string): string {
 
 function pushSymonTextDone(
   turn: SymonTextTurnState,
-  status: 'done' | 'failed' | 'interrupted',
+  status: 'done' | 'failed' | 'interrupted' | 'unconfirmed',
   detail?: string,
   activeMachine?: SymonMachineIdentity,
   selectionPending: boolean = false,
 ): void {
   if (turn.terminal) return;
-  turn.terminal = true;
+  turn.terminal = status !== 'unconfirmed'; turn.resultStatus = status;
+  if (turn.terminal && symonTextTurns.get(textTurnKey(turn.sessionId, turn.turnId)) === turn) touchSymonTextAttachment(turn.sessionId, turn.turnId, true, Date.now(), { status, text: turn.resultText ?? '' });
   const client = clients.get(turn.clientId);
   if (client) {
     send(client, {
@@ -4018,7 +3986,7 @@ function pushSymonTextDone(
       ...(detail ? { detail } : {}),
     });
   }
-  setTimeout(() => symonTextTurns.delete(textTurnKey(turn.sessionId, turn.turnId)), 5 * 60_000).unref();
+  if (turn.terminal) setTimeout(() => { const key = textTurnKey(turn.sessionId, turn.turnId); if (symonTextTurns.get(key) === turn) symonTextTurns.delete(key); }, 5 * 60_000).unref();
 }
 
 async function interruptSymonTextNative(sessionId: string, turnId: string): Promise<boolean> {
@@ -4103,7 +4071,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       try {
         outcome = await pollNative();
       } catch (error) {
-        pushSymonTextDone(turn, 'failed', error instanceof Error ? error.message : 'Planner bridge failed.');
+        pushSymonTextDone(turn, 'unconfirmed', error instanceof Error ? error.message : 'Planner bridge failed.');
         return;
       }
       if (outcome.state === 'pending') continue;
@@ -4119,12 +4087,12 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
           })
           : null;
         if (!confirmation) {
-          pushSymonTextDone(turn, 'failed', 'The desktop returned an uncorrelated confirmation.');
+          pushSymonTextDone(turn, 'unconfirmed', 'The desktop returned an uncorrelated confirmation; native work remains unresolved.');
           return;
         }
         if (!mirroredConfirmations.has(confirmation.confirmationId)) {
           if (!symonConfirmationTracker.register(confirmation, Date.now())) {
-            pushSymonTextDone(turn, 'failed', 'Confirmation identity collision.');
+            pushSymonTextDone(turn, 'unconfirmed', 'Confirmation identity collision; native work remains unresolved.');
             return;
           }
           mirroredConfirmations.add(confirmation.confirmationId);
@@ -4140,7 +4108,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
       if (outcome.state === 'done' && typeof outcome.result?.text === 'string') {
         const activeMachine = parseSymonMachineIdentity(outcome.result.activeMachine);
         if (activeMachine) updateSymonTextMachine(turn.sessionId, activeMachine);
-        const answer = outcome.result.text;
+        const answer = outcome.result.text; turn.resultText = answer;
         appendSymonTextTranscript(turn.sessionId, [{ role: 'assistant', text: answer }]);
         const owner = clients.get(turn.clientId);
         if (owner && answer) {
@@ -4155,7 +4123,7 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
         pushSymonTextDone(turn, 'done', undefined, activeMachine ?? initial.activeMachine);
         return;
       }
-      pushSymonTextDone(turn, 'failed', outcome.detail || outcome.error || 'Planner turn failed.');
+      pushSymonTextDone(turn, outcome.state === 'done' ? 'failed' : 'unconfirmed', outcome.detail || outcome.error || 'Planner turn outcome is unconfirmed.');
       return;
     }
     if (!turn.terminal) {
@@ -4163,12 +4131,21 @@ async function runSymonTextTurn(turn: SymonTextTurnState, text: string): Promise
         turn.interruptRequested = true;
         await interruptSymonTextNative(turn.sessionId, turn.turnId);
       }
-      pushSymonTextDone(turn, 'failed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
+      pushSymonTextDone(turn, 'unconfirmed', 'Planner turn timed out; its final result is still being reconciled.', undefined,
         loadSymonTextSession(turn.sessionId)?.allowDefaultFallback === true);
     }
   } finally {
     await reconcileSelection();
   }
+}
+
+function handleSymonTextAttach(client: ClientState, msg: Record<string, unknown>): void {
+  const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
+  const result = attachSymonTextSession({ sessionId, client, record: loadSymonTextSession(sessionId),
+    owners: symonTextOwners, turns: symonTextTurns, connected: id => clients.has(id) });
+  if (result.ok) touchSymonTextAttachment(sessionId);
+  send(client, { channel: 'symon', type: 'symon-text-attached', sessionId, ...result });
+  if (result.ok) for (const confirmation of symonConfirmationTracker.pendingForSession(sessionId, Date.now())) pushSymonConfirmRequired(client.id, confirmation);
 }
 
 function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>): void {
@@ -4177,14 +4154,17 @@ function handleSymonTextTurn(client: ClientState, msg: Record<string, unknown>):
   const text = typeof msg.text === 'string' ? msg.text.trim().slice(0, 8_000) : '';
   if (!sessionId || !turnId || !text || sessionId.length > 160 || turnId.length > 160) return;
   const record = loadSymonTextSession(sessionId);
-  if (!record || !symonTextClientMatches(record, client)) {
-    const rejected: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
-    pushSymonTextDone(rejected, 'failed', 'Text session is missing, stale, or belongs to another client.');
+  if (!record || !symonTextClientMatches(record, client) || (record.reattachable && symonTextOwners.get(sessionId) !== client.id)) {
+    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Text session is missing, stale, or belongs to another client.' });
     return;
   }
+  if (record.reattachable && record.pendingTurnIds?.some(id => id !== turnId)) {
+    send(client, { channel: 'symon', type: 'symon-text-done', sessionId, turnId, status: 'failed', detail: 'Existing task is still active or unconfirmed; no new task was started.' }); return;
+  }
   const key = textTurnKey(sessionId, turnId);
-  if (symonTextTurns.has(key)) return;
+  if (symonTextTurns.has(key) || record.completedTurns?.some(turn => turn.turnId === turnId)) return;
   const turn: SymonTextTurnState = { clientId: client.id, sessionId, turnId, terminal: false };
+  touchSymonTextAttachment(sessionId, turnId);
   symonTextTurns.set(key, turn);
   symonTextOwners.set(sessionId, client.id);
   void chainOnKey(symonTextChains, sessionId, () => runSymonTextTurn(turn, text));
@@ -4339,12 +4319,13 @@ function handleSymonStop(client: ClientState, msg: Record<string, unknown>): voi
   const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
   if (!sessionId) return;
   const textSession = loadSymonTextSession(sessionId);
-  if (textSession && symonTextClientMatches(textSession, client)) {
+  if (textSession && symonTextClientMatches(textSession, client) && (!textSession.reattachable || symonTextOwners.get(sessionId) === client.id)) {
     for (const turn of symonTextTurns.values()) {
       if (turn.sessionId !== sessionId || turn.terminal) continue;
       void interruptSymonTextNative(turn.sessionId, turn.turnId);
-      pushSymonTextDone(turn, 'interrupted');
+      pushSymonTextDone(turn, textSession.reattachable ? 'unconfirmed' : 'interrupted');
     }
+    if (textSession.reattachable && textSession.pendingTurnIds?.length) return;
     symonTextOwners.delete(sessionId);
     dropSymonTextSession(sessionId);
     endSymonMachineSession(sessionId);
@@ -4857,6 +4838,7 @@ function cleanupSymonForClient(clientId: string): void {
   for (const [sessionId, ownerId] of Array.from(symonTextOwners.entries())) {
     if (ownerId !== clientId) continue;
     symonTextOwners.delete(sessionId);
+    if (loadSymonTextSession(sessionId)?.reattachable) continue;
     for (const turn of symonTextTurns.values()) {
       if (turn.sessionId !== sessionId || turn.terminal) continue;
       void interruptSymonTextNative(turn.sessionId, turn.turnId);
@@ -5172,6 +5154,19 @@ function sendOrchestratorInterruptAck(client: ClientState, input: {
 
 async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
+  const threadId = resolveMsgThreadId(msg);
+  if (!repoPath || !threadId?.startsWith('thoughts-')) return handleOrchestratorSendMsgAdmitted(client, msg);
+  try {
+    await withImmediateComposerSend({ repoPath, threadId }, () => handleOrchestratorSendMsgAdmitted(client, msg));
+  } catch (error) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: error instanceof Error ? error.message : 'Unable to admit this message.',
+      ...orchestratorCommandAckCorrelation(resolveOrchestratorCommandCorrelationId(msg)) } });
+  }
+}
+
+async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = resolveOrchestratorMessageRepoPath(msg);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
@@ -5244,7 +5239,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
             admittedTurnId: leadReceipt.admittedTurnId,
           },
         });
-        void sendLeadTerminalStatus(client, leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor)
+        void sendLeadTerminalStatus(message => send(client, message), leadReceipt.lead.id, leadReceipt.admittedTurnId, leadReceipt.cursor, `orch-user-${correlationId}`)
           .catch((error) => console.warn('[ws-server] Persistent lead terminal status watch failed:', error));
         return;
       }
@@ -5328,6 +5323,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       event: 'error',
       data: {
         error: error instanceof Error ? error.message : 'Failed to reserve orchestrator command',
+        voiceTerminal: { userMessageId: `orch-user-${correlationId}`, outcome: 'failed', text: 'The backend did not accept this request.' },
         repoPath,
         threadId,
         backend: backendId,
@@ -5338,68 +5334,17 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   }
 }
 
-async function sendLeadTerminalStatus(
-  client: ClientState,
-  leadId: string,
-  turnId: string,
-  afterCursor: number,
-): Promise<void> {
-  const deadline = Date.now() + 10 * 60_000;
-  let cursor = afterCursor;
-  while (Date.now() < deadline) {
-    const receipt = await waitForLead({
-      leadId,
-      turnId,
-      afterCursor: cursor,
-      waitMs: Math.min(30_000, deadline - Date.now()),
-    });
-    cursor = receipt.cursor;
-    const leadStatus = receipt.lead.status;
-    const status = leadStatus === 'stopped' ? 'stopped' : receipt.requestedTurn?.status;
-    if (!status || status === 'queued' || status === 'running' || status === 'waiting_workers') continue;
-    const assistantText = receipt.requestedTurn?.resultText
-      ?? receipt.requestedTurn?.outcome?.summary
-      ?? receipt.requestedTurn?.error
-      ?? '';
-    if (assistantText) {
-      send(client, {
-        channel: 'orchestrator',
-        event: 'output',
-        data: {
-          text: assistantText,
-          repoPath: receipt.lead.repoPath,
-          threadId: receipt.lead.threadId,
-          backend: receipt.lead.routing.backend,
-          assistantMessageId: `lead-assistant-${receipt.requestedTurn?.id}`,
-        },
-      });
-    }
-    send(client, {
-      channel: 'orchestrator',
-      event: 'status',
-      data: {
-        status: status === 'failed' || status === 'stopped' ? 'dead' : 'ready',
-        leadStatus: status,
-        repoPath: receipt.lead.repoPath,
-        threadId: receipt.lead.threadId,
-        backend: receipt.lead.routing.backend,
-        lead: receipt.lead,
-        admittedTurnId: turnId,
-      },
-    });
-    return;
-  }
-}
 
 async function handleOrchestratorSendMsgOnce(
   client: ClientState,
-  msg: Record<string, unknown>,
+  incoming: Record<string, unknown>,
   correlationId: string | undefined,
   attachments: ComposerImageAttachment[] | undefined,
 ) {
-  const repoPath = resolveOrchestratorMessageRepoPath(msg);
-  const message = typeof msg.message === 'string' ? msg.message : null;
+  const repoPath = resolveOrchestratorMessageRepoPath(incoming);
+  const message = typeof incoming.message === 'string' ? incoming.message : null;
   if (!repoPath || !message) return;
+  const msg = resolveMobileTurnSelection(incoming, repoPath, resolveMsgThreadId(incoming), resolveMsgBackendId(incoming));
   // The transcript persists the operator's OWN words. `message` may carry
   // model-facing scaffolding the client prepends (mode directives, compaction
   // resume prelude) — persisting it verbatim rendered those directives
@@ -5615,7 +5560,10 @@ async function handleOrchestratorSendMsgOnce(
     // the backend carries the "Operator session rules (binding)" block. Applies
     // across ALL backends because they all forward this argument untouched.
     const executionMode = resolveOrchestratorExecutionMode(msg.orchestrationMode);
-    const operatorMessage = modelFacingComposerMessage(message, executionMode);
+    const mobileMessage = msg.surface === 'mobile' && isComposerWireMode(msg.pickedMode)
+      ? composeComposerWireMessage(message, msg.pickedMode).wireMessage
+      : message;
+    const operatorMessage = modelFacingComposerMessage(mobileMessage, executionMode);
     const turnBody = backendSwitchHandoff
       ? `${backendSwitchHandoff.prelude}\n\n${operatorMessage}`
       : operatorMessage;
@@ -5765,20 +5713,23 @@ async function handleOrchestratorSendMsgOnce(
       overrideMessage?: string,
       leadingEvents: readonly OrchestratorEvent[] = [],
     ) => {
-      const effectiveTurnModel = resolveTurnModel(turnBackend, overrideModel) ?? null;
+      let effectiveTurnModel = resolveTurnModel(turnBackend, overrideModel) ?? null;
       activeAssistantModel = effectiveTurnModel;
       let pendingDone: Extract<OrchestratorEvent, { type: 'done' }> | null = null;
       const emitDone = (event: Extract<OrchestratorEvent, { type: 'done' }>) => {
         sawTerminal = true;
+        if (turnController?.signal.aborted) appendOperatorStopNote(assistantText);
         if (threadId && event.sessionId && (turnBackend.id === 'claude' || turnBackend.id === 'codex')) {
           writeOrchestratorBackendSessionId(threadId, turnBackend.id, event.sessionId);
         }
+        if (activeAssistantReceipt) activeAssistantReceipt = { ...activeAssistantReceipt, terminal: { userMessageId,
+          outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed' } };
         persistAssistantText(event.sessionId ?? null, turnBackend.id, event, effectiveTurnModel);
         if (sessionName) {
           broadcastToOrchestratorSession(sessionName, JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
+            data: { status: 'ready', voiceTerminal: { userMessageId, outcome: turnController?.signal.aborted ? 'unconfirmed' : event.terminalOutcome ?? 'unconfirmed', text: assistantText.value }, repoPath, threadId, sessionId: event.sessionId, cost: event.cost, usage: event.usage, receipt: activeAssistantReceipt, backend: turnBackend.id, model: effectiveTurnModel, agent: turnAgentTag },
           }));
         }
       };
@@ -5795,9 +5746,12 @@ async function handleOrchestratorSendMsgOnce(
 
         switch (event.type) {
           case 'turn_receipt': {
-            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode);
+            effectiveTurnModel = normalizeObservedOrchestratorTurnModel(turnBackend.id, event.leadModel) ?? effectiveTurnModel;
+            activeAssistantModel = effectiveTurnModel;
             const pickedMode = isComposerWireMode(msg.pickedMode) ? msg.pickedMode : undefined;
+            const mode = resolveTurnReceiptMode(turnBackend.id, msg.orchestrationMode, pickedMode);
             activeAssistantReceipt = {
+              permissionMode,
               leadModel: event.leadModel,
               effort: event.effort,
               mode,
@@ -6041,7 +5995,7 @@ async function handleOrchestratorSendMsgOnce(
     // subscribers. Every event is tagged with its actual backend (and `agent`,
     // for openclaw) so fallback handoffs do not cross-contaminate transcripts.
     const resolveQuotaFallback = (currentModel: string | null = model ?? null) => (
-      orchestratorModeAllowsBackendFallback(msg.orchestrationMode)
+      orchestratorModeAllowsBackendFallback(msg.orchestrationMode, msg.pinBackend)
         ? resolveCrossHouseFallback({
             role: crossHouseRole,
             backend: activeBackend.id,
@@ -6196,6 +6150,7 @@ async function handleOrchestratorSendMsgOnce(
     // client latch releases instead of counting up to the 4-hour reaper.
     // (2026-06-22 latch audit)
     if (!sawTerminal && sessionName) {
+      if (turnController?.signal.aborted) appendOperatorStopNote(assistantText);
       persistAssistantText(null);
       broadcastToOrchestratorSession(sessionName, JSON.stringify({
         channel: 'orchestrator',
@@ -6268,6 +6223,7 @@ async function handleOrchestratorSendMsgOnce(
       event: 'error' as const,
       data: {
         error: err instanceof Error ? err.message : 'Failed to send message',
+        voiceTerminal: { userMessageId, outcome: commandAccepted ? 'unconfirmed' : 'failed', text: commandAccepted ? '' : 'The backend did not accept this request.' },
         ...(projectError?.toPayload() ?? {}),
         repoPath,
         threadId,
@@ -6302,6 +6258,10 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   const repoPath = resolveOrchestratorMessageRepoPath(msg);
   if (!repoPath) return;
   const threadId = resolveMsgThreadId(msg);
+  if (threadId) {
+    stopSharedWorkerReturns(repoPath, threadId); holdComposerSends({ repoPath, threadId }); holdWorkerCorrections({ repoPath, threadId });
+    publishComposerQueueChange(threadId);
+  }
   const leadBinding = threadId ? findLeadThreadBinding(threadId) : null;
   if (leadBinding) {
     const correlationId = resolveOrchestratorCommandCorrelationId(msg);
@@ -9793,6 +9753,19 @@ async function bootstrapWsServer() {
 
     // ── Start Agent Supervisor ──
     const supervisorCallbacks: SupervisorCallbacks = {
+      onHeartbeat: createChatContinuationHeartbeat({
+        readTranscript: fetchRuntimeTranscript,
+        isBusy: (repoPath, origin) => orchestratorInflightAborts.has(orchestratorAbortKey(repoPath, origin.backend, '', origin.threadId))
+          || getOrchestratorBackend(origin.backend).peekSession(repoPath, undefined, origin.threadId)?.status === 'busy',
+        registerAbort: (repoPath, origin, controller) => {
+          const key = orchestratorAbortKey(repoPath, origin.backend, '', origin.threadId);
+          if (orchestratorInflightAborts.has(key)) throw new Error('Parent chat is already working.');
+          orchestratorInflightAborts.set(key, controller);
+          return () => { if (orchestratorInflightAborts.get(key) === controller) orchestratorInflightAborts.delete(key); };
+        },
+        publish: (threadId, sessionName, event, data) => broadcastToOrchestratorSession(
+          orchestratorRouteSessionName(sessionName, threadId), JSON.stringify({ channel: 'orchestrator', event, data })),
+      }),
       async fetchFleetStatus() {
         // #476 — Use cached inventory (15s TTL) instead of forcing fresh discovery every 5s.
         // The supervisor only needs to detect status changes, not millisecond-fresh data.

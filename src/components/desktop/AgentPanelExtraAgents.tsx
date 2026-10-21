@@ -1,30 +1,12 @@
 'use client';
 
 /**
- * AgentPanelExtraAgents — the #515 / #627 fold-in. Shows every active lane /
- * agent from non-CLI origins (MCP, Mobile, Webhook, Cloud) that wouldn't
- * otherwise surface in the per-branch row stack from RepoRegistrySection.
- *
- * Rendered BELOW the RepoRegistrySection inside AgentPanel. Uses the existing
- * Rams-dense row treatment — no new chrome, no extra panel, no launcher. If
- * there are no non-CLI lanes, this component renders nothing.
- *
- * Rows are flat across repositories: attention rank first, then recency.
- * A repo suffix appears only when more than one repository is represented.
- *
- * Data sources (merged and deduped by sessionKey):
- *   /api/lanes?active=true — SQLite-backed lane rows (runtime-agnostic)
- *   /api/runtime/inventory — fleet agent summaries
- *   /api/panel/repos — registered repo list (to map repoPath → short name)
- *
- * Subscribes to `o8:lane-lifecycle` + `o8:agent-lifecycle` for instant
- * refresh. Polls every 5 min as a fallback, consistent with AgentPanel.
- *
- * CLI origin rows intentionally omitted — those already render inside the
- * repo cards via useAgentPanelState's runtime inventory feed.
+ * Loads and controls spawned workers. The sidebar consumer places the same
+ * rows in its normal chat views; standalone consumers retain the compact list.
+ * Lane, inventory, retry, archive and focus commands keep their exact targets.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePublishSidebarAttention, useSidebarView } from './repo-focus/tabs/chats/sidebar-view-store';
 import { motion } from 'framer-motion';
 import { deriveParkedLaneBuckets, type ReviewApprovalSummary } from '@/components/desktop/merge-beacon/derive';
@@ -59,6 +41,9 @@ import {
 import { staysInWorkingView } from './repo-focus/tabs/chats/sidebar-view';
 import { useRowReadState } from './repo-focus/tabs/chats/use-row-read-state';
 import { getCompletionStart, getLastVisited, markVisited } from './repo-focus/tabs/chats/read-state';
+import { isSidebarAgentPinned, type SidebarAgentEntry, type ChatViewAction } from './repo-focus/tabs/chats/sidebar-agent-navigation';
+import { useSidebarAgentPins } from './repo-focus/tabs/chats/use-sidebar-agent-pins';
+import { toast } from '@/components/shared/ConfirmToastHost';
 
 // ── Types ──
 
@@ -85,10 +70,12 @@ export interface LaneSummary {
 }
 
 export interface AgentPanelExtraAgentsProps {
+  onOpenChatReview?: (laneId: string, repoPath: string | null) => void;
   activeSessionKey?: string | null;
   onSelectSession?: (sessionKey: string) => void;
   packets?: OrchestratorPacket[];
   workingOnly?: boolean;
+  renderContent?: (entries: readonly SidebarAgentEntry[], actions: readonly ChatViewAction[]) => ReactNode;
 }
 
 // ── Constants ──
@@ -209,7 +196,7 @@ function buildRows(
 }
 
 /**
- * Which lanes belong in the Agents section.
+ * Which lanes belong in sidebar navigation.
  *
  * Live lanes always. A terminal lane stays only while it still says something
  * true about today: outcome-stamped completed/archived lanes keep their chip
@@ -249,6 +236,7 @@ export function deriveSpawnedAgentRows({
   rejectedPacketIds = new Set<string>(),
   archivedSessionKeys = new Set<string>(),
   archivedRowKeys = new Set<string>(),
+  pinnedRowKeys = new Set<string>(),
 }: {
   lanes: LaneSummary[];
   agents: AgentSummary[];
@@ -256,6 +244,7 @@ export function deriveSpawnedAgentRows({
   rejectedPacketIds?: ReadonlySet<string>;
   archivedSessionKeys?: ReadonlySet<string>;
   archivedRowKeys?: ReadonlySet<string>;
+  pinnedRowKeys?: ReadonlySet<string>;
 }): ExtraAgentRow[] {
   const rows = buildRows(lanes, agents, packets, rejectedPacketIds).filter((row) => (
     !archivedRowKeys.has(row.key)
@@ -265,7 +254,7 @@ export function deriveSpawnedAgentRows({
   const terminal = rows
     .filter(isTerminalRow)
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
-    .filter((row, index) => index < RECENT_TERMINAL_CAP
+    .filter((row, index) => isSidebarAgentPinned(pinnedRowKeys, row) || index < RECENT_TERMINAL_CAP
       || (row.lastActivityAt >= getCompletionStart()
         && isCompletionUnread(row.lastActivityAt, getLastVisited(row.packetId ? `packet:${row.packetId}` : row.key))));
   return [...live, ...terminal];
@@ -335,10 +324,12 @@ function ClearFinishedAgentsButton({
 }
 
 function AgentPanelExtraAgentsBase({
+  onOpenChatReview,
   activeSessionKey,
   onSelectSession,
   packets = [],
   workingOnly = false,
+  renderContent,
 }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -349,6 +340,7 @@ function AgentPanelExtraAgentsBase({
   const [busy, setBusy] = useState(false);
   const [headerHovered, setHeaderHovered] = useState(false);
   const readStateVersion = useRowReadState();
+  const agentPins = useSidebarAgentPins();
   const priorityView = useSidebarView() === 'flat';
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -441,7 +433,7 @@ function AgentPanelExtraAgentsBase({
       let laneList: LaneSummary[] = [];
       if (lanesRes.status === 'fulfilled' && lanesRes.value.ok) {
         const json = await lanesRes.value.json() as { lanes?: LaneSummary[] };
-        laneList = (json.lanes ?? []).filter((lane) => isRailLane(lane));
+        laneList = json.lanes ?? [];
         setLanes(laneList);
       }
 
@@ -561,13 +553,15 @@ function AgentPanelExtraAgentsBase({
   const rows = useMemo(() => {
     void readStateVersion; // Re-evaluate retained results when acknowledged.
     return deriveSpawnedAgentRows({
-    lanes,
+    lanes: lanes.filter(lane => isRailLane(lane) || (!lane.archivedByOperator
+      && isSidebarAgentPinned(agentPins.keys, { key: `lane:${lane.id}`, sessionKey: lane.sessionKey }))),
     agents,
     packets,
     rejectedPacketIds,
     archivedRowKeys,
+    pinnedRowKeys: agentPins.keys,
     });
-  }, [lanes, agents, packets, rejectedPacketIds, archivedRowKeys, readStateVersion]);
+  }, [lanes, agents, packets, rejectedPacketIds, archivedRowKeys, readStateVersion, agentPins.keys]);
   const showRepoSuffix = deriveShowRepoSuffix(rows);
   const rankedRows = useMemo(() => {
     void readStateVersion;
@@ -617,7 +611,8 @@ function AgentPanelExtraAgentsBase({
   }, [clearableRowKeys]);
 
   const needsYouCount = rankedRows.filter((entry) => entry.rank > 0).length;
-  usePublishSidebarAttention(needsYouCount);
+  const workingCount = rankedRows.filter(({ row }) => row.status === 'running' && !isTerminalRow(row)).length;
+  usePublishSidebarAttention(needsYouCount, !renderContent);
   const highestBand = rankedRows.find((entry) => entry.rank > 0)?.band ?? null;
   // Tone ladder mirrors attentionWashStyle — 'human' is warm like rejected,
   // never slate, so the header count always matches the loudest wash below it.
@@ -656,6 +651,73 @@ function AgentPanelExtraAgentsBase({
     return () => window.removeEventListener(SIDEBAR_HOVER_THREAD_EVENT, onHoverThread);
   }, []);
 
+  const renderAgentRow = (row: ExtraAgentRow, band: ReturnType<typeof attentionBand>,
+    options?: Parameters<SidebarAgentEntry['render']>[0]) => (
+    <ExtraAgentRowView
+          row={row}
+          band={band}
+          roomy={options?.roomy ?? priorityView}
+          showPreview={options?.showPreview}
+          link={linkedPacketIds
+            ? (row.packetId && linkedPacketIds.has(row.packetId) ? 'linked' : 'dimmed')
+            : null}
+          repoLabel={options ? options.repoLabel : priorityView || showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
+          active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
+          busy={busy}
+          onSelectSession={onSelectSession}
+          onFocusRow={handleFocusRow}
+          onOpenReview={onOpenChatReview}
+          onRetryPacket={handleRetry}
+          onOpenHoverCard={openHoverCard}
+          onCloseHoverCard={scheduleHoverClose}
+          onOpenMenu={(event, targetRow) => {
+            setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
+          }}
+        />
+  );
+  const overlays = <>
+      {actionMenu ? (
+        <ExtraAgentActionMenu
+          state={actionMenu}
+          busy={busy}
+          canFocus={Boolean(actionMenu.row.packetId || actionMenu.row.sessionKey || actionMenu.row.laneId)}
+          pinned={isSidebarAgentPinned(agentPins.keys, actionMenu.row)}
+          onTogglePin={renderContent ? () => {
+            if (!agentPins.toggle(actionMenu.row)) toast('Could not save this pin.');
+            setActionMenu(null);
+          } : undefined}
+          onClose={() => setActionMenu(null)}
+          onFocus={() => {
+            handleFocusRow(actionMenu.row);
+            setActionMenu(null);
+          }}
+          onArchive={() => {
+            void handleArchive(actionMenu.row);
+            setActionMenu(null);
+          }}
+        />
+      ) : null}
+      {hoverCard ? (
+        <SpawnedAgentHoverCard
+          row={hoverCard.row}
+          anchorRect={hoverCard.rect}
+          onMouseEnter={cancelHoverClose}
+          onMouseLeave={scheduleHoverClose}
+        />
+      ) : null}
+  </>;
+  if (renderContent) {
+    const entries: SidebarAgentEntry[] = rankedRows.map(({ row, band }) => ({
+      row, pinned: isSidebarAgentPinned(agentPins.keys, row),
+      active: Boolean(activeSessionKey && row.sessionKey === activeSessionKey),
+      attention: { status: row.laneStatus ?? row.status, rejected: row.rejected, outcome: row.outcome,
+        unread: isCompletionUnread(row.lastActivityAt, getLastVisited(row.packetId ? `packet:${row.packetId}` : row.key)) },
+      render: options => renderAgentRow(row, band, options),
+    }));
+    const actions: ChatViewAction[] = clearableRowKeys.length ? [{ label: `Clear ${clearableRowKeys.length} finished agents`,
+      disabled: busy, onSelect: () => { void handleClearFinished(); } }] : [];
+    return <>{renderContent(entries, actions)}{overlays}</>;
+  }
   if (rankedRows.length === 0) return null;
 
   return (
@@ -676,6 +738,13 @@ function AgentPanelExtraAgentsBase({
           compact
           count={needsYouCount > 0 ? needsYouCount : undefined}
           countTone={countTone}
+          status={workingCount > 0 ? (
+            <span aria-label={`${workingCount} agent${workingCount === 1 ? '' : 's'} working`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 10.5, fontWeight: 300, color: 'var(--t-text-muted)', whiteSpace: 'nowrap' }}>
+              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: AGENT_STATUS_ACCENT.running }} />
+              {workingCount} working
+            </span>
+          ) : undefined}
           collapsed={collapsed}
           onToggle={toggleCollapsed}
           action={clearableRowKeys.length > 0 ? (
@@ -704,53 +773,12 @@ function AgentPanelExtraAgentsBase({
           layout="position"
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         >
-        <ExtraAgentRowView
-          row={row}
-          band={band}
-          roomy={priorityView}
-          link={linkedPacketIds
-            ? (row.packetId && linkedPacketIds.has(row.packetId) ? 'linked' : 'dimmed')
-            : null}
-          repoLabel={priorityView || showRepoSuffix ? repoSuffix({ repoPath: row.repoPath }) : null}
-          active={Boolean(activeSessionKey && row.sessionKey === activeSessionKey)}
-          busy={busy}
-          onSelectSession={onSelectSession}
-          onFocusRow={handleFocusRow}
-          onRetryPacket={handleRetry}
-          onOpenHoverCard={openHoverCard}
-          onCloseHoverCard={scheduleHoverClose}
-          onOpenMenu={(event, targetRow) => {
-            setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
-          }}
-        />
+        {renderAgentRow(row, band)}
         </motion.div>
         ))}
         </div>
       ) : null}
-      {actionMenu ? (
-        <ExtraAgentActionMenu
-          state={actionMenu}
-          busy={busy}
-          canFocus={Boolean(actionMenu.row.packetId || actionMenu.row.sessionKey || actionMenu.row.laneId)}
-          onClose={() => setActionMenu(null)}
-          onFocus={() => {
-            handleFocusRow(actionMenu.row);
-            setActionMenu(null);
-          }}
-          onArchive={() => {
-            void handleArchive(actionMenu.row);
-            setActionMenu(null);
-          }}
-        />
-      ) : null}
-      {hoverCard ? (
-        <SpawnedAgentHoverCard
-          row={hoverCard.row}
-          anchorRect={hoverCard.rect}
-          onMouseEnter={cancelHoverClose}
-          onMouseLeave={scheduleHoverClose}
-        />
-      ) : null}
+      {overlays}
     </section>
   );
 }

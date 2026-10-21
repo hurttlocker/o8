@@ -91,9 +91,11 @@ function actor(mode: string, accountId = 'user_active', token = license(accountI
     child.once('close', (code) => {
       children.delete(child);
       if (code !== 0 && code !== 17) { reject(new Error(`Account fixture exit ${code}: ${stderr}`)); return; }
+      if (stderr) console.error('[account-fixture]', stderr.slice(0, 2000));
       resolve({ code, result: stdout ? JSON.parse(stdout) : null });
     });
   });
+  void done.catch(() => undefined);
   return { scratch, done, release: () => writeFileSync(join(scratch, 'release'), '1') };
 }
 async function ready(accountId = 'user_active') {
@@ -155,15 +157,19 @@ describe('account transitions through the real entitlement sync route', () => {
     await ready();
     const transition = actor('transition');
     await entered(transition);
-    const admission = actor('admit');
-    await entered(admission, 'started');
+    const admissions = Array.from({ length: 8 }, () => actor('admit'));
+    await Promise.all(admissions.map((admission) => entered(admission, 'started')));
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(existsSync(join(admission.scratch, 'entered'))).toBe(false);
-    expect(existsSync(join(admission.scratch, 'children'))).toBe(false);
+    for (const admission of admissions) {
+      expect(existsSync(join(admission.scratch, 'entered'))).toBe(false);
+      expect(existsSync(join(admission.scratch, 'children'))).toBe(false);
+    }
     transition.release();
     expect((await transition.done).result).toMatchObject({ reason: 'signed_out' });
-    expect((await admission.done).result).toEqual({ admitted: false });
-    expect(existsSync(join(admission.scratch, 'children'))).toBe(false);
+    for (const admission of admissions) {
+      expect((await admission.done).result).toEqual({ admitted: false });
+      expect(existsSync(join(admission.scratch, 'children'))).toBe(false);
+    }
   });
 
   it('retains admission ownership through actual child creation before a competing sign-out can commit', async () => {
