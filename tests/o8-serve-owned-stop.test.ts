@@ -1,5 +1,5 @@
 import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -63,10 +63,10 @@ async function fixture(respawn = false, race: 'successor' | 'overlap' | null = n
   writeFileSync(join(dir, 'serve-state.json'), JSON.stringify(state));
   return { dir, child, leaf, state };
 }
-function stop(dir: string, command = 'stop'): Promise<{code:number;output:string}> {
+function stop(dir: string, command = 'stop', env: NodeJS.ProcessEnv = {}): Promise<{code:number;output:string}> {
   return new Promise((done) => {
     execFile(process.execPath, [join(dir, 'server/bin/o8.mjs'), 'serve', ...(command ? [command] : [])], {
-      cwd: dir, env: { ...process.env, O8_DATA_DIR: dir, CORTEX_IDE_DATA_DIR: dir }, encoding: 'utf8', timeout: 20_000,
+      cwd: dir, env: { ...process.env, ...env, O8_DATA_DIR: dir, CORTEX_IDE_DATA_DIR: dir }, encoding: 'utf8', timeout: 20_000,
     }, (error, stdout, stderr) => done({ code: error ? Number(error.code) || 1 : 0, output: stdout + stderr }));
   });
 }
@@ -88,6 +88,41 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform === 'win32')('serve stop process ownership entry point', () => {
+  it('certifies an observed leaf exit between birth capture and ancestry refresh', async () => {
+    const f = await fixture();
+    const outsider = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+    children.push(outsider); pids.add(outsider.pid!);
+    const realPs = execFileSync('which', ['ps'], { encoding: 'utf8' }).trim();
+    const shimDir = join(f.dir, 'sampling-bin'); mkdirSync(shimDir);
+    const counter = join(f.dir, 'sampling-count');
+    const shim = join(shimDir, 'ps');
+    writeFileSync(shim, `#!${process.execPath}
+      const fs=require('node:fs');const {spawnSync}=require('node:child_process');
+      const counter=${JSON.stringify(counter)};
+      const count=fs.existsSync(counter)?Number(fs.readFileSync(counter,'utf8'))+1:1;
+      fs.writeFileSync(counter,String(count));
+      if(count===2){
+        process.kill(${f.leaf},'SIGKILL');
+        for(let n=0;n<100;n++){
+          try{process.kill(${f.leaf},0);}catch{break;}
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5);
+        }
+      }
+      const result=spawnSync(${JSON.stringify(realPs)},process.argv.slice(2),{encoding:'utf8'});
+      process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exit(result.status??1);
+    `);
+    chmodSync(shim, 0o700);
+    const result = await stop(f.dir, 'stop', { PATH: `${shimDir}:${process.env.PATH}` });
+    expect(Number(readFileSync(counter, 'utf8'))).toBeGreaterThanOrEqual(2);
+    expect(result.code, result.output).toBe(0);
+    expect(alive(f.leaf)).toBe(false);
+    expect(alive(f.child.pid!)).toBe(false);
+    expect(alive(outsider.pid!)).toBe(true);
+    const receipt = JSON.parse(readFileSync(join(f.dir, 'serve-stop.json'), 'utf8'));
+    expect(receipt).toMatchObject({ confirmedDead: true, cleanupCommitted: true, targetPid: f.child.pid });
+    expect(existsSync(join(f.dir, 'serve-state.json'))).toBe(false);
+  }, 25_000);
+
   it('stops detached descendants and preserves an unrelated process', async () => {
     const f = await fixture();
     const outsider = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
