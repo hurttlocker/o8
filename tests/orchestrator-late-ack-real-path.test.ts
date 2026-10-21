@@ -29,6 +29,7 @@ let host: HTMLDivElement;
 let root: Root;
 let stream: OrchestratorStreamResult;
 let displayed: MobileTranscriptEntry[];
+let replaceRetainedMessages: (messages: MobileTranscriptEntry[]) => void;
 let persist: ReturnType<typeof usePersistChatThread>;
 let threadId: string;
 let ordinal = 0;
@@ -45,7 +46,7 @@ function Harness() {
     }));
   }, [result.messages]);
   const composed = resolveDisplayMessages({ historyEntries: [], chatMessages, streamMessages: result.messages });
-  useEffect(() => { stream = result; persist = persistence; displayed = composed; }, [result, persistence, composed]);
+  useEffect(() => { stream = result; persist = persistence; displayed = composed; replaceRetainedMessages = setChatMessages; }, [result, persistence, composed]);
   return createElement('output', null, composed.map((message) => message.id).join('|'));
 }
 async function event(name: string, data: Record<string, unknown> = {}) {
@@ -213,4 +214,87 @@ it('retains separate delivery confirmations for consecutive identical messages',
     .toEqual([first.userMessageId, second.userMessageId]);
   expect(stream.messages.some((entry) => entry.id === `orch-delivery-error-${second.clientMessageId}`)).toBe(false);
   expect(sends()).toHaveLength(2);
+});
+
+
+describe('late acknowledgement recovery when browser storage or the retained row is unavailable', () => {
+  it('settles the matching in-memory send when quota prevents saving its pending record', async () => {
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+    try {
+      const sent = await timeoutSend();
+      await save();
+      const warningId = `orch-delivery-error-${sent.clientMessageId}`;
+      await event('send-ack', { clientMessageId: 'another-send' });
+      expect(displayed.some(entry => entry.id === warningId)).toBe(true);
+      await event('send-ack', { clientMessageId: sent.clientMessageId });
+      expect(displayed.some(entry => entry.id === warningId)).toBe(false);
+      await save();
+      await reloadSaved();
+      expect(displayed.some(entry => entry.id === warningId)).toBe(false);
+      expect(displayed.find(entry => entry.id === sent.userMessageId)?.deliveryConfirmed).toBe(true);
+      await act(async () => stream.retryPendingSend(sent.clientMessageId));
+      expect(sends()).toHaveLength(1);
+    } finally {
+      write.mockRestore();
+    }
+  });
+
+  it('persists confirmation after the optimistic user row left the retained transcript', async () => {
+    const sent = await timeoutSend();
+    await save();
+    const stale = await readSaved();
+    const warningId = `orch-delivery-error-${sent.clientMessageId}`;
+    const warning = stream.messages.find(entry => entry.id === warningId)!;
+    await act(async () => {
+      stream.replaceTranscript([warning]);
+      replaceRetainedMessages([warning]);
+    });
+    expect(displayed.some(entry => entry.id === sent.userMessageId)).toBe(false);
+    await event('send-ack', { clientMessageId: sent.clientMessageId });
+    expect(displayed.some(entry => entry.id === warningId)).toBe(false);
+    await save();
+    expect((await readSaved()).some(entry => entry.id === warningId)).toBe(false);
+    expect((await POST(new NextRequest('http://localhost/api/v2/chat-history', {
+      method: 'POST', body: JSON.stringify({ tabId: threadId, messages: stale }),
+    }))).status).toBe(200);
+    await reloadSaved();
+    expect(displayed.some(entry => entry.id === warningId)).toBe(false);
+    expect(displayed.find(entry => entry.id === sent.userMessageId)?.deliveryConfirmed).toBe(true);
+    expect(sends()).toHaveLength(1);
+  });
+});
+
+
+it('settles an older quota-failed send after its user row was evicted, without settling the newer send', async () => {
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+  try {
+    const first = await timeoutSend(); await save();
+    const second = await timeoutSend();
+    const retained = stream.messages.filter(entry => entry.id !== first.userMessageId);
+    await act(async () => { stream.replaceTranscript(retained); replaceRetainedMessages(retained); });
+    await event('send-ack', { clientMessageId: first.clientMessageId });
+    expect(displayed.some(entry => entry.id === `orch-delivery-error-${first.clientMessageId}`)).toBe(false);
+    expect(displayed.some(entry => entry.id === `orch-delivery-error-${second.clientMessageId}`)).toBe(true);
+    await save(); await reloadSaved();
+    expect(displayed.some(entry => entry.id === `orch-delivery-error-${first.clientMessageId}`)).toBe(false);
+    expect(displayed.some(entry => entry.id === `orch-delivery-error-${second.clientMessageId}`)).toBe(true);
+    expect(sends()).toHaveLength(2);
+  } finally { write.mockRestore(); }
+});
+
+it('retires a saved warning even when both local rows were evicted before the matching acknowledgement', async () => {
+  const sent = await timeoutSend(); await save();
+  const stale = await readSaved();
+  await act(async () => { stream.replaceTranscript([]); replaceRetainedMessages([]); });
+  await event('send-ack', { clientMessageId: sent.clientMessageId });
+  expect(stream.messages.find(entry => entry.id === sent.userMessageId)?.deliveryConfirmed).toBe(true);
+  await save();
+  expect((await readSaved()).some(entry => entry.id === `orch-delivery-error-${sent.clientMessageId}`)).toBe(false);
+  expect((await POST(new NextRequest('http://localhost/api/v2/chat-history', {
+    method: 'POST', body: JSON.stringify({ tabId: threadId, messages: stale }),
+  }))).status).toBe(200);
+  await reloadSaved();
+  expect(displayed.some(entry => entry.id === `orch-delivery-error-${sent.clientMessageId}`)).toBe(false);
+  expect(displayed.find(entry => entry.id === sent.userMessageId)?.text).toBe('synthetic message');
+  expect(sends()).toHaveLength(1);
 });

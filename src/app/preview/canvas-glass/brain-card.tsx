@@ -261,7 +261,7 @@ export function BrainConversation({
       {/* Composer — shared soft pill (field-sizing + Input Anticipation), no
           top divider, matching the orchestrator tab. */}
       <div style={{ paddingTop: 2, paddingBottom: 14, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
-        <CardComposer
+        <CardComposer scopeKey={repoPath ?? 'brain'}
           value={draft}
           onChange={setDraft}
           busy={asking}

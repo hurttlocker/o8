@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorBackendSetting, ThoughtsOperatorDefaults } from '@/components/desktop/thoughts/operator-defaults';
 
+import { buildMobileOrchestratorSend } from '@/lib/mobile/orchestrator-wire';
 import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
@@ -542,6 +543,37 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     expect(second).toMatchObject({ displayedModel: 'gpt-5.6-terra', displayedBackend: 'codex', recordedModel: 'gpt-5.6-terra' });
   }, 30_000);
 
+  it.each([true, false])('keeps mobile attribution with a prior desktop turn: %s', async (hasPriorTurn) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
+    sockets.add(socket);
+    await once(socket, 'open');
+    await persistDefaults('gpt-5.6-sol', 'codex');
+    const threadId = `thoughts-mobile-receipt-${hasPriorTurn}-${Date.now()}`;
+    if (hasPriorTurn) await submitComposerTurn(socket, threadId, 'gpt-5.6-sol', 'codex', {
+      orchestrationMode: 'fleet', pickedMode: 'fast', thinkingEffort: 'high',
+    });
+    const wire = buildMobileOrchestratorSend({ repoPath, threadId, backend: 'codex', agent: null, projectId: null },
+      'mobile reply', `${threadId}-mobile`);
+    socket.send(JSON.stringify(wire));
+    socket.send(JSON.stringify(wire));
+    await waitFor(() => {
+      const rows = readPersistedLlmChat(threadId)?.history.messages.filter((row) => row.role === 'assistant') ?? [];
+      return rows.length === (hasPriorTurn ? 2 : 1) && rows.at(-1)?.content === 'deterministic assistant reply';
+    }, 'mobile reply persisted');
+    const history = readPersistedLlmChat(threadId)!.history;
+    const assistant = history.messages.filter((row) => row.role === 'assistant').at(-1)!;
+    expect(assistant.receipt?.mode).toBe(hasPriorTurn ? 'fast' : 'multitask');
+    if (hasPriorTurn) expect(assistant.model).toBe('gpt-5.6-sol');
+    expect(assistant.model).toBeTruthy();
+    expect(assistant.model).toBe(assistant.receipt?.leadModel);
+    if (hasPriorTurn) {
+      expect(assistant.receipt?.effort).toBe('high');
+      expect(readFileSync(promptCapturePath, 'utf8')).toContain('[Mode: Fast] Work in the current checkout.');
+    }
+    expect(history.messages.filter((row) => row.role === 'user' && row.content === 'mobile reply')).toHaveLength(1);
+    expect(history.repoPath).toBe(repoPath);
+  }, 30_000);
+
   it('persists the effective model, effort, and mode through the desktop history reader', async () => {
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
     sockets.add(socket);
@@ -557,6 +589,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'multitask',
@@ -581,6 +614,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     );
 
     expect(turn.receipt).toEqual({
+      permissionMode: 'full', terminal: { userMessageId: `orch-user-${turn.threadId}-client-message`, outcome: 'completed' },
       leadModel: 'gpt-5.6-sol',
       effort: 'high',
       mode: 'fusion',

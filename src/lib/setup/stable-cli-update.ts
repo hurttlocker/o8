@@ -1,7 +1,8 @@
+import { withCliInstallerReservation, releaseOwnedCliUpdateLock, type CliInstallerReservation } from './cli-operation-admission';
 import 'server-only';
 
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, open, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -53,6 +54,15 @@ export async function updateSelectedStableCli(runtime: StableCli, report: CliUpd
   if (runtime === 'grok' && installation.manager === 'npm') {
     throw new CodexUpdateRefusal('manual-update', 'Use Grok Build’s original npm updater, then check again. Its package requires its own native installation step.');
   }
+  return withCliInstallerReservation(runtime, reservation => performStableCliUpdate(runtime, report, selected, installation, reservation));
+}
+
+async function performStableCliUpdate(
+  runtime: StableCli, report: CliUpdateReporter,
+  selected: Awaited<ReturnType<typeof resolveCli>>, installation: Awaited<ReturnType<typeof inspectCliInstallation>>,
+  reservation: CliInstallerReservation,
+) {
+  const spec = specs[runtime];
   const directory = getDataDir();
   await mkdir(directory, { recursive: true });
   const lockPath = path.join(directory, `${runtime}-cli-update.lock`);
@@ -63,6 +73,7 @@ export async function updateSelectedStableCli(runtime: StableCli, report: CliUpd
   const receiptPath = path.join(directory, `${runtime}-cli-update.json`);
   let receipt: { runtime: string; status: string; selectedPath: string; manager: string; targetVersion: string; startedAt: string; finishedAt?: string } | undefined;
   try {
+    await lock.writeFile(JSON.stringify({ operationId: reservation.id }));
     const tool = (await checkCliUpdates(true, runtime))[0];
     if (tool?.status !== 'update-available' || tool.selectedPath !== selected.path || !tool.latestVersion
       || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tool.latestVersion)) throw new CodexUpdateRefusal('not-outdated', 'A newer release could not be verified for this selected installation. Check again.');
@@ -136,5 +147,5 @@ export async function updateSelectedStableCli(runtime: StableCli, report: CliUpd
     if (receipt) { receipt.status = 'failed'; receipt.finishedAt = new Date().toISOString(); await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600 }); }
     if (error instanceof CodexUpdateRefusal) throw error;
     throw new CodexUpdateRefusal('update-failed', 'This CLI could not be updated. Check the selected installation before retrying.', 503);
-  } finally { await lock.close(); await unlink(lockPath); }
+  } finally { await lock.close(); releaseOwnedCliUpdateLock(lockPath, reservation.id); }
 }

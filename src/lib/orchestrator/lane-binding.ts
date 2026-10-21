@@ -10,7 +10,7 @@ export function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | 
     tabId: lane.tabId,
     repoPath: typeof lane.repoPath === 'string' ? lane.repoPath : null,
     worktreePath: typeof lane.worktreePath === 'string' ? lane.worktreePath : null,
-    runtime: isDispatchableRuntime(lane.runtime) ? lane.runtime : 'codex',
+    runtime: isDispatchableRuntime(lane.runtime) || lane.runtime === 'cloud' ? lane.runtime : 'codex',
     sessionKey: typeof lane.sessionKey === 'string' ? lane.sessionKey : null,
     laneId: typeof lane.laneId === 'string' ? lane.laneId : null,
     lastHeartbeatAt: typeof lane.lastHeartbeatAt === 'string' ? lane.lastHeartbeatAt : null,

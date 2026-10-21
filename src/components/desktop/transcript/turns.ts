@@ -10,20 +10,20 @@ export interface TranscriptTurn {
 
 /** Presentation only: original events, permissions and errors remain intact. */
 export function transcriptTurns(entries: MobileTranscriptEntry[], busy: boolean): TranscriptTurn[] {
-  const starts = entries.flatMap((entry, index) => index === 0 || entry.role === 'user' ? [index] : []);
+  const starts = entries.flatMap((entry, index) => index === 0 || (entry.role === 'user' && !entry.voice) ? [index] : []);
   return starts.map((start, turn) => {
     const end = starts[turn + 1] ?? entries.length;
     let answerIndex = end - 1;
-    while (answerIndex > start && entries[answerIndex].role === 'system') answerIndex -= 1;
+    while (answerIndex > start && (entries[answerIndex].role === 'system' || entries[answerIndex].voice)) answerIndex -= 1;
     const last = entries[answerIndex];
-    const final = !(busy && end === entries.length) && last?.role === 'assistant'
+    const final = !(busy && end === entries.length) && last?.role === 'assistant' && !last.voice
       && last.text.trim() && !last.isError && !last.statusEvent && !last.collide
       && (!last.type || last.type === 'message') && !last.toolCalls?.some(call => call.status === 'running' || call.status === 'calling')
       ? answerIndex : null;
     const history: number[] = [];
     if (final !== null) for (let index = start; index < final; index += 1) {
       const entry = entries[index];
-      if ((entry.role === 'assistant' || entry.role === 'tool') && !entry.isError
+      if ((entry.role === 'assistant' || entry.role === 'tool') && !entry.voice && !entry.isError
         && !entry.statusEvent && !entry.collide && (!entry.type || entry.type === 'message')
         && !entry.claudeCodeEvents?.some(event => event.type === 'permission_request')
         && !entry.toolCalls?.some(call => call.status === 'running' || call.status === 'calling' || call.status === 'error')) {

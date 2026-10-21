@@ -2,6 +2,8 @@
 /* eslint-disable react-hooks/refs -- the hook return is composer state, though the rule treats the typed object as a ref */
 'use client';
 
+import { composerDraftKey } from '@/components/desktop/thoughts/chat-panel/composer-draft-store';
+
 import { memo, useCallback, useRef } from 'react';
 import {
   MessageSquare,
@@ -20,6 +22,7 @@ import { BrainPipButton } from '../brain/BrainPipButton';
 import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 import { useWorkspaceComposerSubmit } from './useWorkspaceComposerSubmit';
 import { isOrchestratorBackendSetting } from '@/lib/operator/backend-setting';
+import { ComposerDictationContext } from '../dictation/ComposerDictation';
 import { useAgentVoiceMode } from '@/components/desktop/thoughts/chat-panel/useAgentVoiceMode';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
@@ -52,7 +55,7 @@ function WorkspaceChatComposerBase({
   // pane state. The previous standalone send button + below-card chip
   // row (Pass 2) are gone.
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const attachments = useThoughtsComposerAttachments({ hostRef });
+  const attachments = useThoughtsComposerAttachments({ hostRef, draftKey: composerDraftKey(tab.repo?.localPath, tab.id, chat.normalizedSessionKey ?? null) });
 
   // Model chip label — runtime + model, e.g. "Codex GPT-5.5 xhigh".
   // Falls back to just the runtime label when the chat hasn't picked a
@@ -92,6 +95,7 @@ function WorkspaceChatComposerBase({
   const { submit: handleSubmit, submitting, error: submitError } = useWorkspaceComposerSubmit(chat, attachments, tab.repo?.localPath, active && !isLaneArchived);
 
   return (
+    <ComposerDictationContext.Provider value={voiceMode.dictationId}>
     <div
       style={{
         paddingTop: 12,
@@ -130,7 +134,7 @@ function WorkspaceChatComposerBase({
         }}
       >
         {submitError ? <div role="alert" style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 14, fontSize: 12, color: 'var(--t-text-secondary)' }}>{submitError}</div> : null}
-        {chat.retentionWarning ? <div role="status" style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 14, fontSize: 12, color: 'var(--t-text-secondary)' }}>{chat.retentionWarning}</div> : null}
+        {chat.retentionWarning || attachments.retentionWarning ? <div role="status" style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 14, fontSize: 12, color: 'var(--t-text-secondary)' }}>{chat.retentionWarning ?? attachments.retentionWarning}</div> : null}
         {chat.queueNotice ? <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: 10, paddingBottom: 10, paddingLeft: 14, paddingRight: 14, fontSize: 12, color: 'var(--t-text-secondary)' }}>
           <span style={{ flex: 1, minWidth: 140 }}>{chat.queueNotice}</span>
           {chat.queuePaused && !chat.pendingSteers.some(item => item.status === 'unconfirmed') ? <button type="button" onClick={chat.resumeQueue} style={{ paddingTop: 5, paddingBottom: 5, paddingLeft: 8, paddingRight: 8, borderRadius: 7, border: '1px solid var(--t-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', cursor: 'pointer' }}>Resume queue</button> : null}
@@ -400,6 +404,7 @@ function WorkspaceChatComposerBase({
       </div>
       </div>
     </div>
+    </ComposerDictationContext.Provider>
   );
 }
 

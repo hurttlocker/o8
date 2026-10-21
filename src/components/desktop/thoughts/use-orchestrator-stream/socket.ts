@@ -1,3 +1,4 @@
+import { parseSnapshotTurn } from './snapshot-turn';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
@@ -19,7 +20,7 @@ export interface OrchestratorSnapshotTurn {
   id: string;
   startedAt: number;
   settledAt: number | null;
-  outcome: 'completed' | 'failed' | 'interrupted' | null;
+  outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' | null;
   assistantMessageId: string | null;
 }
 
@@ -86,6 +87,7 @@ interface CreateOrchestratorMessageHandlerOptions {
     data?: Record<string, unknown>;
     observedAt: number;
   }) => void;
+  onVoiceTerminal?: (receipt: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed'; text: string }) => void;
   onSnapshotTurnTerminal?: (turn: OrchestratorSnapshotTurn | null, wasRunning: boolean) => void;
   onSettledAssistantMissing?: (turn: OrchestratorSnapshotTurn) => void;
   resetEpochRef: RefLike<number>;
@@ -106,27 +108,6 @@ interface CreateOrchestratorMessageHandlerOptions {
 // guard; only a truly silent turn heals.
 const ORCH_SNAPSHOT_BUSY_RECONCILE_MS = 6000;
 
-function parseSnapshotTurn(value: unknown): OrchestratorSnapshotTurn | null | undefined {
-  if (value === null) return null;
-  if (!value || typeof value !== 'object') return undefined;
-  const turn = value as Record<string, unknown>;
-  if (typeof turn.id !== 'string' || typeof turn.startedAt !== 'number') return undefined;
-  if (turn.settledAt !== null && typeof turn.settledAt !== 'number') return undefined;
-  if (
-    turn.outcome !== null
-    && turn.outcome !== 'completed'
-    && turn.outcome !== 'failed'
-    && turn.outcome !== 'interrupted'
-  ) return undefined;
-  if (turn.assistantMessageId !== null && typeof turn.assistantMessageId !== 'string') return undefined;
-  return {
-    id: turn.id,
-    startedAt: turn.startedAt,
-    settledAt: turn.settledAt,
-    outcome: turn.outcome,
-    assistantMessageId: turn.assistantMessageId,
-  };
-}
 
 export function createOrchestratorMessageHandler(
   options: CreateOrchestratorMessageHandlerOptions,
@@ -192,6 +173,12 @@ export function createOrchestratorMessageHandler(
       const ownThreadId = options.threadIdRef?.current ?? null;
       if (ownThreadId && evtThreadId !== ownThreadId) return;
       if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
+    }
+
+    const terminal = msg.data?.voiceTerminal as Record<string, unknown> | undefined;
+    if (terminal && typeof terminal.userMessageId === 'string' && typeof terminal.text === 'string'
+      && (terminal.outcome === 'completed' || terminal.outcome === 'failed' || terminal.outcome === 'interrupted' || terminal.outcome === 'unconfirmed')) {
+      options.onVoiceTerminal?.({ userMessageId: terminal.userMessageId, outcome: terminal.outcome, text: terminal.text });
     }
 
     if (options.suppressTurnEventsRef?.current) {

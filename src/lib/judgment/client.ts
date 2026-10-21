@@ -11,6 +11,7 @@
  * key exists, retries once on the direct route.
  */
 import { performance } from 'node:perf_hooks';
+import { validateJudgmentAssets, type JudgmentImageAssets } from './image-assets';
 
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
 import { recordJudgmentReceipt } from './receipts';
@@ -42,6 +43,7 @@ export interface AskJudgmentRequest<Q extends JudgmentQuestionSet> {
   state: unknown;
   questions: Q;
   context?: JudgmentContext;
+  assets?: JudgmentImageAssets;
 }
 
 /** Transport knobs. Production callers pass nothing; tests point at a fixture. */
@@ -53,6 +55,9 @@ export interface AskJudgmentOptions {
   retryBaseMs?: number;
   /** Require the entitled managed judgment route and never use a local key. */
   managedOnly?: boolean;
+  signal?: AbortSignal;
+  /** Per-request pin; does not change the model used by other callers. */
+  model?: string;
 }
 
 type AttemptOutcome =
@@ -151,14 +156,14 @@ async function providerError(response: Response, managed: boolean): Promise<Judg
   }
 }
 
-async function attempt(resolved: ResolvedJudgmentRoute, payload: string, timeoutMs: number): Promise<AttemptOutcome> {
+async function attempt(resolved: ResolvedJudgmentRoute, payload: string, timeoutMs: number, images = false, callerSignal?: AbortSignal): Promise<AttemptOutcome> {
   let response: Response;
   try {
     response = await fetch(resolved.url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${resolved.bearer}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { Authorization: `Bearer ${resolved.bearer}`, 'Content-Type': 'application/json', Accept: 'application/json', ...(images ? { 'TypeSafe-Danger-Zone-Images': 'true' } : {}) },
       body: payload,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
@@ -243,6 +248,8 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
       return null;
     };
 
+    if (request.assets && !validateJudgmentAssets(request.assets)) return fail({ kind: 'invalid_questions', message: 'invalid image assets' }, 0);
+    if (options.signal?.aborted) return fail({ kind: 'timeout' }, 0);
     const invalid = validateQuestions(request.questions);
     if (invalid) return fail({ kind: 'invalid_questions', message: invalid }, 0);
     const resolved = options.managedOnly
@@ -252,12 +259,13 @@ export async function askJudgment<Q extends JudgmentQuestionSet>(
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
     const retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
-    const payload = JSON.stringify({ model: TYPESAFE_MODEL, state: request.state, questions: request.questions });
+    const payload = JSON.stringify({ model: options.model ?? TYPESAFE_MODEL, state: request.state, questions: request.questions, ...(request.assets ? { assets: request.assets } : {}) });
 
     const run = async (target: ResolvedJudgmentRoute): Promise<JudgmentResult<Q> | null | 'managed_cap'> => {
       route = target.route;
       for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
-        const outcome = await attempt(target, payload, timeoutMs);
+        if (options.signal?.aborted) return fail({ kind: 'timeout' }, attemptNumber - 1);
+        const outcome = await attempt(target, payload, timeoutMs, Boolean(request.assets), options.signal);
         if (outcome.ok) {
           const parsed = parseResponse(request.questions, outcome.body);
           if (!parsed) return fail({ kind: 'malformed', message: 'answers do not match the question types' }, attemptNumber);

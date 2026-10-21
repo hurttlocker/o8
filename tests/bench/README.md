@@ -222,3 +222,7 @@ directory remain immutable. The standalone shipped-output experiment retains its
 versioned v1 launcher behavior and does not read the paired runtime config.
 
 If governance is absent for a release, the scorecard records it as `automated — not run this release`. If coding is absent, the scorecard records it as `operator-triggered — not run this release`.
+
+### Activity during transcript streaming
+
+The focused interaction scenario reuses the isolated stack, fixture and browser lifecycle above. Run it against a production build with `node scripts/bench/interactions/activity-stream-refresh.mjs --samples=3 --ticks=12 --output=tests/bench/latest/activity-stream-refresh.json`. Add `--browser=/path/to/chromium` when discovery is unavailable. It records client list requests over first and warm streaming windows, preserves mounted message identities and the unsent draft, and verifies mixed review-batch refresh plus fresh transcript delivery and message identities after transport reconnect. Bind the production artifact to its source with sealed build receipts; a checkout HEAD alone does not identify an existing bundle. Provider histories and read responses are simulated; this is not a live model or installed-native measurement. The zero-extra-read gate is intentionally falsifiable: `--negative-control` reinstates the obsolete list reads in the disposable page and must exit nonzero. Preserve raw receipts and compare matching builds, workload and machine.

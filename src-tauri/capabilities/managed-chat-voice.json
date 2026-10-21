@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "managed-chat-voice",
+  "description": "Passive chat voice overlay. Receives presentation events only; no app commands, microphone, window controls, or task execution.",
+  "windows": ["managed-chat-voice"],
+  "remote": { "urls": ["http://localhost:*", "http://127.0.0.1:*"] },
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

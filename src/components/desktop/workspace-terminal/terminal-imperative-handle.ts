@@ -58,13 +58,34 @@ export interface ImperativeHandleDeps {
   recordTerminalActivity: (sessionName: string, timestamp?: number) => void;
 }
 
+export function snapshotTerminalExit(
+  deps: Pick<ImperativeHandleDeps, 'tabsRef' | 'panelRefs' | 'setTabs' | 'persistTabsNow' | 'activeTabId'>,
+  sessionName: string,
+  exitCode?: number | null,
+  cancelled?: () => boolean,
+): void {
+  const save = (state: TerminalExitState) => {
+    if (cancelled?.() || !deps.tabsRef.current.some((tab) => tab.kind === 'terminal' && tab.tmuxSession === sessionName)) return;
+    const nextTabs = deps.tabsRef.current.map((tab) => (
+      tab.kind === 'terminal' && tab.tmuxSession === sessionName
+        ? { ...tab, terminalExit: state, readOnly: tab.remoteMachine ? true : tab.readOnly } : tab
+    ));
+    deps.tabsRef.current = nextTabs;
+    deps.setTabs(nextTabs);
+    deps.persistTabsNow(nextTabs, deps.activeTabId);
+  };
+  const panel = deps.panelRefs.current.get(sessionName);
+  if (panel) panel.setExited(exitCode, save);
+  else save(terminalExitState(exitCode));
+}
+
 export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabHandle {
   return {
     setTerminalSourceDimensions: (sessionName, cols, rows) => {
       deps.panelRefs.current.get(sessionName)?.setSourceDimensions?.(cols, rows);
     },
     writeToTerminal: (sessionName, data, historical) => {
-      deps.panelRefs.current.get(sessionName)?.writeData(data);
+      deps.panelRefs.current.get(sessionName)?.writeData(data, historical);
       const now = Date.now();
       deps.recordTerminalActivity(sessionName, now);
       if (!historical && deps.urlDetectionEnabledRef.current) {
@@ -106,19 +127,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.panelRefs.current.get(sessionName)?.setError(error);
     },
     setTermExited: (sessionName, exitCode) => {
-      const save = (state: TerminalExitState) => {
-        if (!deps.tabsRef.current.some((tab) => tab.kind === 'terminal' && tab.tmuxSession === sessionName)) return;
-        const nextTabs = deps.tabsRef.current.map((tab) => (
-          tab.kind === 'terminal' && tab.tmuxSession === sessionName
-            ? { ...tab, terminalExit: state, readOnly: tab.remoteMachine ? true : tab.readOnly } : tab
-        ));
-        deps.tabsRef.current = nextTabs;
-        deps.setTabs(nextTabs);
-        deps.persistTabsNow(nextTabs, deps.activeTabId);
-      };
-      const panel = deps.panelRefs.current.get(sessionName);
-      if (panel) panel.setExited(exitCode, save);
-      else save(terminalExitState(exitCode));
+      snapshotTerminalExit(deps, sessionName, exitCode);
     },
     onSessionCreated: deps.handleSessionCreated,
     clearDetectedPreview: (port) => {

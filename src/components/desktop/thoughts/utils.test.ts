@@ -23,6 +23,15 @@ describe('mergeTranscriptEntries retention', () => {
 });
 
 describe('mergeSameThreadHistoryLoad', () => {
+  it('keeps growing voice captions and send links when GET returns an older caption revision', () => {
+    const old: MobileTranscriptEntry = { ...entry('caption', 'user', 'Check', 1), voice: {
+      sessionId: 'voice', direction: 'input', revision: 1, startMs: 0, endMs: 50,
+    } };
+    const live = { ...old, text: 'Check this', voice: { ...old.voice!, revision: 3, endMs: 100, delegatedUserMessageId: 'orch-user-one' } };
+    const result = mergeSameThreadHistoryLoad([live], [old]);
+    expect(result).toEqual({ entries: [live], preservedLiveEntries: true });
+    expect(resolveThreadLoadPlan({ isSameOpenThread: true, streamBusy: false, merged: result }).reset).toBe(false);
+  });
   it('preserves live entries missing from a stale same-thread history fetch', () => {
     const user = entry('u1', 'user', 'review and merge', 1);
     const assistant = entry('a1', 'assistant', 'Packet merged.', 2);

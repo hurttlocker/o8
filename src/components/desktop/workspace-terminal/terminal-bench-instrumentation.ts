@@ -302,3 +302,12 @@ export function settleTerminalBenchStats(): void {
   const at = now();
   for (const session of Object.values(stats.sessions)) settleVisibility(session, at);
 }
+
+export function logTerminalBench(event: string, detail: Record<string, unknown>): void {
+  if (typeof window === 'undefined' || window.__o8TerminalBenchEnabled !== true) return;
+  console.warn('[workspace-terminal:bench]', JSON.stringify({
+    at: performance.now(),
+    event,
+    ...detail,
+  }));
+}

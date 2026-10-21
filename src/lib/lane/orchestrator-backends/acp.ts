@@ -146,7 +146,7 @@ function publishAcpLifecycle(backendId: string, session: AcpSession, event: Orch
   const realtime = event.type === 'text'
     ? { event: 'output' as const, action: 'orchestrator-output', status: 'completed' as const, note: `${backendId} assistant output (${event.text.length} chars)`, data: { ...base, text: event.text, thinking: false } }
     : event.type === 'error'
-      ? { event: 'error' as const, action: 'orchestrator-error', status: 'failed' as const, note: event.error.slice(0, 240), data: { ...base, error: event.error } }
+      ? { event: 'error' as const, action: 'orchestrator-error', status: 'failed' as const, note: event.error.slice(0, 240), data: { ...base, error: event.error, ...(event.code ? { code: event.code } : {}) } }
       : event.type === 'done'
         ? { event: 'status' as const, action: 'orchestrator-status', status: 'completed' as const, note: `${backendId} orchestrator turn completed`, data: { ...base, status: 'ready' as const, sessionId: event.sessionId, cost: event.cost } }
         : null;
@@ -335,8 +335,11 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       // operator an empty reply and no reason, which is the worst outcome. Count
       // real output so a turn that produced none can say why.
       let produced = 0;
+      let awaitingFinalReply = false;
       const countingOnEvent = (event: OrchestratorEvent) => {
         if (event.type === 'text' || event.type === 'thinking' || event.type === 'tool_use') produced += 1;
+        if (event.type === 'tool_use' || event.type === 'tool_result') awaitingFinalReply = true;
+        else if (event.type === 'text' && event.text.trim()) awaitingFinalReply = false;
         onEvent(event);
       };
       session.onEvent = countingOnEvent;
@@ -365,7 +368,10 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
         // default would bound the whole turn (#2472). The watchdog and abort
         // are the real bounds.
         const stopReason = await session.client.prompt(sessionId, message, ACP_PROCESS_TIMEOUT_MS);
-        const doneOrError = produced === 0 && stopReason === 'end_turn'
+        const doneOrError = awaitingFinalReply && stopReason === 'end_turn'
+          ? ({ type: 'error', code: 'acp_ended_after_tools',
+            error: `${label} ended after tool activity without a final reply. You can continue this conversation; no retry was started.` } satisfies OrchestratorEvent)
+          : produced === 0 && stopReason === 'end_turn'
           ? ({
             type: 'error',
             error: session.appliedModel

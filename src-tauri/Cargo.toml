@@ -1,6 +1,6 @@
 [package]
 name = "o8"
-version = "0.1.797"
+version = "0.1.800"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
@@ -41,6 +41,7 @@ default = []
 dev-mcp-plugin = ["dep:tauri-plugin-mcp"]
 
 [dependencies]
+o8-restart-safety = { path = "../crates/o8-restart-safety" }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4"] }
 time = { version = "0.3", features = ["formatting"] }
@@ -81,15 +82,16 @@ window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Crash/error reporting for the native shell (telemetry ruling). DORMANT unless a
-# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). rustls
-# transport matches the repo's TLS stance; reqwest 0.12 is already in the lock
-# graph, so this adds no new reqwest major. `panic` installs the panic hook.
-sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). Keep
+# reqwest/rustls support and the debug images previously enabled by minidump.
+# Shared reqwest features can also enable native TLS. This SDK/minidump pair
+# removes the legacy bundled roots without changing certificate-verification options.
+sentry = { version = "0.42", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
 
 # Native crash capture — the class of crash the `panic` hook above CANNOT see:
 # hardware faults + aborts (SIGSEGV / SIGABRT / SIGBUS / SIGILL / SIGFPE and
-# stack-overflow). Version 0.9 is the first release that depends on `sentry
-# ^0.35`, so these two pins advance together. It pulls `crash-handler 0.6` +
+# stack-overflow). Version 0.13 depends on `sentry ^0.42` without enabling its
+# default transport, so these two pins advance together. It keeps `crash-handler 0.6` +
 # `minidumper 0.8` via `minidumper-child 0.2`.
 #
 # How it works (see telemetry::init_minidump_handler): `init()` re-execs THIS
@@ -113,7 +115,7 @@ sentry = { version = "0.35", default-features = false, features = ["backtrace", 
 # entitlements, so there is NOTHING extra to sign or notarize. Memory is read
 # via the explicitly-handed Mach port, NOT task_for_pid, so no debugger
 # entitlement (com.apple.security.cs.debugger / get-task-allow) is required.
-sentry-rust-minidump = "0.9"
+sentry-rust-minidump = "0.13"
 
 # Issue #755: runtime-download for codebase-memory-mcp static binary.
 # All three crates are already in the transitive lock graph (reqwest pulled
@@ -224,6 +226,7 @@ rodio = "0.19"
 # cpal: stt/capture.rs input-device streaming for local Whisper capture.
 cpal = "0.17.1"
 security-framework = "3.7"
+screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }
 objc2 = "0.6"
 # NSString/NSData/NSJSONSerialization power browser_view::eval_result — the host
 # reads the WKWebView evaluateJavaScript return value back as JSON (see browser_view.rs).
@@ -243,3 +246,6 @@ block2 = "0.6"
 [patch.crates-io]
 tauri-plugin-clerk = { path = "vendor/tauri-plugin-clerk-0.1.1" }
 clerk-fapi-rs = { path = "vendor/clerk-fapi-rs-0.2.0" }
+
+[dev-dependencies]
+tauri = { version = "2.10.3", features = ["test"] }

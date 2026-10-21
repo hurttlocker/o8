@@ -31,9 +31,11 @@ vi.mock('@/lib/entitlement/context', () => ({
   useEntitlement: () => ({ plan: entitlementState.plan }),
 }));
 
-vi.mock('../chat-panel/ComposerPopover', async () => {
+vi.mock('../chat-panel/ComposerPopover', async importOriginal => {
+  const actual = await importOriginal<typeof import('../chat-panel/ComposerPopover')>();
   const React = await import('react');
   return {
+    ...actual,
     ComposerPopover: ({ open, children }: { open: boolean; children: import('react').ReactNode }) => (
       open ? React.createElement('div', null, children) : null
     ),
