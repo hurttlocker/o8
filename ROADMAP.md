@@ -40,6 +40,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 CLI installation and desktop restart share one persisted admission slot across web clients and native restart entries. An active, interrupted or unconfirmed installer defers restart before cloud-job draining or child cleanup; an admitted restart retains ownership through both. Controlled installer, API, client and native fixtures cover the boundary. Packaged acceptance and release remain separate. [#3551](https://github.com/hurttlocker/o8/issues/3551)
 
+A staged desktop update retains an explicit Restart action. The action checks current work, restarts directly when only parked tasks remain, and asks before interrupting running work. CLI installer and restart ownership remain mandatory; automatic applies stay idle-gated. Source regressions and installed acceptance remain separate. [#4061](https://github.com/hurttlocker/o8/issues/4061)
+
 Stop records the same worker owner in the current mission and its registry before interrupting the worker. Preserving Retry retains completed work; stale owners and failed registry publication refuse without interrupting a replacement worker. Source regression evidence and installed acceptance remain separate. [#4022](https://github.com/hurttlocker/o8/issues/4022)
 
 Explicit synchronous dispatch publishes its prepared packet re-arm before worker launch. The real CLI/owned-worker/managed-run regression verifies test execution and held/stopped credential refusal; work-preserving stop/retry reconciliation remains separate in [#4022](https://github.com/hurttlocker/o8/issues/4022). Installed acceptance remains distinct. [#2536](https://github.com/hurttlocker/o8/issues/2536)

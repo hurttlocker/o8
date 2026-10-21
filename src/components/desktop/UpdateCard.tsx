@@ -6,6 +6,7 @@ import { publishAppUpdateView, refreshCliUpdateView, registerAppUpdateCheck } fr
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { UpdateAutoApply } from '@/lib/app-update/types';
+import { confirmExplicitRestart } from '@/lib/app-update/confirm-explicit-restart';
 import { readCachedSummary, writeCachedSummary } from '@/lib/app-update/changelog-cache';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { isTauri, canUseTauriEvents } from '@/lib/tauri/bridge';
@@ -365,6 +366,14 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         : 'Update installed. Restart is waiting for lanes and terminals to become idle.';
   }, [readUpdateIdle]);
 
+  const checkExplicitRestart = useCallback(async () => {
+    const payload = await readUpdateIdle();
+    setBlockers(describeUpdateBlockers(payload));
+    const confirmed = await confirmExplicitRestart(payload);
+    if (confirmed) setProgress({ stage: 'restarting', receivedBytes: 0, totalBytes: null });
+    return confirmed;
+  }, [readUpdateIdle]);
+
   const handleInstall = useCallback(async (request: InstallRequest = {}) => {
     if (installingRef.current || updateInstallInFlight) return;
     const action = resolveUpdateAction(installInfoRef.current, updateRef.current?.version ?? null);
@@ -389,7 +398,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       }
       if (action.kind === 'restart' && restartDeferredRef.current) {
         const restarted = await relaunchInstalledUpdate({
-          beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
+          beforeRestart: request.userInitiated ? checkExplicitRestart : request.requireIdle ? () => checkUpdateIdle() : undefined,
         });
         if (!restarted) setBlockedNote(await explainWaitingRestart());
         return;
@@ -427,15 +436,14 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       setInstalling(false);
       setProgress(null);
     }
-  }, [checkUpdateIdle, explainWaitingRestart]);
+  }, [checkUpdateIdle, checkExplicitRestart, explainWaitingRestart]);
   useEffect(() => {
     const install = () => { void handleInstall({ userInitiated: true, requireIdle: true }); };
     window.addEventListener('o8:install-app-update', install);
     return () => window.removeEventListener('o8:install-app-update', install);
   }, [handleInstall]);
 
-  // "Restart now" from the panel, after the operator has read the named waiting
-  // tasks. It restarts past parked tasks only; running work still blocks it.
+  // The explicit action checks fresh work after waiting for connected CLI updates.
   useEffect(() => {
     const restartNow = async () => {
       if (!restartDeferredRef.current || installingRef.current || updateInstallInFlight) return;
@@ -444,8 +452,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       setInstalling(true);
       setInstallError(null);
       try {
-        setProgress({ stage: 'restarting', receivedBytes: 0, totalBytes: null });
-        const restarted = await relaunchInstalledUpdate({ beforeRestart: () => checkUpdateIdle(true) });
+        const restarted = await relaunchInstalledUpdate({ beforeRestart: checkExplicitRestart });
         if (!restarted) setBlockedNote(await explainWaitingRestart());
       } catch (err) {
         setInstallError(`Restart failed.${describeInstallError(err) ? ` ${describeInstallError(err)}` : ''}`);
@@ -459,7 +466,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     const onRestart = () => { void restartNow(); };
     window.addEventListener('o8:restart-app-update', onRestart);
     return () => window.removeEventListener('o8:restart-app-update', onRestart);
-  }, [checkUpdateIdle, explainWaitingRestart]);
+  }, [checkExplicitRestart, explainWaitingRestart]);
 
   useEffect(() => {
     const onRealtime = (event: Event) => {

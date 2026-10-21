@@ -2,8 +2,8 @@
 
 /**
  * #3722: an operator's "Update o8" downloads with visible progress first, then
- * names what the restart waits for. "Restart now" passes tasks that are only
- * waiting for review or input, and nothing else.
+ * names what the restart waits for. Explicit restart preserves parked tasks,
+ * requires consent to interrupt work and cannot bypass CLI installer ownership.
  */
 
 import { act, createElement } from 'react';
@@ -24,9 +24,11 @@ vi.mock('@/lib/app-update/client-restart', () => ({
   RELEASE_URL: 'https://example.test/releases',
 }));
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => false, canUseTauriEvents: () => false }));
+vi.mock('@/components/shared/ConfirmToastHost', () => ({ requestConfirm: vi.fn(async () => false) }));
 
 const { UpdateCard } = await import('./UpdateCard');
 const { installUpdateAndRestart, relaunchInstalledUpdate } = await import('@/lib/app-update/client-restart');
+const { requestConfirm } = await import('@/components/shared/ConfirmToastHost');
 
 const parkedOnly = {
   ok: true,
@@ -63,6 +65,7 @@ describe('operator update with waiting tasks', () => {
     window.localStorage.clear();
     vi.mocked(installUpdateAndRestart).mockReset();
     vi.mocked(relaunchInstalledUpdate).mockReset();
+    vi.mocked(requestConfirm).mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -113,7 +116,7 @@ describe('operator update with waiting tasks', () => {
     expect(await vi.mocked(relaunchInstalledUpdate).mock.results[0]!.value).toBe(true);
   });
 
-  it('keeps a restart waiting while work is running, and names that work', async () => {
+  it('keeps a restart waiting when interruption is declined, and names that work', async () => {
     idlePayload = withLiveWork;
     vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true, restartDeferred: true });
     vi.mocked(relaunchInstalledUpdate).mockImplementation(async (options) => Boolean(await options?.beforeRestart?.()));
@@ -125,6 +128,7 @@ describe('operator update with waiting tasks', () => {
 
     await act(async () => { window.dispatchEvent(new Event('o8:restart-app-update')); });
     expect(await vi.mocked(relaunchInstalledUpdate).mock.results[0]!.value).toBe(false);
+    expect(requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Restart anyway', cancelLabel: 'Keep waiting', danger: true }));
     expect(lastView().blockers?.live).toEqual(['Build the release (running)']);
   });
 
