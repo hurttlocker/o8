@@ -1,8 +1,0 @@
-- Voice and visual instructions remain experimental, with real-device microphone, capture, playback, and provider recovery acceptance still in progress.
-- Attach marked images and speech to one instruction in the current chat. Continuous screen capture requires macOS 15; image attachments remain available on macOS 14.
-- Live voice supports an explicitly selected personal OpenAI key. Managed Live remains a limited pilot.
-- Use device speech recognition and playback for turn-based conversation with the selected CLI assistant. Ordinary dictation still fills the draft.
-- Preserve completed work and worker ownership during Stop and Retry, and let prepared tasks start their first managed test.
-- Wait for active CLI installation before app restart, and explain interrupted installation recovery.
-- Keep the selected Activity folder, show repository errors, and avoid redundant refreshes and repeated GitHub reads.
-- Keep historical terminal replies out of shell input, preserve mobile turn choices, and flag incomplete replies.
