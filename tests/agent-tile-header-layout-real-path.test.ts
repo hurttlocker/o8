@@ -444,7 +444,7 @@ window.__o8TileHarness = (() => {
       platform: 'browser',
       target: ['chrome120'],
       jsx: 'automatic',
-      define: { 'process.env.NODE_ENV': '"production"' },
+      define: { 'process.env.NODE_ENV': '"production"', 'process.env.__NEXT_IMAGE_OPTS': 'undefined' },
       outfile: bundlePath,
       plugins: [aliasPlugin],
       // The entry file lives in a temp dir; resolve react/react-dom from the
