@@ -140,6 +140,8 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Local machine identity [#3120](https://github.com/hurttlocker/o8/issues/3120) uses the neutral label This computer in the machine selector and phone session response. Legacy This Mac identities still resolve to the same local target without rewriting saved sessions. Source fixtures cover labels, repeated disclosure, parsing and persisted-session continuity; native platform acceptance and release remain separate.
+
 Runtime connection evidence [#2214](https://github.com/hurttlocker/o8/issues/2214) carries observed providers, source kinds and actual check times into Providers, dispatch and CLI/MCP status. Empty probes stay indeterminate; configured carriers remain distinct from verified provider access. Account identity and external tools remain explicitly unreported when the runtime exposes no evidence.
 
 Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
@@ -159,6 +161,8 @@ Mobile voice intent resolution is implemented in [#3146](https://github.com/hurt
 ACP reply and mobile continuation repair [#2473](https://github.com/hurttlocker/o8/issues/2473) records an explicit incomplete-reply marker after tool activity without starting a retry. Phone continuations retain recorded thread choices and report the observed model; display-only defaults never become model pins. Controlled ACP and WebSocket fixtures cover continuation, interruption, duplicate sends, persisted attribution and mode instructions. Local source verification and independent review passed; PR CI, live phone/provider acceptance and release remain separate.
 
 ## 5. Smooth for people and for agents
+
+Sign-in error disclosure [#3441](https://github.com/hurttlocker/o8/issues/3441) binds each expanded reason to its own control and keeps retry actions distinct from disclosure state. Mounted component regressions cover independent cards, collapse/reopen, retry and dismissal. Native assistive-technology acceptance and release remain separate.
 
 Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
 
