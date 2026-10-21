@@ -2853,6 +2853,18 @@
       ]
     },
     {
+      "path": "tests/lane-stop-retry-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/launch-failure-truth-real-path.test.ts",
       "reasons": [
         "child-process",
