@@ -2965,6 +2965,14 @@
       ]
     },
     {
+      "path": "tests/macos-cpu-packages.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/macos-release-artifacts.test.ts",
       "reasons": [
         "apfs-tool",

@@ -15,7 +15,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MACOS_RELEASE_ARCHITECTURES,
   readMachOArchitectures,
@@ -25,11 +25,40 @@ import {
   verifyUniversalMacUpdaterArchive,
 } from '../scripts/lib/macos-release-artifacts.mjs';
 
+const detachFixture = vi.hoisted(() => ({
+  interruptAfterUnmount: false,
+  mountPath: '',
+  attempts: [] as string[][],
+}));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execFileSync: (file: string, args: string[], options?: object) => {
+      if (file === '/usr/bin/hdiutil' && args[0] === 'attach') {
+        detachFixture.mountPath = args[args.indexOf('-mountpoint') + 1];
+      }
+      if (file === '/usr/bin/hdiutil' && args[0] === 'detach') {
+        detachFixture.attempts.push([...args]);
+        if (detachFixture.interruptAfterUnmount) {
+          detachFixture.interruptAfterUnmount = false;
+          actual.execFileSync('/usr/sbin/diskutil', ['unmount', detachFixture.mountPath]);
+          throw new Error('fixture detach interrupted after the volume was unmounted');
+        }
+      }
+      return actual.execFileSync(file, args, options);
+    },
+  };
+});
+
 const roots: string[] = [];
 const CPU_TYPE_X86_64 = 0x01000007;
 const CPU_TYPE_ARM64 = 0x0100000c;
 
 afterEach(() => {
+  detachFixture.interruptAfterUnmount = false;
+  detachFixture.attempts = [];
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
@@ -327,7 +356,7 @@ describe('stable macOS release artifact identity', () => {
     );
   });
 
-  it.skipIf(process.platform !== 'darwin')('mounts and verifies an actual signed DMG against the source app', () => {
+  it.skipIf(process.platform !== 'darwin').each([false, true])('mounts and verifies an actual signed DMG against the source app (interrupted detach: %s)', (interruptedDetach) => {
     const version = '0.1.999';
     const { app, root } = signedAppFixture(version);
     const staging = join(root, 'dmg-staging');
@@ -345,11 +374,19 @@ describe('stable macOS release artifact identity', () => {
     ]);
     execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', dmg]);
 
+    detachFixture.interruptAfterUnmount = interruptedDetach;
     const identity = verifyMacosDmgMatchesApp(app, dmg, version);
 
     expect(identity.bundleVersion).toBe(version);
     expect(identity.architectures).toEqual(MACOS_RELEASE_ARCHITECTURES);
     expect(identity.dmgSha256).toHaveLength(64);
     expect(identity.bundleSha256).toHaveLength(64);
+    expect(detachFixture.attempts).toHaveLength(interruptedDetach ? 2 : 1);
+    expect(detachFixture.attempts[0][1]).toMatch(/^\/dev\/disk\d+$/);
+    if (interruptedDetach) {
+      expect(detachFixture.attempts[1]).toEqual(['detach', detachFixture.attempts[0][1], '-force']);
+    }
+    const attachedImages = execFileSync('/usr/bin/hdiutil', ['info'], { encoding: 'utf8' });
+    expect(attachedImages).not.toContain(dmg);
   });
 });
