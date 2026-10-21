@@ -194,17 +194,22 @@ export function createNativeModelStageAdapter(options: NativeModelStageAdapterOp
       if (!options.admission || typeof options.admission.reserve !== 'function') return refuse('approval_required');
       const hold = (reason: NativeModelStageReason): NativeModelStageResult => ({ status: 'held', reason, state, attempt: null });
       if (!options.carrier || typeof options.carrier.verify !== 'function') return hold('carrier_confinement_required');
-      let backend: OrchestratorBackend;
-      try {
-        const { getOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
-        backend = getOrchestratorBackend(runtime);
-      } catch { return hold('registry_unavailable'); }
-      if (backend.id !== runtime) return hold('runtime_mismatch');
-      if (!supportsBoundedModelStage(backend)) return hold('backend_contract_unavailable');
       const requestDigest = digest(request);
       const key = `${state.manifestDigest}:${request.id}`;
       if (reserved.has(key)) return refuse('already_reserved');
       if (reserved.size >= MAX_RESERVATIONS) return refuse('adapter_capacity_exhausted');
+      // Reserve before registry loading yields or initializes backend state.
+      reserved.add(key);
+      const releaseUnstarted = (reason: NativeModelStageReason): NativeModelStageResult => {
+        reserved.delete(key); return hold(reason);
+      };
+      let backend: OrchestratorBackend;
+      try {
+        const { getOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
+        backend = getOrchestratorBackend(runtime);
+      } catch { return releaseUnstarted('registry_unavailable'); }
+      if (backend.id !== runtime) return releaseUnstarted('runtime_mismatch');
+      if (!supportsBoundedModelStage(backend)) return releaseUnstarted('backend_contract_unavailable');
       const intent: NativeModelStageIntent = {
         schema: 'o8/harness-model-stage-admission/v1', experimentId: state.manifest.id,
         stateRevision: state.revision, stateDigest: digest(state), manifestDigest: state.manifestDigest,
@@ -214,7 +219,6 @@ export function createNativeModelStageAdapter(options: NativeModelStageAdapterOp
         attempts: 1, maxWallMs: request.maxWallMs, maxInputBytes, maxOutputBytes,
       };
       const intentDigest = digest(intent);
-      reserved.add(key); // Prevent concurrent callers while host verification awaits.
       let confinement: NativeModelStageConfinement | null;
       try { confinement = await options.carrier.verify(structuredClone(intent)); }
       catch { return hold('carrier_unavailable'); }

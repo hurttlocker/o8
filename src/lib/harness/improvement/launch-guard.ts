@@ -272,7 +272,8 @@ export function readImprovementPacketBinding(input: Pick<ImprovementPacketLaunch
   if (binding) assertPending(binding);
   return binding;
 }
-export function observeImprovementSource(binding: ImprovementPacketBinding, path: string): { head: string; tree: string } {
+/** Read source pins only; inspection does not confer packet or launch authority. */
+export function observeImprovementSource({ manifest }: Pick<ImprovementPacketBinding, 'manifest'>, path: string): { head: string; tree: string } {
   // Do not let ambient Git overrides redirect source verification or repository
   // fsmonitor configuration execute a command during this read-only check.
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
@@ -285,7 +286,7 @@ export function observeImprovementSource(binding: ImprovementPacketBinding, path
   if (realpathSync(git(['rev-parse', '--show-toplevel'])) !== realpathSync(path)) {
     held('repository_changed', 'Launch source must be the exact checkout root.');
   }
-  if (git(['rev-parse', '--verify', 'HEAD']) !== binding.manifest.baselineRevision) {
+  if (git(['rev-parse', '--verify', 'HEAD']) !== manifest.baselineRevision) {
     held('source_revision_changed', 'Post-refresh checkout HEAD differs from the immutable source revision.');
   }
   // Refuse sources requiring unverified helper programs rather than invoke a
@@ -297,8 +298,8 @@ export function observeImprovementSource(binding: ImprovementPacketBinding, path
   if (git(['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching'])) {
     held('source_dirty', 'Launch checkout differs from the clean immutable source revision.');
   }
-  const expectedCommon = realpathSync(resolve(binding.manifest.repository,
-    gitAt(binding.manifest.repository, ['rev-parse', '--git-common-dir'])));
+  const expectedCommon = realpathSync(resolve(manifest.repository,
+    gitAt(manifest.repository, ['rev-parse', '--git-common-dir'])));
   const actualCommon = realpathSync(resolve(path, git(['rev-parse', '--git-common-dir'])));
   if (actualCommon !== expectedCommon) held('repository_changed', 'Launch checkout is not a worktree of the pinned repository.');
   return { head: git(['rev-parse', '--verify', 'HEAD']), tree: git(['rev-parse', '--verify', 'HEAD^{tree}']) };

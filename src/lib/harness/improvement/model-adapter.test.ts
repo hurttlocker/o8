@@ -9,6 +9,9 @@ import type { ImprovementExperiment, ImprovementManifest, ImprovementReceipt, Im
 
 const registry = vi.hoisted(() => ({ getOrchestratorBackend: vi.fn() }));
 vi.mock('@/lib/lane/orchestrator-backends/registry', () => registry);
+vi.mock('@/lib/db', () => {
+  throw new Error('Model-stage protocol fixtures must not initialize the app database.');
+});
 
 // All native-shaped observations in this file are protocol fixtures. No provider,
 // subprocess, credential, native provenance evidence, or efficacy claim is involved.
@@ -101,6 +104,17 @@ describe('native model-stage adapter, mocked registry protocol only', () => {
     expect(await configured().run(protocolState())).toMatchObject({ status: 'held', reason: 'carrier_confinement_required' });
     expect(reserve).not.toHaveBeenCalled(); expect(sendTurn).not.toHaveBeenCalled();
   });
+  it.each(['registry_unavailable', 'runtime_mismatch', 'backend_contract_unavailable'] as const)(
+    'releases an unstarted reservation after %s without admitting work', async (reason) => {
+      if (reason === 'registry_unavailable') registry.getOrchestratorBackend.mockImplementationOnce(() => { throw new Error('Unavailable'); });
+      else registry.getOrchestratorBackend.mockReturnValueOnce({ ...backend,
+        ...(reason === 'runtime_mismatch' ? { id: 'claude' } : { boundedRefinement: undefined }) });
+      const state = protocolState(); const adapter = configured();
+      expect(await adapter.run(state)).toMatchObject({ status: 'held', reason, attempt: null });
+      expect(verify).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled(); expect(sendTurn).not.toHaveBeenCalled();
+      expect(await adapter.run(state)).toMatchObject({ status: 'settled', reason: null });
+      expect(sendTurn).toHaveBeenCalledTimes(1);
+    });
   it('holds a backend without the source single-attempt contract', async () => {
     delete (backend as { boundedRefinement?: unknown }).boundedRefinement;
     expect(await configured().run(protocolState())).toMatchObject({ status: 'held', reason: 'backend_contract_unavailable' });
@@ -185,6 +199,7 @@ describe('native model-stage adapter, mocked registry protocol only', () => {
     const [first, second] = await Promise.all([adapter.run(state), adapter.run(state)]);
     expect([first.reason, second.reason]).toContain('already_reserved');
     expect([first.reason, second.reason]).toContain('missing_terminal_event');
+    expect(registry.getOrchestratorBackend).toHaveBeenCalledTimes(1);
     expect(sendTurn).toHaveBeenCalledTimes(1);
     expect(await adapter.run(state)).toMatchObject({ reason: 'already_reserved' });
     const uncertain = first.status === 'uncertain' ? first : second;

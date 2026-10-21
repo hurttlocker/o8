@@ -39,7 +39,7 @@ function git(...args: string[]) { return execFileSync('git', ['-C', repo, ...arg
 beforeEach(async () => {
   prior = { ...process.env }; h.grant.mockReset(); h.spawn.mockReset(); h.bridge.mockReset(); h.prepare.mockReset(); h.ready.mockReset();
   h.sync.mockImplementation((await vi.importActual<typeof import('node:fs')>('node:fs')).fsyncSync);
-  root = mkdtempSync(join(realpathSync(tmpdir()), 'runtime-observation-')); repo = join(root, 'repo'); mkdirSync(repo);
+  root = mkdtempSync(join(realpathSync(tmpdir()), 'runtime-observation-')); repo = join(root, 'repo'); mkdirSync(repo, { mode: 0o700 });
   git('init', '-q'); writeFileSync(join(repo, 'source.txt'), 'original'); git('add', '.');
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture');
   const created = createImprovementNamespace({ parentDirectory: root, repository: repo, experimentId: 'fixture' });
@@ -56,8 +56,8 @@ beforeEach(async () => {
   const journal = createImprovementJournal(join(namespace, 'harness-refinement'));
   const initial = journal.append(createExperiment(manifest), null); const pending = journal.append(advanceExperiment(initial), initial.revision);
   packetId = prepareImprovementPacketBinding({ experimentId: 'fixture', requestId: pending.pending!.id, mountDigest: 'd'.repeat(64) }).packetId;
-  bindImprovementPacketLane(packetId, 'lane'); runtimeRoot = join(namespace, 'owned'); mkdirSync(runtimeRoot);
-  const sessionDir = join(runtimeRoot, 'fixture'); mkdirSync(sessionDir);
+  bindImprovementPacketLane(packetId, 'lane'); runtimeRoot = join(namespace, 'owned'); mkdirSync(runtimeRoot, { mode: 0o700 });
+  const sessionDir = join(runtimeRoot, 'fixture'); mkdirSync(sessionDir, { mode: 0o700 });
   session = { surfaceId: 'codex-owned:fixture', packetId, laneId: 'lane', sessionDir, cwd: repo, repoPath: repo,
     title: 'Fixture', createdAt: 'fixture', updatedAt: 'fixture', latestPrompt: '', latestSummary: '', model: manifest.model,
     effort: 'high', recentRuns: [], runIdentityLedger: { version: 1, complete: true, totalRuns: 0 } };

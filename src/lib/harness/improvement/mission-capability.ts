@@ -1,13 +1,12 @@
 import 'server-only';
 import Database from 'better-sqlite3';
-import { execFileSync } from 'node:child_process';
 import { lstatSync, opendirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import type { CreateMissionInput } from '@/lib/orchestrator/operator-mission-service/types';
 import { validatePersistedExperiment } from './engine';
 import { createImprovementJournal } from './journal';
-import type { ImprovementPacketBinding } from './launch-guard';
+import { observeImprovementSource, type ImprovementPacketBinding } from './launch-guard';
 import type { ImprovementExperiment } from './types';
 import { canonical, digest } from './validation';
 import { assertImprovementDirectory, readImprovementPrivateFile, requireImprovementNamespace,
@@ -68,10 +67,7 @@ function pendingFor(namespace: ImprovementNamespace): ImprovementExperiment {
   const state = createImprovementJournal(join(namespace.root, 'harness-refinement')).read(namespace.experimentId);
   if (!state || state.manifest.repository !== namespace.repository || state.manifest.provenance !== 'native'
     || state.status !== 'pending' || state.pendingReceipt || state.pending?.kind !== 'execute') fail('Exact persisted native execution reservation is required.');
-  const git = (...args: string[]) => execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', namespace.repository, ...args],
-    { encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  if (git('rev-parse', '--show-toplevel') !== namespace.repository || git('rev-parse', '--verify', 'HEAD') !== state.manifest.baselineRevision
-    || git('status', '--porcelain', '--untracked-files=all')) fail('Repository or clean baseline revision differs from the frozen experiment.');
+  observeImprovementSource({ manifest: state.manifest }, namespace.repository);
   return state;
 }
 

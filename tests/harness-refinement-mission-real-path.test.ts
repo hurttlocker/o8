@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
-  realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+  realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -211,12 +211,58 @@ describe('trusted held refinement mission through dedicated process and real per
     expect(git('rev-parse', `refs/heads/${branch}`)).toBe(revision);
   });
 
+  it.each(['repository', 'ambient-count', 'ambient-global'] as const)('does not invoke configured Git filters during held preparation (%s)', (configuration) => {
+    const { root, launch, pending, repository, git } = fixture();
+    const marker = join(root, 'filter-effect');
+    const attributes = join(root, 'filter-attributes');
+    writeFileSync(attributes, 'README.md filter=refinementfixture\n');
+    const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+    const program = `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'FILTER\\n'); process.stdin.pipe(process.stdout);`;
+    const command = `${quote(process.execPath)} -e ${quote(program)}`;
+    const configurationEntries = [
+      ['filter.refinementfixture.clean', command],
+      ['filter.refinementfixture.required', 'true'],
+      ['core.attributesFile', attributes],
+    ];
+    const ambient: Record<string, string> = {};
+    if (configuration === 'ambient-count') {
+      ambient.GIT_CONFIG_COUNT = String(configurationEntries.length);
+      configurationEntries.forEach(([key, value], index) => {
+        ambient[`GIT_CONFIG_KEY_${index}`] = key;
+        ambient[`GIT_CONFIG_VALUE_${index}`] = value;
+      });
+    } else {
+      const globalConfig = join(root, 'global.gitconfig');
+      const location = configuration === 'repository' ? [] : ['--file', globalConfig];
+      for (const [key, value] of configurationEntries) git('config', ...location, key, value);
+      if (configuration === 'ambient-global') ambient.GIT_CONFIG_GLOBAL = globalConfig;
+    }
+    // Keep HEAD pinned so this reaches the real source-status inspection.
+    const readme = join(repository, 'README.md');
+    const original = readFileSync(readme, 'utf8');
+    const modified = original.replace('Isolated', 'Modified');
+    expect(Buffer.byteLength(modified)).toBe(Buffer.byteLength(original));
+    writeFileSync(readme, modified);
+    // A different size lets Git refuse from stat data without invoking the filter.
+    utimesSync(readme, 1, 1);
+    expect(git('rev-parse', 'HEAD')).toBe(pending.manifest.baselineRevision);
+    const result = child(launch, prepareCode(pending.pending!.id), ambient);
+    expect(result.ok, JSON.stringify(result)).toBe(false);
+    expect(result.errors, JSON.stringify(result)).toEqual(expect.arrayContaining([expect.stringMatching(
+      /baseline revision differs|checkout differs from the clean immutable source revision|Repository filters or submodules require/i)]));
+    expect(existsSync(marker), `Held preparation invoked a configured Git filter (${configuration}).`).toBe(false);
+    for (const artifact of ['.mission-preparation.json', '.mission-admission.json', 'harness-refinement-packets', 'orchestrator-state.json']) {
+      expect(existsSync(join(launch.namespace.root, artifact))).toBe(false);
+    }
+    expect(createImprovementJournal(join(launch.namespace.root, 'harness-refinement')).read('held-fixture')).toEqual(pending);
+  });
+
   it('rejects changed base and dirty source without creating a packet binding', () => {
     for (const changedBase of [false, true]) {
       const { launch, pending, repository, git } = fixture(); writeFileSync(join(repository, 'README.md'), 'Changed source.');
       if (changedBase) { git('add', 'README.md'); git('commit', '-qm', 'changed'); }
       const result = child(launch, prepareCode(pending.pending!.id));
-      expect(result.ok).toBe(false); expect(result.errors).toEqual(expect.arrayContaining([expect.stringMatching(/baseline revision differs/i)]));
+      expect(result.ok).toBe(false); expect(result.errors).toEqual(expect.arrayContaining([expect.stringMatching(changedBase ? /HEAD differs from the immutable source revision/i : /checkout differs from the clean immutable source revision/i)]));
       expect(existsSync(join(launch.namespace.root, 'harness-refinement-packets'))).toBe(false);
     }
   });
