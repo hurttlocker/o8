@@ -140,6 +140,8 @@ Native Muse Code worker and orchestrator support is implemented in [#3602](https
 
 ## 4. One control plane, every surface
 
+Local machine identity [#3120](https://github.com/hurttlocker/o8/issues/3120) uses the neutral label This computer in the machine selector and phone session response. Legacy This Mac identities still resolve to the same local target without rewriting saved sessions. Source fixtures cover labels, repeated disclosure, parsing and persisted-session continuity; native platform acceptance and release remain separate.
+
 Runtime connection evidence [#2214](https://github.com/hurttlocker/o8/issues/2214) carries observed providers, source kinds and actual check times into Providers, dispatch and CLI/MCP status. Empty probes stay indeterminate; configured carriers remain distinct from verified provider access. Account identity and external tools remain explicitly unreported when the runtime exposes no evidence.
 
 Local development account startup [#3810](https://github.com/hurttlocker/o8/issues/3810) keeps exact loopback browser workspaces usable when a production account key is configured. Native sign-in and production web authentication retain their own paths.
