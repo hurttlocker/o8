@@ -68,6 +68,8 @@ Verification support: sidebar date-fold fixtures and the rendered view share a f
 
 Verification support: Browser-open real-path fixtures advance their clock and polling between React commits, preserving the original request deadline, host acknowledgement, actual navigation and single-open assertions. Boundary cases retain pending results beyond the deadline and observe later navigation without replay. Production Browser behavior is unchanged. [#4006](https://github.com/hurttlocker/o8/issues/4006)
 
+Verification support: the prepared-dispatch publication-conflict fixture requires Stop to refuse mismatched ownership without changing either store, relaunching or interrupting its worker. The fixture teardown remains separate; production dispatch and Stop guards are unchanged. [#4048](https://github.com/hurttlocker/o8/issues/4048)
+
 ## What we need to prove
 
 Three outcomes decide whether the pillars add up. The first-diff comparisons below provide evidence on code quality; operator effort and the full loop's value still need measurement. A green checklist is progress on a row, not proof of the outcome.
