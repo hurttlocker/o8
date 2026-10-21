@@ -368,17 +368,29 @@ export function verifyMacosDmgMatchesApp(appPath, dmgPath, version, architecture
   const mountPath = join(inspectionRoot, 'mount');
   mkdirSync(mountPath);
   let mounted = false;
+  let detachTarget = mountPath;
   let identity;
   let verificationError;
   try {
-    execFileSync('/usr/bin/hdiutil', [
+    const attached = execFileSync('/usr/bin/hdiutil', [
       'attach',
+      '-plist',
       '-readonly',
       '-nobrowse',
       '-mountpoint', mountPath,
       dmgPath,
     ], { stdio: 'pipe' });
     mounted = true;
+    const attachment = JSON.parse(execFileSync('/usr/bin/plutil', [
+      '-convert', 'json', '-o', '-', '--', '-',
+    ], { input: attached, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
+    const device = attachment['system-entities']?.find((entity) => (
+      typeof entity['dev-entry'] === 'string' && /^\/dev\/disk\d+$/.test(entity['dev-entry'])
+    ))?.['dev-entry'];
+    if (!device) throw new Error('DMG attachment did not identify its backing device');
+    // A failed detach can already have unmounted the volume. Its mount path
+    // then stops identifying the image, but the owned backing device survives.
+    detachTarget = device;
     const dmgApp = join(mountPath, 'o8.app');
     if (!existsSync(dmgApp)) throw new Error('DMG is missing its top-level o8.app bundle');
     execFileSync('/usr/bin/codesign', [
@@ -421,10 +433,10 @@ export function verifyMacosDmgMatchesApp(appPath, dmgPath, version, architecture
   let cleanupError;
   if (mounted) {
     try {
-      execFileSync('/usr/bin/hdiutil', ['detach', mountPath], { stdio: 'pipe' });
+      execFileSync('/usr/bin/hdiutil', ['detach', detachTarget], { stdio: 'pipe' });
     } catch {
       try {
-        execFileSync('/usr/bin/hdiutil', ['detach', mountPath, '-force'], { stdio: 'pipe' });
+        execFileSync('/usr/bin/hdiutil', ['detach', detachTarget, '-force'], { stdio: 'pipe' });
       } catch (error) {
         cleanupError = error;
       }

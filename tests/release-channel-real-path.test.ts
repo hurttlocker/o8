@@ -127,7 +127,7 @@ export function execFileSync(command, args = [], options = {}) {
       const cpuApps = JSON.parse(process.env.O8_CHANNEL_TEST_CPU_DMG_APPS || '{}');
       const source = cpuApps[basename(args.at(-1))] || process.env.O8_CHANNEL_TEST_DMG_APP;
       cpSync(source, join(mountpoint, 'o8.app'), { recursive: true, preserveTimestamps: true });
-      return '/dev/disk99';
+      return '<plist><dict><key>system-entities</key><array><dict><key>dev-entry</key><string>/dev/disk99</string></dict></array></dict></plist>';
     }
     return '';
   }
@@ -136,6 +136,7 @@ export function execFileSync(command, args = [], options = {}) {
     throw new Error('CPU notarization ticket unavailable');
   }
   if (command.endsWith('plutil')) {
+    if (args[0] === '-convert') return JSON.stringify({ 'system-entities': [{ 'dev-entry': '/dev/disk99' }] });
     const plist = readFileSync(args[args.length - 1], 'utf8');
     const value = plist.match(/<key>CFBundleShortVersionString<\\/key>\\s*<string>([^<]+)<\\/string>/)?.[1];
     if (!value) throw new Error('missing fixture version');
