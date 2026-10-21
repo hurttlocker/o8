@@ -3696,6 +3696,7 @@ dependencies = [
  "image 0.25.10",
  "libc",
  "log",
+ "o8-restart-safety",
  "objc2",
  "objc2-app-kit",
  "objc2-event-kit",
@@ -3737,6 +3738,15 @@ dependencies = [
  "window-vibrancy",
  "windows-sys 0.59.0",
  "winreg 0.55.0",
+]
+
+[[package]]
+name = "o8-restart-safety"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -6703,6 +6713,7 @@ dependencies = [
  "image 0.24.9",
  "interprocess",
  "log",
+ "o8-restart-safety",
  "serde",
  "serde_json",
  "subtle",

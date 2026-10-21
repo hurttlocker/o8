@@ -150,6 +150,7 @@ export interface RepoActivityData {
   prs: ActivityItem[];
   issues: ActivityItem[];
   ciRuns: ActivityItem[];
+  workspaceError?: string;
 }
 
 export const EMPTY_DATA: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -177,29 +178,35 @@ function mapCommitRow(c: CommitRow, repoSlug: string): ActivityItem {
   };
 }
 
-export async function fetchRepoActivity(repoSlug: string, repoPath?: string | null): Promise<RepoActivityData> {
-  const enc = encodeURIComponent(repoSlug);
+export async function fetchRepoActivity(repoSlug: string | null, repoPath?: string | null): Promise<RepoActivityData> {
+  const enc = encodeURIComponent(repoSlug ?? '');
+  const localLabel = repoSlug ?? repoPath ?? 'local';
   const [commitsRes, prsRes, issuesRes, ciRes] = await Promise.all([
-    fetch(`/api/panel/commits?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/prs?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/issues?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/ci?repo=${enc}`).catch(() => null),
+    repoSlug ? fetch(`/api/panel/commits?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/prs?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/issues?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/ci?repo=${enc}`).catch(() => null) : null,
   ]);
 
   let commits: ActivityItem[] = [];
+  let workspaceError: string | undefined;
   if (commitsRes?.ok) {
     const data = await commitsRes.json();
-    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, repoSlug));
+    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel));
   }
-  // #1341 — graceful degradation. A locally-added repo has no GitHub mirror
-  // rows, so the GitHub-keyed fetch above returns nothing. The repo is on
-  // disk, so read recent history straight from local git instead (bounded to
-  // the last 50 commits) via the commits route's `?workspace=` branch.
-  if (commits.length === 0 && repoPath) {
+  // Validate the selected on-disk folder even when remote history exists.
+  // A confirmed local read can also supply history without a GitHub remote.
+  if (repoPath) {
     const localRes = await fetch(`/api/panel/commits?workspace=${encodeURIComponent(repoPath)}&limit=50`).catch(() => null);
-    if (localRes?.ok) {
-      const data = await localRes.json();
-      commits = ((data.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, repoSlug));
+    try {
+      const data = localRes ? await localRes.json() : null;
+      if (localRes?.ok && !data?.error) {
+        if (commits.length === 0) commits = ((data?.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, localLabel));
+      } else {
+        workspaceError = typeof data?.error === 'string' ? data.error : 'Could not load local commit activity. Retry to check this folder again.';
+      }
+    } catch {
+      workspaceError = 'Could not load local commit activity. Retry to check this folder again.';
     }
   }
 
@@ -227,7 +234,7 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         },
         age: pr.createdAt ? relativeAge(pr.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
       });
     }
   }
@@ -245,7 +252,7 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         labels: issue.labels ?? [],
         age: issue.createdAt ? relativeAge(issue.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
         author: issue.author?.login ?? 'unknown',
         assignees: (issue.assignees ?? []).map((a: { login?: string | null }) => a.login ?? '').filter(Boolean),
         comments: typeof issue.comments === 'number' ? issue.comments : 0,
@@ -270,12 +277,12 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         workflow: run.workflowName ?? '',
         age: run.createdAt ? relativeAge(run.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
       });
     }
   }
 
-  return { commits, prs, issues, ciRuns };
+  return { commits, prs, issues, ciRuns, ...(workspaceError ? { workspaceError } : {}) };
 }
 
 // ── Render helpers ──

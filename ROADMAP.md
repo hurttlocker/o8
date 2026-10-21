@@ -38,6 +38,12 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+CLI installation and desktop restart share one persisted admission slot across web clients and native restart entries. An active, interrupted or unconfirmed installer defers restart before cloud-job draining or child cleanup; an admitted restart retains ownership through both. Controlled installer, API, client and native fixtures cover the boundary. Packaged acceptance and release remain separate. [#3551](https://github.com/hurttlocker/o8/issues/3551)
+
+Stop records the same worker owner in the current mission and its registry before interrupting the worker. Preserving Retry retains completed work; stale owners and failed registry publication refuse without interrupting a replacement worker. Source regression evidence and installed acceptance remain separate. [#4022](https://github.com/hurttlocker/o8/issues/4022)
+
+Explicit synchronous dispatch publishes its prepared packet re-arm before worker launch. The real CLI/owned-worker/managed-run regression verifies test execution and held/stopped credential refusal; work-preserving stop/retry reconciliation remains separate in [#4022](https://github.com/hurttlocker/o8/issues/4022). Installed acceptance remains distinct. [#2536](https://github.com/hurttlocker/o8/issues/2536)
+
 [0.1.798](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.798) publishes the workspace frame, composer and worker displays, dictation ownership, delivery recovery, and restricted voice pilot. The published universal macOS app and installer passed signature and notarization verification. General managed voice remains disabled; installed conversation and provider-image acceptance remain open.
 
 Matching late acknowledgements retire only their own delivery warning, including quota-failed attempts and optimistic rows evicted from retained history. Confirmation persists across saved-history reloads and stale writes. Source, native candidate acceptance and release remain separate gates. [#3638](https://github.com/hurttlocker/o8/issues/3638)
@@ -287,3 +293,8 @@ Bug fixes, chores, security advisories, and dependency work are tracked as plain
 Composer controls [#3961](https://github.com/hurttlocker/o8/issues/3961) use compact named access and checkout icons. Compatible new chats default to Shared; workers are delegated when requested or useful, with Worktrees available explicitly. Saved no-delegation choices and forced-single surfaces stay restricted. Permissions, capability checks and historical wire parsing remain authoritative. Development verification and release remain separate.
 
 Conversation worker hover [#3967](https://github.com/hurttlocker/o8/issues/3967) reuses the existing chat preview for recorded shared and worktree workers. Identity and status remain scoped to the hovered parent; development verification and release remain separate.
+
+Activity refresh [#3460](https://github.com/hurttlocker/o8/issues/3460) excludes transcript-only realtime batches from remote repository list invalidation. Mixed batches, lifecycle refresh and the existing fallback remain active. Broader cache policy, native acceptance and release remain separate.
+
+<!-- issue3131-activity-reliability -->
+Activity folder-state follow-up (#3131): selected local folders retain their scope, local Git failures stay visible beside remote history, and Retry rechecks the same folder. Review/Workspace existing remedies are preserved. Source verification and native acceptance remain separate; no release is included.
