@@ -32,6 +32,14 @@ export interface BuildReleaseManifestOptions {
     signature: string;
     identity: import('./macos-release-artifacts.mjs').MacosUniversalArtifactIdentity;
   };
+  darwinCpuArtifacts?: Array<{
+    architecture: import('./macos-release-artifacts.mjs').MacosArchitecture;
+    signature: string;
+    identity: import('./macos-release-artifacts.mjs').MacosCpuArtifactIdentity & { sourceBundleSha256: string };
+    archivePath: string;
+    signaturePath: string;
+    dmgPath: string;
+  }>;
   baseUploadAssets?: string[];
   trailingUploadAssets?: string[];
 }
