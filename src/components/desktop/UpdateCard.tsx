@@ -21,33 +21,18 @@ import {
 } from '@/lib/app-update/client-restart';
 import type { AppUpdateBlockers } from '@/lib/app-update/update-hub-client';
 import {
+  describeInstallError, describeUpdateBlockers, normalizeUpdateInfo, stringFromRecord,
+  updateCheckReport, normalizeUpdateCheckReport,
+  type UpdateInfo, type UpdateCheckReport, type UpdateIdleResponse,
+} from '@/lib/app-update/update-card-view';
+export { describeInstallError, describeUpdateBlockers } from '@/lib/app-update/update-card-view';
+import {
   normalizeInstallInfo,
   resolveUpdateAction,
   type InstallInfo,
 } from '@/lib/app-update/install-target';
 
-interface UpdateInfo {
-  version: string;
-  currentVersion?: string;
-  notes?: string;
-  date?: string;
-  releaseUrl?: string;
-}
-
-interface UpdateCheckReport {
-  outcome: 'never' | 'available' | 'current' | 'failed';
-  checkedAt: string | null;
-  error: string | null;
-}
-
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
-
-/** The updater can reject with an Error, an empty Error or a plain string; keep whatever it said. */
-export function describeInstallError(error: unknown): string {
-  if (error instanceof Error) return error.message.trim() || error.name;
-  if (typeof error === 'string') return error.trim();
-  try { return JSON.stringify(error) ?? ''; } catch { return ''; }
-}
 
 /** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
 function reportInstall(install: { outcome: 'started' | 'failed'; version: string | null; error?: string }) {
@@ -70,53 +55,6 @@ interface InstallRequest {
   requireIdle?: boolean;
   /** True only for the operator pressing the card's action button. */
   userInitiated?: boolean;
-}
-
-interface UpdateIdleLaneView { label?: string; status?: string }
-interface UpdateIdleResponse {
-  idle?: {
-    idle?: boolean;
-    idleExceptParked?: boolean;
-    parkedLanes?: UpdateIdleLaneView[];
-    unavailable?: string[];
-    active?: {
-      lanes?: UpdateIdleLaneView[];
-      terminalSessions?: Array<{ name?: string }>;
-      managedRuns?: Array<{ command?: string }>;
-      ownedSessions?: Array<{ surfaceId?: string }>;
-      cloudJobs?: Array<{ id?: string }>;
-    };
-  };
-}
-
-const PARKED_LABEL: Record<string, string> = {
-  reviewing: 'waiting for review',
-  awaiting_input: 'waiting for input',
-  awaiting_orchestrator: 'waiting for the lead',
-  awaiting_human: 'waiting for you',
-  paused: 'paused',
-  idle: 'idle',
-  recovering: 'stopped, can retry',
-};
-
-/** Names what a restart would wait for, from GET /api/panel/update/apply. */
-export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppUpdateBlockers {
-  const idle = payload?.idle;
-  const name = (value: string | undefined, fallback: string) => value?.trim() || fallback;
-  const parkedStatuses = new Set((idle?.parkedLanes ?? []).map(lane => lane.status));
-  const live = [
-    ...(idle?.active?.lanes ?? [])
-      .filter(lane => !parkedStatuses.has(lane.status))
-      .map(lane => `${name(lane.label, 'Task')} (${(lane.status ?? 'active').replace(/_/g, ' ')})`),
-    ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
-    ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),
-    ...(idle?.active?.ownedSessions ?? []).map(session => `Agent session ${name(session.surfaceId, '')}`.trim()),
-    ...(idle?.active?.cloudJobs ?? []).map(job => `Cloud job ${name(job.id, '')}`.trim()),
-    ...(idle?.unavailable ?? []).map(item => item === 'terminal-sessions' ? 'Terminal list unavailable' : `Check unavailable: ${item}`),
-  ];
-  const parked = (idle?.parkedLanes ?? [])
-    .map(lane => `${name(lane.label, 'Task')} (${PARKED_LABEL[lane.status ?? ''] ?? (lane.status ?? 'parked').replace(/_/g, ' ')})`);
-  return { live, parked };
 }
 
 function readDismissedVersion() {
@@ -148,50 +86,6 @@ function claimApplyMutation(mutationId: string): boolean {
     window.localStorage.setItem(APPLY_MUTATIONS_KEY, JSON.stringify([...ids.slice(-31), mutationId]));
   } catch { /* duplicate suppression is best-effort */ }
   return true;
-}
-
-function stringFromRecord(record: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) return value;
-  }
-  return undefined;
-}
-
-function normalizeUpdateInfo(payload: unknown): UpdateInfo | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const record = payload as Record<string, unknown>;
-  const version = stringFromRecord(record, ['version']);
-  if (!version) return null;
-  return {
-    version,
-    currentVersion: stringFromRecord(record, ['currentVersion', 'current_version']),
-    notes: stringFromRecord(record, ['notes', 'body']),
-    date: stringFromRecord(record, ['date']),
-    releaseUrl: stringFromRecord(record, ['releaseUrl', 'release_url', 'url']),
-  };
-}
-
-function updateCheckReport(
-  outcome: UpdateCheckReport['outcome'],
-  error: unknown = null,
-  checkedAt = new Date().toISOString(),
-): UpdateCheckReport {
-  const errorText = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error ?? '');
-  return {
-    outcome,
-    checkedAt: outcome === 'never' ? null : checkedAt,
-    error: outcome === 'failed' ? errorText.trim().slice(0, 1_000) || 'Unknown updater error.' : null,
-  };
-}
-
-function normalizeUpdateCheckReport(payload: unknown): UpdateCheckReport | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const record = payload as Record<string, unknown>;
-  const outcome = record.outcome;
-  if (outcome !== 'current' && outcome !== 'failed') return null;
-  const checkedAt = stringFromRecord(record, ['checkedAt', 'checked_at']) ?? new Date().toISOString();
-  return updateCheckReport(outcome, record.error, checkedAt);
 }
 
 export function UpdateCard({ quiet = false }: { quiet?: boolean }) {
@@ -455,8 +349,15 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
 
   /** Names the blockers and returns a note that matches them. */
   const explainWaitingRestart = useCallback(async () => {
-    const named = describeUpdateBlockers(await readUpdateIdle());
+    const payload = await readUpdateIdle();
+    const named = describeUpdateBlockers(payload);
     setBlockers(named);
+    if (payload?.idle?.active?.restartPending) return 'Update installed. Another restart is already in progress.';
+    const installers = payload?.idle?.active?.cliInstallers ?? [];
+    if (installers.some(installer => installer.state !== 'active') || payload?.idle?.unavailable?.includes('cli-update-ownership')) {
+      return 'Update installed. Restart needs CLI update recovery; check the tool and its update receipt.';
+    }
+    if (installers.length) return 'Update installed. Restart is waiting for CLI updates to finish.';
     return named.live.length
       ? 'Update installed. Restart is waiting for running work to finish.'
       : named.parked.length
