@@ -57,9 +57,10 @@ export async function assertOrphanProcessesAbsent(input: {
     if (tmux !== null) throw new OrphanCloseRefusal('a retained run tmux session is still live');
   }
 
+  // Request file delimiters explicitly: Linux omits f fields unless selected.
   // Global descriptors also cover deleted files and the source-to-claim rename.
   // Never log this output; only report holders of the two exact namespaces.
-  const files = await command('lsof', ['-nP', '-Fpctn']);
+  const files = await command('lsof', ['-nP', '-Fpcftn']);
   if (!files?.trim()) throw new OrphanCloseRefusal('lsof returned no open-file snapshot');
   const targets = [input.sourcePath, input.candidatePath].map((target) => path.resolve(target));
   let pid: number | null = null;
