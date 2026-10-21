@@ -229,7 +229,7 @@ describe('Symon text-first say loop wire', () => {
     const { response, body: minted } = await mint('codex-sol-xhigh');
     expect(response.status).toBe(200);
     expect(minted.session).toMatchObject({ model: 'gpt-6.1-sol', effort: 'xhigh', engine: 'codex' });
-    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
+    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This computer' });
     testState.evalCalls.length = 0;
 
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
@@ -283,7 +283,7 @@ describe('Symon text-first say loop wire', () => {
     }));
     expect(frames[0]).toEqual(expect.objectContaining({
       type: 'symon-text-status',
-      activeMachine: { id: 'local', displayName: 'This Mac' },
+      activeMachine: { id: 'local', displayName: 'This computer' },
     }));
     const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
     expect(spawnEval).toContain('"engine":"codex"');
