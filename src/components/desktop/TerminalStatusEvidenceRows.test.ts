@@ -146,4 +146,92 @@ describe('TerminalStatusEvidenceDisclosure', () => {
     expect(container.textContent).not.toContain('No runtime event evidence was available');
     expect(container.querySelector('[data-terminal-status-evidence-row="fallback"]')).toBeNull();
   });
+
+  function disclosureFor(sessionId: string): HTMLElement {
+    const disclosure = container.querySelector<HTMLElement>(
+      `[data-terminal-status-evidence="${sessionId}"]`,
+    );
+    if (!disclosure) throw new Error(`No disclosure rendered for ${sessionId}`);
+    return disclosure;
+  }
+
+  it('gives two sessions distinct evidence region ids with matching aria-controls once opened', async () => {
+    const otherFixture: TerminalStatusEvidence = {
+      ...fixture,
+      sessionId: 'claude-owned:other-rows',
+    };
+    await act(async () => {
+      root.render(createElement(
+        'div',
+        null,
+        createElement(TerminalStatusEvidenceDisclosure, { evidence: fixture }),
+        createElement(TerminalStatusEvidenceDisclosure, { evidence: otherFixture }),
+      ));
+    });
+
+    const buttons = [fixture, otherFixture].map(
+      ({ sessionId }) => disclosureFor(sessionId).querySelector('button')!,
+    );
+    for (const button of buttons) {
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+      expect(button.hasAttribute('aria-controls')).toBe(false);
+    }
+
+    await act(async () => {
+      for (const button of buttons) button.click();
+    });
+
+    const ids = buttons.map((button) => button.getAttribute('aria-controls'));
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
+
+    for (const [index, { sessionId }] of [fixture, otherFixture].entries()) {
+      expect(buttons[index].getAttribute('aria-expanded')).toBe('true');
+      const region = document.getElementById(ids[index]!);
+      expect(region).not.toBeNull();
+      expect(region?.getAttribute('role')).toBe('group');
+      expect(disclosureFor(sessionId).contains(region)).toBe(true);
+    }
+  });
+
+  it('keeps region ids unique when the same session is disclosed twice', async () => {
+    await act(async () => {
+      root.render(createElement(
+        'div',
+        null,
+        createElement(TerminalStatusEvidenceDisclosure, { evidence: fixture, defaultExpanded: true }),
+        createElement(TerminalStatusEvidenceDisclosure, { evidence: fixture, defaultExpanded: true }),
+      ));
+    });
+
+    const buttons = [...container.querySelectorAll('button')];
+    const ids = buttons.map((button) => button.getAttribute('aria-controls'));
+    expect(buttons).toHaveLength(2);
+    expect(ids[0]).toBeTruthy();
+    expect(ids[1]).toBeTruthy();
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const [index, button] of buttons.entries()) {
+      expect(button.parentElement?.contains(document.getElementById(ids[index]!))).toBe(true);
+    }
+  });
+
+  it('drops aria-controls and the region together when the evidence is collapsed', async () => {
+    await act(async () => {
+      root.render(createElement(TerminalStatusEvidenceDisclosure, {
+        evidence: fixture,
+        defaultExpanded: true,
+      }));
+    });
+
+    const button = container.querySelector('button')!;
+    const regionId = button.getAttribute('aria-controls');
+    expect(regionId).toBeTruthy();
+    expect(document.getElementById(regionId!)).not.toBeNull();
+
+    await act(async () => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.hasAttribute('aria-controls')).toBe(false);
+    expect(document.getElementById(regionId!)).toBeNull();
+  });
 });
