@@ -363,7 +363,16 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
       },
     }));
     try {
-      expect((await httpClose(source.packetId)).status).toBe(409);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const interrupted = await httpClose(source.packetId);
+        expect(interrupted.status).toBe(409);
+        if (readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)?.state === 'purging') break;
+        // A disappearing native process can make lsof refuse before the test
+        // reaches its interruption. Only that safe refusal permits setup retry.
+        const body = await interrupted.json();
+        expect(body.error.message).toMatch(/lsof.*(incomplete|inconclusive)/);
+        expect(existsSync(source.worktree.path)).toBe(true);
+      }
       interception.mockRestore();
       const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
       expect(claim.state).toBe('purging');
