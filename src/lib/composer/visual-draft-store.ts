@@ -80,9 +80,10 @@ export async function restoreVisualDraft(principal: string, target: VisualInstru
 
 export async function removeVisualDraft(principal: string, target: VisualInstruction['target'], id: string): Promise<void> {
   const key = keyFor(principal, target);
-  if (drafts.get(key)?.request.id !== id) return;
+  const removing = drafts.get(key);
+  if (removing?.request.id !== id) return;
   revisions.set(key, (revisions.get(key) ?? 0) + 1);
-  const write = (writes.get(key) ?? Promise.resolve()).catch(() => {}).then(() => persist(key, null));
+  const write = (writes.get(key) ?? Promise.resolve()).catch(() => {}).then(() => drafts.get(key) === removing ? persist(key, null) : undefined);
   writes.set(key, write); await write;
-  if (drafts.get(key)?.request.id === id) { drafts.delete(key); publish(); }
+  if (drafts.get(key) === removing) { drafts.delete(key); publish(); }
 }

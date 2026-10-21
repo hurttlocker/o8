@@ -2,7 +2,8 @@
 use std::sync::Mutex;
 use tauri::{Runtime, WebviewWindow};
 
-pub(crate) const BUSY: &str = "Another voice input is active. Finish it before starting another microphone.";
+pub(crate) const BUSY: &str =
+    "Another voice input is active. Finish it before starting another microphone.";
 #[derive(Default)]
 struct Claims {
     browser: Option<String>,
@@ -122,6 +123,17 @@ pub(crate) fn reserve_native(session: u64) -> Result<NativeInput, String> {
         .reserve_native(session)?;
     Ok(NativeInput { session })
 }
+/// Current and reserved native input own dictation; the STT session ID is only
+/// a monotonically advancing teardown fence. Browser Live may share visual capture.
+pub(crate) fn native_in_use() -> bool {
+    CLAIMS
+        .lock()
+        .map(|claims| claims.native.is_some() || claims.pending_native.is_some())
+        .unwrap_or(true)
+}
+#[cfg(test)]
+pub(crate) static TEST_CLAIMS: Mutex<()> = Mutex::new(());
+
 pub(crate) fn release_native(session: u64) {
     if let Ok(mut claims) = CLAIMS.lock() {
         claims.release_native(session);
@@ -178,6 +190,7 @@ mod tests {
     }
     #[test]
     fn commands_enforce_native_exclusion_window_ownership_and_stale_cleanup() {
+        let _serial = TEST_CLAIMS.lock().unwrap();
         *CLAIMS.lock().unwrap() = Claims::default();
         let app = mock_builder()
             .invoke_handler(tauri::generate_handler![
@@ -218,6 +231,10 @@ mod tests {
         };
         let first = invoke(&main, "voice_input_claim", "live-old");
         assert!(first.is_ok(), "{:?}", first.err());
+        assert!(
+            !native_in_use(),
+            "browser Live can coexist with visual capture"
+        );
         assert!(reserve_native(1).is_err());
         #[cfg(target_os = "macos")]
         assert!(crate::stt_engine::start().is_err());
@@ -234,11 +251,13 @@ mod tests {
         assert!(reserve_native(1).is_err());
         assert!(invoke(&main, "voice_input_release", "live-new").is_ok());
         let pending = reserve_native(1).unwrap();
+        assert!(native_in_use());
         assert!(invoke(&main, "voice_input_claim", "live-third").is_err());
         pending.activate().unwrap();
         drop(pending);
         assert!(invoke(&main, "voice_input_claim", "live-third").is_err());
         release_native(1);
+        assert!(!native_in_use());
         assert!(invoke(&other, "voice_input_claim", "live-third").is_err());
         assert!(invoke(&main, "voice_input_claim", "live-third").is_ok());
         assert!(invoke(&main, "voice_input_release", "live-third").is_ok());

@@ -12,11 +12,34 @@ struct Owner {
     generation: u64,
     ready: bool,
     finishing: bool,
+    finished: bool,
     session: Option<Session>,
     shared: Option<Arc<Shared>>,
     directory: PathBuf,
+    artifacts: Arc<Artifacts>,
     cancelled: Arc<AtomicBool>,
     transcribing: bool,
+}
+// Writers hold a lease so cancellation cannot remove a directory underneath an
+// in-flight start, frame extraction, transcription, or snapshot write.
+pub(crate) struct Artifacts {
+    directory: PathBuf,
+    discard: AtomicBool,
+}
+impl Artifacts {
+    fn new(directory: PathBuf) -> Arc<Self> {
+        Arc::new(Self {
+            directory,
+            discard: AtomicBool::new(false),
+        })
+    }
+}
+impl Drop for Artifacts {
+    fn drop(&mut self) {
+        if self.discard.load(Ordering::Acquire) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
 }
 static OWNER: Mutex<Option<Owner>> = Mutex::new(None);
 fn lock_owner() -> std::sync::MutexGuard<'static, Option<Owner>> {
@@ -47,6 +70,12 @@ fn take_owner(id: &str, generation: Option<u64>) -> Option<Owner> {
         None
     }
 }
+fn ensure_idle(owner: &Option<Owner>, armed: bool) -> Result<(), String> {
+    if owner.is_some() || armed || crate::voice_input::native_in_use() {
+        return Err("Another capture or dictation owns the screen. Finish it before starting visual instructions.".into());
+    }
+    Ok(())
+}
 fn main_only(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() != "main" {
         return Err("Visual capture belongs to the main workspace.".into());
@@ -70,6 +99,7 @@ pub async fn o8_visual_capture_begin(
     if !valid_id(&id) {
         return Err("Invalid visual capture identity.".into());
     }
+    crate::visual_capture_session::require_recording_output()?;
     if !crate::mac_perms::screen_capture_granted() {
         return Err("Allow Screen Recording for o8 in System Settings before capturing visual instructions.".into());
     }
@@ -81,14 +111,9 @@ pub async fn o8_visual_capture_begin(
     let directory = crate::agent::agent_data_dir()
         .join("visual-captures")
         .join(format!("{id}-{}", uuid::Uuid::new_v4()));
-    let (generation, cancelled) = {
+    let (generation, cancelled, artifacts) = {
         let mut owner = lock_owner();
-        if owner.is_some()
-            || crate::spatial_ink_window::is_armed()
-            || crate::stt_engine::active_session_id() != 0
-        {
-            return Err("Another capture or dictation owns the screen. Finish it before starting visual instructions.".into());
-        }
+        ensure_idle(&owner, crate::spatial_ink_window::is_armed())?;
         if app.get_webview_window("spatial-ink").is_none() {
             return Err("The drawing surface is unavailable.".into());
         }
@@ -100,22 +125,26 @@ pub async fn o8_visual_capture_begin(
             return Err("Another capture owns the screen.".into());
         };
         let cancelled = Arc::new(AtomicBool::new(false));
+        let artifacts = Artifacts::new(directory.clone());
         *owner = Some(Owner {
             id: id.clone(),
             generation,
             ready: false,
             finishing: false,
+            finished: false,
             session: None,
             shared: None,
             directory: directory.clone(),
+            artifacts: artifacts.clone(),
             cancelled: cancelled.clone(),
             transcribing: false,
         });
-        (generation, cancelled)
+        (generation, cancelled, artifacts)
     };
     crate::spatial_ink_window::set_visual_interaction(&app, generation, false);
     let app_clone = app.clone();
     let correlation = id.clone();
+    let startup_artifacts = artifacts.clone();
     let session = tauri::async_runtime::spawn_blocking(move || {
         Session::start(
             app_clone,
@@ -124,6 +153,7 @@ pub async fn o8_visual_capture_begin(
             directory,
             monitor,
             cancelled,
+            startup_artifacts,
         )
     })
     .await
@@ -282,7 +312,11 @@ pub fn o8_visual_capture_undo(
         })
         .ok_or("This visual capture is no longer active.")?;
     if let Some(shared) = &current.shared {
-        let removed = shared.marks.lock().unwrap_or_else(|value| value.into_inner()).pop();
+        let removed = shared
+            .marks
+            .lock()
+            .unwrap_or_else(|value| value.into_inner())
+            .pop();
         let revision = shared.snapshots.next_revision();
         let _ = app.emit_to("main", "o8:visual-capture-mark", serde_json::json!({"captureId":id,"generation":generation,
             "revision":revision,"phase":"undo","removedAtMs":removed.and_then(|mark| mark.points.last().map(|point| point.t))}));
@@ -302,7 +336,7 @@ pub async fn o8_visual_capture_finish(
     id: String,
 ) -> Result<serde_json::Value, String> {
     main_only(&window)?;
-    let (generation, session) = {
+    let (generation, session, artifacts) = {
         let mut owner = lock_owner();
         let current = owner
             .as_mut()
@@ -315,6 +349,7 @@ pub async fn o8_visual_capture_finish(
                 .session
                 .take()
                 .ok_or("The screen recorder is unavailable.")?,
+            current.artifacts.clone(),
         )
     };
     if crate::spatial_ink_window::generation() != generation {
@@ -330,6 +365,7 @@ pub async fn o8_visual_capture_finish(
     let app_clone = app.clone();
     let correlation = id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _artifacts = artifacts;
         let instruction =
             crate::spatial_ink_window::take_visual_instruction(generation, &correlation)?;
         if !crate::spatial_ink_window::disarm_visual(&app_clone, generation) {
@@ -340,11 +376,22 @@ pub async fn o8_visual_capture_finish(
     .await
     .map_err(|_| "Screen capture stopped unexpectedly.".to_string())
     .and_then(|result| result);
+    finish_result(&id, generation, result)
+}
+
+fn finish_result(
+    id: &str,
+    generation: u64,
+    result: Result<serde_json::Value, String>,
+) -> Result<serde_json::Value, String> {
     let mut owner = lock_owner();
-    owner
+    let current = owner
         .as_mut()
         .filter(|value| value.id == id && value.generation == generation)
         .ok_or("The capture owner changed. Keep the draft in its original chat.")?;
+    // A successful packet may already be entering the persisted draft. Preserve
+    // it across reload, including the interval before the browser releases it.
+    current.finished = result.is_ok();
     result
 }
 
@@ -367,7 +414,7 @@ pub async fn o8_visual_capture_transcribe_audio(
         "audio/ogg" => "ogg",
         _ => return Err("Unsupported capture audio format.".into()),
     };
-    let (directory, cancelled, generation) = {
+    let (directory, cancelled, generation, artifacts) = {
         let mut owner = lock_owner();
         let current = owner
             .as_mut()
@@ -378,6 +425,7 @@ pub async fn o8_visual_capture_transcribe_audio(
             current.directory.clone(),
             current.cancelled.clone(),
             current.generation,
+            current.artifacts.clone(),
         )
     };
     struct Processing(String, u64);
@@ -394,6 +442,7 @@ pub async fn o8_visual_capture_transcribe_audio(
     let _processing = Processing(id.clone(), generation);
     let correlation = id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _artifacts = artifacts;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(audio)
             .map_err(|_| "Invalid capture audio.")?;
@@ -439,24 +488,38 @@ async fn cancel_owned(
     generation: Option<u64>,
     discard: bool,
 ) -> Result<(), String> {
-    let capture = take_owner(&id, generation);
-    if let Some(capture) = capture {
-        capture.cancelled.store(true, Ordering::Release);
-        if let Some(shared) = &capture.shared {
-            shared.stopping.store(true, Ordering::Release);
-        }
+    if let Some(capture) = take_owner(&id, generation) {
+        stop_owner(&capture, discard);
         crate::spatial_ink_window::disarm_visual(&app, capture.generation);
-        let directory = capture.directory.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            drop(capture);
-            if discard {
-                let _ = std::fs::remove_dir_all(directory);
-            }
-        })
-        .await
-        .map_err(|_| "Capture cleanup stopped unexpectedly.")?;
+        tauri::async_runtime::spawn_blocking(move || drop(capture))
+            .await
+            .map_err(|_| "Capture cleanup stopped unexpectedly.")?;
     }
     Ok(())
+}
+
+fn stop_owner(capture: &Owner, discard: bool) {
+    capture.cancelled.store(true, Ordering::Release);
+    capture.artifacts.discard.store(discard, Ordering::Release);
+    if let Some(shared) = &capture.shared {
+        shared.stopping.store(true, Ordering::Release);
+        shared.snapshots.stop();
+    }
+}
+
+/// Detach synchronously at document destruction, before a replacement can begin.
+/// Blocking recorder teardown runs separately and only owns the detached generation.
+fn detach_on_main_navigation() -> Option<Owner> {
+    let capture = lock_owner().take()?;
+    stop_owner(&capture, !capture.finished);
+    Some(capture)
+}
+
+pub(crate) fn reset_on_main_navigation(app: &tauri::AppHandle) {
+    if let Some(capture) = detach_on_main_navigation() {
+        crate::spatial_ink_window::disarm_visual(app, capture.generation);
+        tauri::async_runtime::spawn_blocking(move || drop(capture));
+    }
 }
 
 pub fn register_shortcut(app: &tauri::AppHandle) {
@@ -479,6 +542,7 @@ pub fn register_shortcut(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    pub(super) static TEST_OWNER: Mutex<()> = Mutex::new(());
     #[test]
     fn capture_ids_are_bounded_correlations() {
         assert!(valid_id("frame-123-abcd"));
@@ -505,15 +569,18 @@ mod tests {
     }
     #[test]
     fn old_startup_cleanup_cannot_take_a_replacement_owner_with_the_same_id() {
+        let _serial = TEST_OWNER.lock().unwrap();
         let cancelled = Arc::new(AtomicBool::new(false));
         let previous = lock_owner().replace(Owner {
             id: "frame-reused".into(),
             generation: 42,
             ready: false,
             finishing: false,
+            finished: false,
             session: None,
             shared: None,
             directory: PathBuf::new(),
+            artifacts: Artifacts::new(PathBuf::new()),
             cancelled: cancelled.clone(),
             transcribing: true,
         });
@@ -526,3 +593,7 @@ mod tests {
         *lock_owner() = previous;
     }
 }
+
+#[cfg(test)]
+#[path = "visual_capture_regression_tests.rs"]
+mod regression_tests;

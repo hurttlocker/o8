@@ -7,6 +7,7 @@ import { claimVisualCapture, releaseVisualCapture } from '@/lib/composer/visual-
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import type { DictationStartOptions, DictationState } from '@/components/desktop/dictation/types';
 const test = vi.hoisted(() => ({ principal: 'a', rows: new Map<string, VisualInstructionDraft>(), listeners: new Set<() => void>(), hold: null as Promise<void> | null,
+  removal: null as Promise<void> | null, remove: vi.fn(),
   dictation: 'idle' as DictationState, words: null as DictationStartOptions | null, cancel: vi.fn() }));
 vi.mock('@/components/auth/O8AuthProvider', () => ({ useO8Auth: () => ({ user: { id: test.principal }, isLoaded: true }) }));
 vi.mock('@/lib/tauri/bridge', () => ({ canUseTauriEvents: () => false, isTauri: () => false }));
@@ -28,7 +29,7 @@ vi.mock('./VisualInstructionClarification', () => ({ VisualInstructionClarificat
 vi.mock('@/lib/composer/visual-draft-store', () => ({
   readVisualDraft: (principal: string) => test.rows.get(principal) ?? null,
   subscribeVisualDrafts: (listener: () => void) => { test.listeners.add(listener); return () => test.listeners.delete(listener); },
-  restoreVisualDraft: async () => {}, removeVisualDraft: async () => {},
+  restoreVisualDraft: async () => {}, removeVisualDraft: async () => { await test.remove(); await test.removal; test.rows.delete('a'); test.listeners.forEach(listener => listener()); },
   saveVisualDraft: async (draft: VisualInstructionDraft) => { test.rows.set(draft.principal, draft); test.listeners.forEach(listener => listener()); if (draft.status === 'saving') await test.hold; },
 }));
 const { VisualComposerArea } = await import('./VisualComposerArea');
@@ -58,7 +59,7 @@ function mount(scope = 'chat-a') { root.render(React.createElement(DictationHost
 const send = () => node.querySelector<HTMLButtonElement>('[data-testid="composer-send-control"]')!;
 beforeEach(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.listeners.clear(); fetcher.mockReset();
+  test.principal = 'a'; test.rows.clear(); test.rows.set('a', sample()); test.hold = null; test.removal = null; test.remove.mockClear(); test.listeners.clear(); fetcher.mockReset();
   vi.stubGlobal('fetch', (url: RequestInfo | URL, options?: RequestInit) => options?.method === 'POST' ? fetcher(url, options) : Promise.resolve(Response.json({})));
   ordinarySend.mockClear(); localStorage.clear(); node = document.createElement('div'); document.body.append(node); root = createRoot(node);
   ordinaryChange.mockClear(); test.cancel.mockClear(); test.dictation = 'idle'; test.words = null;
@@ -94,6 +95,32 @@ it('cannot send or clear a draft while its next frame is still recording or tran
   await act(async () => claimVisualCapture('capture', 'a', target, 'request-a'));
   expect(send().disabled).toBe(true);
   expect(node.querySelector<HTMLButtonElement>('[aria-label="Discard visual draft"]')?.disabled).toBe(true);
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('locks the marked draft until confirmed discard finishes persisting', async () => {
+  let release!: () => void;
+  test.removal = new Promise<void>(done => { release = done; });
+  await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Discard visual draft"]')!.click());
+  const button = (text: string) => [...node.querySelectorAll('button')].find(value => value.textContent === text)!;
+  await act(async () => button('Discard').click());
+  expect(test.remove).toHaveBeenCalledTimes(1);
+  expect(node.querySelector('textarea')!.disabled).toBe(true);
+  expect(send().disabled).toBe(true);
+  expect(button('Keep draft').disabled).toBe(true);
+  await act(async () => { button('Discard').click(); send().click(); });
+  expect(test.remove).toHaveBeenCalledTimes(1);
+  expect(fetcher).not.toHaveBeenCalled();
+  await act(async () => release());
+  expect(node.querySelector('textarea')!.value).toBe('Unsent ordinary message');
+});
+it('retains an editable visual draft when confirmed discard cannot persist', async () => {
+  test.remove.mockRejectedValueOnce(new Error('Draft storage is unavailable.'));
+  await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="Discard visual draft"]')!.click());
+  await act(async () => [...node.querySelectorAll('button')].find(value => value.textContent === 'Discard')!.click());
+  expect(node.textContent).toContain('Draft storage is unavailable.');
+  expect(node.querySelector('textarea')!.value).toBe('Keep this button.');
+  expect(node.querySelector('textarea')!.disabled).toBe(false);
+  expect(test.rows.get('a')?.request.frames).toHaveLength(1);
   expect(fetcher).not.toHaveBeenCalled();
 });
 it('uses one actual composer, preserves the ordinary draft on close, and resumes its marked draft', async () => {

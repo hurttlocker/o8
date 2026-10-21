@@ -43,6 +43,7 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const clearing = useRef(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const scope = props.target ? visualInstructionScope(props.target) : '';
   const capturing = useSyncExternalStore(subscribeVisualCapture, () => props.target ? ownsVisualDraft(principal, props.target) : false, () => false);
@@ -110,7 +111,7 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
     finally { setBusy(false); }
   };
   const send = async () => {
-    if (!draft || busy || capturing || draft.status === 'saved' || !draft.request.utterance.trim() || !draft.request.frames.length) return;
+    if (!draft || busy || clearing.current || capturing || draft.status === 'saved' || !draft.request.utterance.trim() || !draft.request.frames.length) return;
     setBusy(true); setError(null);
     try {
       await commitVisualInstruction(draft, () => alive.current && current.current.loaded && current.current.principal === draft.principal);
@@ -119,6 +120,15 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);
     } finally { setBusy(false); }
+  };
+  const clear = async () => {
+    if (!draft || busy || clearing.current || capturing) return;
+    clearing.current = true; setBusy(true); setError(null);
+    try {
+      await removeVisualDraft(principal, draft.request.target, draft.request.id);
+      setConfirmClear(false); setExpanded(false); props.anchor.current?.focus();
+    } catch (cause) { setError(String(cause)); }
+    finally { clearing.current = false; setBusy(false); }
   };
   const locked = busy || capturing || (draft !== null && draft.status !== 'draft');
   const draftKey = draft ? `${draft.request.id}:${draft.request.frames.length}` : '';
@@ -133,7 +143,7 @@ export function VisualInstructionComposer(props: VisualInstructionComposerProps)
       annotate: id => { if (!locked) setEditing(id); },
       removeFrame: id => { if (draft && !locked) save({ ...draft, request: { ...draft.request, clarification: undefined, frames: draft.request.frames.filter(frame => frame.id !== id) } }); },
       send: () => { void send(); }, toggleClear: () => setConfirmClear(value => !value),
-      clear: () => { if (draft && !busy && !capturing) void removeVisualDraft(principal, draft.request.target, draft.request.id).then(() => { setConfirmClear(false); setExpanded(false); setError(null); props.anchor.current?.focus(); }).catch(cause => setError(String(cause))); },
+      clear: () => { void clear(); },
     })}
     <input ref={input} aria-label="Add visual instruction frames" type="file" multiple accept="image/png,image/jpeg,image/gif,image/webp" style={{ display: 'none' }} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void addFiles(files); }} />
     {props.active && draft && editFrame ? <ScreenshotAnnotator image={{ ...editFrame.image, mimeType: 'image/png' }}
