@@ -1,3 +1,5 @@
+import { orphanCloseRetirement, withOrphanCloseContext, prepareOrphanCloseOwners } from './close-orphaned-owner';
+import { OrphanCloseRefusal } from './close-orphaned-process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -400,18 +402,17 @@ async function closePacketUnmergedUnlocked(input: {
     worktreeRefs.set(refKey, target.worktreePath);
   }
 
-  const missingWorktreeBindings = new Set(lanesToClose.flatMap((target) => {
-    const worktreePath = target.worktreePath?.trim();
-    return worktreePath && !existsSync(worktreePath)
-      ? [`${target.id}\0${worktreePath}`]
-      : [];
-  }));
+  const missingWorktreeBindings = new Set<string>();
   const detachedSessionRollbacks: Array<() => Promise<unknown>> = [];
   const restoreDetachedSessions = async () => {
     await Promise.allSettled(detachedSessionRollbacks.map((rollback) => rollback()));
     detachedSessionRollbacks.length = 0;
   };
   try {
+    for (const target of lanesToClose) {
+      const worktreePath = target.worktreePath?.trim();
+      if (worktreePath && !existsSync(worktreePath) && !orphanCloseRetirement(target)) missingWorktreeBindings.add(`${target.id}\0${worktreePath}`);
+    }
     const stoppedReviewTurns = [];
     const reviewedLaneIds = new Set<string>();
     for (const target of lanesToClose) {
@@ -427,9 +428,11 @@ async function closePacketUnmergedUnlocked(input: {
     if (archivedOwner) {
       lanesToClose = archivedOwner.targets;
     }
+    const orphanLaneIds = await prepareOrphanCloseOwners(lanesToClose);
     const retiredWorkerBindings = await confirmedRetiredWorkerBindings(input.packetId, lanesToClose);
     if (archivedOwner) retiredWorkerBindings.add(archivedOwner.bindingKey);
     const workerLanesToKill = lanesToClose.filter((target) => {
+      if (orphanLaneIds.has(target.id)) return false;
       const bindingKey = workerBindingKey(target);
       return !bindingKey || !retiredWorkerBindings.has(bindingKey);
     });
@@ -553,7 +556,7 @@ async function closePacketUnmergedUnlocked(input: {
           return {
             ok: false,
             code: 'close_failed',
-            message: `Close refused because worktree cleanup for lane ${candidate.id} was not confirmed (${cleanup.reason ?? 'unknown'}). The packet remains held and the checkout remains visible.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`,
+            message: cleanup.detail ?? `Close refused because worktree cleanup for lane ${candidate.id} was not confirmed (${cleanup.reason ?? 'unknown'}). The packet remains held and the checkout remains visible.${formatWorktreeHolderPids(cleanupAttempt.holderPids)}`,
             status: 409,
           };
         }
@@ -569,7 +572,7 @@ async function closePacketUnmergedUnlocked(input: {
       }
     }
     try {
-      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id)));
+      await archiveLaneSessionsConfirmed(lanesToClose.filter((candidate) => !survivorLaneIds.has(candidate.id) && !orphanLaneIds.has(candidate.id)));
     } catch (error) {
       if (!(error instanceof LaneSessionArchiveUnconfirmedError)) throw error;
       await restoreDetachedSessions();
@@ -729,7 +732,7 @@ async function closePacketUnmergedUnlocked(input: {
       ok: false,
       code: 'close_failed',
       message: error instanceof Error ? error.message : 'Unable to close packet unmerged.',
-      status: 500,
+      status: error instanceof OrphanCloseRefusal ? 409 : 500,
       error,
     };
   }
@@ -750,9 +753,9 @@ export function closePacketUnmerged(input: {
         status: 409,
       };
     }
-    return closePacketUnmergedUnlocked({
+    return withOrphanCloseContext(input.packetId, () => closePacketUnmergedUnlocked({
       ...input,
       acknowledgeMissingWorktree: input.acknowledgeMissingWorktree === true,
-    });
+    }));
   });
 }

@@ -1,3 +1,4 @@
+import { assertOrphanCloseOwner } from '@/lib/orchestrator/close-orphaned-owner';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 
@@ -37,7 +38,7 @@ export async function assertManagedRetirementQuiescence(input: {
   candidatePath: string;
   identity: WorktreeMaterializationIdentity;
   capturedPurge?: CapturedPurgeProcessWitness;
-}): Promise<{ repositoryUuid: string | null; packetId: string | null; laneId: string | null; sessionKey: string | null }> {
+}): Promise<{ repositoryUuid: string | null; packetId: string | null; laneId: string | null; sessionKey: string | null; orphanedClose?: true }> {
   // The source leaf may already be renamed into an exact retirement claim.
   // Canonicalize its still-owned parent so configured aliases retain the same
   // namespace authority before and after rename without following the leaf.
@@ -64,6 +65,14 @@ export async function assertManagedRetirementQuiescence(input: {
     return { repositoryUuid: null, packetId: null, laneId: null, sessionKey: null };
   }
   const lane = lanes.length === 1 ? lanes[0] : null;
+  const orphan = lane ? await assertOrphanCloseOwner(lane.id, input.candidatePath) : null;
+  if (orphan && lane) {
+    if (input.capturedPurge || orphan.device !== input.identity.device || orphan.inode !== input.identity.inode) {
+      throw new Error('Orphan close cannot prove the captured purge or materialization identity.');
+    }
+    return { repositoryUuid: orphan.repositoryUuid, packetId: orphan.packetId, laneId: lane.id,
+      sessionKey: lane.sessionKey?.trim() || null, orphanedClose: true };
+  }
   const sessionKey = lane?.sessionKey?.trim();
   if (!lane?.packetId || !sessionKey || metadata.sessionKey !== sessionKey) {
     throw new Error('Retirement lacks an unambiguous durable packet and owned session.');

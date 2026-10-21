@@ -1,3 +1,5 @@
+import { orphanCloseOwner, orphanCloseRefusal, orphanCloseRetirement } from './close-orphaned-owner';
+import { OrphanCloseRefusal } from './close-orphaned-process';
 /**
  * Synchronous worktree cleanup for merged lanes.
  *
@@ -53,6 +55,7 @@ export type RemoveMergedWorktreeReason =
 
 export interface RemoveMergedWorktreeResult {
   removed: boolean;
+  detail?: string;
   reason?: RemoveMergedWorktreeReason;
 }
 
@@ -125,6 +128,12 @@ export async function removeMergedWorktree(
     // durable terminal truth for this exact packet plus confirmed absence.
     if (!(await pathExists(worktreePath))) {
       // Retirement records the real path; on macOS /tmp and the like resolve elsewhere.
+      if (orphanCloseOwner(currentLane.id) && orphanCloseRetirement(currentLane)) {
+        const removed = await getWorktreeManager(normalizedRepo).cleanup(path.basename(normalizedWorktree), {
+          force: true, deleteBranch: false, workspaceRetirementAction: 'discard',
+        });
+        return removed ? { removed: true } : { removed: false, reason: 'retirement-refused', detail: orphanCloseRefusal(lane.id) };
+      }
       const snapshot = exactSnapshot(normalizedWorktree);
       const retired = snapshot?.state === 'retired' && snapshot.repositoryUuid === repo.id
         && snapshot.packetId === currentLane.packetId && snapshot.laneId === currentLane.id;
@@ -135,7 +144,8 @@ export async function removeMergedWorktree(
       return { removed: false, reason: 'ownership-unavailable' };
     }
     const managed = await readManagedWorkspaceMaterialization(normalizedRepo, normalizedWorktree);
-    if (!currentLane.sessionKey || managed.metadata.sessionKey !== currentLane.sessionKey) {
+    if ((!currentLane.sessionKey || managed.metadata.sessionKey !== currentLane.sessionKey)
+      && !orphanCloseOwner(currentLane.id)) {
       return { removed: false, reason: 'ownership-unavailable' };
     }
 
@@ -156,10 +166,12 @@ export async function removeMergedWorktree(
     const removed = await getWorktreeManager(normalizedRepo).cleanup(managed.metadata.id, {
       force: true,
       deleteBranch: false,
-      workspaceRetirementAction: getWorkspaceRetirementAction(normalizedWorktree) ?? 'cleanup',
+      workspaceRetirementAction: orphanCloseOwner(currentLane.id) ? 'discard'
+        : getWorkspaceRetirementAction(normalizedWorktree) ?? 'cleanup',
     });
-    return removed ? { removed: true } : { removed: false, reason: 'retirement-refused' };
+    return removed ? { removed: true } : { removed: false, reason: 'retirement-refused', detail: orphanCloseRefusal(lane.id) };
   } catch (error) {
+    if (error instanceof OrphanCloseRefusal) return { removed: false, reason: 'inconclusive', detail: error.message };
     console.warn(`[worktree-cleanup] Retirement refused for lane ${lane.id}: ${formatError(error)}`);
     return { removed: false, reason: 'ownership-unavailable' };
   }

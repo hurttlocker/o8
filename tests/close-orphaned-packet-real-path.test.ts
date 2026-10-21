@@ -2,11 +2,11 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { bindOwnedPacketSession } from './helpers/managed-packet-worktree';
 
@@ -19,18 +19,27 @@ process.env.O8_WORKTREE_ROOT = path.join(root, 'worktrees');
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = sessionRoot;
 writeFileSync(path.join(root, 'ws-token'), token);
 const route = await import('@/app/api/orchestrator/discard-packet/route');
-const { closeDb } = await import('@/lib/db');
+const { mintPacketWorkerToken, bindPacketWorkerTokenProcess } = await import('@/lib/auth/packet-worker-token');
+const { ownedProcessExitPayload } = await import('@/lib/runtimes/shared/owned-session/helpers');
+const { resolveSpawnedProcessGroupId } = await import('@/lib/runtimes/shared/owned-session/run-process-proof');
+const { recordLaneEvent } = await import('@/lib/lane/events');
+const { recordMission } = await import('@/lib/db/missions-store');
+const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
 const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-store');
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
-const { resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
+const { canonicalRepoRoot, resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { addRepo } = await import('@/lib/repos/registry');
 const { archiveRootForOwnedSessionRoot } = await import('@/lib/runtimes/shared/owned-session/archive');
 const { handleClosePacketUnmerged } = await import('@/lib/mcp/operator-handlers/close-packet');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
+const exactRetirement = await import('@/lib/workspace/exact-managed-directory-retirement');
+const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
+const worktreeCleanup = await import('@/lib/orchestrator/worktree-cleanup');
+const { removeMergedWorktree } = worktreeCleanup;
 const { exactSnapshot } = await import('@/lib/workspace/workspace-materialization-retirement');
 let server: Server;
 let base: string;
@@ -74,6 +83,34 @@ async function fixture(sessionState: SessionState) {
     packetId, sessionKey: sessionState === 'unbound' ? undefined : worktree.sessionKey,
     ownership: 'managed',
   });
+  const runMarker = randomUUID();
+  const workerToken = mintPacketWorkerToken(packetId, { processMarker: runMarker });
+  const worker = spawn(process.execPath, ['-e', 'process.stdin.once("data", () => process.exit(0));process.stdout.write("ready")'], {
+    cwd: worktree.path, detached: true, env: { ...process.env, O8_OWNED_RUN_MARKER: runMarker },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  children.add(worker);
+  const workerClosed = once(worker, 'close');
+  await once(worker.stdout!, 'data');
+  const processGroupId = await resolveSpawnedProcessGroupId(worker.pid!);
+  bindPacketWorkerTokenProcess(workerToken, { pid: worker.pid!, processGroupId, processMarker: runMarker });
+  worker.stdin.end('finish');
+  const [exitCode] = await workerClosed;
+  children.delete(worker);
+  expect(exitCode).toBe(0);
+  const run = { id: runMarker, mode: 'launch' as const, prompt: 'fixture',
+    startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+    pid: worker.pid!, processGroupId, processMarker: runMarker, commandIdentity: 'node',
+    spawnState: 'started' as const, outcome: 'finished' as const,
+    stdoutPath: path.join(root, 'fixture-output'), stderrPath: path.join(root, 'fixture-error'),
+    childExit: { code: 0, signal: null, classification: 'clean-exit' as const } };
+  const sessionFile = path.join(sessionRoot, `codex-owned-${packetId}`, 'session.json');
+  const session = JSON.parse(readFileSync(sessionFile, 'utf8'));
+  writeFileSync(sessionFile, JSON.stringify({ ...session, laneId: lane.id,
+    recentRuns: [run], runIdentityLedger: { version: 1, complete: true, totalRuns: 1 } }));
+  recordLaneEvent(lane.id, 'runtime_process_exit', 'system', ownedProcessExitPayload(
+    'codex', worktree.sessionKey, run, run.childExit, undefined, '',
+  ));
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
   if (sessionState === 'archived') {
     const archive = archiveRootForOwnedSessionRoot(sessionRoot);
@@ -89,7 +126,7 @@ async function fixture(sessionState: SessionState) {
     }
   }
   resetOwnedSessionIndex();
-  writeOrchestratorControlPlaneState({
+  const mission = writeOrchestratorControlPlaneState({
     ...createEmptyOrchestratorMissionState(), missionId: `mission-${packetId}`, repoPath,
     runtime: 'codex', updatedAt: new Date().toISOString(),
     packets: [{
@@ -101,7 +138,11 @@ async function fixture(sessionState: SessionState) {
         worktreePath: worktree.path, runtime: 'codex', sessionKey: lane.sessionKey }, review: null,
     } as OrchestratorPacket],
   });
-  return { packetId, repoPath, branch, worktree, lane, head };
+  recordMission({ id: mission.missionId!, repoPath, runtime: 'codex', prompt: '', summary: '',
+    constraints: '', totalWaves: 1, missionState: mission,
+    packetMeta: mission.packets.map(({ id, title, referenceLabel }) => ({ id, title, referenceLabel })),
+  });
+  return { packetId, repoPath, branch, worktree, lane, head, runMarker };
 }
 
 async function httpClose(packetId: string) {
@@ -187,37 +228,157 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
         expect(existsSync(source.worktree.path)).toBe(false);
         expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
         expect(exactSnapshot(source.worktree.path)?.state).toBe('retired');
-      });
+      }, 120_000);
     }
   }
 
-  it('HTTP, CLI and MCP refuse a live orphan process with the same code and message', async () => {
+  for (const holder of ['cwd', 'open-file', 'escaped-marker', 'revoked-marker', 'archived-cwd', 'archived-marker'] as const) {
+    it(`HTTP, CLI and MCP refuse a live ${holder} process with the same code and message`, async () => {
+      const source = await fixture(holder.startsWith('archived') ? 'archived' : 'missing');
+      if (holder === 'revoked-marker') getSqlite().prepare('UPDATE worker_tokens SET revoked_at = ? WHERE packet_id = ?').run(new Date().toISOString(), source.packetId);
+      const script = holder === 'open-file'
+        ? 'require("node:fs").openSync(process.argv[1], "r");process.stdout.write("ready");setInterval(() => {}, 1000)'
+        : 'process.stdout.write("ready");setInterval(() => {}, 1000)';
+      const child = spawn(process.execPath, ['-e', script, path.join(source.worktree.path, 'source.txt')], {
+        cwd: holder.endsWith('cwd') ? source.worktree.path : root,
+        env: { ...process.env, ...(holder.endsWith('marker') ? { O8_OWNED_RUN_MARKER: source.runMarker } : {}) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      children.add(child);
+      await once(child.stdout!, 'data');
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      const cli = await cliClose(source.packetId);
+      const mcp = await handleClosePacketUnmerged({ packetId: source.packetId, disposition: 'superseded' });
+      expect(response.status).toBe(409);
+      expect(body.error.message).toContain(String(child.pid));
+      expect(cli.exitCode).not.toBe(0);
+      const cliError = JSON.parse(cli.stderr.trim()).error;
+      expect(cliError).toMatchObject(body.error);
+      expect(mcp.isError).toBe(true);
+      expect(mcp.content[0]?.type).toBe('text');
+      expect(JSON.parse((mcp.content[0] as { text: string }).text)).toMatchObject({ error: body.error });
+      expect(getLane(source.lane.id)?.status).not.toBe('archived');
+      expect(existsSync(source.worktree.path)).toBe(true);
+      const exited = once(child, 'close');
+      child.kill();
+      await exited;
+      children.delete(child);
+      const retry = await httpClose(source.packetId);
+      expect(await retry.json()).toMatchObject({ ok: true, result: { closed: true } });
+      expect(existsSync(source.worktree.path)).toBe(false);
+    }, 120_000);
+  }
+  it('keeps ordinary cleanup closed to orphan authority', async () => {
     const source = await fixture('missing');
-    const child = spawn(process.execPath, ['-e', 'process.stdout.write("ready");setInterval(() => {}, 1000)'], {
-      cwd: source.worktree.path, stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    children.add(child);
-    await once(child.stdout!, 'data');
-    const response = await httpClose(source.packetId);
-    const body = await response.json();
-    const cli = await cliClose(source.packetId);
-    const mcp = await handleClosePacketUnmerged({ packetId: source.packetId, disposition: 'superseded' });
-    expect(response.status).toBe(409);
-    expect(body.error.message).toContain(String(child.pid));
-    expect(cli.exitCode).not.toBe(0);
-    const cliError = JSON.parse(cli.stderr.trim()).error;
-    expect(cliError).toMatchObject(body.error);
-    expect(mcp.isError).toBe(true);
-    expect(mcp.content[0]?.type).toBe('text');
-    expect(JSON.parse((mcp.content[0] as { text: string }).text)).toMatchObject({ error: body.error });
-    expect(getLane(source.lane.id)?.status).not.toBe('archived');
+    expect(await removeMergedWorktree(source.lane)).toMatchObject({ removed: false });
     expect(existsSync(source.worktree.path)).toBe(true);
-    const exited = once(child, 'close');
-    child.kill();
-    await exited;
-    children.delete(child);
-    const retry = await httpClose(source.packetId);
-    expect(await retry.json()).toMatchObject({ ok: true, result: { closed: true } });
-    expect(existsSync(source.worktree.path)).toBe(false);
   });
+
+  for (const protocol of ['failed', 'partial'] as const) {
+    it(`names ${protocol} native open-file evidence and keeps the checkout`, async () => {
+      const source = await fixture('missing');
+      const shims = path.join(root, 'probe-shims-' + protocol);
+      mkdirSync(shims);
+      const shim = path.join(shims, 'lsof');
+      writeFileSync(shim, protocol === 'failed'
+        ? '#!/bin/sh\nprintf "p123\\ncnode\\nf3\\nn/partial\\n"\nprintf "permission denied" >&2\nexit 1\n'
+        : '#!/bin/sh\nprintf "p123\\ncnode\\nf3\\nn/unrelated\\np456\\ncnode\\nf4\\n"\nexit 0\n');
+      chmodSync(shim, 0o755);
+      const originalPath = process.env.PATH;
+      try {
+        process.env.PATH = shims + path.delimiter + originalPath;
+        const response = await httpClose(source.packetId);
+        const body = await response.json();
+        expect(response.status).toBe(409);
+        expect(body.error.message).toMatch(/lsof.*unavailable or inconclusive|lsof.*incomplete/);
+        expect(existsSync(source.worktree.path)).toBe(true);
+      } finally { process.env.PATH = originalPath; }
+    });
+  }
+
+  it('holds a renamed retirement for a late process, then revalidates its durable authority on retry', async () => {
+    const source = await fixture('missing');
+    const retire = exactRetirement.retireExactManagedDirectory;
+    let holder: ChildProcess | undefined;
+    const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation((input) => retire({
+      ...input,
+      afterRetirementRename: async () => {
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        holder = spawn(process.execPath, ['-e', 'process.stdout.write("ready");setInterval(() => {}, 1000)'], {
+          cwd: claim.claimPath, stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        children.add(holder);
+        await once(holder.stdout!, 'data');
+      },
+    }));
+    try {
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toContain(String(holder?.pid));
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+      expect(existsSync(source.worktree.path)).toBe(false);
+      expect(existsSync(claim.claimPath)).toBe(true);
+      expect(getLane(source.lane.id)?.status).not.toBe('archived');
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+      interception.mockRestore();
+      const exited = once(holder!, 'close');
+      holder!.kill();
+      await exited;
+      children.delete(holder!);
+      const retry = await httpClose(source.packetId);
+      expect(await retry.json()).toMatchObject({ ok: true, result: { closed: true, worktreeRemoved: true } });
+      expect(existsSync(claim.claimPath)).toBe(false);
+      expect(getLane(source.lane.id)?.status).toBe('archived');
+      expect(exactSnapshot(source.worktree.path)?.state).toBe('retired');
+    } finally { interception.mockRestore(); }
+  }, 120_000);
+
+  for (const interruption of ['after-cleanup', 'before-claim-completion'] as const) {
+    it(`finishes close after ${interruption} without recovering deletion authority`, async () => {
+      const source = await fixture('missing');
+      const cleanup = worktreeCleanup.removeMergedWorktree;
+      const interception = interruption === 'after-cleanup'
+        ? vi.spyOn(worktreeCleanup, 'removeMergedWorktree').mockImplementation(async (...args) => {
+          const result = await cleanup(...args);
+          if (result.removed) throw new Error('Injected failure after actual retirement.');
+          return result;
+        })
+        : vi.spyOn(exactRetirement, 'completeExactManagedDirectoryRetirement').mockImplementation(() => {
+          throw new Error('Injected interruption before clearing a completed exact claim.');
+        });
+      try {
+        const response = await httpClose(source.packetId);
+        expect(response.status).toBe(409);
+        expect(existsSync(source.worktree.path)).toBe(false);
+        expect(exactSnapshot(source.worktree.path)?.state).toBe('retired');
+        expect(getLane(source.lane.id)?.status).toBe('archived');
+        interception.mockRestore();
+        const retry = await httpClose(source.packetId);
+        expect(await retry.json()).toMatchObject({ ok: true, result: { closed: true } });
+        expect(readOrchestratorControlPlaneState().packets[0]?.status).toBe('archived');
+        expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+      } finally { interception.mockRestore(); }
+    }, 120_000);
+  }
+
+  for (const missing of ['run-identity', 'process-group', 'newer-launch', 'unbound-run', 'too-many-runs', 'controlled-exit', 'pid-reuse'] as const) {
+    it(`refuses uncertain ${missing} evidence and preserves the checkout`, async () => {
+      const source = await fixture('missing');
+      if (missing === 'run-identity') getSqlite().prepare('DELETE FROM worker_tokens WHERE packet_id = ?').run(source.packetId);
+      if (missing === 'process-group') getSqlite().prepare('UPDATE worker_tokens SET lease_process_group_id = NULL WHERE packet_id = ?').run(source.packetId);
+      if (missing === 'newer-launch') recordLaneEvent(source.lane.id, 'status_change', 'system', { status: 'launching' });
+      if (missing === 'unbound-run') mintPacketWorkerToken(source.packetId, { processMarker: randomUUID() });
+      if (missing === 'too-many-runs') for (let count = 0; count < 16; count++) mintPacketWorkerToken(source.packetId, { processMarker: randomUUID() });
+      if (missing === 'pid-reuse') getSqlite().prepare('UPDATE worker_tokens SET lease_process_pid = ? WHERE packet_id = ?').run(process.pid, source.packetId);
+      if (missing === 'controlled-exit') recordLaneEvent(source.lane.id, 'runtime_process_exit', 'system', { runId: randomUUID(), runtime: 'codex', surfaceId: source.worktree.sessionKey });
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toMatch(/identity|process.group|launch|run bound/i);
+      expect(existsSync(source.worktree.path)).toBe(true);
+      expect(getLane(source.lane.id)?.status).not.toBe('archived');
+    });
+  }
 });

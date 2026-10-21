@@ -1,3 +1,4 @@
+import { orphanCloseOwner, readOrphanCloseOwner, withOrphanCloseContext } from '@/lib/orchestrator/close-orphaned-owner';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import {
@@ -22,6 +23,15 @@ export async function withRetirementAuthorityLock<T>(
   if (authority?.retirementReason !== 'terminal') return operation();
   if (typeof authority.preservationId !== 'string') throw new Error('Terminal retirement has no preservation owner.');
   const { payload } = await readWorkspacePreservation(authority.preservationId);
+  if (authority.orphanCloseOwner !== undefined) {
+    const owner = readOrphanCloseOwner(authority.orphanCloseOwner);
+    if (owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
+      || owner.repositoryUuid !== payload.repositoryUuid || owner.sourcePath !== payload.identity.canonicalPath
+      || owner.device !== payload.identity.device || owner.inode !== payload.identity.inode) {
+      throw new Error('Durable orphan close authority belongs to another preservation owner.');
+    }
+    return withPacketLifecycleSpawnLock(payload.packetId, () => withOrphanCloseContext(payload.packetId, operation, owner));
+  }
   return withPacketLifecycleSpawnLock(payload.packetId, operation);
 }
 
@@ -55,7 +65,8 @@ export async function admitRetirementAuthority(input: {
     || payload.identity.inode !== input.identity.inode) {
     throw new Error('Terminal preservation belongs to another exact workspace owner.');
   }
-  return { retirementReason: 'terminal', preservationId };
+  const orphan = payload.laneId ? orphanCloseOwner(payload.laneId) : null;
+  return { retirementReason: 'terminal', preservationId, ...(orphan ? { orphanCloseOwner: orphan } : {}) };
 }
 
 async function verifyCreationAuthority(authority: Record<string, unknown>): Promise<void> {
@@ -117,8 +128,9 @@ export async function verifyRetirementAuthority(input: {
     sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
   });
   if (owner.repositoryUuid !== payload.repositoryUuid || owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
-    || !payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
-      && identity.identity === owner.sessionKey)) {
+    || !(owner.orphanedClose && owner.sessionKey === null && payload.handoff.sessionIdentities.length === 0
+      || payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
+        && identity.identity === owner.sessionKey))) {
     throw new Error('Terminal preservation process owner changed after capture.');
   }
   if (input.verifyContents) {
