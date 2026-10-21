@@ -2,7 +2,7 @@ import 'server-only';
 
 import { listActiveLanes } from '@/lib/lane/registry';
 import type { LaneStatus } from '@/lib/lane/types';
-import { getProjectContext } from '@/lib/projects/context';
+import { getProjectContext, ProjectNotFoundError, type ProjectContext } from '@/lib/projects/context';
 
 const STALE_LOCK_MS = 5 * 60_000;
 
@@ -39,10 +39,17 @@ export async function listProjectLocks(projectId?: string | null): Promise<Proje
   const locks: ProjectLock[] = [];
 
   for (const lane of lanes) {
-    const context = await getProjectContext({
-      repoPath: lane.repoPath,
-      projectId: lane.projectId,
-    });
+    let context: ProjectContext;
+    try {
+      context = await getProjectContext({
+        repoPath: lane.repoPath,
+        projectId: lane.projectId,
+      });
+    } catch (error) {
+      // Historical lanes can outlive their project and no longer hold locks.
+      if (!(error instanceof ProjectNotFoundError)) throw error;
+      continue;
+    }
     const matchesFilter = !filter
       || context.id.toLowerCase() === filter
       || context.runtimeProjectId.toLowerCase() === filter
