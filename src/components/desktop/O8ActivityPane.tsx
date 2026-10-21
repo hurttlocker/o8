@@ -76,6 +76,19 @@ function parseTs(value?: string | null): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+// Transcript delivery cannot change the remote repository activity lists.
+// Keep unknown or mixed batches conservative so review and attention updates
+// still refresh immediately through the existing single-flight scheduler.
+function isTranscriptOnlyBatch(event: Event): boolean {
+  const detail = (event as CustomEvent<{ data?: { events?: unknown } }>).detail;
+  const events = detail?.data?.events;
+  return Array.isArray(events) && events.length > 0 && events.every((entry: unknown) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const envelope = entry as { channel?: unknown; event?: unknown };
+    return envelope.channel === 'history' && envelope.event === 'history.snapshot';
+  });
+}
+
 // ── Component ──
 
 interface O8ActivityPaneProps {
@@ -341,13 +354,16 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
     // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
     const handler = () => { scheduleLoad(); };
-    window.addEventListener('o8:realtime', handler);
+    const handleRealtime = (event: Event) => {
+      if (!isTranscriptOnlyBatch(event)) scheduleLoad();
+    };
+    window.addEventListener('o8:realtime', handleRealtime);
     window.addEventListener('o8:lifecycle-reconcile', handler);
     const fallbackId = setInterval(handler, 300_000);
 
     return () => {
       cancelled = true;
-      window.removeEventListener('o8:realtime', handler);
+      window.removeEventListener('o8:realtime', handleRealtime);
       window.removeEventListener('o8:lifecycle-reconcile', handler);
       clearInterval(fallbackId);
     };

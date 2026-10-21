@@ -22,7 +22,7 @@ function SignInTerminal({ command, onClose }: { command: string; onClose: () => 
       sessionRef.current = name; setSession(name);
     },
     onTerminalAttached: (name) => { if (name === sessionRef.current) setAttached(true); },
-    onTerminalData: (name, data) => { if (name === sessionRef.current) panelRef.current?.writeData(data); },
+    onTerminalData: (name, data, historical) => { if (name === sessionRef.current) panelRef.current?.writeData(data, historical); },
     onTerminalDimensions: (name, cols, rows) => { if (name === sessionRef.current) panelRef.current?.setSourceDimensions?.(cols, rows); },
     onTerminalVisibilityReady: (name, value) => { if (name === sessionRef.current) panelRef.current?.visibilityReady?.(value); },
     onTerminalResync: (name, data, value, truncated, source) => { if (name === sessionRef.current) panelRef.current?.applyResync?.(data, value, truncated, source); },
