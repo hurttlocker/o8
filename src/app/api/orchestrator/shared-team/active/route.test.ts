@@ -86,6 +86,9 @@ it('reads finished Shared membership after restart, deduplicates receipts, and e
   for (let read = 0; read < 2; read++) {
     const response = await GET(new NextRequest(url, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ threadId: 'thoughts-parent', workers: [{ sessionKey: member.surfaceId, name: member.taskName, runtime: 'codex', status: 'completed' }] });
+    expect(await response.json()).toEqual({ threadId: 'thoughts-parent', workers: [{
+      sessionKey: member.surfaceId, name: member.taskName, runtime: 'codex', status: 'completed',
+      parentTurnId: null, returnStatus: null, returnReason: null, model: null, effort: null,
+    }] });
   }
 });
