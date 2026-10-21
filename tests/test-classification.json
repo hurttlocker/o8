@@ -4768,6 +4768,13 @@
       ]
     },
     {
+      "path": "tests/status-freshness-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/status-truth.test.ts",
       "reasons": [
         "child-process",

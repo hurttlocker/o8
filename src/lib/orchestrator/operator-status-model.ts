@@ -341,7 +341,7 @@ export function buildOperatorStatusAgents(
 
 const ACTIVE_STATUSES = new Set(['launching', 'running', 'working', 'recovering']);
 const REVIEW_STATUSES = new Set(['awaiting_review']);
-const ATTENTION_STATUSES = new Set(['blocked', 'failed']);
+const ATTENTION_STATUSES = new Set(['blocked', 'failed', 'stale']);
 
 export function summarizeOperatorStatus(input: {
   agents: OperatorStatusAgent[];
