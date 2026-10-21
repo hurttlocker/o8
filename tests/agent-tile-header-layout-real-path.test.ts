@@ -115,12 +115,7 @@ function measureHeaderInPage(probe: { expectedName: string; expectedModel: strin
   const modelElement = Array.from(document.querySelectorAll('span'))
     .filter((el) => (el.textContent ?? '').includes(probe.expectedModel))
     .sort((a, b) => (a.textContent ?? '').length - (b.textContent ?? '').length)[0] ?? null;
-  const statusElement = Array.from(document.querySelectorAll('span')).find((el) => {
-    const dot = el.firstElementChild;
-    if (!dot || dot.tagName !== 'SPAN') return false;
-    const radius = Number.parseFloat(window.getComputedStyle(dot).borderRadius);
-    return radius >= 100 && (el.textContent ?? '').trim().length > 0;
-  }) ?? null;
+  const statusElement = document.querySelector<HTMLElement>('[data-worker-pane-header] span[aria-label="Running"]')?.parentElement ?? null;
 
   // The tile root is the first ancestor of the close button that clips
   // overflow (border-radius 14 card with overflow: hidden) — painted glyphs
@@ -460,7 +455,11 @@ window.__o8TileHarness = (() => {
     page = await context.newPage();
     const bootstrapErrors: string[] = [];
     page.on('pageerror', (error) => bootstrapErrors.push(error.stack ?? error.message));
-    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${PRODUCT_ENV_STYLE}</style></head><body></body></html>`);
+    // Reuse the canonical status grid geometry; do not approximate it in the specimen.
+    const statusStyles = fs.readFileSync(path.join(repoRoot, 'src/app/globals.css'), 'utf8')
+      .match(/^\.o8-fam(?:>i)?\{[^\n]+\}$/gm) ?? [];
+    expect(statusStyles).toHaveLength(2);
+    await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${PRODUCT_ENV_STYLE}\n${statusStyles.join('\n')}</style></head><body></body></html>`);
     // Install the fetch fixture in the existing document, before any
     // component can mount (addInitScript does not run for setContent).
     await page.evaluate(FETCH_STUB_SOURCE);
