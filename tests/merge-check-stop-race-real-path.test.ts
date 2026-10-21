@@ -155,6 +155,10 @@ async function setupPacket(packetId: string, retries: number, queueState: 'queue
     runtime: 'codex',
     packetId,
   });
+  const bound = readOrchestratorControlPlaneState();
+  bound.packets[0].lane = { tileId: lane.id, tabId: lane.id, laneId: lane.id, repoPath: lane.repoPath,
+    worktreePath: lane.worktreePath, runtime: 'codex', sessionKey: lane.sessionKey };
+  writeOrchestratorControlPlaneState(bound);
   recordOrchestratorReview(packetId, {
     approved: true,
     findings: [],
@@ -247,6 +251,9 @@ async function runStoppedInterleaving(packetId: string, retries: number, beforeR
       }),
     ]);
     stop = await dispatch({ verb: 'stop', laneId: lane.id, actor: 'user' });
+    expect(stop.ok, stop.note).toBe(true);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ operatorStopped: true,
+      queueState: 'held', lane: { laneId: lane.id, sessionKey: lane.sessionKey } });
     beforeRelease?.();
     boundary.fail(FAILURE_OUTPUT);
   } catch (error) {
