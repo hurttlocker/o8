@@ -283,7 +283,8 @@ export interface MobileTranscriptToolCall {
   id?: string | null;
   name: string;
   args?: Record<string, unknown>;
-  status?: 'calling' | 'running' | 'done' | 'error';
+  /** `stopped`: the operator's Stop ended the call before it reported a result (#3659). */
+  status?: 'calling' | 'running' | 'done' | 'error' | 'stopped';
   preview?: string;
   result?: string;
   sideEffectClass?: ToolSideEffectClass;
@@ -336,6 +337,9 @@ export interface MobileTranscriptCommand {
 }
 
 export interface MobileTurnReceipt {
+  /** Server-correlated outcome; idle state and assistant text are not completion. */
+  terminal?: { userMessageId: string; outcome: 'completed' | 'failed' | 'interrupted' | 'unconfirmed' };
+  permissionMode?: 'full' | 'plan';
   leadModel: string;
   effort: ThinkingEffort;
   mode: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
@@ -351,6 +355,10 @@ export type MobilePendingTurnWorkers = Record<string, NonNullable<MobileTurnRece
 
 // Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
+  /** Spoken captions are display evidence, never a runtime completion receipt. */
+  voice?: import('@/lib/transcripts/voice-captions').VoiceCaption;
+  /** Matching send acknowledgement or live turn activity; not turn completion. */
+  deliveryConfirmed?: boolean;
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;

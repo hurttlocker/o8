@@ -1,0 +1,54 @@
+# Recover an older updater to 0.1.796
+
+Use this procedure if an older macOS o8 app detects 0.1.796 but stays at
+"Restart is waiting for lanes and terminals to become idle" when only saved
+reviews or tasks waiting for input remain. Version 0.1.796 includes the corrected
+parked-task restart flow. The affected older app needs a manual upgrade to reach it.
+
+## Download
+
+Open the [public 0.1.796 release](https://github.com/hurttlocker/o8-releases/releases/tag/v0.1.796)
+and download the [signed universal macOS installer](https://github.com/hurttlocker/o8-releases/releases/download/v0.1.796/o8_0.1.796_universal.dmg).
+This installer supports Apple Silicon and Intel Macs on macOS 14 or later.
+
+In the older app, hover over **Updates**, then choose **View release on GitHub**.
+The release page is available immediately. The app caches release-note text for
+up to six hours at each cache layer, so a previously opened panel can retain older
+text. Open the public release page directly if the recovery instructions are absent.
+There is no need to clear application data or caches.
+
+## Replace the installed app
+
+1. Let active workers, terminal commands, and connected CLI updates finish.
+   Saved reviews and tasks waiting for input can remain parked.
+2. Quit o8 normally with **o8 > Quit o8**. If a menu-bar instance remains, quit it
+   before replacing the app.
+3. Open the downloaded disk image. Replace **o8.app** in **Applications** with
+   the app from the installer. Approve the normal replacement prompt.
+4. Eject the disk image and launch **o8.app** from **Applications**.
+5. Open **o8 > About o8** and confirm **0.1.796**. Check that your saved tasks,
+   reviews, approvals, and holds are still present.
+
+The app replacement leaves saved application data in place. Do not delete that
+data, edit its databases, or close parked tasks to unblock the update. Keep macOS
+signature checks enabled. If macOS reports a damaged or unverified app, stop and
+report the exact message rather than disabling those checks.
+
+App and connected CLI updates are separate. The About panel confirms the desktop
+version; check each separately installed CLI through its own version command.
+
+## After recovery
+
+In 0.1.796, an update downloads and installs before a restart is attempted. If
+only parked tasks remain, the Updates panel names them and offers **Restart now**.
+That explicit confirmation preserves their saved state. Actual running work still
+blocks a restart.
+
+Manual recovery from an affected 0.1.795 installation to the signed 0.1.796 app
+was verified with six parked tasks. The installed app launched at 0.1.796, and
+the saved task identities, review state, approval, and hold remained intact.
+
+If recovery fails, report the installed version, the exact updater or macOS
+message, and whether work is running or parked in the
+[updater recovery issue](https://github.com/hurttlocker/o8/issues/3807).
+Do not include private task content, credentials, or database files.

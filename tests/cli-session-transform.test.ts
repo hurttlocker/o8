@@ -20,6 +20,34 @@ const { runSession } = await import('../cli/src/commands/session.js');
 const { CliError, EXIT } = await import('../cli/src/api.js');
 
 describe('session transform CLI', () => {
+  it('returns honest queued resume admission with an explicit retry key', async () => {
+    apiFetchMock.mockResolvedValueOnce({
+      status: 200, data: { ok: true, status: 'queued', note: 'Admitted; worker task unfinished.' },
+    });
+    await expect(runSession({ human: false, verbose: false }, 'resume', [
+      'codex-owned:queued', '--message', 'Continue unfinished work.', '--idempotency-key', 'original-resume-key',
+    ])).resolves.toBe(0);
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock).toHaveBeenCalledWith(expect.anything(), '/api/runtime/action', expect.objectContaining({
+      body: { action: 'send_input', surfaceId: 'codex-owned:queued',
+        message: 'Continue unfinished work.', clientMutationId: 'original-resume-key' },
+    }));
+    expect(printJsonMock).toHaveBeenCalledWith(expect.objectContaining({ ok: true, status: 'queued' }));
+  });
+
+  it.each([
+    ['--idempotency-key'],
+    ['--idempotency-key='],
+    ['--idempotency-key', ' '],
+    ['--idempotency-key', '--runtime=codex'],
+    ['--idempotency-key', 'one', '--idempotency-key=two'],
+  ])('rejects an invalid explicit resume key before a request: %j', async (...keyArgs) => {
+    await expect(runSession({ human: false, verbose: false }, 'resume', [
+      'codex-owned:invalid-key', '--message', 'Continue unfinished work.', ...keyArgs,
+    ])).rejects.toMatchObject({ code: 'invalid_args' });
+    expect(apiFetchMock).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     apiFetchMock.mockReset();
     printJsonMock.mockReset();

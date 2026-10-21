@@ -12,9 +12,18 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { piWriteHelperPath } from '@/lib/pi/sdk/scripts';
+
 import { runLaneRebaseLint } from './rebase-lint';
 
 const tempDirs: string[] = [];
+
+// Linux confines ESLint only through the built supervisor. A checkout that has
+// not built it still lints, unconfined, and the receipt says so.
+const linuxSupervisorMissing = process.platform === 'linux' && (() => {
+  try { piWriteHelperPath(); return false; } catch { return true; }
+})();
+const CLEAN_LINT = linuxSupervisorMissing ? { ok: true, unconfined: true } : { ok: true };
 
 function makeDir(label: string): string {
   const dir = mkdtempSync(path.join(tmpdir(), `o8-rebase-lint-${label}-`));
@@ -107,7 +116,7 @@ describe('runLaneRebaseLint', () => {
       baseRef: 'main',
       actualBranch: 'packet/warnings',
       logPrefix: 'test',
-    })).resolves.toEqual({ ok: true });
+    })).resolves.toEqual(CLEAN_LINT);
 
     writeFileSync(
       path.join(repo, 'src', 'packet.js'),
@@ -163,7 +172,7 @@ describe('runLaneRebaseLint', () => {
       baseRef: 'main',
       actualBranch: 'packet/warning-shift',
       logPrefix: 'test',
-    })).resolves.toEqual({ ok: true });
+    })).resolves.toEqual(CLEAN_LINT);
   }, 20_000);
 
   it('turns the hard timeout into a skipped receipt', async () => {

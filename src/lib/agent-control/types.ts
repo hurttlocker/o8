@@ -20,6 +20,7 @@ export type SessionControlAction =
       kind: 'send';
       message: string;
       runId?: string;
+      automaticRecoveryRunId?: string;
       attachments?: AgentControlAttachment[];
       auditSteer?: boolean;
       steerSource?: AgentControlSteerSource;
@@ -167,6 +168,10 @@ export function parseAgentControlRequest(value: unknown): ParseResult {
       if (steerSource !== undefined && steerSource !== 'operator' && steerSource !== 'orchestrator' && steerSource !== 'heal-bot') {
         return { ok: false, error: 'steerSource must be operator, orchestrator, or heal-bot.' };
       }
+      if (actionRecord.automaticRecoveryRunId !== undefined && (typeof actionRecord.automaticRecoveryRunId !== 'string'
+        || !actionRecord.automaticRecoveryRunId.trim())) {
+        return { ok: false, error: 'automaticRecoveryRunId must be a nonempty generation.' };
+      }
       const attachments = parseAttachments(actionRecord.attachments);
       if (!attachments.ok) {
         return { ok: false, error: 'attachments must contain mimeType, fileName, and content strings.' };
@@ -179,6 +184,7 @@ export function parseAgentControlRequest(value: unknown): ParseResult {
             kind: 'send',
             message,
             runId: optionalString(actionRecord, 'runId'),
+            automaticRecoveryRunId: optionalString(actionRecord, 'automaticRecoveryRunId'),
             attachments: attachments.value,
             auditSteer: typeof actionRecord.auditSteer === 'boolean' ? actionRecord.auditSteer : undefined,
             steerSource,

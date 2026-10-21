@@ -14,6 +14,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import type { LaneLifecycleEventPayload, RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
+import { terminalProcessExitCode } from '@/lib/terminal/exit-state';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -28,13 +29,13 @@ export interface DesktopWsCallbacks {
   onReviewUpdate?: (data: Record<string, unknown>) => void;
   // Terminal channel
   onTerminalCreated?: (sessionName: string, requestId?: string) => void;
-  onTerminalData?: (sessionName: string, data: string) => void;
+  onTerminalData?: (sessionName: string, data: string, historical?: boolean) => void;
   onTerminalAttached?: (sessionName: string) => void;
   onTerminalDimensions?: (sessionName: string, cols: number, rows: number) => void;
   onTerminalVisibilityReady?: (sessionName: string, epoch: number) => void;
   onTerminalResync?: (sessionName: string, data: string, epoch: number, historyTruncated: boolean, source: 'tmux' | 'scrollback') => void;
   onTerminalDiagnostic?: (diagnostic: Record<string, unknown>) => void;
-  onTerminalExited?: (sessionName: string, exitCode: number) => void;
+  onTerminalExited?: (sessionName: string, exitCode: number | null) => void;
   onTerminalError?: (sessionName: string, error: string) => void;
   onTerminalImage?: (sessionName: string, imageB64: string, filename: string) => void;
   // Agent lifecycle channel
@@ -238,7 +239,7 @@ export function useDesktopWebSocket(
           if (eventType === 'created' && data) {
             cbRef.current.onTerminalCreated?.(data.sessionName as string, data.requestId as string | undefined);
           } else if (eventType === 'data' && data) {
-            cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string);
+            cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string, data.historical === true);
           } else if (eventType === 'attached' && data) {
             cbRef.current.onTerminalAttached?.(data.sessionName as string);
             if (typeof data.cols === 'number' && typeof data.rows === 'number') {
@@ -259,7 +260,7 @@ export function useDesktopWebSocket(
           } else if (eventType === 'diagnostic' && data) {
             cbRef.current.onTerminalDiagnostic?.(data);
           } else if (eventType === 'exited' && data) {
-            cbRef.current.onTerminalExited?.(data.sessionName as string, (data.exitCode as number) ?? 0);
+            cbRef.current.onTerminalExited?.(data.sessionName as string, terminalProcessExitCode(data.exitCode, data.exitCodeSource));
           } else if (eventType === 'error' && data) {
             cbRef.current.onTerminalError?.(data.sessionName as string, (data.error as string) ?? 'Unknown error');
           } else if (eventType === 'image' && data) {

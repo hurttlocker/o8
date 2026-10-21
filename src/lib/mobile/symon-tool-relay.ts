@@ -616,6 +616,11 @@ export class SymonConfirmationTracker {
     return true;
   }
 
+  pendingForSession(sessionId: string, now: number): SymonPendingConfirmation[] {
+    return [...this.records.values()].filter(record => record.sessionId === sessionId && !record.outcome
+      && record.decisionAllow === undefined && record.expiresAt > now).map(confirmationSnapshot);
+  }
+
   expire(now: number): SymonPendingConfirmation[] {
     const expired: SymonPendingConfirmation[] = [];
     for (const record of this.records.values()) {

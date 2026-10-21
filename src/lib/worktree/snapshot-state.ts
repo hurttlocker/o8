@@ -1,8 +1,9 @@
 import 'server-only';
-
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
+import { assertSnapshotRetentionReleased } from '@/lib/workspace/retention-holds';
+import { assertNoActiveWorkspaceArtifactRestore } from '@/lib/workspace/artifact-restore-state';
 import {
   WORKSPACE_SNAPSHOT_STATES,
   type CreateWorkspaceSnapshotInput,
@@ -18,13 +19,8 @@ import {
   type WorkspaceSnapshotState,
   type WorkspaceSnapshotTransitionReceipt,
 } from './snapshot-state-types';
-import {
-  verifyWorkspaceSnapshotReceiptChain,
-  type WorkspaceSnapshotChainReceipt,
-} from './snapshot-receipt-chain';
-
+import { verifyWorkspaceSnapshotReceiptChain, type WorkspaceSnapshotChainReceipt } from './snapshot-receipt-chain';
 export * from './snapshot-state-types';
-
 interface WorkspaceSnapshotRow {
   repository_uuid: string;
   packet_id: string;
@@ -447,6 +443,7 @@ export function createWorkspaceSnapshot(
   const normalized = prepareWorkspaceSnapshotTruth(input);
   const sqlite = getSqlite();
   const execute = sqlite.transaction((): CreateWorkspaceSnapshotResult => {
+    assertNoActiveWorkspaceArtifactRestore(normalized.packetId, normalized.originalPath);
     const existing = selectSnapshot(normalized.repositoryUuid, normalized.packetId);
     if (existing) {
       const creation = selectTransition(
@@ -612,6 +609,8 @@ export function transitionWorkspaceSnapshot(
     }
 
     const errorAt = error?.recordedAt ?? null;
+    assertNoActiveWorkspaceArtifactRestore(packetId, currentRecord.originalPath);
+    if (input.toState === 'retiring') assertSnapshotRetentionReleased(currentRecord);
     const updated = sqlite.prepare(`
       UPDATE workspace_snapshots
       SET state = ?,

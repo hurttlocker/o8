@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: () => undefined }));
+
 vi.mock('@/components/desktop/onboarding/useRuntimeInventory', async () => {
   const { listDispatchableRuntimes } = await import('@/lib/orchestrator/runtime-capabilities');
   return { useRuntimeInventory: () => ({
@@ -54,6 +56,7 @@ beforeEach(async () => {
   resetStarted = new Promise<void>((resolve) => { markResetStarted = resolve; });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
+    if (url.startsWith('/api/orchestrator/composer-queue')) return Response.json({ items: [] });
     if (url.startsWith('/api/v2/chat-history?')) {
       const id = new URL(url, 'http://localhost').searchParams.get('tabId');
       return new Response(JSON.stringify({ messages: [

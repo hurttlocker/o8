@@ -345,6 +345,26 @@ pub(crate) fn resolve() -> PlannerRouting {
     resolve_with(&read_brain_setting(), preferred_provider(), locate_planner_binary)
 }
 
+/// Text-only default. Voice keeps its existing rung; a bound session or model
+/// pin never passes through this new-session selection.
+pub(crate) fn resolve_text() -> (PlannerRouting, bool) {
+    resolve_text_with(&read_brain_setting(), preferred_provider(), locate_planner_binary)
+}
+
+fn resolve_text_with<F>(setting: &BrainSetting, preferred: &'static PlannerAdapter, locate: F) -> (PlannerRouting, bool)
+where F: FnMut(&PlannerAdapter) -> Option<String> {
+    let mut routing = resolve_with(setting, preferred, locate);
+    let mut automatic = false;
+    if let PlannerRouting::Selected(selection) = &mut routing {
+        if selection.provider.id == "codex" && setting.model.is_none()
+            && selection.model.as_deref() == Some(DEFAULT_CODEX_PLANNER_MODEL) {
+            selection.model = Some(crate::models::CODEX_GPT_6_1_SOL.to_string());
+            automatic = true;
+        }
+    }
+    (routing, automatic)
+}
+
 pub(crate) fn resolve_bound(engine: &str, model: &str, effort: &str) -> PlannerRouting {
     resolve_bound_with(engine, model, effort, locate_planner_binary)
 }

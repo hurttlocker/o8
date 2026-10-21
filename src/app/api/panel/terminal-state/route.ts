@@ -1,12 +1,14 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
 import { listLanes } from '@/lib/lane/registry';
-import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
+import { buildRepoStateScope, MAX_PERSISTED_TABS, persistedTabStateSavedAt, stripPersistedTabs } from '@/lib/terminal/tab-state';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { restoreFileTabContext } from '@/lib/terminal/restore-file-tabs';
+import { includeRegisteredWorktreeRoots } from '@/lib/terminal/registered-worktree-roots';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = getDataDir();
@@ -29,7 +31,14 @@ function noSavedState(): Response {
 function normalizeScopePath(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) return null;
-  return path.resolve(trimmed.replace(/^~(?=\/|$)/, HOME)).replace(/\/+$/, '');
+  const absolute = path.resolve(trimmed.replace(/^~(?=\/|$)/, HOME));
+  let normalized = absolute;
+  try {
+    normalized = realpathSync.native(absolute);
+  } catch {
+    // Keep unavailable repository paths comparable without inventing an alias.
+  }
+  return normalized === path.parse(normalized).root ? normalized : normalized.replace(/\/+$/, '');
 }
 
 function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: Set<string>) {
@@ -120,12 +129,13 @@ function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
 }
 
 function sanitizeRestoredState(data: unknown, repoRoots: Set<string>) {
-  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(data, repoRoots)));
+  const restored = restoreFileTabContext(data, repoRoots);
+  return stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(restored, repoRoots)));
 }
 
 function stateMatchesRepoPath(data: unknown, repoPath: string) {
   return Array.isArray((data as { tabs?: Array<{ repoPath?: string }> })?.tabs)
-    && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => tab.repoPath === repoPath);
+    && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => normalizeScopePath(tab.repoPath) === repoPath);
 }
 
 function canonicalRepoScopeFromState(data: unknown) {
@@ -145,7 +155,7 @@ function repoStateStats(data: unknown, repoPath: string) {
   const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string; kind?: string }> })?.tabs)
     ? (data as { tabs: Array<{ repoPath?: string; kind?: string }> }).tabs
     : [];
-  const matchingTabs = tabs.filter((tab) => tab.repoPath === repoPath);
+  const matchingTabs = tabs.filter((tab) => normalizeScopePath(tab.repoPath) === repoPath);
   return {
     matchingCount: matchingTabs.length,
     llmChatOnly: matchingTabs.length > 0 && matchingTabs.every((tab) => tab.kind === 'llm-chat'),
@@ -231,15 +241,29 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const scope = sanitizeScope(url.searchParams.get('scope'));
-    const repoPath = url.searchParams.get('repoPath');
-    const repoRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
+    const repoPath = normalizeScopePath(url.searchParams.get('repoPath'));
+    const registeredRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
+    const stateFile = getStateFile(scope);
+    const persistedFile = existsSync(stateFile) ? stateFile
+      : scope === 'tile-root' && existsSync(LEGACY_STATE_FILE) ? LEGACY_STATE_FILE : null;
+    const persisted = persistedFile ? JSON.parse(readFileSync(persistedFile, 'utf-8')) : null;
+    if (persistedFile && (!persisted || typeof persisted !== 'object' || Array.isArray(persisted) || !Array.isArray(persisted.tabs))) {
+      return noSavedState();
+    }
+    const tabs = (persisted?.tabs ?? []) as Array<{ id?: string; repoPath?: string } | null>;
+    // Preserve the active selection even in an old oversized snapshot. Only
+    // this requested scope and an explicit repo may propose additional roots.
+    const selected = typeof persisted?.activeTabId === 'string'
+      ? tabs.find((tab) => tab?.id === persisted.activeTabId) : null;
+    const candidates = [repoPath, selected?.repoPath, ...tabs.slice(0, MAX_PERSISTED_TABS).map((tab) => tab?.repoPath)]
+      .map((candidate) => typeof candidate === 'string' ? normalizeScopePath(candidate) : null)
+      .filter((candidate): candidate is string => Boolean(candidate));
+    const repoRoots = includeRegisteredWorktreeRoots(registeredRoots, candidates);
     if (repoPath && !pathBelongsToRegisteredRepo(repoPath, repoRoots)) {
       return noSavedState();
     }
-    const stateFile = getStateFile(scope);
-
     if (existsSync(stateFile)) {
-      const data = sanitizeRestoredState(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
+      const data = sanitizeRestoredState(persisted, repoRoots);
       if (!data) {
         return noSavedState();
       }
@@ -255,7 +279,9 @@ export async function GET(request: Request) {
           const canonicalFile = getStateFile(canonicalScope);
           if (existsSync(canonicalFile)) {
             const canonicalData = sanitizeRestoredState(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
-            if (canonicalData) {
+            // A cross-repo conversation can save only the primary scope. Do
+            // not replace that selection with an older repo-scope snapshot.
+            if (canonicalData && persistedTabStateSavedAt(canonicalData) >= persistedTabStateSavedAt(data)) {
               return NextResponse.json(canonicalData);
             }
           }

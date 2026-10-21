@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ComposerChipCompactContext } from './composer-compact-context';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
+import { useRepoTargetMenu } from './useRepoTargetMenu';
 import { AttachFilesButton } from './AttachFilesButton';
-import { ComposerModeChip, FleetWorkerChip } from './ComposerFleetChips';
+import { ComposerModeChip } from './ComposerFleetChips';
 import type { ComposerMode } from './composer-mode';
 import { MicButton } from './MicButton';
 import { SessionRulesChip } from './SessionRulesChip';
@@ -11,6 +12,7 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { ComposerSelectorFooterView } from './composer-selector/ComposerSelectorFooter';
+import { SendPill } from './ComposerSendControl';
 import type { ComposerSelectorController } from './composer-selector/useComposerSelectorState';
 
 // xhigh stays in the menu but reads as a sibling option to max, NOT as
@@ -176,6 +178,7 @@ export function RepoTargetChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const { menuRef, focusMenu, closeMenu, onTriggerKeyDown, onMenuKeyDown } = useRepoTargetMenu(setOpen, buttonRef);
   const targets = useMemo(() => workspaceTargets ?? [], [workspaceTargets]);
   const targetGroups = useMemo(() => {
     const groups = new Map<string, {
@@ -224,13 +227,13 @@ export function RepoTargetChip({
   const showingAffordance = canSelect && (hovered || focused || open);
 
   if (!label) return null;
-
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
       <button
         ref={buttonRef}
         type="button"
         onClick={() => { if (canSelect) setOpen((value) => !value); }}
+        onKeyDown={onTriggerKeyDown}
         onPointerEnter={() => setHovered(true)}
         onPointerLeave={() => setHovered(false)}
         onFocus={() => setFocused(true)}
@@ -277,10 +280,12 @@ export function RepoTargetChip({
         ) : null}
       </button>
 
-      <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
+      <ComposerPopover anchorRef={buttonRef} open={open} onClose={closeMenu} onOpenReady={focusMenu} align="start">
         <div
+          ref={menuRef}
           role="listbox"
           aria-label="Project target"
+          onKeyDown={onMenuKeyDown}
           style={{
             width: REPO_TARGET_MENU_WIDTH,
             maxHeight: REPO_TARGET_MENU_HEIGHT,
@@ -347,7 +352,7 @@ export function RepoTargetChip({
                       aria-selected={active}
                       onClick={() => {
                         onSelectRepoPath?.(target.localPath);
-                        setOpen(false);
+                        closeMenu();
                       }}
                       style={{
                         width: '100%',
@@ -399,7 +404,7 @@ export function RepoTargetChip({
             );
           })}
           {onAddProject ? (
-            <button type="button" role="option" aria-selected={false} onClick={() => { onAddProject(); setOpen(false); }} style={{ width: '100%', paddingTop: 8, paddingRight: 9, paddingBottom: 8, paddingLeft: 12, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', textAlign: 'left', fontSize: 11.5, fontFamily: 'var(--font-sans-system)' }}>
+            <button type="button" role="option" aria-selected={false} onClick={() => { buttonRef.current?.focus(); onAddProject(); setOpen(false); }} style={{ width: '100%', paddingTop: 8, paddingRight: 9, paddingBottom: 8, paddingLeft: 12, borderWidth: 0, borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', cursor: 'pointer', textAlign: 'left', fontSize: 11.5, fontFamily: 'var(--font-sans-system)' }}>
               Add repository…
             </button>
           ) : null}
@@ -436,6 +441,8 @@ export function InputButtons({
   selectedRepoPath,
   onSelectRepoPath,
   inlineLeadingExtras,
+  permissionControl,
+  managedVoiceControl,
   inlineMeterSlot,
   onBrowsePrompts,
   onSavePrompt,
@@ -486,6 +493,8 @@ export function InputButtons({
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
   inlineLeadingExtras?: ReactNode;
+  permissionControl?: ReactNode;
+  managedVoiceControl?: ReactNode;
   inlineMeterSlot?: ReactNode;
   voiceModeEnabled?: boolean;
   onVoiceModeChange?: (enabled: boolean) => void;
@@ -497,7 +506,7 @@ export function InputButtons({
   const canSubmit = Boolean(input.trim() || hasAttachments);
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
   const selectorReady = Boolean(
-    composerSelectorController && composerMode && modelLabel && modelId && activeBackend && onEffortChange,
+    composerSelectorController && composerMode && (modelLabel || activeBackend === 'acp') && (modelId || activeBackend === 'acp') && activeBackend && onEffortChange,
   );
   const selectorControls = composerSelectorController;
 
@@ -536,8 +545,11 @@ export function InputButtons({
           onEffortChange={selectorControls.onEffortChange}
           onRuntimeChange={selectorControls.onRuntimeChange}
           onWorkerModelChange={selectorControls.onWorkerModelChange}
+          onWorkerEffortChange={selectorControls.onWorkerEffortChange}
+          workerLocks={selectorControls.workerLocks}
           onWorkerStartModeChange={selectorControls.onWorkerStartModeChange}
           saving={selectorControls.savingWorkerDefaults}
+          permissionControl={permissionControl}
           leadingControls={(
             <>
               {inlineLeadingExtras ? (
@@ -575,6 +587,7 @@ export function InputButtons({
           )}
           meterControl={inlineMeterSlot}
           micControl={<MicButton />}
+          voiceControl={managedVoiceControl}
           sendControl={(
             <SendPill
               canSubmit={canSubmit}
@@ -598,7 +611,7 @@ export function InputButtons({
       gap: 6,
       paddingTop: 4,
       paddingRight: 8,
-      paddingBottom: 6,
+      paddingBottom: 8,
       paddingLeft: 10,
     }}>
       {/* Left controls — the flexible group. As the composer narrows this
@@ -606,6 +619,7 @@ export function InputButtons({
           The right action cluster stays pinned, so Send/mic/attach are never
           pushed off the clipped right edge — the bug this fixes. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
+      {permissionControl}
       {inlineLeadingExtras ? (
         // overflow:hidden is load-bearing — without it a nowrap child that
         // can't shrink spills out of this minWidth:0 span and paints under
@@ -635,10 +649,6 @@ export function InputButtons({
           ambiguous requests, and the system prompt arms it for a repo's
           first-ever mission. No transcript-visible directive, no chrome. */}
 
-      {/* Permission (shield) toggle removed 2026-07-11 (Q ruling): the
-          orchestrator + worker composers always run full access — a
-          read-only mode chip was chrome nobody used. */}
-
       {/* Session rules (#1329) — "Rules · N" chip. Lists the merged
           Session/Repo/Global rule set; session tier is editable inline.
           Only on orchestrator surfaces (undefined = hidden). */}
@@ -658,6 +668,7 @@ export function InputButtons({
         onSavePrompt={onSavePrompt}
       />
       <MicButton />
+      {managedVoiceControl}
 
       </div>
 
@@ -695,17 +706,7 @@ export function InputButtons({
           composerMode={selectorControls?.state.mode ?? composerMode}
         />
       ) : null}
-      {composerMode && (selectorControls?.state.mode ?? composerMode) !== 'solo' ? (
-        <FleetWorkerChip
-          compact={compact}
-          defaults={selectorControls?.defaults}
-          workerModelLocked={selectorControls?.workerModelLocked}
-          saving={selectorControls?.savingWorkerDefaults}
-          onRuntimeChange={selectorControls?.onRuntimeChange}
-          onWorkerModelChange={selectorControls?.onWorkerModelChange}
-          onWorkerStartModeChange={selectorControls?.onWorkerStartModeChange}
-        />
-      ) : null}
+
 
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}
@@ -718,79 +719,5 @@ export function InputButtons({
       </div>
     </div>
     </ComposerChipCompactContext.Provider>
-  );
-}
-
-function SendPill({
-  canSubmit,
-  working,
-  onSubmit,
-  onStop,
-}: {
-  canSubmit: boolean;
-  working: boolean;
-  onSubmit: () => void;
-  onStop?: () => void;
-}) {
-  // Compact icon-only button — operator-pinned visual, matches the reference
-  // pill set (voice / pause / stop). Single button: play when idle+armed,
-  // pause when working (clicking it stops the orchestrator if onStop is
-  // wired, otherwise it's a passive indicator).
-  const canStop = working && Boolean(onStop);
-  const interactive = canStop || (!working && canSubmit);
-  const accent = '#2563eb';
-  const background = !interactive
-    ? 'transparent'
-    : accent;
-  const iconColor = interactive ? '#ffffff' : 'var(--t-text-faint)';
-  const title = working
-    ? (canStop ? 'Stop orchestrator' : 'Orchestrator working…')
-    : canSubmit ? 'Send (Enter)' : 'Type to send';
-
-  return (
-    <button
-      type="button"
-      onClick={canStop ? onStop : onSubmit}
-      disabled={!interactive}
-      title={title}
-      aria-label={title}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 32,
-        height: 32,
-        paddingTop: 0,
-        paddingRight: 0,
-        paddingBottom: 0,
-        paddingLeft: 0,
-        borderRadius: 10,
-        borderWidth: interactive ? 0 : 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        background,
-        color: iconColor,
-        cursor: interactive ? 'pointer' : 'default',
-        flexShrink: 0,
-        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-        opacity: working && !canStop ? 0.7 : 1,
-        animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
-      }}
-    >
-      {working ? (
-        // Stop glyph — solid square (Claude Code reference). Click stops
-        // (canStop) or shows "working" indicator otherwise.
-        <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
-          <rect x="4" y="4" width="8" height="8" rx="1.5" />
-        </svg>
-      ) : (
-        // Enter-key glyph — ↵ (Claude Code reference).
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={iconColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-          <polyline points="9 10 4 15 9 20" />
-          <path d="M20 4v7a4 4 0 0 1-4 4H4" />
-        </svg>
-      )}
-      <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
-    </button>
   );
 }

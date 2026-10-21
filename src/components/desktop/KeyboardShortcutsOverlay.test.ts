@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, createElement, useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import {
   createDashboardChromeKeydownHandler,
   type DashboardChromeShortcutActions,
 } from '@/app/dashboard/dashboard-chrome-shortcuts';
-import { KEYBOARD_SHORTCUT_SECTIONS } from './KeyboardShortcutsOverlay';
+import { KEYBOARD_SHORTCUT_SECTIONS, KeyboardShortcutsOverlay } from './KeyboardShortcutsOverlay';
 
 const listeners: Array<(event: KeyboardEvent) => void> = [];
 
@@ -53,4 +55,41 @@ describe('⌘T overlay label vs chrome handler', () => {
 
     expect(actions.spawnOrchestrator).toHaveBeenCalledOnce();
   });
+});
+
+it('contains help focus and restores its opener on Escape without closing underlying panels', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const underlying = vi.fn();
+  window.addEventListener('keydown', underlying);
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    return createElement('div', null,
+      createElement('button', { onClick: () => setOpen(true) }, 'Help'),
+      createElement(KeyboardShortcutsOverlay, { open, onClose: () => setOpen(false) }),
+    );
+  }
+  try {
+    await act(async () => root.render(createElement(Harness)));
+    const opener = host.querySelector('button')!;
+    opener.focus();
+    await act(async () => opener.click());
+    const close = host.querySelector<HTMLButtonElement>('[aria-label="Close keyboard shortcuts"]')!;
+    expect(document.activeElement).toBe(close);
+    await act(async () => close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+    const shortcutList = host.querySelector<HTMLElement>('[aria-label="Shortcut list"]')!;
+    expect(document.activeElement).toBe(shortcutList);
+    underlying.mockClear();
+    await act(async () => shortcutList.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+    expect(underlying).not.toHaveBeenCalled();
+  } finally {
+    window.removeEventListener('keydown', underlying);
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
 });

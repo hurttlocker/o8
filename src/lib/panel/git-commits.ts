@@ -2,6 +2,7 @@ import 'server-only';
 
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
+import { assertReviewWorkspace, WorkspaceReviewError } from '@/lib/review/workspace-status';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REPO || process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const COMMIT_RECORD_SEPARATOR = '\u001e';
@@ -182,21 +183,29 @@ function buildPatchSection(lines: string[]) {
   };
 }
 
-export function getRecentWorkspaceCommits(root: string, limit = 20) {
+export async function getRecentWorkspaceCommits(root: string, limit = 20) {
   const resolvedRoot = resolvePanelWorkspaceRoot(root);
-  if (!isGitRepo(resolvedRoot)) return [];
+  await assertReviewWorkspace(resolvedRoot, async (_command, args) => runGit(resolvedRoot, args).trim());
 
   const safeLimit = Math.max(1, Math.min(limit, 30));
-  const output = runGit(
-    resolvedRoot,
-    [
-      'log',
-      `--max-count=${safeLimit}`,
-      '--date=iso-strict',
-      `--format=${COMMIT_RECORD_SEPARATOR}%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%B${STAT_SEPARATOR}`,
-      '--numstat',
-    ],
-  );
+  let output: string;
+  try {
+    output = runGit(
+      resolvedRoot,
+      [
+        'log',
+        `--max-count=${safeLimit}`,
+        '--date=iso-strict',
+        `--format=${COMMIT_RECORD_SEPARATOR}%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%B${STAT_SEPARATOR}`,
+        '--numstat',
+      ],
+    );
+  } catch (error) {
+    // An unborn branch is a valid repository with no history. Other failures
+    // must stay visible instead of becoming an empty successful activity feed.
+    if (/does not have any commits yet/i.test(String((error as { stderr?: string }).stderr ?? ''))) return [];
+    throw new WorkspaceReviewError('REVIEW_GIT_UNAVAILABLE', 'Git could not read local commit activity. Check Git and repository access, then retry.', 503);
+  }
 
   return output
     .split(COMMIT_RECORD_SEPARATOR)

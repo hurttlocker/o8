@@ -32,7 +32,7 @@ describe('model setup navigation', () => {
     defaultsFetch.mockImplementation(async () => Response.json(defaults));
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).startsWith('/api/panel/operator-defaults')) return Response.json({ dispatchableRuntimes: [
-        { id: 'gemini', label: 'Gemini', available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
+        { id: 'gemini', label: 'Gemini', installed: true, available: false, unavailableReason: 'needs_auth', detail: '', fix: 'Sign in' },
         { id: 'antigravity', label: 'Antigravity', available: true, unavailableReason: null, detail: '', fix: '' },
       ] });
       if (String(input) === '/api/setup/detect') return Response.json({ tools: [
@@ -48,41 +48,32 @@ describe('model setup navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses Antigravity detection and keeps optional setup collapsed while linking dedicated pages', async () => {
+  it('keeps model routing and Brain defaults without duplicating provider connections', async () => {
     const navigate = vi.fn();
     await act(async () => root.render(createElement(ModelsTab, { onNavigateTab: navigate })));
-    const tools = container.querySelector('[data-settings-section="Connected tools"]')?.closest('details');
     expect(container.querySelector('[data-settings-section="Orchestrator"]')).not.toBeNull();
-    expect(container.textContent).not.toContain('When set to Automatic, it uses Claude');
-    expect(container.querySelector('[data-settings-section="OpenCode 2 models"]')).toBeNull();
-    expect(container.querySelector('[data-settings-section="3code worker"]')).toBeNull();
-    const fallback = [...container.querySelectorAll('span')].find(element => element.textContent === 'OpenCode fallback model');
-    expect(fallback?.closest('details')?.querySelector('summary')?.dataset.settingsSection).toBe('Advanced orchestrator options');
+    expect(container.querySelector('[data-settings-section="Connected tools"]')).toBeNull();
+    expect(container.querySelector('[data-settings-section="Claude Code settings"]')).toBeNull();
+    expect(container.querySelector('[data-settings-section="Engineering Brain"]')).not.toBeNull();
     expect(container.querySelector('[data-settings-section="Advanced orchestrator options"]')?.closest('details')?.open).toBe(false);
-    expect(tools?.open).toBe(false);
-    expect(tools?.querySelector('summary')?.textContent).toContain('Ready: Antigravity');
-    expect(tools?.textContent).toContain('Legacy Gemini CLI (gemini) for enterprise or paid API access');
-    expect(tools?.textContent).toContain('Google Antigravity CLI (agy) for free and AI Pro/Ultra accounts');
-    expect(tools?.textContent).not.toContain('GitHub Copilot CLI');
-    expect(tools?.textContent).toContain('Not checked');
-    const review = [...container.querySelectorAll('span')].find(element => element.textContent === 'Code review provider');
-    expect(review).toBeDefined();
-    expect(review?.closest('details')).toBeNull();
-    const sections = [...container.querySelectorAll<HTMLElement>('[data-settings-section]')].map(element => element.dataset.settingsSection);
-    expect(sections.indexOf('Engineering Brain')).toBeLessThan(sections.indexOf('Advanced orchestrator options'));
-    expect(container.textContent).not.toContain('Spending limit per task');
     expect(container.querySelector('[data-settings-section="Advanced worker setup"]')?.closest('details')?.open).toBe(false);
-    expect(container.querySelector('[data-settings-section="Claude Code settings"]')?.closest('details')?.open).toBe(false);
+    expect(container.textContent).not.toContain('Spending limit per task');
     const api = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Manage provider keys'))!;
     act(() => api.click());
     expect(navigate).toHaveBeenCalledWith('api-keys');
     expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'local endpoint', { founder: false })[0]?.tab).toBe('local-models');
   });
 
-  it('opens Claude options when Claude is the selected chat provider', async () => {
-    defaultsFetch.mockResolvedValue(Response.json({ ...defaults, values: { ...defaults.values, orchestratorBackend: 'claude' } }));
+  it('enables an available worker without changing the preferred runtime or model', async () => {
     await act(async () => root.render(createElement(ModelsTab)));
-    expect(container.querySelector('[data-settings-section="Claude Code settings"]')?.closest('details')?.open).toBe(true);
+    const allow = container.querySelector<HTMLButtonElement>('[aria-label="Allow Antigravity workers"]');
+    expect(allow).not.toBeNull();
+    await act(async () => allow!.click());
+    expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ workerRuntimes: ['codex', 'antigravity'] }),
+    }));
+    const unavailable = container.querySelector<HTMLButtonElement>('[aria-label="Allow Gemini workers"]');
+    expect(unavailable?.disabled).toBe(true);
   });
 
   it('saves the metered task limit from Dispatch without writing provider settings', async () => {

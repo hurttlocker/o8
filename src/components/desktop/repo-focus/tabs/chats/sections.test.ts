@@ -6,6 +6,7 @@ import {
   derivePrioritySplit,
   deriveSweptThreads,
   isCompletionUnread,
+  repoSuffix,
   shouldRecede,
 } from './sections';
 import { getLastVisited, type RowReadStorage } from './read-state';
@@ -28,6 +29,18 @@ function thread(overrides: Partial<ChatHistoryItem> = {}): ChatHistoryItem {
 }
 
 describe('sidebar section derivation', () => {
+  it('shows the parent repo instead of the managed worktree name', () => {
+    for (const folder of ['.cortex-worktrees', '.worktrees']) {
+      expect(repoSuffix({ repoName: 'topic-worker', repoPath: `/repos/site/${folder}/topic-worker` })).toBe('site');
+    }
+  });
+
+  it('uses registered repo identity for a worktree outside the repo folder', () => {
+    expect(repoSuffix({ repoName: 'topic-worker', repoPath: '/workspaces/topic-worker', remoteUrl: 'https://github.com/org/site.git' }, [{
+      id: 'site', name: 'Site', localPath: '/repos/site', remoteUrl: 'https://github.com/org/site.git', defaultBranch: 'main',
+    }])).toBe('Site');
+  });
+
   it('orders attention bands by operator urgency', () => {
     const ranks = [
       attentionRank({ status: 'failed' }),
@@ -99,13 +112,13 @@ describe('sidebar section derivation', () => {
     expect(active.archivedAt).toBeUndefined();
   });
 
-  it('treats an empty read-state map as zero unread rows', () => {
+  it('treats a valid never-read completion as unread', () => {
     const storage: RowReadStorage = {
       getItem: () => '{}',
       setItem: () => {},
     };
     const lastVisited = getLastVisited('packet:p1', storage);
     expect(lastVisited).toBeNull();
-    expect(isCompletionUnread('2026-07-31T12:00:00.000Z', lastVisited)).toBe(false);
+    expect(isCompletionUnread('2026-07-31T12:00:00.000Z', lastVisited)).toBe(true);
   });
 });

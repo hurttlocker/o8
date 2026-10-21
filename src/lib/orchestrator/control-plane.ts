@@ -377,18 +377,25 @@ async function buildRuntimeTruthSummaries(domainLanes: DomainLaneSummary[]): Pro
   const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
   return snapshot.agents
     .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
-    .map((agent) => ({
-      sessionKey: agent.sessionKey,
-      runtime: agent.runtime === 'claude-code' ? 'claude-code' as const : 'codex' as const,
-      status: agent.status ?? 'idle',
-      currentTask: agent.currentTask ?? null,
-      lastEventAt: agent.lastEventAt ?? null,
-      workflowStageLabel: null,
-      canSendInput: agent.runtimeSurface?.capabilities.sendInput ?? null,
-      canInterrupt: agent.runtimeSurface?.capabilities.interrupt ?? null,
-      runtimeAvailability: agent.runtimeSurface?.lifecycle?.availability ?? null,
-      ownership: agent.runtimeSurface?.ownership ?? null,
-    }));
+    .map(runtimeTruthFromInventoryAgent);
+}
+
+type InventoryAgent = Awaited<ReturnType<typeof import('@/lib/runtime/inventory').getRuntimeInventorySnapshot>>['agents'][number];
+
+/** One inventory agent as the runtime truth reconciliation reads it. */
+export function runtimeTruthFromInventoryAgent(agent: InventoryAgent): OrchestratorRuntimeTruth {
+  return {
+    sessionKey: agent.sessionKey,
+    runtime: agent.runtime === 'claude-code' ? 'claude-code' as const : 'codex' as const,
+    status: agent.status ?? 'idle',
+    currentTask: agent.currentTask ?? null,
+    lastEventAt: agent.lastEventAt ?? null,
+    workflowStageLabel: null,
+    canSendInput: agent.runtimeSurface?.capabilities.sendInput ?? null,
+    canInterrupt: agent.runtimeSurface?.capabilities.interrupt ?? null,
+    runtimeAvailability: agent.runtimeSurface?.lifecycle?.availability ?? null,
+    ownership: agent.runtimeSurface?.ownership ?? null,
+  };
 }
 
 export function reconcileOrchestratorControlPlaneState(

@@ -45,7 +45,6 @@ import { OrchestratorPromptControls } from '@/components/desktop/orchestrator/Or
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { BranchDetailsLauncher } from '@/components/desktop/BranchDetailsLauncher';
-import { COLLAPSED_BRANCH_RAIL_WIDTH } from '@/components/desktop/branch-rail-geometry';
 import { ThoughtsChatPanel, type ThoughtsChatPanelChromeState, type ThoughtsChatPanelHandle } from '@/components/desktop/thoughts/ThoughtsChatPanel';
 import { ORCHESTRATOR_TOKEN_EVENT, type OrchestratorTokenUsageDetail } from '@/components/desktop/thoughts/useOrchestratorStream';
 import { ORCHESTRATOR_HOME_REPO_SENTINEL, resolveOrchestratorClientRepoPath } from '@/components/desktop/thoughts/orchestrator-home-mode';
@@ -54,12 +53,13 @@ import { SessionPillContextMenu } from '@/components/desktop/SessionPillContextM
 import { projectLiveSessionMeshParticipants } from './SessionTileSurface';
 import { ResponsiveSessionSurface } from './ResponsiveSessionSurface';
 import type { ThreadDropAction } from './ThreadDropLayer';
+import { findThreadLeafByThreadId } from '@/lib/orchestrator/session-tiles';
 import { useSessionTiles, buildPillContextMenuItems } from './use-session-tiles';
+import { useWorkerCardFocus } from './use-worker-card-focus';
 import { HISTORY_NAVIGATION_SUPERSEDED_EVENT, publishWorkspaceThreadBinding, WORKSPACE_THREAD_ID_EVENT } from './utils';
 import type { OrchestratorTurnInjection } from './types';
 import { useOrchestratorTurnInjection } from './use-orchestrator-turn-injection';
-// Issue #663: SessionTileSurface replaces the legacy flat AgentTileLayout
-// row. The old layout component is no longer imported here.
+import { readStoredCollide, persistCollide } from './orchestrator-collide-preference';
 
 interface OrchestratorTabProps {
   tabId: string;
@@ -123,28 +123,6 @@ const tabIdsMountedThisLoad = new Set<string>();
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
 // at tab-creation time (pre-set tab.label) without re-implementing.
-
-function collideStorageKey(tabId: string): string {
-  return `cortex-ide:orchestrator-collide:tab:${tabId}`;
-}
-
-function readStoredCollide(tabId: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(collideStorageKey(tabId)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function persistCollide(tabId: string, enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(collideStorageKey(tabId), enabled ? '1' : '0');
-  } catch {
-    // ignore
-  }
-}
 
 export function OrchestratorTab(props: OrchestratorTabProps) {
   return (
@@ -563,6 +541,7 @@ function OrchestratorTabInner({
     .filter((key): key is string => typeof key === 'string' && !retiredSessionKeys.has(key)), [agents, retiredSessionKeys]);
   const meshParticipants = useMemo(() => projectLiveSessionMeshParticipants(agents, data?.missionState?.packets ?? []), [agents, data?.missionState?.packets]);
   const sessionTiles = useSessionTiles({ tabId, repoPath: homeAwareRepoPath, workspaceId, threadId: chatChromeState.threadId, liveSessionKeys, retiredSessionKeys, participants: meshParticipants, active });
+  const focusWorkerPacket = useWorkerCardFocus({ packets: data?.missionState?.packets ?? [], threadId: chatChromeState.threadId, openSession: sessionTiles.splitSessionFromMenu });
   useEffect(() => {
     const activeGroupIds = comparisonGroups.map((group) => group.groupId);
     if (
@@ -615,6 +594,9 @@ function OrchestratorTabInner({
   // never leaves the tree.
   const handleThreadDrop = useCallback((action: ThreadDropAction) => {
     if (action.kind === 'replace-chat') {
+      if (findThreadLeafByThreadId(sessionTiles.layout.root, action.thread.threadId)) {
+        sessionTiles.replaceLeafWithThreadPane(action.leafId, action.thread); return;
+      }
       if (chatChromeState.threadId === action.thread.threadId) return;
       window.dispatchEvent(new Event(HISTORY_NAVIGATION_SUPERSEDED_EVENT));
       if (publishWorkspaceThread) {
@@ -635,6 +617,7 @@ function OrchestratorTabInner({
   }, [
     chatChromeState.threadId,
     sessionTiles.replaceLeafWithThreadPane,
+    sessionTiles.layout,
     sessionTiles.splitLeafWithThreadPane,
     publishWorkspaceThread,
     tabId,
@@ -977,47 +960,16 @@ function OrchestratorTabInner({
     );
   }
 
-  // Branch-details rail rendered to the RIGHT of the transcript (inside the
-  // panel) so the composer spans full width even when the rail is up (Q ruling
-  // 2026-07-11). The rail is now a fixed COLLAPSED_BRANCH_RAIL_WIDTH capsule
-  // whose expanded card floats as a hover/click overlay (portal), so it never
-  // crowds the chat. The old railFits width-fold gate is gone (Q ruling
-  // 2026-07-14) — the capsule shows whenever projectContextRailVisible, at any
-  // window size.
-  const branchRail = (
-    <div
-      style={{
-        // The rail is ALWAYS the collapsed capsule width in layout now — the
-        // expanded card stack floats as a hover overlay (portal) instead of
-        // widening this flex item, so revealing it never pushes the chat over
-        // (git/environment popover, Q ruling 2026-07-14).
-        width: projectContextRailVisible ? COLLAPSED_BRANCH_RAIL_WIDTH : 0,
-        flexShrink: 0,
-        // minHeight:0 keeps this flex item bounded by the row height so the
-        // rail's own overflowY:auto can engage — without it the rail sized to
-        // its content and the ancestor CLIPPED it with no way to scroll
-        // (Q live-hit, short windows, 2026-07-13).
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-    >
-      <BranchDetailsLauncher
-        visible={projectContextRailVisible}
-        repoPath={repoPath ?? null}
-        threadId={chatChromeState.threadId}
-        collapsed={branchRailCollapsed}
-        onToggleCollapsed={toggleBranchRailCollapsed}
-      />
-    </div>
-  );
+  const branchRail = projectContextRailVisible ? <BranchDetailsLauncher
+    header workspaceId={workspaceId} visible={active}
+    repoPath={effectiveRepoPath === ORCHESTRATOR_HOME_REPO_SENTINEL ? null : effectiveRepoPath}
+    threadId={chatChromeState.threadId}
+    collapsed={branchRailCollapsed} onToggleCollapsed={toggleBranchRailCollapsed}
+  /> : null;
 
   const thoughtsChatPanel = (
     <ThoughtsChatPanel
       ref={chatPanelRef}
-      transcriptSideRail={projectContextRailVisible ? branchRail : null}
       open={active}
       // The panel's #1459 crash-recovery auto-restore (adopt the latest thread
       // when it was modified <60s ago) belongs ONLY to the boot-restore tab.
@@ -1030,6 +982,7 @@ function OrchestratorTabInner({
       suppressAutoRestore={!restoreLastThread || Boolean(initialThreadId)} suppressRuntimePrewarm={suppressRuntimePrewarm || meshParticipants.some((participant) => participant.launchContext?.presentation === 'split' && participant.launchContext.source !== 'desktop')}
       // Until a thread-bound tab's history lands, show '…', never the default backend.
       expectsThreadLoad={Boolean(initialThreadId)}
+      draftConversationId={initialThreadId}
       draftInjection={effectiveDraftInjection}
       imageInjection={data?.imageInjection ?? null}
       onImageInjectionConsumed={data?.onImageInjectionConsumed}
@@ -1083,7 +1036,7 @@ function OrchestratorTabInner({
       )}
       composerLeadingExtras={composerLeadingExtras}
       onMissionStateChange={data.onMissionStateChange}
-      onLaunchPacket={data.onLaunchPacket}
+      onFocusPacket={focusWorkerPacket} onFocusSession={sessionKey => sessionTiles.splitSessionFromMenu(sessionKey, 'vertical')}
       onChromeChange={handleChromeChange}
     />
   );
@@ -1142,6 +1095,7 @@ function OrchestratorTabInner({
           minHeight: 0,
           display: 'flex',
           flexDirection: 'row',
+          position: 'relative',
         }}
       >
         {/* Chat body */}
@@ -1163,8 +1117,7 @@ function OrchestratorTabInner({
           onCloseLeaf={sessionTiles.closeSessionLeafById}
           onFocusSession={sessionTiles.setFocusedSessionKey}
         />
-        {/* Branch-details rail moved INSIDE the panel (transcriptSideRail) so
-            it sits beside the transcript, not the composer — see branchRail. */}
+        {branchRail}
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <OrchestratorPromptControls active={active} repoPath={repoPath ?? null} repoName={repoLabel?.trim() || repoPath?.split('/').filter(Boolean).pop() || 'This repo'} onDraft={handlePaletteDraft} />

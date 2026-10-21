@@ -21,6 +21,7 @@ import { access, mkdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { remoteRepositoryIdentity } from './remote-identity';
 
 const execFileAsync = promisify(execFile);
 
@@ -79,10 +80,14 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
   const dest = path.join(root, name);
 
   if (await pathExists(dest)) {
-    // Idempotent re-run: if a git repo already sits at the destination,
-    // registering it is the right outcome; anything else is a real conflict.
+    // Reuse only the requested repository. Different owners can use the same
+    // basename, so an existing Git checkout alone is not enough evidence.
     const gitDir = await stat(path.join(dest, '.git')).catch(() => null);
-    if (gitDir) return { localPath: dest };
+    if (gitDir) {
+      const origin = await execFileAsync('git', ['-C', dest, 'remote', 'get-url', 'origin'], { windowsHide: true, timeout: 5_000 }).then(({ stdout }) => stdout.trim()).catch(() => '');
+      if (origin && remoteRepositoryIdentity(origin) === remoteRepositoryIdentity(url)) return { localPath: dest };
+      throw new RepoCloneError('The destination folder belongs to a different repository. Add its local folder or choose another repository.', 409);
+    }
     throw new RepoCloneError(`Destination already exists and is not a git repository: ${dest}`, 409);
   }
 

@@ -5,9 +5,12 @@ import {
   findManagedRun,
   killManagedRun,
   listManagedRuns,
+  bindManagedRunProvider,
+  recordManagedRunSettlement,
 } from '@/lib/runtimes/managed-runs/registry';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
-import { terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
+import { inspectOwnedManagedRun, terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
+import { externalSettlementQuiet, parseSettlementBinding, settlementBindingDigest } from '@/lib/runtimes/managed-runs/settlement';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
 import { getLane } from '@/lib/lane/registry';
@@ -22,6 +25,12 @@ export const dynamic = 'force-dynamic';
 const RUN_SESSION_RE = /^cortex-run-[A-Za-z0-9]+$/;
 const MAX_FIELD = 4096; // cap persisted/echoed strings — no unbounded command/cwd
 
+function workerView(run: ManagedRunRecord) {
+  const { settlement, termination, ...visible } = run;
+  return { ...visible, settlementState: settlement ? externalSettlementQuiet(run) ? 'quiet' : 'unknown' : null,
+    termination: termination ? { confirmedDead: termination.confirmedDead } : null };
+}
+
 /** GET — list managed runs (reconciled against live tmux). */
 export async function GET(request: Request) {
   const startedAt = performance.now();
@@ -35,10 +44,10 @@ export async function GET(request: Request) {
   try {
     const allRuns = await listManagedRuns();
     const runs = principal.role === 'worker'
-      ? allRuns.filter((run) => Boolean(principal.packetId) && run.packetId === principal.packetId)
+      ? allRuns.filter((run) => Boolean(principal.packetId) && run.packetId === principal.packetId).map(workerView)
       : allRuns;
     return NextResponse.json(
-      { schema: 'o8/managed-runs/v1', runs },
+      { schema: 'o8/managed-runs/v1', settlementContract: 'o8/managed-run-settlement/v1', runs },
       { headers: serverTimingHeaders(startedAt) },
     );
   } catch (err) {
@@ -50,7 +59,7 @@ export async function GET(request: Request) {
 }
 
 type RegisterBody = {
-  action?: 'register' | 'finish' | 'kill' | 'output';
+  action?: 'register' | 'finish' | 'kill' | 'output' | 'bind-session' | 'settlement';
   id?: string;
   session?: string;
   command?: string;
@@ -69,6 +78,14 @@ type RegisterBody = {
   outputChunk?: string;
   outputSequence?: number;
   observedAt?: number;
+  settlementBinding?: unknown;
+  bindingDigest?: string;
+  receiptId?: string;
+  sequence?: number;
+  state?: 'active' | 'unknown' | 'quiet';
+  providerSessionId?: string | null;
+  cancelledBeforeLaunch?: boolean;
+  stopRequestId?: string | null;
 };
 
 function managedRunRepoPath(run: ManagedRunRecord): string {
@@ -77,6 +94,14 @@ function managedRunRepoPath(run: ManagedRunRecord): string {
 
 /** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
+  try { return await post(req); } catch (error) {
+    const message = error instanceof Error ? error.message : 'managed_run_failed';
+    const unavailable = message === 'managed_run_persistence_unavailable';
+    return NextResponse.json({ ok: false, error: message }, { status: unavailable ? 503 : 409 });
+  }
+}
+
+async function post(req: Request) {
   const principal = resolveRequestPrincipalContext(req);
   if (principal.role !== 'operator' && principal.role !== 'worker') {
     return NextResponse.json({ ok: false, error: 'operator_or_worker_required' }, { status: 403 });
@@ -86,6 +111,31 @@ export async function POST(req: Request) {
     body = (await req.json()) as RegisterBody;
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
+  const view = (run: ManagedRunRecord | null) => run && (principal.role === 'worker' ? workerView(run) : run);
+  if (body.action === 'settlement' || body.action === 'bind-session' || body.settlementBinding !== undefined) {
+    if (principal.role !== 'operator') {
+      return NextResponse.json({ ok: false, error: 'operator_settlement_required' }, { status: 403 });
+    }
+  }
+  if (body.action === 'bind-session') {
+    const run = bindManagedRunProvider(body.id ?? '', body.bindingDigest ?? '', body.providerSessionId);
+    return NextResponse.json({ ok: true, run });
+  }
+  if (body.action === 'settlement') {
+    if (!['active', 'unknown', 'quiet'].includes(body.state ?? '')
+      || !Number.isSafeInteger(body.sequence) || Number(body.sequence) < 1
+      || (body.providerSessionId !== null && typeof body.providerSessionId !== 'string')) {
+      return NextResponse.json({ ok: false, error: 'invalid_settlement_receipt' }, { status: 400 });
+    }
+    const run = recordManagedRunSettlement(body.id ?? '', {
+      receiptId: body.receiptId ?? '', bindingDigest: body.bindingDigest ?? '', sequence: Number(body.sequence),
+      state: body.state!, providerSessionId: body.providerSessionId!,
+      cancelledBeforeLaunch: body.cancelledBeforeLaunch === true, stopRequestId: body.stopRequestId ?? null,
+    });
+    // Receiving a quiet seal alone never proves that the wrapper/process tree exited.
+    if (run.settlement?.wrapperFinished) await listManagedRuns();
+    return NextResponse.json({ ok: true, run: findManagedRun(run.id) });
   }
   if (body.action === 'register' || !body.action) {
     const ownershipRefusal = workerPacketRefusal(principal, body.packetId);
@@ -128,8 +178,13 @@ export async function POST(req: Request) {
     if (!key) {
       return NextResponse.json({ ok: false, error: 'missing_id' }, { status: 400 });
     }
-    const rec = finishManagedRun(key, typeof body.exitCode === 'number' ? body.exitCode : null);
-    if (rec) {
+    const target = findManagedRun(key);
+    const quiet = target?.settlement ? await inspectOwnedManagedRun(target) : false;
+    const rec = finishManagedRun(key, typeof body.exitCode === 'number' ? body.exitCode : null, quiet);
+    if (rec?.status === 'settling') {
+      return NextResponse.json({ ok: false, error: 'settlement_unconfirmed', run: view(rec) }, { status: 409 });
+    }
+    if (rec?.status === 'finished') {
       recordAutomationSourceEvent({
         sourceKind: 'managed_run',
         sourceId: rec.id,
@@ -139,7 +194,7 @@ export async function POST(req: Request) {
         payload: { exitCode: rec.exitCode ?? null, status: rec.status, mode: rec.mode },
       });
     }
-    return NextResponse.json({ ok: Boolean(rec), run: rec });
+    return NextResponse.json({ ok: Boolean(rec), run: view(rec) });
   }
 
   if (body.action === 'kill') {
@@ -158,12 +213,13 @@ export async function POST(req: Request) {
     const termination = await terminateManagedRun(target, { reason, exitCode });
     if (!termination.confirmedDead) {
       return NextResponse.json(
-        { ok: false, error: 'termination_unconfirmed', termination },
+        { ok: false, error: 'termination_unconfirmed', run: view(findManagedRun(session)),
+          termination: principal.role === 'worker' ? { confirmedDead: false } : termination },
         { status: 409 },
       );
     }
     const rec = killManagedRun(session, exitCode, termination);
-    if (rec) {
+    if (rec?.status === 'killed') {
       recordAutomationSourceEvent({
         sourceKind: 'managed_run',
         sourceId: rec.id,
@@ -173,7 +229,8 @@ export async function POST(req: Request) {
         payload: { exitCode: rec.exitCode ?? null, reason, status: rec.status },
       });
     }
-    return NextResponse.json({ ok: Boolean(rec), run: rec, termination });
+    return NextResponse.json({ ok: Boolean(rec), run: view(rec),
+      termination: principal.role === 'worker' ? { confirmedDead: termination.confirmedDead } : termination });
   }
 
   // ── register (default) ──
@@ -201,9 +258,13 @@ export async function POST(req: Request) {
   if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD || (body.title?.length ?? 0) > MAX_FIELD || (body.startedAt?.length ?? 0) > MAX_FIELD) {
     return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
+  const binding = body.settlementBinding === undefined ? null : parseSettlementBinding(body.settlementBinding);
+  if (body.settlementBinding !== undefined && !binding) {
+    return NextResponse.json({ ok: false, error: 'invalid_settlement_binding' }, { status: 400 });
+  }
 
   const commitRegistration = () => {
-    const rec: ManagedRunRecord = {
+    const proposed: ManagedRunRecord = {
       id: body.id!,
       session: body.session!,
       command: body.command!,
@@ -223,8 +284,13 @@ export async function POST(req: Request) {
       exitCode: null,
       status: 'running',
       termination: null,
+      settlement: binding ? {
+        binding, bindingDigest: settlementBindingDigest(binding, body.cwd!),
+        providerSessionId: binding.providerSessionId, receipt: null, stopRequestId: null,
+        stopRequestedAt: null, wrapperFinished: false,
+      } : null,
     };
-    registerManagedRun(rec);
+    const rec = registerManagedRun(proposed);
     recordAutomationSourceEvent({
       sourceKind: 'managed_run',
       sourceId: rec.id,
@@ -234,7 +300,7 @@ export async function POST(req: Request) {
       occurredAt: Date.parse(rec.startedAt) || Date.now(),
       payload: { command: rec.command, mode: rec.mode, packetId: rec.packetId, laneId: rec.laneId },
     });
-    return NextResponse.json({ ok: true, run: rec });
+    return NextResponse.json({ ok: true, run: view(rec) });
   };
 
   const packetId = body.packetId?.trim() ?? '';

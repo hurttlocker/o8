@@ -5,6 +5,7 @@ import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { PersistedChatCheckpoint } from '@/lib/terminal/tab-state';
+import type { TerminalExitState } from '@/lib/terminal/exit-state';
 import type {
   OrchestrationMode,
   OrchestratorLaneSnapshot,
@@ -65,8 +66,9 @@ export interface TerminalTab {
    *                       canvas (experimentalCanvas flag).
    *                       NOT the same as 'canvas'.
    */
-  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas';
+  kind: 'terminal' | 'chat' | 'llm-chat' | 'chatgpt-plan' | 'canvas' | 'orchestrator' | 'fleet-canvas';
   tmuxSession: string | null;
+  terminalExit?: TerminalExitState;
   /** Live run views attach to an existing PTY but must never send it input. */
   readOnly?: boolean;
   /** Prevent typing into a new local shell until its remote control starts. */
@@ -161,7 +163,7 @@ export type { PreviewSelectionPayload };
 export type WorkspaceChatRuntime = OrchestratorRuntime | 'chat';
 
 export interface TerminalTabHandle {
-  writeToTerminal: (sessionName: string, data: string) => void;
+  writeToTerminal: (sessionName: string, data: string, historical?: boolean) => void;
   setTerminalSourceDimensions?: (sessionName: string, cols: number, rows: number) => void;
   writeRaw: (sessionName: string, data: string) => void;
   terminalVisibilityReady?: (sessionName: string, epoch: number) => void;
@@ -169,7 +171,7 @@ export interface TerminalTabHandle {
   recordTerminalDiagnostic?: (diagnostic: Record<string, unknown>) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
-  setTermExited: (sessionName: string) => void;
+  setTermExited: (sessionName: string, exitCode?: number | null) => void;
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   clearDetectedPreview: (port: number) => void;
   isRestoreSettled: () => boolean;
@@ -244,7 +246,9 @@ export interface TerminalTabHandle {
       id: string;
       label: string;
       kind: TerminalTab['kind'];
+      canvasKind?: CanvasTab['kind'];
       sessionKey?: string;
+      terminalExited?: boolean;
       laneId?: string | null;
       packetId?: string | null;
       orchestratorThreadId?: string;
@@ -278,7 +282,7 @@ export interface TerminalTabHandle {
 export interface WorkspaceTerminalProps {
   stateScope: string;
   activeWorkspaceSurface?: boolean;
-  defaultTab: 'llm-chat' | 'terminal';
+  defaultTab: 'orchestrator' | 'llm-chat' | 'terminal';
   autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;
   /** Current Projects/sidebar selection. New sessions inherit this before

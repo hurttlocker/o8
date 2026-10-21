@@ -38,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
   const responses: OperatorMcpResponse[] = [];
   for (const message of messages) {
     try {
-      const response = await handleOperatorMcpMessage(message);
+      const response = await handleOperatorMcpMessage(message, request.headers.get('x-o8-mcp-profile') || undefined);
       if (response) responses.push(response);
     } catch (error) {
       if (message && message.id !== undefined && message.id !== null) {

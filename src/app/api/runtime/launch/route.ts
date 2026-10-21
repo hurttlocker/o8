@@ -17,6 +17,7 @@ import { listLanes } from '@/lib/lane/registry';
 import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
+import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,9 @@ function canonicalLaunchRequest(
   clientMutationId: string,
 ): RuntimeLaunchRequest {
   return {
+    automaticRecoverySurfaceId: payload.automaticRecoverySurfaceId,
+    automaticRecoveryRunId: payload.automaticRecoveryRunId,
+    executionPolicy: payload.executionPolicy,
     runtime: runtimeName as RuntimeLaunchRequest['runtime'],
     prompt: payload.prompt?.trim() ?? '',
     model: trimmed(payload.model),
@@ -67,13 +71,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
   }
   if ((payload.claudeCodeModel !== undefined && typeof payload.claudeCodeModel !== 'string')
+    || (payload.executionPolicy !== undefined && payload.executionPolicy !== 'single-attempt')
     || (payload.claudeCodeCarrier !== undefined && !isClaudeCodeModelSource(payload.claudeCodeCarrier))
     || (payload.workMode !== undefined && payload.workMode !== 'edit' && payload.workMode !== 'read-only')
     || (payload.spendCap !== undefined && !normalizePacketSpendCap(payload.spendCap))) {
     return NextResponse.json({ error: 'Invalid carrier, work mode, or spend cap for this launch.' }, { status: 400 });
   }
 
+  if ((payload.automaticRecoverySurfaceId !== undefined || payload.automaticRecoveryRunId !== undefined)
+    && (typeof payload.automaticRecoverySurfaceId !== 'string' || !payload.automaticRecoverySurfaceId.startsWith(`${runtimeName}-owned:`)
+      || typeof payload.automaticRecoveryRunId !== 'string' || !payload.automaticRecoveryRunId.trim())) {
+    return NextResponse.json({ error: 'Automatic retry requires the original owned runtime and generation.' }, { status: 400 });
+  }
+
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
+  try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode); }
+  catch { return NextResponse.json({ error: 'Single-attempt workers require exact native runtime, model, effort and read-only pins.' }, { status: 400 }); }
   const canonicalBody = JSON.stringify(launchRequest);
 
   try {

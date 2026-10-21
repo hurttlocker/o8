@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 /** Reclaim generated native-release outputs after publication finishes. */
-import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, readFile, readdir, readlink, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { generatedOutputLaunch } from './lib/generated-output-launch.mjs';
+import { boundBuildEnvironment } from './lib/release-build-profile.mjs';
+import { resolveReleaseBuildEnvironment } from './lib/release-config.mjs';
+
+const runFile = promisify(execFile);
 
 export const POSTSHIP_GENERATED_DIRS = [
   '.next',
   'src-tauri/target',
   'src-tauri/sidecars/speech-local/.build',
+  'src-tauri/sidecars/pi-write/target',
 ];
 
 // `out` is the verified release artifact, not disposable scratch space. Its
@@ -28,7 +36,54 @@ async function assertO8RepoRoot(repoRoot) {
   }
 }
 
-async function assertGeneratedTreeHasNoLinks(target, relativePath) {
+async function assertGeneratedAncestors(root, target) {
+  let ancestor = root;
+  for (const segment of path.relative(root, path.dirname(target)).split(path.sep).filter(Boolean)) {
+    ancestor = path.join(ancestor, segment);
+    const metadata = await lstat(ancestor);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`linked ancestor: ${path.relative(root, ancestor)}`);
+    }
+    if (!metadata.isDirectory()) throw new Error('ancestor is not a real directory');
+  }
+}
+
+async function assertInternalLink(root, rootAlias, link) {
+  // Resolve only path components, never destination contents. Check each hop
+  // before continuing so an external detour cannot return to the checkout.
+  let current = root;
+  let remaining = path.relative(root, link).split(path.sep);
+  let hops = 0;
+  while (remaining.length > 0) {
+    const segment = remaining.shift();
+    if (!segment || segment === '.') continue;
+    const candidate = path.join(current, segment);
+    if (candidate !== root && !isInside(root, candidate)) throw new Error('link escapes repo root');
+    const metadata = await lstat(candidate);
+    if (metadata.isSymbolicLink()) {
+      if (++hops > 40) throw new Error('link resolution is uncertain');
+      const destination = await readlink(candidate);
+      if (path.isAbsolute(destination)) {
+        // Accept the caller's checkout alias (e.g. macOS /var vs /private/var),
+        // but retain unnormalized components to check symlinks before `..`.
+        const prefix = [root, rootAlias].find((base) => destination === base || destination.startsWith(`${base}${path.sep}`));
+        if (!prefix) throw new Error('link escapes repo root');
+        current = root;
+        remaining = [...destination.slice(prefix.length).split(path.sep), ...remaining];
+      } else {
+        remaining = [...destination.split(path.sep), ...remaining];
+      }
+      continue;
+    }
+    if (remaining.length > 0 && !metadata.isDirectory()) throw new Error('link ancestor is not a directory');
+    current = candidate;
+  }
+  // Require agreement with the filesystem's own resolution; failures are
+  // uncertain links and must keep the generated tree intact.
+  if (await realpath(link) !== current) throw new Error('link resolution is uncertain');
+}
+
+export async function assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath) {
   const pending = [target];
   while (pending.length > 0) {
     const directory = pending.pop();
@@ -37,7 +92,12 @@ async function assertGeneratedTreeHasNoLinks(target, relativePath) {
       const candidate = path.join(directory, entry.name);
       const metadata = await lstat(candidate);
       if (entry.isSymbolicLink() || metadata.isSymbolicLink()) {
-        throw new Error(`linked entry inside ${relativePath}: ${path.relative(target, candidate)}`);
+        try {
+          await assertInternalLink(root, rootAlias, candidate);
+        } catch {
+          throw new Error(`linked entry inside ${relativePath}: ${path.relative(target, candidate)}`);
+        }
+        continue;
       }
       if (metadata.isDirectory()) pending.push(candidate);
     }
@@ -45,12 +105,40 @@ async function assertGeneratedTreeHasNoLinks(target, relativePath) {
 }
 
 export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
-  const root = await realpath(path.resolve(repoRoot));
+  const rootAlias = path.resolve(repoRoot);
+  const root = await realpath(rootAlias);
   await assertO8RepoRoot(root);
   const result = { removed: [], skipped: [], refused: [] };
 
   for (const relativePath of POSTSHIP_GENERATED_DIRS) {
     const target = path.resolve(root, relativePath);
+    if (relativePath === '.next') {
+      try {
+        const env = resolveReleaseBuildEnvironment(root, boundBuildEnvironment(root));
+        const marker = await lstat(path.join(root, '.o8-generated-output-store')).catch(error => {
+          if (error.code !== 'ENOENT') throw error;
+          return null;
+        });
+        if (!marker) {
+          if (await lstat(target).catch(error => { if (error.code !== 'ENOENT') throw error; return null; })) {
+            throw new Error('Postship output has unknown lifecycle ownership.');
+          }
+          result.skipped.push(relativePath);
+          continue;
+        }
+        const invocation = generatedOutputLaunch('postship');
+        const completed = await runFile(invocation.command, invocation.args, { cwd: root,
+          env: { ...env, TSX_TSCONFIG_PATH: fileURLToPath(new URL('../tsconfig.json', import.meta.url)) },
+          maxBuffer: 2 * 1024 ** 2 });
+        const status = /\[postship-generated-output\] (removed|skipped)\s*$/.exec(completed.stdout)?.[1];
+        if (!status) throw new Error('Postship output has no completed lifecycle receipt.');
+        result[status].push(relativePath);
+      } catch (error) {
+        result.refused.push({ path: relativePath, reason: error instanceof Error ? error.message : String(error) });
+        break;
+      }
+      continue;
+    }
     if (!isInside(root, target)) {
       result.refused.push({ path: relativePath, reason: 'outside repo root' });
       break;
@@ -58,6 +146,7 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
 
     let metadata;
     try {
+      await assertGeneratedAncestors(root, target);
       metadata = await lstat(target);
     } catch (error) {
       if (error?.code === 'ENOENT') {
@@ -74,7 +163,8 @@ export async function cleanupPostshipOutputs(repoRoot = process.cwd()) {
     }
 
     try {
-      await assertGeneratedTreeHasNoLinks(target, relativePath);
+      await assertGeneratedTreeHasSafeLinks(root, rootAlias, target, relativePath);
+      // Recursive rm unlinks nested symlinks without removing their destinations.
       await rm(target, { recursive: true, force: false, maxRetries: 0 });
       result.removed.push(relativePath);
     } catch (error) {
@@ -104,5 +194,5 @@ async function main() {
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  await main();
+  void main();
 }

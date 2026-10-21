@@ -8,7 +8,6 @@ import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
@@ -20,6 +19,7 @@ import {
   supportedEffortsForLead,
 } from './composer-selector/state';
 import { useUltraEffortPreference } from './composer-selector/UltraEffortPreference';
+import { ServiceTierPicker } from './composer-selector/ServiceTierPicker';
 
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
   // Between medium (3) and high (4): adaptive auto-picks in that band, so its
@@ -41,9 +41,10 @@ const MODEL_THINKING_MENU_WIDTH = 200;
 // open; the fixed houses keep their locked 200px geometry.
 const SEARCHABLE_HOUSE_MENU_WIDTH = 300;
 
-// Synthetic model id for the free o8 backend — there is no underlying model name
+// Synthetic model id for the o8 backend — there is no underlying model name
 // exposed in the UI (monetization doctrine: we own the brand, hide the model).
-// This value is what `onModelChange` stores and what `activeModelOption` matches.
+// This value is what `onModelChange` stores and what `activeModelOption` matches,
+// so it keeps its original value for saved selections.
 const O8_FREE_MODEL_ID = 'o8-free';
 
 export type ComposerModelOption = {
@@ -57,7 +58,7 @@ export type ComposerModelOption = {
 };
 
 export type ComposerModelGroup = {
-  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode';
+  key: 'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode' | 'acp' | 'muse';
   label: string;
   options: ComposerModelOption[];
   /**
@@ -117,17 +118,19 @@ export const COMPOSER_MODEL_GROUPS: ComposerModelGroup[] = [
   // and either can return when its setup story is one-click. Settings →
   // Operator Defaults still offers Hermes when a HEALTHY binary is present
   // (isHermesAvailable now exec-probes instead of existsSync).
-  // The free house (operator ruling 2026-07-12): one conversational model that
-  // streams with no subscription draw, so the operator can drive the full
-  // orchestrator UI without burning Claude/Codex usage. Named only 'o8' — the
-  // underlying model is never surfaced.
+  // o8's own house (#3408): its built-in agent, bundled Pi with the full o8
+  // command set, on the managed model and the o8 model allowance. Needs no
+  // installed CLI or key, so it draws on no Claude/Codex subscription. It is
+  // the one Pi entry: a separate Pi row would name the same agent twice.
   {
     key: 'o8',
     label: 'o8',
     options: [
-      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'free · no usage' },
+      { value: O8_FREE_MODEL_ID, label: 'o8', triggerLabel: 'o8', backend: 'o8', model: O8_FREE_MODEL_ID, sub: 'Managed model' },
     ],
   },
+  { key: 'acp', label: 'Local ACP', options: [], searchable: true },
+  { key: 'muse', label: 'Muse Code', options: [], searchable: true },
 ];
 
 export interface ComposerModelCatalogue {
@@ -135,9 +138,10 @@ export interface ComposerModelCatalogue {
   carrier: { source: 'native' | 'openrouter' | 'codex-subscription'; model: string | null } | null;
 }
 
-export function useComposerModelCatalogue(): ComposerModelCatalogue {
+export function useComposerModelCatalogue(enabled = true): ComposerModelCatalogue {
   const [carrier, setCarrier] = useState<ComposerModelCatalogue['carrier']>(null);
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const load = () => {
       void fetch('/api/runtime/claude-code-profile', { cache: 'no-store' })
@@ -154,7 +158,7 @@ export function useComposerModelCatalogue(): ComposerModelCatalogue {
     load();
     window.addEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load);
     return () => { cancelled = true; window.removeEventListener(CLAUDE_CODE_PROFILE_CHANGED_EVENT, load); };
-  }, []);
+  }, [enabled]);
   const carrierModel = carrier?.model ?? null;
   const carrierSource = carrier?.source;
   const groups = carrierSource && carrierSource !== 'native' && carrierModel
@@ -364,18 +368,26 @@ export function ModelThinkingChip({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const tools = useRuntimeInventory(open);
+  const [acpAvailable, setAcpAvailable] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch('/api/setup/orchestrator-backends').then(response => response.json()).then(data => { if (alive) setAcpAvailable(data.acp === true); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open]);
   const [advancedLeads, setAdvancedLeads] = useState(false);
   const installed = visibleRuntimeInventory(tools.inventory ?? []);
   const visibleLead = (key: ComposerModelGroup['key']) => {
     const current = key === activeBackend || (key === 'claude' && activeBackend === 'fable');
     if (current) return true;
+    if (key === 'acp') return acpAvailable;
     if (key === 'o8') return advancedLeads;
     const tool = runtimeForLead(key);
     return installed.some((item) => item.id === tool) && (key !== 'opencode' || advancedLeads);
   };
-  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8'
+  const leadReady = (key: ComposerModelGroup['key']) => key === 'o8' || (key === 'acp' && acpAvailable)
     || tools.inventory?.some((item) => item.id === runtimeForLead(key) && item.available) === true;
-  const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue();
+  const { groups: composerModelGroups, carrier: harnessCarrier } = useComposerModelCatalogue(Boolean(onEffortChange || onModelChange || onBackendChange));
   const ultraEnabled = useUltraEffortPreference();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const splitRef = useRef<HTMLSpanElement>(null);
@@ -412,10 +424,10 @@ export function ModelThinkingChip({
   const triggerModelLabel = activeModelOption?.triggerLabel ?? activeModelOption?.label ?? searchableHouseLabel ?? modelLabel;
   // Which house drawer is open in the model picker. Defaults to the active
   // backend's house so the current model is visible on open.
-  const [openHouse, setOpenHouse] = useState<'claude' | 'codex' | 'openclaw' | 'hermes' | 'o8' | 'opencode'>(
-    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode'
+  const [openHouse, setOpenHouse] = useState<ComposerModelGroup['key']>(
+    activeBackend === 'codex' || activeBackend === 'openclaw' || activeBackend === 'hermes' || activeBackend === 'o8' || activeBackend === 'opencode' || activeBackend === 'muse'
       ? activeBackend
-      : 'claude',
+      : activeBackend === 'pi' ? 'o8' : 'claude',
   );
   // The ACP house needs a wider menu than the fixed drawers (see the width
   // constants) — derived from the open house, not the active backend, so the
@@ -427,10 +439,8 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
-  // o8 tiers (Q ruling 2026-07-12): Low = the free rail, High = the founders
-  // rail. Founders default High, free defaults Low, and High never renders for
-  // the free plan — the proxy enforces the same gate server-side, this is
-  // just the honest UI for it. Mode rows (Solo/Collide) stay hidden for o8.
+  // The o8 lead has one setting on every plan, so it shows no effort control
+  // (#2999, #3660). Mode rows (Solo/Collide) stay hidden for o8.
   const isO8Backend = activeBackend === 'o8';
   const { plan: entitlementPlan } = useEntitlement();
   const isFreePlan = entitlementPlan === 'free';
@@ -441,17 +451,14 @@ export function ModelThinkingChip({
     isFreePlan,
     ultraEnabled,
   );
-  // Backends without steerable thinking expose no effort stops. o8 keeps its
-  // own plan-gated Low/High options from the shared support resolver.
-  const hideEffortUi = options.length === 0 || (!thinkingKnown && !isO8Backend);
+  // Backends without steerable thinking expose no effort stops.
+  const hideEffortUi = options.length === 0 || !thinkingKnown;
   const useSplit = split && !compact;
 
   const effortStops: EffortStop[] = options.map((option) => ({
     effort: option,
     label: THINKING_EFFORT_LABELS[option].long,
-    sub: isO8Backend
-      ? option === 'high' ? PLAN_LABELS[entitlementPlan] : 'free'
-      : option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
+    sub: option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`,
   }));
   const currentEffortIndex = Math.max(0, options.indexOf(effort));
   const handleEffortPick = (idx: number) => {
@@ -531,7 +538,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${triggerModelLabel} · ${mode.long} · ${effortTitle} ${selectedLabel}`}
+        title={canOpen ? `${triggerModelLabel} · ${mode.long} · ${effortTitle} ${selectedLabel}` : triggerModelLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -642,6 +649,7 @@ export function ModelThinkingChip({
                           models come from the live agent, so it renders a
                           searchable picker instead of a drawer of literals. */}
                       {houseOpen && !leadReady(group.key) ? <div style={{ padding: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{tools.loading ? 'Checking readiness…' : tools.inventory?.find((item) => item.id === runtimeForLead(group.key))?.fix || 'Connect this tool using Add tools below.'}</div> : null}
+                      {houseOpen && leadReady(group.key) && group.key === 'acp' ? <button type="button" onClick={() => { onBackendChange?.('acp', ''); setOpen(false); }} style={{ border: 0, borderRadius: 8, paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, background: 'var(--t-hover)', color: 'var(--t-text)', cursor: 'pointer', textAlign: 'left' }}>Use agent default</button> : null}
                       {houseOpen && leadReady(group.key) && group.searchable ? (
                         <AcpModelPicker
                           backend={group.key}
@@ -671,12 +679,8 @@ export function ModelThinkingChip({
                               }
                               // Drop an effort only when the shared verified catalog excludes it.
                               if (!codexSupportsReasoningEffort(option.model, 'ultra') && effort === 'ultra') onEffortChange?.('max');
-                              // o8 auto tier (Q ruling 2026-07-12): founders land on
-                              // High, free lands on Low — the server enforces the
-                              // same gate regardless.
-                              if (option.backend === 'o8') {
-                                onEffortChange?.(isFreePlan ? 'low' : 'high');
-                              }
+                              // The o8 lead has one setting on every plan (#3660).
+                              if (option.backend === 'o8') onEffortChange?.('low');
                               setOpen(false);
                             }}
                             style={{
@@ -729,6 +733,7 @@ export function ModelThinkingChip({
           {onEffortChange && !hideEffortUi ? (
             <EffortSlider stops={effortStops} index={currentEffortIndex} onPick={handleEffortPick} />
           ) : null}
+          {onEffortChange && !hideEffortUi ? <ServiceTierPicker backend={activeBackend ?? 'claude'} model={modelId ?? ''} disabled={false} /> : null}
 
           {/* Mode section removed (Q 2026-07-17): Solo / Multitask /
               Mixture of Agents live in the composer's "+" switcher now —

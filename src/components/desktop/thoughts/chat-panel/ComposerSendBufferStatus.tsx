@@ -85,6 +85,7 @@ export function ComposerSendBufferStatus({
                 }}
               >
                 {item.text}
+                {item.status ? <span title={item.reason ?? undefined} style={{ color: 'var(--t-text-muted)' }}>{` · ${item.status === 'dispatching' ? 'Sending' : item.status === 'held' ? `Needs attention${item.reason ? `: ${item.reason}` : ''}` : 'Send next'}`}</span> : null}
                 {item.images.length > 0 ? (
                   <span style={{ color: 'var(--t-text-muted)' }}>
                     {` · ${item.images.length} image${item.images.length === 1 ? '' : 's'}`}
@@ -97,6 +98,7 @@ export function ComposerSendBufferStatus({
                 title="Cancel queued message"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={() => onCancelQueued(item.id)}
+                disabled={item.cancellable === false}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',

@@ -182,6 +182,14 @@ export async function reconcileWorkspaceSnapshot(
         note: 'Another packet lifecycle mutation ran first.',
       };
     }
+    if (current.state === 'restoring') {
+      const started = listWorkspaceSnapshotTransitions(current.repositoryUuid, current.packetId)
+        .findLast((entry) => entry.snapshotGeneration === current.snapshotGeneration
+          && entry.toState === 'restoring' && entry.transitionId.endsWith(':restoring'));
+      if (started?.receipt?.archiveRecovery) {
+        return quarantineRefusal(current, 'Interrupted archived-session recovery requires explicit reconciliation; all partial state is preserved.');
+      }
+    }
     if (current.state === 'retiring') {
       if (await pathExists(current.originalPath)) {
         return {

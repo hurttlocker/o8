@@ -20,10 +20,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 
 import { AlertTriangle, AlertCircle, CheckCircle2 } from '@/components/desktop/lucide-shims';
 import { getQuietModeSnapshot } from '@/lib/presentation/quiet-mode-client';
 import { noticeIsVisible } from '@/lib/presentation/quiet-mode-policy';
+import { useUrgentNotificationHeight } from './notification-layout';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +110,7 @@ export function toast(message: string, kind: ToastKind = 'error') {
 
 export function ConfirmToastHost() {
   const [, force] = useState(0);
+  const urgentHeight = useUrgentNotificationHeight();
   useEffect(() => {
     const l = () => force((n) => n + 1);
     listeners.add(l);
@@ -119,22 +122,23 @@ export function ConfirmToastHost() {
   return (
     <>
       {dialog ? <DialogCard key={dialog.id} dialog={dialog} /> : null}
-      {toastList.length > 0 ? (
         <div
+          role="region"
+          aria-label="Notifications"
+          aria-live="polite"
           style={{
             position: 'fixed',
-            bottom: 56,
-            right: 20,
+            top: 52 + (urgentHeight ? urgentHeight + 8 : 0),
+            right: 16,
             zIndex: 100000,
             display: 'flex',
-            flexDirection: 'column-reverse',
+            flexDirection: 'column',
             gap: 8,
             pointerEvents: 'none',
           }}
         >
-          {toastList.map((t) => <ToastRow key={t.id} item={t} />)}
+          <AnimatePresence initial={false}>{toastList.map((t) => <ToastRow key={t.id} item={t} />)}</AnimatePresence>
         </div>
-      ) : null}
     </>
   );
 }
@@ -303,13 +307,19 @@ const TOAST_TINT: Record<ToastKind, string> = {
 
 function ToastRow({ item }: { item: ToastItem }) {
   const Icon = TOAST_ICON[item.kind];
+  const reducedMotion = useReducedMotion();
   return (
-    <div
+    <motion.div
+      layout={!reducedMotion}
+      initial={reducedMotion ? false : { opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: reducedMotion ? 0 : 24, transition: { duration: 0.16 } }}
+      transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 460, damping: 38 }}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
-        width: 320,
+        width: 'min(340px, calc(100vw - 32px))',
         paddingTop: 11,
         paddingBottom: 11,
         paddingLeft: 13,
@@ -328,6 +338,6 @@ function ToastRow({ item }: { item: ToastItem }) {
       <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.4, whiteSpace: 'pre-line' }}>
         {item.message}
       </div>
-    </div>
+    </motion.div>
   );
 }

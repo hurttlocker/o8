@@ -328,8 +328,8 @@ export function DiffViewer() {
     }
   }, []);
 
-  const copyPath = useCallback((path: string) => {
-    void navigator.clipboard.writeText(path);
+  const copyPath = useCallback(async (path: string) => {
+    try { await navigator.clipboard.writeText(path); } catch { return; }
     setCopiedPath(path);
     setTimeout(() => setCopiedPath(null), 1500);
   }, []);

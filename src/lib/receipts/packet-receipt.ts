@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { listApprovalsForContext } from '@/lib/approvals/store';
+import { listReviewCosts, reviewPayer, type ReviewPayer } from '@/lib/lane/review-payer';
 import {
   artifactAbsPath,
   artifactRelPath,
@@ -47,12 +48,18 @@ export interface StoredPacketReceipt {
   rawReceiptJson: string;
 }
 
-function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
+/**
+ * `turnPayers` are the payers the turns' own usage rows recorded; they win over a
+ * payer inferred from the backend and reported model.
+ */
+export function collectReviews(events: LaneEvent[], turnPayers: ReadonlyMap<string, ReviewPayer> = new Map()): PacketReceiptReview[] {
   const starts = new Map<string, {
     backend: string;
     startedAt: string;
     outcome: PacketReceiptReview['outcome'];
     finishedAt: string | null;
+    model: string | null;
+    surface: string | null;
   }>();
   for (const event of events) {
     const turnId = typeof event.payload.reviewTurnId === 'string'
@@ -67,7 +74,15 @@ function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
         startedAt: event.timestamp,
         outcome: 'active',
         finishedAt: null,
+        model: null,
+        surface: typeof event.payload.surface === 'string' && event.payload.surface.trim()
+          ? event.payload.surface.trim()
+          : null,
       });
+    } else if (event.payload.event === 'review_turn_runtime_receipt') {
+      const turn = starts.get(turnId);
+      const route = event.payload.runtimeRoute as { model?: unknown } | null | undefined;
+      if (turn && typeof route?.model === 'string') turn.model = route.model;
     } else if (event.verb === 'review_turn_finished') {
       const turn = starts.get(turnId);
       const outcome = event.payload.outcome;
@@ -82,6 +97,9 @@ function collectReviews(events: LaneEvent[]): PacketReceiptReview[] {
     backend: turn.backend,
     outcome: turn.outcome,
     at: turn.finishedAt ?? turn.startedAt,
+    model: turn.model,
+    surface: turn.surface,
+    payer: turnPayers.get(turnId) ?? reviewPayer(turn.backend, turn.model).payer,
   }));
 }
 
@@ -187,7 +205,8 @@ async function buildPacketReceipt(input: {
       baseBranch: input.lane.baseBranch,
     },
     disposition: input.disposition,
-    reviews: collectReviews(getLaneEvents(input.lane.id, 10_000)),
+    reviews: collectReviews(getLaneEvents(input.lane.id, 10_000),
+      new Map(listReviewCosts([input.packet.id]).map((turn) => [turn.reviewTurnId, turn.payer]))),
     approvals: collectApprovals(input.packet.id, input.lane),
     runtime: input.packet.runtime,
     model: input.packet.model ?? input.lane.model ?? null,

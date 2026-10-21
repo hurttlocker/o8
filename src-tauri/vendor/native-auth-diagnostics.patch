@@ -1,0 +1,56 @@
+--- a/tauri-plugin-clerk-0.1.1/src/lib.rs
++++ b/tauri-plugin-clerk-0.1.1/src/lib.rs
+@@ -103 +103 @@
+-                        debug!("Received ClerkAuthEvent: {payload:?}");
++                        debug!("Clerk: received auth state change");
+--- a/tauri-plugin-clerk-0.1.1/src/events.rs
++++ b/tauri-plugin-clerk-0.1.1/src/events.rs
+@@ -28 +28 @@
+-    debug!("Emiting auth event: {payload:?}");
++    debug!("Clerk: emitting auth state change");
+@@ -30 +30 @@
+-    if let Err(e) = app.emit(
++    if let Err(_) = app.emit(
+@@ -37 +37 @@
+-        tracing::error!("Failed to emit clerk auth change: {e}");
++        tracing::error!("Clerk: failed to emit auth state change");
+--- a/clerk-fapi-rs-0.2.0/src/clerk.rs
++++ b/clerk-fapi-rs-0.2.0/src/clerk.rs
+@@ -141,2 +141,2 @@
+-        self.api_client.get_environment().await.map_err(|e| {
+-            error!("Clerk: Failed to load environment from API: {e}");
++        self.api_client.get_environment().await.map_err(|_| {
++            error!("Clerk: failed to load environment from API");
+@@ -164,3 +164,2 @@
+-            .map_err(|e| {
+-                error!("Clerk: Failed to load client from API: {e}");
+-                println!("Clerk: Failed to load client from API: {e}");
++            .map_err(|_| {
++                error!("Clerk: failed to load client from API");
+@@ -434,2 +433,2 @@
+-                .map_err(|e| {
+-                    error!("Failed to call create_session_token_with_template: {e}");
++                .map_err(|_| {
++                    error!("Clerk: failed to create session token with template");
+@@ -442,2 +441,2 @@
+-                .map_err(|e| {
+-                    error!("Failed to call create_session_token: {e}");
++                .map_err(|_| {
++                    error!("Clerk: failed to create session token");
+@@ -554,2 +553,2 @@
+-            .map_err(|e| {
+-                error!("Failed to touch session: {}", e);
++            .map_err(|_| {
++                error!("Clerk: failed to touch session");
+--- a/clerk-fapi-rs-0.2.0/src/utils.rs
++++ b/clerk-fapi-rs-0.2.0/src/utils.rs
+@@ -69,2 +69,2 @@
+-    let user = fapi.get_user().await.map_err(|e| {
+-        error!("Failed to get user: {}", e);
++    let user = fapi.get_user().await.map_err(|_| {
++        error!("Clerk: failed to get user");
+@@ -92,2 +92,2 @@
+-        .map_err(|e| {
+-            error!("Failed to get org memberships: {}", e);
++        .map_err(|_| {
++            error!("Clerk: failed to get organization memberships");

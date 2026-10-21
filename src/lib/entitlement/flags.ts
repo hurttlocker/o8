@@ -20,9 +20,9 @@ export function isPaidPlan(plan: Plan): boolean {
  *  - pro:     managed-inference proxy.
  *  - team:    managed-inference proxy + shared team governance.
  *  - founder: managed-inference proxy (included for life, fair-use-capped); NOT
- *             team.shared. Early-access (experimental*) is a deliberate founder
- *             perk wired separately (use-founder-status + the experimental
- *             hooks), not a cost/reach lever, so it isn't here.
+ *             team.shared. Early-access (experimental*) uses isPaidPlan through
+ *             use-early-access + the experimental hooks. It is not a cost/reach
+ *             lever, so it isn't in the resolved flags.
  *
  * relay.offNetwork follows the public relay contract in docs/internals/connect-contract.md.
  * Entitlement is "all paid tiers" in principle; today only 'founder' is a live

@@ -22,6 +22,7 @@ import {
 } from '@/lib/worktree/materialization-execution';
 import { verifyImmutableWorkspaceTruth } from './hibernator';
 import { probeOwnedSessionProcessQuiescence } from './process-probes';
+import { prepareArchivedReviewRecovery, assertArchivedReviewRecoveryCurrent, publishRecoveredReviewLane, completeArchivedReviewRecovery, type ArchivedReviewRecovery } from './archived-review-recovery';
 import {
   REPO_SETUP_POLICY_IDENTITY_KIND,
   repoSetupCopyBindingRequirements,
@@ -48,6 +49,7 @@ export interface RestoreWorkspaceInput {
   packetId: string;
   operationId: string;
   allowedIgnoredPaths?: string[];
+  expectedSnapshot?: { generation: number; version: number; fingerprint: string };
 }
 
 export type RestoreWorkspaceResult =
@@ -299,6 +301,7 @@ export async function restoreWorkspace(
     let repo: RepoRegistryEntry | undefined;
     let lane: Lane | null = null;
     let snapshot: WorkspaceSnapshotRecord | null = null;
+    let archivedRecovery: ArchivedReviewRecovery | null = null;
     let allowedIgnoredPaths: string[] = [];
     let allowedExternalSymlinks: WorkspaceStorageVerifierOptions['allowedExternalSymlinks'] = {};
     let requiredCopyBindings: WorkspaceStorageVerifierOptions['requiredCopyBindings'] = {};
@@ -307,11 +310,17 @@ export async function restoreWorkspace(
       repo = (await deps.listRepos()).find((entry) => entry.id === input.repositoryUuid);
       if (!repo) throw new Error('Registered repository UUID was not found.');
       lane = deps.findLaneByPacket(input.packetId);
-      if (!lane || lane.packetId !== input.packetId || lane.status !== 'reviewing' || lane.ownership !== 'managed') {
+      if (!lane || lane.packetId !== input.packetId || lane.ownership !== 'managed') {
         throw new Error('Only a managed reviewing packet lane can be restored.');
       }
       snapshot = getWorkspaceSnapshot(repo.id, input.packetId);
       if (!snapshot) throw new Error('Workspace snapshot was not found.');
+      if (lane.status === 'archived') {
+        const expected = input.expectedSnapshot;
+        if (!expected || expected.generation !== snapshot.snapshotGeneration || expected.version !== snapshot.version
+          || expected.fingerprint !== snapshot.snapshotFingerprint) throw new Error('The requested parked generation changed.');
+        archivedRecovery = await prepareArchivedReviewRecovery(lane, snapshot);
+      } else if (lane.status !== 'reviewing') throw new Error('Only a managed reviewing packet lane can be restored.');
       if (snapshot.state === 'materialized') return { status: 'already_materialized', snapshot };
       if (snapshot.state !== 'parked') throw new Error(`Workspace snapshot is ${snapshot.state}; reconcile it before restoring.`);
       if (path.resolve(lane.repoPath) !== path.resolve(repo.localPath)
@@ -336,9 +345,25 @@ export async function restoreWorkspace(
         repo,
         snapshot.originalPath,
       );
+      if (archivedRecovery) {
+        try {
+          await lstat(snapshot.originalPath);
+          throw new Error('The original workspace path is occupied.');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+        const processReceipt = await deps.processProbe(archivedRecovery.binding.surfaceId, snapshot.originalPath, { allowArchivedRecovery: true });
+        if (processReceipt.state !== 'quiescent') throw new Error('Archived session process quiescence is unproved.');
+        assertArchivedReviewRecoveryCurrent(archivedRecovery, false);
+      }
       snapshot = transition(snapshot, input.operationId, 'restoring', 'restoring', {
         originalPath: snapshot.originalPath,
         isolationKind,
+        archiveRecovery: archivedRecovery ? true : null,
+        archiveRecoveryLaneId: archivedRecovery ? lane.id : null,
+        archiveRecoveryApprovalId: archivedRecovery?.approvalId ?? null,
+        archiveRecoveryOriginalVersion: archivedRecovery ? snapshot.version : null,
+        archiveRecoverySessionFingerprint: archivedRecovery?.binding.recordFingerprint ?? null,
       });
       await deps.restoreExact({
         repoPath: repo.localPath,
@@ -389,6 +414,14 @@ export async function restoreWorkspace(
       });
       if (first.state !== 'verified_clean') throw new Error('Restored workspace did not pass its first storage verification.');
 
+      if (archivedRecovery) {
+        assertArchivedReviewRecoveryCurrent(archivedRecovery);
+        const recovery = archivedRecovery;
+        const lifecycle = getOwnedSessionLifecycle(recovery.binding.surfaceId);
+        if (!lifecycle?.recoverArchivedWorkspace) throw new Error('Session recovery capability disappeared.');
+        await lifecycle.recoverArchivedWorkspace(recovery.binding.surfaceId, recovery.binding,
+          () => publishRecoveredReviewLane(recovery));
+      }
       for (const identity of snapshot.sessionIdentities.filter((entry) => entry.kind === 'owned-session')) {
         const lifecycle = getOwnedSessionLifecycle(identity.identity);
         if (!lifecycle?.getWorkspaceBinding || !lifecycle.rebindWorkspace || !identity.bindingId) {
@@ -425,7 +458,8 @@ export async function restoreWorkspace(
           throw new Error(`Restored owned session process state is ${processReceipt.state}.`);
         }
       }
-      snapshot = transition(snapshot, input.operationId, 'materialized', 'materialized', {
+      const restoringSnapshot = snapshot;
+      const complete = () => transition(restoringSnapshot, input.operationId, 'materialized', 'materialized', {
         setupRecipeKey: setupReceipt.recipeKey,
         dependencyMode: setupReceipt.install.materialization?.mode ?? null,
         dependencyLeaseId: setupReceipt.install.materialization?.leaseId ?? null,
@@ -436,6 +470,7 @@ export async function restoreWorkspace(
         firstFingerprint: first.fingerprint,
         secondFingerprint: second.fingerprint,
       });
+      snapshot = archivedRecovery ? await completeArchivedReviewRecovery(archivedRecovery, complete) : complete();
       if (setupReceipt.install.materialization) {
         deps.queueDependencyPublication(
           snapshot.originalPath,
@@ -446,6 +481,17 @@ export async function restoreWorkspace(
         },
       );
     } catch (error) {
+      if (archivedRecovery && snapshot) {
+        const current = getWorkspaceSnapshot(snapshot.repositoryUuid, snapshot.packetId);
+        const held = current?.state === 'restoring'
+          && current.snapshotGeneration === archivedRecovery.snapshot.snapshotGeneration
+          && current.snapshotFingerprint === archivedRecovery.snapshot.snapshotFingerprint
+          && current.version === archivedRecovery.snapshot.version + 1
+          ? transition(current, input.operationId, 'archive-recovery-held', 'restoring',
+          { archiveRecovery: true }, { code: 'archive_recovery_incomplete', message: compactError(error),
+            phase: 'restoring', recordedAt: Date.now() }) : current;
+        return { status: 'refused', code: 'archive_recovery_incomplete', note: compactError(error), snapshot: held ?? undefined };
+      }
       const failedSnapshot = repo && snapshot
         ? await recordRestoreFailure(
             repo,

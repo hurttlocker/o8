@@ -3,7 +3,8 @@
  * Pins the three-way return contract the liveness probes depend on, and that
  * the 2s TTL shares one readdir instead of re-scanning per lookup.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -95,6 +96,28 @@ describe('lookupOwnedActiveRun', () => {
     for (const [index, surfaceId] of surfaces.entries()) {
       expect(await lookupOwnedActiveRun(surfaceId, 1000)).toEqual({ pid: 5000 + index, tmuxSession: undefined });
     }
+  });
+
+  it('reads a known session beside a FIFO and refuses to infer a missing owner is dead', async () => {
+    writeSession('known', 'codex-owned:known', { pid: 4242 });
+    const sibling = join(root, 'unreadable');
+    mkdirSync(sibling);
+    const fifo = join(sibling, 'session.json');
+    execFileSync('mkfifo', ['-m', '600', fifo], { timeout: 2_000 });
+    const identity = lstatSync(fifo);
+    expect(await lookupOwnedActiveRunFresh('codex-owned:known')).toMatchObject({ pid: 4242 });
+    await expect(lookupOwnedActiveRunFresh('codex-owned:unreadable')).rejects.toThrow('unreadable metadata');
+    const after = lstatSync(fifo);
+    expect(after.isFIFO()).toBe(true);
+    expect([after.dev, after.ino, after.size]).toEqual([identity.dev, identity.ino, identity.size]);
+  });
+
+  it('keeps malformed session metadata unknown while allowing a valid sibling lookup', async () => {
+    writeSession('known', 'codex-owned:known', undefined);
+    writeSession('corrupt', 'codex-owned:corrupt', undefined);
+    writeFileSync(join(root, 'corrupt/session.json'), '{');
+    expect(await lookupOwnedActiveRunFresh('codex-owned:known')).toEqual({});
+    await expect(lookupOwnedActiveRunFresh('codex-owned:corrupt')).rejects.toThrow('unreadable metadata');
   });
 
   it('null for a surfaceId that matches no known root marker', async () => {

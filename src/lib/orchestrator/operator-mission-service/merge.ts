@@ -371,6 +371,38 @@ async function dispatchPacketMerge(
     throw new HeadShaMismatchError(packet.id, result.expectedHeadSha, result.currentHeadSha);
   }
 
+  // Persist canonical release evidence before lane reconciliation projects the
+  // retired workspace as archived. Evidence-backed release then survives sync.
+  const [
+    { readOrchestratorControlPlaneState, syncOrchestratorControlPlaneState, withLockedState },
+    { runDispatchTick },
+  ] = await Promise.all([
+    loadControlPlane(),
+    loadDispatch(),
+  ]);
+  if (result.ok) {
+    await withLockedState(async (fresh) => {
+      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
+      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
+      markPacketReleased(packetState, {
+        source: 'approve_and_merge',
+        mergeCommit: result.mergeSha ?? null,
+        headSha: result.reviewedHeadSha ?? result.mergeSha ?? null,
+        evidenceKind: 'merge_command',
+      });
+      packetState.lastEventAt = packetState.releaseStatePayload!.releasedAt!;
+      packetState.lastEventLabel = 'merged';
+      if (packetState.lane) {
+        packetState.lane.lastEventAt = packetState.lastEventAt;
+        packetState.lane.lastEventLabel = 'merged';
+      }
+      const { persistReleasedPacketToMission } = await import('@/lib/orchestrator/mission-registry');
+      if (!(await persistReleasedPacketToMission(packetState, lane.id, releaseGeneration))) {
+        throw new Error('Durable packet ownership changed before merge release could be persisted.');
+      }
+    });
+  }
+
   // #622 — Synchronous worktree cleanup guarantee.
   if (result.ok) {
     // #1110 follow-up — stamp mergedClean on the session_outcomes row so the
@@ -433,30 +465,6 @@ async function dispatchPacketMerge(
     }
   }
 
-  // Persist canonical release evidence before lane reconciliation projects the
-  // retired workspace as archived. Evidence-backed release then survives sync.
-  const [
-    { readOrchestratorControlPlaneState, syncOrchestratorControlPlaneState, withLockedState },
-    { runDispatchTick },
-  ] = await Promise.all([
-    loadControlPlane(),
-    loadDispatch(),
-  ]);
-  if (result.ok) {
-    await withLockedState((fresh) => {
-      const packetState = fresh.packets.find((candidate) => candidate.id === input.packetId);
-      if (!packetState || !packetReleaseIdentityIsCurrent(packetState, lane.id, releaseGeneration)) return;
-      markPacketReleased(packetState, {
-        source: 'approve_and_merge',
-        mergeCommit: result.mergeSha ?? null,
-        headSha: result.reviewedHeadSha ?? result.mergeSha ?? null,
-        evidenceKind: 'merge_command',
-      });
-      if (packetState.lane) {
-        packetState.lane.lastEventLabel = 'merged';
-      }
-    });
-  }
   const synced = await syncOrchestratorControlPlaneState();
 
   const releasedAfterDispatch = await alreadyReleasedResultForPacketId(input.packetId, synced.packets);
@@ -562,7 +570,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     };
   }
 
-  const { findLatestLaneByPacket } = await loadLaneRegistry();
+  const [{ findLatestLaneByPacket }, { isPacketMergeHeld }] = await Promise.all([loadLaneRegistry(), import('@/lib/lane/merge-hold')]);
   const lane = findLatestLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
@@ -573,8 +581,8 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     // pending card (full audit trail) and fall through to the merge instead
     // of bouncing the human to the inbox for a second click (Q ruling
     // 2026-07-18). Gate violations stay a hard stop even for the operator:
-    // that card carries findings a human must actually read.
-    if (input.actor === 'user' && latestMergeApproval.policyRuleId === 'merge-gate-violation') {
+    // that card carries findings a human must read. #3740: the lead shares the operator token, so a held packet merges only from the inbox.
+    if (input.actor === 'user' && !isPacketMergeHeld(packet.id) && latestMergeApproval.policyRuleId === 'merge-gate-violation') {
       const { buildPreviewForLane } = await loadPreviewMerge();
       const preview = await buildPreviewForLane(lane, packet.id, {
         orchestratorApproved: packet.review?.approved === true,
@@ -589,7 +597,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
           approvalId: latestMergeApproval.id,
         }, packet.review?.approved === true);
       }
-    } else if (input.actor === 'user') {
+    } else if (input.actor === 'user' && !isPacketMergeHeld(packet.id)) {
       const { resolveApproval } = await import('@/lib/approvals/resolution');
       resolveApproval(latestMergeApproval.id, 'approve', 'desktop', 'Operator merged directly from the review surface.');
     } else {
@@ -609,7 +617,7 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     if (releasedAfterSync) return releasedAfterSync;
   }
 
-  const mergeActor = latestMergeApproval?.status === 'approved' ? 'user' : 'orchestrator';
+  const mergeActor = latestMergeApproval?.status === 'approved' && !isPacketMergeHeld(packet.id) ? 'user' : 'orchestrator';
   return dispatchPacketMerge(packet, input, mergeActor);
 }
 

@@ -55,6 +55,19 @@ function reserveInput(
 }
 
 describe('storage admission', () => {
+  it.each([20, 466, 2048])('admits a small reservation with 15 GiB free on a %i GiB volume', async (totalGiB) => {
+    const gib = 1024 ** 3;
+    const sqlite = openDatabase(':memory:');
+    try {
+      const store = new StorageAdmissionStore(sqlite, {
+        now: () => 1_000,
+        observeVolume: async () => ({ ...observed(1_000, 15 * gib), totalBytes: totalGiB * gib }),
+      });
+      const receipt = await store.reserve(reserveInput(1, { exactBytes: 64 * 1024 ** 2, policy: undefined }));
+      expect(receipt).toMatchObject({ decision: 'reserved', requiredReserveBytes: 2 * gib, headroomBytes: 13 * gib });
+    } finally { sqlite.close(); }
+  });
+
   it('persists an idempotent body-bound reservation through a real SQLite reopen', async () => {
     const dir = mkdtempSync(join(os.tmpdir(), 'o8-admission-reopen-'));
     const file = join(dir, 'admission.db');

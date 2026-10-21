@@ -1,5 +1,6 @@
 'use client';
 
+import { FloatingSurface } from '../FloatingSurface';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from '../lucide-shims';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -21,10 +22,6 @@ const POPOVER_SURFACE: CSSProperties = {
   position: 'absolute',
   top: 34,
   right: 0,
-  borderRadius: 10,
-  background: 'var(--t-popover-surface)',
-  border: '1px solid var(--t-divider)',
-  boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
   zIndex: 60,
 };
 
@@ -293,14 +290,14 @@ export function ReviewGitActions({
       </button>
 
       {menuOpen ? (
-        <div role="menu" style={{ ...POPOVER_SURFACE, minWidth: 152, paddingTop: 4, paddingBottom: 4, paddingLeft: 4, paddingRight: 4 }}>
+        <FloatingSurface role="menu" aria-label="Git actions" style={{ ...POPOVER_SURFACE, minWidth: 152 }} contentStyle={{ padding: 4 }}>
           <GitMenuRow icon={<IconCommit size={13} />} label="Commit" onClick={() => { setMenuOpen(false); setCommitOpen(true); setCommitError(null); }} />
           <GitMenuRow icon={<IconPush size={13} />} label={busy ? 'Pushing…' : 'Push'} onClick={() => { void runPush(); }} />
-        </div>
+        </FloatingSurface>
       ) : null}
 
       {commitOpen ? (
-        <div style={{ ...POPOVER_SURFACE, width: 300, paddingTop: 10, paddingBottom: 10, paddingLeft: 10, paddingRight: 10 }}>
+        <FloatingSurface role="dialog" aria-label="Commit changes" style={{ ...POPOVER_SURFACE, width: 300 }} contentStyle={{ padding: 10 }}>
           <textarea
             value={commitMsg}
             onChange={(event) => { setCommitMsg(event.target.value); setCommitError(null); }}
@@ -339,7 +336,7 @@ export function ReviewGitActions({
             <ComposerButton label="Cancel" onClick={() => { setCommitOpen(false); setCommitError(null); }} />
             <ComposerButton label={busy ? 'Committing…' : 'Commit'} primary disabled={!commitMsg.trim() || busy} onClick={() => { void runCommit(); }} />
           </div>
-        </div>
+        </FloatingSurface>
       ) : null}
 
       {toast ? (

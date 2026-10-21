@@ -10,7 +10,8 @@ const tmux = spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout?.trim();
 const tsxImport = import.meta.resolve('tsx');
 const cli = new URL('../cli/src/index.ts', import.meta.url).pathname;
 const routingKeys = ['O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
-  'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'NODE_OPTIONS'];
+  'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR', 'NODE_OPTIONS',
+  '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE'];
 const servers: Server[] = [], roots: string[] = [], sockets: string[] = [], children: ChildProcess[] = [];
 function quote(value: string) { return `'${value.replaceAll("'", "'\\''")}'`; }
 
@@ -84,14 +85,17 @@ const __filename = __o8_fileURLToPath(import.meta.url); const __dirname = __o8_d
     execFileSync(tmux, ['-S', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'fixture-keepalive', 'sleep 90']);
     for (const [key, value] of Object.entries({ O8_API_PORT: '1', O8_WS_PORT: '1', WS_PORT: '1',
       O8_API_TOKEN: 'stale-fixture-token', O8_WORKER_TOKEN: 'stale-worker', O8_WORKER_PACKET_ID: 'stale-packet',
-      O8_SPECTATOR_TOKEN: 'stale-spectator', O8_DATA_DIR: staleData, CORTEX_IDE_DATA_DIR: staleData })) {
+      O8_SPECTATOR_TOKEN: 'stale-spectator', O8_DATA_DIR: staleData, CORTEX_IDE_DATA_DIR: staleData,
+      __NEXT_PRIVATE_STANDALONE_CONFIG: JSON.stringify({ outputFileTracingRoot: join(root, 'deleted-checkout') }),
+      O8_PACKAGED_APP: '1', NEXT_PHASE: 'phase-production-server' })) {
       execFileSync(tmux, ['-S', socket, 'set-environment', '-g', key, value]);
     }
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
     for (const key of routingKeys) delete env[key];
     env.CORTEX_IDE_DATA_DIR = data;
     if (mode === 'explicit-worker') Object.assign(env, { O8_API_PORT: String(explicit.port),
-      O8_WORKER_TOKEN: 'worker-fixture-token', O8_WORKER_PACKET_ID: 'caller-packet', O8_WS_PORT: '49999' });
+      O8_WORKER_TOKEN: 'worker-fixture-token', O8_WORKER_PACKET_ID: 'caller-packet', O8_WS_PORT: '49999',
+      __NEXT_PRIVATE_STANDALONE_CONFIG: '{"output":"standalone"}', O8_PACKAGED_APP: 'caller', NEXT_PHASE: 'caller-phase' });
     const parent = await run(bundle, ['version'], root, env);
     expect(parent.code, parent.output).toBe(0);
     expect(parent.output).toContain('"serverReachable": true');
@@ -108,6 +112,9 @@ assert.equal(config.source.token, ${JSON.stringify(mode === 'explicit-worker' ? 
 assert.equal(process.env.O8_SPECTATOR_TOKEN, undefined);
 assert.equal(process.env.O8_DATA_DIR, undefined);
 assert.equal(process.env.CORTEX_IDE_DATA_DIR, ${JSON.stringify(data)});
+assert.equal(process.env.__NEXT_PRIVATE_STANDALONE_CONFIG, ${mode === 'explicit-worker' ? JSON.stringify('{"output":"standalone"}') : 'undefined'});
+assert.equal(process.env.O8_PACKAGED_APP, ${mode === 'explicit-worker' ? "'caller'" : 'undefined'});
+assert.equal(process.env.NEXT_PHASE, ${mode === 'explicit-worker' ? "'caller-phase'" : 'undefined'});
 await runVersion({ human: false, verbose: false });
 `);
     const child = await run(bundle, ['run', '--', process.execPath, '--import', tsxImport, probe], root, env);

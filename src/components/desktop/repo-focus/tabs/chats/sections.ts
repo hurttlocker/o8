@@ -1,5 +1,5 @@
 import { normalizeRepoPath } from '../../utils';
-import { CONVERSATIONS_GROUP_KEY, historyRepoGroupLabel } from './helpers';
+import { CONVERSATIONS_GROUP_KEY, historyBelongsToRepo, historyRepoGroupLabel, type HistoryRepoIdentity } from './helpers';
 import type { RepoFocusRepo } from '../../types';
 import type { ArchivedLaneRow, ChatHistoryItem, RepoHistoryGroup } from './types';
 
@@ -16,6 +16,7 @@ export type AttentionBand =
   | 'human'
   | 'review'
   | 'merged'
+  | 'finished'
   | 'in-flight'
   | 'settled'
   | 'neutral';
@@ -33,6 +34,7 @@ const ATTENTION_RANK: Record<AttentionBand, number> = {
   human: 3,
   review: 2,
   merged: 1,
+  finished: 1,
   'in-flight': 0,
   settled: 0,
   neutral: 0,
@@ -67,6 +69,9 @@ export function attentionBand(subject: AttentionSubject): AttentionBand {
   if (REVIEW_STATUSES.has(status) || outcome === 'pr_opened') return 'review';
   if ((outcome === 'merged' || status === 'merged' || status === 'released') && subject.unread) {
     return 'merged';
+  }
+  if (subject.unread && (status === 'completed' || outcome === 'no_changes' || outcome === 'discarded')) {
+    return 'finished';
   }
   if (IN_FLIGHT_STATUSES.has(status)) return 'in-flight';
   if (outcome || TERMINAL_STATUSES.has(status)) return 'settled';
@@ -109,11 +114,10 @@ export function isCompletionUnread(
   completionAt: string | number | null | undefined,
   lastVisited: number | null,
 ): boolean {
-  if (lastVisited == null) return false;
   const completedAt = typeof completionAt === 'number'
     ? completionAt
     : Date.parse(completionAt ?? '');
-  return Number.isFinite(completedAt) && completedAt > lastVisited;
+  return Number.isFinite(completedAt) && completedAt > (lastVisited ?? 0);
 }
 
 export function deriveSweptThreads(
@@ -162,7 +166,12 @@ export function deriveShowRepoSuffix(
   return repos.size > 1;
 }
 
-export function repoSuffix(item: { repoName?: string | null; repoPath?: string | null }): string | null {
+export function repoSuffix(item: HistoryRepoIdentity, repos: RepoFocusRepo[] = []): string | null {
+  const registered = repos.filter(repo => historyBelongsToRepo(item, repo))
+    .sort((a, b) => a.localPath.length - b.localPath.length)[0];
+  if (registered) return registered.name;
+  const path = item.repoPath?.trim().replace(/[\\/]\.(?:cortex-)?worktrees[\\/].*$/, '');
+  if (path && path !== item.repoPath?.trim()) return path.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
   const name = item.repoName?.trim();
   if (name) return name;
   return item.repoPath
@@ -196,11 +205,11 @@ export function deriveHistoryRepoGroups(
   });
 }
 
-export function deriveHistoryDateGroups(
-  items: ChatHistoryItem[],
+export function deriveHistoryDateGroups<T extends { modifiedAt: string }>(
+  items: T[],
   now = new Date(),
-): RepoHistoryGroup[] {
-  const buckets = new Map<string, RepoHistoryGroup>([
+): Array<{ key: string; label: string; items: T[] }> {
+  const buckets = new Map<string, { key: string; label: string; items: T[] }>([
     ['today', { key: 'today', label: 'Today', items: [] }],
     ['yesterday', { key: 'yesterday', label: 'Yesterday', items: [] }],
     ['prev-7', { key: 'prev-7', label: 'Previous 7 days', items: [] }],

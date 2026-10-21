@@ -372,6 +372,8 @@ describe('worktree-side merge with real git repos', () => {
   it('fast-forwards the operator checkout from the worker worktree without checkout/stash detours', async () => {
     const { repo } = makeRepo('o8-merge-ff');
     const worktree = await makeWorktree(repo, 'pkt-ff', 'inline/ff');
+    const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+    const sessionKey = await bindOwnedPacketSession(repo, worktree, { packetId: 'pkt-ff', branch: 'inline/ff' });
     writeFileSync(join(worktree.path, 'file.txt'), 'base\nworker\n');
     commitAll(worktree.path, 'worker change');
 
@@ -382,6 +384,7 @@ describe('worktree-side merge with real git repos', () => {
       baseBranch: 'main',
       runtime: 'codex',
       packetId: 'pkt-ff',
+      sessionKey,
     });
 
     const { result, approvals } = await mergeLane(lane);
@@ -391,7 +394,7 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(repo, ['status', '--porcelain', '--untracked-files=no'])).toBe('');
     expect(git(repo, ['stash', 'list'])).toBe('');
     expect(git(repo, ['show', 'HEAD:file.txt'])).toContain('worker');
-    expect(getLane(lane.id)?.status).toBe('completed');
+    expect(getLane(lane.id)?.status).toBe('archived');
     expect(approvals).toEqual([]);
     expect(getSqlite().prepare(`
       SELECT verb FROM resource_lease_events

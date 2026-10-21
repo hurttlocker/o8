@@ -20,6 +20,7 @@ export interface OwnedSessionLifecycleRegistration {
     note: string;
   }>;
   getWorkspaceBinding?(surfaceId: string): Promise<OwnedWorkspaceBindingReceipt | null>;
+  recoverArchivedWorkspace?(surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void): Promise<OwnedWorkspaceBindingReceipt>;
   rebindWorkspace?(surfaceId: string, input: RebindOwnedWorkspaceInput): Promise<RebindOwnedWorkspaceResult>;
 }
 
@@ -50,6 +51,11 @@ export function registerOwnedSessionLifecycle(options: {
     ...(options.store.setDetachedSession ? {
       setDetachedSession: (surfaceId: string, reason: string | null) => (
         options.store.setDetachedSession!(surfaceId, reason)
+      ),
+    } : {}),
+    ...(options.store.recoverArchivedWorkspace ? {
+      recoverArchivedWorkspace: (surfaceId: string, expected: OwnedWorkspaceBindingReceipt, publish: () => void) => (
+        options.store.recoverArchivedWorkspace!(surfaceId, expected, publish)
       ),
     } : {}),
     ...(options.store.getWorkspaceBinding && options.store.rebindWorkspace ? {

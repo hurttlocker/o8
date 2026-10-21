@@ -38,6 +38,7 @@ export function restoreReleaseBuildCache(
   root: string,
   phase: ReleaseBuildCachePhase,
   options?: {
+    runId?: string;
     identity?: ReleaseBuildCacheIdentity;
     cacheRoot?: string;
     env?: NodeJS.ProcessEnv;
@@ -48,6 +49,7 @@ export function captureReleaseBuildCache(
   root: string,
   phase: ReleaseBuildCachePhase,
   options?: {
+    runId?: string;
     identity?: ReleaseBuildCacheIdentity;
     cacheRoot?: string;
     env?: NodeJS.ProcessEnv;
@@ -70,7 +72,7 @@ export function finalizeReleaseBuildCacheReceipt(
     buildDurationMs: number;
   },
   options?: { projectRoot?: string },
-): { receipt: Record<string, unknown>; receiptPath: string };
+): Promise<{ receipt: Record<string, unknown>; receiptPath: string }>;
 export const releaseBuildCacheInternals: {
   PHASE_CONFIG: Record<ReleaseBuildCachePhase, unknown>;
   isReleaseBuildCacheJsonCandidate(name: string): boolean;

@@ -127,7 +127,7 @@ export const FILTER_TABS: { key: O8FeedFilter; label: string; icon: (color: stri
 
 const FEED_ICON_MAP: Record<string, { bg: string; color: string; icon: React.ReactNode }> = {
   commit: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconGitCommit size={11} color={ACTIVITY_COLORS.success} /> },
-  issue: { bg: ACTIVITY_COLORS.mergeBg, color: ACTIVITY_COLORS.merge, icon: <IconAlertCircle size={11} color={ACTIVITY_COLORS.merge} /> },
+  issue: { bg: `var(--o8-activity-issue-bg, ${ACTIVITY_COLORS.mergeBg})`, color: `var(--o8-activity-issue-fg, ${ACTIVITY_COLORS.merge})`, icon: <IconAlertCircle size={11} color={`var(--o8-activity-issue-fg, ${ACTIVITY_COLORS.merge})`} /> },
   pr: { bg: ACTIVITY_COLORS.accentBg, color: ACTIVITY_COLORS.accent, icon: <IconGitPullRequest size={11} color={ACTIVITY_COLORS.accent} /> },
   ci_success: { bg: ACTIVITY_COLORS.successBg, color: ACTIVITY_COLORS.success, icon: <IconCheckCircle size={11} color={ACTIVITY_COLORS.success} /> },
   ci_failure: { bg: ACTIVITY_COLORS.dangerBg, color: ACTIVITY_COLORS.danger, icon: <IconXCircle size={11} color={ACTIVITY_COLORS.danger} /> },
@@ -150,6 +150,7 @@ export interface RepoActivityData {
   prs: ActivityItem[];
   issues: ActivityItem[];
   ciRuns: ActivityItem[];
+  workspaceError?: string;
 }
 
 export const EMPTY_DATA: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -177,29 +178,35 @@ function mapCommitRow(c: CommitRow, repoSlug: string): ActivityItem {
   };
 }
 
-export async function fetchRepoActivity(repoSlug: string, repoPath?: string | null): Promise<RepoActivityData> {
-  const enc = encodeURIComponent(repoSlug);
+export async function fetchRepoActivity(repoSlug: string | null, repoPath?: string | null): Promise<RepoActivityData> {
+  const enc = encodeURIComponent(repoSlug ?? '');
+  const localLabel = repoSlug ?? repoPath ?? 'local';
   const [commitsRes, prsRes, issuesRes, ciRes] = await Promise.all([
-    fetch(`/api/panel/commits?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/prs?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/issues?repo=${enc}`).catch(() => null),
-    fetch(`/api/panel/ci?repo=${enc}`).catch(() => null),
+    repoSlug ? fetch(`/api/panel/commits?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/prs?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/issues?repo=${enc}`).catch(() => null) : null,
+    repoSlug ? fetch(`/api/panel/ci?repo=${enc}`).catch(() => null) : null,
   ]);
 
   let commits: ActivityItem[] = [];
+  let workspaceError: string | undefined;
   if (commitsRes?.ok) {
     const data = await commitsRes.json();
-    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, repoSlug));
+    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel));
   }
-  // #1341 — graceful degradation. A locally-added repo has no GitHub mirror
-  // rows, so the GitHub-keyed fetch above returns nothing. The repo is on
-  // disk, so read recent history straight from local git instead (bounded to
-  // the last 50 commits) via the commits route's `?workspace=` branch.
-  if (commits.length === 0 && repoPath) {
+  // Validate the selected on-disk folder even when remote history exists.
+  // A confirmed local read can also supply history without a GitHub remote.
+  if (repoPath) {
     const localRes = await fetch(`/api/panel/commits?workspace=${encodeURIComponent(repoPath)}&limit=50`).catch(() => null);
-    if (localRes?.ok) {
-      const data = await localRes.json();
-      commits = ((data.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, repoSlug));
+    try {
+      const data = localRes ? await localRes.json() : null;
+      if (localRes?.ok && !data?.error) {
+        if (commits.length === 0) commits = ((data?.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, localLabel));
+      } else {
+        workspaceError = typeof data?.error === 'string' ? data.error : 'Could not load local commit activity. Retry to check this folder again.';
+      }
+    } catch {
+      workspaceError = 'Could not load local commit activity. Retry to check this folder again.';
     }
   }
 
@@ -227,7 +234,7 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         },
         age: pr.createdAt ? relativeAge(pr.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
       });
     }
   }
@@ -245,7 +252,7 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         labels: issue.labels ?? [],
         age: issue.createdAt ? relativeAge(issue.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
         author: issue.author?.login ?? 'unknown',
         assignees: (issue.assignees ?? []).map((a: { login?: string | null }) => a.login ?? '').filter(Boolean),
         comments: typeof issue.comments === 'number' ? issue.comments : 0,
@@ -270,12 +277,12 @@ export async function fetchRepoActivity(repoSlug: string, repoPath?: string | nu
         workflow: run.workflowName ?? '',
         age: run.createdAt ? relativeAge(run.createdAt) : '',
         ts,
-        repo: repoSlug,
+        repo: localLabel,
       });
     }
   }
 
-  return { commits, prs, issues, ciRuns };
+  return { commits, prs, issues, ciRuns, ...(workspaceError ? { workspaceError } : {}) };
 }
 
 // ── Render helpers ──
@@ -389,8 +396,8 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
               paddingBottom: 0,
               paddingLeft: 4,
               borderRadius: 4,
-              background: `#${label.color}18`,
-              color: `#${label.color}`,
+              background: `var(--o8-activity-label-bg, #${label.color}18)`,
+              color: `var(--o8-activity-label-fg, #${label.color})`,
               fontSize: 9.5,
               fontWeight: 300,
               letterSpacing: '-0.1px',
@@ -490,8 +497,8 @@ const DETAIL_ROW_STYLE: React.CSSProperties = {
   fontFamily: 'var(--font-sans-system)',
 };
 
-function DetailPill({ label, color }: { label: string; color: string }) {
-  const background = color.startsWith('#') ? `${color}14` : 'var(--t-bg-card)';
+function DetailPill({ label, color, background: fill }: { label: string; color: string; background?: string }) {
+  const background = fill ?? (color.startsWith('#') ? `${color}14` : 'var(--t-bg-card)');
   return (
     <span style={{
       paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
@@ -638,7 +645,7 @@ export function renderExpandedDetail(
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <DetailPill label={item.state} color={item.state === 'open' ? ACTIVITY_COLORS.success : ACTIVITY_COLORS.merge} />
           {item.labels.slice(0, 4).map((l) => (
-            <DetailPill key={l.name} label={l.name} color={`#${l.color}`} />
+            <DetailPill key={l.name} label={l.name} color={`var(--o8-activity-label-fg, #${l.color})`} background={`var(--o8-activity-label-bg, #${l.color}14)`} />
           ))}
         </div>
         {item.body ? (

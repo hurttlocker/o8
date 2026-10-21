@@ -60,6 +60,7 @@ vi.mock('@/lib/analytics/server', () => ({
   emitProductEvent: vi.fn(async () => undefined),
 }));
 
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [], 'gpt-5.6-sol': [] } }) }));
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),
 }));
@@ -108,7 +109,7 @@ writeFileSync(fakeWorkerPath, [
 chmodSync(fakeWorkerPath, 0o755);
 
 const { dispatch } = await import('@/lib/lane/commands');
-const { getLane } = await import('@/lib/lane/registry');
+const { getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { POST: delegatePost } = await import('@/app/api/orchestrator/delegate/route');
 const {
   approveAndMergePacket,
@@ -196,6 +197,8 @@ describe('#2308 delegated dispatch merges into the repository it was dispatched 
   it('dispatches three workers through the delegate route and lands all three reviewed commits', async () => {
     const { target, ambient } = await makeSharedOriginRepos();
     holdAmbientMission(ambient.repoPath);
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ workerRuntimes: ['codex', 'qoder'] });
     const delegatedPackets: Array<{ laneId: string; packetId: string }> = [];
 
     // Launch every packet before merging any result. All three workers start
@@ -215,7 +218,7 @@ describe('#2308 delegated dispatch merges into the repository it was dispatched 
       const delegated = await response.json() as {
         ok: boolean; laneId: string; packetId: string; error?: string;
       };
-      expect(response.status).toBe(200);
+      expect(response.status, JSON.stringify(delegated)).toBe(200);
       expect({ ok: delegated.ok, error: delegated.error }).toMatchObject({ ok: true });
       delegatedPackets.push(delegated);
     }
@@ -261,7 +264,7 @@ describe('#2308 delegated dispatch merges into the repository it was dispatched 
         .toBe(git(target.repoPath, ['rev-parse', 'origin/main']));
 
       const snapshots = listWorkspaceSnapshotsByOriginalPath(workspacePath);
-      expect(snapshots).toHaveLength(1);
+      expect(snapshots, JSON.stringify(getLaneEvents(laneId, 10))).toHaveLength(1);
       expect(snapshots[0]).toMatchObject({ state: 'retired', headCommit: reviewedHeadSha });
       expect(listWorkspaceSnapshotTransitions(snapshots[0]!.repositoryUuid, snapshots[0]!.packetId)[0]?.receipt)
         .toMatchObject({ reviewedHeadSha, mergeCandidateSha: mergeSha });

@@ -1,6 +1,6 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+import { SourceEditor } from './SourceEditor';
 import {
   useCallback,
   useEffect,
@@ -34,30 +34,13 @@ import {
 import type { OpenRichDocumentResult } from '@/lib/markdown/editor/document';
 import { serializeDocument } from '@/lib/markdown/transport';
 import { richMarkdownNodeViews } from './rich-node-views';
+import { richImageNodeView } from './rich-image-node-view';
 import { RichMarkdownFind, richMarkdownFindPlugin } from './rich-markdown-find';
 import {
   RichMarkdownSlashMenu,
   richMarkdownSlashMenuPlugin,
 } from './rich-markdown-slash-menu';
 import { useRichMarkdownImageInput } from './use-rich-markdown-image-input';
-
-const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
-  import('@monaco-editor/react').then((mod) => mod.default)
-), {
-  ssr: false,
-  loading: () => (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      fontSize: 13,
-      color: 'var(--t-text-muted)',
-    }}>
-      Loading editor…
-    </div>
-  ),
-});
 
 export type MarkdownEditorMode = 'rich' | 'source';
 
@@ -401,10 +384,12 @@ function editorPlugins(openLinkPopover: (view: EditorView) => boolean) {
 }
 
 function RichMarkdownEditor({
+  filePath,
   openDocument,
   onSourceChange,
   repoPath,
 }: {
+  filePath: string;
   openDocument: OpenRichDocumentResult;
   onSourceChange: (source: string) => void;
   repoPath: string | null;
@@ -491,7 +476,7 @@ function RichMarkdownEditor({
         onSourceChangeRef.current(serializeDocument(transport));
         view.sourceChangeCount += 1;
       },
-      nodeViews: richMarkdownNodeViews,
+      nodeViews: { ...richMarkdownNodeViews, image: richImageNodeView(filePath, repoPath) },
       handlePaste: imageInput.handlePaste,
       handleDrop: imageInput.handleDrop,
       handleDOMEvents: {
@@ -511,6 +496,8 @@ function RichMarkdownEditor({
       view.destroy();
     };
   }, [
+    filePath,
+    repoPath,
     imageInput.handleDragOver,
     imageInput.handleDrop,
     imageInput.handlePaste,
@@ -659,6 +646,7 @@ function RichMarkdownEditor({
 }
 
 export function MarkdownEditorMount({
+  filePath,
   controller,
   language,
   value,
@@ -668,6 +656,7 @@ export function MarkdownEditorMount({
   beforeMonacoMount,
   repoPath,
 }: {
+  filePath: string;
   controller: RichMarkdownEditorController;
   language: string;
   value: string;
@@ -688,6 +677,7 @@ export function MarkdownEditorMount({
           }}
         >
           <RichMarkdownEditor
+            filePath={filePath}
             openDocument={controller.document}
             onSourceChange={onSourceChange}
             repoPath={repoPath ?? null}
@@ -719,7 +709,9 @@ export function MarkdownEditorMount({
             </div>
           ) : null}
           <div style={{ flex: 1, minHeight: 0 }}>
-            <MonacoEditor
+            <SourceEditor
+              key={filePath}
+              sourceLabel={filePath}
               height="100%"
               language={language}
               value={value}

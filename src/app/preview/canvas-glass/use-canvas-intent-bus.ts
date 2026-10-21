@@ -263,14 +263,14 @@ export function useCanvasIntentBus({
             // Gateless worktree spawn — "spawn two agents on the auth refactor".
             // The created lanes bloom as numbered cards via the lane watcher.
             const task = typeof args.task === 'string' ? args.task : (typeof args.text === 'string' ? args.text : '');
-            const count = typeof args.count === 'number' ? args.count : 1;
+            const count = args.count;
             const repo = typeof args.repo === 'string' ? args.repo : null;
             const failure = spawnAgents(task, count, repo, origin);
             if (failure) {
               ok = false;
               note = failure;
             } else {
-              const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
+              const n = count === undefined ? 1 : count;
               note = `spawning ${n} agent${n === 1 ? '' : 's'}`;
             }
             break;

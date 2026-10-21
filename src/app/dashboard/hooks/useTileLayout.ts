@@ -330,6 +330,15 @@ export function useTileLayout({
   const handleCloseTile = useCallback((tileId: string) => {
     // Never close the WorkspaceTerminal tile
     const tile = findTile(tileLayout.root, tileId);
+    if (tile?.type === 'leaf' && tile.content.kind === 'contextual-panel') {
+      if (countLeaves(tileLayout.root) < 2) return;
+      setTileLayout({ ...tileLayout, root: replaceTileContent(tileLayout.root, tileId, { ...tile.content, hidden: true }) });
+      if (activeTileId === tileId) {
+        const next = collectLeafNodes(tileLayout.root).find((leaf) => leaf.id !== tileId && (leaf.content.kind !== 'contextual-panel' || !leaf.content.hidden));
+        if (next) setActiveTileId(next.id);
+      }
+      return;
+    }
     // Protect the LAST terminal tile — but allow closing extras
     if (tile?.type === 'leaf' && tile.content.kind === 'terminal') {
       const allTerminals = collectLeafContentKinds(tileLayout.root).filter(k => k === 'terminal');
@@ -371,15 +380,13 @@ export function useTileLayout({
     });
   }, [setTileLayout, tileLayout]);
 
-  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'chat' | 'terminal' | 'remote', placeBefore = false, exactPlacement = false): string | null => {
+  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical', initialTab?: 'orchestrator' | 'chat' | 'terminal' | 'remote', placeBefore = false, exactPlacement = false): string | null => {
     const ratio = direction === 'vertical' ? 0.55 : 0.62;
     // Split creates the same type: workspace splits → new terminal (chat), contextual splits → new contextual (shell)
     const sourceTile = findTile(tileLayout.root, tileId);
     const sourceKind = sourceTile?.type === 'leaf' ? sourceTile.content.kind : 'workspace';
-    const newKind = sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
-    const nextContent = sourceTile?.type === 'leaf'
-      && sourceTile.content.kind === 'terminal'
-      && newKind === 'terminal'
+    const newKind = !initialTab && sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
+    const nextContent = newKind === 'terminal'
       ? {
           kind: 'terminal' as const,
           repoPath: null,
@@ -427,6 +434,9 @@ export function useTileLayout({
   ) => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, kind);
     if (existingLeaf) {
+      if (existingLeaf.content.kind === 'contextual-panel' && existingLeaf.content.hidden) {
+        setTileLayout({ ...tileLayout, root: replaceTileContent(tileLayout.root, existingLeaf.id, { ...existingLeaf.content, hidden: false }) });
+      }
       if (kind === 'preview' && options?.selectedPreviewId && existingLeaf.content.kind === 'preview') {
         setTileLayout({
           ...tileLayout,
@@ -501,6 +511,10 @@ export function useTileLayout({
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
+      if (existingLeaf.content.kind === 'contextual-panel' && existingLeaf.content.hidden) {
+        ensureTileKind('contextual-panel');
+        return;
+      }
       if (countLeaves(tileLayout.root) > 1) {
         handleCloseTile(existingLeaf.id);
       }
@@ -519,13 +533,8 @@ export function useTileLayout({
       }
       return [...current, preview];
     });
-    ensureTileKind('preview', {
-      direction: 'vertical',
-      preferredKinds: ['terminal', 'contextual-panel'],
-      ratio: 0.56,
-      selectedPreviewId: preview.id,
-    });
-  }, [ensureTileKind]);
+    // Discovery feeds the Browser launcher; terminal output must not open another viewer.
+  }, []);
 
   const handleSelectPreviewTile = useCallback((tileId: string, previewId: string) => {
     const currentTile = findTile(tileLayout.root, tileId);
@@ -590,10 +599,8 @@ export function useTileLayout({
 
     const workspacePath = tab.meta?.workspace ?? (tab.kind === 'readme' || tab.kind === 'git-log' ? tab.resourceId : null);
     if (workspacePath) {
-      const matchedRepo = globalRepoEntries.find((repo) => (
-        workspacePath === repo.localPath
-        || workspacePath.startsWith(`${repo.localPath}/`)
-      ));
+      const matchedRepo = globalRepoEntries.find((repo) => workspacePath === repo.localPath)
+        ?? globalRepoEntries.find((repo) => workspacePath.startsWith(`${repo.localPath}/`));
       if (matchedRepo) {
         return matchedRepo.localPath;
       }
@@ -602,6 +609,7 @@ export function useTileLayout({
     switch (tab.kind) {
       case 'issue':
       case 'pr':
+      case 'pull-requests':
       case 'file':
       case 'diff':
       case 'commit':

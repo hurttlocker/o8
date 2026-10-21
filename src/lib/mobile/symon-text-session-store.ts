@@ -17,8 +17,13 @@ export interface SymonTextTranscriptEntry {
 
 export interface SymonTextSessionRecord extends SymonClientSubject {
   sessionId: string;
+  reattachable?: boolean;
+  pendingTurnIds?: string[];
+  completedTurns?: Array<{ turnId: string; status: string; text: string }>;
   model: string;
   effort: string;
+  /** Only a newly selected automatic default may retry a pre-execution rejection. */
+  allowDefaultFallback?: boolean;
   engine: string;
   workspaceMode: SymonWorkspaceMode;
   repoId: string | null;
@@ -136,6 +141,43 @@ export function appendSymonTextTranscript(
   return records[index];
 }
 
+/** Bind the native result and consume eligibility before another turn can use this session.
+ * Older records and explicit pins cannot be rewritten by a compatibility result. */
+export function bindSymonTextEffectiveModel(
+  sessionId: string,
+  model: unknown,
+  effort: unknown,
+  now: number = Date.now(),
+): SymonTextSessionRecord | null {
+  const records = active(loadAll(), now);
+  const index = records.findIndex((record) => record.sessionId === sessionId);
+  if (index < 0) return null;
+  const record = records[index];
+  const fallback = record.allowDefaultFallback === true && record.engine === 'codex'
+    && record.model === 'gpt-6.1-sol' && model === 'gpt-5.6-sol' && effort === record.effort;
+  records[index] = {
+    ...record,
+    model: fallback ? model : record.model,
+    allowDefaultFallback: false,
+    lastActivityAt: now,
+  };
+  persist(records);
+  return records[index];
+}
+
+/** Authenticated attachment heartbeat and durable uncertainty marker; no task replay. */
+export function touchSymonTextAttachment(sessionId: string, turnId?: string, terminal = false, now = Date.now(), result?: { status: string; text: string }): SymonTextSessionRecord | null {
+  const records = active(loadAll(), now);
+  const index = records.findIndex(record => record.sessionId === sessionId);
+  if (index < 0) return null;
+  const record = records[index];
+  const pending = new Set(record.pendingTurnIds ?? []);
+  if (turnId) { if (terminal) pending.delete(turnId); else pending.add(turnId); }
+  const completed = result && turnId ? [...(record.completedTurns ?? []).filter(turn => turn.turnId !== turnId), { turnId, status: result.status, text: result.text.slice(-4000) }].slice(-24) : record.completedTurns;
+  records[index] = { ...record, pendingTurnIds: [...pending], completedTurns: completed, lastActivityAt: now };
+  persist(records); return records[index];
+}
+
 export function dropSymonTextSession(sessionId: string): boolean {
   const records = loadAll();
   const next = records.filter((record) => record.sessionId !== sessionId);
@@ -151,6 +193,7 @@ export function formatSymonTextPlannerPrompt(record: SymonTextSessionRecord, nex
     : 'This text session uses the general o8 workspace scope.';
   return [
     scope,
+    `Your bound planner is ${record.engine}, model ${record.model}, effort ${record.effort}. Report the effective model accurately if asked.`,
     history.length > 0 ? `Conversation so far:\n${history.join('\n')}` : '',
     `User: ${nextText}`,
     'Reply to the newest user message. Preserve context from the transcript above.',

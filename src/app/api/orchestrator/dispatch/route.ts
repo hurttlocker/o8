@@ -9,6 +9,7 @@ import {
 } from '@/lib/orchestrator/operator-mission-service';
 import { DispatchPreflightError } from '@/lib/runtimes/shared/auth-detect';
 import { EffortPinRejectionError } from '@/lib/orchestrator/effort-pin';
+import { DispatchRegistryConflictError } from '@/lib/orchestrator/operator-mission-service/dispatch-registry-publication';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { formatDispatchableRuntimeChoices, isDispatchableRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import {
@@ -144,6 +145,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
       if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);
+      if (error instanceof DispatchRegistryConflictError) return operatorError('dispatch_registry_conflict', error.message, 409);
       const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
       return operatorError('dispatch_failed', message, 500, error);
     }
@@ -168,6 +170,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof RepoDispatchAdmissionError) return repoAdmissionErrorResponse(error);
     if (error instanceof EffortPinRejectionError) return operatorError(error.code, error.message, 400);
+    if (error instanceof DispatchRegistryConflictError) return operatorError('dispatch_registry_conflict', error.message, 409);
     if (error instanceof DispatchPreflightError) {
       return operatorError(error.code, `${error.status.detail} ${error.status.fix}`, 400, {
         runtime: error.status.runtime,

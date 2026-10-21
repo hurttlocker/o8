@@ -19,3 +19,15 @@ export class ResetCleanupFailedError extends Error {
     this.name = 'ResetCleanupFailedError';
   }
 }
+
+export class ResetStateChangedError extends Error {}
+
+/** The packet is in no mission and has no lane, so there is nothing to reset. */
+export class ResetPacketNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ResetPacketNotFoundError';
+  }
+}
+
+export class ResetRetrySalvagePublicationError extends Error {}

@@ -1,4 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import type { RemotePreviewRequest, RemotePreviewResponse, RemotePreviewService } from '../../src/lib/cloud/preview-contract';
+import type { RemoteServiceSession } from '../../src/lib/cloud/review-service-contract';
 import type { ThinkingEffort } from '../../src/lib/orchestrator/thinking-effort';
 
 const INITIAL_BACKOFF_MS = 100;
@@ -7,11 +9,19 @@ const MAX_ATTEMPTS = 5;
 const REQUEST_TIMEOUT_MS = 12_000;
 const LONG_POLL_WAIT_MS = REQUEST_TIMEOUT_MS - 2_000;
 const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENOTFOUND', 'UND_ERR_SOCKET']);
+const SERVICE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
 
 function isRetryable(error: unknown) {
   if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return false;
   const code = (error as Error & { cause?: { code?: string } }).cause?.code;
   return error.message === 'fetch failed' || (typeof code === 'string' && RETRYABLE_CODES.has(code));
+}
+
+export function isTransientTransportError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return false;
+  const code = (error as Error & { cause?: { code?: string } }).cause?.code;
+  return typeof code === 'string' && SERVICE_TRANSPORT_CODES.has(code);
 }
 
 async function fetchWithRetry(input: string, init: RequestInit): Promise<Response> {
@@ -47,7 +57,7 @@ export interface CloudWorkerJob {
   leaseToken: string;
   leaseExpiresAt: string;
   claimCount: number;
-  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; };
+  launch: { prompt: string; model?: string; effort?: ThinkingEffort; packetId?: string; workMode?: string; remoteSource?: CloudRemoteSource; remoteManifestHash?: string; remotePreview?: RemotePreviewService; remoteServiceSession?: RemoteServiceSession; };
 }
 
 export interface CloudWorkerControl {
@@ -124,5 +134,21 @@ export class EventStream {
       body: JSON.stringify({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, controlId: control.id, deliveryToken: control.deliveryToken }),
     });
     if (!response.ok) throw responseError('/api/cloud/worker-control', response);
+  }
+
+  async pollPreview(job: CloudWorkerJob, signal: AbortSignal): Promise<RemotePreviewRequest | null> {
+    const params = new URLSearchParams({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, attempt: String(job.claimCount) });
+    const response = await fetchWithRetry(`${this.baseUrl}/api/cloud/worker-preview?${params}`, { headers: this.headers(), signal });
+    if (response.status === 204) return null;
+    if (!response.ok) throw responseError('/api/cloud/worker-preview', response);
+    return (await response.json() as { request: RemotePreviewRequest }).request;
+  }
+
+  async answerPreview(job: CloudWorkerJob, result: RemotePreviewResponse, signal: AbortSignal): Promise<void> {
+    const response = await fetchWithRetry(`${this.baseUrl}/api/cloud/worker-preview`, {
+      method: 'POST', headers: this.headers(true), signal,
+      body: JSON.stringify({ jobId: job.id, workerId: this.workerId, leaseToken: job.leaseToken, attempt: job.claimCount, result }),
+    });
+    if (!response.ok) throw responseError('/api/cloud/worker-preview', response);
   }
 }

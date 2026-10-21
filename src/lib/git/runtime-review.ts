@@ -8,14 +8,19 @@ const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 // o8's own machinery living inside the repo — never part of "your changes".
 const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 
-async function tryGit(repoPath: string, args: string[]) {
+/** Optional trusted runner. Runner errors fail closed; legacy callers keep their projection. */
+export type RuntimeRepoReviewGitRunner = (args: string[]) => Promise<{ stdout: string }>;
+
+async function tryGit(repoPath: string, args: string[], runGit?: RuntimeRepoReviewGitRunner) {
   try {
+    if (runGit) return (await runGit(args)).stdout.trim();
     const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024,
     });
     return stdout.trim();
-  } catch {
+  } catch (error) {
+    if (runGit) throw error;
     return '';
   }
 }
@@ -97,15 +102,15 @@ function summarizeLocalDiff(changedFiles: ReviewChangedFile[], diffStatRaw: stri
   return lines.join('\n');
 }
 
-export async function getRuntimeRepoReview(repoPath: string) {
+export async function getRuntimeRepoReview(repoPath: string, runGit?: RuntimeRepoReviewGitRunner) {
   const [branch, head, nameStatusRaw, numStatRaw, untrackedRaw, diffStatRaw, recentCommitsRaw] = await Promise.all([
-    tryGit(repoPath, ['branch', '--show-current']),
-    tryGit(repoPath, ['rev-parse', '--short', 'HEAD']),
-    tryGit(repoPath, ['diff', '--name-status', '--relative', '-M', 'HEAD']),
-    tryGit(repoPath, ['diff', '--numstat', '--relative', '-M', 'HEAD']),
-    tryGit(repoPath, ['ls-files', '--others', '--exclude-standard']),
-    tryGit(repoPath, ['diff', '--stat=120', '--relative', 'HEAD']),
-    tryGit(repoPath, ['log', '--format=%H%x09%h%x09%s', '-8']),
+    tryGit(repoPath, ['branch', '--show-current'], runGit),
+    tryGit(repoPath, ['rev-parse', '--short', 'HEAD'], runGit),
+    tryGit(repoPath, ['diff', '--name-status', '--relative', '-M', 'HEAD'], runGit),
+    tryGit(repoPath, ['diff', '--numstat', '--relative', '-M', 'HEAD'], runGit),
+    tryGit(repoPath, ['ls-files', '--others', '--exclude-standard'], runGit),
+    tryGit(repoPath, ['diff', '--stat=120', '--relative', 'HEAD'], runGit),
+    tryGit(repoPath, ['log', '--format=%H%x09%h%x09%s', '-8'], runGit),
   ]);
 
   const changedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
 interface CompactionNodeProps {
@@ -37,6 +37,7 @@ export function CompactionNode({
   timestampLabel,
 }: CompactionNodeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const detailsId = useId();
 
   const inferredCount = Number(readMeta(summary, 'turns'));
   const compactedTurns = Number.isFinite(inferredCount) ? inferredCount : compactedCount;
@@ -73,11 +74,13 @@ export function CompactionNode({
         overflow: 'hidden',
       }}>
         <button
+          type="button"
           onClick={() => {
             if (!hasDetails) return;
             setIsExpanded((value) => !value);
           }}
           aria-expanded={hasDetails ? isExpanded : undefined}
+          aria-controls={isExpanded && hasDetails ? detailsId : undefined}
           style={{
             width: '100%',
             display: 'flex',
@@ -137,7 +140,7 @@ export function CompactionNode({
         </button>
 
         {isExpanded && hasDetails ? (
-          <div style={{
+          <div id={detailsId} style={{
             paddingTop: 0,
             paddingBottom: 16,
             paddingLeft: 16,

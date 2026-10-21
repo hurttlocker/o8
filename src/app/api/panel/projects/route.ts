@@ -3,6 +3,7 @@ import {
   createProject,
   reconcileProjectsWithRegistry,
 } from '@/lib/repos/projects';
+import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,12 +15,13 @@ export async function GET() {
     const ledger = await reconcileProjectsWithRegistry();
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to read projects.';
+    console.error('[api] panel/projects failed:', error);
+    const message = 'Failed to read projects.';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE });
   }
 }
 
-export async function POST(request: NextRequest) {
+async function handlePOST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as { name?: string } | null;
   const name = body?.name?.trim();
   if (!name) {
@@ -29,7 +31,10 @@ export async function POST(request: NextRequest) {
     const ledger = await createProject(name);
     return NextResponse.json(ledger, { headers: NO_STORE });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create project.';
+    console.error('[api] panel/projects failed:', error);
+    const message = 'Failed to create project.';
     return NextResponse.json({ error: message }, { status: 400, headers: NO_STORE });
   }
 }
+
+export const POST = withRepoInventoryChange('project-create', handlePOST);

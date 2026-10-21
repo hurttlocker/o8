@@ -168,10 +168,9 @@ export async function GET(request: NextRequest) {
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[operator-status]', message);
+    console.error('[operator-status]', error);
     return NextResponse.json(
-      { error: 'Failed to build operator status', detail: message },
+      { error: 'Failed to build operator status' },
       { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   }

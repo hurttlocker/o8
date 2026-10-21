@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { WorkerPoolSettings } from './WorkerPoolSettings';
 import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
+import { LocalAcpSection } from './LocalAcpSection';
 import { SettingsAdvanced } from './SettingsAdvanced';
 import { SettingsSegmented } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
@@ -61,7 +63,12 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
   updateField: <K extends keyof OperatorDefaults>(field: K, value: OperatorDefaults[K]) => void;
 }) {
   const tools = useRuntimeInventory(!advanced);
+  const piSetup = tools.inventory?.find((item) => item.id === 'pi')?.piSetup;
   // Hermes (ACP backend) only appears in the backend picker when its binary is present.
+  const [acpAvailable, setAcpAvailable] = useState(false);
+  const [acpOpen, setAcpOpen] = useState(false);
+  const [connectionVersion, setConnectionVersion] = useState(0);
+  useEffect(() => { const refresh = () => setConnectionVersion(value => value + 1); window.addEventListener('o8:acp-connection-changed', refresh); return () => window.removeEventListener('o8:acp-connection-changed', refresh); }, []);
   const [hermesAvailable, setHermesAvailable] = useState(false);
   const [opencodeAvailable, setOpencodeAvailable] = useState(false);
   useEffect(() => {
@@ -72,11 +79,12 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
       .then((d) => {
         if (!alive) return;
         setHermesAvailable(Boolean(d?.hermes));
+        setAcpAvailable(Boolean(d?.acp));
         setOpencodeAvailable(Boolean(d?.opencode));
       })
       .catch(() => { /* picker just omits Hermes */ });
     return () => { alive = false; };
-  }, [advanced]);
+  }, [advanced, connectionVersion]);
   const [openDispatchPicker, setOpenDispatchPicker] = useState<string | null>(null);
   const { values, sources, cliAuth } = data;
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
@@ -102,6 +110,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
 
   return (<>
     {!advanced && <>
+    <details style={{ marginTop: 20 }} onToggle={event => setAcpOpen(event.currentTarget.open)}><summary style={{ cursor: 'pointer', fontSize: 13 }}>Connect a local ACP agent</summary>{acpOpen ? <LocalAcpSection /> : null}</details>
     <section style={{ marginTop: 28 }}>
       <SettingsGroup header="Orchestrator" footnote="The orchestrator is your lead: talk through ideas, plan work, and coordinate workers here. Claude + Codex uses both providers.">
           <SettingsRow
@@ -117,6 +126,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
                 options={[
                   { value: 'auto', label: 'Use existing setup' },
                   { value: 'o8', label: 'o8' },
+                  ...(acpAvailable || values.orchestratorBackend === 'acp' ? [{ value: 'acp', label: 'Local ACP' }] : []),
                   ...(tools.inventory?.some((item) => item.id === 'codex' && item.available) || values.orchestratorBackend === 'codex' ? [{ value: 'codex', label: 'Codex', detail: cliStatusLabel(cliAuth?.statuses.codex) }] : []),
                   ...(tools.inventory?.some((item) => item.id === 'claude-code' && item.available) || values.orchestratorBackend === 'claude' ? [{ value: 'claude', label: 'Claude', detail: cliStatusLabel(cliAuth?.statuses.claude) }] : []),
                   // OpenClaw hidden from the picker (Q ruling 2026-07-16, not
@@ -156,7 +166,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
       </SettingsGroup>
     </section>
     <section style={{ marginTop: 28 }}>
-      <SettingsGroup header="Workers" footnote="Choose which connected tools may run tasks and which one starts when no worker is specified. Worker effort is available under Connected tools.">
+      <SettingsGroup header="Workers" footnote="Choose the tools your orchestrator may use. Describe the task in chat, or name a worker and model there. The preferred worker is used when no task choice is supplied. Model and effort defaults remain under Connected tools.">
           <SettingsRow
             icon={<RocketIcon />}
             label="Subscription profile"
@@ -182,7 +192,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             accessory={
               <PickerMenu<DispatchRuntime>
                 value={values.defaultDispatchRuntime}
-                options={DEFAULT_WORKER_RUNTIME_OPTIONS.filter((option) => option.value === values.defaultDispatchRuntime || tools.inventory?.some((item) => item.id === option.value && item.available))}
+                options={DEFAULT_WORKER_RUNTIME_OPTIONS.filter((option) => option.value === values.defaultDispatchRuntime || (sources.workerRuntimes !== 'file' || values.workerRuntimes.includes(option.value)) && tools.inventory?.some((item) => item.id === option.value && item.available))}
                 onChange={(next) => { updateField('defaultDispatchRuntime', next); }}
                 disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
                 minWidth={150}
@@ -193,6 +203,11 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
             disabled={Boolean(profileOverrideReason) || envLocked('defaultDispatchRuntime') || busyField === 'defaultDispatchRuntime'}
             divider
           />
+          <WorkerPoolSettings data={data} inventory={tools.inventory} busy={busyField === 'workerRuntimes'} onChange={pool => updateField('workerRuntimes', pool)} />
+          {piSetup?.detected ? <SettingsRow
+            label="Your Pi setup"
+            subtitle={<span style={{ overflowWrap: 'anywhere' }}>{`${piSetup.binaryPath ?? 'CLI not found'}${piSetup.version ? ` (v${piSetup.version})` : ''}. ${piSetup.provider ?? 'Provider not set'} / ${piSetup.model ?? 'Model not set'}. ${piSetup.extensions} extensions, ${piSetup.skills} skills, ${piSetup.sessions} sessions${piSetup.countsTruncated ? ' (scan limit reached)' : ''}. Credentials ${piSetup.credentialsPresent ? 'present' : 'not found'}. Choose Pi in Default worker to use this setup.`}</span>}
+          /> : null}
       </SettingsGroup>
     </section>
     <RuntimeToolsPanel inventory={tools.inventory} loading={tools.loading} error={tools.error} onRefresh={tools.refresh} />

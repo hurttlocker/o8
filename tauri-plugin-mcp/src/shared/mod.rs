@@ -117,6 +117,8 @@ pub struct MouseMovementResult {
 
 /// Command string constants for socket commands
 pub mod commands {
+    pub const INSPECT_DIRECTORY_DIALOG: &str = "inspect_directory_dialog";
+    pub const RESOLVE_DIRECTORY_DIALOG: &str = "resolve_directory_dialog";
     pub const PING: &str = "ping";
     pub const TAKE_SCREENSHOT: &str = "take_screenshot";
     pub const GET_DOM: &str = "get_dom";

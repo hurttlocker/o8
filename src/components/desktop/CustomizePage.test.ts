@@ -5,12 +5,34 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomizePage } from './CustomizePage';
 import { RetainedCustomizeView } from './customize/RetainedCustomizeView';
+import { openCustomizeTab, setCustomizeTab } from './customize/navigation';
 
 describe('CustomizePage skills', () => {
   let host: HTMLDivElement;
   let root: Root;
 
+  it('offers this project repositories inside Plugins without another section roundtrip', async () => {
+    const fetcher = vi.mocked(fetch);
+    const previous = fetcher.getMockImplementation()!;
+    fetcher.mockImplementation((input, init) => String(input) === '/api/customize/actions'
+      ? Promise.resolve(Response.json({ installed: [], damaged: [], receipts: [] })) : previous(input, init));
+    await act(async () => root.render(createElement(CustomizePage, {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8', '/repo/web'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }, { name: 'Web repo', localPath: '/repo/web' }],
+    })));
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Plugins')!.click());
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Choose action repository"]')!.click());
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Web repo'))!.click());
+    expect(host.textContent).toContain('Selected repository: /repo/web');
+    expect(host.querySelector('[aria-label="Search Instructions"]')).toBeNull();
+  });
+
   beforeEach(() => {
+    setCustomizeTab('rules');
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -34,10 +56,85 @@ describe('CustomizePage skills', () => {
       }
       if (url.startsWith('/api/cortex/directives')) return Response.json({ directives: [] });
       if (url === '/api/setup/mcp-servers') return Response.json({ servers: [] });
+      if (url === '/api/customize/actions') return Response.json({ installed: [], damaged: [], receipts: [] });
       if (url.startsWith('/api/projects/context')) return Response.json({ context: { id: 'sample', runtimeProjectId: 'sample', settingsProjectId: 'sample', instructions: 'Shared instructions' }, taskBrief: 'Sample project' });
       if (url.startsWith('/api/prompt-library')) return Response.json({ prompts: [] });
       return Response.json({}, { status: 404 });
     }));
+  });
+
+  it('distinguishes unmatched instructions from empty inventory and restores rows across scopes', async () => {
+    const previous = vi.mocked(fetch).getMockImplementation()!;
+    const personal = { id: 'personal', title: 'Personal guide', scope: 'global', repoName: null, body: 'Personal rules', projects: [], priority: null, file: null };
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname !== '/api/cortex/directives') return previous(input, init);
+      const path = url.searchParams.get('repoPath');
+      return Promise.resolve(Response.json({ directives: [personal, ...(path ? [{ ...personal, id: path, title: 'Repository guide', scope: 'repo', repoName: 'o8' }] : [])] }));
+    });
+    await act(async () => root.render(createElement(CustomizePage, {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
+    })));
+    const search = host.querySelector<HTMLInputElement>('[aria-label="Search Instructions"]')!;
+    const enter = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const tab = () => [...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Instructions'))!;
+    expect(host.textContent).toContain('Repository guide');
+    expect(tab().textContent).toContain('2');
+    enter('ZZqv');
+    expect(host.textContent).toContain('No matching instructions');
+    expect(host.textContent).toContain('ZZqv');
+    expect(host.textContent).not.toContain('No additional rules');
+    expect(tab().textContent).toContain('2');
+    const view = host.querySelector<HTMLSelectElement>('[aria-label="Customization view"]')!;
+    for (const scope of ['/repo/o8', 'personal', 'all']) {
+      await act(async () => { view.value = scope; view.dispatchEvent(new Event('change', { bubbles: true })); });
+      expect(host.textContent).toContain('No matching instructions');
+      expect(tab().textContent).toContain(scope === 'personal' ? '1' : '2');
+      enter('');
+      expect(host.textContent).toContain('Personal guide');
+      expect(host.textContent?.includes('Repository guide')).toBe(scope !== 'personal');
+      enter('ZZqv');
+    }
+    enter('');
+    expect(host.textContent).toContain('Repository guide');
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+  });
+
+  it('keeps empty-inventory guidance when no instructions exist', async () => {
+    await act(async () => root.render(createElement(CustomizePage)));
+    expect(host.textContent).toContain('No additional rules');
+    expect(host.textContent).toContain('Rules appear here with their source and scope.');
+    expect(host.textContent).not.toContain('No matching instructions');
+  });
+
+  it('keeps the dedicated Plugins page separate from customization navigation', async () => {
+    const props = {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/o8'], createdAt: '' },
+      registeredRepos: [{ name: 'o8', localPath: '/repo/o8' }],
+    };
+    const event = vi.fn();
+    window.addEventListener('o8:open-customize', event);
+    try {
+      openCustomizeTab('plugins');
+      expect((event.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'plugins' });
+      await act(async () => root.render(createElement(CustomizePage, { ...props, fixedTab: 'plugins' })));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      expect(host.querySelector('[aria-label="Customization sections"]')).toBeNull();
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+        expect(host.querySelector('[aria-label="Choose action repository"]')).not.toBeNull();
+      });
+      await act(async () => openCustomizeTab('rules'));
+      expect(host.querySelector('h1')?.textContent).toBe('Plugins');
+      await act(async () => root.render(createElement(CustomizePage, props)));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+      await act(async () => openCustomizeTab('plugins'));
+      expect(host.querySelector('[aria-label="Search Instructions"]')).not.toBeNull();
+    } finally { window.removeEventListener('o8:open-customize', event); }
   });
 
   afterEach(() => {

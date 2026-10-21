@@ -34,5 +34,7 @@ describe('Codex backend prompt scope (#2898)', () => {
     expect(single).not.toMatch(/cortex_[a-z_]+|create_mission|## ORCHESTRATOR PROTOCOL/);
     expect(fleet).toContain('cortex_launch_agent');
     expect(fleet).toContain('## ORCHESTRATOR PROTOCOL');
+    expect(fleet).toContain('dispatch_mission({missionId:');
+    expect(fleet).toContain('Do not launch a new worker to dispatch an existing mission');
   });
 });

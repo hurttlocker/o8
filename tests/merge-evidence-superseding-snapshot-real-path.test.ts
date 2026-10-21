@@ -34,12 +34,12 @@ const { createLane } = await import('@/lib/lane/registry');
 const { performWorktreeSideMerge } = await import('@/lib/lane/worktree-side-merge');
 const { createLaneActionApproval } = await import('@/lib/lane/commands-approval');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
+const { addRepo } = await import('@/lib/repos/registry');
 const { getWorkspaceSnapshot, listWorkspaceSnapshotTransitions } = await import('@/lib/worktree/snapshot-state');
 const { captureWorkspaceMaterializationSnapshot } = await import('@/lib/workspace/workspace-materialization-retirement');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 const tempDirs: string[] = [dataDir];
-const registeredRepos: Array<{ id: string; localPath: string }> = [];
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -51,34 +51,7 @@ function commitAll(cwd: string, message: string): string {
   return git(cwd, ['rev-parse', 'HEAD']);
 }
 
-function writeRepoRegistry() {
-  writeFileSync(join(dataDir, 'repos.json'), JSON.stringify({
-    version: 1,
-    repos: registeredRepos.map((repo) => ({
-      id: repo.id,
-      name: repo.id,
-      localPath: repo.localPath,
-      remoteUrl: null,
-      defaultBranch: 'main',
-      isGitRepo: true,
-      addedAt: '2026-09-16T00:00:00.000Z',
-      lastOpenedAt: null,
-      setup: {
-        envMode: 'skip',
-        envFiles: [],
-        installCommand: null,
-        installOnCreateWorkspace: false,
-        buildCommand: null,
-        runBuildOnCreateWorkspace: false,
-        devCommand: null,
-        defaultPort: null,
-        workspaceIsolationPreference: 'auto',
-      },
-    })),
-  }));
-}
-
-function makeRepo(name: string) {
+async function makeRepo(name: string) {
   const root = mkdtempSync(join(os.tmpdir(), `${name}-root-`));
   tempDirs.push(root);
   const origin = join(root, 'origin.git');
@@ -91,15 +64,13 @@ function makeRepo(name: string) {
   writeFileSync(join(repo, 'file.txt'), 'base\n');
   commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
-  const repositoryUuid = `repo-uuid-${name}`;
   const localPath = realpathSync(repo);
-  registeredRepos.push({ id: repositoryUuid, localPath });
-  writeRepoRegistry();
-  return { repo: localPath, repositoryUuid };
+  const registered = await addRepo(localPath);
+  return { repo: localPath, repositoryUuid: registered.id };
 }
 
 async function makePacketWorkspace(name: string) {
-  const { repo, repositoryUuid } = makeRepo(name);
+  const { repo, repositoryUuid } = await makeRepo(name);
   const packetId = `pkt-${name}`;
   const branch = `inline/${name}`;
   const worktree = await getWorktreeManager(repo).create({

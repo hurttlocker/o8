@@ -8,6 +8,13 @@ import { z } from 'zod';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createBroadcastRedactionContext, redactBroadcastText } from '@/lib/broadcast/redaction';
 import { resolveScope } from '@/lib/customize/storage';
+import { ActionPluginError } from './errors';
+import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
+import { verifyGithubFiles } from './github-files';
+import { actionStateSchema, clearActionState, describeActionState, provisionActionState, type ActionState } from './state-storage';
+import { inspectPluginTerminal, pluginTerminalEnvironment, requirePluginTerminalRuntime, startPluginTerminal, stopPluginTerminal } from './terminal-runtime';
+
+export { ActionPluginError } from './errors';
 
 const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64);
 const fileName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).max(128).refine((name) => name !== '.' && name !== '..' && name !== 'installed.json' && name !== 'o8-actions.json');
@@ -23,7 +30,7 @@ process.on('disconnect', stop);
 process.on('SIGTERM', stop);
 const timer = setTimeout(stop, Number(process.env.O8_ACTION_TIMEOUT_MS) + 1000);
 let action;
-try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV } }); }
+try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); }
 catch (error) { process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)); }
 if (action) {
   action.on('error', (error) => process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)));
@@ -41,6 +48,7 @@ export const actionManifestSchema = z.object({
   description: z.string().trim().min(1).max(500),
   supportedPlatforms: z.array(z.enum(['darwin', 'linux'])).min(1).max(2).refine((items) => new Set(items).size === items.length),
   workspace: z.enum(['none', 'registered-project']),
+  state: z.object({ scope: z.literal('source-and-project') }).strict().optional(),
   files: z.array(z.object({ path: fileName, sha256: digest }).strict()).min(1).max(12),
   actions: z.array(z.object({
     id: slug,
@@ -48,19 +56,25 @@ export const actionManifestSchema = z.object({
     entry: fileName,
     args: z.array(z.string().max(256).refine((arg) => !arg.includes('\0'), 'Arguments cannot contain NUL characters.')).max(16).default([]),
     timeoutMs: z.number().int().min(100).max(30_000),
-  }).strict()).min(1).max(12),
+  }).strict()).max(12),
+  terminals: z.array(z.object({
+    id: slug,
+    description: z.string().trim().min(1).max(500),
+    entry: fileName,
+    args: z.array(z.string().max(256).refine((arg) => !arg.includes('\0'), 'Arguments cannot contain NUL characters.')).max(16).default([]),
+  }).strict()).min(1).max(12).optional(),
 }).strict().superRefine((manifest, ctx) => {
   if (new Set(manifest.files.map((file) => file.path)).size !== manifest.files.length) ctx.addIssue({ code: 'custom', message: 'Duplicate files' });
   if (new Set(manifest.actions.map((action) => action.id)).size !== manifest.actions.length) ctx.addIssue({ code: 'custom', message: 'Duplicate actions' });
   for (const action of manifest.actions) if (!manifest.files.some((file) => file.path === action.entry)) ctx.addIssue({ code: 'custom', message: 'Action entry is not a declared file' });
+  if (!manifest.actions.length && !manifest.terminals?.length) ctx.addIssue({ code: 'custom', message: 'Declare an action or a terminal' });
+  if (manifest.terminals && new Set(manifest.terminals.map((terminal) => terminal.id)).size !== manifest.terminals.length) ctx.addIssue({ code: 'custom', message: 'Duplicate terminals' });
+  for (const terminal of manifest.terminals ?? []) if (!manifest.files.some((file) => file.path === terminal.entry)) ctx.addIssue({ code: 'custom', message: 'Terminal entry is not a declared file' });
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
-type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null };
-export class ActionPluginError extends Error {
-  constructor(public code: string, message: string, public status = 400) { super(message); }
-}
+type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
 function sha(data: Buffer | string) { return createHash('sha256').update(data).digest('hex'); }
-function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory })); }
+function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string, source?: GithubActionSource) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory, ...(source ? { source } : {}) })); }
 function root(create: boolean) {
   let at = getDataDir();
   if (create && !existsSync(at)) mkdirSync(at, { recursive: true, mode: 0o700 });
@@ -94,14 +108,18 @@ function safeFile(dir: string, name: string, limit: number) {
     return data;
   } finally { closeSync(fd); }
 }
-export async function reviewActionSource(directory: string, repo?: string) {
+export async function reviewActionSource(directory: string, repo?: string, signal?: AbortSignal) {
   const dir = sourceDir(directory);
-  const manifest = actionManifestSchema.parse(JSON.parse(safeFile(dir, 'o8-actions.json', 64 * 1024).toString('utf8')));
+  const manifestBytes = safeFile(dir, 'o8-actions.json', 64 * 1024);
+  const manifest = actionManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')));
+  const source = acquiredSource(dir, manifestBytes);
   if (manifest.workspace === 'registered-project' && repo === undefined) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for review.');
   const workspaceRoot = manifest.workspace === 'none' ? null : await resolveScope(repo);
   if (manifest.workspace === 'registered-project' && !workspaceRoot) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for review.');
+  const sourceFiles = [{ path: 'o8-actions.json', data: manifestBytes }];
   const files = manifest.files.map((file) => {
     const data = safeFile(dir, file.path, 1024 * 1024);
+    sourceFiles.push({ path: file.path, data });
     if (sha(data) !== file.sha256) throw new ActionPluginError('digest_mismatch', `File ${file.path} changed or does not match its digest.`, 409);
     let content: string;
     try { content = new TextDecoder('utf-8', { fatal: true }).decode(data); }
@@ -109,9 +127,11 @@ export async function reviewActionSource(directory: string, repo?: string) {
     if (content.includes('\0')) throw new ActionPluginError('unreviewable_file', `File ${file.path} contains NUL bytes and cannot be reviewed in this version.`);
     return { path: file.path, bytes: data.length, sha256: file.sha256, content };
   });
+  if (source) await verifyGithubFiles(source, sourceFiles, signal);
+  const state = manifest.state ? describeActionState({ id: manifest.id, sourceDirectory: dir, workspaceRoot, source }) : undefined;
   return {
-    manifest, revision: revisionFor(manifest, workspaceRoot, dir), files, sourceDirectory: dir,
-    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV'], principal: 'local-user' as const },
+    manifest, revision: revisionFor(manifest, workspaceRoot, dir, source), files, sourceDirectory: dir, ...(source ? { source } : {}),
+    execution: { cwd: workspaceRoot ?? path.join(getDataDir(), 'customizations', 'actions', manifest.id), environmentKeys: ['PATH', 'NODE_ENV', ...(state ? [state.environmentKey] : [])], principal: 'local-user' as const, ...(state ? { state } : {}), ...(manifest.terminals ? { terminalEnvironmentKeys: Object.keys(pluginTerminalEnvironment(state?.directory)) } : {}) },
     workspaceRoot,
   };
 }
@@ -121,8 +141,9 @@ function readSaved(id: string): Saved {
   if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw new ActionPluginError('unsafe_path', 'Invalid installation.');
   const saved = JSON.parse(safeFile(dir, 'installed.json', 64 * 1024).toString('utf8')) as Saved;
   const manifest = actionManifestSchema.parse(saved.manifest);
+  const source = saved.source === undefined ? undefined : githubSourceSchema.parse(saved.source);
   if (manifest.id !== id || typeof saved.sourceDirectory !== 'string' || (saved.workspaceRoot !== null && typeof saved.workspaceRoot !== 'string')
-    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
+    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory, source) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
   return { ...saved, manifest };
 }
 function db() {
@@ -137,7 +158,13 @@ function db() {
   const stat = lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new ActionPluginError('unsafe_path', 'Invalid receipt storage file.');
   const database = new Database(file);
-  database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT)');
+  database.exec('CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, action_id TEXT NOT NULL, actor TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, exit_code INTEGER, stdout TEXT, stderr TEXT, error TEXT, source_metadata TEXT)');
+  database.exec('CREATE TABLE IF NOT EXISTS terminal_receipts (id TEXT PRIMARY KEY, plugin_id TEXT NOT NULL, receipt_json TEXT NOT NULL)');
+  database.transaction(() => {
+    const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
+    if (!columns.some((column) => column.name === 'state_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN state_metadata TEXT');
+  }).immediate();
   return database;
 }
 function lifecycle<T>(action: (database: Database.Database) => T): T {
@@ -146,23 +173,132 @@ function lifecycle<T>(action: (database: Database.Database) => T): T {
   finally { database.close(); }
 }
 function refuseRunning(database: Database.Database, id: string) {
+  for (const terminal of readTerminalReceipts(database, id)) {
+    if (['launching', 'running'].includes(refreshTerminalReceipt(database, terminal).status)) throw new ActionPluginError('busy', 'Stop this plugin’s active or pending terminal before changing its installation or saved data.', 409);
+  }
   const now = new Date().toISOString();
   database.prepare("UPDATE receipts SET status = 'interrupted', finished_at = ?, error = 'Host stopped before completion' WHERE plugin_id = ? AND status = 'running' AND started_at < ?")
     .run(now, id, new Date(Date.now() - 60_000).toISOString());
   const active = database.prepare("SELECT id FROM receipts WHERE plugin_id = ? AND status = 'running' LIMIT 1").get(id);
   if (active) throw new ActionPluginError('busy', 'An action from this plugin is running.', 409);
 }
+
+export type PluginTerminalReceipt = {
+  id: string; pluginId: string; terminalId: string; revision: string; sessionName: string;
+  label: string; workspaceRoot: string | null; source: GithubActionSource | null; state: ActionState | null;
+  actor: 'local-operator'; startedAt: string; finishedAt: string | null;
+  status: 'launching' | 'running' | 'exited' | 'ended' | 'stopped' | 'failed';
+  exitCode: number | null; error: string | null;
+};
+function readTerminalReceipts(database: Database.Database, pluginId?: string): PluginTerminalReceipt[] {
+  const rows = (pluginId
+    ? database.prepare('SELECT receipt_json FROM terminal_receipts WHERE plugin_id = ? ORDER BY rowid DESC').all(pluginId)
+    : database.prepare('SELECT receipt_json FROM terminal_receipts ORDER BY rowid DESC').all()) as Array<{ receipt_json: string }>;
+  return rows.map((row) => JSON.parse(row.receipt_json) as PluginTerminalReceipt);
+}
+function saveTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
+  database.prepare('INSERT INTO terminal_receipts (id, plugin_id, receipt_json) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET receipt_json = excluded.receipt_json')
+    .run(receipt.id, receipt.pluginId, JSON.stringify(receipt));
+  return receipt;
+}
+function refreshTerminalReceipt(database: Database.Database, receipt: PluginTerminalReceipt) {
+  if (!['launching', 'running', 'exited'].includes(receipt.status)) return receipt;
+  try {
+    const current = inspectPluginTerminal(receipt.sessionName);
+    // Missing does not mean a pending launch has finished: the host may have
+    // stopped before spawn, or another process may be between claim and spawn.
+    // Only explicit Stop cancels this claim. Replays never execute it again.
+    if (receipt.status === 'launching' && current.status === 'ended') return receipt;
+    return saveTerminalReceipt(database, { ...receipt, ...current, error: null, finishedAt: current.status === 'running' ? null : receipt.finishedAt ?? new Date().toISOString() });
+  } catch {
+    return saveTerminalReceipt(database, { ...receipt, error: 'Terminal status is unavailable. The session remains reserved; retry inspection or stop it before launching again.' });
+  }
+}
+export function pluginTerminalReceipts(pluginId?: string) {
+  return lifecycle((database) => readTerminalReceipts(database, pluginId).map((receipt) => refreshTerminalReceipt(database, receipt)));
+}
+export function pluginTerminalSessionReferences() {
+  if (!existsSync(path.join(getDataDir(), 'customizations', 'actions', 'receipts.sqlite'))) return [];
+  return pluginTerminalReceipts().filter((receipt) => ['launching', 'running', 'exited'].includes(receipt.status)).map((receipt) => receipt.sessionName);
+}
+export async function launchPluginTerminal(input: { id: string; terminalId: string; revision: string; requestId: string; repo?: string }) {
+  const requestId = z.string().uuid().parse(input.requestId).toLowerCase();
+  const dir = path.dirname(savedPath(input.id));
+  const cwd = input.repo === undefined ? dir : await resolveScope(input.repo);
+  if (!cwd) throw new ActionPluginError('invalid_workspace', 'Choose a registered repository for this terminal.');
+  const claim = lifecycle((database) => {
+    const saved = readSaved(input.id);
+    if (saved.revision !== input.revision) throw new ActionPluginError('conflict', 'Plugin changed since review.', 409);
+    if (!saved.enabled) throw new ActionPluginError('disabled', 'Plugin is disabled.', 409);
+    if (!saved.manifest.supportedPlatforms.includes(process.platform as 'darwin' | 'linux')) throw new ActionPluginError('unsupported_platform', 'This plugin does not support this platform.', 409);
+    if ((saved.manifest.workspace === 'registered-project') !== (input.repo !== undefined) || saved.workspaceRoot !== (input.repo === undefined ? null : cwd)) throw new ActionPluginError('invalid_workspace', 'Use the repository selected during review.', 409);
+    const terminal = saved.manifest.terminals?.find((item) => item.id === input.terminalId);
+    if (!terminal) throw new ActionPluginError('not_found', 'Terminal entrypoint does not exist.', 404);
+    const previous = readTerminalReceipts(database).find((receipt) => receipt.id === requestId);
+    if (previous) {
+      if (previous.pluginId !== input.id || previous.terminalId !== input.terminalId || previous.revision !== input.revision || previous.workspaceRoot !== saved.workspaceRoot) throw new ActionPluginError('conflict', 'Launch request belongs to another terminal.', 409);
+      return { receipt: refreshTerminalReceipt(database, previous), created: false };
+    }
+    if (['0', 'false', 'off', 'no'].includes(process.env.O8_PERSISTENT_TERMINALS?.trim().toLowerCase() ?? '')) throw new ActionPluginError('persistence_disabled', 'Enable persistent terminals before launching a plugin terminal.', 409);
+    for (const file of saved.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Plugin file changed after linking.', 409);
+    refuseRunning(database, input.id);
+    requirePluginTerminalRuntime();
+    const state = saved.manifest.state ? provisionActionState({ ...saved, id: input.id }) : null;
+    const receipt: PluginTerminalReceipt = {
+      id: requestId, pluginId: input.id, terminalId: input.terminalId, revision: input.revision,
+      sessionName: `cortex-dash-${requestId.replaceAll('-', '')}`, label: `${saved.manifest.name} / ${terminal.id}`,
+      workspaceRoot: saved.workspaceRoot, source: saved.source ?? null, state, actor: 'local-operator',
+      startedAt: new Date().toISOString(), finishedAt: null, status: 'launching', exitCode: null, error: null,
+    };
+    saveTerminalReceipt(database, receipt);
+    return { receipt, created: true };
+  });
+  if (!claim.created) return claim.receipt;
+  // The claim is durable before process creation. Holding a separate lifecycle
+  // lock across spawn serializes stop/remove/clear without rolling back that
+  // recovery record if the host dies before publishing the launch result.
+  return lifecycle((database) => {
+    const receipt = readTerminalReceipts(database).find((item) => item.id === requestId);
+    if (!receipt) throw new ActionPluginError('damaged', 'Terminal launch receipt is missing.', 409);
+    if (receipt.status !== 'launching') return receipt;
+    try {
+      const saved = readSaved(input.id);
+      if (!saved.enabled || saved.revision !== input.revision) throw new ActionPluginError('conflict', 'Plugin changed before terminal launch.', 409);
+      const terminal = saved.manifest.terminals?.find((item) => item.id === input.terminalId);
+      if (!terminal) throw new ActionPluginError('not_found', 'Terminal entrypoint does not exist.', 404);
+      for (const file of saved.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Plugin file changed before terminal launch.', 409);
+      const current = startPluginTerminal({ sessionName: receipt.sessionName, cwd, entry: path.join(dir, terminal.entry), args: terminal.args, stateDirectory: receipt.state?.directory });
+      return saveTerminalReceipt(database, { ...receipt, ...current });
+    } catch (error) {
+      // A tmux timeout may occur after creation. Keep the durable reservation
+      // until inspection proves its state or the operator explicitly stops it.
+      return refreshTerminalReceipt(database, saveTerminalReceipt(database, { ...receipt, error: error instanceof ActionPluginError ? error.message : 'Terminal launch outcome is unresolved. Inspect or stop this session before launching again.' }));
+    }
+  });
+}
+export function stopPluginTerminalRun(receiptId: string) {
+  return lifecycle((database) => {
+    const receipt = readTerminalReceipts(database).find((item) => item.id === receiptId.toLowerCase());
+    if (!receipt) throw new ActionPluginError('not_found', 'Terminal receipt does not exist.', 404);
+    if (receipt.status === 'stopped') return receipt;
+    stopPluginTerminal(receipt.sessionName);
+    return saveTerminalReceipt(database, { ...receipt, status: 'stopped', finishedAt: receipt.finishedAt ?? new Date().toISOString() });
+  });
+}
 export function listActionPlugins() {
   let dir: string;
   try { dir = root(false); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { installed: [], damaged: [] }; throw error; }
-  const installed: Saved[] = []; const damaged: string[] = [];
+  const installed: Array<Saved & { state?: ActionState }> = []; const damaged: string[] = [];
   for (const id of readdirSync(dir).filter((name) => slug.safeParse(name).success)) {
-    try { installed.push(readSaved(id)); } catch { damaged.push(id); }
+    try {
+      const saved = readSaved(id);
+      installed.push({ ...saved, ...(saved.manifest.state ? { state: describeActionState({ ...saved, id }) } : {}) });
+    } catch { damaged.push(id); }
   }
   return { installed, damaged };
 }
-export async function linkActionSource(directory: string, expectedRevision: string, repo?: string) {
-  const reviewed = await reviewActionSource(directory, repo);
+export async function linkActionSource(directory: string, expectedRevision: string, repo?: string, signal?: AbortSignal) {
+  const reviewed = await reviewActionSource(directory, repo, signal);
   if (reviewed.manifest.workspace === 'none' && repo !== undefined) throw new ActionPluginError('invalid_workspace', 'This action does not use a repository.');
   if (reviewed.revision !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed since review.', 409);
   return lifecycle(() => {
@@ -172,14 +308,16 @@ export async function linkActionSource(directory: string, expectedRevision: stri
     const stage = path.join(base, `.stage-${randomUUID()}`);
     mkdirSync(stage, { mode: 0o700 });
     try {
-      const currentManifest = actionManifestSchema.parse(JSON.parse(safeFile(sourceDir(directory), 'o8-actions.json', 64 * 1024).toString('utf8')));
-      if (revisionFor(currentManifest, reviewed.workspaceRoot, reviewed.sourceDirectory) !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
+      const currentBytes = safeFile(sourceDir(directory), 'o8-actions.json', 64 * 1024);
+      const currentManifest = actionManifestSchema.parse(JSON.parse(currentBytes.toString('utf8')));
+      const currentSource = acquiredSource(reviewed.sourceDirectory, currentBytes);
+      if (revisionFor(currentManifest, reviewed.workspaceRoot, reviewed.sourceDirectory, currentSource) !== expectedRevision) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
       for (const file of reviewed.manifest.files) {
         const data = safeFile(sourceDir(directory), file.path, 1024 * 1024);
         if (sha(data) !== file.sha256) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
         writeFileSync(path.join(stage, file.path), data, { flag: 'wx', mode: 0o700 });
       }
-      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, linkedAt: new Date().toISOString(), sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot };
+      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, linkedAt: new Date().toISOString(), sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot, ...(reviewed.source ? { source: reviewed.source } : {}) };
       writeFileSync(path.join(stage, 'installed.json'), JSON.stringify(saved), { flag: 'wx', mode: 0o600 });
       renameSync(stage, destination);
       return saved;
@@ -206,6 +344,15 @@ export function changeActionPlugin(id: string, revision: string, action: 'enable
     return { cleanupPending: false };
   });
 }
+export function clearActionPluginState(id: string, revision: string) {
+  return lifecycle((database) => {
+    refuseRunning(database, id);
+    const saved = readSaved(id);
+    if (saved.revision !== revision) throw new ActionPluginError('conflict', 'Plugin changed since review.', 409);
+    if (!saved.manifest.state) throw new ActionPluginError('state_not_declared', 'This plugin does not declare persistent state.', 409);
+    return clearActionState({ ...saved, id });
+  });
+}
 export async function invokeActionPlugin(id: string, actionId: string, actor = 'local-operator', signal?: AbortSignal, expectedRevision?: string, repo?: string) {
   if (process.platform === 'win32') throw new ActionPluginError('unsupported_platform', 'Executable actions are not available on Windows in this version.', 409);
   const saved = readSaved(id);
@@ -229,14 +376,16 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
       if (!currentAction) throw new ActionPluginError('not_found', 'Action does not exist.', 404);
       for (const file of fresh.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Action file changed after linking.', 409);
       refuseRunning(database, id);
-      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, saved.revision, 'running', startedAt);
-      return { saved: fresh, action: currentAction };
+      if (fresh.manifest.state && signal?.aborted) throw new ActionPluginError('cancelled', 'Run cancelled before state provisioning.', 409);
+      const state = fresh.manifest.state ? provisionActionState({ ...fresh, id }) : undefined;
+      database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, source_metadata, state_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, fresh.revision, 'running', startedAt, fresh.source ? JSON.stringify(fresh.source) : null, state ? JSON.stringify(state) : null);
+      return { saved: fresh, action: currentAction, state };
   });
   const action = claimed.action;
   const result = await new Promise<{ status: string; exitCode: number | null; stdout: string; stderr: string; error: string | null }>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(process.execPath, ['-e', actionRunner, path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], detached: true });
+      child = spawn(process.execPath, ['-e', actionRunner, path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs), ...(claimed.state ? { O8_PLUGIN_STATE_DIR: claimed.state.directory } : {}) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], detached: true });
     } catch (error) {
       resolve({ status: 'spawn_error', exitCode: null, stdout: '', stderr: '', error: error instanceof Error ? error.message : 'Could not start action.' });
       return;
@@ -291,7 +440,7 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
   } catch {
     safeResult = { ...result, stdout: '[redacted-output]', stderr: '[redacted-output]', error: result.error ? '[redacted-error]' : null };
   }
-  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, startedAt, finishedAt, ...safeResult };
+  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, state: claimed.state ?? null, startedAt, finishedAt, ...safeResult };
   const finishDb = db();
   try { finishDb.prepare('UPDATE receipts SET status = ?, finished_at = ?, exit_code = ?, stdout = ?, stderr = ?, error = ? WHERE id = ?').run(safeResult.status, finishedAt, safeResult.exitCode, safeResult.stdout, safeResult.stderr, safeResult.error, receiptId); }
   finally { finishDb.close(); }
@@ -301,7 +450,14 @@ export function actionReceipts(id?: string) {
   const database = db();
   try {
     const rows = id ? database.prepare('SELECT * FROM receipts WHERE plugin_id = ? ORDER BY started_at DESC LIMIT 100').all(slug.parse(id)) : database.prepare('SELECT * FROM receipts ORDER BY started_at DESC LIMIT 100').all();
-    return rows.map((row) => ({ ...(row as Record<string, unknown>), actorKind: 'authorization-class' as const, actorIdentity: null }));
+    return rows.map((row) => {
+      const { source_metadata: metadata, state_metadata: stateMetadata, ...receipt } = row as Record<string, unknown>;
+      let source: GithubActionSource | null = null;
+      let state: ActionState | null = null;
+      try { if (typeof metadata === 'string') source = githubSourceSchema.parse(JSON.parse(metadata)); } catch { /* Never present malformed origin metadata as verified source. */ }
+      try { if (typeof stateMetadata === 'string') state = actionStateSchema.parse(JSON.parse(stateMetadata)); } catch { /* Malformed historical state metadata is not an approved scope. */ }
+      return { ...receipt, source, state, actorKind: 'authorization-class' as const, actorIdentity: null };
+    });
   }
   finally { database.close(); }
 }

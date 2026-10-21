@@ -1,11 +1,13 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { formatTokens } from '@/lib/util/format-tokens';
 import { approxTokens } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { useOrchestratorContextResidency } from './context-residency';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { ComposerPopover } from '../thoughts/chat-panel/ComposerPopover';
+import { FloatingSurface } from '../FloatingSurface';
+import { ContextCacheSection, latestContextCacheReuse, type ContextCacheReuse } from './ContextCacheSection';
 
 const CONTEXT_LIMIT = 1_000_000;
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -87,9 +89,8 @@ function tokensFor(entry: MobileTranscriptEntry): number {
 export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount: number; runningTotal: number; onClick?: () => void }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const [anchor, setAnchor] = useState<{ left: number; bottom: number; width: number } | null>(null);
   const residency = useOrchestratorContextResidency();
+  const cacheReuse = useMemo(() => latestContextCacheReuse(residency?.messages ?? []), [residency?.messages]);
   const estimatedConversationTokens = useMemo(() => {
     const messages = residency?.messages ?? [];
     return messages.reduce((sum, entry) => sum + tokensFor(entry), 0);
@@ -103,38 +104,6 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
     onClick?.();
     setOpen((prev) => !prev);
   }, [onClick]);
-
-  useEffect(() => {
-    if (!open) return;
-    const button = buttonRef.current;
-    if (!button) return;
-    const rect = button.getBoundingClientRect();
-    setAnchor({
-      left: rect.left,
-      bottom: window.innerHeight - rect.top + 8,
-      width: rect.width,
-    });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickAway = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (popoverRef.current?.contains(target)) return;
-      if (buttonRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', handleClickAway);
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      window.removeEventListener('mousedown', handleClickAway);
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [open]);
 
   const percent = Math.round((Math.max(0, Math.min(CONTEXT_LIMIT, projection.activeTokens)) / CONTEXT_LIMIT) * 100);
   const tone = percent >= 85 ? 'critical' : percent >= 60 ? 'warning' : 'idle';
@@ -150,7 +119,8 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        aria-label={tokenCount > 0 ? `${titlePrefix} ${label}. Context grew by ${meterLabel(tokenCount)} tokens since the previous runtime report.` : `${titlePrefix} ${label}.`}
+        aria-label={`${titlePrefix} ${label}.${cacheReuse ? ` Last prompt reused ${cacheReuse.percent}% cached input.` : ''}${tokenCount > 0 ? ` Context grew by ${meterLabel(tokenCount)} tokens since the previous runtime report.` : ''}`}
+        aria-expanded={open}
         data-context-meter
         title={tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} since previous report` : `${titlePrefix} ${label}`}
         style={{
@@ -178,14 +148,14 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
           if (!open) event.currentTarget.style.background = 'transparent';
         }}
       >
-        <svg width={17} height={17} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+        <svg width={19} height={19} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', transform: 'rotate(-90deg)' }}>
           <circle
             cx="9"
             cy="9"
             r="7"
             fill="none"
             stroke="var(--t-divider-subtle)"
-            strokeWidth="3"
+            strokeWidth="2"
           />
           <circle
             cx="9"
@@ -193,41 +163,30 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
             r="7"
             fill="none"
             stroke="currentColor"
-            strokeWidth="3"
+            strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={dashOffset}
             opacity={percent > 0 ? 1 : 0}
           />
+          <circle cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-divider-subtle)" strokeWidth="1.5" />
+          {cacheReuse ? <circle data-testid="context-cache-ring" cx="9" cy="9" r="3.5" fill="none" stroke="var(--t-accent)" strokeWidth="1.5" strokeLinecap="round" strokeDasharray={21.99} strokeDashoffset={21.99 * (1 - cacheReuse.percent / 100)} /> : null}
         </svg>
       </button>
-      {open && anchor && typeof document !== 'undefined'
-        ? createPortal(
-          <ContextPopover
-            ref={popoverRef}
-            anchorLeft={anchor.left}
-            anchorBottom={anchor.bottom}
-            projection={projection}
-            onClose={() => setOpen(false)}
-          />,
-          document.body,
-        )
-        : null}
+      <ComposerPopover anchorRef={buttonRef} open={open} align="end" onClose={() => setOpen(false)}>
+        <ContextPopover projection={projection} cacheReuse={cacheReuse} onClose={() => setOpen(false)} />
+      </ComposerPopover>
     </>
   );
 }
 
 interface ContextPopoverProps {
-  anchorLeft: number;
-  anchorBottom: number;
   projection: ContextMeterProjection;
+  cacheReuse: ContextCacheReuse | null;
   onClose: () => void;
 }
 
-const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function ContextPopover(
-  { anchorLeft, anchorBottom, projection, onClose },
-  ref,
-) {
+function ContextPopover({ projection, cacheReuse, onClose }: ContextPopoverProps) {
   const rows: CategoryRow[] = useMemo(() => {
     return [
       { key: 'system' as const, label: 'System prompt estimate', tokens: SYSTEM_PROMPT_TOKENS, approximate: true },
@@ -243,29 +202,15 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
     ? Math.min(100, Math.round((projection.activeTokens / CONTEXT_LIMIT) * 100))
     : 0;
 
-  const popoverWidth = 340;
-
   return (
-    <div
-      ref={ref}
+    <FloatingSurface
       role="dialog"
       aria-label="Context breakdown"
       style={{
-        position: 'fixed',
-        left: Math.max(8, Math.min(anchorLeft, window.innerWidth - popoverWidth - 8)),
-        bottom: anchorBottom,
-        width: popoverWidth,
-        background: 'var(--t-popover-surface)',
-        backdropFilter: 'saturate(140%) blur(18px)',
-        WebkitBackdropFilter: 'saturate(140%) blur(18px)',
-        color: 'var(--t-text)',
-        borderRadius: 14,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-border)',
-        boxShadow: '0 16px 40px rgba(15, 23, 42, 0.18)',
+        width: 340,
+        maxWidth: 'calc(100vw * var(--zoom-inverse, 1) - 32px)',
+        borderRadius: 18,
         fontFamily: JAKARTA_STACK,
-        zIndex: 9999,
         overflow: 'hidden',
       } as React.CSSProperties}
     >
@@ -439,6 +384,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
           ? 'The total is the runtime\u2019s parent-session context report. Child-worker usage is excluded; category rows are estimates.'
           : 'The runtime has not reported context yet. The total is estimated from the visible transcript plus the current prompt and tool baseline.'}
       </div>
-    </div>
+      <ContextCacheSection reuse={cacheReuse} />
+    </FloatingSurface>
   );
-});
+}

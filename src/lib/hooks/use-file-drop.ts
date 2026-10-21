@@ -24,6 +24,11 @@ export interface DroppedFile {
    * pastes — those have no path.
    */
   absolutePath?: string;
+  /** Agent upload guard, kept only in transient pending state. */
+  isCurrent?: () => boolean;
+  uploadRequestId?: string;
+  /** Explicit agent-only scheduling policy; never copied into attachments. */
+  backgroundAgent?: boolean;
 }
 
 export interface UseFileDropOptions {
@@ -43,11 +48,15 @@ export interface UseFileDropOptions {
   hostRef?: React.RefObject<HTMLElement | null>;
 }
 
+export interface FileUploadOptions { isCurrent?: () => boolean; requestId?: string; backgroundAgent?: boolean }
+export interface FileUploadResult { status: 'read' | 'skipped' | 'error' }
+export type FileUploadHandler = (files: FileList | File[], options?: FileUploadOptions) => Promise<FileUploadResult[]> | void;
+
 export interface UseFileDropResult {
   pendingFiles: DroppedFile[];
   setPendingFiles: React.Dispatch<React.SetStateAction<DroppedFile[]>>;
   dragOver: boolean;
-  processFiles: (files: FileList | File[]) => void;
+  processFiles: FileUploadHandler;
   removePendingFile: (index: number) => void;
   clearPendingFiles: () => void;
   dragHandlers: {
@@ -82,25 +91,31 @@ export function useFileDrop(options?: UseFileDropOptions): UseFileDropResult {
   const [pendingFiles, setPendingFiles] = useState<DroppedFile[]>([]);
   const [htmlDragOver, setHtmlDragOver] = useState(false);
 
-  const processFiles = useCallback((files: FileList | File[]) => {
-    Array.from(files).forEach((file) => {
+  const processFiles = useCallback((files: FileList | File[], upload?: FileUploadOptions) => (
+    Promise.all(Array.from(files).map((file) => new Promise<FileUploadResult>((resolve) => {
       if (file.size > MAX_FILE_SIZE_BYTES) {
         console.warn(`[file-drop] Skipping ${file.name}: exceeds 5 MB limit (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+        resolve({ status: 'skipped' });
         return;
       }
-
       const reader = new FileReader();
+      reader.onerror = reader.onabort = () => resolve({ status: 'error' });
       reader.onload = () => {
+        if (upload?.isCurrent && !upload.isCurrent()) { resolve({ status: 'skipped' }); return; }
         const base64 = (reader.result as string).split(',')[1];
         const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
         setPendingFiles((prev) => {
-          if (prev.length >= maxFiles) return prev;
-          return [...prev, { name: file.name, mimeType: file.type || 'application/octet-stream', content: base64, preview }];
+          if ((upload?.isCurrent && !upload.isCurrent()) || prev.length >= maxFiles) {
+            if (preview) URL.revokeObjectURL(preview);
+            return prev;
+          }
+          return [...prev, { name: file.name, mimeType: file.type || 'application/octet-stream', content: base64, preview, ...(upload?.isCurrent ? { isCurrent: upload.isCurrent } : {}), ...(upload?.requestId ? { uploadRequestId: upload.requestId } : {}), ...(upload?.backgroundAgent === true && upload.isCurrent && upload.requestId ? { backgroundAgent: true } : {}) }];
         });
+        resolve({ status: 'read' });
       };
-      reader.readAsDataURL(file);
-    });
-  }, [maxFiles]);
+      try { reader.readAsDataURL(file); } catch { resolve({ status: 'error' }); }
+    })))
+  ), [maxFiles]);
 
   // #1136 Tauri drag-drop bridge. When hostRef is provided AND running in
   // Tauri, subscribe to the Rust bridge and route drops through

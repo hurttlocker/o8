@@ -5,6 +5,7 @@ import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { fetchSWRJson, getSWR } from '@/lib/panel/fetch-cache';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { isAbortError } from '@/lib/active-long-lived-request';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type {
@@ -219,19 +220,12 @@ export function useGlobalRepoState({
             && typeof (entry as { localPath?: unknown }).localPath === 'string'
           ));
           if (repos.length !== data.repos.length) return false;
-          const rootOwnedPaths = new Set(repos.filter((repo) => validatedPaths.some((path) => (
+          const needsWorktreeProof = validatedPaths.some((path) => !repos.some((repo) => (
             path === repo.localPath || path.startsWith(`${repo.localPath}/`)
-          ))));
-          // Worktree paths often live outside their repository root. If a
-          // validated path is not root-owned, inspect every registered repo's
-          // authoritative worktree list; exact membership below is the only
-          // authorization decision for that external path.
-          if (validatedPaths.some((path) => !Array.from(rootOwnedPaths).some((repo) => (
-            path === repo.localPath || path.startsWith(`${repo.localPath}/`)
-          )))) {
-            repos.forEach((repo) => rootOwnedPaths.add(repo));
-          }
-          const reposToLoad = Array.from(rootOwnedPaths);
+          )));
+          // Registered roots already establish scope for validated paths.
+          // External paths still require exact authoritative worktree membership.
+          const reposToLoad = needsWorktreeProof ? repos : [];
           const summaries: Array<readonly [string, RepoWorktreeSummary]> = [];
           let nextRepoIndex = 0;
           const workerCount = Math.min(8, reposToLoad.length);
@@ -325,7 +319,11 @@ export function useGlobalRepoState({
   // re-derives.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handler = () => { void loadRegisteredRepos(); };
+    const handler = () => {
+      void loadRegisteredRepos().catch((error: unknown) => {
+        if (!isAbortError(error)) toast('Could not refresh repositories. Try opening the project again.');
+      });
+    };
     window.addEventListener('o8:repos-changed', handler);
     return () => window.removeEventListener('o8:repos-changed', handler);
   }, [loadRegisteredRepos]);

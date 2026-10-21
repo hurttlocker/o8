@@ -12,16 +12,19 @@
  * TTL is deliberately tiny (2s): liveness does not change faster than a sweeper
  * tick, and every consumer's grace window (>= 45s) dwarfs 2s of staleness, so
  * the memo can never make a live session look dead or vice-versa within a
- * decision window. Semantics are byte-identical to the old per-file loop:
+ * decision window. The lookup contract is:
  *   - lookup returns `null`  → surfaceId not present under its root
  *   - lookup returns `{}`    → present but `activeRun` cleared (definitively dead)
  *   - lookup returns `{pid?, tmuxSession?}` → present with an active run
+ *   - unreadable metadata with no exact match throws (ownership is unknown)
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { listOwnedSessionLifecycles } from './owned-session-lifecycle';
 import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
+import { readOwnedSessionMetadata } from './owned-session/metadata-read';
+import type { OwnedSessionRecord } from './owned-session/types';
 
 export interface OwnedActiveRun {
   id?: string;
@@ -99,80 +102,81 @@ export function ownedRoots(): ReadonlyArray<{ marker: string; root: string }> {
   return roots;
 }
 
-/** Resolve a pane's identity after its owned session leaves the live fleet. */
-export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedSessionDisplay | null> {
+/** Exact read-only lookup, including archives; never creates a live session root. */
+export async function readOwnedSessionRecord(surfaceId: string): Promise<OwnedSessionRecord | null> {
   const root = ownedRoots().find((entry) => surfaceId.startsWith(entry.marker));
   if (!root) return null;
   const directory = surfaceId.slice(root.marker.length);
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(directory)) return null;
 
   for (const base of [root.root, archiveRootForOwnedSessionRoot(root.root)]) {
-    let parsed: {
-      surfaceId?: unknown;
-      title?: unknown;
-      model?: unknown;
-      activeRun?: unknown;
-      recentRuns?: Array<{ outcome?: unknown; startedAt?: unknown }>;
-    };
+    let parsed: OwnedSessionRecord;
     try {
-      parsed = JSON.parse(await readFile(path.join(base, directory, 'session.json'), 'utf-8'));
+      parsed = await readOwnedSessionMetadata(path.join(base, directory, 'session.json'));
     } catch {
       continue;
     }
     if (parsed.surfaceId !== surfaceId) continue;
-    const outcome = Array.isArray(parsed.recentRuns)
-      ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
-      : null;
-    const status = parsed.activeRun ? 'running'
-      : outcome === 'finished' ? 'completed'
-        : outcome === 'failed' ? 'failed'
-          : outcome === 'interrupted' ? 'interrupted'
-            : 'idle';
-    return {
-      sessionKey: surfaceId,
-      name: typeof parsed.title === 'string' && parsed.title.trim()
-        ? parsed.title.trim().slice(0, 120)
-        : root.marker.slice(0, -7),
-      model: typeof parsed.model === 'string' && parsed.model.trim()
-        ? parsed.model.trim().slice(0, 120) : null,
-      runtime: root.marker.slice(0, -7),
-      status,
-    };
+    return parsed;
   }
   return null;
+}
+
+/** Resolve a pane's identity after its owned session leaves the live fleet. */
+export async function readOwnedSessionDisplay(surfaceId: string): Promise<OwnedSessionDisplay | null> {
+  const parsed = await readOwnedSessionRecord(surfaceId);
+  if (!parsed) return null;
+  const runtime = surfaceId.slice(0, surfaceId.indexOf('-owned:'));
+  const outcome = Array.isArray(parsed.recentRuns)
+    ? [...parsed.recentRuns].sort((left, right) => String(right.startedAt ?? '').localeCompare(String(left.startedAt ?? '')))[0]?.outcome
+    : null;
+  const status = parsed.activeRun ? 'running'
+    : outcome === 'finished' ? 'completed'
+      : outcome === 'failed' ? 'failed'
+        : outcome === 'interrupted' ? 'interrupted'
+          : 'idle';
+  return {
+    sessionKey: surfaceId,
+    name: typeof parsed.title === 'string' && parsed.title.trim()
+      ? parsed.title.trim().slice(0, 120)
+      : runtime,
+    model: typeof parsed.model === 'string' && parsed.model.trim()
+      ? parsed.model.trim().slice(0, 120) : null,
+    runtime,
+    status,
+  };
 }
 
 const INDEX_TTL_MS = 2_000;
 
 /** Per-root memo: surfaceId → activeRun (or {} when cleared). */
-type RootIndex = Map<string, OwnedActiveRun>;
+interface RootIndex {
+  runs: Map<string, OwnedActiveRun>;
+  unreadable: boolean;
+}
 const rootCache = new Map<string, { builtAt: number; index: RootIndex }>();
 
 async function buildRootIndex(root: string): Promise<RootIndex> {
-  const index: RootIndex = new Map();
+  const index: RootIndex = { runs: new Map(), unreadable: false };
   let entries: Awaited<ReturnType<typeof readdir>>;
   try {
     entries = await readdir(root, { withFileTypes: true });
-  } catch {
-    return index; // root missing — every lookup under it resolves to "gone".
+  } catch (error) {
+    index.unreadable = (error as NodeJS.ErrnoException).code !== 'ENOENT';
+    return index;
   }
   await Promise.all(entries.map(async (entry) => {
     if (!entry.isDirectory()) return;
     const metadataPath = path.join(root, entry.name, 'session.json');
-    let raw: string;
-    try {
-      raw = await readFile(metadataPath, 'utf-8');
-    } catch {
-      return;
-    }
     let parsed: { surfaceId?: string; activeRun?: OwnedActiveRun };
     try {
-      parsed = JSON.parse(raw) as typeof parsed;
+      parsed = await readOwnedSessionMetadata(metadataPath);
+      if (!parsed || typeof parsed.surfaceId !== 'string') throw new Error('Missing owned session identity.');
     } catch {
+      index.unreadable = true;
       return;
     }
-    if (typeof parsed.surfaceId !== 'string') return;
-    index.set(parsed.surfaceId, parsed.activeRun
+    index.runs.set(parsed.surfaceId, parsed.activeRun
       ? {
           id: typeof parsed.activeRun.id === 'string' ? parsed.activeRun.id : undefined,
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
@@ -200,6 +204,15 @@ async function getRootIndex(root: string, now: number): Promise<RootIndex> {
   return index;
 }
 
+function indexedRun(index: RootIndex, surfaceId: string): OwnedActiveRun | null {
+  const run = index.runs.get(surfaceId);
+  if (run) return run;
+  // An unreadable sibling must not block a known session, but it also cannot
+  // prove that a missing identity is quiescent. Liveness callers fail closed.
+  if (index.unreadable) throw new Error('Owned session liveness unavailable: unreadable metadata.');
+  return null;
+}
+
 /**
  * Resolve a lane's owned active run, sharing a per-root scan across all callers
  * within the TTL. Returns `null` when the surfaceId is not present under its
@@ -209,7 +222,7 @@ export async function lookupOwnedActiveRun(surfaceId: string, now: number = Date
   const match = ownedRoots().find((r) => surfaceId.startsWith(r.marker));
   if (!match) return null;
   const index = await getRootIndex(match.root, now);
-  return index.get(surfaceId) ?? null;
+  return indexedRun(index, surfaceId);
 }
 
 /** Safety-critical lookup that bypasses the short fleet cache before a kill. */
@@ -218,7 +231,7 @@ export async function lookupOwnedActiveRunFresh(surfaceId: string): Promise<Owne
   if (!match) return null;
   const index = await buildRootIndex(match.root);
   rootCache.set(match.root, { builtAt: Date.now(), index });
-  return index.get(surfaceId) ?? null;
+  return indexedRun(index, surfaceId);
 }
 
 /** List every owned session whose persisted metadata still carries an active run. */
@@ -226,7 +239,7 @@ export async function listOwnedActiveRuns(now: number = Date.now()): Promise<Ind
   const indexes = await Promise.all(ownedRoots().map(({ root }) => getRootIndex(root, now)));
   const active = new Map<string, IndexedOwnedActiveRun>();
   for (const index of indexes) {
-    for (const [surfaceId, run] of index) {
+    for (const [surfaceId, run] of index.runs) {
       if (run.pid !== undefined || run.tmuxSession !== undefined) active.set(surfaceId, { surfaceId, ...run });
     }
   }
@@ -253,13 +266,11 @@ export async function findOwnedLaunchByMutationId(
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       try {
-        const parsed = JSON.parse(
-          await readFile(path.join(root, entry.name, 'session.json'), 'utf-8'),
-        ) as Partial<OwnedLaunchMutationMatch> & {
+        const parsed = await readOwnedSessionMetadata<Partial<OwnedLaunchMutationMatch> & {
           launchMutationId?: unknown;
           activeRun?: { outcome?: unknown };
           recentRuns?: Array<{ outcome?: unknown }>;
-        };
+        }>(path.join(root, entry.name, 'session.json'));
         if (parsed.launchMutationId !== clientMutationId
           || typeof parsed.surfaceId !== 'string'
           || typeof parsed.cwd !== 'string'

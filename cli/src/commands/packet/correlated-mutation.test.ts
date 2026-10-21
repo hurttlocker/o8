@@ -18,6 +18,50 @@ afterEach(() => {
 });
 
 describe('fetchCorrelatedPacketMutation', () => {
+  it('accepts a successful queued admission without waiting for background task completion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true, status: 'queued', note: 'Background turn admitted.',
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await fetchCorrelatedPacketMutation(cfg, '/api/runtime/action', {
+      action: 'send_input', clientMutationId: 'queued-admission-key',
+    }, { acceptQueuedAdmission: true });
+    expect(response.data).toMatchObject({ ok: true, status: 'queued' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps polling explicit pending receipts even when queued admission is allowed', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, status: 'queued' }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, status: 'queued', inProgress: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, status: 'queued' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const body = { action: 'send_input', clientMutationId: 'queued-pending-key' };
+    const pending = fetchCorrelatedPacketMutation(cfg, '/api/runtime/action', body, {
+      acceptQueuedAdmission: true, timeoutMs: 1_000, pollMs: 250,
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(pending).resolves.toMatchObject({ status: 200, data: { status: 'queued' } });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(new Set(fetchMock.mock.calls.map(([, init]) => String((init as RequestInit).body))))
+      .toEqual(new Set([JSON.stringify(body)]));
+  });
+
+  it('continues waiting for queued packet mutations under the default policy', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: { status: 'queued' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: { status: 'completed' } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = fetchCorrelatedPacketMutation(cfg, '/api/orchestrator/reset-packet', {
+      packetId: 'queued-default', idempotencyKey: 'queued-default-key',
+    }, { timeoutMs: 1_000, pollMs: 250 });
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(pending).resolves.toMatchObject({ status: 200, data: { result: { status: 'completed' } } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps polling the exact body after an incomplete success receipt', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()

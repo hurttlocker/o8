@@ -9,7 +9,9 @@ import {
   addSessionRule,
   listSessionRules,
   removeSessionRule,
+  getSessionRule,
 } from '@/lib/db/session-rules-store';
+import { withSessionRuleMutation } from '@/lib/orchestrator/session-merge-restriction';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -88,7 +90,10 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'text is required.', 400);
   }
   try {
-    const rule = addSessionRule(threadId, text);
+    if (record.constraint !== undefined && record.constraint !== null && record.constraint !== 'no_merge') {
+      return operatorError('invalid_request', 'Unknown session-rule constraint.', 400);
+    }
+    const rule = await withSessionRuleMutation(threadId, () => addSessionRule(threadId, text, record.constraint === 'no_merge' ? 'no_merge' : null));
     if (!rule) {
       return operatorError('invalid_request', 'Rule text was empty after trimming.', 400);
     }
@@ -112,7 +117,8 @@ export async function DELETE(request: NextRequest) {
     return operatorError('invalid_request', 'id query param is required.', 400);
   }
   try {
-    return operatorSuccess({ removed: removeSessionRule(id) });
+    const rule = getSessionRule(id);
+    return operatorSuccess({ removed: rule ? await withSessionRuleMutation(rule.threadId, () => removeSessionRule(id)) : false });
   } catch (error) {
     return operatorError('session_rules_remove_failed', error instanceof Error ? error.message : 'Failed to remove session rule.');
   }

@@ -23,7 +23,7 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-function initRepo(branch: string): string {
+function initRepo(branch?: string): string {
   const repoPath = mkdtempSync(join(tmpdir(), 'o8-reset-cleanup-repo-'));
   git(repoPath, ['init', '-q', '-b', 'main']);
   git(repoPath, ['config', 'user.email', 'test@o8.dev']);
@@ -31,14 +31,13 @@ function initRepo(branch: string): string {
   writeFileSync(join(repoPath, 'base.txt'), 'base\n');
   git(repoPath, ['add', 'base.txt']);
   git(repoPath, ['commit', '-q', '-m', 'base']);
-  git(repoPath, ['branch', branch]);
+  if (branch) git(repoPath, ['branch', branch]);
   return repoPath;
 }
 
-function addPacketWorktree(repoPath: string, branch: string, packetId: string): string {
-  const worktreePath = join(repoPath, '.cortex-worktrees', `packet-${packetId}`);
-  git(repoPath, ['worktree', 'add', '-q', worktreePath, branch]);
-  return worktreePath;
+async function addPacketWorktree(repoPath: string, branch: string, packetId: string) {
+  const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+  return createManagedPacketWorktree(repoPath, { branch, packetId });
 }
 
 function branchExists(repoPath: string, branch: string): boolean {
@@ -94,16 +93,17 @@ describe('reset_packet clearWorktree branch cleanup', () => {
 
   it('archives only the reset packet lane and retains a branch owned by a live sibling lane', async () => {
     const branch = 'inline/reset-shared-branch';
-    const repoPath = initRepo(branch);
+    const repoPath = initRepo();
     const packetA = 'pkt-reset-shared-a';
     const packetB = 'pkt-reset-shared-b';
-    const worktreeA = addPacketWorktree(repoPath, branch, packetA);
+    const { path: worktreeA, sessionKey } = await addPacketWorktree(repoPath, branch, packetA);
     const laneA = createLane({
       repoPath,
       branch,
       runtime: 'codex',
       packetId: packetA,
       worktreePath: worktreeA,
+      sessionKey,
     });
     setLaneStatus(laneA.id, 'running', 'system');
     const laneB = createLane({
@@ -140,15 +140,16 @@ describe('reset_packet clearWorktree branch cleanup', () => {
 
   it('fully prunes the worktree and branch for a single reset packet lane', async () => {
     const branch = 'inline/reset-single-branch';
-    const repoPath = initRepo(branch);
+    const repoPath = initRepo();
     const packetId = 'pkt-reset-single';
-    const worktreePath = addPacketWorktree(repoPath, branch, packetId);
+    const { path: worktreePath, sessionKey } = await addPacketWorktree(repoPath, branch, packetId);
     const lane = createLane({
       repoPath,
       branch,
       runtime: 'codex',
       packetId,
       worktreePath,
+      sessionKey,
     });
     setLaneStatus(lane.id, 'running', 'system');
 

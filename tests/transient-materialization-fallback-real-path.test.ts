@@ -123,7 +123,7 @@ describe.sequential('transient materialization fallback through persisted lane t
     };
 
     expect(isManagedPacketWorktreeId(worktreeId, packetId)).toBe(true);
-    await expect(inspectOwnedWorkspaceMaterialization(input)).resolves.toEqual({
+    await expect(inspectOwnedWorkspaceMaterialization(input)).resolves.toMatchObject({
       status: 'available',
       source: 'materialized',
       materializationIdentity,

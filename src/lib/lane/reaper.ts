@@ -312,6 +312,7 @@ export async function reapZombieLane(
       const { autoCommitted, reviewable } = await decideRunningLaneSalvage(
         before.worktreePath,
         baseRef,
+        before.repoPath,
         { label: before.label, preCommitted: preservedWork?.autoCommitted },
       );
       if (reviewable) {

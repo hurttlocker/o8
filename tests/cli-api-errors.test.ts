@@ -4,7 +4,7 @@ import {
   apiFetch,
   DEFAULT_API_TIMEOUT_MS,
   EXIT,
-  type CliError,
+  CliError,
 } from '../cli/src/api';
 import type { ResolvedConfig } from '../cli/src/config';
 import { printError } from '../cli/src/output';
@@ -169,6 +169,18 @@ describe('CLI apiFetch network error taxonomy', () => {
     });
   });
 
+  it('names the route\'s not-found reason on a 404', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: false, error: { code: 'packet_not_found', message: 'Packet pkt-1 not found.' },
+    }), { status: 404, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(apiFetch(config, '/api/orchestrator/reset-packet')).rejects.toMatchObject({
+      code: 'not_found',
+      exit: EXIT.NOT_FOUND,
+      message: '404 from /api/orchestrator/reset-packet: Packet pkt-1 not found.',
+    });
+  });
+
   it('returns structured conflict details when a command opts into handling them', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       ok: false,
@@ -186,5 +198,44 @@ describe('CLI apiFetch network error taxonomy', () => {
     });
     expect(response.status).toBe(409);
     expect(response.data).toMatchObject({ error: { code: 'update_apply_busy' } });
+  });
+});
+
+
+describe('CLI authorization refusal details', () => {
+  it.each([
+    { error: 'Safe server refusal.\n' },
+    { error: { code: 'spectator_scope_denied', message: 'Safe server refusal.\n' } },
+  ])('retains bounded string/structured reasons and spectator grant guidance', async body => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 403 })));
+    await expect(apiFetch({ ...config, source: { port: 'env', token: 'spectator' } }, '/api/lanes'))
+      .rejects.toMatchObject({
+        code: 'forbidden', exit: EXIT.UNAUTHORIZED,
+        message: 'Server refused this operation (403): Safe server refusal. ',
+        hint: 'Check O8_SPECTATOR_TOKEN and the repository grants attached to that bearer.',
+      });
+  });
+
+  it('keeps worker hints packet-scoped even when the server supplies a spectator code', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 'spectator_scope_denied', message: 'Capability refused.' },
+    }), { status: 403 })));
+    await expect(apiFetch({ ...config, source: { port: 'env', token: 'worker' } }, '/api/lanes'))
+      .rejects.toMatchObject({ code: 'forbidden', hint: expect.stringContaining('assigned packet') });
+  });
+
+  it('bounds refusal text and omits unknown object fields', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: { message: 'x'.repeat(1000), unrelated: 'not-a-refusal-detail' },
+    }), { status: 403 })));
+    try {
+      await apiFetch(config, '/api/lanes');
+      throw new Error('Expected refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CliError);
+      expect((error as CliError).message.length).toBeLessThan(350);
+      expect((error as CliError).message).not.toContain('not-a-refusal-detail');
+      expect((error as CliError).hint).not.toMatch(/O8_API_TOKEN|ws-token|refresh/i);
+    }
   });
 });

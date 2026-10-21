@@ -1,130 +1,20 @@
 'use client';
 
-import { memo, useMemo } from 'react';
-import { ChevronDown, ChevronRight } from '../lucide-shims';
-import { renderInline } from '../LLMMarkdown';
+import Image from 'next/image';
+import { memo } from 'react';
+import { relativeTimeLabel } from '@/lib/format/relative-time';
+import { CircleUser } from '../lucide-shims';
 
-interface PrPanelTitleProps {
-  title: string;
-  prNumber: number;
-  body: string;
-  expanded: boolean;
-  onToggle: () => void;
-}
-
-const SUMMARY_BULLETS_LIMIT = 3;
-
-function extractBullets(body: string): string[] {
-  if (!body) return [];
-  const lines = body.split('\n').map((line) => line.trim()).filter(Boolean);
-  const bullets = lines
-    .filter((line) => /^[-*]\s+/.test(line) || /^\d+\.\s+/.test(line))
-    .map((line) => line.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, ''));
-  if (bullets.length > 0) return bullets;
-  // Fallback: first few non-empty lines (skip headings)
-  return lines.filter((line) => !line.startsWith('#')).slice(0, 5);
-}
-
-export const PrPanelTitle = memo(function PrPanelTitle({
-  title,
-  prNumber,
-  body,
-  expanded,
-  onToggle,
-}: PrPanelTitleProps) {
-  const bullets = useMemo(() => extractBullets(body), [body]);
-  const visibleBullets = expanded ? bullets : bullets.slice(0, SUMMARY_BULLETS_LIMIT);
-  const hasMore = bullets.length > SUMMARY_BULLETS_LIMIT;
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        paddingTop: 12,
-        paddingBottom: 12,
-        paddingLeft: 14,
-        paddingRight: 14,
-        borderBottom: '1px solid var(--t-divider-subtle)',
-      }}
-    >
-      <div style={{ fontSize: 15, fontWeight: 350, color: 'var(--t-text)', letterSpacing: '-0.1px', lineHeight: 1.25 }}>
-        {title}
-        <span style={{ color: 'var(--t-text-faint)', fontWeight: 300, marginLeft: 6 }}>#{prNumber}</span>
-      </div>
-
-      {bullets.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div
-            style={{
-              fontSize: 9,
-              fontWeight: 300,
-              color: 'var(--t-text-faint)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            Summary
-          </div>
-          <ul
-            style={{
-              listStyle: 'disc',
-              paddingLeft: 18,
-              margin: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 3,
-            }}
-          >
-            {visibleBullets.map((bullet, index) => (
-              <li
-                key={index}
-                style={{
-                  fontSize: 12,
-                  color: 'var(--t-text-secondary, var(--t-text-muted))',
-                  lineHeight: 1.5,
-                }}
-              >
-                {renderInline(bullet)}
-              </li>
-            ))}
-          </ul>
-          {hasMore ? (
-            <button
-              type="button"
-              onClick={onToggle}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                marginTop: 2,
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                color: 'var(--t-accent)',
-                fontSize: 11,
-                fontWeight: 350,
-                letterSpacing: '-0.1px',
-                cursor: 'pointer',
-                alignSelf: 'flex-start',
-              }}
-            >
-              {expanded ? (
-                <>
-                  <ChevronDown size={11} strokeWidth={2} />
-                  Show less
-                </>
-              ) : (
-                <>
-                  <ChevronRight size={11} strokeWidth={2} />
-                  Show more
-                </>
-              )}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+export const PrPanelTitle = memo(function PrPanelTitle({ title, author, avatarUrl, updatedAt }: {
+  title: string; author: string; avatarUrl?: string | null; updatedAt: string;
+}) {
+  const timestamp = Date.parse(updatedAt);
+  return <div style={{ display: 'grid', gap: 6 }}>
+    <h2 style={{ margin: 0, fontSize: 15, fontWeight: 350, letterSpacing: '-0.1px', lineHeight: 1.4, overflowWrap: 'anywhere' }}>{title}</h2>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--t-text-secondary)' }}>
+      {avatarUrl ? <Image src={avatarUrl} alt="" width={20} height={20} unoptimized style={{ borderRadius: '50%' }} /> : <CircleUser size={20} aria-hidden="true" />}
+      <span>{author}</span>
+      {Number.isFinite(timestamp) ? <><span aria-hidden="true">·</span><time dateTime={updatedAt} title={new Date(timestamp).toLocaleString()} style={{ color: 'var(--t-text-muted)', fontSize: 11 }}>updated {relativeTimeLabel(timestamp, { overflow: 'days', subMinute: 'just-now-lower' })}</time></> : null}
     </div>
-  );
+  </div>;
 });

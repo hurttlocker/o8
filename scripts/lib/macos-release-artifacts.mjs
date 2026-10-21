@@ -32,6 +32,7 @@ const REQUIRED_BINARIES = Object.freeze([
   'Contents/MacOS/o8',
   'Contents/MacOS/speech_recognizer',
   'Contents/MacOS/speech-local',
+  'Contents/MacOS/o8-pi-write',
 ]);
 
 function architectureForCpuType(cpuType) {
@@ -124,6 +125,12 @@ export function resolveMacosReleaseArtifacts(root, version) {
   };
 }
 
+export function stageMacosDmgApp(appPath, stagingPath) {
+  // Preserve signed bundle modes and relative symlinks regardless of the
+  // process umask; fs.cpSync can strip permission bits during staging.
+  execFileSync('/usr/bin/ditto', [appPath, join(stagingPath, 'o8.app')], { stdio: 'pipe' });
+}
+
 export function verifyUniversalMacApp(appPath) {
   const binaries = REQUIRED_BINARIES.map((relativePath) => {
     const path = join(appPath, ...relativePath.split('/'));
@@ -209,7 +216,8 @@ export function verifyUniversalMacUpdaterArchive(appPath, archivePath) {
   validateUpdaterArchiveMembers(archivePath);
   const extractionRoot = mkdtempSync(join(tmpdir(), 'o8-updater-inspection-'));
   try {
-    execFileSync('tar', ['xzf', archivePath, '-C', extractionRoot], { stdio: 'pipe' });
+    // Preserve archived modes so the caller's umask cannot change bundle identity.
+    execFileSync('tar', ['xzpf', archivePath, '-C', extractionRoot], { stdio: 'pipe' });
     const entries = readdirSync(extractionRoot).sort();
     if (entries.length !== 1 || entries[0] !== 'o8.app') {
       throw new Error('updater archive must contain exactly one top-level o8.app bundle');

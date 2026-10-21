@@ -1,5 +1,8 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { terminateManagedRun } from '@/lib/runtimes/managed-runs/termination';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
@@ -7,10 +10,11 @@ import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 const tmuxAvailable = spawnSync('tmux', ['-V'], { stdio: 'ignore' }).status === 0;
 const sessions: string[] = [];
 const processGroups: number[] = [];
+const roots: string[] = [];
 
 function markerPids(marker: string): number[] {
   try {
-    const output = execFileSync('ps', ['eww', '-axo', 'pid=,command='], { encoding: 'utf8' });
+    const output = execFileSync('ps', ['axeww', '-o', 'pid=,command='], { encoding: 'utf8' });
     return output.split('\n').flatMap((line) => {
       if (!line.includes(`O8_MANAGED_RUN_MARKER=${marker}`)) return [];
       const pid = Number.parseInt(line.trim().split(/\s+/, 1)[0] ?? '', 10);
@@ -37,6 +41,7 @@ afterEach(() => {
   while (processGroups.length > 0) {
     try { process.kill(-processGroups.pop()!, 'SIGKILL'); } catch {}
   }
+  while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe.skipIf(!tmuxAvailable)('managed-run process-tree settlement through real tmux', () => {
@@ -44,16 +49,22 @@ describe.skipIf(!tmuxAvailable)('managed-run process-tree settlement through rea
     const id = randomUUID().replace(/-/g, '').slice(0, 8);
     const session = `cortex-run-${id}`;
     const marker = randomUUID().replace(/-/g, '');
+    const root = mkdtempSync(join(tmpdir(), 'o8-run-termination-ready-'));
+    roots.push(root);
+    const childReady = join(root, 'child-ready');
     sessions.push(session);
     const childScript = [
       "process.on('SIGINT', () => {})",
       "process.on('SIGTERM', () => {})",
+      "process.on('SIGHUP', () => {})",
+      `require('node:fs').writeFileSync(${JSON.stringify(childReady)}, 'ready')`,
       'setInterval(() => {}, 1000)',
     ].join(';');
     const fixture = [
       "const { spawn } = require('node:child_process')",
       "process.on('SIGINT', () => {})",
       "process.on('SIGTERM', () => {})",
+      "process.on('SIGHUP', () => {})",
       `spawn(process.execPath, ['-e', ${JSON.stringify(childScript)}], { stdio: 'ignore' })`,
       'setInterval(() => {}, 1000)',
     ].join(';');
@@ -62,7 +73,7 @@ describe.skipIf(!tmuxAvailable)('managed-run process-tree settlement through rea
       '-e', `O8_MANAGED_RUN_MARKER=${marker}`,
       process.execPath, '-e', fixture,
     ]);
-    await waitFor(() => markerPids(marker).length >= 2);
+    await waitFor(() => existsSync(childReady) && markerPids(marker).length >= 2);
     const panePid = Number.parseInt(execFileSync(
       'tmux',
       ['list-panes', '-t', session, '-F', '#{pane_pid}'],

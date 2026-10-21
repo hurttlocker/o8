@@ -148,4 +148,27 @@ describe('PATCH /api/runtime/claude-code-profile', () => {
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ error: { code: 'invalid_repo_skill_name' } });
   });
+
+  it('rejects stale conditional provider saves without overwriting a newer choice', async () => {
+    const profile = await import('@/lib/claude-code/worker-profile');
+    const newer = { source: 'codex-subscription' as const, model: 'retained/model', codexModel: 'gpt-6-astra', repoSkillAllowlist: ['review-only'] };
+    await profile.writeClaudeCodeWorkerProfile(newer);
+    const response = await post({ source: 'native', model: 'retained/model', codexModel: 'gpt-6-sol', expectedProfile: { source: 'codex-subscription', model: 'retained/model', codexModel: 'gpt-6-sol' } });
+    expect(response.status).toBe(409);
+    expect(profile.readClaudeCodeWorkerProfileSync()).toEqual(newer);
+  });
+
+  it('allows conditional recovery while preserving a newer skill allowlist', async () => {
+    const profile = await import('@/lib/claude-code/worker-profile');
+    const applied = { source: 'codex-subscription' as const, model: 'retained/model', codexModel: 'gpt-6-astra', repoSkillAllowlist: ['new-skill'] };
+    await profile.writeClaudeCodeWorkerProfile(applied);
+    const response = await post({ source: 'native', model: 'retained/model', codexModel: 'gpt-6-sol', expectedProfile: { source: applied.source, model: applied.model, codexModel: applied.codexModel } });
+    expect(response.status).toBe(200);
+    expect(profile.readClaudeCodeWorkerProfileSync()).toEqual({ source: 'native', model: 'retained/model', codexModel: 'gpt-6-sol', repoSkillAllowlist: ['new-skill'] });
+  });
+
+  it('rejects malformed recovery preconditions before saving', async () => {
+    const response = await post({ source: 'native', model: null, codexModel: null, expectedProfile: { source: 'native' } });
+    expect(response.status).toBe(400);
+  });
 });

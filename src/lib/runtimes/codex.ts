@@ -23,6 +23,7 @@ import type {
 import '@/lib/runtimes/codex-cost-parser';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
+import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import {
   getCodexDiscoveredFleetAdditions,
   getCodexRolloutPath,
@@ -337,6 +338,10 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
+    createOwnedExecutionPolicy({ ...opts, runtimeConfig: {
+      ...(opts.workMode ? { workMode: opts.workMode } : {}),
+      ...(opts.executionCarrier ? { executionCarrier: opts.executionCarrier } : {}),
+    } }, 'codex');
     const startedAtMs = Date.now();
     // Fall back to the operator's default worker model when the dispatch didn't
     // pin one — that's how "run every worker on my local model" (an
@@ -349,6 +354,8 @@ export const codexRuntime: AgentRuntime = {
       prompt: opts.prompt,
       taskName: opts.taskName,
       clientMutationId: opts.clientMutationId,
+      executionPolicy: opts.executionPolicy,
+      controlledTask: opts.controlledTask,
       model,
       effort,
       laneId: opts.laneId,

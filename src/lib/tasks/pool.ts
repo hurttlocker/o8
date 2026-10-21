@@ -1,6 +1,10 @@
 import 'server-only';
 
 import { basename } from 'node:path';
+import { getProjectsLedger, type ProjectRecord } from '@/lib/repos/projects';
+import { taskPanelProjectId } from './panel-project-identity';
+import { getSqlite } from '@/lib/db';
+import { completedServiceResultSha } from '@/lib/cloud/review-service-authority';
 import { getLatestPacketJob } from '@/lib/cloud/job-queue';
 import type { CloudJob, CloudJobStatus } from '@/lib/cloud/job-store';
 import { DEFAULT_CLOUD_TEAM_ID } from '@/lib/cloud/team';
@@ -30,6 +34,7 @@ export interface TaskPoolRepoSummary {
 
 export interface TaskPoolProjectSummary {
   id: string;
+  panelProjectId?: string | null;
   name: string;
   slug: string;
   mainRepo: TaskPoolRepoSummary | null;
@@ -61,7 +66,7 @@ export interface TaskPoolRemoteExecution {
   leaseState: 'active' | 'expired' | 'none';
   updatedAt: string;
   workspaceAccess: 'unavailable';
-  previewAccess: 'unavailable';
+  previewAccess: 'requestable' | 'unavailable';
 }
 
 export interface TaskPoolTask {
@@ -194,7 +199,9 @@ function toRemoteExecution(job: CloudJob | undefined, nowMs: number): TaskPoolRe
     leaseState,
     updatedAt: job.updatedAt,
     workspaceAccess: 'unavailable',
-    previewAccess: 'unavailable',
+    previewAccess: job.launch.remotePreview && (leaseState === 'active' || (job.status === 'completed'
+      && job.launch.remoteSource && job.launch.remoteManifestHash && completedServiceResultSha(getSqlite(), job.id)))
+      ? 'requestable' : 'unavailable',
   };
 }
 
@@ -211,9 +218,10 @@ function toRepoSummary(context: ProjectContext, repoId: string | null | undefine
   };
 }
 
-function toProjectSummary(context: ProjectContext): TaskPoolProjectSummary {
+function toProjectSummary(context: ProjectContext, projects: ProjectRecord[]): TaskPoolProjectSummary {
   return {
     id: context.id,
+    panelProjectId: taskPanelProjectId(context, projects),
     name: context.name,
     slug: context.slug,
     mainRepo: toRepoSummary(context, context.primaryRepo?.id),
@@ -267,6 +275,7 @@ async function resolveProjectContext(
 }
 
 export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPool> {
+  const panelProjects = (await getProjectsLedger()).projects;
   const mission = currentMissionState();
   const lanes = listLanes();
   const lanesByPacketId = new Map(lanes.flatMap((lane) => (
@@ -286,7 +295,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       ? toRemoteExecution(remoteJob, nowMs)
       : null;
     const repoPath = normalizePath(lane?.repoPath ?? packet.workspaceTargetPath);
-    const context = await resolveProjectContext(projectCache, repoPath, lane?.projectId ?? null);
+    const context = await resolveProjectContext(projectCache, repoPath, lane?.projectId ?? packet.projectId ?? null);
     if (options.projectId && context?.id !== options.projectId && context?.slug !== options.projectId) continue;
     if (options.repoPath && repoPath !== normalizePath(options.repoPath)) continue;
 
@@ -317,7 +326,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       sourceIssue: packet.issue ?? null,
       problemDossierId: packet.problemDossierId ?? null,
       problemRemedyId: packet.problemRemedyId ?? null,
-      project: context ? toProjectSummary(context) : null,
+      project: context ? toProjectSummary(context, panelProjects) : null,
       lane: toLaneSummary(lane),
       execution,
       taskBrief: options.includeBrief && context
@@ -364,7 +373,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       sourceIssue: null,
       problemDossierId: null,
       problemRemedyId: null,
-      project: context ? toProjectSummary(context) : null,
+      project: context ? toProjectSummary(context, panelProjects) : null,
       lane: toLaneSummary(lane),
       execution: null,
       taskBrief: options.includeBrief && context

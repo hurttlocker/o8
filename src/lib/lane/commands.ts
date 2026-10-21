@@ -38,9 +38,12 @@ import { decideSurfaceMerge } from '@/lib/lane/surface-merge-decision';
 import { resolveRequireApprovalSync } from '@/lib/operator/defaults';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
+import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
+import { isPacketMergeHeld, MERGE_HOLD_POLICY_RULE_ID } from '@/lib/lane/merge-hold';
+import { assertSessionMergeAllowed } from '@/lib/orchestrator/session-merge-restriction';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
@@ -59,6 +62,8 @@ import { commitDirtyWorktree, readHeadSha } from '@/lib/lane/worktree-merge-git'
 import { withRepoActionRecovery } from '@/lib/lane/repo-action-lock';
 import { materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import { enqueueLaneReview } from '@/lib/lane/review-queue';
+import { assertPacketCreationBaseAuthority, resolvePacketCreationBase, PacketCreationBaseError, type PacketCreationBaseAuthority } from '@/lib/lane/packet-creation-base';
+import { readPinnedLaneCreationBaseCommit } from '@/lib/lane/creation-base';
 import { persistLanePacketHold } from '@/lib/lane/packet-stop-hold';
 import { killLaneSessionsConfirmed } from '@/lib/lane/reap-sessions';
 import { liveWorkerSessionLanes } from '@/lib/lane/worker-session-state';
@@ -100,6 +105,7 @@ export async function dispatch(
   dependencies: {
     afterWorkspaceMaterializationProof?: () => Promise<void>;
     repoActionLeaseMaxWaitMs?: number;
+    packetCreationBase?: PacketCreationBaseAuthority;
   } = {},
 ): Promise<LaneCommandResult> {
   if (command.verb === 'merge' || command.verb === 'create_pr') {
@@ -123,7 +129,7 @@ export async function dispatch(
 
 async function dispatchUnlocked(
   command: LaneCommand,
-  dependencies: { repoActionLeaseMaxWaitMs?: number } = {},
+  dependencies: { repoActionLeaseMaxWaitMs?: number; packetCreationBase?: PacketCreationBaseAuthority } = {},
 ): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
 
@@ -137,6 +143,15 @@ async function dispatchUnlocked(
         command.repoPath,
         command.branch,
       );
+      if (dependencies.packetCreationBase && command.packetId) {
+        assertPacketCreationBaseAuthority(dependencies.packetCreationBase, {
+          repoPath: command.repoPath, packetId: command.packetId, branch: command.branch,
+          baseBranch: command.baseBranch?.trim() || 'main',
+        });
+        if (existing && readPinnedLaneCreationBaseCommit(existing.id) !== dependencies.packetCreationBase.baseCommit) {
+          throw new Error('Existing lane creation base differs from the admitted checkout.');
+        }
+      }
       if (existing) {
         if (!listDispatchableRuntimes({ includeExperimental: true }).includes(existing.runtime) && !(existing.runtime === 'cloud' && command.packetId === existing.packetId)) {
           return {
@@ -154,42 +169,15 @@ async function dispatchUnlocked(
       const baseBranch = command.baseBranch?.trim() || 'main';
       let baseCommit: string | undefined;
       if (command.packetId) {
-        const [{ getWorktreeManager, WorktreeFetchUnreachableError }, fetchRecovery] = await Promise.all([
-          import('@/lib/worktree'),
-          import('@/lib/runtime/fetch-unreachable-recovery'),
-        ]);
-        const retryInSeconds = fetchRecovery.fetchUnreachableCooldownRetrySeconds(command.repoPath, {
-          packetId: command.packetId,
-          stage: 'pre_lane_receipt',
-        });
-        if (retryInSeconds != null) {
-          return {
-            ok: false,
-            laneId: '',
-            note: `Launch blocked: fetch_unreachable cooldown for ${command.repoPath}; retry in ${retryInSeconds}s`,
-            reason: 'fetch_unreachable',
-          };
-        }
         try {
-          baseCommit = await getWorktreeManager(command.repoPath)
-            .resolveCreationBaseCommit(baseBranch, command.branch);
-          fetchRecovery.recordFetchUnreachableRecoverySuccess(command.repoPath);
-        } catch (error) {
-          if (!(error instanceof WorktreeFetchUnreachableError)) throw error;
-          const recovery = fetchRecovery.recoverWorktreeFetchUnreachable({
-            error,
-            repoPath: command.repoPath,
-            packetId: command.packetId,
-            laneId: null,
-            runtime: workerRouting.selectedRuntime,
-            stage: 'pre_lane_receipt',
+          const authority = dependencies.packetCreationBase ?? await resolvePacketCreationBase({
+            repoPath: command.repoPath, packetId: command.packetId, branch: command.branch,
+            baseBranch, runtime: workerRouting.selectedRuntime,
           });
-          return {
-            ok: false,
-            laneId: '',
-            note: recovery.note,
-            reason: 'fetch_unreachable',
-          };
+          baseCommit = authority.baseCommit;
+        } catch (error) {
+          if (!(error instanceof PacketCreationBaseError)) throw error;
+          return { ok: false, laneId: '', note: error.message, reason: error.reason };
         }
       }
 
@@ -293,7 +281,7 @@ async function dispatchUnlocked(
       //    interrupt can race a re-dispatch in. (2026-06-22)
       if (lane.packetId) {
         try {
-          if (!await persistLanePacketHold(lane.packetId)) {
+          if (!await persistLanePacketHold(lane.packetId, lane)) {
             return {
               ok: false,
               laneId: command.laneId,
@@ -474,19 +462,12 @@ async function dispatchUnlocked(
       // #454 — Guard: auto-commit dirty worktrees before allowing review transition
       const reviewCwd = lane.worktreePath ?? lane.repoPath;
       try {
-        const { execFile } = await import('node:child_process');
-        const { promisify } = await import('node:util');
-        const execFileAsync = promisify(execFile);
-        const { stdout: porcelain } = await execFileAsync('git', ['status', '--porcelain'], {
-          windowsHide: true,
-          cwd: reviewCwd,
+        const { stdout: porcelain } = await laneGit(reviewCwd, lane.repoPath, ['status', '--porcelain'], {
           maxBuffer: 10 * 1024 * 1024,
         });
         if (porcelain.trim().length > 0) {
           console.log(`[lane] request_review: dirty worktree detected in ${reviewCwd}, auto-committing`);
-          await execFileAsync('git', ['add', '-A', '--', '.'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['add', '-A', '--', '.'], {
             maxBuffer: 10 * 1024 * 1024,
           });
           // Unstage o8-injected worktree artifacts so they never land in the review
@@ -495,20 +476,19 @@ async function dispatchUnlocked(
           // the target repo's main). Use `git reset` to unstage rather than a negative
           // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
           // dir like node_modules exists in the worktree.
-          await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['reset', '-q', '--', '.claude', 'node_modules'], {
             maxBuffer: 10 * 1024 * 1024,
           });
-          await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
-            windowsHide: true,
-            cwd: reviewCwd,
+          await laneGit(reviewCwd, lane.repoPath, ['commit', '-m', 'auto-commit: agent work before review'], {
             maxBuffer: 10 * 1024 * 1024,
           });
         }
       } catch (err) {
         console.warn(`[lane] request_review: git status/commit check failed for ${reviewCwd}:`, err);
-        // Non-fatal — proceed with the review transition even if the commit check fails
+        if (err instanceof LaneGitMetadataError) {
+          return { ok: false, laneId: command.laneId, note: err.message };
+        }
+        // Other commit failures retain the existing review transition.
       }
 
       // Empty-commit guard — if the worktree has zero commits ahead of base
@@ -518,7 +498,7 @@ async function dispatchUnlocked(
       // a clean <self-review> block but never actually landed a commit.)
       try {
         const baseBranch = lane.baseBranch || 'main';
-        const probe = await probeNoChangesProduced(reviewCwd, baseBranch);
+        const probe = await probeNoChangesProduced(reviewCwd, baseBranch, (args) => laneGit(reviewCwd, lane.repoPath, args));
         if (probe.noChangesProduced) {
           if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
             return {
@@ -569,6 +549,9 @@ async function dispatchUnlocked(
         }
       } catch (err) {
         console.warn(`[lane] request_review: empty-commit check failed for ${reviewCwd}:`, err);
+        if (err instanceof LaneGitMetadataError) {
+          return { ok: false, laneId: command.laneId, note: err.message };
+        }
         if (lane.lastEventLabel === 'launch_failed' || lane.lastEventLabel === 'launch_error') {
           return {
             ok: false,
@@ -726,11 +709,11 @@ async function dispatchUnlocked(
         if (publicationGovernanceDrift) return publicationGovernanceDrift;
 
         // Push the immutable reviewed commit, never the mutable local branch.
-        await materializationAwareExecFile('git', [
+        await laneGit(lockedLane.worktreePath, lockedLane.repoPath, [
           'push',
           'origin',
           `${reviewedSnapshotSha}:refs/heads/${lockedLane.branch}`,
-        ], { windowsHide: true, cwd: lockedLane.worktreePath });
+        ]);
 
         // Create PR via gh CLI
         const prTitle = lockedLane.label || `${lockedLane.branch}`;
@@ -912,6 +895,26 @@ async function dispatchUnlocked(
 
       if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (merge)`);
+      }
+
+      try { assertSessionMergeAllowed(lane.packetId); }
+      catch (error) { return { ok: false, laneId: lane.id, note: error instanceof Error ? error.message : 'Session restriction unavailable; merge held.' }; }
+
+      // #3740 — a held mission merges only by the operator's hand. Checked after
+      // every other gate, so the card means "ready to merge, held by the mission".
+      if (actor !== 'user' && isPacketMergeHeld(lane.packetId)) {
+        return createLaneActionApproval(lane, actor, {
+          verb: 'merge',
+          commitMessage: command.commitMessage,
+          expectedHeadSha: command.expectedHeadSha,
+          reviewSummary: command.reviewSummary,
+          title: 'Merge held by mission',
+          description: `This packet's mission was created with merges held. Approve to merge "${lane.label}" (${lane.branch} → ${lane.baseBranch}), or leave it held.`,
+          summary: `Merge held: ${lane.branch} → ${lane.baseBranch}`,
+          risk: 'medium',
+          policyRuleId: MERGE_HOLD_POLICY_RULE_ID,
+          note: 'Merge held: the mission was created with merges held, so the operator decides. An approval card is waiting.',
+        });
       }
 
       if (isRemoteCustomerLane) {

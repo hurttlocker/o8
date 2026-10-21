@@ -1438,11 +1438,11 @@ describe('POST /api/mobile/symon/session — fleet briefing block (#2410)', () =
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchMock = mintOk();
 
-    const startedAt = Date.now();
+    const startedAt = performance.now();
     const res = await POST(req());
 
     expect(res.status).toBe(200);
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_400);
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(1_400);
     expect(mintedInstructions(fetchMock)).not.toContain(PHONE_BRIEFING_START);
     const skipped = warnSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes('briefing_skipped'));
     expect(skipped).toContain('exceeded 1500ms');

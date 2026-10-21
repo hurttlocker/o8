@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
+import { WorkspaceReviewError } from '@/lib/review/workspace-status';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,8 +59,9 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unable to load workflow review snapshot',
+        code: error instanceof WorkspaceReviewError ? error.code : undefined,
       },
-      { status: 500 },
+      { status: error instanceof WorkspaceReviewError ? error.status : 500 },
     );
   }
 }

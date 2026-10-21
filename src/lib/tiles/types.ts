@@ -16,7 +16,7 @@ export interface TerminalTileContent {
   kind: 'terminal';
   repoPath?: string | null;
   createdFromSplit?: boolean;
-  initialTab?: 'chat' | 'terminal' | 'remote';
+  initialTab?: 'orchestrator' | 'chat' | 'terminal' | 'remote';
 }
 
 export interface PreviewTileContent {
@@ -31,6 +31,8 @@ export interface CanvasTileContent {
 
 export interface BottomTerminalTileContent {
   kind: 'contextual-panel';
+  /** Visibility only; the retained tile and its sessions keep their identity. */
+  hidden?: boolean;
 }
 
 export type TileContent =

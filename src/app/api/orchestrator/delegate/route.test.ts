@@ -16,6 +16,9 @@ vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/panel/api-port', () => ({ resolvePortInfo: () => ({ wsPort: 12345 }) }));
 vi.mock('@/lib/ws-auth', () => ({ getOrCreateWsToken: () => 'test-token' }));
+// The install gate (#3657) reads the host's CLIs; these tests launch through a stub.
+vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
+vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [], 'gpt-5.6-sol': [] } }) }));
 
 const roots: string[] = [];
 
@@ -90,6 +93,44 @@ describe('orchestrator Fast delegation entry', () => {
     expect((await dispatch('a', 'src/a')).status).toBe(403);
   });
 
+  it('persists mixed worker choices, preserves adaptive reset, and never duplicates changed replay', async () => {
+    const { repoPath, state } = fixture();
+    vi.stubEnv('O8_DATA_DIR', state);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const { updateOperatorDefaults, getOperatorDefaultsSync } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ workerRuntimes: ['codex', 'claude-code'], defaultDispatchRuntime: 'codex',
+      defaultDispatchModel: 'gpt-5.6-terra', codexWorkerEffort: 'high', subscriptionProfile: 'both' });
+    const saved = getOperatorDefaultsSync().values;
+    const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
+    const { POST } = await import('./route');
+    const base = { prompt: 'Read the README heading', repoPath, taskName: 'Inspect', checkoutMode: 'shared',
+      parentThreadId: 'thoughts-fast-route', fastCapability: fastDelegationCapability(repoPath, 'thoughts-fast-route'), readOnly: true };
+    const send = (extra: Record<string, unknown>) => POST(new NextRequest('http://localhost/api/orchestrator/delegate', {
+      method: 'POST', body: JSON.stringify({ ...base, ...extra }),
+    }));
+    const first = { runtime: 'codex', model: 'gpt-5.6-sol', requestedEffort: 'adaptive', clientMutationId: 'pin-a', assignedPaths: ['README.md'] };
+    expect((await send(first)).status).toBe(200);
+    expect((await send({ runtime: 'claude-code', model: 'claude-sonnet-5', requestedEffort: 'high', clientMutationId: 'pin-b', assignedPaths: ['package.json'] })).status).toBe(200);
+    expect(launchRuntimeSurface.mock.calls.map(([input]) => [input.runtime, input.model, input.effort])).toEqual([
+      ['codex', 'gpt-5.6-sol', 'adaptive'], ['claude-code', 'claude-sonnet-5', 'high'],
+    ]);
+    const replay = await send(first);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true, workerRouting: { selectedModel: 'gpt-5.6-sol', requestedEffort: 'adaptive' } });
+    expect((await send({ ...first, requestedEffort: 'high' })).status).toBe(409);
+    expect((await send({ ...first, model: 'missing-model', clientMutationId: 'bad-model' })).status).toBe(400);
+    expect((await send({ ...first, runtime: 'gemini', clientMutationId: 'bad-runtime' })).status).toBe(400);
+    expect(launchRuntimeSurface).toHaveBeenCalledTimes(2);
+    const { readSharedCheckoutTeam } = await import('@/lib/orchestrator/shared-checkout-team');
+    const team = readSharedCheckoutTeam({ repoPath, parentThreadId: 'thoughts-fast-route' });
+    expect(team?.members).toHaveLength(2);
+    expect(team?.members.map(member => member.workerRouting)).toEqual([
+      expect.objectContaining({ selectedRuntime: 'codex', selectedModel: 'gpt-5.6-sol', requestedEffort: 'adaptive', selectedEffort: null }),
+      expect.objectContaining({ selectedRuntime: 'claude-code', selectedModel: 'claude-sonnet-5', selectedEffort: 'high' }),
+    ]);
+    expect(getOperatorDefaultsSync().values).toEqual(saved);
+  });
+
   it('rejects a bearer caller spoofing the chat, capability, or selected mode', async () => {
     const { repoPath, state } = fixture();
     vi.stubEnv('O8_DATA_DIR', state);
@@ -133,7 +174,7 @@ describe('orchestrator Fast delegation entry', () => {
     expect((await dispatch('first', ['src/shared.ts'])).status).toBe(200);
     const overlap = await dispatch('second', ['src/shared.ts']);
     expect(overlap.status).toBe(422);
-    expect((await overlap.json()).error).toMatch(/overlaps worker first/);
+    expect(await overlap.json()).toEqual({ ok: false, error: 'Delegation failed' });
     expect(launchRuntimeSurface).toHaveBeenCalledTimes(1);
     const teamFiles = (await import('node:fs')).readdirSync(join(state, 'shared-checkout-teams'))
       .filter((file) => file.endsWith('.json'));

@@ -8,6 +8,7 @@ exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
 links = "tauri-plugin-mcp"
 
 [dependencies]
+o8-restart-safety = { path = "../crates/o8-restart-safety" }
 anyhow = "1.0"
 base64 = "0.22"
 image = "0.24.7"
@@ -43,3 +44,6 @@ tauri-plugin = { version = "2.5", features = ["build"] }
 
 [profile.dev.package."*"]
 opt-level = 0  # Force dependencies to compile with minimal optimization
+
+[dev-dependencies]
+tauri = { version = "2.10", features = ["test"] }

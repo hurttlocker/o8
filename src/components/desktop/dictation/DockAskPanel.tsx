@@ -224,11 +224,17 @@ export function DockAskPanel({ thread, onClose, pendingUser = null, pendingAssis
     if (el) el.scrollTop = el.scrollHeight;
   }, [thread.length, pendingUser?.text, hasPendingUser, hasPendingAssistant]);
 
-  const handleCopy = (index: number, text: string) => {
+  const handleCopy = async (index: number, text: string) => {
     if (!text.trim()) return;
-    void navigator.clipboard?.writeText(text).catch(() => { /* noop */ });
-    setCopiedIdx(index);
-    setTimeout(() => setCopiedIdx((c) => (c === index ? null : c)), 1400);
+    if (!navigator.clipboard?.writeText) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIdx(index);
+      setTimeout(() => setCopiedIdx((c) => (c === index ? null : c)), 1400);
+    } catch {
+      // A failed write must not show “Copied”.
+    }
   };
 
   return (

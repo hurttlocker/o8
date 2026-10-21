@@ -58,13 +58,6 @@ afterAll(() => {
   rmSync(worktreeRoot, { recursive: true, force: true });
 });
 
-function createWorktree(label: string): { branch: string; worktreePath: string } {
-  const branch = `inline/${label}`;
-  const worktreePath = join(worktreeRoot, label);
-  execFileSync('git', ['worktree', 'add', '-q', '-b', branch, worktreePath, 'main'], { cwd: repoPath });
-  return { branch, worktreePath };
-}
-
 async function createRunningPacket(label: string, withWorktree = true, absentWorktree = false) {
   const mission = await createMission({
     issues: [{ number: Date.now(), title: `inline: ${label}`, body: label, url: '' }],
@@ -74,10 +67,14 @@ async function createRunningPacket(label: string, withWorktree = true, absentWor
   });
   const packetId = mission.packets[0]!.id;
   const branch = `inline/${label}`;
-  const worktreePath = withWorktree
-    ? absentWorktree ? join(worktreeRoot, `absent-${label}`) : createWorktree(label).worktreePath
-    : null;
-  const lane = createLane({ repoPath, branch, worktreePath: worktreePath ?? undefined, runtime: 'codex', packetId });
+  const { createManagedPacketWorktree } = await import('./helpers/managed-packet-worktree');
+  const worktree = withWorktree ? await createManagedPacketWorktree(repoPath, { packetId, branch }) : null;
+  const worktreePath = worktree?.path ?? null;
+  const sessionKey = worktree?.sessionKey ?? null;
+  if (absentWorktree && worktreePath) {
+    execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoPath });
+  }
+  const lane = createLane({ repoPath, branch, worktreePath: worktreePath ?? undefined, runtime: 'codex', packetId, sessionKey: sessionKey ?? undefined });
   appendEvent(lane.id, 'update', 'orchestrator', {
     storageAdmissionOwnerGeneration: 1,
     storageAdmissionReservationId: `packet-storage:${packetId}:1`,
@@ -90,7 +87,7 @@ async function createRunningPacket(label: string, withWorktree = true, absentWor
     packet.branchTarget = branch;
     packet.lane = {
       tileId: `tile-${label}`, tabId: `tab-${label}`, repoPath,
-      worktreePath, runtime: 'codex', laneId: lane.id, sessionKey: null,
+      worktreePath, runtime: 'codex', laneId: lane.id, sessionKey,
       lastHeartbeatAt: null, lastEventAt: null, lastEventLabel: null,
     };
   });

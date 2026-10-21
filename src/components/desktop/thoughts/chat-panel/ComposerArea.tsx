@@ -1,20 +1,26 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { InputButtons, type ThinkingEffort } from '../InputButtons';
-import { composerModeSpec, type ComposerMode } from '../composer-mode';
-import type { OrchestratorBackendSetting } from '../operator-defaults';
+import { ComposerVoiceTurnContext } from './ComposerVoiceTurnContext';
+import type { ComposerAreaProps } from './composer-area-types';
+import { ComposerDictationContext, useComposerDictation, useComposerTextareaRef } from '../../dictation/ComposerDictation';
+import { useComposerImageBridge } from './useComposerImageBridge';
+import Image from 'next/image';
+import { useComposerClock } from './useComposerClock';
+import { forwardRef, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useComposerAutosize } from './useComposerAutosize';
+import { InputButtons } from '../InputButtons';
+import { ComposerPopoverVisibilityContext } from './ComposerPopover';
+import { BrainPipButton } from '../../brain/BrainPipButton';
+import { composerModeSpec } from '../composer-mode';
 import { SlashCommandPicker } from './SlashCommandPicker';
+import { transcriptRunningTools } from '../../transcript/activity';
 import { ComposerStatusBar } from './ComposerStatusBar';
-import type { ComposerActivityPacket } from '@/lib/orchestrator/composer-activity';
-import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
-import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
 import { registerComposerCenter } from '../../composer-center-registry';
 import { PromptStashRow } from '../PromptStashRow';
-import { stashPrompt, type PromptStashContext } from '@/lib/orchestrator/prompt-stash';
+import { stashPrompt } from '@/lib/orchestrator/prompt-stash';
 import { OPEN_PROMPT_LIBRARY_EVENT, SAVE_PROMPT_LIBRARY_EVENT } from '@/lib/prompt-library/client';
 import {
   cycleComposerSelectorMode,
@@ -25,77 +31,23 @@ import {
 } from '../composer-selector/state';
 import { useComposerSelectorState } from '../composer-selector/useComposerSelectorState';
 import { ComposerContextRow } from './ComposerContextRow';
-import type { ThoughtsChatPermissionMode } from './types';
-
-interface ComposerAreaProps {
-  activeComposer?: boolean;
-  input: string;
-  onInputChange: (next: string) => void;
-  isOrchestratorMode: boolean;
-  isChatMode?: boolean;
-  isSingleMode?: boolean;
-  displayWaiting: boolean;
-  chatMessages: MobileTranscriptEntry[];
-  /** Packets this thread dispatched — the status bar counts the live ones. */
-  workerPackets?: readonly ComposerActivityPacket[];
-  activeTargetLabel: string;
-  targetAgentExists: boolean;
-  thoughtsBodyBackground: string;
-  enhancing: boolean;
-  preEnhanceInput: string | null;
-  onEnhance: () => void;
-  onUndoEnhance: () => void;
-  onSubmit: () => void;
-  onStop?: () => void;
-  onSlashCommand: (cmd: string) => void;
-  modelLabel: string;
-  /** Raw orchestrator model id — only meaningful in orchestrator mode. */
-  modelId?: string;
-  /** Restore persisted model state without applying user-pick side effects. */
-  onModelRestore?: (model: string) => void;
-  /** Orchestrator-mode model switching from the composer chip. */
-  onModelChange?: (model: string) => void;
-  activeBackend?: OrchestratorBackendSetting;
-  onBackendChange?: (backend: OrchestratorBackendSetting, model?: string) => void;
-  effort: ThinkingEffort;
-  operatorDefaultEffort?: ThinkingEffort;
-  codexDefaultDispatchModel?: string;
-  onEffortChange: (next: ThinkingEffort) => void;
-  adaptiveEnabled: boolean;
-  sessionRulesThreadId?: string | null;
-  repoLabel?: string | null;
-  displayMessagesCount: number;
-  hasAssistantActivity: boolean;
-  footerMeterSlot?: React.ReactNode;
-  attachedImages?: ThoughtsAttachedImage[];
-  attachedFiles?: string[];
-  dragOver?: boolean;
-  dragHandlers?: ThoughtsComposerDragHandlers;
-  onAttachedImageRemove?: (index: number) => void;
-  onAttachedImageAnnotate?: (index: number) => void;
-  onAttachedFileRemove?: (fileName: string) => void;
-  onUploadDiskFiles?: (files: FileList | File[]) => void;
-  composerMode?: ComposerMode;
-  onComposerModeChange?: (mode: ComposerMode) => void;
-  composerModeStorageId?: string;
-  repoPath?: string | null;
-  workspaceTargets?: OrchestratorWorkspaceTarget[];
-  selectedRepoPath?: string | null;
-  onSelectRepoPath?: (next: string) => void;
-  permissionMode?: ThoughtsChatPermissionMode;
-  onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
-  contextLocationSlot?: React.ReactNode;
-  composerLeadingExtras?: React.ReactNode;
-  /** ⌘⏎ or Return while busy routes through the host send buffer. */
-  onSteer?: () => void;
-  sendBufferStatus?: React.ReactNode;
-  promptStash?: PromptStashContext & { onRestore: (text: string) => void };
-  voiceModeEnabled?: boolean;
-  onVoiceModeChange?: (enabled: boolean) => void;
-}
-
+import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
+import { ComposerFileTags } from './ComposerFileTags';
+import { ComposerQueueActions } from './ComposerQueueActions';
+import { WorkerCorrections } from './WorkerCorrections';
+import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
+const subscribeToComposerSelectorFlag = () => () => undefined;
+export type { ComposerAreaProps } from './composer-area-types';
 export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(function ComposerArea({
-  activeComposer = false,
+  activeComposer = false, dictationId, dictationScopeKey,
+  showBrain = true,
+  inputLabel,
+  placeholder,
+  literalInput = false,
+  draftWarning,
+  footerOverride,
+  attachmentContent,
+  inputDisabled = false,
   input,
   onInputChange,
   isOrchestratorMode,
@@ -104,6 +56,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   displayWaiting,
   chatMessages,
   workerPackets,
+  activityContent,
+  voiceControl,
+  workerContext,
   activeTargetLabel,
   targetAgentExists,
   enhancing,
@@ -115,6 +70,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSlashCommand,
   modelLabel,
   modelId,
+  isolatedModelSelection = false,
   onModelRestore,
   onModelChange,
   activeBackend,
@@ -149,18 +105,36 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   contextLocationSlot,
   composerLeadingExtras,
   onSteer,
+  queueSaving = false,
   sendBufferStatus,
   promptStash,
   voiceModeEnabled,
   onVoiceModeChange,
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
+  const [textareaRef, setTextareaRef] = useComposerTextareaRef(inputRef);
+  const voiceDelivery = useRef<((text: string) => boolean) | null>(null);
+  const localDictationId = useComposerDictation({
+    active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
+    scopeKey: JSON.stringify([dictationScopeKey, repoPath, sessionRulesThreadId, inputLabel]),
+    onText: text => {
+      if (voiceDelivery.current?.(text)) return;
+      if (text) onInputChange(`${input}${input && !/\s$/.test(input) ? ' ' : ''}${text}`);
+    },
+  });
+  const voiceTurnTarget = useMemo(() => ({
+    dictationId: dictationId ?? localDictationId,
+    intercept: (handler: (text: string) => boolean) => {
+      voiceDelivery.current = handler;
+      return () => { if (voiceDelivery.current === handler) voiceDelivery.current = null; };
+    },
+  }), [dictationId, localDictationId]);
+  const now = useComposerClock(activeComposer && isOrchestratorMode);
+  const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
+  useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const [composerSelectorV1Enabled, setComposerSelectorV1Enabled] = useState(true);
-  useEffect(() => {
-    setComposerSelectorV1Enabled(readComposerSelectorV1Flag());
-  }, []);
+  const composerSelectorV1Enabled = useSyncExternalStore(subscribeToComposerSelectorFlag, readComposerSelectorV1Flag, () => true);
   const selectorModelId = resolveEffectiveComposerLeadModelId(activeBackend, modelId, codexDefaultDispatchModel);
   const selectorControls = useComposerSelectorState({
     enabled: isOrchestratorMode,
@@ -175,43 +149,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     threadId: sessionRulesThreadId ?? null,
     repoPath,
     onModeChange: onComposerModeChange,
+    isolated: isolatedModelSelection,
     onModelRestore,
     onModelChange,
     onBackendChange,
     onEffortChange,
   });
-  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
-    if (!isOrchestratorMode) return [];
-    // Scan the latest assistant message for any tool calls still marked as
-    // running. This is what the sticky status bar uses to stay visible even
-    // if orchStream.status flickers — if there are live tool calls, the user
-    // should see the bar regardless of the top-level status flag.
-    for (let i = chatMessages.length - 1; i >= 0; i--) {
-      const msg = chatMessages[i];
-      if (msg.role !== 'assistant') continue;
-      const tools = msg.toolCalls ?? [];
-      const running = tools.filter((t) => t.status === 'running' || t.status === 'calling');
-      if (running.length > 0) {
-        // Stale-turn gate (Q's iMac, 2026-07-17: "225:16 · 1 running" — a
-        // dead turn from a previous app run restores with a tool call whose
-        // completion event never landed, and the bar counted forever while
-        // the composer sat locked in "Queue for next turn"). A genuinely
-        // live turn keeps the stream busy (displayWaiting) — including
-        // durable-turn reattach — and stream flicker gaps are seconds, so an
-        // idle stream plus a message older than the ceiling means the tool
-        // is dead history, not work. Server-authoritative healing (#8) is
-        // the structural fix; this stops the lie at the surface.
-        const STALE_TURN_MS = 30 * 60 * 1000;
-        const stale = !displayWaiting
-          && typeof msg.timestamp === 'number'
-          && Date.now() - msg.timestamp > STALE_TURN_MS;
-        return stale ? [] : running;
-      }
-      // Stop at the most recent assistant message — older tool calls are done.
-      break;
-    }
-    return [];
-  }, [chatMessages, displayWaiting, isOrchestratorMode]);
+  const runningTools = useMemo<MobileTranscriptToolCall[]>(() => isOrchestratorMode
+    ? transcriptRunningTools(chatMessages, displayWaiting, now) : [], [chatMessages, displayWaiting, isOrchestratorMode, now]);
   const latestUserEntry = useMemo(() => {
     for (let i = chatMessages.length - 1; i >= 0; i--) {
       if (chatMessages[i].role === 'user') return chatMessages[i];
@@ -226,7 +171,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const awaitingReply = chatMessages[chatMessages.length - 1]?.role === 'user';
   const slashSuggestions = useMemo(() => {
     const normalizedInput = input.trimStart();
-    if (!isOrchestratorMode || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
+    if (!isOrchestratorMode || literalInput || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
       return [];
     }
     const commandToken = normalizedInput.split(/\s+/, 1)[0]?.toLowerCase() ?? '';
@@ -234,33 +179,18 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ...getOrchestratorSlashCommandSuggestions(input),
       ...MODE_ROUTING_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken)),
     ];
-  }, [dismissedSlashInput, input, isOrchestratorMode]);
-
-  // After the parent clears `input` (post-submit), force the textarea height
-  // back to its minHeight. The onSubmit keydown handler already sets
-  // height: 'auto' optimistically, but React's value-clear happens on the next
-  // render so the autosize effect inside onChange never re-fires to shrink the
-  // box — the result is a textarea that stays oversized with the "Queue for
-  // next turn" placeholder showing at the grown height. Watching `input` for
-  // the empty-string transition catches every clear path (submit, slash-route,
-  // programmatic resets) without having to touch each call site.
-  useEffect(() => {
-    if (input !== '') return;
-    const node = inputRef && 'current' in inputRef ? inputRef.current : null;
-    if (!node) return;
-    node.style.height = 'auto';
-  }, [input, inputRef]);
+  }, [dismissedSlashInput, input, isOrchestratorMode, literalInput]);
 
   useEffect(() => {
     const composerCenter = composerCenterRef.current;
     if (!composerCenter || !activeComposer) return;
     return registerComposerCenter(composerCenter);
   }, [activeComposer]);
-
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Keep the textarea typeable during a running turn for steering.
   // The Send button itself still flips to Stop via `working` on InputButtons.
-  const isDisabled = !acceptsDirectInput && !targetAgentExists;
+  const isDisabled = inputDisabled || (!acceptsDirectInput && !targetAgentExists);
+  useComposerImageBridge(composerCenterRef, activeComposer, isDisabled, JSON.stringify([repoPath, selectedRepoPath, sessionRulesThreadId, composerModeStorageId]), attachedImages, onUploadDiskFiles);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
   let composerPlaceholder = `Message ${activeTargetLabel}…`;
@@ -307,30 +237,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   const handleFileReferenceSelect = (filePath: string) => {
     const node = getInputNode();
-    const cursorPos = node?.selectionStart ?? input.length;
-    const textBeforeCursor = input.slice(0, cursorPos);
-    const textAfterCursor = input.slice(cursorPos);
-    const atMatch = textBeforeCursor.match(/@[\w./-]*$/);
-
-    let nextValue: string;
-    let nextCursorPos: number;
-    if (atMatch && typeof atMatch.index === 'number') {
-      const beforeMatch = textBeforeCursor.slice(0, atMatch.index);
-      nextValue = `${beforeMatch}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = beforeMatch.length + filePath.length + 2;
-    } else {
-      const spacer = textBeforeCursor.length === 0 || /\s$/.test(textBeforeCursor) ? '' : ' ';
-      nextValue = `${textBeforeCursor}${spacer}@${filePath} ${textAfterCursor}`;
-      nextCursorPos = textBeforeCursor.length + spacer.length + filePath.length + 2;
-    }
-
-    updateInput(nextValue);
+    const next = addComposerFileReference(input, filePath, node?.selectionStart ?? fileReferences.body.length);
+    updateInput(next.input);
     requestAnimationFrame(() => {
       const nextNode = getInputNode();
       nextNode?.focus();
       if (!nextNode) return;
-      nextNode.selectionStart = nextCursorPos;
-      nextNode.selectionEnd = nextCursorPos;
+      nextNode.selectionStart = next.cursor;
+      nextNode.selectionEnd = next.cursor;
       nextNode.style.height = 'auto';
       nextNode.style.height = `${Math.min(nextNode.scrollHeight, 200)}px`;
     });
@@ -352,6 +266,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
+    <ComposerVoiceTurnContext.Provider value={dictationId ? null : voiceTurnTarget}>
+    <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
       paddingTop: 24,
       paddingRight: 12,
@@ -374,8 +290,16 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           awaitingReply={awaitingReply}
         />
       ) : null}
+      {activityContent}
       {sendBufferStatus}
-      <div style={{ position: 'relative' }}>
+      {draftWarning ? <div role="status" style={{ fontSize: 11, color: 'var(--t-text-secondary)', paddingBottom: 8 }}>{draftWarning}</div> : null}
+      <div data-brain-composer-anchor="" style={{ position: 'relative' }}>
+        {!literalInput && isOrchestratorMode && sessionRulesThreadId && (selectedRepoPath ?? repoPath) ? <WorkerCorrections
+          key={`${selectedRepoPath ?? repoPath}:${sessionRulesThreadId}`} repoPath={(selectedRepoPath ?? repoPath)!} threadId={sessionRulesThreadId}
+          draft={input} hasAttachments={Boolean(attachedImages.length || attachedFiles.length)} working={displayWaiting} active={activeComposer} workerContext={workerContext}
+          onDelivered={sent => { if (input === sent) onInputChange(''); }}
+        /> : null}
+        {showBrain ? <BrainPipButton preferredRuntime={activeBackend} active={activeComposer} repoPath={selectedRepoPath ?? repoPath} conversationKey={sessionRulesThreadId} /> : null}
         <SlashCommandPicker
           suggestions={slashSuggestions}
           activeIndex={activeSlashIndex}
@@ -404,6 +328,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             outlineOffset: -2,
           }}
         >
+          {attachmentContent}
           {attachedImages.length > 0 ? (
             <div style={{
               display: 'flex',
@@ -416,7 +341,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             }}>
               {attachedImages.map((image, index) => (
                 <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
-                  <img
+                  <Image width={56} height={56} unoptimized
                     src={image.dataUri}
                     alt={image.name}
                     title={onAttachedImageAnnotate ? 'Click to annotate' : undefined}
@@ -562,15 +487,17 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               ))}
             </div>
           ) : null}
+          <ComposerFileTags paths={fileReferences.paths} repoPath={selectedRepoPath ?? repoPath} onRemove={path => {
+            updateInput(writeComposerFileReferences(fileReferences.body, fileReferences.paths.filter(item => item !== path)));
+            getInputNode()?.focus();
+          }} />
           <textarea
-            ref={inputRef}
+            ref={setTextareaRef}
             data-o8-active-composer={activeComposer ? 'true' : undefined}
-            value={input}
+            aria-label={inputLabel}
+            value={fileReferences.body}
             onChange={(event) => {
-              updateInput(event.target.value);
-              const el = event.target;
-              el.style.height = 'auto';
-              el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+              updateInput(writeComposerFileReferences(event.target.value, fileReferences.paths));
             }}
             onKeyDown={(event) => {
               if (
@@ -594,7 +521,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && composerMode
                 && onComposerModeChange
                 && event.key === 'Tab'
@@ -610,7 +537,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 return;
               }
               if (
-                composerSelectorV1Enabled
+                !literalInput && composerSelectorV1Enabled
                 && selectorModelId
                 && activeBackend
                 && isComposerEffortShortcut(event.nativeEvent)
@@ -648,7 +575,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
-              // ⌘⏎ / Ctrl+Enter — steer. Routes through the parent's enqueue path.
+              // Steering requires an actual live-runtime acknowledgement.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
@@ -661,8 +588,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
                 if (isWorkingLocked) {
-                  if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
-                  onSteer();
+                  if ((!input.trim() && attachedImages.length === 0) || queueSaving) return;
+                  onSubmit();
                   if (event.currentTarget) {
                     event.currentTarget.style.height = 'auto';
                   }
@@ -700,13 +627,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
             }}
             onPaste={handleTextareaPaste}
-            placeholder={composerPlaceholder}
+            placeholder={placeholder ?? composerPlaceholder}
             disabled={isDisabled}
             rows={2}
             style={{
               width: '100%',
               minHeight: 52,
-              maxHeight: 200,
+              maxHeight: 'max(52px, min(200px, 28vh, calc(100cqh - 120px)))',
+              display: 'block',
               paddingTop: 11,
               paddingRight: 14,
               paddingBottom: 4,
@@ -727,67 +655,78 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               // 2026-07-15, 80% zoom) that also ate clicks along its band.
               overflowX: 'hidden',
               overflowY: 'auto',
+              overscrollBehavior: 'contain',
+              overflowWrap: 'anywhere',
             }}
           />
-          <InputButtons
-            input={input}
-            hasAttachments={attachedImages.length > 0}
-            enhancing={enhancing}
-            preEnhanceInput={preEnhanceInput}
-            onEnhance={onEnhance}
-            onUndoEnhance={onUndoEnhance}
-            onSubmit={onSubmit}
-            modelLabel={modelLabel}
-            modelId={isOrchestratorMode ? selectorModelId : undefined}
-            onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
-            activeBackend={isOrchestratorMode ? activeBackend : undefined}
-            onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
-            effort={selectorControls.state.effort}
-            onEffortChange={selectorControls.onEffortChange}
-            adaptiveEnabled={adaptiveEnabled}
-            sessionRulesThreadId={sessionRulesThreadId}
-            repoLabel={null}
-            displayMessagesCount={displayMessagesCount}
-            working={isOrchestratorMode && displayWaiting}
-            onStop={isOrchestratorMode ? onStop : undefined}
-            onUploadDiskFiles={onUploadDiskFiles}
-            composerMode={composerMode}
-            onComposerModeChange={selectorControls.onModeChange}
-            composerSelectorController={selectorControls}
-            onFileReferenceSelect={handleFileReferenceSelect}
-            repoPath={repoPath}
-            workspaceTargets={workspaceTargets}
-            selectedRepoPath={selectedRepoPath}
-            onSelectRepoPath={onSelectRepoPath}
-            inlineLeadingExtras={composerLeadingExtras}
-            inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
-            voiceModeEnabled={voiceModeEnabled}
-            onVoiceModeChange={onVoiceModeChange}
-            onBrowsePrompts={isOrchestratorMode ? () => {
-              window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
-            } : undefined}
-            onSavePrompt={isOrchestratorMode ? (body) => {
-              window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
-                detail: { body, repoPath: repoPath ?? null },
-              }));
-            } : undefined}
-            composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
-            onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
-          />
+          {!footerOverride && isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
+          {footerOverride}
+          {/* Keep the chat's Live owner mounted when the visible footer changes. */}
+          {footerOverride != null && !voiceControl ? null : <ComposerPopoverVisibilityContext.Provider value={footerOverride == null}>
+            <div style={{ display: footerOverride != null ? 'none' : 'contents' }}>
+              <InputButtons
+                input={input}
+                hasAttachments={attachedImages.length > 0}
+                enhancing={enhancing}
+                preEnhanceInput={preEnhanceInput}
+                onEnhance={onEnhance}
+                onUndoEnhance={onUndoEnhance}
+                onSubmit={onSubmit}
+                modelLabel={modelLabel}
+                modelId={isOrchestratorMode ? selectorModelId : undefined}
+                onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
+                activeBackend={isOrchestratorMode ? activeBackend : undefined}
+                onBackendChange={isOrchestratorMode ? selectorControls.onBackendChange : undefined}
+                effort={selectorControls.state.effort}
+                onEffortChange={selectorControls.onEffortChange}
+                adaptiveEnabled={adaptiveEnabled}
+                sessionRulesThreadId={sessionRulesThreadId}
+                repoLabel={null}
+                displayMessagesCount={displayMessagesCount}
+                working={isOrchestratorMode && displayWaiting}
+                onStop={isOrchestratorMode ? onStop : undefined}
+                onUploadDiskFiles={onUploadDiskFiles}
+                composerMode={composerMode}
+                onComposerModeChange={selectorControls.onModeChange}
+                composerSelectorController={selectorControls}
+                onFileReferenceSelect={handleFileReferenceSelect}
+                repoPath={repoPath}
+                workspaceTargets={workspaceTargets}
+                selectedRepoPath={selectedRepoPath}
+                onSelectRepoPath={onSelectRepoPath}
+                inlineLeadingExtras={composerLeadingExtras}
+                managedVoiceControl={voiceControl}
+                permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
+                  ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}
+                    // The o8 and Pi leads run on the built-in Pi orchestrator, whose commands stay in the workspace.
+                    fullAccessDetail={activeBackend === 'o8' || activeBackend === 'pi' ? WORKSPACE_FULL_ACCESS_DETAIL : undefined} /> : null}
+                inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
+                voiceModeEnabled={voiceModeEnabled}
+                onVoiceModeChange={onVoiceModeChange}
+                onBrowsePrompts={isOrchestratorMode ? () => {
+                  window.dispatchEvent(new CustomEvent(OPEN_PROMPT_LIBRARY_EVENT));
+                } : undefined}
+                onSavePrompt={isOrchestratorMode ? (body) => {
+                  window.dispatchEvent(new CustomEvent(SAVE_PROMPT_LIBRARY_EVENT, {
+                    detail: { body, repoPath: repoPath ?? null },
+                  }));
+                } : undefined}
+                composerSelectorV1Enabled={isOrchestratorMode ? composerSelectorV1Enabled : false}
+                onRequestTextareaFocus={() => composerCenterRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()}
+              />
+            </div>
+          </ComposerPopoverVisibilityContext.Provider>}
         </div>
       </div>
-
       <ComposerContextRow
+        showRepoTarget={displayMessagesCount === 0 && !displayWaiting && !hasAssistantActivity}
         contextLocationSlot={contextLocationSlot}
         repoLabel={repoLabel}
         workspaceTargets={workspaceTargets}
         selectedRepoPath={selectedRepoPath}
         onSelectRepoPath={onSelectRepoPath}
         onAddProject={() => window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode: 'existing' } }))}
-        permissionMode={isOrchestratorMode ? permissionMode : undefined}
-        onPermissionModeChange={isOrchestratorMode ? onPermissionModeChange : undefined}
       />
-
       {footerLeadingSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -796,5 +735,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
         </div>
       ) : null}
     </div>
+    </ComposerDictationContext.Provider>
+    </ComposerVoiceTurnContext.Provider>
   );
 });

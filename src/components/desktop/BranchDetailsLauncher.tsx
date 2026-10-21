@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SmoothCorners } from '@lisse/react';
-import { CollapsedRailIcon, ChevronsLeftIcon } from './branch-rail-collapse';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { WORKSPACE_TOOLS_STATE, WORKSPACE_TOOLS_TOGGLE } from './shell/WorkspaceToolsButton';
+import { FloatingSurface } from './FloatingSurface';
+import { CollapsedRailIcon, ChevronsLeftIcon, ChevronsRightIcon } from './branch-rail-collapse';
+import { WorkspaceContextSection } from './WorkspaceContextSection';
 import {
   COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
   COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
   COLLAPSED_BRANCH_RAIL_INSET,
   COLLAPSED_BRANCH_RAIL_WIDTH,
-  WORKSPACE_RAIL_CORNER_SMOOTHING,
 } from './branch-rail-geometry';
 import {
   BranchDetailsOverlay,
@@ -34,27 +35,6 @@ import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarg
 function normalizePath(path: string | null | undefined): string | null {
   if (!path) return null;
   return path.replace(/\/+$/, '');
-}
-
-/** Environment section: closed unless the operator opened it before. */
-const ENVIRONMENT_OPEN_KEY = 'o8:branch-rail:environment-open';
-
-function readEnvironmentOpen(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(ENVIRONMENT_OPEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeEnvironmentOpen(open: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(ENVIRONMENT_OPEN_KEY, open ? '1' : '0');
-  } catch {
-    // localStorage unavailable — the section just falls back to closed.
-  }
 }
 
 function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId: string | null | undefined): OrchestratorPacket | null {
@@ -128,8 +108,10 @@ function pickTarget(
 
 const NOOP = () => {};
 
-export function BranchDetailsLauncher({ visible = true, repoPath = null, threadId = null, collapsed = false, onToggleCollapsed }: {
+export function BranchDetailsLauncher({ visible = true, repoPath = null, threadId = null, collapsed = false, onToggleCollapsed, header = false, workspaceId }: {
   visible?: boolean;
+  header?: boolean;
+  workspaceId?: string;
   repoPath?: string | null;
   /** Active orchestrator thread — scopes the Sources card to this conversation. */
   threadId?: string | null;
@@ -140,8 +122,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   const data = useOrchestratorData();
   const hasData = Boolean(data);
   const [progressOpen, setProgressOpen] = useState(false);
-  // Spawns closed and stays wherever the operator last put it (Q 2026-07-16).
-  const [environmentOpen, setEnvironmentOpen] = useState(readEnvironmentOpen);
+  const [headerOpen, setHeaderOpen] = useState(false);
 
   // Click-to-open overlay (Q ruling 2026-07-14). The capsule stays in layout
   // (never pushes the chat); CLICKING it toggles the full card stack open as a
@@ -149,31 +130,76 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // NOT hover-triggered — the operator wants the same click trigger as before,
   // with the drawer floating over the chat instead of widening the rail.
   const capsuleRef = useRef<HTMLElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
   const measure = useCallback(() => {
+    if (header) capsuleRef.current = [...document.querySelectorAll<HTMLElement>('[data-workspace-tools-owner]')]
+      .find(node => node.dataset.workspaceToolsOwner === (workspaceId ?? ''))?.querySelector('button') ?? null;
     const el = capsuleRef.current;
-    if (el) setAnchorRect(el.getBoundingClientRect());
-  }, []);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setAnchorRect(header ? new DOMRect(rect.x, rect.bottom + 8, rect.width, 0) : rect);
+    }
+  }, [header, workspaceId]);
 
-  const isOpen = !collapsed;
+  const isOpen = visible && (header ? headerOpen : !collapsed);
+  const toggle = () => {
+    measure();
+    if (header) setHeaderOpen(value => !value); else onToggleCollapsed?.();
+    window.requestAnimationFrame(() => {
+      if (isOpen) {
+        if (header) capsuleRef.current?.focus();
+        else capsuleRef.current?.querySelector<HTMLButtonElement>('[aria-expanded]')?.focus();
+      }
+      else overlayRef.current?.querySelector<HTMLButtonElement>('[aria-label="Hide workspace details"]')?.focus();
+    });
+  };
+
+  useEffect(() => {
+    if (!header || !visible || !hasData) return;
+    const request = (event: Event) => {
+      if ((event as CustomEvent<{ workspaceId: string }>).detail?.workspaceId !== (workspaceId ?? '')) return;
+      measure(); setHeaderOpen(value => !value);
+      requestAnimationFrame(() => overlayRef.current?.querySelector<HTMLButtonElement>('[aria-label="Hide workspace details"]')?.focus());
+    };
+    window.addEventListener(WORKSPACE_TOOLS_TOGGLE, request);
+    return () => window.removeEventListener(WORKSPACE_TOOLS_TOGGLE, request);
+  }, [header, visible, hasData, workspaceId, measure]);
+  useEffect(() => {
+    if (!header) return;
+    window.dispatchEvent(new CustomEvent(WORKSPACE_TOOLS_STATE, { detail: { workspaceId: workspaceId ?? '', open: isOpen } }));
+    if (!isOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!capsuleRef.current?.contains(event.target as Node) && !overlayRef.current?.contains(event.target as Node)) setHeaderOpen(false);
+    };
+    const select = () => setHeaderOpen(false);
+    document.addEventListener('pointerdown', outside);
+    window.addEventListener('o8:request-select-tab', select);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      window.removeEventListener('o8:request-select-tab', select);
+      window.dispatchEvent(new CustomEvent(WORKSPACE_TOOLS_STATE, { detail: { workspaceId: workspaceId ?? '', open: false } }));
+    };
+  }, [header, isOpen, workspaceId]);
 
   // Measure the capsule on mount + keep the overlay glued to it. The overlay is
   // always mounted (it cross-fades / morphs on open+close), so we measure
   // regardless of open state.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    measure();
-    // The right panel animates the workspace width without a window resize.
-    // Keep the closed drawer's anchor current too, so its first open frame
-    // starts at the rail instead of jumping from the previous panel position.
-    const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
-    if (workspace) observer?.observe(workspace);
+    const frame = window.requestAnimationFrame(() => {
+      measure();
+      // Observe after resolving the header trigger and its workspace.
+      const workspace = capsuleRef.current?.closest('[data-mcp-scope="workspace"]');
+      if (workspace) observer?.observe(workspace);
+    });
     const onScrollResize = () => measure();
     window.addEventListener('scroll', onScrollResize, true);
     window.addEventListener('resize', onScrollResize);
     return () => {
+      window.cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener('scroll', onScrollResize, true);
       window.removeEventListener('resize', onScrollResize);
@@ -189,7 +215,6 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // idle frames are a string compare. Closed card costs nothing.
   useEffect(() => {
     if (!isOpen || typeof window === 'undefined') return;
-    measure();
     let raf = 0;
     let lastKey = '';
     const glue = () => {
@@ -199,31 +224,29 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
         const key = `${rect.top}|${rect.right}`;
         if (key !== lastKey) {
           lastKey = key;
-          setAnchorRect(rect);
+          setAnchorRect(header ? new DOMRect(rect.x, rect.bottom + 8, rect.width, 0) : rect);
         }
       }
       raf = window.requestAnimationFrame(glue);
     };
     raf = window.requestAnimationFrame(glue);
     return () => window.cancelAnimationFrame(raf);
-  }, [isOpen, measure]);
+  }, [header, isOpen]);
 
   const activePacket = useMemo(
-    () => pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath),
+    () => repoPath ? pickActivePacketForRepo(data?.missionState?.packets, data?.selectedPacketId, repoPath) : null,
     [data?.missionState?.packets, data?.selectedPacketId, repoPath],
   );
 
   const activeTarget = useMemo(
-    () => pickTarget(activePacket, data?.workspaceTargets ?? [], repoPath),
+    () => repoPath ? pickTarget(activePacket, data?.workspaceTargets ?? [], repoPath) : null,
     [activePacket, data?.workspaceTargets, repoPath],
   );
 
-  const branch = activePacket?.branchTarget || activeTarget?.branch || 'main';
-  // Fall back to the tab's own repoPath (the prop) when there's no active packet
-  // or matching target, so the hooks below stay scoped to THIS repo's local
-  // state instead of resolving nothing (or, pre-scoping, a foreign repo).
-  const resolvedRepoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? repoPath ?? null;
-  const changes = useWorkspaceChanges(resolvedRepoPath);
+  // Git identity is the chat's checkout, never a selected worker's branch.
+  const resolvedRepoPath = repoPath;
+  const changes = useWorkspaceChanges(resolvedRepoPath, { active: visible });
+  const branch = changes.branch && changes.branch !== 'unknown' && changes.branch !== '(detached)' ? changes.branch : null;
   // Sources card: the links the operator put into THIS conversation.
   const sources = useThreadSources(threadId);
   // Browser card: the pages o8 owns in the right panel's pane, o8 itself filtered out.
@@ -234,9 +257,9 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
   // without opening the PRs tab (Q ruling 2026-07-11). Keyed by repo NAME (the
   // list API resolves slug/name, not a local path). Null on main/master or
   // when no open PR points at the branch.
-  const prRepoIdent = activeTarget?.repoName
+  const prRepoIdent = (changes.repoSlug || activeTarget?.repoName)
     ?? (resolvedRepoPath ? resolvedRepoPath.split('/').filter(Boolean).pop() ?? null : null);
-  const branchPr = useBranchPr(prRepoIdent, branch, resolvedRepoPath);
+  const branchPr = useBranchPr(visible ? prRepoIdent : null, visible ? branch : null, resolvedRepoPath);
   const { detail: prDetail } = usePrDetail(branchPr?.number ?? null, branchPr?.repoSlug ?? null);
 
   // Coexists with the wide O8 panel now (Q ruling 2026-07-11) — no longer
@@ -249,12 +272,11 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     : 0;
 
   const packetRuntime = activePacket?.runtime ?? data.agents.find((agent) => agent.status === 'running' || agent.currentTask)?.runtime;
-  const progressRows = buildProgressRows(activePacket, activeTarget, branch);
+  const progressRows = buildProgressRows(activePacket);
   const inboxActive = inboxCount > 0;
   const inboxTitle = inboxActive
     ? `${inboxCount} human-required inbox item${inboxCount === 1 ? '' : 's'}`
     : 'Supervisor inbox';
-  const hasDiff = changes.totalAdditions > 0 || changes.totalDeletions > 0;
 
   const open = (tab: OverlayPanelTab) => {
     data.onOpenO8Panel?.({ repoPath: resolvedRepoPath, tab });
@@ -275,12 +297,22 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
     }, 250);
   };
 
+  const utilities = <div aria-label="Workspace tools" style={{ display: 'flex', justifyContent: 'space-between', gap: 4, paddingTop: 8, flexShrink: 0 }}>
+    <WorkspaceUtility label="Inbox" title={inboxTitle} onClick={openSupervisorInboxTab} warning={inboxActive}>
+      <MailOpen width={14} height={14} strokeWidth={1.6} />{inboxActive ? <span>{inboxCount}</span> : null}
+    </WorkspaceUtility>
+    <WorkspaceUtility label="o8.md" title="o8.md preview" onClick={() => togglePip('spec')}><PageEdit width={14} height={14} strokeWidth={1.6} /></WorkspaceUtility>
+    {isOpen ? <FooterPorts placement={header ? 'above' : 'rail'} onPortPreview={(_port, url) => openSource(url)}
+      renderTrigger={({ pageCount }) => <WorkspaceUtility label="Ports" title={`Ports and browser preview${pageCount ? ` · ${pageCount} local pages` : ''}`}
+        onClick={NOOP}><GlobeIcon /></WorkspaceUtility>} /> : null}
+  </div>;
+
   return (
     <>
       {/* Always-in-layout trigger: the collapsed icon capsule (Codex parity, Q
           2026-07-13). Clicking an icon floats the full card stack as an overlay
           — the capsule width never changes, so the chat is never pushed. */}
-      <aside
+      {!header ? <aside
         ref={capsuleRef}
         className="hide-scrollbar"
         style={{
@@ -299,35 +331,22 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
           scrollbarWidth: 'none',
         }}
       >
-        <SmoothCorners
-          corners={{ radius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS, smoothing: WORKSPACE_RAIL_CORNER_SMOOTHING }}
-          innerBorder={{ width: 1, color: 'var(--t-divider-subtle)', opacity: 1 }}
-          autoEffects={false}
-          style={{
-            width: COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 0,
-            paddingTop: 5,
-            paddingBottom: 5,
-            paddingLeft: 4,
-            paddingRight: 4,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'transparent',
-            background: 'var(--t-bg-card)',
-            flexShrink: 0,
-            // Morph: the capsule fades out as the card scales up out of its
-            // corner, so the two never coexist (Q ruling 2026-07-14).
-            opacity: isOpen ? 0 : 1,
-            pointerEvents: isOpen ? 'none' : 'auto',
-            transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}>
+        <FloatingSurface
+          overlay
+          data-workspace-shortcut-capsule
+          inert={isOpen}
+          aria-hidden={isOpen}
+          style={{ width: COLLAPSED_BRANCH_RAIL_CAPSULE_WIDTH, flexShrink: 0,
+            borderRadius: COLLAPSED_BRANCH_RAIL_CAPSULE_RADIUS,
+            boxShadow: '0 4px 14px rgba(15, 23, 42, 0.16)',
+            opacity: isOpen ? 0 : 1, pointerEvents: isOpen ? 'none' : 'auto',
+            transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)' }}
+          contentStyle={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
+            paddingTop: 5, paddingBottom: 5, paddingLeft: 4, paddingRight: 4 }}>
           {/* The arrow opens the drawer. Every other glyph here used to ALSO
               just open the drawer — five buttons for one action. They carry
               their own destinations now (Q 2026-07-16). */}
-          <CollapsedRailIcon title="Expand" onClick={() => onToggleCollapsed?.()}><ChevronsLeftIcon /></CollapsedRailIcon>
+          <CollapsedRailIcon title="Workspace details" expanded={isOpen} onClick={toggle}><ChevronsLeftIcon /></CollapsedRailIcon>
           <CollapsedRailIcon
             title={inboxTitle}
             onClick={openSupervisorInboxTab}
@@ -345,7 +364,7 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
               status bar (Q 2026-07-16). Hover lists the local pages; clicking
               the globe opens the browser; clicking a page in the list opens
               THAT url in it. */}
-          <FooterPorts
+          {!isOpen ? <FooterPorts
             placement="rail"
             // Clicking a page in the hover opens that url in o8's browser —
             // the same path the Sources rows already take.
@@ -359,33 +378,30 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
                 <GlobeIcon />
               </CollapsedRailIcon>
             )}
-          />
-          <CollapsedRailIcon title="Sources" onClick={() => onToggleCollapsed?.()}><SquaresIcon /></CollapsedRailIcon>
-        </SmoothCorners>
-      </aside>
+          /> : null}
+          {sources.length > 0 ? <CollapsedRailIcon title="Sources" onClick={toggle}><SquaresIcon /></CollapsedRailIcon> : null}
+        </FloatingSurface>
+      </aside> : null}
 
       {anchorRect ? (
         <BranchDetailsOverlay
+          headerAnchor={header}
+          overlayRef={overlayRef}
           open={isOpen}
           anchorRect={anchorRect}
           onMouseEnter={NOOP}
           onMouseLeave={NOOP}
-          onToggleCollapsed={onToggleCollapsed}
+          onToggleCollapsed={toggle}
+          workspaceContext={<WorkspaceContextSection key={resolvedRepoPath ?? 'home'} repoPath={resolvedRepoPath}
+            repoName={changes.repoSlug || activeTarget?.repoName} changes={changes}
+            onBrowseFiles={path => data.onOpenO8Panel?.({ repoPath: path, tab: 'files' })}
+            onReviewChanges={() => open('workspace')}
+            controls={<CollapsedRailIcon title="Hide workspace details" onClick={toggle}><ChevronsRightIcon /></CollapsedRailIcon>} />}
+          utilities={utilities}
           progressHint={activePacket?.referenceLabel ?? activeTarget?.label ?? 'Workspace'}
           progressRows={progressRows}
           progressOpen={progressOpen}
           onToggleProgress={() => setProgressOpen((value) => !value)}
-          environmentOpen={environmentOpen}
-          onToggleEnvironment={() => setEnvironmentOpen((value) => {
-            const next = !value;
-            writeEnvironmentOpen(next);
-            return next;
-          })}
-          hasDiff={hasDiff}
-          additions={changes.totalAdditions}
-          deletions={changes.totalDeletions}
-          changesFileCount={changes.files.length}
-          branch={branch}
           prDetail={prDetail ?? null}
           prChecks={prChecks}
           prCommentCount={prCommentCount}
@@ -403,22 +419,29 @@ export function BranchDetailsLauncher({ visible = true, repoPath = null, threadI
 
 function buildProgressRows(
   activePacket: OrchestratorPacket | null,
-  activeTarget: OrchestratorWorkspaceTarget | null,
-  branch: string,
 ): ProgressRowData[] {
-  if (!activePacket) {
-    return [
-      { label: `${activeTarget?.label ?? 'Workspace'} selected`, done: true, muted: false },
-      { label: `Branch ${branch}`, done: true, muted: false },
-      { label: 'No active packet', done: false, muted: true },
-    ];
-  }
+  if (!activePacket) return [];
 
   return [
     { label: activePacket.title || activePacket.referenceLabel, done: true, muted: false },
     { label: activePacket.status.replace(/_/g, ' '), done: activePacket.status !== 'blocked' && activePacket.status !== 'failed', muted: false },
-    { label: activePacket.lastEventLabel || `Branch ${branch}`, done: true, muted: !activePacket.lastEventLabel },
+    ...(activePacket.lastEventLabel ? [{ label: activePacket.lastEventLabel, done: true, muted: false }] : []),
   ];
+}
+
+function WorkspaceUtility({ label, title, onClick, warning, children }: {
+  label: string; title: string; onClick: () => void; warning?: boolean; children: ReactNode;
+}) {
+  return <button type="button" title={title} aria-label={title} onClick={onClick}
+    onMouseEnter={event => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+    onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}
+    onFocus={event => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+    onBlur={event => { event.currentTarget.style.background = 'transparent'; }}
+    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 32, borderWidth: 0, borderRadius: 8,
+      paddingTop: 5, paddingRight: 8, paddingBottom: 5, paddingLeft: 8, background: 'transparent', fontFamily: 'inherit', fontSize: 11,
+      fontWeight: 300, color: warning ? 'var(--t-warning)' : 'var(--t-text-secondary)', cursor: 'pointer' }}>
+    {children}{label}
+  </button>;
 }
 
 function summarizePrChecks(rollup: PrCheck[]): { label: string; danger: boolean } | null {

@@ -140,3 +140,32 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
     expect(body).not.toHaveProperty('tool_choice');
   });
 });
+
+describe('openrouter-adapter managed text model', { timeout: 10_000 }, () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    resetOpenRouterCircuit();
+    resetLocalInferenceProbeCacheForTests();
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
+    delete process.env.O8_LOCAL_INFERENCE_BASE_URL;
+    delete process.env.O8_LOCAL_CHAT_MODEL;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetOpenRouterCircuit();
+  });
+
+  it('asks for the managed text model with reasoning off, Flash Lite first in the fallback chain', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(200, okBody));
+    await callOpenRouter('Say OK');
+    const chat = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/chat/completions'));
+    const body = JSON.parse(String((chat![1] as RequestInit).body)) as Record<string, unknown>;
+    expect(body.model).toBe('openai/gpt-6-luna');
+    expect(body.reasoning_effort).toBe('none');
+    expect((body.models as string[])[0]).toBe('google/gemini-2.5-flash-lite');
+  });
+});

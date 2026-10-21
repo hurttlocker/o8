@@ -21,19 +21,23 @@ export interface CorrelatedMutationEnvelope {
 
 const RECEIPT_POLL_MS = 250;
 
-function receiptIsInProgress(status: number, data: CorrelatedMutationEnvelope | null): boolean {
+function receiptIsInProgress(
+  status: number,
+  data: CorrelatedMutationEnvelope | null,
+  acceptQueuedAdmission: boolean,
+): boolean {
   const topLevel = data as (InProgressReceipt & CorrelatedMutationEnvelope) | null;
   const result = data?.result && typeof data.result === 'object'
     ? data.result as InProgressReceipt
     : null;
   if (topLevel?.outcomeUnknown === true || result?.outcomeUnknown === true) return false;
+  const queuedAdmission = acceptQueuedAdmission && status === 200 && data?.ok === true;
   return status === 202
     || topLevel?.inProgress === true
     || topLevel?.status === 'in_progress'
-    || topLevel?.status === 'queued'
     || result?.inProgress === true
     || result?.status === 'in_progress'
-    || result?.status === 'queued';
+    || (!queuedAdmission && (topLevel?.status === 'queued' || result?.status === 'queued'));
 }
 
 function ambiguousTransportFailure(error: unknown): boolean {
@@ -50,7 +54,12 @@ export async function fetchCorrelatedPacketMutation<T extends CorrelatedMutation
   cfg: ResolvedConfig,
   path: string,
   body: Record<string, unknown>,
-  options: { timeoutMs?: number; pollMs?: number; allowConflict?: boolean } = {},
+  options: {
+    timeoutMs?: number;
+    pollMs?: number;
+    allowConflict?: boolean;
+    acceptQueuedAdmission?: boolean;
+  } = {},
 ): Promise<ApiResponse<T | null>> {
   const settleTimeoutMs = options.timeoutMs ?? SLOW_MUTATION_TIMEOUT_MS;
   const pollMs = options.pollMs ?? RECEIPT_POLL_MS;
@@ -68,7 +77,9 @@ export async function fetchCorrelatedPacketMutation<T extends CorrelatedMutation
       });
       lastReceipt = receipt;
       const validEnvelope = receipt.data && typeof (receipt.data as { ok?: unknown }).ok === 'boolean';
-      if (validEnvelope && !receiptIsInProgress(receipt.status, receipt.data)) return receipt;
+      if (validEnvelope && !receiptIsInProgress(receipt.status, receipt.data, options.acceptQueuedAdmission === true)) {
+        return receipt;
+      }
     } catch (error) {
       if (!ambiguousTransportFailure(error)) throw error;
     }

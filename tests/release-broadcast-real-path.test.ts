@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -105,6 +105,8 @@ function runRelease(fixture: Fixture, failBroadcast = false, preview = false) {
     encoding: 'utf8',
     env: {
       ...process.env,
+      HOME: tmpdir(),
+      CORTEX_IDE_DB_PATH: undefined,
       O8_RELEASE_TEST_MODE: '1',
       O8_RELEASE_TEST_PLAN: fixture.planPath,
       O8_RELEASE_BROADCAST_CLI: fixture.broadcastPath,
@@ -180,8 +182,8 @@ describe('release Broadcast milestones through the release entry point', () => {
       legacy: string;
     };
     expect(buildEnv.modern).toBe(buildEnv.legacy);
-    expect(buildEnv.modern).toContain('o8-release-build-data-');
-    expect(buildEnv.modern).not.toContain('/.o8');
+    expect(buildEnv.modern).toContain('/.o8-release-build-profiles/');
+    expect(existsSync(buildEnv.modern)).toBe(true);
   });
 
   it('does not start the build when preflight fails', () => {

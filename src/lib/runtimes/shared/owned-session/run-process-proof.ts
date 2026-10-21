@@ -24,7 +24,7 @@ export async function probeOwnedRunMarker(
 ): Promise<'live' | 'clear' | 'unknown'> {
   if (!marker?.trim()) return 'unknown';
   try {
-    const { stdout } = await execFileAsync('ps', ['eww', '-axo', 'pid=,command='], {
+    const { stdout } = await execFileAsync('ps', ['axeww', '-o', 'pid=,command='], {
       encoding: 'utf8',
       timeout: 3_000,
       maxBuffer: 2 * 1024 * 1024,

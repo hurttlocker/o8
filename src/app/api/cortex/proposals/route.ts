@@ -33,7 +33,8 @@ export function GET(request: NextRequest) {
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to load proposals.';
+    console.error('[api] cortex/proposals failed:', error);
+    const message = 'Unable to load proposals.';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
@@ -107,7 +108,8 @@ export async function POST(request: NextRequest) {
       const proposal = proposeObservation(proposalInput);
       return NextResponse.json({ ok: true, proposal }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to propose observation.';
+      console.error('[api] cortex/proposals failed:', error);
+    const message = 'Unable to propose observation.';
       return NextResponse.json({ ok: false, error: message }, { status: 400 });
     }
   }
@@ -136,7 +138,8 @@ export async function POST(request: NextRequest) {
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to snooze proposal.';
+    console.error('[api] cortex/proposals failed:', error);
+    const message = 'Unable to snooze proposal.';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

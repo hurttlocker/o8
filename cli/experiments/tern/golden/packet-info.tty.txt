@@ -1,0 +1,15 @@
+
+[1mpacket[0m
+lane            lane-fixture
+packet          packet-fixture
+status          running
+runtime         pi
+actual runtime  (pending)
+branch          lab/read-only
+base            main
+repo            /example/o8
+worktree        (none)
+label           SYNTHETIC FIXTURE — not live worker evidence
+
+[1mrecent events (1)[0m
+  2026-10-07T00:00:00Z  fixture       observed

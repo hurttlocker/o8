@@ -106,6 +106,7 @@ export function ProfileSubView({
 
 export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
   const [defaults, setDefaults] = useState<OperatorDefaultsState | null>(null);
+  const [parallelCapCeiling, setParallelCapCeiling] = useState(16);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -116,7 +117,10 @@ export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
         const res = await fetch('/api/panel/operator-defaults', { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json() as { values?: OperatorDefaultsState };
-        if (!cancelled && data.values) setDefaults(data.values);
+        if (!cancelled && data.values) {
+          setParallelCapCeiling((current) => Math.max(current, data.values!.parallelCap));
+          setDefaults(data.values);
+        }
       } catch {
         if (!cancelled) setError('Could not load operator defaults.');
       }
@@ -140,7 +144,10 @@ export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { values?: OperatorDefaultsState };
-      if (data.values) setDefaults(data.values);
+      if (data.values) {
+        setParallelCapCeiling((current) => Math.max(current, data.values!.parallelCap));
+        setDefaults(data.values);
+      }
     } catch {
       setError('Could not save change.');
     } finally {
@@ -203,7 +210,7 @@ export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
           <input
             type="range"
             min={1}
-            max={16}
+            max={parallelCapCeiling}
             step={1}
             value={defaults.parallelCap}
             onChange={(event) => {

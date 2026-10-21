@@ -89,7 +89,28 @@ export function TerminalMark(props: ProviderMarkProps) {
   );
 }
 
-export type ProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal';
+export function PiMark(props: ProviderMarkProps) {
+  return <ProviderMark {...props}><path d="M4 8h16M8 8v12M16 8v9q0 3 3 3" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" /></ProviderMark>;
+}
+
+// Monochrome silhouettes from the public brand assets, kept in one optical slot.
+export function OpenCodeMark(props: ProviderMarkProps) {
+  return <ProviderMark {...props} viewBox="0 0 240 300"><path d="M180 60H60v180h120V60ZM240 300H0V0h240v300Z" /><path d="M180 240H60V120h120v120Z" opacity={0.35} /></ProviderMark>;
+}
+
+export function ThreeCodeMark(props: ProviderMarkProps) {
+  return <ProviderMark {...props}><text x="12" y="13" dominantBaseline="middle" textAnchor="middle" fontFamily="ui-monospace,monospace" fontWeight="800" fontSize="22">3</text></ProviderMark>;
+}
+
+export function AntigravityMark(props: ProviderMarkProps) {
+  return <ProviderMark {...props} viewBox="4 4 32 32"><path d="M33.0017 34.7292c1.7867 1.4295 4.4665.4764 2.0098-2.1438C27.6419 24.9626 29.2053 4 20.049 4S12.456 24.9626 5.08629 32.5854c-2.67988 2.8584.22331 3.5733 2.00992 2.1438C14.0192 29.7269 13.5726 20.913 20.049 20.913s6.0297 8.8139 12.9527 13.8162Z" /></ProviderMark>;
+}
+
+export function CursorMark(props: ProviderMarkProps) {
+  return <ProviderMark {...props} viewBox="8 8 25 25"><path d="m29.6214 14.2072-8.6712-5.08471a.888.888 0 0 0-.9004 0l-8.6712 5.08471a.772.772 0 0 0-.3786.6661v10.2534c0 .2745.1445.5288.3786.6661l8.6712 5.0847a.888.888 0 0 0 .9004 0l8.6712-5.0847A.772.772 0 0 0 30 25.1267V14.8733a.772.772 0 0 0-.3786-.6661ZM29.0767 15.2843 20.706 30.0101c-.0566.0992-.206.0587-.206-.0563v-9.6423a.542.542 0 0 0-.2658-.4676l-8.2218-4.8213c-.0977-.0575-.0578-.2092.0554-.2092h16.7415c.2377 0 .3863.2617.2674.4709Z" /></ProviderMark>;
+}
+
+export type ProviderMark = 'anthropic' | 'openai' | 'gemini' | 'x' | 'deepseek' | 'copilot' | 'ollama' | 'o8' | 'terminal' | 'opencode' | 'threecode' | 'antigravity' | 'cursor' | 'pi';
 
 const providerMarks: Record<ProviderMark, ComponentType<ProviderMarkProps>> = {
   anthropic: AnthropicMark,
@@ -101,6 +122,11 @@ const providerMarks: Record<ProviderMark, ComponentType<ProviderMarkProps>> = {
   ollama: OllamaMark,
   o8: O8Mark,
   terminal: TerminalMark,
+  opencode: OpenCodeMark,
+  threecode: ThreeCodeMark,
+  antigravity: AntigravityMark,
+  cursor: CursorMark,
+  pi: PiMark,
 };
 
 export function ProviderMarkGlyph({ mark, ...props }: ProviderMarkProps & { mark: ProviderMark }) {
