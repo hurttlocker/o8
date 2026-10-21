@@ -446,7 +446,21 @@ it('retains a concurrently advanced registry and reports publication conflict wi
   expect(replay.body.result.registryPublication.status).toBe('conflict');
   expect(starts()).toBe(before + 1);
   expect(JSON.parse(rawRegistry(created.missionId).mission_state_json).packets).toEqual(authoritative.packets);
-  expect((await post('/api/lanes', { verb: 'stop', laneId: current.lane!.laneId })).status).toBe(200);
+  // Publication lost ownership: Stop must not overwrite the newer registry or
+  // interrupt this lane until both stores agree. afterAll owns fixture teardown.
+  const currentBeforeStop = readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8');
+  const registryBeforeStop = rawRegistry(created.missionId);
+  const worker = JSON.parse(readFileSync(join(root, 'starts.jsonl'), 'utf8').trim().split('\n').at(-1)!) as { pid: number };
+  expect(() => process.kill(worker.pid, 0)).not.toThrow();
+  const stopped = await post('/api/lanes', { verb: 'stop', laneId: current.lane!.laneId });
+  expect(stopped.status, JSON.stringify(stopped.body)).toBe(422);
+  expect(stopped.body).toMatchObject({ ok: false, laneId: current.lane!.laneId,
+    note: 'Stop refused because the packet hold could not be persisted.',
+    lane: { sessionKey: current.lane!.sessionKey, status: 'running' } });
+  expect(rawRegistry(created.missionId)).toEqual(registryBeforeStop);
+  expect(readFileSync(join(dataDir, 'orchestrator-state.json'), 'utf8')).toBe(currentBeforeStop);
+  expect(() => process.kill(worker.pid, 0)).not.toThrow();
+  expect(starts()).toBe(before + 1);
 }, 40_000);
 
 it('holds a SQLite immediate lock across captured-version comparison and publication against another process', async () => {
