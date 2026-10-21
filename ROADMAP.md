@@ -38,6 +38,8 @@ Shared-checkout teams shipped in 0.1.771 with four-worker native evidence. Ten-w
 
 ## Source work awaiting installed acceptance
 
+Documentation follow-up: worker guidance distinguishes Stop acknowledgements, exact-run interruption and process-tree confirmation before recovery. UI visibility is separate from coordinator and tunnel reachability, while bounded review previews keep their existing contract. This changes documentation only; runtime behavior, installed acceptance and release are unchanged. [#4063](https://github.com/hurttlocker/o8/issues/4063)
+
 Public voice preference reads derive saved-key presence from legacy values or non-authenticating Keychain metadata, without retrieving or migrating secret data, and run native I/O on a blocking worker. A persisted-read regression and controlled native query inspection cover the source boundary; rebuilt installed-app responsiveness and protected-Keychain acceptance remain open. [#3063](https://github.com/hurttlocker/o8/issues/3063)
 
 Local ancestry reconciliation preserves cloud-owned packet and lane results even when their remote branch is absent from the coordinator checkout, including conflicting ownership metadata and lanes whose mission has rotated away. Controlled sweep regressions retain review state, event history and the pushed remote commit across repeated sweeps. Live remote/native acceptance and release remain separate. [#3065](https://github.com/hurttlocker/o8/issues/3065)
