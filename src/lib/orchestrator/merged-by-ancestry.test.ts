@@ -147,13 +147,13 @@ function writeFreshClaudeTranscript(sessionKey: string): void {
   resetOwnedSessionIndex();
 }
 
-function seedPacket(repoPath: string, packetId: string) {
+function seedPacket(repoPath: string, packetId: string, runtime: 'codex' | 'cloud' = 'codex', branch = 'packet') {
   const lane = createLane({
     repoPath,
     worktreePath: repoPath,
-    branch: 'packet',
+    branch,
     baseBranch: 'main',
-    runtime: 'codex',
+    runtime,
     packetId,
   });
   laneIds.push(lane.id);
@@ -163,7 +163,7 @@ function seedPacket(repoPath: string, packetId: string) {
     ...createEmptyOrchestratorMissionState(),
     missionId: `mission-${packetId}`,
     repoPath,
-    packets: [packetFixture(repoPath, packetId, lane.id)],
+    packets: [packetFixture(repoPath, packetId, lane.id, { branch })],
   });
   return lane;
 }
@@ -185,6 +185,44 @@ afterEach(() => {
 });
 
 describe('merged-by-ancestry reconciliation', () => {
+  it.each(['packet', 'binding', 'lane', 'orphan'] as const)(
+    'preserves pushed remote work when %s owns the cloud result', async (owner) => {
+      const { clone, seed, origin } = makeRepo('o8-cloud-ancestry');
+      const branch = 'remote-only-branch';
+      git(seed, ['checkout', '-b', branch]);
+      writeFileSync(join(seed, 'remote-work.txt'), 'completed remote work\n');
+      const remoteHead = commitAll(seed, 'completed remote work');
+      git(seed, ['push', 'origin', branch]);
+      expect(git(clone, ['for-each-ref', '--format=%(refname)', `refs/heads/${branch}`, `refs/remotes/origin/${branch}`])).toBe('');
+      const packetId = `pkt-cloud-${owner}`;
+      const lane = seedPacket(clone, packetId, owner === 'lane' || owner === 'orphan' ? 'cloud' : 'codex', branch);
+      const state = readOrchestratorControlPlaneState();
+      const packet = state.packets[0]!;
+      if (owner === 'packet') { packet.runtime = 'cloud'; packet.workerRouting = undefined; }
+      if (owner === 'binding') packet.lane!.runtime = 'cloud';
+      updateLane(lane.id, { worktreePath: null }, 'system');
+      writeOrchestratorControlPlaneState(owner === 'orphan' ? createEmptyOrchestratorMissionState() : state);
+      const statePath = join(process.env.O8_DATA_DIR!, 'orchestrator-state.json');
+      const beforeState = readFileSync(statePath, 'utf8');
+      const beforeLane = getLane(lane.id);
+      const beforeEvents = getLaneEvents(lane.id);
+      const beforeInbox = listInboxItems({ includeAllProjects: true, includeDismissed: true });
+
+      await sweepPacketsMergedByAncestry();
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 0, merged: 0 });
+
+      expect(readFileSync(statePath, 'utf8')).toBe(beforeState);
+      if (owner !== 'orphan') expect(persistedPacket(packetId)).toMatchObject({
+        status: 'awaiting_review', releaseState: 'pending', archivedAt: null,
+      });
+      expect(getLane(lane.id)).toEqual(beforeLane);
+      expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', outcome: null });
+      expect(getLaneEvents(lane.id)).toEqual(beforeEvents);
+      expect(listInboxItems({ includeAllProjects: true, includeDismissed: true })).toEqual(beforeInbox);
+      expect(git(origin, ['rev-parse', `refs/heads/${branch}`])).toBe(remoteHead);
+    }, 20_000,
+  );
+
   it.each([
     ['parkable', false, false], ['hibernating', false, false], ['parked', false, false],
     ['restoring', false, false], ['retiring', false, false], ['retired', false, false],
