@@ -160,6 +160,8 @@ ACP reply and mobile continuation repair [#2473](https://github.com/hurttlocker/
 
 ## 5. Smooth for people and for agents
 
+Sign-in error disclosure [#3441](https://github.com/hurttlocker/o8/issues/3441) binds each expanded reason to its own control and keeps retry actions distinct from disclosure state. Mounted component regressions cover independent cards, collapse/reopen, retry and dismissal. Native assistive-technology acceptance and release remain separate.
+
 Account resolution [#3762](https://github.com/hurttlocker/o8/issues/3762) bounds unresolved loading, hides unconfirmed profile details, and offers native account initialization recovery without confirming sign-out or losing the app transport guard.
 
 Account recovery [#3990](https://github.com/hurttlocker/o8/issues/3990) keeps the workspace mounted when initialization settles, preserving the open view and unsent input. Native timeout and recovery acceptance remains separate from source checks and release.
