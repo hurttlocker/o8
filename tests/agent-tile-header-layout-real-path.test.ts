@@ -366,6 +366,8 @@ export function WorkspaceTranscript({ entries }) {
 }
 `);
     fs.writeFileSync(path.join(tempDir, 'browser-pip-stub.mjs'), `export const BROWSER_PIP_EVENT = 'o8:browser-pip';\n`);
+    // Authentication is unrelated to header geometry; keep its SDK server graph outside this browser bundle.
+    fs.writeFileSync(path.join(tempDir, 'auth-stub.mjs'), `export function useO8Auth() { return { user: null, isLoaded: true, signedIn: false }; }\n`);
     fs.writeFileSync(path.join(tempDir, 'server-only-stub.mjs'), 'export default {};\n');
 
     const entryPath = path.join(tempDir, 'entry.mjs');
@@ -426,6 +428,9 @@ window.__o8TileHarness = (() => {
         }));
         builder.onResolve({ filter: /BrowserPipCard$/ }, () => ({
           path: path.join(tempDir!, 'browser-pip-stub.mjs'),
+        }));
+        builder.onResolve({ filter: /^@\/components\/auth\/O8AuthProvider$/ }, () => ({
+          path: path.join(tempDir!, 'auth-stub.mjs'),
         }));
         builder.onResolve({ filter: /^server-only$/ }, () => ({
           path: path.join(tempDir!, 'server-only-stub.mjs'),
