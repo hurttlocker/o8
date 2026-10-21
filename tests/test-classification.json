@@ -5399,6 +5399,15 @@
       ]
     },
     {
+      "path": "tests/workspace-review-linked-issues-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/worktree-conflict-idle-real-path.test.ts",
       "reasons": [
         "child-process",
