@@ -229,7 +229,7 @@ describe('Symon text-first say loop wire', () => {
     const { response, body: minted } = await mint('codex-sol-xhigh');
     expect(response.status).toBe(200);
     expect(minted.session).toMatchObject({ model: 'gpt-6.1-sol', effort: 'xhigh', engine: 'codex' });
-    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This Mac' });
+    expect(minted.session.activeMachine).toEqual({ id: 'local', displayName: 'This computer' });
     testState.evalCalls.length = 0;
 
     const socket = new WebSocket(`ws://127.0.0.1:${wsPort}/ws?token=${encodeURIComponent(token)}`);
@@ -283,7 +283,7 @@ describe('Symon text-first say loop wire', () => {
     }));
     expect(frames[0]).toEqual(expect.objectContaining({
       type: 'symon-text-status',
-      activeMachine: { id: 'local', displayName: 'This Mac' },
+      activeMachine: { id: 'local', displayName: 'This computer' },
     }));
     const spawnEval = testState.evalCalls.find((code) => code.includes('A.text.runTurn'));
     expect(spawnEval).toContain('"engine":"codex"');
@@ -336,7 +336,7 @@ it.each(['error', 'interrupted'] as const)('reports fallback metadata on WS %s a
   });
   try {
     expect(await sendTurn('terminal-first')).toMatchObject({
-      status: status === 'error' ? 'failed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
+      status: status === 'error' ? 'unconfirmed' : 'interrupted', model: 'gpt-5.6-sol', effort: 'high',
       ...(status === 'error' ? { detail: 'fixture terminal failure' } : {}),
     });
     testState.terminal = null;
@@ -399,7 +399,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await new Promise((resolve) => setTimeout(resolve, 200));
     if (deadlineExpired) {
       await waitFor(() => terminal().length >= 1);
-      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'failed' });
+      expect(terminal()[0]).toMatchObject({ turnId: 'stop-first', status: 'unconfirmed' });
       expect(terminal()[0].model, 'an unresolved native result has no verified effective model').toBeUndefined();
     } else {
       expect(terminal(), 'DELETE acknowledgement must not fabricate native completion').toEqual([]);
@@ -410,7 +410,7 @@ it.each([false, true])('reconciles phone Stop before spawning a queued turn (dea
     await waitFor(() => terminal().length === 2);
     expect(terminal().map(({ turnId, status, model, effort }) => ({ turnId, status, model, effort }))).toEqual([
       deadlineExpired
-        ? { turnId: 'stop-first', status: 'failed', model: undefined, effort: undefined }
+        ? { turnId: 'stop-first', status: 'unconfirmed', model: undefined, effort: undefined }
         : { turnId: 'stop-first', status: 'interrupted', model: 'gpt-5.6-sol', effort: 'high' },
       { turnId: 'stop-next', status: 'done', model: 'gpt-5.6-sol', effort: 'high' },
     ]);

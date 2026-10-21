@@ -32,6 +32,9 @@ for (const [key, value] of Object.entries({
   SHELL: '/bin/sh',
 })) vi.stubEnv(key, value);
 
+const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+await updateOperatorDefaults({ workerRuntimes: ['pi'], defaultDispatchRuntime: 'pi', defaultDispatchModel: '' });
+
 const { POST: delegatePost } = await import('@/app/api/orchestrator/delegate/route');
 
 const STORAGE_NOTE = 'Dispatch held by storage admission (reserve_breached). Storage policy keeps 5% of disk or 10.0 GB, whichever is greater, unallocated. This volume requires 23.3 GB free; 8.1 GB is available. The volume is 15.2 GB below that reserve. Free 15.2 GB more to dispatch this packet\'s 64.1 MB estimate while preserving the reserve.';
