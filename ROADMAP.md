@@ -295,3 +295,6 @@ Composer controls [#3961](https://github.com/hurttlocker/o8/issues/3961) use com
 Conversation worker hover [#3967](https://github.com/hurttlocker/o8/issues/3967) reuses the existing chat preview for recorded shared and worktree workers. Identity and status remain scoped to the hovered parent; development verification and release remain separate.
 
 Activity refresh [#3460](https://github.com/hurttlocker/o8/issues/3460) excludes transcript-only realtime batches from remote repository list invalidation. Mixed batches, lifecycle refresh and the existing fallback remain active. Broader cache policy, native acceptance and release remain separate.
+
+<!-- issue3131-activity-reliability -->
+Activity folder-state follow-up (#3131): selected local folders retain their scope, local Git failures stay visible beside remote history, and Retry rechecks the same folder. Review/Workspace existing remedies are preserved. Source verification and native acceptance remain separate; no release is included.
