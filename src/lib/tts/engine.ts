@@ -60,6 +60,7 @@ class TTSEngineImpl {
   private animFrameId: number | null = null;
   // Set up the native `o8:tts-state` subscription exactly once (desktop only).
   private tauriListenerSetup = false;
+  private webPlayback = false;
 
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
@@ -100,7 +101,17 @@ class TTSEngineImpl {
 
   /** Play a message. Desktop → native streaming engine; browser → edge-tts. */
   async play(text: string, messageId: string): Promise<void> {
+    this.cleanup();
+    this.webPlayback = false;
     if (isTauri()) return this.playViaTauri(text, messageId);
+    return this.playViaWeb(text, messageId);
+  }
+
+  /** Explicit no-key read aloud, including desktop: Edge, then system speech only. */
+  async playNoKey(text: string, messageId: string): Promise<void> {
+    // Release prior native reading before starting browser audio on desktop.
+    if (isTauri() && !this.webPlayback && this._state.activeMessageId) this.invokeTauri('tts_stop');
+    this.webPlayback = true;
     return this.playViaWeb(text, messageId);
   }
 
@@ -117,6 +128,7 @@ class TTSEngineImpl {
     });
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+      if (this._state.activeMessageId !== messageId || this.webPlayback) return;
       // Raw text on purpose — the Rust engine runs its own speech_text
       // normalization (numbers / units / URLs / markdown) + chunking. Its
       // single-flight supersedes any current playback, so we deliberately do
@@ -126,6 +138,7 @@ class TTSEngineImpl {
       // state transitions ('playing' → 'idle') arrive via o8:tts-state, and the
       // spoken-block spans (for line highlighting) via o8:tts-chunk.
     } catch (err) {
+      if (this._state.activeMessageId !== messageId || this.webPlayback) return;
       console.warn('[TTS] Native tts_speak failed, using web path:', err);
       await this.playViaWeb(text, messageId);
     }
@@ -139,6 +152,7 @@ class TTSEngineImpl {
     import('@tauri-apps/api/event')
       .then(({ listen }) => {
         void listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
+          if (this.webPlayback) return;
           const next = e.payload?.state;
           if (next === 'playing') {
             this.updateState({ state: 'playing' });
@@ -184,6 +198,7 @@ class TTSEngineImpl {
 
   private async playViaWeb(text: string, messageId: string): Promise<void> {
     this.cleanup();
+    this.webPlayback = true;
     this.updateState({
       state: 'loading',
       activeMessageId: messageId,
@@ -252,7 +267,7 @@ class TTSEngineImpl {
       return;
     } catch (err) {
       console.warn('[TTS] Server-side TTS failed, using fallback:', err);
-      this.playFallback(cleanText, messageId);
+      if (this._state.activeMessageId === messageId) this.playFallback(cleanText, messageId);
     }
   }
 
@@ -287,6 +302,7 @@ class TTSEngineImpl {
     if (preferred) utterance.voice = preferred;
 
     utterance.onend = () => {
+      if (this._state.activeMessageId !== messageId) return;
       this.updateState({
         state: 'idle',
         activeMessageId: null,
@@ -296,6 +312,7 @@ class TTSEngineImpl {
     };
 
     utterance.onerror = () => {
+      if (this._state.activeMessageId !== messageId) return;
       this.updateState({ state: 'error', activeMessageId: null });
     };
 
@@ -304,7 +321,7 @@ class TTSEngineImpl {
   }
 
   pause() {
-    if (isTauri()) {
+    if (isTauri() && !this.webPlayback) {
       if (this._state.state === 'playing') this.invokeTauri('tts_toggle_pause');
       return;
     }
@@ -317,7 +334,7 @@ class TTSEngineImpl {
   }
 
   resume() {
-    if (isTauri()) {
+    if (isTauri() && !this.webPlayback) {
       if (this._state.state === 'paused') this.invokeTauri('tts_toggle_pause');
       return;
     }
@@ -330,11 +347,8 @@ class TTSEngineImpl {
   }
 
   stop() {
-    if (isTauri()) {
-      this.invokeTauri('tts_stop');
-    } else {
-      this.cleanup();
-    }
+    if (isTauri() && !this.webPlayback) this.invokeTauri('tts_stop');
+    this.cleanup();
     this.updateState({
       state: 'idle',
       activeMessageId: null,
@@ -357,7 +371,7 @@ class TTSEngineImpl {
 
   setRate(rate: number) {
     this.updateState({ playbackRate: rate });
-    if (isTauri()) {
+    if (isTauri() && !this.webPlayback) {
       this.invokeTauri('tts_set_speed', { rate });
       return;
     }
@@ -383,6 +397,8 @@ class TTSEngineImpl {
       this.currentBlobUrl = null;
     }
     if (this.utterance) {
+      this.utterance.onend = null;
+      this.utterance.onerror = null;
       speechSynthesis.cancel();
       this.utterance = null;
     }

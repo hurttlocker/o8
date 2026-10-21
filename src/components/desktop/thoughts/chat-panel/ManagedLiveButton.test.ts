@@ -32,8 +32,18 @@ function ManagedLiveButton(props: ComponentProps<typeof VoiceButton>) {
   } });
 }
 let root: Root; let container: HTMLDivElement;
+async function chooseManaged() {
+  const action = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Start managed voice');
+  if (action) await act(async () => action.click());
+}
+async function toggleVoice() {
+  await act(async () => container.querySelector('button')!.click());
+  await chooseManaged();
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   queues.clear(); saved.mockClear(); fixture.backend = null;
   fixture.native = false; fixture.invoke.mockReset();
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
@@ -76,7 +86,7 @@ it('retains the existing CLI discussion when live captions fill the recent trans
     ],
   };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(fixture.backend!.context()).toContain('Check the repository version without changing files.');
   expect(fixture.backend!.context()).toContain('The repository version is 1.2.3.');
   expect(fixture.backend!.context()).toContain('Earlier voice exchange');
@@ -118,7 +128,7 @@ it('keeps late restored history out of current CLI progress', async () => {
       { id: 'current-answer', role: 'assistant', text: 'Current result.', timestamp: 21 },
     ] };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const beforeRestore = fixture.backend!.context();
   await act(async () => root.render(createElement(ManagedLiveButton, { ...props, messages: [...props.messages,
     { id: 'old-task', role: 'user', text: 'An old request.', timestamp: 1 },
@@ -133,13 +143,13 @@ it('rechecks admission when a mounted composer outlives its test window and can 
     .mockResolvedValueOnce(Response.json({ enabled: false, error: 'personal_voice_unavailable' }, { status: 503 }));
   const props = { binding: 'same-chat', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(fixture.backend).toBeNull();
   expect(props.send).not.toHaveBeenCalled();
   expect(container.querySelector('button')!.disabled).toBe(false);
-  expect(container.querySelector('button')!.title).toContain('Dev voice test is unavailable or expired');
+  expect(container.querySelector('button')!.title).toContain('Live voice availability could not be checked');
   expect(fetch.mock.calls.every(([_url, init]) => init?.method !== 'POST')).toBe(true);
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(fixture.backend!.binding).toBe('same-chat');
   expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
 });
@@ -147,7 +157,7 @@ it('projects captions only into their bound chat and links accepted sends withou
   const transcript = vi.fn(); const submitted = vi.fn();
   const props = { key: 'a', binding: 'a', messages: [], busy: false, terminals: {}, transcript, send: vi.fn(() => ({ userMessageId: 'orch-user-a' })), interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const old = fixture.backend!;
   old.transcript!([{ id: 'spoken', role: 'user', text: 'Check this' }]);
   expect(transcript).toHaveBeenCalledOnce();
@@ -161,7 +171,7 @@ it('serializes same-poll delegations and waits for correlated terminal even if a
   const send = vi.fn(() => ({ userMessageId: 'user-1' }));
   const props = { binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const update = vi.fn(async (): Promise<void> => { throw new Error('append unavailable'); });
   const blocked = vi.fn(async () => {});
   const task = fixture.backend!.delegate('Do this', 'one', update);
@@ -189,10 +199,10 @@ it('serializes same-poll delegations and waits for correlated terminal even if a
 it('allows voice restart when the app remounts with the new binding key', async () => {
   const props = { key: 'repo:thread:claude:model', binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('true');
   await act(async () => root.render(createElement(ManagedLiveButton, {...props, key:'repo:other-thread:codex:model', binding:'repo:other-thread:codex:model'})));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(container.querySelector('button')!.disabled).toBe(false);
   expect(fixture.backend!.binding).toBe('repo:other-thread:codex:model');
 });
@@ -200,12 +210,12 @@ it('allows voice restart when the app remounts with the new binding key', async 
 it('offers explicit resume after closure without reconnecting itself', async () => {
   const props = { binding: 'repo:thread:claude:model', messages: [], busy: false, terminals: {}, send: vi.fn(), interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const previous = fixture.backend;
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Resume managed voice for this conversation');
   expect(fixture.backend).toBe(previous);
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Disconnect managed voice');
   expect(fixture.backend!.binding).toBe(props.binding);
 });
@@ -214,7 +224,7 @@ it('persists explicit follow-up consent through the shared queue and never drain
   const send = vi.fn().mockReturnValueOnce({userMessageId:'user-one'}).mockReturnValueOnce({userMessageId:'user-two'});
   const props = {binding:'same-thread',messages:[],busy:false,terminals:{},send,interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   const update = vi.fn(async()=>{});
   const first = fixture.backend!.delegate('Start task','first',update);
   await fixture.backend!.delegate('Actually change it','correction',update);
@@ -224,8 +234,8 @@ it('persists explicit follow-up consent through the shared queue and never drain
   const messages = [{id:'user-one',role:'user' as const,text:'Start task'}];
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'unconfirmed',text:''}}})));
   expect(send).toHaveBeenCalledTimes(1);
-  await act(async()=>container.querySelector('button')!.click());
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
+  await toggleVoice();
   const resumed = vi.fn(async()=>{}); fixture.backend!.subscribe!(resumed);
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,terminals:{'user-one':{outcome:'completed',text:'Verified original result'}}})));
   await first;
@@ -239,7 +249,7 @@ it('persists explicit follow-up consent through the shared queue and never drain
 it('cancels deliberate queue without interrupting the doer', async () => {
   const props = {binding:'same-thread',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(),interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   const update=vi.fn(async()=>{});
   await fixture.backend!.delegate('queue next step','queue',update);
   await fixture.backend!.delegate('cancel queued','cancel',update);
@@ -250,7 +260,7 @@ it('cancels deliberate queue without interrupting the doer', async () => {
 it('does not auto-submit a follow-up after the same utterance withdraws queue consent', async () => {
   const props={binding:'same',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   await fixture.backend!.delegate('queue check tests, actually do not queue that','q',vi.fn(async()=>{}));
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
   expect(props.send).not.toHaveBeenCalled();
@@ -259,11 +269,11 @@ it('does not auto-submit a follow-up after the same utterance withdraws queue co
 it('leaves the persisted queue with its originating chat across a keyed remount', async () => {
   const props={key:'a',binding:'a',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   const oldBackend=fixture.backend!;
   await oldBackend.delegate('queue check tests','q',vi.fn(async()=>{}));
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,key:'b',binding:'b',busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   expect(fixture.backend!.binding).toBe('b'); expect(props.send).not.toHaveBeenCalled();
   expect(queues.get('a')?.[0].payload.afterTaskId).toBe('running'); expect(queues.get('b')).toBeUndefined();
 });
@@ -271,7 +281,7 @@ it('leaves the persisted queue with its originating chat across a keyed remount'
 it('does not drain a follow-up when a different user turn owns current conversation', async () => {
   const props={binding:'same',messages:[{id:'running',role:'user' as const,text:'Work'}],busy:true,terminals:{},send:vi.fn(()=>({userMessageId:'next'})),interrupt:vi.fn()};
   await act(async()=>root.render(createElement(ManagedLiveButton,props)));
-  await act(async()=>container.querySelector('button')!.click());
+  await toggleVoice();
   await fixture.backend!.delegate('queue check tests','q',vi.fn(async()=>{}));
   const messages=[...props.messages,{id:'external',role:'user' as const,text:'Other work'}];
   await act(async()=>root.render(createElement(ManagedLiveButton,{...props,messages,busy:false,terminals:{running:{outcome:'completed',text:'done'}}})));
@@ -289,6 +299,7 @@ it('Caps Lock uses the focused composer and a second tap closes voice without st
   const buttons = container.querySelectorAll('button');
   await act(async () => container.querySelectorAll('textarea')[1].focus());
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'CapsLock' })));
+  await chooseManaged();
   expect(fixture.backend!.binding).toBe('second-chat');
   expect(buttons[0].getAttribute('aria-pressed')).toBe('false');
   expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
@@ -304,10 +315,10 @@ it('does not accept a stale delegation after the same chat starts a new voice ac
   const send = vi.fn(() => ({ userMessageId: 'new' }));
   const props = { binding: 'same', messages: [], busy: false, terminals: {}, send, interrupt: vi.fn() };
   await act(async () => root.render(createElement(ManagedLiveButton, props)));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const old = fixture.backend!;
-  await act(async () => container.querySelector('button')!.click());
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
+  await toggleVoice();
   expect(fixture.backend).not.toBe(old);
   await old.delegate('Late old request', 'old', vi.fn(async () => {}));
   expect(send).not.toHaveBeenCalled();
@@ -323,10 +334,90 @@ it('invalidates the actual visual pre-dispatch guard when Live closes during a p
   };
   await act(async () => root.render(createElement(ManagedLiveButton, { binding: 'close-during-save', messages: [], terminals: {}, busy: false,
     send: vi.fn(), sendVisual, interrupt: vi.fn() })));
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   const request = fixture.backend!.delegate('Adjust the marked button.', 'visual-request', vi.fn(async () => {})); void request.catch(() => {});
-  await act(async () => container.querySelector('button')!.click());
+  await toggleVoice();
   release();
   await expect(request).rejects.toThrow('Voice closed before dispatch');
   expect(dispatched).not.toHaveBeenCalled();
+});
+
+it('keeps no-key and signed-out voice choices visible and Caps Lock opens the focused chat chooser without starting Live', async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ enabled: false, entitled: false, byokAvailable: false }));
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+  const props = { binding: 'no-key-chat', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement('section', { 'data-voice-chat-root': true }, createElement(ManagedLiveButton, props), createElement('textarea'))));
+  expect(fixture.backend).toBeNull();
+  await act(async () => container.querySelector('textarea')!.focus());
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'CapsLock' })));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Turn-by-turn · Edge voice');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Browser dictation may require');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Open OpenAI key settings');
+  expect(fixture.backend).toBeNull(); expect(props.send).not.toHaveBeenCalled();
+});
+
+it('starts personal-key Live only after explicit selection and rechecks the key immediately before connection', async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ enabled: false, entitled: false, byokAvailable: true }));
+  const props = { binding: 'personal-key-chat', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  expect(fixture.backend).toBeNull();
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend).toBeNull();
+  const start = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Start Live with my key')!;
+  expect(start.disabled).toBe(false);
+  await act(async () => start.click());
+  expect(fixture.backend?.source).toBe('byok'); expect(fixture.backend?.binding).toBe('personal-key-chat');
+  expect(fetch).toHaveBeenCalledTimes(3); expect(props.send).not.toHaveBeenCalled();
+});
+
+it('preserves managed pilot direct start and exposes alternate modes on the same waveform', async () => {
+  const props = { binding: 'pilot-chat', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  expect(fixture.backend?.source).toBe('managed');
+  await act(async () => container.querySelector('button')!.click());
+  await act(async () => container.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Turn-by-turn');
+  expect(container.querySelectorAll('button')).toHaveLength(1);
+});
+
+it('keeps personal-key readiness independent when an expired pilot returns 503', async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ enabled: false, entitled: false, error: 'personal_voice_unavailable', byokAvailable: true }, { status: 503 }));
+  const props = { binding: 'expired-pilot', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Start managed voice');
+  const start = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Start Live with my key')!;
+  expect(start.disabled).toBe(false); await act(async () => start.click());
+  expect(fixture.backend?.source).toBe('byok');
+});
+
+it('does not fall back to a managed provider when the personal key disappears after the chooser opens', async () => {
+  let byokAvailable = true;
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ enabled: false, entitled: false, byokAvailable }));
+  const props = { binding: 'key-removed', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.click());
+  byokAvailable = false;
+  const start = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Start Live with my key')!;
+  await act(async () => start.click());
+  expect(fixture.backend).toBeNull();
+  expect(container.querySelector('button')!.title).toContain('personal Live key is unavailable');
+  expect(props.send).not.toHaveBeenCalled();
+});
+
+it('keeps an explicit personal-key choice from silently reverting to the managed pilot after stop', async () => {
+  vi.mocked(fetch).mockImplementation(async () => Response.json({ enabled: true, entitled: true, byokAvailable: true }));
+  const props = { binding: 'pilot-personal-choice', messages: [], terminals: {}, busy: false, send: vi.fn(), interrupt: vi.fn() };
+  await act(async () => root.render(createElement(ManagedLiveButton, props)));
+  await act(async () => container.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+  const start = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Start Live with my key')!;
+  await act(async () => start.click());
+  expect(container.querySelector('button')!.getAttribute('aria-label')).toBe('Disconnect personal-key Live');
+  expect(container.querySelector('button')!.title).toContain('billed to your key');
+  const previous = fixture.backend;
+  await act(async () => container.querySelector('button')!.click());
+  await act(async () => container.querySelector('button')!.click());
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(fixture.backend).toBe(previous);
 });

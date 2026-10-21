@@ -10,6 +10,8 @@ export type LiveEvent = Record<string, unknown>;
 export interface LiveBackend {
   /** Immutable identity, including conversation, repository and runtime. */
   binding: string;
+  /** Chosen explicitly before capture; never fall back to another payer. */
+  source?: 'managed' | 'byok';
   ready?: () => Promise<void>;
   context: () => string;
   subscribe?: (listener: LiveUpdate) => () => void;
@@ -52,6 +54,7 @@ class LiveRequestError extends Error {
 const accessRefused = (error: unknown) => error instanceof LiveRequestError && [401, 403, 404].includes(error.status);
 /** One automatic continuation, only after the previous provider session confirms terminal usage. */
 export async function startManagedLive(backend: LiveBackend, onState: (state: LiveState, detail?: string) => void, signal?: AbortSignal, options?: LiveOptions): Promise<LiveSession> {
+  const ownedBackend = { ...backend, source: backend.source ?? 'managed' };
   const controller = new AbortController();
   let current: LiveSession | undefined;
   let state: LiveState = 'connecting';
@@ -75,7 +78,7 @@ export async function startManagedLive(backend: LiveBackend, onState: (state: Li
   const abort = () => { void close(); };
   const launch = () => {
     const started = ++epoch;
-    const pending = startLiveAttempt(backend, (next, detail, canResume, inputReleased) => {
+    const pending = startLiveAttempt(ownedBackend, (next, detail, canResume, inputReleased) => {
       if (started !== epoch) return;
       if (next === 'closed' && canResume && !stopped && !retried && !signal?.aborted) {
         retried = true; resuming = true;
@@ -119,6 +122,7 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   let cleaned = false;
   let pollingStarted = false;
   let id = '';
+  const requestId = crypto.randomUUID();
   let startRequested = false;
   let rejectStartup: (error: Error) => void = () => {};
   let startupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -159,9 +163,14 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
   const activity = () => {}; // UI interactions are not evidence of speech.
   const request = async (body: Record<string, unknown>, requestSignal?: AbortSignal) => {
     const response = await fetch('/api/voice/live', { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: `Bearer ${getMobileWsToken()}` },
-      body: JSON.stringify({ ...body, binding: backend.binding, ...(id ? { id } : {}) }), signal: requestSignal });
+      body: JSON.stringify({ ...body, source: backend.source, requestId, binding: backend.binding, ...(id ? { id } : {}) }), signal: requestSignal });
     const data = await response.json();
-    if (!response.ok) throw new LiveRequestError(typeof data.error === 'string' ? data.error : 'Voice request failed', response.status);
+    if (!response.ok) {
+      // The server exposes this receipt only after checking the current owner.
+      if (body.action === 'start' && backend.source === 'byok' && typeof data.id === 'string'
+        && /^[a-f0-9-]{36}$/i.test(data.id)) id = data.id;
+      throw new LiveRequestError(typeof data.error === 'string' ? data.error : 'Voice request failed', response.status);
+    }
     return data;
   };
   const cleanup = () => {
@@ -351,6 +360,17 @@ async function startLiveAttempt(backend: LiveBackend, onState: (state: LiveState
     return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
   } catch (error) {
     if (cleaned && startRequested) return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };
+    if (!id && startRequested && backend.source === 'byok'
+      && !(error instanceof LiveRequestError && error.status >= 400 && error.status < 500)) {
+      // A lost response is not permission to buy another session. Resolve only
+      // this attempt's durable receipt, with capture stopped during recovery.
+      microphoneReleased = microphone?.stop() ?? Promise.resolve();
+      void microphoneReleased.catch(() => {});
+      try {
+        const recovered = await request({ action: 'recover' }, AbortSignal.timeout(10_000));
+        if (typeof recovered.id === 'string' && /^[a-f0-9-]{36}$/i.test(recovered.id)) id = recovered.id;
+      } catch { /* The durable unresolved receipt continues to block admission. */ }
+    }
     if (id) {
       await close(); // A failed setup can still have a confirmed final usage receipt.
       return { close, activity, get state() { return state; }, get usage() { return activityPolicy.usage; } };

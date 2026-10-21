@@ -1,5 +1,6 @@
 'use client';
 
+import { ComposerVoiceTurnContext } from './ComposerVoiceTurnContext';
 import type { ComposerAreaProps } from './composer-area-types';
 import { ComposerDictationContext, useComposerDictation, useComposerTextareaRef } from '../../dictation/ComposerDictation';
 import { useComposerImageBridge } from './useComposerImageBridge';
@@ -112,13 +113,22 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 }, inputRef) {
   const composerCenterRef = useRef<HTMLDivElement>(null);
   const [textareaRef, setTextareaRef] = useComposerTextareaRef(inputRef);
+  const voiceDelivery = useRef<((text: string) => boolean) | null>(null);
   const localDictationId = useComposerDictation({
     active: activeComposer, enabled: !dictationId, nodeRef: textareaRef,
     scopeKey: JSON.stringify([dictationScopeKey, repoPath, sessionRulesThreadId, inputLabel]),
     onText: text => {
+      if (voiceDelivery.current?.(text)) return;
       if (text) onInputChange(`${input}${input && !/\s$/.test(input) ? ' ' : ''}${text}`);
     },
   });
+  const voiceTurnTarget = useMemo(() => ({
+    dictationId: dictationId ?? localDictationId,
+    intercept: (handler: (text: string) => boolean) => {
+      voiceDelivery.current = handler;
+      return () => { if (voiceDelivery.current === handler) voiceDelivery.current = null; };
+    },
+  }), [dictationId, localDictationId]);
   const now = useComposerClock(activeComposer && isOrchestratorMode);
   const fileReferences = useMemo(() => literalInput ? { body: input, paths: [] } : readComposerFileReferences(input), [input, literalInput]);
   useComposerAutosize(textareaRef, fileReferences.body, activeComposer);
@@ -256,6 +266,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   };
 
   return (
+    <ComposerVoiceTurnContext.Provider value={dictationId ? null : voiceTurnTarget}>
     <ComposerDictationContext.Provider value={dictationId ?? localDictationId}>
     <div data-o8-composer-root="" style={{
       paddingTop: 24,
@@ -725,5 +736,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ) : null}
     </div>
     </ComposerDictationContext.Provider>
+    </ComposerVoiceTurnContext.Provider>
   );
 });

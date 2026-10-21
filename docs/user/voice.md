@@ -1,5 +1,9 @@
 # Symon, the voice layer
 
+For the composer microphone, current-chat conversation and personal-key Live,
+see [Voice in the current chat](./current-chat-voice.md). The shortcuts below
+describe the separate system-wide Symon surface.
+
 **Why a voice agent is in a control room:** a fleet generates decisions while you're doing something else. Agents finish, reviews queue, a merge blocks — and the cost of that isn't the decision, it's having to stop, find the window, and reload the context. Symon closes that gap. You ask "what needs me?" without turning around, and approve the one thing that's blocking, hands still on whatever you were doing.
 
 He runs on the rest of your Mac too, because an operator's day isn't only the fleet:
