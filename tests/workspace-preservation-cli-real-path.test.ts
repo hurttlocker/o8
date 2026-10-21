@@ -188,7 +188,7 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
         dependencyLabels: [], dependencyPacketIds: [], queueState: 'held', releaseState: 'pending',
         status: 'running', blockedReason: null, review: null,
         lane: { tileId: source.lane.id, tabId: source.lane.id, repoPath: repo.localPath,
-          worktreePath: source.workspacePath, runtime: 'codex', laneId: source.lane.id },
+          worktreePath: source.workspacePath, runtime: 'codex', laneId: source.lane.id, sessionKey: source.lane.sessionKey },
       } as OrchestratorPacket], updatedAt: new Date().toISOString(),
     });
     recordMission({ id: mission.missionId!, repoPath: repo.localPath, runtime: 'codex',
@@ -200,6 +200,11 @@ describe('workspace preservation compiled CLI and persisted owner', () => {
     expect(hold.exitCode, hold.stderr + hold.stdout).toBe(0);
     const stop = await cli(['packet', 'stop', packetId]);
     expect(stop.exitCode, stop.stderr + stop.stdout).toBe(0);
+    closeDb();
+    for (const stopped of [readOrchestratorControlPlaneState(), readMissionRegistryEntry(mission.missionId!)!.mission]) {
+      expect(stopped.packets[0]).toMatchObject({ operatorStopped: true, queueState: 'held', status: 'blocked',
+        blockedReason: 'operator_stopped', lane: { laneId: source.lane.id, sessionKey: source.lane.sessionKey } });
+    }
     const closeArgs = ['packet', 'close', packetId, '--reason', 'superseded',
       '--note', 'Continue in a distinct successor', '--idempotency-key', 'close-preservation-held'];
     const heldClose = await cli(closeArgs);

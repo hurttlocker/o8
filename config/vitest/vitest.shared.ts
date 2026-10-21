@@ -1,5 +1,13 @@
 import path from 'node:path';
 
+// Packet shells run in development mode and carry live control-plane tokens.
+// Normalize before Vitest forks workers (and before application imports), not
+// inside individual tests. Tests requiring authority must supply fixture tokens.
+Object.assign(process.env, { NODE_ENV: 'test' });
+for (const name of ['O8_WORKER_TOKEN', 'O8_API_TOKEN', 'O8_SPECTATOR_TOKEN']) {
+  delete process.env[name];
+}
+
 export const sharedVitestConfig = {
   resolve: {
     alias: {

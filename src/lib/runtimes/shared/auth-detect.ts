@@ -478,7 +478,7 @@ async function detectPi(): Promise<RuntimeAuthStatus> {
     authenticated,
     connection: localCredentialEvidence([process.env.ANTHROPIC_API_KEY ? 'Anthropic' : '', process.env.OPENAI_API_KEY ? 'OpenAI' : '', process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated),
     detail: !binaryPath
-      ? process.platform === 'win32' ? 'Existing Pi setup detection is not available on Windows yet.' : 'Pi CLI is not installed.'
+      ? process.platform === 'win32' ? 'Existing Pi setup detection is not available on Windows yet.' : 'Worker runtime "pi" is not installed. The built-in Pi worker that ships with o8 is runtime "pi-builtin".'
       : authenticated
       ? 'Pi CLI is installed and has provider credentials.'
       : 'Pi CLI is installed but no provider credentials were found.',

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   signedIn: false,
   userLoaded: true,
   user: null as { id: string; reload: () => Promise<void> } | null,
+  userSnapshot: null as { isLoaded: boolean; isSignedIn: boolean; user: { id: string; reload: () => Promise<void> } | null } | null,
+  userListeners: new Set<() => void>(),
   clerk: {} as Record<string, unknown>,
   signIn: {} as Record<string, unknown>,
   opened: vi.fn(),
@@ -19,12 +21,18 @@ const mocks = vi.hoisted(() => ({
   ticket: vi.fn(async () => ({})),
   callbacks: null as ((event: { payload: string[] }) => void) | null,
 }));
-vi.mock('@clerk/nextjs', () => ({
+vi.mock('@clerk/nextjs', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return ({
   ClerkProvider: ({ children }: { children: unknown }) => children,
-  useUser: () => ({ isLoaded: mocks.userLoaded, isSignedIn: mocks.signedIn, user: mocks.user }),
+  useUser: () => useSyncExternalStore(listener => {
+    mocks.userListeners.add(listener);
+    return () => { mocks.userListeners.delete(listener); };
+  }, () => mocks.userSnapshot!),
   useClerk: () => mocks.clerk,
   useSignIn: () => ({ signIn: mocks.signIn }),
-}));
+  });
+});
 vi.mock('@clerk/nextjs/server', () => ({ auth: async () => ({ userId: null }) }));
 vi.mock('tauri-plugin-clerk', () => ({ initClerk: async () => ({}), noopLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async () => [] }));
@@ -56,7 +64,13 @@ function localRequest(input: string, init?: RequestInit) {
   });
 }
 
+function publishUser() {
+  mocks.userSnapshot = { isLoaded: mocks.userLoaded, isSignedIn: mocks.signedIn, user: mocks.user };
+  mocks.userListeners.forEach(listener => listener());
+}
+
 async function mount(withAccount = false) {
+  publishUser();
   const { O8AuthProvider, useO8Auth } = await import('@/components/auth/O8AuthProvider');
   const Account = withAccount ? (await import('@/components/desktop/settings/AccountTab')).AccountTab : null;
   const Probe = () => {
@@ -115,6 +129,8 @@ beforeEach(() => {
   mocks.signedIn = false;
   mocks.userLoaded = true;
   mocks.user = null;
+  mocks.userListeners.clear();
+  mocks.userSnapshot = null;
   mocks.opened.mockClear();
   mocks.browserSignIn.mockClear();
   mocks.ticket.mockClear();
@@ -136,14 +152,14 @@ beforeEach(() => {
       mocks.signedIn = true;
       mocks.user = { id: 'user_device', reload: async () => {} };
       mocks.clerk.user = mocks.user;
-      render();
+      publishUser();
     },
-    signOut: async () => {
+    signOut: vi.fn(async () => {
       mocks.signedIn = false;
       mocks.user = null;
       mocks.clerk.user = null;
-      render();
-    },
+      publishUser();
+    }),
   };
   fetchMock = vi.fn(async (input, init) => {
     if (input.includes('/auth/handoff')) {
@@ -295,8 +311,9 @@ describe('round 2 handoff through the native provider, real callback handler and
       mocks.signedIn = true;
       mocks.user = { id: 'user_device', reload: async () => {} };
       mocks.clerk.user = mocks.user;
-      render();
+      publishUser();
     });
+    expect(state.signedIn).toBe(true);
     expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(true);
     const normal = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => {
@@ -305,6 +322,8 @@ describe('round 2 handoff through the native provider, real callback handler and
     });
     await act(async () => { await expect(state.signOut()).rejects.toThrow('Sign-out failed. Try again.'); });
     expect(state.signedIn).toBe(true);
+    expect(mocks.clerk.signOut).not.toHaveBeenCalled();
+    expect(existsSync(join(dataDir, 'desktop-auth-handoff.json'))).toBe(true);
   });
 
   it('shows the cancellation failure through the real Sign out button without an unhandled rejection', async () => {
