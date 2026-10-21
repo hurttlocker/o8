@@ -3785,6 +3785,14 @@
       ]
     },
     {
+      "path": "tests/packet-scope-orphan-project-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/panel-repos-add-response.test.ts",
       "reasons": [
         "child-process",
