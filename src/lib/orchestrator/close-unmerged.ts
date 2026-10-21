@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { recoverArchivedCloseOwner } from '@/lib/orchestrator/close-archived-owner';
 import { dispatch } from '@/lib/lane/commands';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket, getLaneEvents, listLanes, updateLane } from '@/lib/lane/registry';
@@ -357,7 +358,7 @@ async function closePacketUnmergedUnlocked(input: {
     && candidate.status !== 'archived'
     && candidate.status !== 'completed'
   ));
-  const lanesToClose = collectPacketLifecycleLanes(
+  let lanesToClose = collectPacketLifecycleLanes(
     guard.previousPacket,
     guard.repoPath,
     persistedLanes,
@@ -421,7 +422,13 @@ async function closePacketUnmergedUnlocked(input: {
       if (stopped) stoppedReviewTurns.push(stopped);
     }
 
+    const archivedOwner = rawDisposition === 'adopted_elsewhere'
+      ? await recoverArchivedCloseOwner(input.packetId, lanesToClose) : null;
+    if (archivedOwner) {
+      lanesToClose = archivedOwner.targets;
+    }
     const retiredWorkerBindings = await confirmedRetiredWorkerBindings(input.packetId, lanesToClose);
+    if (archivedOwner) retiredWorkerBindings.add(archivedOwner.bindingKey);
     const workerLanesToKill = lanesToClose.filter((target) => {
       const bindingKey = workerBindingKey(target);
       return !bindingKey || !retiredWorkerBindings.has(bindingKey);
