@@ -47,6 +47,26 @@ vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => {}),
 }));
 
+const background = vi.hoisted(() => ({ prunes: [] as Promise<unknown>[] }));
+vi.mock('@/lib/lane/successful-merge-worktree-cleanup', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/lane/successful-merge-worktree-cleanup')>();
+  return {
+    ...actual,
+    settleSuccessfulMergeWorktreeCleanup: async (input: Parameters<typeof actual.settleSuccessfulMergeWorktreeCleanup>[0]) => {
+      // Keep merge and prune real, but retain the detached writer for teardown.
+      const prune = vi.spyOn(input.manager, 'prune');
+      try {
+        return await actual.settleSuccessfulMergeWorktreeCleanup(input);
+      } finally {
+        for (const result of prune.mock.results) {
+          if (result.type === 'return') background.prunes.push(result.value);
+        }
+        prune.mockRestore();
+      }
+    },
+  };
+});
+
 // Record every lane command the approvals route forwards, then run the real one.
 const laneDispatch = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>> }));
 vi.mock('@/lib/lane/commands', async (importOriginal) => {
@@ -265,6 +285,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await waitForInboxUrgency();
+  await Promise.all(background.prunes);
   setApprovalRefereeOptionsForTests(undefined);
   setInboxUrgencyTransportForTests(undefined);
   await fixture.close();
