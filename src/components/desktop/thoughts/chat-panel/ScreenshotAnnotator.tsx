@@ -117,10 +117,12 @@ export function ScreenshotAnnotator({
   image,
   onCancel,
   onDone,
+  instruction,
 }: {
   image: ThoughtsAttachedImage;
   onCancel: () => void;
   onDone: (nextDataUri: string) => void;
+  instruction?: { value: string; onChange: (words: string) => void };
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -236,11 +238,20 @@ export function ScreenshotAnnotator({
     setShapeCount((c) => c + 1);
   };
 
-  const undo = () => {
+  const undo = useCallback(() => {
     if (shapesRef.current.length === 0) return;
     shapesRef.current = shapesRef.current.slice(0, -1);
     setShapeCount((c) => Math.max(0, c - 1));
-  };
+  }, []);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z' || event.shiftKey) return;
+      if (event.target instanceof HTMLElement && (event.target.matches('input, textarea') || event.target.isContentEditable)) return;
+      event.preventDefault(); undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo]);
 
   const done = () => {
     const canvas = canvasRef.current;
@@ -270,11 +281,12 @@ export function ScreenshotAnnotator({
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 14,
-        paddingTop: 20,
-        paddingRight: 20,
-        paddingBottom: 20,
-        paddingLeft: 20,
+        gap: 16,
+        paddingTop: 16,
+        paddingRight: 16,
+        paddingBottom: 16,
+        paddingLeft: 16,
+        boxSizing: 'border-box',
       }}
     >
       {/* Blur scrim on its OWN layer, BEHIND the content — NOT an ancestor of any
@@ -291,17 +303,6 @@ export function ScreenshotAnnotator({
           WebkitBackdropFilter: 'blur(18px)',
         } as CSSProperties}
       />
-      <Toolbar
-        tool={tool}
-        onTool={setTool}
-        color={color}
-        onColor={setColor}
-        canUndo={shapeCount > 0}
-        onUndo={undo}
-        onDone={done}
-        onCancel={onCancel}
-      />
-
       <div style={{ position: 'relative', maxWidth: '100%', minHeight: 0, display: 'flex' }}>
         <canvas
           ref={canvasRef}
@@ -311,8 +312,8 @@ export function ScreenshotAnnotator({
           onPointerLeave={handleUp}
           style={{
             display: 'block',
-            maxWidth: '86vw',
-            maxHeight: '74vh',
+            maxWidth: 'calc(100vw - 48px)',
+            maxHeight: instruction ? 'calc(100dvh - 252px)' : 'calc(100dvh - 180px)',
             width: 'auto',
             height: 'auto',
             borderRadius: 12,
@@ -334,8 +335,14 @@ export function ScreenshotAnnotator({
         ))}
       </div>
 
-      <div style={{ fontSize: 11.5, fontWeight: 400, color: 'rgba(255,255,255,0.72)', fontFamily: 'var(--font-sans-system)', letterSpacing: '-0.01em' }}>
-        Pick a tool and draw · Text drops a card — click it and type · drag its bar to move · Done attaches it
+      <div style={{ width: instruction ? 'min(720px, 100%)' : undefined, maxWidth: '100%', borderRadius: 14, background: 'var(--t-chat-surface-input-bg, var(--t-input-bg))', boxShadow: '0 12px 40px rgba(0, 0, 0, 0.25)', overflow: 'hidden', flexShrink: 0 }}>
+        {instruction ? <textarea aria-label="Instruction for marked image" value={instruction.value} placeholder="What should change here?" rows={2} maxLength={16_000}
+          onChange={event => instruction.onChange(event.target.value)} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') event.currentTarget.blur(); }}
+          style={{ display: 'block', boxSizing: 'border-box', width: '100%', minHeight: 60, maxHeight: 96, paddingTop: 14, paddingRight: 16, paddingBottom: 6, paddingLeft: 16, border: 0, resize: 'none', outline: 'none', background: 'transparent', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 13, fontWeight: 300, lineHeight: 1.5, letterSpacing: '-0.1px', overflowY: 'auto' }} /> : null}
+        <Toolbar tool={tool} onTool={setTool} color={color} onColor={setColor} canUndo={shapeCount > 0} onUndo={undo} onDone={done} onCancel={onCancel} />
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-accent-contrast)', fontFamily: 'var(--font-sans-system)', letterSpacing: '-0.1px', textAlign: 'center' }}>
+        {tool === 'text' ? 'Click to add a note · Drag its handle to move it' : 'Draw to mark the detail · ⌘Z undo · Esc cancel'}
       </div>
     </div>
   );
@@ -499,28 +506,30 @@ function Toolbar({
       style={{
         display: 'flex',
         alignItems: 'center',
+        justifyContent: 'center',
+        flexWrap: 'wrap',
         gap: 8,
+        maxWidth: 'calc(100vw - 32px)',
+        boxSizing: 'border-box',
         paddingTop: 8,
         paddingBottom: 8,
         paddingLeft: 10,
         paddingRight: 10,
         borderRadius: 14,
-        background: 'var(--t-input-bg)',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-divider)',
-        boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
+        background: 'transparent',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {(['arrow', 'box', 'pen', 'highlight', 'text'] as Tool[]).map((t) => (
         <ToolButton key={t} active={tool === t} onClick={() => onTool(t)} label={t}>
           <ToolIcon tool={t} />
         </ToolButton>
       ))}
 
-      <div style={{ width: 1, height: 22, background: 'var(--t-divider)', marginLeft: 2, marginRight: 2 }} />
+      </div>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 8, paddingRight: 8 }}>
       {COLORS.map((c) => (
         <button
           key={c}
@@ -542,8 +551,9 @@ function Toolbar({
         />
       ))}
 
-      <div style={{ width: 1, height: 22, background: 'var(--t-divider)', marginLeft: 2, marginRight: 2 }} />
+      </div>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <ToolButton active={false} onClick={onUndo} label="Undo" disabled={!canUndo}>
         <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
           <path d="M9 14 4 9l5-5" />
@@ -563,7 +573,7 @@ function Toolbar({
           background: 'transparent',
           color: 'var(--t-text-muted)',
           fontSize: 12.5,
-          fontWeight: 400,
+          fontWeight: 300,
           cursor: 'pointer',
           fontFamily: 'var(--font-sans-system)',
         }}
@@ -582,13 +592,14 @@ function Toolbar({
           background: 'var(--t-text)',
           color: 'var(--t-chat-surface-bg)',
           fontSize: 12.5,
-          fontWeight: 500,
+          fontWeight: 300,
           cursor: 'pointer',
           fontFamily: 'var(--font-sans-system)',
         }}
       >
         Done
       </button>
+      </div>
     </div>
   );
 }

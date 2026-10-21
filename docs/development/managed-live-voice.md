@@ -1,5 +1,51 @@
 # Managed Live voice: integration and installed-pilot handoff
 
+## Personal-key and no-key current-chat access
+
+The current-chat voice chooser also offers an explicit personal-key source and
+turn-by-turn conversation. These are separate from managed activation below.
+See the [user setup and acceptance matrix](../user/current-chat-voice.md).
+
+Authenticated readiness adds `byokAvailable` to the existing managed fields.
+It reports local key configuration only, without probing provider access or
+creating a session. An unavailable managed pilot does not grant managed access
+and does not invalidate independently configured personal-key access.
+
+Personal-key admission is operator-only and does not require an o8 plan token.
+Use `{action:"start", source:"byok", requestId, binding, context, sdp}`; `requestId`
+is a fresh UUID for one deliberate admission attempt. Every control retains the
+same source, request ID and binding. There is no implicit payer fallback. The
+server resolves the configured OpenAI key and owns the fixed provider endpoints.
+Existing managed controls and their activation hold remain unchanged.
+
+Private `byok-voice-relay` receipts are durably published before creation. They
+bind local operator, account/sign-in scope, key fingerprint and chat, retain
+deduplicated events and terminal usage, and serialize admission through the
+existing profile admission lock. They contain no API key or SDP. Unresolved
+receipts block further personal-key sessions, including after restart or a key
+change. A five-minute local timer requests closure; it does not establish a
+provider lifetime ceiling or managed spending guarantee.
+
+`{action:"recover", source:"byok", requestId, binding}` looks up the same owned
+attempt and requests closure of its known provider session. It never creates a
+replacement. Recovered terminal events remain available through normal polling.
+The browser uses this after an ambiguous lost start response. Unknown creation
+without a durably acknowledged provider identity and missing final usage remain
+unresolved; they are not reset, refunded or represented as safe closure.
+
+Turn-by-turn keeps the existing composer dictation owner and send callback. It
+requires explicit mount-local consent, correlates the accepted `userMessageId`
+with a typed terminal result, and uses the dedicated no-key Edge playback path.
+Ordinary dictation still fills the draft. Stop/navigation revoke that consent
+and prevent late delivery or playback from moving to another chat. Provider
+credentials, CLI authentication and distribution channel stay independent.
+
+Mocked route tests exercise actual admission handlers, principal resolution and
+persisted private receipts. Client replay covers explicit source selection,
+single-attempt recovery and terminal correlation. These do not prove real API
+model entitlement, microphone/shortcut behavior, audible playback or the native
+webview's system-speech fallback. The installed checklist above remains required.
+
 ## Delivery boundary
 
 The merged application implements the relay, browser WebRTC transport, existing-chat adapter, and existing Symon text-session adapter. General managed admission requires the separate managed-gateway draft. It is **disabled by default and not production-activation ready**. Production remains disabled. A separately authorized, expiring personal experiment can use a local relay and the operator’s existing API credential without changing managed customer admission. Development uses a private marker; an installed desktop requires an independently signed account-and-installation-bound pilot grant. Provider receipts from that experiment are distinct from production readiness and physical-shortcut acceptance.

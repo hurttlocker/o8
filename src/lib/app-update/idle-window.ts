@@ -1,3 +1,4 @@
+import { inspectCliOperationAdmission, type CliInstallerActivity } from '@/lib/setup/cli-operation-admission';
 import 'server-only';
 
 import { listLanes } from '@/lib/lane/registry';
@@ -74,6 +75,8 @@ export interface UpdateIdleWindow {
     managedRuns: UpdateIdleManagedRun[];
     ownedSessions: UpdateIdleOwnedSession[];
     cloudJobs: UpdateIdleCloudJob[];
+    cliInstallers?: CliInstallerActivity[];
+    restartPending?: boolean;
   };
   unavailable: string[];
   checkedAt: string;
@@ -85,6 +88,9 @@ interface IdleWindowInput {
   managedRuns: UpdateIdleManagedRun[];
   ownedSessions: UpdateIdleOwnedSession[];
   cloudJobs?: UpdateIdleCloudJob[];
+  cliInstallers?: CliInstallerActivity[];
+  cliAdmissionUnavailable?: boolean;
+  restartPending?: boolean;
   terminalInventoryAvailable: boolean;
   checkedAt?: string;
 }
@@ -95,11 +101,14 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     session.kind === 'managed-process' || session.clientCount > 0
   ));
   const unavailable = input.terminalInventoryAvailable ? [] : ['terminal-sessions'];
+  if (input.cliAdmissionUnavailable) unavailable.push('cli-update-ownership');
   const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status));
   const otherWorkIdle = terminalSessions.length === 0
     && input.managedRuns.length === 0
     && input.ownedSessions.length === 0
     && (input.cloudJobs?.length ?? 0) === 0
+    && (input.cliInstallers?.length ?? 0) === 0
+    && !input.restartPending
     && unavailable.length === 0;
   return {
     idle: activeLanes.length === 0 && otherWorkIdle,
@@ -111,6 +120,8 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,
       cloudJobs: input.cloudJobs ?? [],
+      cliInstallers: input.cliInstallers ?? [],
+      ...(input.restartPending ? { restartPending: true } : {}),
     },
     unavailable,
     checkedAt: input.checkedAt ?? new Date().toISOString(),
@@ -178,8 +189,12 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
       workerId: job.claimedBy ?? null,
       leaseExpiresAt: job.leaseExpiresAt ?? null,
     }));
+  const cliAdmission = inspectCliOperationAdmission();
   return evaluateUpdateIdleWindow({
     lanes,
+    cliInstallers: cliAdmission.installers,
+    cliAdmissionUnavailable: cliAdmission.blocked && cliAdmission.installers.length === 0 && cliAdmission.code !== 'app_restart_pending',
+    restartPending: cliAdmission.code === 'app_restart_pending',
     terminalSessions: terminalInventory.sessions,
     terminalInventoryAvailable: terminalInventory.available,
     ownedSessions: ownedSessions.map((session) => ({

@@ -103,9 +103,9 @@ export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: s
         : 'var(--t-text-muted)';
 
   const idleHint = inputMode === 'toggle'
-    ? 'Click to dictate — click again to send (Ctrl+Z hold also works)'
+    ? 'Click to dictate — click again to finish (Ctrl+Z hold also works)'
     : 'Hold to dictate (or hold Ctrl+Z)';
-  const recordingHint = inputMode === 'toggle' ? 'Click to send' : 'Release to send';
+  const recordingHint = inputMode === 'toggle' ? 'Click to finish dictation' : 'Release to finish dictation';
 
   return (
     <button

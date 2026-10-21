@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { ExternalLink, GitPullRequest } from '../lucide-shims';
+import { PrDiffStats } from './PrDiffStats';
 import { PrPanelTitle } from './PrPanelTitle';
 import { PrPanelActions } from './PrPanelActions';
 import type { PrComposerMode, PrDetail } from './types';
@@ -28,7 +29,7 @@ export const PrPanelHeader = memo(function PrPanelHeader({ detail, repoSlug, rep
     {detail.checksUnavailable || detail.discussionIncomplete ? <span role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{detail.checksUnavailable ? 'Checks unavailable. ' : ''}{detail.discussionIncomplete ? 'Some discussion is available only on GitHub.' : ''}</span> : null}
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--t-text-muted)' }}>
       <span title={`${detail.baseRefName} ← ${detail.headRefName}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0, maxWidth: '100%', fontFamily: 'var(--font-mono)' }}><span style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }}>{detail.baseRefName}</span><span aria-hidden="true">←</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail.headRefName}</span></span>
-      {showDiffStats ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}><span>{detail.changedFiles} file{detail.changedFiles === 1 ? '' : 's'}</span><span style={{ color: 'var(--t-success)' }}>+{detail.additions.toLocaleString()}</span><span style={{ color: 'var(--t-danger)' }}>−{detail.deletions.toLocaleString()}</span></span> : null}
+      {showDiffStats ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}><span>{detail.changedFiles} file{detail.changedFiles === 1 ? '' : 's'}</span><PrDiffStats files={detail.files} totalFiles={detail.changedFiles} additions={detail.additions} deletions={detail.deletions} /></span> : null}
     </div>
   </header>;
 });

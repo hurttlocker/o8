@@ -42,7 +42,7 @@ it('shows installed and available versions, download progress, and the release n
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 
-it('names waiting tasks and offers "Restart now"; running work hides it', async () => {
+it('names waiting tasks and keeps explicit restart accessible with cached running work', async () => {
   publishAppUpdateView({ ...baseView, message: 'Update installed. Restart now to apply it. Waiting tasks keep their state.',
     blockers: { live: [], parked: ['Fix the login form (waiting for review)'] } });
   const { host, root, panel } = await openPanel();
@@ -55,9 +55,10 @@ it('names waiting tasks and offers "Restart now"; running work hides it', async 
 
     await act(async () => publishAppUpdateView({ ...baseView, message: 'Update installed. Restart is waiting for running work to finish.',
       blockers: { live: ['Build the release (running)'], parked: ['Fix the login form (waiting for review)'] } }));
-    expect(panel().textContent).toContain('Restart waits for:');
+    expect(panel().textContent).toContain('Work to check before restarting:');
     expect(panel().textContent).toContain('Build the release (running)');
-    expect([...panel().querySelectorAll('button')].some(button => button.textContent === 'Restart now')).toBe(false);
+    await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Restart now')!.click());
+    expect(restart).toHaveBeenCalledTimes(2);
   } finally {
     window.removeEventListener('o8:restart-app-update', restart);
     await act(async () => root.unmount()); host.remove();

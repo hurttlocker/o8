@@ -1,3 +1,4 @@
+import { CliOperationRefusal } from '@/lib/setup/cli-operation-admission';
 import { NextResponse } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { CodexUpdateRefusal } from '@/lib/setup/codex-cli-update';
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
           const result = await updateSelectedStableCli(runtimeId, stage => send('progress', { runtime: runtimeId, stage }));
           send('result', result);
         } catch (error) {
-          const refusal = error instanceof CodexUpdateRefusal ? error : new CodexUpdateRefusal('update-failed', 'Unable to update this CLI.', 503);
+          const refusal = (error instanceof CodexUpdateRefusal || error instanceof CliOperationRefusal) ? error : new CodexUpdateRefusal('update-failed', 'Unable to update this CLI.', 503);
           send('error', { code: refusal.code, error: refusal.message });
         } finally { if (connected) controller.close(); }
       },
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await updateSelectedStableCli(runtimeId));
   } catch (error) {
-    const refusal = error instanceof CodexUpdateRefusal ? error : new CodexUpdateRefusal('update-failed', 'Unable to update this CLI.', 503);
+    const refusal = (error instanceof CodexUpdateRefusal || error instanceof CliOperationRefusal) ? error : new CodexUpdateRefusal('update-failed', 'Unable to update this CLI.', 503);
     return NextResponse.json({ code: refusal.code, error: refusal.message }, { status: refusal.status });
   }
 }

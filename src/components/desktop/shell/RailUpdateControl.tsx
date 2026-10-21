@@ -159,7 +159,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
         {hub.app.progress ? <UpdateProgressBar progress={hub.app.progress} reducedMotion={Boolean(reducedMotion)} /> : null}
         {hub.app.blockers ? <div style={{ display: 'grid', gap: 6, fontSize: 11.5, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
           {hub.app.blockers.live.length ? <div>
-            <div>Restart waits for:</div>
+            <div>Work to check before restarting:</div>
             <ul style={{ margin: 0, paddingLeft: 16 }}>{hub.app.blockers.live.slice(0, 6).map(item => <li key={item}>{item}</li>)}</ul>
             {hub.app.blockers.live.length > 6 ? <div style={{ color: 'var(--t-text-muted)' }}>and {hub.app.blockers.live.length - 6} more</div> : null}
           </div> : null}
@@ -168,11 +168,11 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
             <ul style={{ margin: 0, paddingLeft: 16 }}>{hub.app.blockers.parked.slice(0, 6).map(item => <li key={item}>{item}</li>)}</ul>
             {hub.app.blockers.parked.length > 6 ? <div style={{ color: 'var(--t-text-muted)' }}>and {hub.app.blockers.parked.length - 6} more</div> : null}
           </div> : null}
-          {!hub.app.blockers.live.length ? <button type="button" disabled={pending}
+          <button type="button" disabled={pending}
             onClick={() => { setPinned(true); window.dispatchEvent(new Event('o8:restart-app-update')); }}
             style={{ ...button, justifySelf: 'start', minHeight: 30, color: 'var(--t-accent-contrast, #fff)', background: 'var(--t-accent)' }}>
             Restart now
-          </button> : null}
+          </button>
         </div> : null}
         {hub.app.version && !hub.app.blockers ? <div style={{ display: 'grid', justifyItems: 'start', gap: 6 }}>
           {hub.app.version && !hub.app.blockers ? <button type="button" disabled={pending || hub.checkingAll}

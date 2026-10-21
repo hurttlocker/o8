@@ -24,6 +24,7 @@ import {
   startCodexBrowserRealtimeSession,
   type CodexBrowserRealtimeSession,
 } from '@/lib/voice/codex-realtime-browser';
+import { captureMicrophone, type MicrophoneInput } from '@/lib/voice/microphone-input';
 
 export type RealtimeStatus =
   | 'idle'
@@ -409,6 +410,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   let pc: RTCPeerConnection | null = null;
   let dc: RTCDataChannel | null = null;
   let micStream: MediaStream | null = null;
+  let microphone: MicrophoneInput | null = null;
   let audioEl: HTMLAudioElement | null = null;
   let codexSession: CodexBrowserRealtimeSession | null = null;
   let toolDefs: Array<Record<string, unknown>> = [];
@@ -445,7 +447,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
         pc.close();
       }
     } catch { /* */ }
-    try { micStream?.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+    try { await microphone?.stop(); } catch { /* An unconfirmed input release remains held. */ }
     try {
       if (audioEl) {
         audioEl.srcObject = null;
@@ -611,9 +613,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     // 1. Microphone — echo cancellation matters: it stops the model hearing itself.
     setStatus('requesting-mic');
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({
+      microphone = await captureMicrophone({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      }, () => !aborted);
+      micStream = microphone.stream;
     } catch (e) {
       return fail(`Microphone denied or unavailable: ${(e as Error)?.message || String(e)}`);
     }

@@ -175,6 +175,13 @@
       ]
     },
     {
+      "path": "src/app/api/voice/live/byok-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/app/api/voice/live/personal-pilot-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -1325,6 +1332,14 @@
       ]
     },
     {
+      "path": "tests/activity-folder-state-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/activity-local-commits.test.ts",
       "reasons": [
         "child-process",
@@ -1806,6 +1821,15 @@
       ]
     },
     {
+      "path": "tests/cli-installer-restart-admission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-output-completeness-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1858,6 +1882,15 @@
     {
       "path": "tests/cli-usage-api-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/close-archived-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
         "real-path"
       ]
     },
@@ -2850,6 +2883,18 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/lane-stop-retry-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -3935,7 +3980,8 @@
         "git-cli",
         "network-listener",
         "process-signal",
-        "real-path"
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -5142,6 +5188,18 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "tests/visual-inspection-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/visual-instruction-delivery-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

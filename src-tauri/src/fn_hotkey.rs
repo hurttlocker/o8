@@ -692,6 +692,9 @@ extern "C" {
 /// tap callback.
 #[cfg(target_os = "macos")]
 fn begin_system_dictation(smart_compose: bool) {
+    let Some(input) = prepare_dictation_input() else {
+        return;
+    };
     // Fn is a barge-in gesture. Stop governed review speech before opening the
     // mic so interrupted audio can never drain as authorization.
     crate::tts::playback::stop();
@@ -788,7 +791,7 @@ fn begin_system_dictation(smart_compose: bool) {
         settled: duck_settled,
         cap: std::time::Duration::from_millis(DUCK_SETTLE_CAP_MS),
     };
-    match crate::stt_engine::start_with_gate(Some(duck_gate)) {
+    match crate::stt_engine::start_prepared(input, Some(duck_gate)) {
         Ok(sid) => {
             CURRENT_PTT_SESSION_ID.store(sid, Ordering::SeqCst);
             crate::live_dictation::bind_session(sid);
@@ -811,12 +814,26 @@ fn begin_system_dictation(smart_compose: bool) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn prepare_dictation_input() -> Option<crate::voice_input::NativeInput> {
+    match crate::stt_engine::prepare_input() {
+        Ok(input) => Some(input),
+        Err(error) => {
+            surface_dictation_start_error(&error);
+            None
+        }
+    }
+}
+
 /// Turn a raw `stt_engine::start()` failure string into a human-readable failure
 /// class for the dock. Distinguishes the three things that actually go wrong at
 /// capture start: Microphone permission, opening the input device, and the STT
 /// engine/helper being unavailable.
 #[cfg(target_os = "macos")]
 fn classify_start_error(raw: &str) -> String {
+    if raw == crate::voice_input::BUSY {
+        return raw.to_string();
+    }
     // Permission is the most common and most actionable — check TCC directly
     // rather than string-matching, since a denied grant surfaces as a generic
     // device-open failure downstream.
@@ -975,6 +992,10 @@ fn discard_brush() {
 /// `LONG_FORM_ACTIVE` is already set true synchronously by the tap callback.
 #[cfg(target_os = "macos")]
 fn begin_long_form_dictation() {
+    let Some(input) = prepare_dictation_input() else {
+        LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+        return;
+    };
     crate::tts::playback::stop();
     let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
@@ -1016,7 +1037,7 @@ fn begin_long_form_dictation() {
         });
     }
 
-    match crate::stt_engine::start() {
+    match crate::stt_engine::start_prepared(input, None) {
         Ok(sid) => {
             LONG_FORM_SESSION_ID.store(sid, Ordering::SeqCst);
             crate::live_dictation::bind_session(sid);
@@ -1102,6 +1123,9 @@ fn cancel_long_form_dictation() {
 #[cfg(target_os = "macos")]
 #[allow(dead_code)] // Ask lane unbound from keys (both Options = agent); kept for a future initiator.
 fn begin_ask_dictation() {
+    let Some(input) = prepare_dictation_input() else {
+        return;
+    };
     let _ = crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     // Ask takes the mic: the three voice modes (push-to-talk, long-form, ask)
@@ -1147,7 +1171,7 @@ fn begin_ask_dictation() {
         });
     }
 
-    match crate::stt_engine::start() {
+    match crate::stt_engine::start_prepared(input, None) {
         Ok(sid) => {
             // A sub-120ms brush (discard_ask_dictation) may have cleared ASK_MODE
             // while we were starting — tear down the session we just started
@@ -1204,6 +1228,10 @@ fn discard_ask_dictation() {
 /// Mirror of `begin_ask_dictation`. Worker thread, never the tap.
 #[cfg(target_os = "macos")]
 fn begin_agent_dictation() {
+    let Some(input) = prepare_dictation_input() else {
+        AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+        return;
+    };
     // Right-Option is a barge-in gesture. Stop pending or active TTS before the
     // recognizer starts; a governed review completion then resolves false and
     // can never surface its confirmation card after the operator talked over it.
@@ -1269,7 +1297,7 @@ fn begin_agent_dictation() {
         });
     }
 
-    match crate::stt_engine::start() {
+    match crate::stt_engine::start_prepared(input, None) {
         Ok(sid) => {
             // A sub-120ms brush may have cleared AGENT_MODE while we were starting.
             if !AGENT_MODE.load(Ordering::SeqCst) {
@@ -1297,6 +1325,9 @@ fn begin_agent_dictation() {
 /// to the agent via take_agent_mode. Mirror of `end_ask_dictation`.
 #[cfg(target_os = "macos")]
 fn end_agent_dictation() {
+    if !AGENT_MODE.load(Ordering::SeqCst) {
+        return;
+    }
     crate::audio_ducker::restore();
     crate::sound::play_sound("Pop");
     let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
@@ -1309,6 +1340,9 @@ fn end_agent_dictation() {
 /// and stop the recognizer (fenced). Mirror of `discard_ask_dictation`.
 #[cfg(target_os = "macos")]
 fn discard_agent_dictation() {
+    if !AGENT_MODE.load(Ordering::SeqCst) {
+        return;
+    }
     let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
     AGENT_MODE.store(false, Ordering::SeqCst);
     AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
