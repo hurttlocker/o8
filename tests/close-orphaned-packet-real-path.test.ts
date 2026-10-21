@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
@@ -33,7 +33,7 @@ const { withWorktreeMetaTransaction } = await import('@/lib/worktree/metadata-st
 const { captureWorktreeMaterializationIdentity } = await import('@/lib/worktree/materialization-identity');
 const { canonicalRepoRoot, resolveWorktreeRootLayout } = await import('@/lib/worktree/root-layout');
 const { addRepo } = await import('@/lib/repos/registry');
-const { archiveRootForOwnedSessionRoot } = await import('@/lib/runtimes/shared/owned-session/archive');
+const { archiveOwnedSessionDir } = await import('@/lib/runtimes/shared/owned-session/archive');
 const { handleClosePacketUnmerged } = await import('@/lib/mcp/operator-handlers/close-packet');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const exactRetirement = await import('@/lib/workspace/exact-managed-directory-retirement');
@@ -112,10 +112,11 @@ async function fixture(sessionState: SessionState) {
     'codex', worktree.sessionKey, run, run.childExit, undefined, '',
   ));
   setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+  let archivedRecordPath: string | null = null;
   if (sessionState === 'archived') {
-    const archive = archiveRootForOwnedSessionRoot(sessionRoot);
-    mkdirSync(archive, { recursive: true });
-    renameSync(path.join(sessionRoot, `codex-owned-${packetId}`), path.join(archive, `codex-owned-${packetId}`));
+    const archived = await archiveOwnedSessionDir(sessionRoot, JSON.parse(readFileSync(sessionFile, 'utf8')));
+    expect(archived.archived).toBe(true);
+    archivedRecordPath = path.join(archived.archivePath!, 'session.json');
   } else {
     rmSync(path.join(sessionRoot, `codex-owned-${packetId}`), { recursive: true });
     if (sessionState === 'unbound') {
@@ -142,7 +143,7 @@ async function fixture(sessionState: SessionState) {
     constraints: '', totalWaves: 1, missionState: mission,
     packetMeta: mission.packets.map(({ id, title, referenceLabel }) => ({ id, title, referenceLabel })),
   });
-  return { packetId, repoPath, branch, worktree, lane, head, runMarker };
+  return { packetId, repoPath, branch, worktree, lane, head, runMarker, archivedRecordPath };
 }
 
 async function httpClose(packetId: string) {
@@ -361,6 +362,23 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
         expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
       } finally { interception.mockRestore(); }
     }, 120_000);
+  }
+
+  for (const mismatch of ['cwd', 'surfaceId', 'sessionDir', 'ledger'] as const) {
+    it(`refuses inconsistent archived ${mismatch} identity`, async () => {
+      const source = await fixture('archived');
+      const record = JSON.parse(readFileSync(source.archivedRecordPath!, 'utf8'));
+      if (mismatch === 'ledger') record.runIdentityLedger.complete = false;
+      else record[mismatch] = mismatch === 'surfaceId' ? 'codex-owned:other' : source.repoPath;
+      writeFileSync(source.archivedRecordPath!, JSON.stringify(record));
+      resetOwnedSessionIndex();
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toMatch(/archived|ownership/i);
+      expect(existsSync(source.worktree.path)).toBe(true);
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+    });
   }
 
   for (const missing of ['run-identity', 'process-group', 'newer-launch', 'unbound-run', 'too-many-runs', 'controlled-exit', 'pid-reuse'] as const) {

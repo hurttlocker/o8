@@ -11,7 +11,7 @@ import type { Lane } from '@/lib/lane/types';
 import { exactWorkspaceOwningLanes } from '@/lib/lane/workspace-ownership-query';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
-import { archivedSessionPathForSurfaceId } from '@/lib/runtimes/shared/owned-session/archive';
+import { archivedSessionPathForSurfaceId, assertArchivedWorkspaceSessionRestorable, ownedSessionRecordFingerprint } from '@/lib/runtimes/shared/owned-session/archive';
 import { readOwnedSessionMetadata } from '@/lib/runtimes/shared/owned-session/metadata-read';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 import { readWorkspacePreservation } from '@/lib/workspace/preservation-store';
@@ -129,7 +129,11 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string): Prom
     const receipt = await lifecycle.getWorkspaceBinding?.(sessionKey);
     const archive = await archivedSessionPathForSurfaceId(lifecycle.resolveRoot(), sessionKey, lifecycle.surfaceIdPrefix);
     const record = archive ? await readOwnedSessionMetadata<OwnedSessionRecord>(path.join(archive, 'session.json')) : null;
-    if (!receipt || !record || record.laneId !== lane.id || record.packetId !== lane.packetId
+    if (!receipt || !record || record.surfaceId !== sessionKey || record.laneId !== lane.id || record.packetId !== lane.packetId
+      || path.join(await realpath(path.dirname(record.cwd)), path.basename(record.cwd)) !== sourcePath
+      || record.runIdentityLedger?.version !== 1 || record.runIdentityLedger.complete !== true
+      || record.runIdentityLedger.totalRuns !== record.recentRuns.length
+      || ownedSessionRecordFingerprint(record) !== receipt.recordFingerprint
       || record.executionPolicy !== undefined || record.controlledTask || record.activeRun || record.detachedAt
       || receipt.surfaceId !== sessionKey || receipt.runtimeId !== lane.runtime || receipt.sessionState !== 'archived'
       || receipt.binding.packetId !== lane.packetId || receipt.binding.logicalWorkspaceId !== `packet:${lane.packetId}`
@@ -141,6 +145,7 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string): Prom
         || run.childExit?.code !== 0 || run.childExit.signal !== null || run.childExit.classification !== 'clean-exit')) {
       refuse('archived session binding or complete terminal run identity is uncertain');
     }
+    await assertArchivedWorkspaceSessionRestorable(lifecycle.resolveRoot(), sessionKey, lifecycle.surfaceIdPrefix, receipt.recordFingerprint);
     // Native probing below also checks every retained PID/group/marker and open descriptor.
     runs = receipt.retainedRuns.map((run) => ({ runId: run.id, pid: run.pid, processGroupId: run.processGroupId! }));
     evidence = receipt;
