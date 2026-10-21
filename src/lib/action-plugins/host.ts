@@ -458,7 +458,7 @@ type ClaimedAction = {
   state?: ActionState;
 };
 async function runClaimedAction(claimed: ClaimedAction) {
-  const { id, actionId, action, saved, cwd, receiptId, startedAt, actor, signal, input, eventId, triggerId, workspaceIdentity } = claimed;
+  const { id, actionId, action, cwd, receiptId, startedAt, actor, signal, input, eventId, triggerId, workspaceIdentity } = claimed;
   const dir = path.dirname(savedPath(id));
   const result = await new Promise<{ status: string; exitCode: number | null; stdout: string; stderr: string; error: string | null }>((resolve) => {
     let child: ReturnType<typeof spawn>;

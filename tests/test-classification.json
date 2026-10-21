@@ -2968,6 +2968,14 @@
       ]
     },
     {
+      "path": "tests/macos-cpu-packages.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/macos-release-artifacts.test.ts",
       "reasons": [
         "apfs-tool",
@@ -3776,6 +3784,14 @@
         "child-process",
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/packet-scope-orphan-project-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
         "real-path"
       ]
     },
@@ -5391,6 +5407,15 @@
         "network-listener",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/workspace-review-linked-issues-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
       ]
     },
     {

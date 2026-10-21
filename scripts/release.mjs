@@ -34,9 +34,12 @@ import { runShipWorkflow } from './lib/ship-broadcast.mjs';
 import { buildReleaseManifest } from './lib/release-manifest.mjs';
 import {
   resolveMacosReleaseArtifacts,
+  resolveMacosCpuArtifacts,
+  verifyMacCpuUpdaterArchive,
   verifyMacosDmgMatchesApp,
   verifyUniversalMacUpdaterArchive,
 } from './lib/macos-release-artifacts.mjs';
+import { assertCpuPreparationCurrent, macosCpuPackageArchitectures } from './lib/macos-cpu-packages.mjs';
 import { verifyUpdaterSignature } from './lib/updater-signature.mjs';
 import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
@@ -56,6 +59,7 @@ const PING_ALWAYS_RE = /\b(security|vulnerabilit|CVE|breaking change|breaking:|d
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister';
 const CHECKOUT_NATIVE_MODULES = ['better-sqlite3', 'node-pty'];
 const root = process.cwd();
+const cpuArchitectures = macosCpuPackageArchitectures(process.env.O8_MACOS_CPU_PACKAGES);
 
 function runCheckoutNativeModuleGate(checkoutRoot) {
   const script = `
@@ -282,6 +286,34 @@ if (process.env.O8_PRESHIP_GATE_ENABLED === '1') {
 }
 
 const signature = readFileSync(APP_SIG, 'utf8').trim();
+let darwinCpuArtifacts;
+if (cpuArchitectures.length) {
+  try {
+    darwinCpuArtifacts = cpuArchitectures.map((architecture) => {
+      const cpu = resolveMacosCpuArtifacts(root, version, architecture);
+      assertCpuPreparationCurrent(root, version, architecture);
+      const identity = verifyMacCpuUpdaterArchive(cpu.app, cpu.updaterArchive, architecture);
+      const signatureIdentity = verifyUpdaterSignature(root, cpu.updaterArchive, cpu.updaterSignature);
+      if (signatureIdentity.artifactSha256 !== identity.updaterArchiveSha256) {
+        throw new Error(`${architecture} updater signature identity mismatch`);
+      }
+      verifyMacosDmgMatchesApp(cpu.app, cpu.dmg, version, architecture);
+      execFileSync('xcrun', ['stapler', 'validate', cpu.app], { stdio: 'pipe' });
+      execFileSync('xcrun', ['stapler', 'validate', cpu.dmg], { stdio: 'pipe' });
+      runNativeGate(join(cpu.app, 'Contents', 'Resources', 'server'));
+      return {
+        architecture,
+        signature: readFileSync(cpu.updaterSignature, 'utf8').trim(),
+        identity: { ...identity, sourceBundleSha256: darwinIdentity.bundleSha256 },
+        archivePath: cpu.updaterArchive, signaturePath: cpu.updaterSignature, dmgPath: cpu.dmg,
+      };
+    });
+  } catch (error) {
+    console.error(`[release] FATAL: CPU package verification failed: ${error.message}`);
+    console.error('[release] Refusing partial or unverified CPU delivery; the universal artifacts remain intact.');
+    process.exit(1);
+  }
+}
 const pubDate = new Date().toISOString();
 // Point latest.json download URLs at the PUBLIC MIRROR so the Tauri updater
 // can fetch artifacts anonymously. The private repo (REPO) returns 404 for
@@ -300,9 +332,8 @@ const releaseNotes = (gateReleaseNote
   : `o8 ${tag} — see installer assets.`) + (creditLine ? `\n\n${creditLine}` : '') + warnStamp;
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
-// Both Darwin entries intentionally share the one updater archive. The
-// inspected artifact identity above proves that archive's app is universal;
-// buildReleaseManifest rejects an identity missing either native slice.
+// Universal delivery stays the default and its artifacts always remain in
+// the upload list. CPU delivery requires both independently verified packages.
 const latestJsonPath = join(BUNDLE, 'macos', releaseChannel.manifestName);
 const fixedJsonPath = join(BUNDLE, 'macos', 'fixed.json');
 const { latestJson, uploadArgs } = buildReleaseManifest({
@@ -315,6 +346,7 @@ const { latestJson, uploadArgs } = buildReleaseManifest({
   pubDate,
   downloadBase,
   darwinArtifact: { signature, identity: darwinIdentity },
+  darwinCpuArtifacts,
   baseUploadAssets: [DMG, APP_TAR, APP_SIG],
   trailingUploadAssets: [latestJsonPath, ...(releaseChannel.publishStableEffects ? [fixedJsonPath] : [])],
 });
