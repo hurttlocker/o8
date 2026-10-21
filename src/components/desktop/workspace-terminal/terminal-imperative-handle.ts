@@ -85,7 +85,7 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.panelRefs.current.get(sessionName)?.setSourceDimensions?.(cols, rows);
     },
     writeToTerminal: (sessionName, data, historical) => {
-      deps.panelRefs.current.get(sessionName)?.writeData(data);
+      deps.panelRefs.current.get(sessionName)?.writeData(data, historical);
       const now = Date.now();
       deps.recordTerminalActivity(sessionName, now);
       if (!historical && deps.urlDetectionEnabledRef.current) {

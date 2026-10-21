@@ -82,15 +82,16 @@ window-vibrancy = "0.6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Crash/error reporting for the native shell (telemetry ruling). DORMANT unless a
-# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). rustls
-# transport matches the repo's TLS stance; reqwest 0.12 is already in the lock
-# graph, so this adds no new reqwest major. `panic` installs the panic hook.
-sentry = { version = "0.35", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). Keep
+# reqwest/rustls support and the debug images previously enabled by minidump.
+# Shared reqwest features can also enable native TLS. This SDK/minidump pair
+# removes the legacy bundled roots without changing certificate-verification options.
+sentry = { version = "0.42", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
 
 # Native crash capture — the class of crash the `panic` hook above CANNOT see:
 # hardware faults + aborts (SIGSEGV / SIGABRT / SIGBUS / SIGILL / SIGFPE and
-# stack-overflow). Version 0.9 is the first release that depends on `sentry
-# ^0.35`, so these two pins advance together. It pulls `crash-handler 0.6` +
+# stack-overflow). Version 0.13 depends on `sentry ^0.42` without enabling its
+# default transport, so these two pins advance together. It keeps `crash-handler 0.6` +
 # `minidumper 0.8` via `minidumper-child 0.2`.
 #
 # How it works (see telemetry::init_minidump_handler): `init()` re-execs THIS
@@ -114,7 +115,7 @@ sentry = { version = "0.35", default-features = false, features = ["backtrace", 
 # entitlements, so there is NOTHING extra to sign or notarize. Memory is read
 # via the explicitly-handed Mach port, NOT task_for_pid, so no debugger
 # entitlement (com.apple.security.cs.debugger / get-task-allow) is required.
-sentry-rust-minidump = "0.9"
+sentry-rust-minidump = "0.13"
 
 # Issue #755: runtime-download for codebase-memory-mcp static binary.
 # All three crates are already in the transitive lock graph (reqwest pulled
