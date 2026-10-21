@@ -1,8 +1,8 @@
+import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { getAppUpdateState } from '@/lib/app-update/relaunch-state';
-import { beginJobDrain } from '@/lib/cloud/job-queue';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 export const runtime = 'nodejs';
@@ -28,8 +28,11 @@ export async function POST(request: Request) {
     }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   }
 
+  const admission = inspectCliOperationAdmission();
+  if (admission.blocked) return NextResponse.json({ ok: false, relaunched: false,
+    error: { code: admission.code, message: admission.message } }, { status: 409 });
+
   const now = new Date().toISOString();
-  const cloudDrain = beginJobDrain('team_default');
   await publishRealtimeMutation({
     mutation: {
       mutationId: `app-relaunch-${randomUUID()}`,
@@ -49,7 +52,6 @@ export async function POST(request: Request) {
     relaunched: true,
     skipped: false,
     message: 'Restart request published to the dashboard.',
-    cloudDrain,
     state,
   }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
 }

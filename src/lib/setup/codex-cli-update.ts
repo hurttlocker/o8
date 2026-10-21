@@ -1,9 +1,10 @@
+import { withCliInstallerReservation, releaseOwnedCliUpdateLock, type CliInstallerReservation } from './cli-operation-admission';
 import 'server-only';
 import type { CliUpdateReporter } from './cli-update-progress';
 
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, realpath, readFile, stat, open, unlink, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { access, realpath, readFile, stat, open, mkdir, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -84,6 +85,10 @@ async function requireIdle(selectedPath: string, binary: string) {
 
 /** One bounded, user-triggered operation, with a persisted receipt and crash-safe refusal lock. */
 export async function updateSelectedCodex(report: CliUpdateReporter = () => {}) {
+  return withCliInstallerReservation('codex', reservation => performSelectedCodexUpdate(report, reservation));
+}
+
+async function performSelectedCodexUpdate(report: CliUpdateReporter, reservation: CliInstallerReservation) {
   report('checking');
   await mkdir(DATA_DIR, { recursive: true });
   const lockPath = path.join(DATA_DIR, 'codex-cli-update.lock');
@@ -94,6 +99,7 @@ export async function updateSelectedCodex(report: CliUpdateReporter = () => {}) 
   const receiptPath = path.join(DATA_DIR, 'codex-cli-update.json');
   let receipt: { status: string; selectedPath: string; targetVersion: string; startedAt: string; finishedAt?: string } | undefined;
   try {
+    await lock.writeFile(JSON.stringify({ operationId: reservation.id }));
     invalidateCliCache('codex');
     const selected = await resolveCli(spec);
     const tool = (await checkCliUpdates(true, 'codex')).find((item) => item.runtimeId === 'codex');
@@ -148,6 +154,6 @@ export async function updateSelectedCodex(report: CliUpdateReporter = () => {}) 
     throw new CodexUpdateRefusal('update-failed', 'Codex could not be updated. The installation may be incomplete. Check the selected installation before retrying.', 503);
   } finally {
     await lock.close();
-    await unlink(lockPath);
+    releaseOwnedCliUpdateLock(lockPath, reservation.id);
   }
 }

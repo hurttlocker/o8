@@ -281,7 +281,7 @@ async function dispatchUnlocked(
       //    interrupt can race a re-dispatch in. (2026-06-22)
       if (lane.packetId) {
         try {
-          if (!await persistLanePacketHold(lane.packetId)) {
+          if (!await persistLanePacketHold(lane.packetId, lane)) {
             return {
               ok: false,
               laneId: command.laneId,

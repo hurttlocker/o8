@@ -127,4 +127,34 @@ describe('operator update with waiting tasks', () => {
     expect(await vi.mocked(relaunchInstalledUpdate).mock.results[0]!.value).toBe(false);
     expect(lastView().blockers?.live).toEqual(['Build the release (running)']);
   });
+
+  it.each(['active', 'interrupted', 'unconfirmed'])('names a %s CLI installer instead of inventing lane or terminal blockers', async state => {
+    idlePayload = { ok: true, idle: { idle: false, idleExceptParked: false, parkedLanes: [], unavailable: [],
+      active: { lanes: [], terminalSessions: [], managedRuns: [], ownedSessions: [], cloudJobs: [],
+        cliInstallers: [{ runtime: 'codex', state }] } } };
+    vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true, restartDeferred: true });
+    vi.mocked(relaunchInstalledUpdate).mockImplementation(async options => Boolean(await options?.beforeRestart?.()));
+    await mount();
+    await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
+    expect(lastView().message).toBe(state === 'active'
+      ? 'Update installed. Restart is waiting for CLI updates to finish.'
+      : 'Update installed. Restart needs CLI update recovery; check the tool and its update receipt.');
+    expect(lastView().blockers?.live).toHaveLength(1);
+    expect(lastView().blockers?.live[0]).toContain(state === 'active' ? 'is running'
+      : state === 'interrupted' ? 'was interrupted' : 'has unconfirmed ownership');
+    await act(async () => { window.dispatchEvent(new Event('o8:restart-app-update')); });
+    expect(await vi.mocked(relaunchInstalledUpdate).mock.results[0]!.value).toBe(false);
+  });
+
+
+  it('names another reserved restart without calling it an interrupted CLI installer', async () => {
+    idlePayload = { ok: true, idle: { idle: false, idleExceptParked: false, parkedLanes: [], unavailable: [],
+      active: { lanes: [], terminalSessions: [], managedRuns: [], ownedSessions: [], cloudJobs: [], restartPending: true } } };
+    vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true, restartDeferred: true });
+    await mount();
+    await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
+    expect(lastView().message).toBe('Update installed. Another restart is already in progress.');
+    expect(lastView().blockers?.live).toEqual(['Another app restart is already reserved']);
+  });
+
 });

@@ -57,16 +57,18 @@ describe('activity feed local-git fallback (#1341)', () => {
     expect(typeof body.commits[0].date).toBe('string');
   });
 
-  it('returns an empty (not errored) list for a path with no git history', async () => {
+  it('keeps a non-Git folder distinct from empty Git history', async () => {
     const dir = mkdtempSync(join(os.tmpdir(), 'o8-activity-nogit-'));
     const req = new NextRequest(
       `http://127.0.0.1/api/panel/commits?workspace=${encodeURIComponent(dir)}&limit=50`,
     );
 
     const res = await GET(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(422);
 
     const body = await res.json();
     expect(body.commits).toEqual([]);
+    expect(body.workspaceState).toBe('not_git');
+    expect(body.code).toBe('REVIEW_NOT_GIT');
   });
 });

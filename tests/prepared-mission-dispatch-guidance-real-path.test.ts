@@ -49,7 +49,7 @@ git('remote', 'add', 'origin', origin); git('push', '-u', 'origin', 'main');
 execFileSync('git', ['-C', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
 for (const [key, value] of Object.entries({ O8_DATA_DIR: dataDir, CORTEX_IDE_DATA_DIR: dataDir,
   CORTEX_IDE_DB_PATH: join(dataDir, 'cortex-ide.db'), O8_OPERATOR_MCP_PROFILE: 'full',
-  O8_WORKTREE_ROOT: join(dataDir, 'worktrees'),
+  O8_WORKTREE_ROOT: join(dataDir, '.cortex-worktrees'),
   O8_SKIP_PRELAUNCH_TYPECHECK: '1', O8_APFS_DEPENDENCY_IMAGES: '0', O8_WORKER_SANDBOX: '0',
   O8_CRASH_SURVIVABLE_WORKERS: '0', O8_CODEX_BIN: join(root, 'codex'),
   CORTEX_IDE_OWNED_CODEX_ROOT: join(dataDir, 'owned-codex'), O8_TEST_PROVIDER_CAPTURE: join(root, 'starts.jsonl'),
@@ -59,6 +59,15 @@ const fs = require('node:fs');
 if (process.argv.includes('--version')) { console.log('codex-cli 1.0.0'); process.exit(0); }
 fs.appendFileSync(process.env.O8_TEST_PROVIDER_CAPTURE, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}) + String.fromCharCode(10));
 console.log(JSON.stringify({type: 'thread.started', thread_id: 'fixture-thread-' + process.pid}));
+if (process.env.O8_TEST_MANAGED_RUN_CAPTURE) {
+  const child = require('node:child_process').spawnSync(process.execPath,
+    [process.env.O8_TEST_SOURCE_ROOT + '/cli/dist/o8.mjs', 'run', '--', process.execPath, process.env.O8_TEST_MANAGED_COMMAND],
+    {cwd: process.cwd(), env: {...process.env, O8_API_TOKEN: '', NODE_OPTIONS: ''}, encoding: 'utf8', timeout: 20000});
+  fs.writeFileSync(process.env.O8_TEST_MANAGED_RUN_CAPTURE, JSON.stringify({status: child.status, stdout: child.stdout,
+    stderr: child.stderr, packetId: process.env.O8_WORKER_PACKET_ID, hasWorkerToken: Boolean(process.env.O8_WORKER_TOKEN)}));
+  fs.writeFileSync(process.env.O8_TEST_MANAGED_RUN_CAPTURE + '.credential', process.env.O8_WORKER_TOKEN || '', {mode: 0o600});
+}
+
 setInterval(() => {
   if (fs.existsSync(process.env.O8_TEST_PROVIDER_FINISH + '/' + process.pid)) {
     console.log(JSON.stringify({type: 'turn.completed', usage: {input_tokens: 1, output_tokens: 1}}));
@@ -77,6 +86,8 @@ const closeRoute = await import('@/app/api/orchestrator/discard-packet/route');
 const preservationRoute = await import('@/app/api/orchestrator/workspace/preservation/route');
 const retentionRoute = await import('@/app/api/orchestrator/workspace/retention/route');
 const mcpRoute = await import('@/app/api/mcp/route');
+const runsRoute = await import('@/app/api/panel/managed-runs/route');
+const { listManagedRuns } = await import('@/lib/runtimes/managed-runs/registry');
 const { panelGateMiddleware } = await import('@/middleware');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { readMissionRegistryEntry, withMissionRegistryState, persistMissionRegistryStateIfVersion } = await import('@/lib/orchestrator/mission-registry');
@@ -101,6 +112,7 @@ const server = createServer(async (req, res) => {
       : req.url === '/api/orchestrator/discard-packet' ? await closeRoute.POST(request)
       : req.url === '/api/orchestrator/workspace/retention' ? await retentionRoute.POST(request)
       : req.url?.startsWith('/api/orchestrator/workspace/preservation?') ? await preservationRoute.GET(request)
+      : request.nextUrl.pathname === '/api/panel/managed-runs' ? req.method === 'GET' ? await runsRoute.GET(request) : await runsRoute.POST(request)
       : req.url === '/api/setup/agent' ? await setupRoute.POST(request)
       : request.nextUrl.pathname === '/api/setup/status' ? setupStatusRoute.GET()
       : req.url === '/api/orchestrator/create-mission' ? await missionRoute.POST(request)
@@ -199,6 +211,7 @@ beforeAll(async () => {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
   writeFileSync(join(dataDir, 'api-port'), String(port));
+  vi.stubEnv('O8_API_PORT', String(port));
   const { buildToolRegistry, resetToolSpinePortIdentityForTests } = await import('@/lib/mcp/tool-spine/build');
   resetToolSpinePortIdentityForTests();
   const registry = buildToolRegistry(repoPath, { profile: 'full' });
@@ -219,6 +232,7 @@ beforeAll(async () => {
 afterAll(async () => {
   const { getOwnedCodexFleetAdditions, interruptOwnedCodexSession } = await import('@/lib/codex/owned');
   for (const agent of (await getOwnedCodexFleetAdditions({ fresh: true })).agents) await interruptOwnedCodexSession(agent.sessionKey);
+  launchSeam.afterLaunch = null;
   client.kill('SIGTERM');
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true });
@@ -458,3 +472,46 @@ it('holds a SQLite immediate lock across captured-version comparison and publica
   expect(childResult).toEqual({ written: false, code: 'SQLITE_BUSY' });
   expect(rawRegistry(created.missionId).updated_at).toBeGreaterThan(baseline.updatedAt);
 });
+
+
+it('admits a managed test from the worker after explicit CLI dispatch of a prepared packet', async () => {
+  const capturePath = join(root, 'managed-test.json');
+  // Keep dispatch inside its launch boundary until the worker attempts its first run.
+  launchSeam.afterLaunch = async () => {
+    await vi.waitFor(() => expect(existsSync(capturePath)).toBe(true), { timeout: 25_000 });
+  };
+  vi.stubEnv('O8_TEST_MANAGED_RUN_CAPTURE', capturePath);
+  vi.stubEnv('O8_TEST_SOURCE_ROOT', process.cwd());
+  const commandPath = join(root, 'managed-check.cjs');
+  writeFileSync(commandPath, 'console.log("managed-test-ran")');
+  vi.stubEnv('O8_TEST_MANAGED_COMMAND', commandPath);
+  const created = payload(await create({ issues_inline: [{ title: 'Explicit dispatch managed test', body: 'Bounded worker test.' }] }));
+  const packet = readMissionRegistryEntry(created.missionId)!.mission.packets[0];
+  expect(packet).toMatchObject({ queueState: 'held' });
+  const held = await post('/api/panel/managed-runs', { id: 'preheld0001', session: 'cortex-run-preheld0001',
+    command: 'fixture test', cwd: repoPath, packetId: packet.id, mode: 'detach' });
+  expect(held.status).toBe(409);
+  const dispatched = await cli(['mission', 'dispatch', '--mission', created.missionId, '--wait']);
+  expect(dispatched.exitCode, dispatched.stdout + dispatched.stderr).toBe(0);
+  expect(JSON.parse(dispatched.stdout).dispatch.dispatched, dispatched.stdout).toBe(1);
+  await vi.waitFor(() => expect(existsSync(capturePath)).toBe(true), { timeout: 25_000 });
+  const capture = JSON.parse(readFileSync(capturePath, 'utf8'));
+  expect(capture, JSON.stringify(capture)).toMatchObject({ status: 0, packetId: packet.id, hasWorkerToken: true });
+  expect(capture.stdout).toContain('managed-test-ran');
+  const current = readOrchestratorControlPlaneState().packets.find(row => row.id === packet.id)!;
+  const durable = readMissionRegistryEntry(created.missionId)!.mission.packets.find(row => row.id === packet.id)!;
+  expect(current).toMatchObject({ queueState: 'queued', status: 'running', blockedReason: null });
+  expect(durable).toMatchObject({ queueState: 'queued', blockedReason: null });
+  expect(['launching', 'running']).toContain(durable.status);
+  expect(durable.lane?.laneId).toBe(current.lane?.laneId);
+  expect((await listManagedRuns()).find(run => run.packetId === packet.id)).toMatchObject({ status: 'finished', exitCode: 0 });
+  const formerCredential = readFileSync(capturePath + '.credential', 'utf8');
+  expect((await post('/api/lanes', { verb: 'stop', laneId: current.lane!.laneId })).status).toBe(200);
+  vi.stubEnv('O8_TEST_MANAGED_RUN_CAPTURE', '');
+  const late = () => fetch(`http://127.0.0.1:${port}/api/panel/managed-runs`, { method: 'POST',
+    headers: { Authorization: `Bearer ${formerCredential}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'stalegen0001', session: 'cortex-run-stalegen0001', command: 'fixture test',
+      cwd: current.lane!.worktreePath, packetId: packet.id, laneId: current.lane!.laneId, mode: 'detach' }) });
+  expect([401, 403, 409]).toContain((await late()).status);
+  expect((await listManagedRuns()).some(run => run.id === 'stalegen0001')).toBe(false);
+}, 75_000);
