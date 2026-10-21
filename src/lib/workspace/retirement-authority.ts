@@ -137,12 +137,14 @@ export async function verifyRetirementAuthority(input: {
   }
   // Discard receipts may omit dirty source. Check orphan source even during
   // purge replay; a partially purged Git tree conservatively remains held.
+  let verifyOrphanArtifacts = false;
   if (owner.orphanedClose && owner.laneId) {
     try {
       const entries = await readdir(input.candidatePath).catch((error: NodeJS.ErrnoException) => {
         if (!input.verifyContents && error.code === 'ENOENT') return [];
         throw error;
       });
+      verifyOrphanArtifacts = entries.length > 0;
       if (entries.length > 0 || input.verifyContents) {
         const revision = await inspectArtifactRestoreRevision({
           workspacePath: input.candidatePath,
@@ -156,9 +158,16 @@ export async function verifyRetirementAuthority(input: {
       refuseOrphanClose(owner.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
     }
   }
-  if (input.verifyContents) {
-    await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
-      ...input.identity, canonicalPath: input.candidatePath,
-    });
+  if (input.verifyContents || verifyOrphanArtifacts) {
+    try {
+      await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
+        ...input.identity, canonicalPath: input.candidatePath,
+      });
+    } catch (error) {
+      if (owner.orphanedClose && owner.laneId) {
+        refuseOrphanClose(owner.laneId, 'ignored artifacts changed or their preserved content is uncertain; preserve the edits before retrying');
+      }
+      throw error;
+    }
   }
 }

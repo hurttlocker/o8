@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { NextRequest } from 'next/server';
@@ -37,6 +37,7 @@ const { archiveOwnedSessionDir } = await import('@/lib/runtimes/shared/owned-ses
 const { handleClosePacketUnmerged } = await import('@/lib/mcp/operator-handlers/close-packet');
 const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
 const exactRetirement = await import('@/lib/workspace/exact-managed-directory-retirement');
+const exactPurge = await import('@/lib/workspace/exact-directory-purge');
 const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
 const worktreeCleanup = await import('@/lib/orchestrator/worktree-cleanup');
 const { removeMergedWorktree } = worktreeCleanup;
@@ -296,6 +297,94 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
       } finally { interception.mockRestore(); }
     }, 120_000);
   }
+
+  it('retains bytes written through a live descriptor after the purge helper captures the tree (P1-a)', async () => {
+    const source = await fixture('missing');
+    const purge = exactPurge.purgeExactDirectory;
+    let holder: ChildProcess | undefined;
+    const late = 'external late writer after helper capture\n';
+    const interception = vi.spyOn(exactPurge, 'purgeExactDirectory').mockImplementation((candidate, identity, before, after, ...rest) =>
+      purge(candidate, identity, before, async (capturedPath, witness) => {
+        holder = spawn(process.execPath, ['-e', `
+          const fs = require('node:fs');
+          const fd = fs.openSync(process.argv[1], 'r+');
+          const bytes = Buffer.from(process.argv[2]);
+          fs.writeSync(fd, bytes, 0, bytes.length, 0);
+          fs.ftruncateSync(fd, bytes.length);
+          process.stdout.write('ready');
+          process.stdin.on('data', () => {
+            const observed = Buffer.alloc(fs.fstatSync(fd).size);
+            fs.readSync(fd, observed, 0, observed.length, 0);
+            process.stdout.write(JSON.stringify({ content: observed.toString() }));
+          });
+        `, path.join(capturedPath, 'source.txt'), late], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+        children.add(holder);
+        await once(holder.stdout!, 'data');
+        await after?.(capturedPath, witness);
+      }, ...rest));
+    try {
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      const observed = once(holder!.stdout!, 'data');
+      holder!.stdin!.write('inspect');
+      const [bytes] = await observed;
+      expect.soft(JSON.parse(bytes.toString()).content).toBe(late);
+      expect.soft(response.status).toBe(409);
+      if (response.status === 409) expect(body.error.message).toContain(String(holder?.pid));
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id);
+      expect.soft(claim && existsSync(claim.claimPath)).toBe(true);
+      expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+    } finally {
+      interception.mockRestore();
+      if (holder) {
+        const closed = once(holder, 'close');
+        holder.kill();
+        await closed;
+        children.delete(holder);
+      }
+    }
+  }, 120_000);
+
+  it('refuses a same-inode unique ignored-file edit before purging replay (P1-b)', async () => {
+    const source = await fixture('missing');
+    const relative = '.orphan-note';
+    writeFileSync(path.join(source.worktree.path, '.gitignore'), `${relative}\n`);
+    git(source.worktree.path, 'add', '.gitignore');
+    git(source.worktree.path, 'commit', '-qm', 'fixture ignored artifact');
+    const head = git(source.worktree.path, 'rev-parse', 'HEAD');
+    writeFileSync(path.join(source.worktree.path, relative), 'captured ignored bytes\n');
+    expect(git(source.worktree.path, 'status', '--porcelain')).toBe('');
+    const retire = exactRetirement.retireExactManagedDirectory;
+    const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation((input) => retire({
+      ...input, beforeRetirementPurge: async () => {
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        if (claim.state === 'purging') throw new Error('Injected interruption before ignored-content release.');
+      },
+    }));
+    try {
+      expect((await httpClose(source.packetId)).status).toBe(409);
+      interception.mockRestore();
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+      expect(claim.state).toBe('purging');
+      const artifactPath = path.join(claim.claimPath, relative);
+      const inode = statSync(artifactPath).ino;
+      writeFileSync(artifactPath, 'new unbanked ignored bytes\n');
+      expect(statSync(artifactPath).ino).toBe(inode);
+      const snapshot = exactSnapshot(source.worktree.path)!;
+      const { payload } = await readWorkspacePreservation(preservationIdForSnapshot(snapshot)!);
+      const captured = payload.capture.entries.find((entry) => entry.path === relative)!;
+      expect(Buffer.from(captured.content!, 'base64').toString()).toBe('captured ignored bytes\n');
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect.soft(response.status).toBe(409);
+      expect.soft(existsSync(artifactPath)).toBe(true);
+      if (existsSync(artifactPath)) expect(readFileSync(artifactPath, 'utf8')).toBe('new unbanked ignored bytes\n');
+      if (response.status === 409) expect(body.error.message).toMatch(/ignored.*(changed|uncertain)|preserv.*content/i);
+      expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(head);
+    } finally { interception.mockRestore(); }
+  }, 120_000);
 
   for (const holder of ['cwd', 'open-file', 'escaped-marker', 'revoked-marker', 'archived-cwd', 'archived-marker'] as const) {
     it(`HTTP, CLI and MCP refuse a live ${holder} process with the same code and message`, async () => {
