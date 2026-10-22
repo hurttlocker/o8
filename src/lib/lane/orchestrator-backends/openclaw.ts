@@ -1,3 +1,6 @@
+import { ensureOpenclawGateway } from './openclaw-gateway';
+import { buildGovernedO8Profile as buildProfile, prepareOpenclawProfile, OPENCLAW_O8_CONFIG, OPENCLAW_SOURCE_CONFIG } from './openclaw-profile';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * openclaw orchestrator backend.
  *
@@ -21,9 +24,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { createConnection, createServer } from 'node:net';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -34,8 +36,6 @@ import type {
   OrchestratorSessionInfo,
   OrchestratorTurnOptions,
 } from './types';
-import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
-import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { resolveOpenclawSpawnBinary } from './openclaw-spawn-preflight';
 import { readOpenclawAgentPrimaryModel, type OpenclawAgentResult, resolveOpenclawPromptSeeded } from './openclaw-turn-state';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -66,26 +66,6 @@ let openclawRealtimeMutationSeq = 0;
 const OPENCLAW_PROFILE = 'o8';
 /** Mirror of the other orchestrator backends' 4-hour process budget (hang watchdog, not a work budget). */
 const PROCESS_TIMEOUT_MS = 14_400_000;
-const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
-const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
-const OPENCLAW_O8_HOME = join(homedir(), `.openclaw-${OPENCLAW_PROFILE}`);
-const OPENCLAW_O8_CONFIG = join(OPENCLAW_O8_HOME, 'openclaw.json');
-
-/**
- * Schema version of the generated o8 profile. Bumped whenever the derivation
- * shape changes so a stale profile is re-derived even when its mtime says "up
- * to date" — see `ensureOpenclawProfile`. v4: per-agent auth (auth-profiles.json
- * + auth-state.json) carried. v3: channels/bindings stripped + npm/plugins
- * runtime dirs symlink-borrowed.
- */
-const O8_PROFILE_SCHEMA = 4;
-/**
- * Sidecar marker holding `O8_PROFILE_SCHEMA`. Lives in ~/.o8 — NOT inside the
- * generated profile — because openclaw's config validator rejects any
- * unrecognized top-level key.
- */
-const OPENCLAW_PROFILE_SCHEMA_FILE = join(getDataDir(), 'openclaw-profile-schema');
-
 /**
  * The o8 profile gets its OWN gateway port — never the operator's personal
  * openclaw gateway. Probed once and persisted to ~/.o8/openclaw-gateway-port
@@ -193,32 +173,6 @@ function ensureSession(repoPath: string, agentId: string): OpenclawOrchestratorS
  *      keeping any prompt the agent already had.
  * The operator's real agent (~/.openclaw) is never modified — only this copy.
  */
-function governOpenclawAgent(agent: Record<string, unknown>): Record<string, unknown> {
-  const tools: Record<string, unknown> = {
-    ...((agent.tools as Record<string, unknown> | undefined) ?? {}),
-  };
-  const deny = Array.isArray(tools.deny)
-    ? (tools.deny as unknown[]).filter((t): t is string => typeof t === 'string')
-    : [];
-  if (!deny.includes('sessions_spawn')) deny.push('sessions_spawn');
-  tools.deny = deny;
-  if (Array.isArray(tools.alsoAllow)) {
-    tools.alsoAllow = (tools.alsoAllow as unknown[]).filter((t) => t !== 'sessions_spawn');
-  }
-
-  // OpenClaw 2026.7.1 removed `agents.list[].systemPromptOverride` ("OpenClaw
-  // owns the generated system prompt") — writing it makes the WHOLE profile
-  // config invalid and the gateway dies before becoming ready (live-hit
-  // 2026-07-16, Q's runtime sweep). Strip it from the governed copy (the
-  // operator's source agent may still carry the legacy key) and deliver the
-  // o8 orchestrator framing per-session instead: sendOpenclawTurn seeds
-  // OPENCLAW_ORCHESTRATOR_PROMPT into the session's FIRST message.
-  const { systemPromptOverride: _legacy, ...rest } = agent as Record<string, unknown> & {
-    systemPromptOverride?: unknown;
-  };
-  return { ...rest, tools };
-}
-
 /**
  * Model ids the governed agent accepts as a `--model` override — the keys of
  * its `agents.list[].models` map (OpenClaw 2026.7.1 treats that map as the
@@ -327,273 +281,6 @@ export async function ensureOpenclawGatewayPort(): Promise<number> {
 }
 
 // ── o8 profile gateway ───────────────────────────────────────────────────────
-
-/** The lazily-spawned o8-profile openclaw gateway — reused across turns. */
-let gatewayProc: ChildProcess | null = null;
-
-/** Resolve true when a TCP client can connect to `port` on loopback. */
-function canConnect(port: number): Promise<boolean> {
-  return new Promise((resolveConnect) => {
-    const socket = createConnection({ port, host: '127.0.0.1' });
-    const finish = (ok: boolean) => { socket.destroy(); resolveConnect(ok); };
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-    socket.setTimeout(1_000, () => finish(false));
-  });
-}
-
-/** Poll until the gateway accepts connections, or throw after `timeoutMs`. */
-async function waitForGatewayReady(proc: ChildProcess, port: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (gatewayProc !== proc) {
-      throw new Error('openclaw gateway exited or failed to spawn before becoming ready');
-    }
-    if (await canConnect(port)) return;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  throw new Error(`openclaw gateway did not come up on port ${port} within ${timeoutMs}ms`);
-}
-
-/**
- * Ensure the o8-profile openclaw gateway is running on `port`.
- *
- * `openclaw agent` (without `--local`) connects to a gateway — it does NOT
- * auto-start one. So o8 lazy-spawns the gateway on first openclaw use and
- * reuses it across turns. If something is already listening on `port` (a prior
- * o8 run's gateway), that is reused as-is. The gateway runs the operator's real
- * codex-harness agents — the embedded `--local` harness cannot.
- */
-async function ensureOpenclawGateway(port: number, openclawBin: string): Promise<void> {
-  if (gatewayProc && gatewayProc.exitCode === null && !gatewayProc.killed) {
-    return; // Our gateway child is alive.
-  }
-  if (await canConnect(port)) {
-    return; // A gateway is already listening on this port — reuse it.
-  }
-
-  console.log(`[openclaw-gateway] Starting o8-profile gateway on port ${port}`);
-  const proc = spawn(
-    openclawBin,
-    ['--profile', OPENCLAW_PROFILE, 'gateway', 'run', '--port', String(port)],
-    { windowsHide: true,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  gatewayProc = proc;
-  proc.stdout?.on('data', (chunk: Buffer) => {
-    const line = chunk.toString('utf-8').trimEnd();
-    if (line) console.log(`[openclaw-gateway] ${line}`);
-  });
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    const line = chunk.toString('utf-8').trimEnd();
-    if (line) console.log(`[openclaw-gateway] ${line}`);
-  });
-  proc.on('error', (err) => {
-    console.error(`[openclaw-gateway] spawn error: ${err.message}`);
-    if (gatewayProc === proc) gatewayProc = null;
-  });
-  proc.on('exit', (code) => {
-    console.log(`[openclaw-gateway] exited (code ${code})`);
-    if (gatewayProc === proc) gatewayProc = null;
-  });
-
-  await waitForGatewayReady(proc, port, 20_000);
-  console.log(`[openclaw-gateway] ready on port ${port}`);
-}
-
-/** True when the generated o8 profile is current — schema marker + mtime. */
-function o8ProfileIsCurrent(): boolean {
-  if (!existsSync(OPENCLAW_O8_CONFIG)) return false;
-  if (statSync(OPENCLAW_O8_CONFIG).mtimeMs < statSync(OPENCLAW_SOURCE_CONFIG).mtimeMs) {
-    return false;
-  }
-  try {
-    const schema = Number.parseInt(readFileSync(OPENCLAW_PROFILE_SCHEMA_FILE, 'utf8').trim(), 10);
-    return schema === O8_PROFILE_SCHEMA;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Symlink-borrow a runtime directory from the operator's openclaw into the o8
- * profile — read-only sharing of code that is identical regardless of profile.
- * Used for `npm` (the @openclaw/* plugin packages, including the codex
- * agent-runtime) and `plugins` (the install manifest). Without these the o8
- * gateway loads only bundled plugins → the codex harness is not registered.
- */
-function linkProfileDir(name: string): void {
-  const src = join(OPENCLAW_SOURCE_HOME, name);
-  const dest = join(OPENCLAW_O8_HOME, name);
-  if (!existsSync(src)) return;
-  try {
-    const st = lstatSync(dest);
-    if (st.isSymbolicLink()) {
-      if (readlinkSync(dest) === src) return; // already linked correctly
-      unlinkSync(dest); // stale link — unlink removes the link, never the target
-    } else {
-      console.warn(`[openclaw-orchestrator] ${dest} exists and is not a symlink — skipping link`);
-      return;
-    }
-  } catch {
-    // dest does not exist — fall through to create the symlink.
-  }
-  symlinkSync(src, dest);
-  console.log(`[openclaw-orchestrator] Linked ${dest} -> ${src}`);
-}
-
-/**
- * Build the governed o8 profile object from the operator's source openclaw
- * config: headless (channels/bindings dropped), agents governed (#1075), gateway
- * on the dedicated o8 port, and `mcp.servers` locked to o8 ONLY (every other
- * source mcp server is dropped — the governed profile exposes only o8's tools).
- *
- * The o8 entry is supplied by the caller. Post-F that's the Tool-Spine registry
- * projection (o8 owns its own entry) rather than the source passthrough — that
- * is the ONLY value that differs between the old and new behavior; everything
- * else here is a pure function of `source` and is unchanged. Exported for the
- * Step-F containment test.
- */
-export function buildGovernedO8Profile(source: Record<string, unknown>, o8Entry: unknown): Record<string, unknown> {
-  const sourceAgents = (source.agents as Record<string, unknown> | undefined) ?? {};
-  const sourceAgentList = Array.isArray(sourceAgents.list)
-    ? (sourceAgents.list as Array<Record<string, unknown>>)
-    : [];
-  const sourceGateway = (source.gateway as Record<string, unknown> | undefined) ?? {};
-
-  return {
-    ...source,
-    // Headless orchestrator — drop the operator's messaging surface so the o8
-    // gateway never starts their Telegram/Discord. `undefined` keys are omitted
-    // by JSON.stringify.
-    channels: undefined,
-    bindings: undefined,
-    agents: {
-      ...sourceAgents,
-      list: sourceAgentList.map(governOpenclawAgent),
-    },
-    mcp: { servers: { o8: o8Entry } },
-    // Dedicated gateway port — never the operator's personal gateway (:18789).
-    gateway: { ...sourceGateway, port: readOpenclawGatewayPort() ?? OPENCLAW_GATEWAY_PORT_BASE },
-  };
-}
-
-/**
- * Ensure the isolated `o8` openclaw profile exists at ~/.openclaw-o8.
- *
- * Derives the profile config from the operator's working openclaw config —
- * inheriting auth / models / global tool policy — with these changes:
- *   - `agents.list` becomes governed COPIES of the operator's real agents
- *     (`governOpenclawAgent` — the #1075 lockout);
- *   - only the `o8` MCP server is kept;
- *   - `channels` / `bindings` are stripped — the o8 gateway is a headless
- *     orchestrator and must NOT run the operator's Telegram/Discord;
- *   - `gateway.port` is the dedicated o8 port, never the operator's personal
- *     openclaw gateway (:18789).
- * Profile credentials + each governed agent's per-agent auth are copied, and
- * the npm/plugins runtime dirs are symlink-borrowed, so the isolated profile
- * can authenticate and load the codex harness.
- *
- * Re-derives whenever the source config is newer OR the schema marker is stale.
- */
-export function ensureOpenclawProfile(): void {
-  if (!existsSync(OPENCLAW_SOURCE_CONFIG)) {
-    throw new Error(
-      'openclaw is not configured — ~/.openclaw/openclaw.json is missing. '
-        + 'Run `openclaw onboard` before using the openclaw orchestrator.',
-    );
-  }
-
-  mkdirSync(OPENCLAW_O8_HOME, { recursive: true });
-  // The plugin runtime (incl. the codex agent-runtime) is symlink-borrowed —
-  // ensured every call (cheap), even when the config itself is up to date.
-  linkProfileDir('npm');
-  linkProfileDir('plugins');
-
-  if (o8ProfileIsCurrent()) {
-    return; // Config up to date.
-  }
-
-  const source = JSON.parse(readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8')) as Record<string, unknown>;
-  const sourceAgents = (source.agents as Record<string, unknown> | undefined) ?? {};
-  const sourceAgentList = Array.isArray(sourceAgents.list)
-    ? (sourceAgents.list as Array<Record<string, unknown>>)
-    : [];
-  if (sourceAgentList.length === 0) {
-    throw new Error('openclaw has no agents configured (agents.list is empty).');
-  }
-  const sourceMcpServers =
-    ((source.mcp as Record<string, unknown> | undefined)?.servers as Record<string, unknown> | undefined) ?? {};
-
-  const o8McpServer = sourceMcpServers.o8;
-  if (!o8McpServer) {
-    throw new Error(
-      'The o8 MCP server is not registered in openclaw (mcp.servers.o8 missing). '
-        + 'Register it via o8 Settings -> MCP before using the openclaw orchestrator.',
-    );
-  }
-  // TODO(tool-spine-convergence): this throw is vestigial post-F — o8's mcp entry
-  // is now EMITTED from the registry below, not the read sourceMcpServers.o8 (the
-  // read survives only as a presence check). Removing the throw = the self-heal
-  // (auto-register o8 from the registry), which the spec gates separately.
-
-  // o8 owns its own mcp entry: emit it from the Tool-Spine registry instead of
-  // passing through whatever the user pre-registered. repoPath is irrelevant to
-  // the openclaw surface (operator-only; cortex/externals filtered out).
-  const o8Config = buildGovernedO8Profile(
-    source,
-    toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8,
-  );
-
-  writeFileSync(OPENCLAW_O8_CONFIG, `${JSON.stringify(o8Config, null, 2)}\n`, { mode: 0o600 });
-  // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
-  // unrecognized keys inside its own config).
-  mkdirSync(getDataDir(), { recursive: true });
-  writeFileSync(OPENCLAW_PROFILE_SCHEMA_FILE, `${O8_PROFILE_SCHEMA}\n`, 'utf8');
-
-  // Seed credentials so the isolated profile can resolve model auth.
-  //
-  // SEED, don't sync (2026-07-16): OAuth refresh tokens are SINGLE-USE. The
-  // old copy-on-every-regen guaranteed a recurring death spiral — the o8
-  // profile refreshes (its copy advances, the source's token is now consumed),
-  // then the next regen pastes the source's DEAD token back over the o8
-  // profile's working one ("Your refresh token has already been used…",
-  // live-hit during the runtime sweep). Copy only when the destination is
-  // missing OR the source file is strictly newer (= the operator re-logged-in
-  // at the source profile and we should adopt the fresh credential).
-  const seedIfMissingOrNewer = (srcFile: string, destFile: string): void => {
-    if (!existsSync(srcFile)) return;
-    if (existsSync(destFile) && statSync(srcFile).mtimeMs <= statSync(destFile).mtimeMs) return;
-    mkdirSync(join(destFile, '..'), { recursive: true });
-    cpSync(srcFile, destFile, { recursive: true });
-    try { chmodSync(destFile, 0o600); } catch { /* directories keep their mode */ }
-  };
-
-  const sourceCredentials = join(OPENCLAW_SOURCE_HOME, 'credentials');
-  const destCredentials = join(OPENCLAW_O8_HOME, 'credentials');
-  if (existsSync(sourceCredentials) && !existsSync(destCredentials)) {
-    cpSync(sourceCredentials, destCredentials, { recursive: true });
-  }
-
-  // Carry each governed agent's per-agent auth — the credential index that
-  // pairs with the encrypted `credentials/` blobs above. COPY, never symlink:
-  // openclaw's OAuth refresh writes back here, and ~/.openclaw must stay
-  // untouched. `codex-home/` is deliberately NOT carried — it is session/log
-  // state, not auth; the o8 codex runtime regenerates its own.
-  for (const agent of sourceAgentList) {
-    const agentId = typeof agent.id === 'string' ? agent.id : null;
-    if (!agentId) continue;
-    const srcAgentDir = join(OPENCLAW_SOURCE_HOME, 'agents', agentId, 'agent');
-    const destAgentDir = join(OPENCLAW_O8_HOME, 'agents', agentId, 'agent');
-    for (const file of ['auth-profiles.json', 'auth-state.json']) {
-      seedIfMissingOrNewer(join(srcAgentDir, file), join(destAgentDir, file));
-    }
-  }
-
-  console.log(`[openclaw-orchestrator] Wrote o8 profile config to ${OPENCLAW_O8_CONFIG}`);
-}
 
 // ── Turn message ─────────────────────────────────────────────────────────────
 
@@ -747,7 +434,7 @@ async function sendToOpenclawOrchestrator(
     const launch = cliInvocation(openclawBin, args);
     const proc = spawn(launch.command, launch.args, { windowsHide: true,
       cwd: session.repoPath,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+      env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' }, { runtimeId: 'openclaw' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     session.proc = proc;
@@ -896,3 +583,10 @@ export const openclawBackend: OrchestratorBackend = {
     return sendToOpenclawOrchestrator(session, message, onEvent, options);
   },
 };
+
+export function buildGovernedO8Profile(source: Record<string, unknown>, o8Entry: unknown): Record<string, unknown> {
+  return buildProfile(source, o8Entry, readOpenclawGatewayPort() ?? OPENCLAW_GATEWAY_PORT_BASE);
+}
+export function ensureOpenclawProfile(): void {
+  prepareOpenclawProfile(readOpenclawGatewayPort() ?? OPENCLAW_GATEWAY_PORT_BASE);
+}

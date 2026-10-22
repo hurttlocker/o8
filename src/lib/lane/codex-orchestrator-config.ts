@@ -1,3 +1,4 @@
+import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -115,10 +116,10 @@ function pinCodexOrchestratorModel(
 function syncCodexAuthFiles(codexHome: string): void {
   for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
     const sourcePath = join(USER_CODEX_HOME, fileName);
-    if (!existsSync(sourcePath)) continue;
+    if (!existsSync(sourcePath)) { if (fileName === 'auth.json') reconcileRuntimeConfigFile(join(codexHome, fileName), 'codex'); continue; }
     const destPath = join(codexHome, fileName);
     copyFileSync(sourcePath, destPath);
-    if (fileName === 'auth.json') chmodSync(destPath, 0o600);
+    if (fileName === 'auth.json') { reconcileRuntimeConfigFile(destPath, 'codex'); chmodSync(destPath, 0o600); }
   }
 }
 
@@ -147,6 +148,7 @@ export function prepareCodexHome(
   );
   const configPath = join(codexHome, 'config.toml');
   writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
+  reconcileRuntimeConfigFile(configPath, 'codex');
   chmodSync(configPath, 0o600);
   syncCodexAuthFiles(codexHome);
   return { codexHome, ...resolved };

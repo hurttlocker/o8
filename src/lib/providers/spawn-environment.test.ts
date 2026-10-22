@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({ dir: '' }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 state.dir = mkdtempSync(join(tmpdir(), 'o8-spawn-authority-'));
 const { providerSpawnEnvironment } = await import('./spawn-environment');
+const { saveRuntimeBillingMode } = await import('./runtime-billing');
 const { mutateProviderKey } = await import('./key-store');
 const { ownedSpawnEnvironment } = await import('@/lib/runtimes/shared/owned-session/restricted-spawn-env');
 beforeEach(() => {
@@ -29,6 +30,8 @@ it('preserves an adapter native-auth suppression without re-injecting OpenRouter
   expect(ownedSpawnEnvironment({} as OwnedSessionRecord, { OPENROUTER_API_KEY: '' }).OPENROUTER_API_KEY).toBe('');
 });
 it.each(['openrouter', 'codex-subscription'])('preserves explicit %s gateway transport credentials', source => {
+  if (source === 'openrouter') mutateProviderKey('OPENROUTER_API_KEY', { key: 'fixture-router' });
+  saveRuntimeBillingMode('claude-code', source === 'openrouter' ? 'api' : 'subscription');
   mutateProviderKey('ANTHROPIC_API_KEY', { key: 'fixture-other-anthropic' });
   const env = ownedSpawnEnvironment({ surfaceId: 'claude-code-owned:fixture', runtimeConfig: { modelSource: source } } as unknown as OwnedSessionRecord, {
     ANTHROPIC_BASE_URL: 'http://127.0.0.1/fixture', ANTHROPIC_AUTH_TOKEN: 'fixture-gateway-token', ANTHROPIC_API_KEY: '',

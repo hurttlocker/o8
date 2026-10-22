@@ -1,3 +1,4 @@
+import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
 import { chmodSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,10 @@ export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: strin
   // Seed once. After the first launch this profile is the durable session
   // authority; an ACP reconnect must not overwrite worker state from ~/.hermes
   // or fail merely because the operator later moved their default profile.
-  if (existsSync(path.join(hermesHome, 'config.yaml'))) return { hermesHome };
+  if (existsSync(path.join(hermesHome, 'config.yaml'))) {
+    for (const file of HERMES_WORKER_PROFILE_FILES) reconcileRuntimeConfigFile(path.join(hermesHome, file), 'hermes');
+    return { hermesHome };
+  }
 
   const source = operatorHermesHome();
   if (!existsSync(path.join(source, 'config.yaml'))) {
@@ -38,6 +42,7 @@ export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: strin
     if (!existsSync(from)) continue;
     const to = path.join(hermesHome, file);
     cpSync(from, to);
+    reconcileRuntimeConfigFile(to, 'hermes');
     try { chmodSync(to, 0o600); } catch { /* best-effort on Windows */ }
   }
   return { hermesHome };

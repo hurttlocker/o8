@@ -524,6 +524,12 @@
       ]
     },
     {
+      "path": "src/lib/lane/orchestrator-backends/openclaw-gateway.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/lane/orchestrator-permission-lockout.test.ts",
       "reasons": [
         "process-signal"
@@ -4749,6 +4755,13 @@
     {
       "path": "tests/runtime-archive-generic-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/runtime-billing-acp-real-path.test.ts",
+      "reasons": [
+        "process-signal",
         "real-path"
       ]
     },

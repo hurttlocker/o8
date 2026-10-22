@@ -2,21 +2,21 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { listDeclarativeRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 
-const state = vi.hoisted(() => ({ dir: '', runtime: '', envs: [] as NodeJS.ProcessEnv[], children: [] as EventEmitter[], bridges: 0 }));
+const state = vi.hoisted(() => ({ dir: '', runtime: '', envs: [] as NodeJS.ProcessEnv[], children: [] as EventEmitter[], args: [] as string[][], bridges: 0, mcp: false }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir, migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => undefined) }));
 vi.mock('@/lib/runtimes/shared/cli-resolver', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/cli-resolver')>(), resolveCli: vi.fn(async () => ({ path: process.execPath })) }));
 vi.mock('@/lib/runtimes/shared/owned-session/workspace-spawn-guard', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/owned-session/workspace-spawn-guard')>(), assertOwnedWorkspaceSpawnAvailable: vi.fn(async () => ({ status: 'available' })) }));
 vi.mock('@/lib/hermes/runtime-resolution', () => ({ resolveHermesBinary: () => process.execPath }));
-vi.mock('@/lib/hermes/worker-profile', () => ({ prepareHermesWorkerHome: () => ({ hermesHome: state.dir }) }));
 vi.mock('@/lib/deepseek-harness/runtime-resolution', () => ({ resolveDeepSeekHarnessLaunch: async () => ({ command: process.execPath, args: [] }) }));
 vi.mock('@/lib/claude-code/codex-subscription-proxy', () => ({ prepareClaudeCodeWorkerConfig: async () => ({ configDir: join(state.dir, 'claude-config'), credentialEnv: {} }) }));
+vi.mock('@/lib/mcp/worker-injection', async original => ({ ...await original<typeof import('@/lib/mcp/worker-injection')>(), resolveWorkerMcpInjection: async () => ({ servers: state.mcp ? [{ id: 'fixture', name: 'fixture', command: process.execPath, args: [], env: { OPENAI_API_KEY: 'fixture-stale-mcp', LLM_API_KEY: 'fixture-stale-mcp', MCP_SERVICE_TOKEN: 'fixture-non-provider' } }] : [], skipped: [] }) }));
 vi.mock('@/lib/pi/managed-usage', () => ({ createPiManagedUsageTransport: () => ({ stream: async function* () {} }) }));
 vi.mock('@/lib/pi/sdk/scripts', () => ({ piSdkScriptPath: () => 'fixture-worker.mjs' }));
 vi.mock('@/lib/pi/sdk/platform', () => ({ requirePiNode: () => {}, requirePiPlatform: () => {} }));
@@ -28,7 +28,7 @@ vi.mock('@/lib/runtime/pty-bridge', () => ({ spawnBridgeTerminalSession: async (
   state.envs.push(launch.env); return { ok: true, sessionName: `fixture-${state.runtime}`, pid: 999999999 };
 } }));
 vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>(), spawn: (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
-  state.envs.push(options.env);
+  state.envs.push(options.env); state.args.push(_args);
   const child = Object.assign(new EventEmitter(), { pid: 999999999, stdout: new PassThrough(), stderr: new PassThrough(), stdin: null as Writable | null, unref() {}, kill() { return true; } });
   child.stdin = new Writable({ write(chunk, _encoding, done) {
     for (const line of String(chunk).trim().split('\n')) {
@@ -80,19 +80,26 @@ beforeAll(async () => {
 
 });
 beforeEach(() => {
-  state.envs.length = 0; state.bridges = 0;
+  state.envs.length = 0; state.args.length = 0; state.bridges = 0; state.mcp = false;
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 61).toString('base64url')); clearMasterKeyCache();
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '1'); vi.stubEnv('O8_WORKER_SANDBOX', '0');
   for (const name of [...keys, ...aliases]) vi.stubEnv(name, `fixture-ambient-${name}`);
   vi.stubEnv('XAI_API_KEY', 'fixture-unmanaged-xai'); vi.stubEnv('NOUS_API_KEY', 'fixture-unmanaged-nous');
+  const hermes = join(state.dir, 'operator-hermes'); mkdirSync(hermes, { recursive: true });
+  writeFileSync(join(hermes, 'config.yaml'), 'model:\n  provider: openai\n  api_key: fixture-stale-profile\n');
+  writeFileSync(join(hermes, '.env'), 'OPENAI_API_KEY=fixture-stale-profile\nLLM_API_KEY=fixture-stale-profile\n');
+  vi.stubEnv('HERMES_HOME', hermes);
   writeFileSync(join(state.dir, '.env.local'), '');
+  rmSync(join(state.dir, 'runtime-billing'), { recursive: true, force: true });
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 });
-afterEach(() => { for (const child of state.children.splice(0)) child.emit('close', 0, null); });
+afterEach(async () => { for (const child of state.children.splice(0)) child.emit('close', 0, null); await new Promise(resolve => setTimeout(resolve, 20)); });
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); clearMasterKeyCache(); rmSync(state.dir, { recursive: true, force: true }); });
 const cases = [...[...generic, ...declarative].flatMap(runtime => ['direct', 'bridge'].map(mode => [runtime, mode])), ...acp.map(runtime => [runtime, 'acp']), ['pi', 'rpc'], ['pi-builtin', 'sdk']];
 it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys real API %s for all provider families', async (runtime, mode, action) => {
   state.runtime = runtime;
+  const billing = await import('@/app/api/runtime/billing/route');
+  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', mode === 'bridge' ? '0' : '1');
   for (const provider of providers) {
     expect((await routes.POST(request('POST', provider, { key: `fixture-saved-${provider}` }))).status).toBe(200);
@@ -102,6 +109,10 @@ it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(
   expect(result).toMatchObject({ ok: true });
   expect(state.envs.length).toBeGreaterThan(0);
   for (const env of state.envs) {
+    if (runtime === 'hermes' && action !== 'enabled') {
+      expect(readFileSync(join(env.HERMES_HOME!, '.env'), 'utf8')).not.toContain('fixture-stale-profile');
+      expect(readFileSync(join(env.HERMES_HOME!, 'config.yaml'), 'utf8')).not.toContain('fixture-stale-profile');
+    }
     for (const [index, key] of keys.entries()) {
       const enabled = action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(enabled ? `fixture-saved-${providers[index]}` : null);
@@ -128,4 +139,81 @@ it('ACP launch retains an explicit unmanaged provider override instead of an amb
   const client = new AcpClient({ command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
   expect(state.envs.at(-1)?.XAI_API_KEY).toBe('fixture-explicit-xai');
   client.kill();
+});
+
+it.each(['codex', 'claude-code'])('%s subscription default never changes payer through saved keys', async runtime => {
+  state.runtime = runtime;
+  for (const provider of ['openai', 'anthropic']) expect((await routes.POST(request('POST', provider, { key: `fixture-saved-${provider}` }))).status).toBe(200);
+  expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+  expect(state.envs.length).toBeGreaterThan(0);
+  for (const env of state.envs) for (const name of ['CODEX_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) expect(env[name] || null, name).toBeNull();
+});
+it.each(['disable', 'remove'])('generic aliases obey real API %s in owned spawn', async action => {
+  state.runtime = 'goose';
+  const billing = await import('@/app/api/runtime/billing/route');
+  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: 'goose', mode: 'api' }) }))).status).toBe(200);
+  for (const name of ['LLM_PROVIDER', 'GOOSE_PROVIDER', 'COPILOT_PROVIDER_TYPE']) vi.stubEnv(name, 'openai');
+  for (const alias of ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN']) vi.stubEnv(alias, 'fixture-stale-alias');
+  expect((await routes.POST(request('POST', 'openai', { key: 'fixture-openai' }))).status).toBe(200);
+  expect((await (action === 'disable' ? routes.PATCH(request('PATCH', 'openai', { enabled: false })) : routes.DELETE(request('DELETE', 'openai')))).status).toBe(200);
+  expect(await modules.goose.launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+  for (const env of state.envs) for (const name of ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN']) expect(env[name] || null, name).toBeNull();
+});
+
+it.each(['codex', 'claude-code'])('%s saved API billing permits saved credentials and survives a fresh read', async runtime => {
+  state.runtime = runtime;
+  const billing = await import('@/app/api/runtime/billing/route');
+  const url = 'http://localhost/api/runtime/billing';
+  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
+  expect(await (await billing.GET(new NextRequest(`${url}?runtimeId=${runtime}`, { headers: { host: 'localhost' } }))).json()).toMatchObject({ mode: 'api' });
+  expect((await routes.POST(request('POST', runtime === 'codex' ? 'openai' : 'anthropic', { key: 'fixture-billed-api' }))).status).toBe(200);
+  expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+  expect(state.envs.at(-1)?.[runtime === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY']).toBe('fixture-billed-api');
+});
+
+it.each(['disable', 'remove'])('MCP child receives no revoked key after real API %s', async action => {
+  expect((await routes.POST(request('POST', 'openai', { key: 'fixture-saved-openai' }))).status).toBe(200);
+  expect((await (action === 'disable' ? routes.PATCH(request('PATCH', 'openai', { enabled: false })) : routes.DELETE(request('DELETE', 'openai')))).status).toBe(200);
+  const { testMcpConnection } = await import('@/lib/mcp/test-connection');
+  expect(await testMcpConnection({ transport: 'stdio', command: process.execPath, env: { OPENAI_API_KEY: 'fixture-stale-mcp', LLM_API_KEY: 'fixture-stale-mcp', MCP_SERVICE_TOKEN: 'fixture-non-provider' } }, 1_000)).toMatchObject({ ok: true });
+  const env = state.envs.at(-1)!;
+  expect(env.OPENAI_API_KEY || null).toBeNull(); expect(env.LLM_API_KEY || null).toBeNull(); expect(env.MCP_SERVICE_TOKEN).toBe('fixture-non-provider');
+});
+it.each(['codex', 'claude-code'])('%s launch filters revoked credentials before MCP config serialization', async runtime => {
+  state.runtime = runtime; state.mcp = true;
+  const billing = await import('@/app/api/runtime/billing/route');
+  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
+  expect((await routes.POST(request('POST', 'openai', { key: 'fixture-saved-openai' }))).status).toBe(200);
+  expect((await routes.DELETE(request('DELETE', 'openai'))).status).toBe(200);
+  expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture', packetId: 'fixture-mcp-packet' } as never)).toMatchObject({ ok: true });
+  const args = state.args.at(-1)!;
+  if (runtime === 'claude-code') {
+    const raw = readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8');
+    expect(raw).not.toContain('fixture-stale-mcp'); expect(raw).toContain('fixture-non-provider');
+  } else {
+    expect(args.join(' ')).not.toContain('fixture-stale-mcp'); expect(args.join(' ')).toContain('fixture-non-provider');
+  }
+});
+
+it('Copilot aliases use its provider selector when the generic LLM selector differs', async () => {
+  state.runtime = 'copilot-cli';
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('copilot-cli', 'api');
+  vi.stubEnv('COPILOT_PROVIDER_TYPE', 'gemini'); vi.stubEnv('LLM_PROVIDER', 'openai');
+  vi.stubEnv('COPILOT_PROVIDER_API_KEY', 'fixture-stale-copilot'); vi.stubEnv('COPILOT_PROVIDER_BEARER_TOKEN', 'fixture-stale-copilot');
+  for (const provider of ['openai', 'gemini']) expect((await routes.POST(request('POST', provider, { key: `fixture-${provider}` }))).status).toBe(200);
+  expect(await modules['copilot-cli'].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+  expect(state.envs.at(-1)?.COPILOT_PROVIDER_API_KEY).toBe('fixture-gemini'); expect(state.envs.at(-1)?.COPILOT_PROVIDER_BEARER_TOKEN).toBe('fixture-gemini');
+  expect((await routes.DELETE(request('DELETE', 'gemini'))).status).toBe(200);
+  expect(await modules['copilot-cli'].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
+  expect(state.envs.at(-1)?.COPILOT_PROVIDER_API_KEY || null).toBeNull(); expect(state.envs.at(-1)?.COPILOT_PROVIDER_BEARER_TOKEN || null).toBeNull();
+});
+it.each(['disable', 'remove'])('Fable resident launch cannot restore its scoped Anthropic alias after API %s', async action => {
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('claude-code', 'api');
+  vi.stubEnv('O8_FABLE_ANTHROPIC_API_KEY', 'fixture-stale-fable');
+  expect((await routes.POST(request('POST', 'anthropic', { key: 'fixture-saved-anthropic' }))).status).toBe(200);
+  expect((await (action === 'disable' ? routes.PATCH(request('PATCH', 'anthropic', { enabled: false })) : routes.DELETE(request('DELETE', 'anthropic')))).status).toBe(200);
+  const { spawnOrchestratorProc, getWarmState } = await import('@/lib/lane/orchestrator-resident-process');
+  const session = { sessionName: 'fixture-fable', repoPath: repo, threadId: null, claudeSessionId: null, status: 'ready', proc: null, createdAt: Date.now() };
+  spawnOrchestratorProc(session as never, getWarmState(session.sessionName), { cwd: repo, model: 'claude-opus-4-8', permissionMode: 'full', toolProfile: 'fable', effort: 'high', mcpConfigPath: join(state.dir, 'mcp.json'), modelSource: 'native' } as never, {}, 'fixture');
+  for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'O8_FABLE_ANTHROPIC_API_KEY']) expect(state.envs.at(-1)?.[name] || null, name).toBeNull();
 });

@@ -1,3 +1,5 @@
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 import { spawn } from 'node:child_process';
@@ -51,6 +53,7 @@ type InteractiveTurn = {
 };
 
 interface InternalClaudeCodeInteractiveSession extends ClaudeCodeInteractiveSession {
+  credentialPolicy: string;
   idleTimer: ReturnType<typeof setTimeout> | null;
   stdoutLineBuffer: string;
   stderrBuffer: string;
@@ -377,15 +380,16 @@ function spawnSession(
   const proc = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd,
-    env: {
+    env: providerSpawnEnvironment({
       ...process.env,
       FORCE_COLOR: '0',
       O8_MANAGED_SESSION: '1',
-    },
+    }, { runtimeId: 'claude-code' }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
   const session: InternalClaudeCodeInteractiveSession = {
+    credentialPolicy: credentialPolicyFingerprint('claude-code'),
     tabId,
     cwd,
     model,
@@ -433,6 +437,7 @@ export function ensureSession(
   if (
     existing
     && existing.status !== 'dead'
+    && existing.credentialPolicy === credentialPolicyFingerprint('claude-code')
     && existing.cwd === normalizedCwd
     && existing.model === normalizedModel
     && existing.permissionMode === normalizedPermissionMode

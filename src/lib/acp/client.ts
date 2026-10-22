@@ -192,6 +192,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 }
 
 export interface AcpClientOptions {
+  runtimeId?: string;
   command: string;
   args: string[];
   /** Working directory used to boot the ACP agent and its private service. */
@@ -248,7 +249,7 @@ export class AcpClient {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
-      env: Object.fromEntries(Object.entries(providerSpawnEnvironment({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) })).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
+      env: Object.fromEntries(Object.entries(providerSpawnEnvironment({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) }, { runtimeId: opts.runtimeId })).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));

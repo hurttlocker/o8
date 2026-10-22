@@ -1,3 +1,4 @@
+import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
 import { randomUUID } from 'node:crypto';
 import {
   accessSync,
@@ -280,7 +281,7 @@ export async function prepareSingleOrchestratorLaunch(input: {
       if (existsSync(source)) copyFileSync(source, join(overlayHome, fileName));
     }
     const overlayAuth = join(overlayHome, 'auth.json');
-    if (existsSync(overlayAuth)) chmodSync(overlayAuth, 0o600);
+    if (existsSync(overlayAuth)) { reconcileRuntimeConfigFile(overlayAuth, 'codex'); chmodSync(overlayAuth, 0o600); }
 
     const sessionsDir = join(input.codexHome, 'sessions');
     mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });

@@ -310,7 +310,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
     windowsHide: true,
     cwd: session.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: providerSpawnEnvironment({ ...process.env, PI_CODING_AGENT_DIR: session.agentDir ?? piUserAgentDir(), FORCE_COLOR: '0', NO_COLOR: '1' }),
+    env: providerSpawnEnvironment({ ...process.env, PI_CODING_AGENT_DIR: session.agentDir ?? piUserAgentDir(), FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: 'pi' }),
   });
   run.pid = child.pid;
   let carry = '';

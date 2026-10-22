@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * External MCP Client Auto-Register
  *
@@ -188,7 +189,7 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
 
   await new Promise<void>((resolve, reject) => {
     const launch = cliInvocation(cliPath, args);
-    const child = spawn(launch.command, launch.args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { onlyExisting: true }), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -217,7 +218,7 @@ async function hermesRemove(cliPath: string): Promise<void> {
   // Same stdin-Y trick as install.
   await new Promise<void>((resolve, reject) => {
     const launch = cliInvocation(cliPath, ['mcp', 'remove', 'o8']);
-    const child = spawn(launch.command, launch.args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { onlyExisting: true }), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {

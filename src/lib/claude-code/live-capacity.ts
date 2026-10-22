@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 import { spawn } from 'node:child_process';
@@ -64,7 +65,7 @@ export async function readLiveClaudeRuntimeCapacity(options: {
       CLAUDE_CODE_AUTO_CONNECT_IDE: '0', CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1' };
     delete env.FORCE_CODE_TERMINAL;
     const proc = spawn(invocation.command, invocation.args, {
-      cwd: options.cwd ?? homedir(), env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: options.cwd ?? homedir(), env: providerSpawnEnvironment(env, { runtimeId: 'claude-code' }), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     const initId = randomUUID();
     const usageId = randomUUID();

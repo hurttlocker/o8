@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
@@ -241,7 +242,7 @@ async function openCodexLoginInBrowser(child: ChildProcess): Promise<void> {
 
 function spawnProxy(binary: string, args: string[], kind: 'server' | 'login'): ChildProcess {
   const log = openLog(kind);
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = providerSpawnEnvironment(process.env, { inject: false });
   delete env.BROWSER;
   try {
     const child = spawn(binary, args, {
@@ -380,7 +381,7 @@ export async function prepareClaudeCodeWorkerConfig(
     // native carrier at the readiness seam (detectNativeClaudeAuth skips the CLI probe
     // for it), and the spawned worker inherits this same environment. Demanding an
     // OAuth credential on top of it would refuse a launch that preflight approved.
-    const envCredential = hasClaudeEnvCredential({ ...process.env, ...credentialEnv });
+    const envCredential = hasClaudeEnvCredential(providerSpawnEnvironment({ ...process.env, ...credentialEnv }, { runtimeId: 'claude-code' }));
     if (process.platform === 'darwin') {
       if (!envCredential) {
         throw new ClaudeCodeWorkerAuthenticationError(`No dedicated worker credential is configured. ${WORKER_TOKEN_SETUP_HINT}`);
@@ -430,7 +431,7 @@ async function assertNativeWorkerAuthenticated(
     throw new ClaudeCodeWorkerAuthenticationError('Claude Code could not verify the seeded credential.');
   }
   const raw = await execFileUtf8(binary, ['auth', 'status', '--json'], {
-    ...process.env,
+    ...providerSpawnEnvironment(process.env, { runtimeId: 'claude-code' }),
     ...credentialEnv,
     CLAUDE_CONFIG_DIR: configDir,
   }).catch(() => '');

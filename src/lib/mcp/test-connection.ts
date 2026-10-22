@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Exercises a stdio or HTTP MCP server enough to answer:
  *
@@ -106,7 +107,7 @@ async function testStdio(input: StdioTestInput, timeoutMs: number, npxFamily: bo
 
   return new Promise<McpTestResult>((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
-    const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
+    const childEnv = providerSpawnEnvironment({ ...process.env, ...(input.env ?? {}) }, { onlyExisting: true });
     try {
       // Most stdio MCP servers are configured as `npx …`, which on Windows is
       // `npx.cmd` — spawning it directly throws EINVAL and the user sees

@@ -1,3 +1,4 @@
+import { providerConfigEnvironment } from '@/lib/providers/spawn-environment';
 import { readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -72,7 +73,7 @@ export async function prepareOwnedWorkerMcpConfig({
   }
   if (resolution.servers.length === 0) return { sandboxReadPaths: [], servers: [] };
 
-  const injectableServers = resolution.servers;
+  const injectableServers = resolution.servers.map(server => ({ ...server, env: providerConfigEnvironment(server.env ?? {}, adapter.runtimeId) }));
   const commandReadPaths = sandboxEnabled
     ? injectableServers.map((server) => path.dirname(server.command))
     : [];

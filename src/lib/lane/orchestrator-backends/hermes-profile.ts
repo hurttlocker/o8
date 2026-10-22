@@ -1,3 +1,5 @@
+import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Governed Hermes profile — the #1075 orchestrator≠worker lockout for Hermes.
  *
@@ -57,8 +59,9 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) {
     const src = join(userDir, file);
     if (existsSync(src)) {
-      try { cpSync(src, join(governedHermes, file)); } catch { /* best-effort */ }
+      cpSync(src, join(governedHermes, file));
     }
+    reconcileRuntimeConfigFile(join(governedHermes, file), 'hermes');
   }
 
   // Apply the deny via Hermes's own CLI against the ISOLATED home — never touches
@@ -67,7 +70,7 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   try {
     execFileSync(hermesBin, ['tools', 'disable', ...HERMES_DENIED_TOOLSETS], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment({ ...process.env, HOME: home }, { runtimeId: 'hermes' }),
       stdio: 'ignore',
       timeout: 20000,
     });
@@ -91,7 +94,7 @@ export function isHermesProfileGoverned(home: string, hermesBin: string): boolea
   try {
     const out = execFileSync(hermesBin, ['tools', 'list'], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment({ ...process.env, HOME: home }, { runtimeId: 'hermes' }),
       encoding: 'utf8',
       timeout: 20000,
     });

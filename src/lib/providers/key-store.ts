@@ -1,3 +1,4 @@
+import { credentialPolicyChanged } from './policy-events';
 /** Shared Node/native credential protocol. See crates/o8-provider-keys. */
 import 'server-only';
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -126,5 +127,5 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     if (temporary) { try { unlinkSync(temporary); } catch { /* Already renamed. */ } }
     lock.close();
   }
-  if (committedValues) cleanupLegacyProviderKeys(committedValues);
+  if (committedValues) { cleanupLegacyProviderKeys(committedValues); credentialPolicyChanged(); }
 }

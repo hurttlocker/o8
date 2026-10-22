@@ -1,3 +1,5 @@
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Warm REPL pool for brain Q&A `claude` spawns (2026-06-11 brain perf pass).
  *
@@ -82,7 +84,7 @@ function poolKey(binary: string, model: string, effort?: string): string {
   // No-effort callers key EXACTLY as before (byte-identical) so their warm
   // hits are unaffected; an effort'd proc gets a distinct key so it can never
   // be handed to a no-effort caller.
-  return effort ? `${binary}\x00${model}\x00${effort}` : `${binary}\x00${model}`;
+  return `${binary}\x00${model}\x00${effort ?? ''}\x00${credentialPolicyFingerprint('claude-code')}`;
 }
 
 function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc | null {
@@ -98,7 +100,7 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
     child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd: os.tmpdir(),
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+      env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' }, { runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch {

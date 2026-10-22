@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Sonnet adapter for the Cortex Q&A layer.
@@ -76,7 +77,7 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v claude'], {
         windowsHide: true,
         timeout: 10_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: 'claude-code' }),
       });
       const found = stdout.trim();
       if (found) return found;
@@ -118,7 +119,7 @@ async function detectTier(): Promise<TierResult> {
         await execFileAsync(claudeBin, ['--version'], {
           windowsHide: true,
           timeout: 5_000,
-          env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+          env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: 'claude-code' }),
         });
         cachedTier = { tier: 'cli', claudeBin };
         console.log(`[qa] Sonnet provider: CLI (${claudeBin})`);

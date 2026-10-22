@@ -1,5 +1,4 @@
-import { resolveProviderKey } from '@/lib/providers/key-store';
-import { createHash } from 'node:crypto';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 /**
@@ -209,17 +208,19 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       modelUnconfirmed: false,
       completedTurns: 0,
       launchFingerprint: acpLaunchFingerprint(launch),
-      credentialFingerprint: createHash('sha256').update(resolveProviderKey('OPENROUTER_API_KEY') ?? '').digest('hex'),
+      credentialFingerprint: credentialPolicyFingerprint(id),
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
         cwd: repoPath,
         env: launch.env,
+        runtimeId: id,
         omitEnv: launch.omitEnv,
         onEvent: (event, sourceSessionId) => { if (sourceSessionId === session.sessionId && session.status === 'busy') session.onEvent?.(event); },
         requestTimeoutMs: config.requestTimeoutMs,
       }),
     };
+    session.credentialFingerprint = credentialPolicyFingerprint(id);
     sessions.set(key, session);
     return session;
   }
@@ -229,7 +230,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
     const existing = sessions.get(key);
     if (existing && existing.status !== 'dead' && existing.client.alive) {
       const launch = config.resolveLaunch(repoPath);
-      if (existing.sessionId || existing.status === 'busy' || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))) return existing;
+      if (existing.status === 'busy' || (existing.credentialFingerprint === credentialPolicyFingerprint(id) && (existing.sessionId || (launch && existing.launchFingerprint === acpLaunchFingerprint(launch))))) return existing;
       existing.client.kill();
     }
     if (existing) sessions.delete(key);
@@ -319,7 +320,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
         await resolveOpenRouterKey();
         const cold = sessions.get(sessionKey(id, repoPath, options?.threadId));
-        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== createHash('sha256').update(resolveProviderKey('OPENROUTER_API_KEY') ?? '').digest('hex')) {
+        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== credentialPolicyFingerprint(id)) {
           cold.client.kill(); cold.status = 'dead';
         }
       }
