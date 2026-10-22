@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ForgetMemoryButton } from '../ForgetMemoryButton';
 import { RamsButton } from '../settings/shared';
 import { indexedDocumentationSource, isIndexedDocumentation, type DirectiveSummary } from './inventory';
 import { DetailLine, EmptyState, OpenFileLink, Row, SectionHeader, TruncatedRows } from './shared';
@@ -28,6 +29,7 @@ function InstructionRow({ directive: d, expandedRow, onToggleRow, onOpenFile }: 
           {d.body}
         </div>
         {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
+        <ForgetMemoryButton key={d.id} kind="directive" id={d.id} label={d.title} />
       </div>
     </Row>
   );

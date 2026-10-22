@@ -973,6 +973,12 @@
       ]
     },
     {
+      "path": "src/lib/supervisor/launch-agent-recovery.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/supervisor/liveness-probes.test.ts",
       "reasons": [
         "child-process",
@@ -4732,6 +4738,13 @@
     {
       "path": "tests/search-file-context-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/selective-forget-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },

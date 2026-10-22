@@ -1,4 +1,5 @@
 import 'server-only';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 
 import { createHash } from 'node:crypto';
 import { classifyQuestionForRecall } from '@/lib/cortex/qa/classifier';
@@ -58,7 +59,7 @@ function dependencies(): RecallDependencies {
 }
 
 function scopeKey(repoPath: string, projectId?: string): string {
-  return `${repoPath}\x00${projectId ?? ''}`;
+  return `${readMemoryRevision()}\x00${repoPath}\x00${projectId ?? ''}`;
 }
 
 function cacheKey(question: string, scope: string): string {

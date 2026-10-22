@@ -39,18 +39,18 @@ describe('task execution placement', () => {
   it('allows saving remote placement while refusing dispatch to a disconnected pool', async () => {
     await show(false);
     expect(container.textContent).toContain('No remote worker connected.');
-    expect(button('Add + dispatch').disabled).toBe(true);
-    act(() => button('Add').click());
+    expect(button('Start task').disabled).toBe(true);
+    act(() => button('Save task').click());
     expect(onCreate).toHaveBeenCalledWith('cloud', null, null);
     expect(onDispatch).not.toHaveBeenCalled();
   });
 
   it('passes remote placement when the operator dispatches to a connected pool', async () => {
     await show(true);
-    expect(button('Add + dispatch').disabled).toBe(false);
+    expect(button('Start task').disabled).toBe(false);
     const model = container.querySelector<HTMLSelectElement>('select[aria-label="Task model"]')!;
     act(() => { model.value = 'gpt-6-sol'; model.dispatchEvent(new Event('change', { bubbles: true })); });
-    act(() => button('Add + dispatch').click());
+    act(() => button('Start task').click());
     expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6-sol', null);
   });
 
@@ -63,9 +63,9 @@ describe('task execution placement', () => {
       model.value = 'gpt-6.1-sol'; model.dispatchEvent(new Event('change', { bubbles: true }));
       effort!.value = 'medium'; effort!.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    act(() => button('Add').click());
+    act(() => button('Save task').click());
     expect(onCreate).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
-    act(() => button('Add + dispatch').click());
+    act(() => button('Start task').click());
     expect(onDispatch).toHaveBeenCalledWith('cloud', 'gpt-6.1-sol', 'medium');
   });
 
@@ -86,7 +86,7 @@ describe('task execution placement', () => {
   it('blocks every dismissal control and callback while creation is in flight', async () => {
     await show(true, true);
     expect(button('Cancel').disabled).toBe(true);
-    act(() => { button('Cancel').click(); button('Add').click(); button('Add + dispatch').click(); });
+    act(() => { button('Cancel').click(); button('Save task').click(); button('Start task').click(); });
     const title = container.querySelector<HTMLInputElement>('input')!;
     act(() => title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(onCancel).not.toHaveBeenCalled();

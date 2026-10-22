@@ -13,6 +13,9 @@ import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
 import { THINKING_EFFORTS, THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 const composerActionStyle: CSSProperties = { fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', flexShrink: 0 };
+const WORKER_ROLES: Record<string, string> = {
+  heavy_worker: 'Heavy worker', light_worker: 'Light worker', diagnostic: 'Diagnostic', reviewer: 'Reviewer', orchestrator: 'Orchestrator',
+};
 
 export function TaskStatusStrip({
   counts,
@@ -149,7 +152,7 @@ export function NewTaskComposer({
             New task
           </div>
           <div style={{ marginTop: 1, fontSize: 10.25, lineHeight: '13px', color: 'var(--t-text-faint)' }}>
-            Choose where this task runs
+            Tasks appear as threads with their progress and results.
           </div>
         </div>
         <ActionButton label="Cancel" disabled={busy} onClick={onCancel} style={composerActionStyle} />
@@ -163,6 +166,7 @@ export function NewTaskComposer({
         style={fieldStyle}
       />
       <textarea
+        aria-label="Task details"
         value={summary}
         onChange={(event) => onSummaryChange(event.currentTarget.value)}
         placeholder="Brief detail, constraints, or success criteria"
@@ -174,41 +178,24 @@ export function NewTaskComposer({
           minHeight: 58,
         }}
       />
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 7, marginTop: 7 }}>
-        <select
-          value={repoPath}
-          disabled={Boolean(selectedRepo)}
-          onChange={(event) => onRepoPathChange(event.currentTarget.value)}
-          style={{
-            ...fieldStyle,
-            height: 34,
-            paddingTop: 0,
-            paddingBottom: 0,
-            color: selectedRepo ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
-          }}
-        >
-          {repos.map((repo) => (
-            <option key={repo.id} value={repo.localPath}>{repo.name}</option>
-          ))}
-        </select>
-        <select
-          value={workerIntent}
-          onChange={(event) => onWorkerIntentChange(event.currentTarget.value)}
-          style={{
-            ...fieldStyle,
-            height: 34,
-            paddingTop: 0,
-            paddingBottom: 0,
-            color: 'var(--t-text-muted)',
-          }}
-        >
-          <option value="heavy_worker">Heavy worker</option>
-          <option value="light_worker">Light worker</option>
-          <option value="diagnostic">Diagnostic</option>
-          <option value="reviewer">Reviewer</option>
-          <option value="orchestrator">Orchestrator</option>
-        </select>
-      </div>
+      <select
+        aria-label="Task repository"
+        value={repoPath}
+        disabled={Boolean(selectedRepo)}
+        onChange={(event) => onRepoPathChange(event.currentTarget.value)}
+        style={{
+          ...fieldStyle,
+          marginTop: 7,
+          height: 34,
+          paddingTop: 0,
+          paddingBottom: 0,
+          color: selectedRepo ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+        }}
+      >
+        {repos.map((repo) => (
+          <option key={repo.id} value={repo.localPath}>{repo.name}</option>
+        ))}
+      </select>
       <select
         aria-label="Task execution location"
         value={executionRuntime}
@@ -218,19 +205,30 @@ export function NewTaskComposer({
         <option value="codex">This machine · Codex</option>
         <option value="cloud">Remote worker · Codex</option>
       </select>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 7, marginTop: 7 }}>
-        <select aria-label="Task model" value={model} disabled={busy} onChange={(event) => setModel(event.currentTarget.value)} style={fieldStyle}>
-          <option value="">Automatic · {MODEL_IDS.codexWorkerDefault}</option>
-          {CODEX_MODEL_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+      <details style={{ marginTop: 7 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11.5, lineHeight: '16px', fontWeight: 300, color: 'var(--t-text-muted)', paddingTop: 6, paddingBottom: 6 }}>
+          Worker options
+          <span style={{ display: 'block', marginTop: 3, fontSize: 10.25, color: 'var(--t-text-faint)' }}>
+            {WORKER_ROLES[workerIntent] ?? workerIntent} · {model || 'Automatic model'} · {effort === 'adaptive' ? 'Adaptive effort' : `${THINKING_EFFORT_LABELS[effort].long} effort`}
+          </span>
+        </summary>
+        <select aria-label="Task worker role" value={workerIntent} onChange={(event) => onWorkerIntentChange(event.currentTarget.value)} style={{ ...fieldStyle, marginTop: 7 }}>
+          {Object.entries(WORKER_ROLES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-        <select aria-label="Task reasoning effort" value={effort} disabled={busy} onChange={(event) => setEffort(event.currentTarget.value as ThinkingEffort)} style={fieldStyle}>
-          {THINKING_EFFORTS.map((value) => (
-            <option key={value} value={value} disabled={value !== 'adaptive' && !codexSupportsReasoningEffort(model || MODEL_IDS.codexWorkerDefault, value)}>
-              {THINKING_EFFORT_LABELS[value].long}
-            </option>
-          ))}
-        </select>
-      </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 7, marginTop: 7 }}>
+          <select aria-label="Task model" value={model} disabled={busy} onChange={(event) => setModel(event.currentTarget.value)} style={fieldStyle}>
+            <option value="">Automatic · {MODEL_IDS.codexWorkerDefault}</option>
+            {CODEX_MODEL_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+          </select>
+          <select aria-label="Task reasoning effort" value={effort} disabled={busy} onChange={(event) => setEffort(event.currentTarget.value as ThinkingEffort)} style={fieldStyle}>
+            {THINKING_EFFORTS.map((value) => (
+              <option key={value} value={value} disabled={value !== 'adaptive' && !codexSupportsReasoningEffort(model || MODEL_IDS.codexWorkerDefault, value)}>
+                {THINKING_EFFORT_LABELS[value].long}
+              </option>
+            ))}
+          </select>
+        </div>
+      </details>
       {!effortSupported ? (
         <div role="status" style={{ marginTop: 5, fontSize: 10.5, lineHeight: '15px', fontWeight: 300, color: 'var(--t-text-muted)' }}>
           Choose an effort supported by this model.
@@ -241,9 +239,12 @@ export function NewTaskComposer({
           {remote?.detail ?? 'Checking remote workers…'}
         </div>
       ) : null}
+      <div style={{ marginTop: 8, fontSize: 10.5, lineHeight: '15px', color: 'var(--t-text-muted)' }}>
+        Save task keeps it ready for later. Start task also requests an agent.
+      </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 7, marginTop: 9 }}>
-        <ActionButton label="Add" style={composerActionStyle} disabled={busy || !effortSupported} onClick={() => onCreate(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
-        <ActionButton label="Add + dispatch" style={composerActionStyle} icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy || !effortSupported || (executionRuntime === 'cloud' && !remote?.available)} onClick={() => onCreateAndDispatch(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
+        <ActionButton label="Save task" style={composerActionStyle} disabled={busy || !effortSupported} onClick={() => onCreate(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
+        <ActionButton label="Start task" style={composerActionStyle} icon={<Play size={12} strokeWidth={2.2} />} primary disabled={busy || !effortSupported || (executionRuntime === 'cloud' && !remote?.available)} onClick={() => onCreateAndDispatch(executionRuntime, model || null, effort === 'adaptive' ? null : effort)} />
       </div>
     </div>
   );

@@ -35,7 +35,7 @@ describe('New task dismissal through Threads', () => {
   async function show() {
     await act(async () => root.render(createElement(O8ThreadsPane, { active: true, repoPath: null, repos, allRepos: true })));
   }
-  function opener() { return container.querySelector<HTMLButtonElement>('[aria-label="Create thread"]')!; }
+  function opener() { return container.querySelector<HTMLButtonElement>('[aria-label="Create task"]')!; }
   function title() { return container.querySelector<HTMLInputElement>('input[placeholder="Task title"]'); }
   function button(label: string) { return [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label); }
   async function open() {
@@ -82,7 +82,8 @@ describe('New task dismissal through Threads', () => {
     await open();
     type(title()!, 'Synthetic draft');
     type(container.querySelector<HTMLTextAreaElement>('textarea')!, 'Keep these constraints');
-    const [repo, intent] = container.querySelectorAll<HTMLSelectElement>('select');
+    const repo = container.querySelector<HTMLSelectElement>('[aria-label="Task repository"]')!;
+    const intent = container.querySelector<HTMLSelectElement>('[aria-label="Task worker role"]')!;
     select(repo, '/second'); select(intent, 'reviewer');
     for (const dismiss of ['escape', 'cancel', 'toggle']) {
       if (dismiss === 'escape') escape(title()!);
@@ -92,8 +93,8 @@ describe('New task dismissal through Threads', () => {
       await open();
       expect(title()!.value).toBe('Synthetic draft');
       expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Keep these constraints');
-      const fields = container.querySelectorAll<HTMLSelectElement>('select');
-      expect(fields[0].value).toBe('/second'); expect(fields[1].value).toBe('reviewer');
+      expect(container.querySelector<HTMLSelectElement>('[aria-label="Task repository"]')!.value).toBe('/second');
+      expect(container.querySelector<HTMLSelectElement>('[aria-label="Task worker role"]')!.value).toBe('reviewer');
     }
     expect(mutations()).toHaveLength(0);
   });
@@ -145,7 +146,7 @@ describe('New task dismissal through Threads', () => {
     expect(mutations()).toHaveLength(0);
   });
 
-  it.each(['Add', 'Add + dispatch'])('protects the real Control Room toggle and Cancel during %s', async (action) => {
+  it.each(['Save task', 'Start task'])('protects the real Control Room toggle and Cancel during %s', async (action) => {
     await act(async () => root.render(createElement(ControlRoomTab, { project, repos })));
     const source = container.querySelector<HTMLButtonElement>('[aria-label="Create task"]')!;
     await act(async () => source.click()); type(title()!, 'Pending Control Room draft');
@@ -199,7 +200,7 @@ describe('New task dismissal through Threads', () => {
     expect(mutations()).toHaveLength(0);
   });
 
-  it.each(['Add', 'Add + dispatch'])('cannot dismiss in-flight %s, then retains the failed draft for a cancel and retry', async (action) => {
+  it.each(['Save task', 'Start task'])('cannot dismiss in-flight %s, then retains the failed draft for a cancel and retry', async (action) => {
     await show(); await open(); type(title()!, 'Retry this draft');
     let resolveCreate!: (response: Response) => void;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => init?.method === 'POST'
@@ -216,7 +217,7 @@ describe('New task dismissal through Threads', () => {
     expect(title()).toBeNull(); expect(document.activeElement).toBe(opener());
     await open(); expect(title()!.value).toBe('Retry this draft');
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => json(init?.method === 'POST' ? { ok: true, taskId: 'synthetic-task' } : { tasks: [] }));
-    await act(async () => button('Add')!.click());
+    await act(async () => button('Save task')!.click());
     expect(title()).toBeNull(); expect(mutations()).toHaveLength(2);
     expect(fetchMock.mock.calls.some((call) => call[0].includes('/dispatch'))).toBe(false);
     await open(); expect(title()!.value).toBe('');

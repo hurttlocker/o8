@@ -11,14 +11,18 @@ import { surfaceLaunchAgentCrashLoop, surfaceLaunchAgentCrashLoops } from './lau
 
 const SECONDARY_LABEL = 'com.rainwater.o8-worker';
 let callerServiceName: string | undefined;
+const platform = process.platform;
 
 // Default-label cases must not pick up a launchd identity inherited by the runner.
 beforeEach(() => {
+  // Alert-only fixtures must never probe a real launchd service.
+  Object.defineProperty(process, 'platform', { value: 'linux' });
   callerServiceName = process.env.XPC_SERVICE_NAME;
   delete process.env.XPC_SERVICE_NAME;
 });
 
 afterEach(() => {
+  Object.defineProperty(process, 'platform', { value: platform });
   if (callerServiceName === undefined) delete process.env.XPC_SERVICE_NAME;
   else process.env.XPC_SERVICE_NAME = callerServiceName;
   rmSync(launchAgentCounterPath(getDataDir()), { force: true });
@@ -43,7 +47,7 @@ describe('LaunchAgent Incident Queue bridge', () => {
     expect(surfaceLaunchAgentCrashLoop(nowMs)).toBe(0);
   });
 
-  it('discovers and surfaces counters from other o8 LaunchAgent services', () => {
+  it('discovers and surfaces counters from other o8 LaunchAgent services', async () => {
     const dataDir = getDataDir();
     const nowMs = Date.now();
     for (let offset = 3; offset >= 0; offset -= 1) {
@@ -55,7 +59,7 @@ describe('LaunchAgent Incident Queue bridge', () => {
       });
     }
 
-    expect(surfaceLaunchAgentCrashLoops(nowMs)).toEqual([{
+    expect(await surfaceLaunchAgentCrashLoops(nowMs)).toEqual([{
       label: SECONDARY_LABEL,
       failureCount: 3,
     }]);
