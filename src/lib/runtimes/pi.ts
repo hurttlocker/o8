@@ -8,6 +8,7 @@ import type {
   RuntimeTelemetry,
   RuntimeTranscriptEntry,
 } from './types';
+import { piRunModelTelemetry } from '@/lib/pi/run-usage';
 import { parsePiSessionCost } from '@/lib/runtimes/pi-cost-parser';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { listUserPiSessions } from '@/lib/pi/user-setup';
@@ -143,6 +144,8 @@ export const piRuntime: AgentRuntime = {
   async getTelemetry(sessionKey: string): Promise<RuntimeTelemetry | undefined> {
     const sources = await getOwnedPiTelemetrySources(sessionKey);
     if (!sources?.stdoutPaths.length) return undefined;
+    const recorded = piRunModelTelemetry(sources.runUsage);
+    if (recorded) return recorded;
     const cost = await parsePiSessionCost(sources.stdoutPaths, { fallbackModel: null }).catch(() => null);
     if (!cost) return undefined;
     return {

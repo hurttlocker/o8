@@ -1,3 +1,4 @@
+import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
 import { spawn } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -113,7 +114,10 @@ export async function readCapturedPurgeCwdSnapshot(
     || stat.ino !== captured.inode || await realpath(captured.candidatePath) !== captured.candidatePath) {
     throw new Error('Captured purge namespace changed during the process probe.');
   }
-  const snapshot = await readProcessCwdSnapshot({ forceRefresh: true });
+  // Close callers explicitly refresh after readers settle at the paused seam.
+  // Its bracketed helper checks share that generation; other callers force a
+  // native read on each check rather than relying on the inventory cache.
+  const snapshot = await readProcessCwdSnapshot({ forceRefresh: !hasCloseProcessObservation() });
   const probe = await probeMetadataLockProcessIdentity(captured.pid);
   if (snapshot.status !== 'ready' || probe.state !== 'live'
     || !sameMetadataLockProcessIdentity(probe.identity, captured.identity)
@@ -126,6 +130,26 @@ export async function readCapturedPurgeCwdSnapshot(
     throw new Error('Captured purge process has no exact native cwd observation.');
   }
   return { ...snapshot, rows: snapshot.rows.filter(row => row.pid !== captured.pid) };
+}
+
+/** Scoped exclusion for this exact live, paused helper, never a PID allowlist. */
+export async function withCapturedPurgeProcessExclusion<T>(
+  witness: CapturedPurgeProcessWitness,
+  candidatePath: string,
+  operation: (isHelper: (pid: number) => boolean) => Promise<T>,
+): Promise<T> {
+  const captured = capturedPurgeProcesses.get(witness);
+  if (!captured || path.resolve(candidatePath) !== captured.candidatePath) {
+    throw new Error('Purge helper exclusion has no exact candidate authority.');
+  }
+  await readCapturedPurgeCwdSnapshot(witness, candidatePath);
+  let active = true;
+  try {
+    const result = await operation((pid) => active
+      && capturedPurgeProcesses.get(witness) === captured && pid === captured.pid);
+    await readCapturedPurgeCwdSnapshot(witness, candidatePath);
+    return result;
+  } finally { active = false; }
 }
 
 export interface ExactDirectoryManifestEntry {
@@ -365,7 +389,10 @@ async function runCapturedPurge(
   let stderr = '';
   let witness: CapturedPurgeProcessWitness | undefined;
   const closed = new Promise<number | null>((resolve) => child.once('close', code => {
-    if (witness) capturedPurgeProcesses.delete(witness);
+    if (witness && child.pid) {
+      settleCloseObservedHelper(child.pid);
+      capturedPurgeProcesses.delete(witness);
+    }
     resolve(code);
   }));
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
