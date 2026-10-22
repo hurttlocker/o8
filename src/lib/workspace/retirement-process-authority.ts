@@ -52,7 +52,7 @@ export async function assertManagedRetirementQuiescence(input: {
     || path.join(metadata.materializationParentIdentity.canonicalPath, input.worktreeId) !== sourcePath) {
     throw new Error('Retirement has no exact ready manager process authority.');
   }
-  const lanes = await owningLanes(input.repositoryPath, input.sourcePath);
+  const lanes = exactWorkspaceOwningLanes(input.repositoryPath, input.sourcePath, metadata);
   if (lanes.length === 0 && !metadata.sessionKey) {
     const allowed = input.capturedPurge
       ? (await probeLiveProcessInside(input.candidatePath, {

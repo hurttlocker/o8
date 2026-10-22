@@ -140,28 +140,40 @@ export async function verifyRetirementAuthority(input: {
   }
   // Discard receipts may omit dirty source. Check orphan source even during
   // purge replay; a partially purged Git tree conservatively remains held.
-  let verifyOrphanArtifacts = false;
+  let verifiedOrphanArtifacts = false;
   if (owner.orphanedClose && owner.laneId) {
+    let entries: string[];
     try {
-      const entries = await readdir(input.candidatePath).catch((error: NodeJS.ErrnoException) => {
+      entries = await readdir(input.candidatePath).catch((error: NodeJS.ErrnoException) => {
         if (!input.verifyContents && error.code === 'ENOENT') return [];
         throw error;
       });
-      verifyOrphanArtifacts = entries.length > 0;
-      if (entries.length > 0 || input.verifyContents) {
-        const revision = await inspectArtifactRestoreRevision({
-          workspacePath: input.candidatePath,
-          identity: { ...input.identity, canonicalPath: input.candidatePath },
-        });
-        if (revision.headCommit !== payload.capture.headCommit || revision.treeSha !== payload.capture.treeSha) {
-          throw new Error('Source revision differs from the retirement snapshot.');
-        }
-      }
     } catch {
       refuseOrphanClose(owner.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
     }
+    if (entries.length > 0 || input.verifyContents) {
+      // These children only read the candidate. Settle both before another
+      // native proof or mutation, preserving source-refusal precedence.
+      const [revision, artifacts] = await Promise.allSettled([
+        inspectArtifactRestoreRevision({
+          workspacePath: input.candidatePath,
+          identity: { ...input.identity, canonicalPath: input.candidatePath },
+        }),
+        verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
+          ...input.identity, canonicalPath: input.candidatePath,
+        }),
+      ]);
+      if (revision.status === 'rejected' || revision.value.headCommit !== payload.capture.headCommit
+        || revision.value.treeSha !== payload.capture.treeSha) {
+        refuseOrphanClose(owner.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
+      }
+      if (artifacts.status === 'rejected') {
+        refuseOrphanClose(owner.laneId, 'ignored artifacts changed or their preserved content is uncertain; preserve the edits before retrying');
+      }
+      verifiedOrphanArtifacts = true;
+    }
   }
-  if (input.verifyContents || verifyOrphanArtifacts) {
+  if (input.verifyContents && !verifiedOrphanArtifacts) {
     try {
       await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
         ...input.identity, canonicalPath: input.candidatePath,

@@ -163,14 +163,19 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
   if (runs.some((run) => !Number.isSafeInteger(run.pid) || run.pid <= 0
     || !Number.isSafeInteger(run.processGroupId) || run.processGroupId <= 0
     || !/^[A-Za-z0-9._-]{1,160}$/.test(run.runId))) refuse('retained process identity is incomplete');
-  await assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath, capturedPurge });
-  if (state === 'archived' && sessionKey) {
-    // Native evidence names live holders before the aggregate owned-session proof.
-    const process = await probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, {
+  // Independent read-only proofs share one boundary, not cached authority.
+  // Settle both before returning, preserving native holder/refusal precedence.
+  const [native, owned] = await Promise.allSettled([
+    assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath, capturedPurge }),
+    state === 'archived' && sessionKey ? probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, {
       allowArchivedRetirement: true,
       ...(capturedPurge ? { readCwdSnapshot: () => readCapturedPurgeCwdSnapshot(capturedPurge, candidatePath) } : {}),
-    });
-    if (process.state !== 'quiescent') refuse(`archived run process proof is ${process.state}: ${process.reasons.slice(0, 3).join('; ')}`);
+    }) : Promise.resolve(null),
+  ]);
+  if (native.status === 'rejected') throw native.reason;
+  if (owned.status === 'rejected') throw owned.reason;
+  if (owned.value && owned.value.state !== 'quiescent') {
+    refuse(`archived run process proof is ${owned.value.state}: ${owned.value.reasons.slice(0, 3).join('; ')}`);
   }
   return { packetId: lane.packetId, laneId: lane.id, repositoryUuid: repo.id, sourcePath,
     device: identity.device, inode: identity.inode,
