@@ -33,10 +33,12 @@ describe('permissions-model status mappers', () => {
     expect(permPillText('denied')).toBe('Denied');
     expect(permPillText('not-asked')).toBe('Not asked');
     expect(permPillText('unknown')).toBe('Checking…');
+    expect(permPillText('unavailable')).toBe('Not checked on this platform');
     expect(permPillTone('granted')).toBe('success');
     expect(permPillTone('denied')).toBe('destructive');
     expect(permPillTone('not-asked')).toBe('default');
     expect(permPillTone('unknown')).toBe('default');
+    expect(permPillTone('unavailable')).toBe('default');
   });
 });
 
@@ -68,6 +70,7 @@ describe('permissions-model fix-flow shape', () => {
     expect(isFreshGrant('granted', 'granted')).toBe(false);
     // Pre-first-read → not a fresh grant.
     expect(isFreshGrant('unknown', 'granted')).toBe(false);
+    expect(isFreshGrant('unavailable', 'granted')).toBe(false);
     // Still not granted → not a fresh grant.
     expect(isFreshGrant('denied', 'denied')).toBe(false);
   });

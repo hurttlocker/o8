@@ -17,7 +17,8 @@
  *     a relaunch — when one of those flips to granted during the session the row
  *     surfaces a "Relaunch o8 to apply" button wired to the updater's restart.
  *
- * All native state reads live through the Tauri bridge (isTauri() guarded).
+ * Native state reads use the Tauri bridge only on a macOS shell. Other
+ * desktop platforms show neutral unavailable checks without invoking stubs.
  * Inline styles only, var(--t-*) tokens, raw-SVG icons (repo rule: no React
  * icon components inside the Tauri webview). The status-shape logic lives in the
  * pure, unit-tested `permissions-model` module.
@@ -36,6 +37,7 @@ import {
   restartApp,
 } from '@/lib/tauri/bridge';
 import { APP_FONT_STACK, RAMS_INK_QUIET, TabHeading, SETTINGS_CONTENT_MAX_WIDTH } from './shared';
+import { isNonMacShell } from '@/lib/desktop/host-platform';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 import {
   PERMISSIONS,
@@ -133,6 +135,8 @@ const INITIAL_STATUS: StatusMap = {
 
 export function PermissionsTab() {
   const tauri = isTauri();
+  const nonMac = tauri && isNonMacShell();
+  const canCheck = tauri && !nonMac;
 
   const [statuses, setStatuses] = useState<StatusMap>(INITIAL_STATUS);
   // Permissions the user GRANTED during this visit (was actionable → granted).
@@ -143,7 +147,7 @@ export function PermissionsTab() {
   const statusRef = useRef<StatusMap>(INITIAL_STATUS);
 
   const refresh = useCallback(async () => {
-    if (!tauri) return;
+    if (!canCheck) return;
     const [mic, acc, input, screen] = await Promise.all([
       micPermissionGranted(),
       accessibilityPermissionGranted(),
@@ -170,18 +174,19 @@ export function PermissionsTab() {
         return merged;
       });
     }
-  }, [tauri]);
+  }, [canCheck]);
 
   // Live grant detection — poll the non-prompting status commands at ~1s while
   // the tab is mounted; stop on unmount.
   useEffect(() => {
-    if (!tauri) return;
+    if (!canCheck) return;
     void refresh();
     const timer = setInterval(() => { void refresh(); }, 1000);
     return () => clearInterval(timer);
-  }, [tauri, refresh]);
+  }, [canCheck, refresh]);
 
   const handleFix = useCallback(async (meta: PermMeta) => {
+    if (!canCheck) return;
     const status = statusRef.current[meta.id];
     // Microphone: prompt only when never-asked; a denial goes to Settings.
     if (meta.id === 'microphone') {
@@ -202,9 +207,9 @@ export function PermissionsTab() {
     }
     // Accessibility + Screen Recording: no self-fireable prompt — deep-link.
     await openSystemSettings(meta.deepLink);
-  }, []);
+  }, [canCheck]);
 
-  const handleRelaunch = useCallback(() => { void restartApp(); }, []);
+  const handleRelaunch = useCallback(() => { if (canCheck) void restartApp(); }, [canCheck]);
 
   return (
     <div
@@ -219,7 +224,9 @@ export function PermissionsTab() {
     >
       <TabHeading
         title="permissions"
-        subtitle="o8 needs a few macOS permissions to dictate, run the global hotkey, and see your screen. The app does everything except click the final toggle — grants here update live."
+        subtitle={nonMac
+          ? 'This build does not check system permissions on this platform. No permission grants have been verified here.'
+          : 'o8 needs a few macOS permissions to dictate, run the global hotkey, and see your screen. The app does everything except click the final toggle — grants here update live.'}
       />
 
       {!tauri ? (
@@ -229,11 +236,13 @@ export function PermissionsTab() {
       ) : (
         <section>
           <SettingsGroup
-            header="macOS permissions"
-            footnote="Grants update automatically while this tab is open. Accessibility, Input Monitoring, and Screen Recording only take effect after o8 relaunches — the row offers a one-click relaunch once you grant them."
+            header={nonMac ? 'System permission checks' : 'macOS permissions'}
+            footnote={nonMac
+              ? 'These checks are unavailable on this platform. This page does not request or change permissions.'
+              : 'Grants update automatically while this tab is open. Accessibility, Input Monitoring, and Screen Recording only take effect after o8 relaunches — the row offers a one-click relaunch once you grant them.'}
           >
             {PERMISSIONS.map((meta, i) => {
-              const status = statuses[meta.id];
+              const status: PermStatus = nonMac ? 'unavailable' : statuses[meta.id];
               const granted = status === 'granted';
               const needsRelaunchNow = meta.needsRelaunch && granted && grantedThisSession.has(meta.id);
               return (
@@ -241,14 +250,14 @@ export function PermissionsTab() {
                   key={meta.id}
                   icon={statusGlyph(status)}
                   label={meta.label}
-                  subtitle={meta.why}
+                  subtitle={nonMac ? 'No system permission check is available for this capability in this build.' : meta.why}
                   divider={i < PERMISSIONS.length - 1}
                   accessory={
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       <ValuePill tone={permPillTone(status)}>{permPillText(status)}</ValuePill>
-                      {needsRelaunchNow ? (
+                      {canCheck && needsRelaunchNow ? (
                         <RowButton label="Relaunch o8 to apply" accent onClick={handleRelaunch} />
-                      ) : !granted && status !== 'unknown' ? (
+                      ) : canCheck && !granted && status !== 'unknown' ? (
                         <RowButton label={fixActionLabel(meta, status)} onClick={() => { void handleFix(meta); }} />
                       ) : null}
                     </span>
@@ -272,7 +281,9 @@ export function PermissionsTab() {
           maxWidth: 620,
         }}
       >
-        o8 never uploads audio or screen captures — Microphone feeds on-device dictation, Screen Recording powers Symon&rsquo;s look-and-point. Everything stays local.
+        {nonMac
+          ? 'Permission availability depends on your operating system and desktop environment. This page does not verify microphone, screen or input access on this platform.'
+          : <>o8 never uploads audio or screen captures — Microphone feeds on-device dictation, Screen Recording powers Symon&rsquo;s look-and-point. Everything stays local.</>}
       </p>
     </div>
   );
