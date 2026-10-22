@@ -95,6 +95,8 @@ if (ownedRunRoot) {
   });
 }
 delete process.env.O8_DATA_DIR;
+// CLI fixtures must not inherit the packet's run-scoped receipt location.
+delete process.env.O8_OWNED_RUN_MARKER;
 // The ship sets this to the operator's REAL data dir so the publish step can
 // find the intake ledger and credential while O8_DATA_DIR points at the
 // throwaway build directory (#2387, #2389). It is load-bearing in two scripts

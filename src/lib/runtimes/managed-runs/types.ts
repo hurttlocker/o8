@@ -94,6 +94,8 @@ export interface ManagedRunRecord {
   processGroupId?: number | null;
   /** Unique inherited marker used to find descendants that escape the process group. */
   processMarker?: string | null;
+  /** Validated wrapper receipt path; absent on older data-directory records. */
+  exitReceiptPath?: string;
   mode: ManagedRunMode;
   startedAt: string;
   finishedAt?: string | null;

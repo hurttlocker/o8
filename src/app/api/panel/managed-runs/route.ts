@@ -17,6 +17,7 @@ import { getLane } from '@/lib/lane/registry';
 import { recordAutomationSourceEvent } from '@/lib/automations/source-events';
 import { inspectPacketManagedRunAdmission } from '@/lib/lane/packet-stop-hold';
 import { withPacketManagedRunLifecycleLock } from '@/lib/runtimes/managed-runs/packet-lifecycle';
+import { resolveManagedRunExitReceipt } from '@/lib/runtimes/managed-runs/receipt-path';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -74,6 +75,7 @@ type RegisterBody = {
   exitCode?: number;
   processGroupId?: number;
   processMarker?: string;
+  exitReceiptPath?: unknown;
   reason?: 'stream_sigint' | 'operator_stop';
   outputChunk?: string;
   outputSequence?: number;
@@ -248,6 +250,10 @@ async function post(req: Request) {
   if (!RUN_SESSION_RE.test(body.session) || body.session !== `cortex-run-${body.id}`) {
     return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
   }
+  const exitReceiptPath = resolveManagedRunExitReceipt(body.id, body.exitReceiptPath);
+  if (body.exitReceiptPath !== undefined && !exitReceiptPath) {
+    return NextResponse.json({ ok: false, error: 'invalid_exit_receipt_path' }, { status: 400 });
+  }
   if (body.processMarker !== undefined && !/^[A-Za-z0-9._-]{1,160}$/.test(body.processMarker)) {
     return NextResponse.json({ ok: false, error: 'invalid_process_marker' }, { status: 400 });
   }
@@ -276,6 +282,7 @@ async function post(req: Request) {
       panePid: typeof body.panePid === 'number' ? body.panePid : null,
       processGroupId: typeof body.processGroupId === 'number' ? body.processGroupId : null,
       processMarker: typeof body.processMarker === 'string' ? body.processMarker : null,
+      ...(body.exitReceiptPath === undefined ? {} : { exitReceiptPath: exitReceiptPath! }),
       mode: body.mode === 'detach' ? 'detach' : 'stream',
       startedAt: typeof body.startedAt === 'string' && body.startedAt.trim()
         ? body.startedAt.trim()
