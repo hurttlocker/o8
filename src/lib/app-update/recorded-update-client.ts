@@ -1,9 +1,11 @@
 'use client';
 
 import { normalizeUpdateInfo, type UpdateCheckReport, type UpdateInfo } from './update-card-view';
+import type { AppUpdateAutoApplyState } from './relaunch-state';
 
 /** Polling only reads recorded state. Native code owns all scheduled checks. */
-export function subscribeRecordedUpdate(onState: (info: UpdateInfo | null, check: UpdateCheckReport) => void) {
+export function subscribeRecordedUpdate(onState: (info: UpdateInfo | null, check: UpdateCheckReport,
+  activity?: AppUpdateAutoApplyState | null) => void) {
   let cancelled = false;
   let latest = '';
   const controller = new AbortController();
@@ -12,12 +14,13 @@ export function subscribeRecordedUpdate(onState: (info: UpdateInfo | null, check
       const response = await fetch('/api/panel/app/update-state', { cache: 'no-store', signal: controller.signal });
       if (!response.ok || cancelled) return;
       const { state } = await response.json() as { state?: { updatePending: boolean; version: string | null;
-        info?: Record<string, unknown> | null; check: UpdateCheckReport } };
+        info?: Record<string, unknown> | null; check: UpdateCheckReport; autoApply?: AppUpdateAutoApplyState | null } };
       if (!state?.check || state.check.outcome === 'never' || cancelled) return;
       const key = JSON.stringify(state);
       if (key === latest) return;
       latest = key;
-      onState(state.updatePending ? normalizeUpdateInfo({ ...state.info, version: state.version }) : null, state.check);
+      onState(state.updatePending ? normalizeUpdateInfo({ ...state.info, version: state.version }) : null,
+        state.check, state.autoApply);
     } catch { /* Native results are replayed when the server reconnects. */ }
   };
   void read();

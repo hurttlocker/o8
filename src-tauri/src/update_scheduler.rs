@@ -1,4 +1,6 @@
 //! Native schedule and server handoff. No webview, React mount, or JS timer is needed.
+#[path = "update_auto_apply.rs"]
+pub(crate) mod auto_apply;
 #[path = "update_schedule.rs"]
 mod schedule;
 use schedule::UpdateSchedule;
@@ -37,6 +39,24 @@ fn now_ms() -> u64 {
 }
 
 pub async fn run<R: Runtime>(app: AppHandle<R>) {
+    run_with_effects(
+        app,
+        |app, client, base, token| auto_apply::NativeEffects {
+            app,
+            client,
+            base,
+            token,
+        },
+        Duration::from_secs(60),
+    )
+    .await;
+}
+
+pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
+    app: AppHandle<R>,
+    factory: impl Fn(AppHandle<R>, reqwest::Client, String, String) -> E + Send,
+    auto_interval: Duration,
+) {
     let client = match reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -52,6 +72,7 @@ pub async fn run<R: Runtime>(app: AppHandle<R>) {
     let mut schedule = UpdateSchedule::default();
     let mut report: Option<serde_json::Value> = None;
     let mut served_request = String::new();
+    let mut auto_apply = auto_apply::AutoApply::new(auto_interval);
     loop {
         // Boot starts before port allocation. Never fall back to another running server.
         let url = std::env::var("O8_API_PORT")
@@ -96,6 +117,15 @@ pub async fn run<R: Runtime>(app: AppHandle<R>) {
                     .send()
                     .await;
             }
+        }
+        if let Some(url) = &url {
+            let effects = factory(
+                app.clone(),
+                client.clone(),
+                url.trim_end_matches("/api/panel/app/update-state").into(),
+                token.clone(),
+            );
+            auto_apply.tick(&client, url, &token, &effects).await;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

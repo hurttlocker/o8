@@ -6,6 +6,8 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 export const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 
 export interface InstallUpdateOutcome {
+  /** The actual plugin result, which can differ from a previously displayed check. */
+  version?: string;
   /** True when the update downloaded and installed. */
   installed: boolean;
   /** The update installed, but the caller's final safety check deferred relaunch. */
@@ -117,5 +119,5 @@ export async function installUpdateAndRestart(
   });
   options.onProgress?.({ stage: 'restarting', receivedBytes, totalBytes });
   const restarted = await relaunchInstalledUpdate(options);
-  return { installed: true, restartDeferred: !restarted };
+  return { installed: true, version: result.version, restartDeferred: !restarted };
 }

@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const { publishRealtimeMutation } = vi.hoisted(() => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation }));
 let sessions: unknown[] = [];
+let beforeTerminalReply: (() => Promise<void>) | null = null;
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-parked-'));
 const previous = { CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, O8_DATA_DIR: process.env.O8_DATA_DIR, O8_WS_PORT: process.env.O8_WS_PORT };
@@ -24,7 +25,8 @@ process.env.O8_DATA_DIR = dataDir;
 // This fixture answers that one route with no attached terminals.
 let terminals: Server;
 beforeAll(async () => {
-  terminals = createServer((request, response) => {
+  terminals = createServer(async (request, response) => {
+    await beforeTerminalReply?.();
     response.setHeader('Content-Type', 'application/json');
     response.end(request.url === '/terminal-voice-sessions' ? JSON.stringify({ sessions }) : '{}');
   });
@@ -68,7 +70,8 @@ describe('update restart with parked tasks', () => {
     const waiting = lane('Ask about the schema', 'awaiting_input');
 
     const payload = await readIdle();
-    expect(payload.idle.idle).toBe(false);
+    expect(payload.idle.idle).toBe(true);
+    expect(payload.idle.active?.lanes).toEqual([]);
     expect(payload.idle.idleExceptParked).toBe(true);
     expect(payload.idle.parkedLanes.map(item => item.label).sort()).toEqual(['Ask about the schema', 'Fix the login form']);
     expect(describeUpdateBlockers(payload)).toEqual({
@@ -91,6 +94,86 @@ describe('update restart with parked tasks', () => {
     expect(blockers.parked).toHaveLength(2);
     setLaneStatus(running, 'completed', 'system');
     expect((await readIdle()).idle.idleExceptParked).toBe(true);
+  });
+});
+
+describe('native auto-apply through the real state route without UpdateCard', () => {
+  it('admits parked-only work automatically and rechecks live work before restart', async () => {
+    const { POST: control } = await import('@/app/api/panel/app/update-state/route');
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    await updateOperatorDefaults({ updateAutoApply: 'idle' });
+    const id = lane('Automatic saved review', 'reviewing');
+    setAppUpdateState({ updatePending: true, version: '0.1.999' });
+    const send = async (autoApply: object) => (await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ autoApply }),
+    }))).json();
+    const admitted = await send({ action: 'admit', attemptId: 'fixture-native-attempt' });
+    expect(admitted.allowed).toBe(true);
+    expect(admitted.idle.idle).toBe(true);
+    expect(admitted.attemptId).toEqual(expect.any(String));
+    expect((await send({ action: 'admit', attemptId: 'fixture-native-attempt' })).attemptId).toBe(admitted.attemptId);
+    const manual = await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ install: { outcome: 'started', version: '0.1.999' } }),
+    }));
+    expect(manual.status).toBe(409);
+    sessions = [{ name: 'Build terminal', kind: 'managed-process', clientCount: 0 }];
+    const blocked = await send({ action: 'restart', attemptId: admitted.attemptId });
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.state.autoApply.blockers.live).toEqual(['Terminal Build terminal']);
+    expect(blocked.state.autoApply.installed).toBe(true);
+    sessions = [];
+    const restart = await send({ action: 'restart', attemptId: admitted.attemptId });
+    expect(restart.allowed).toBe(true);
+    expect(restart.state.autoApply.phase).toBe('restarting');
+    expect((await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ install: { outcome: 'started', version: '0.1.999' } }),
+    }))).status).toBe(409);
+    expect(restart.idle.parkedLanes).toEqual(expect.arrayContaining([expect.objectContaining({ id })]));
+    expect(getLane(id)?.status).toBe('reviewing');
+    await send({ action: 'failed', attemptId: admitted.attemptId, error: 'fixture finished' });
+    await updateOperatorDefaults({ updateAutoApply: 'off' });
+    expect((await send({ action: 'admit' })).allowed).toBe(false);
+  });
+
+  it('does not claim a native install when manual installation starts during live inventory', async () => {
+    const { POST: control } = await import('@/app/api/panel/app/update-state/route');
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    const { recordAppUpdateInstall, recordAutoApply } = await import('@/lib/app-update/relaunch-state');
+    await updateOperatorDefaults({ updateAutoApply: 'idle' });
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'failed', error: 'fixture reset' });
+    setAppUpdateState({ updatePending: true, version: '0.1.999' });
+    let entered!: () => void;
+    let release!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    beforeTerminalReply = async () => { entered(); await paused; };
+    try {
+      const automatic = control(new Request('http://localhost/api/panel/app/update-state', {
+        method: 'POST', body: JSON.stringify({ autoApply: { action: 'admit' } }),
+      }));
+      await reading;
+      const manual = await control(new Request('http://localhost/api/panel/app/update-state', {
+        method: 'POST', body: JSON.stringify({ install: { outcome: 'started', version: '0.1.999' } }),
+      }));
+      expect(manual.status).toBe(200);
+      release();
+      expect((await (await automatic).json()).allowed).toBe(false);
+    } finally { release(); beforeTerminalReply = null; }
+    recordAppUpdateInstall({ outcome: 'installed', version: '0.1.999' });
+    const resumed = await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ autoApply: { action: 'admit' } }),
+    }));
+    expect(await resumed.json()).toMatchObject({ allowed: true, installed: true });
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'installed', version: '0.1.998' });
+    const newer = await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ autoApply: { action: 'admit' } }),
+    }));
+    expect(await newer.json()).toMatchObject({ allowed: true, installed: false });
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'failed', error: 'fixture finished' });
+    await updateOperatorDefaults({ updateAutoApply: 'off' });
   });
 });
 

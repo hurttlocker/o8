@@ -1,16 +1,34 @@
 //! Exercise the production scheduler, signed updater transport and state handoff without a window.
 use super::{app, server};
+use crate::launch_updater::scheduler::auto_apply::{commit_restart, Effects};
 use std::{
     io::{Read, Write},
     net::TcpListener,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
 };
 use tauri::Manager;
+
+struct FixtureEffects {
+    app: tauri::AppHandle<tauri::test::MockRuntime>,
+    installs: Arc<AtomicUsize>,
+}
+impl Effects for FixtureEffects {
+    async fn install(&self, version: &str, _attempt_id: &str) -> Result<bool, String> {
+        let update = crate::update_ping::check(&self.app).await?.unwrap();
+        assert_eq!(update.version, version);
+        // The signed artifact installation is the only effect replaced by this fixture.
+        self.installs.fetch_add(1, Ordering::SeqCst);
+        Ok(true)
+    }
+    fn restart(&self) -> Result<(), String> {
+        commit_restart(&self.app)
+    }
+}
 
 struct Running(
     tauri::async_runtime::JoinHandle<()>,
@@ -58,7 +76,8 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
     listener.set_nonblocking(true).unwrap();
     let state = Arc::new(Mutex::new(serde_json::json!({
         "state": { "check": { "checkedAt": null } }, "checkRequestedAt": null,
-        "reports": [], "attempts": 0, "gets": 0
+        "reports": [], "attempts": 0, "gets": 0,
+        "autoEnabled": false, "restartChecks": 0
     })));
     let stop = Arc::new(AtomicBool::new(false));
     let done = stop.clone();
@@ -104,6 +123,23 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
                 request.extend_from_slice(&buffer[..count]);
             }
             let mut data = shared.lock().unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&request[split..split + length])
+                .unwrap_or(serde_json::Value::Null);
+            if body.get("autoApply").is_some() {
+                let auto = &body["autoApply"];
+                let allowed = if auto["action"] == "restart" {
+                    data["restartChecks"] = (data["restartChecks"].as_u64().unwrap() + 1).into();
+                    // Work starts during download, then finishes. Never download twice.
+                    data["restartChecks"].as_u64().unwrap() > 1
+                } else {
+                    data["autoEnabled"].as_bool().unwrap()
+                };
+                let reply = serde_json::json!({ "allowed": allowed,
+                    "attemptId": auto["attemptId"], "version": "0.2.0" })
+                .to_string();
+                let _ = write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
+                continue;
+            }
             let mut location = String::new();
             let status = if headers.starts_with("post ") {
                 data["attempts"] = (data["attempts"].as_u64().unwrap() + 1).into();
@@ -131,8 +167,25 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
     });
     let previous = std::env::var_os("O8_API_PORT");
     std::env::set_var("O8_API_PORT", port.to_string());
+    let installs = Arc::new(AtomicUsize::new(0));
+    let installed = installs.clone();
+    let restarts = Arc::new(AtomicUsize::new(0));
+    let restarted = restarts.clone();
+    app.manage(o8_restart_safety::RestartSafety::new(
+        settings.path().join("admission"),
+        move || {
+            restarted.fetch_add(1, Ordering::SeqCst);
+        },
+    ));
     let _running = Running(
-        tauri::async_runtime::spawn(crate::launch_updater::scheduler::run(app.handle().clone())),
+        tauri::async_runtime::spawn(crate::launch_updater::scheduler::run_with_effects(
+            app.handle().clone(),
+            move |app, _, _, _| FixtureEffects {
+                app,
+                installs: installed.clone(),
+            },
+            Duration::from_millis(50),
+        )),
         previous,
         stop,
     );
@@ -166,4 +219,17 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
         data["reports"][1]["checkedAt"]
     );
     assert!(app.get_webview_window("main").is_none());
+    drop(data);
+    state.lock().unwrap()["autoEnabled"] = true.into();
+    wait_for(|| restarts.load(Ordering::SeqCst) == 1);
+    assert_eq!(
+        installs.load(Ordering::SeqCst),
+        1,
+        "staged update must not download again while waiting"
+    );
+    assert_eq!(state.lock().unwrap()["restartChecks"], 2);
+    assert!(
+        app.get_webview_window("main").is_none(),
+        "auto-apply cannot require a mounted component"
+    );
 }

@@ -1,6 +1,17 @@
 import 'server-only';
+import type { AppUpdateBlockers } from './update-hub-client';
+
+export interface AppUpdateAutoApplyState {
+  attemptId: string | null;
+  phase: 'installing' | 'restarting' | 'waiting' | 'failed';
+  version: string;
+  installed: boolean;
+  blockers: AppUpdateBlockers;
+  error: string | null;
+}
 
 export interface AppUpdateState {
+  autoApply: AppUpdateAutoApplyState | null;
   info: Record<string, unknown> | null;
   updatePending: boolean;
   version: string | null;
@@ -11,7 +22,7 @@ export interface AppUpdateState {
 }
 
 export interface AppUpdateInstallState {
-  outcome: 'started' | 'failed';
+  outcome: 'started' | 'installed' | 'failed';
   version: string | null;
   at: string;
   error: string | null;
@@ -29,6 +40,7 @@ export interface AppUpdateCheckState {
 const NEVER_CHECKED_MESSAGE = 'No updater check has completed since the app server started.';
 
 let state: AppUpdateState = {
+  autoApply: null,
   info: null,
   updatePending: false,
   version: null,
@@ -70,6 +82,7 @@ export function setAppUpdateState(update: {
       ? update.checkError?.trim().slice(0, 1_000) || 'The updater check failed without an error message.'
       : null;
   state = {
+    autoApply: state.autoApply,
     info: update.info ?? (update.updatePending ? state.info : null),
     updatePending: update.updatePending,
     version: update.updatePending ? update.version ?? null : null,
@@ -89,10 +102,16 @@ export function setAppUpdateState(update: {
   return state;
 }
 
+export function recordAutoApply(autoApply: AppUpdateAutoApplyState | null): AppUpdateState {
+  state = { ...state, autoApply };
+  return state;
+}
+
 /** Records the start or the failure of an install, with the error message for a failure. */
-export function recordAppUpdateInstall(update: { outcome: 'started' | 'failed'; version?: string | null; error?: string | null }): AppUpdateState {
+export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed' | 'failed'; version?: string | null; error?: string | null }): AppUpdateState {
   state = {
     ...state,
+    autoApply: update.outcome === 'started' ? null : state.autoApply,
     lastInstall: {
       outcome: update.outcome,
       version: update.version?.trim() || null,

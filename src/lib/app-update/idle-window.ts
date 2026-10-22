@@ -69,7 +69,7 @@ export interface UpdateIdleWindow {
    * runtime blocker. Manual, automatic and remote apply may preserve these lanes.
    */
   idleExceptParked: boolean;
-  /** Parked lanes among `active.lanes`, named so the operator can confirm past them. */
+  /** Persisted parked lanes, listed separately from running work. */
   parkedLanes: UpdateIdleLane[];
   active: {
     lanes: UpdateIdleLane[];
@@ -105,6 +105,7 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
   const unavailable = input.terminalInventoryAvailable ? [] : ['terminal-sessions'];
   if (input.cliAdmissionUnavailable) unavailable.push('cli-update-ownership');
   const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status) && !lane.processLive);
+  const runningLanes = activeLanes.filter(lane => !parkedLanes.includes(lane));
   const otherWorkIdle = terminalSessions.length === 0
     && input.managedRuns.length === 0
     && input.ownedSessions.length === 0
@@ -113,11 +114,11 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     && !input.restartPending
     && unavailable.length === 0;
   return {
-    idle: activeLanes.length === 0 && otherWorkIdle,
+    idle: activeLanes.length === parkedLanes.length && otherWorkIdle,
     idleExceptParked: activeLanes.length === parkedLanes.length && otherWorkIdle,
     parkedLanes,
     active: {
-      lanes: activeLanes,
+      lanes: runningLanes,
       terminalSessions,
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,

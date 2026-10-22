@@ -19,6 +19,7 @@ time = { version = "0.3", features = ["formatting"] }
 chrono = "0.4"
 log = "0.4"
 tauri-plugin-notification = "2"
+o8-restart-safety = { path = "../../../crates/o8-restart-safety" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = "0.3"

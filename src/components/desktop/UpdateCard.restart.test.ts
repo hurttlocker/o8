@@ -61,7 +61,7 @@ describe('operator update with waiting tasks', () => {
     views.length = 0;
     idlePayload = parkedOnly;
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => Response.json(String(input).startsWith('/api/panel/update/apply') ? idlePayload : {})));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => Response.json(String(input).startsWith('/api/panel/update/apply') ? idlePayload : { ok: true })));
     window.localStorage.clear();
     vi.mocked(installUpdateAndRestart).mockReset();
     vi.mocked(relaunchInstalledUpdate).mockReset();
@@ -123,7 +123,7 @@ describe('operator update with waiting tasks', () => {
 
     await mount();
     await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
-    expect(lastView().message).toBe('Update installed. Restart is waiting for running work to finish.');
+    expect(lastView().message).toBe('Update installed. Waiting for: Build the release (running).');
     expect(lastView().blockers?.live).toEqual(['Build the release (running)']);
 
     await act(async () => { window.dispatchEvent(new Event('o8:restart-app-update')); });
@@ -140,9 +140,7 @@ describe('operator update with waiting tasks', () => {
     vi.mocked(relaunchInstalledUpdate).mockImplementation(async options => Boolean(await options?.beforeRestart?.()));
     await mount();
     await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
-    expect(lastView().message).toBe(state === 'active'
-      ? 'Update installed. Restart is waiting for CLI updates to finish.'
-      : 'Update installed. Restart needs CLI update recovery; check the tool and its update receipt.');
+    expect(lastView().message).toContain('CLI update for codex');
     expect(lastView().blockers?.live).toHaveLength(1);
     expect(lastView().blockers?.live[0]).toContain(state === 'active' ? 'is running'
       : state === 'interrupted' ? 'was interrupted' : 'has unconfirmed ownership');
@@ -157,7 +155,7 @@ describe('operator update with waiting tasks', () => {
     vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true, restartDeferred: true });
     await mount();
     await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
-    expect(lastView().message).toBe('Update installed. Another restart is already in progress.');
+    expect(lastView().message).toBe('Update installed. Waiting for: Another app restart is already reserved.');
     expect(lastView().blockers?.live).toEqual(['Another app restart is already reserved']);
   });
 
@@ -172,6 +170,46 @@ describe('operator update with waiting tasks', () => {
     const options = vi.mocked(installUpdateAndRestart).mock.calls[0]![1]!;
     expect(await options.beforeRestart?.()).toBe(true);
     expect(requestConfirm).not.toHaveBeenCalled();
+  });
+
+  it.each(['network', 'http', 'receipt'])('requires a confirmed manual ownership receipt after a %s failure', async failure => {
+    vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true });
+    await mount();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/app/update-state') && String(init?.body).includes('started')) {
+        if (failure === 'network') throw new Error('fixture network failure');
+        return Response.json({ ok: false }, { status: failure === 'http' ? 503 : 200 });
+      }
+      return Response.json({ ok: true });
+    }));
+    await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
+    expect(installUpdateAndRestart).not.toHaveBeenCalled();
+    expect(lastView().error).toContain('ownership could not be confirmed');
+  });
+
+  it('reads a native staged update and names its blockers before an explicit restart', async () => {
+    const activity = { attemptId: 'native-fixture', phase: 'waiting', installed: true, version: '0.1.796',
+      blockers: { live: ['Terminal Build terminal'], parked: [] }, error: null };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/app/update-state')
+      ? Response.json({ state: { updatePending: true, version: '0.1.796',
+        check: { outcome: 'available', checkedAt: new Date().toISOString(), error: null }, autoApply: activity } })
+      : Response.json(withLiveWork)));
+    vi.mocked(relaunchInstalledUpdate).mockImplementation(async options => Boolean(await options?.beforeRestart?.()));
+    await mount();
+    expect(lastView().blockers?.live).toEqual(['Terminal Build terminal']);
+    expect(lastView().message).toContain('Terminal Build terminal');
+    await act(async () => { window.dispatchEvent(new Event('o8:restart-app-update')); });
+    expect(installUpdateAndRestart).not.toHaveBeenCalled();
+    expect(requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: 'Restart anyway' }));
+  });
+
+  it('records the actual installed version when a fresh plugin check differs from the displayed version', async () => {
+    vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true, version: '0.1.797', restartDeferred: true });
+    await mount();
+    await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
+    expect(fetch).toHaveBeenCalledWith('/api/panel/app/update-state', expect.objectContaining({
+      body: JSON.stringify({ install: { outcome: 'installed', version: '0.1.797' } }),
+    }));
   });
 
 });

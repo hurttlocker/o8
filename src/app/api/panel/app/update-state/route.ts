@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
+import { controlAutoApply } from '@/lib/app-update/auto-apply';
 
 import {
   getAppUpdateState,
@@ -28,11 +29,24 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
+  if (isRecord(body) && isRecord(body.autoApply)) {
+    try {
+      return NextResponse.json(await controlAutoApply(body.autoApply), { headers: NO_STORE_HEADERS });
+    } catch {
+      return NextResponse.json({ allowed: false, error: { code: 'auto_apply_inventory_unavailable',
+        message: 'Update work inventory is unavailable.', retryable: true, retryAfterMs: 5_000 } },
+      { status: 503, headers: NO_STORE_HEADERS });
+    }
+  }
   // An install outcome from the webview (#3588), separate from check results.
   if (isRecord(body) && isRecord(body.install)) {
     const { outcome, version, error } = body.install;
-    if (outcome !== 'started' && outcome !== 'failed') {
-      return invalidState('invalid_install_outcome', 'install.outcome must be started or failed.');
+    if (outcome !== 'started' && outcome !== 'installed' && outcome !== 'failed') {
+      return invalidState('invalid_install_outcome', 'install.outcome must be started, installed, or failed.');
+    }
+    if (['installing', 'restarting'].includes(getAppUpdateState().autoApply?.phase ?? '')) {
+      return NextResponse.json({ error: { code: 'update_install_in_progress',
+        message: 'The native updater is already installing this update.' } }, { status: 409, headers: NO_STORE_HEADERS });
     }
     const state = recordAppUpdateInstall({ outcome,
       version: typeof version === 'string' ? version : null,

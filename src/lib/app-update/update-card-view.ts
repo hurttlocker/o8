@@ -40,6 +40,25 @@ export interface UpdateIdleResponse {
   };
 }
 
+/** Parked records are preserved by restart and never represent running work. */
+export function canRestartWhenIdle(payload: UpdateIdleResponse | null): boolean {
+  return payload?.idle?.idle === true || payload?.idle?.idleExceptParked === true;
+}
+
+export function describeWaitingUpdate(payload: UpdateIdleResponse | null, installed: boolean): string {
+  const { live } = describeUpdateBlockers(payload);
+  const prefix = installed ? 'Update installed.' : 'Update ready.';
+  return live.length ? `${prefix} Waiting for: ${live.join('; ')}.`
+    : canRestartWhenIdle(payload) ? `${prefix} Restart now to apply it. Waiting tasks keep their state.`
+      : `${prefix} Running-work inventory is unavailable. Check again or confirm a restart.`;
+}
+
+/** This label never promises an override of the native installer reservation. */
+export function updateRestartLabel(blockers: AppUpdateBlockers | null | undefined): string {
+  return blockers?.live.length && !blockers.live.some(item => item.startsWith('CLI update')
+    || item.startsWith('Another app restart')) ? 'Restart anyway' : 'Restart now';
+}
+
 const PARKED_LABEL: Record<string, string> = {
   reviewing: 'waiting for review',
   awaiting_input: 'waiting for input',

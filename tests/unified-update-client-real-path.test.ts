@@ -42,7 +42,7 @@ describe('unified updates through the existing app install entry point', () => {
   });
   it('retains the final idle gate after download', async () => {
     expect(await installUpdateAndRestart(undefined, { beforeRestart: async () => false }))
-      .toEqual({ installed: true, restartDeferred: true });
+      .toEqual({ installed: true, version: '0.1.902', restartDeferred: true });
     expect(fixture.calls).toEqual(['release-health', 'app-download']);
   });
   it('waits for an already running CLI update before the final idle check and restart', async () => {

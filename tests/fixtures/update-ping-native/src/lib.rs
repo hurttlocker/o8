@@ -10,6 +10,7 @@ fn resolve_ws_token() -> String {
 #[cfg(test)]
 mod tests {
     mod scheduler_tests;
+    mod auto_apply_failure_tests;
     use super::update_ping;
     use std::{
         collections::BTreeMap,
