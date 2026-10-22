@@ -7,9 +7,20 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { resolveCliDataDir } from '../config.js';
 
 const RECEIPT_RETENTION = 50;
+
+function resolveReceiptDataDir(): string {
+  // The owned-session launcher supplies this marker on dispatch and resume.
+  // Its sandbox already allows TMPDIR, while the control-plane data directory
+  // remains denied. Scope receipts to this run without changing API routing.
+  const marker = process.env.O8_OWNED_RUN_MARKER?.trim();
+  return marker && /^\d{10,17}-[a-f0-9]{8}$/.test(marker)
+    ? join(tmpdir(), 'o8-worker-runs', marker)
+    : resolveCliDataDir();
+}
 
 export interface ManagedRunReceiptMetadata {
   schema: 'o8/cli/run-receipt/v1';
@@ -26,7 +37,7 @@ export interface LastManagedRunReceipt extends ManagedRunReceiptMetadata {
   logPath: string;
 }
 
-export function managedRunReceiptPaths(id: string, dataDir = resolveCliDataDir()) {
+export function managedRunReceiptPaths(id: string, dataDir = resolveReceiptDataDir()) {
   const directory = join(dataDir, 'logs', 'run');
   return {
     directory,
@@ -81,7 +92,7 @@ function pruneRunReceipts(directory: string): void {
 
 export function initializeManagedRunReceipt(
   metadata: ManagedRunReceiptMetadata,
-  dataDir = resolveCliDataDir(),
+  dataDir = resolveReceiptDataDir(),
 ) {
   const paths = managedRunReceiptPaths(metadata.id, dataDir);
   try {
@@ -100,7 +111,7 @@ export function initializeManagedRunReceipt(
 }
 
 export function readLastManagedRunReceipt(
-  dataDir = resolveCliDataDir(),
+  dataDir = resolveReceiptDataDir(),
 ): LastManagedRunReceipt | null {
   const directory = join(dataDir, 'logs', 'run');
   const latest = readReceiptMetadata(directory)[0];

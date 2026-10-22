@@ -116,6 +116,7 @@ describe('CLI stop command parsing', () => {
     const cwd = '/tmp/o8 repo';
     const clearRouting = ['O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
       'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
+      'O8_OWNED_RUN_MARKER',
       '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE'].map((key) => `unset ${key}`);
     expect(managedRunEnvironmentLines({ PATH: '/usr/bin' }, cwd)).toEqual([
       'unset NODE_OPTIONS',
