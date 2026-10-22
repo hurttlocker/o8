@@ -1,3 +1,7 @@
+import { refreshCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { timeClosePhase } from '@/lib/orchestrator/close-timing';
+import { orphanCloseOwner, readOrphanCloseOwner, refuseOrphanClose, withOrphanCloseContext } from '@/lib/orchestrator/close-orphaned-owner';
+import { readdir } from 'node:fs/promises';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { readWorktreeMetaSnapshot } from '@/lib/worktree/metadata-store';
 import {
@@ -11,8 +15,19 @@ import { getWorkspaceRetirementPreservationId } from './workspace-materializatio
 import { admitStandaloneRetirement, verifyStandaloneRetirement } from './standalone-retirement-authority';
 import { withPacketLifecycleSpawnLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { assertManagedRetirementQuiescence } from './retirement-process-authority';
+import { UnbankedArtifactSourceError } from './ignored-artifact-io';
+import type { CapturedPurgeProcessWitness } from './exact-directory-purge';
 
 export type ManagedRetirementReason = 'terminal' | 'creation-rollback' | 'empty-orphan';
+
+/** Older claims may predate durable orphan authority while a warm close owns them. */
+export async function requiresPausedOrphanVerification(authority: Record<string, unknown> | null): Promise<boolean> {
+  if (authority?.retirementReason !== 'terminal') return false;
+  if (authority.orphanCloseOwner !== undefined) return true;
+  if (typeof authority.preservationId !== 'string') throw new Error('Terminal retirement has no preservation owner.');
+  const { payload } = await readWorkspacePreservation(authority.preservationId);
+  return !!(payload.laneId && orphanCloseOwner(payload.laneId));
+}
 
 /** Crash replay must retain the same lifecycle exclusion as the original terminal. */
 export async function withRetirementAuthorityLock<T>(
@@ -22,6 +37,15 @@ export async function withRetirementAuthorityLock<T>(
   if (authority?.retirementReason !== 'terminal') return operation();
   if (typeof authority.preservationId !== 'string') throw new Error('Terminal retirement has no preservation owner.');
   const { payload } = await readWorkspacePreservation(authority.preservationId);
+  if (authority.orphanCloseOwner !== undefined) {
+    const owner = readOrphanCloseOwner(authority.orphanCloseOwner);
+    if (owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
+      || owner.repositoryUuid !== payload.repositoryUuid || owner.sourcePath !== payload.identity.canonicalPath
+      || owner.device !== payload.identity.device || owner.inode !== payload.identity.inode) {
+      throw new Error('Durable orphan close authority belongs to another preservation owner.');
+    }
+    return withPacketLifecycleSpawnLock(payload.packetId, () => withOrphanCloseContext(payload.packetId, operation, owner));
+  }
   return withPacketLifecycleSpawnLock(payload.packetId, operation);
 }
 
@@ -55,7 +79,8 @@ export async function admitRetirementAuthority(input: {
     || payload.identity.inode !== input.identity.inode) {
     throw new Error('Terminal preservation belongs to another exact workspace owner.');
   }
-  return { retirementReason: 'terminal', preservationId };
+  const orphan = payload.laneId ? orphanCloseOwner(payload.laneId) : null;
+  return { retirementReason: 'terminal', preservationId, ...(orphan ? { orphanCloseOwner: orphan } : {}) };
 }
 
 async function verifyCreationAuthority(authority: Record<string, unknown>): Promise<void> {
@@ -82,12 +107,13 @@ async function verifyCreationAuthority(authority: Record<string, unknown>): Prom
   }
 }
 
-export async function verifyRetirementAuthority(input: {
+async function verifyRetirementAuthorityNative(input: {
   authority: Record<string, unknown> | null;
   sourcePath: string;
   candidatePath: string;
   identity: WorktreeMaterializationIdentity;
   verifyContents: boolean;
+  capturedPurge?: CapturedPurgeProcessWitness;
 }): Promise<void> {
   const reason = input.authority?.retirementReason;
   if (reason === 'standalone-clean') {
@@ -112,18 +138,70 @@ export async function verifyRetirementAuthority(input: {
   if (receipt.sourceDevice !== input.identity.device || receipt.sourceInode !== input.identity.inode) {
     throw new Error('Exact retirement preservation materialization changed.');
   }
+  const orphan = (payload.laneId ? orphanCloseOwner(payload.laneId) : null)
+    ?? (input.authority?.orphanCloseOwner === undefined ? null : readOrphanCloseOwner(input.authority.orphanCloseOwner));
+  let artifactFailure: unknown = null;
+  try {
+    // Discard receipts may omit dirty source. Check orphan source even during
+    // purge replay; a partially purged Git tree conservatively remains held.
+    let verifiedOrphanArtifacts = false;
+    if (orphan?.laneId) {
+      let entries: string[];
+      try {
+        entries = await readdir(input.candidatePath).catch((error: NodeJS.ErrnoException) => {
+          if (!input.verifyContents && error.code === 'ENOENT') return [];
+          throw error;
+        });
+      } catch {
+        refuseOrphanClose(orphan.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
+      }
+      if (entries.length > 0 || input.verifyContents) {
+        // The capture helper checks clean source, index flags, the exact
+        // revision and ignored content in one pinned read before native proof.
+        try {
+          await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
+            ...input.identity, canonicalPath: input.candidatePath,
+          }, { requireCleanSource: true });
+        } catch (error) {
+          if (error instanceof UnbankedArtifactSourceError) {
+            refuseOrphanClose(orphan.laneId, 'unbanked source or uncertain source/snapshot revision; preserve the edits before retrying');
+          }
+          refuseOrphanClose(orphan.laneId, 'ignored artifacts changed or their preserved content is uncertain; preserve the edits before retrying');
+        }
+        verifiedOrphanArtifacts = true;
+      }
+    }
+    if (input.verifyContents && !verifiedOrphanArtifacts) {
+      try {
+        await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
+          ...input.identity, canonicalPath: input.candidatePath,
+        });
+      } catch (error) {
+        if (orphan?.laneId) {
+          refuseOrphanClose(orphan.laneId, 'ignored artifacts changed or their preserved content is uncertain; preserve the edits before retrying');
+        }
+        throw error;
+      }
+    }
+  } catch (error) { artifactFailure = error; }
+  // Settle artifact readers before the final native snapshot. The paused
+  // purge helper is the only permitted holder; immutable owner checks still
+  // run against current durable state immediately before continuation.
+  if (input.capturedPurge) refreshCloseProcessObservation();
   const owner = await assertManagedRetirementQuiescence({
     repositoryPath: payload.repositoryPath, worktreeId: payload.worktreeId,
     sourcePath: input.sourcePath, candidatePath: input.candidatePath, identity: input.identity,
+    capturedPurge: input.capturedPurge,
   });
   if (owner.repositoryUuid !== payload.repositoryUuid || owner.packetId !== payload.packetId || owner.laneId !== payload.laneId
-    || !payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
-      && identity.identity === owner.sessionKey)) {
+    || !(owner.orphanedClose && owner.sessionKey === null && payload.handoff.sessionIdentities.length === 0
+      || payload.handoff.sessionIdentities.some((identity) => identity.kind === 'owned-session'
+        && identity.identity === owner.sessionKey))) {
     throw new Error('Terminal preservation process owner changed after capture.');
   }
-  if (input.verifyContents) {
-    await verifyPreservedArtifactsAtPath(preservationId, input.candidatePath, {
-      ...input.identity, canonicalPath: input.candidatePath,
-    });
-  }
+  if (artifactFailure) throw artifactFailure;
+}
+
+export function verifyRetirementAuthority(...args: Parameters<typeof verifyRetirementAuthorityNative>): ReturnType<typeof verifyRetirementAuthorityNative> {
+  return timeClosePhase('verifyRetirementAuthority', () => verifyRetirementAuthorityNative(...args));
 }

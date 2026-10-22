@@ -1,3 +1,4 @@
+import { timeClosePhase } from '@/lib/orchestrator/close-timing';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
@@ -133,7 +134,7 @@ async function executePreservationNode(
   return settlement;
 }
 
-export async function preservationGitValue(cwd: string, identity: WorktreeMaterializationIdentity, args: string[]): Promise<string> {
+async function preservationGitValueNative(cwd: string, identity: WorktreeMaterializationIdentity, args: string[]): Promise<string> {
   return withWorktreeMaterializationExecution(cwd, identity, async () => {
     // Private empty verifiers have no lane metadata or configured drivers.
     const invocation = args[0] === 'init' || args[0]?.startsWith('--git-dir=verify.git')
@@ -186,7 +187,7 @@ try {
 } finally { fs.closeSync(fd); }
 `;
 
-export async function capturePreservationGitBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
+async function capturePreservationGitBundleNative(snapshot: WorkspaceSnapshotRecord, repositoryPath: string,
   repositoryIdentity: WorktreeMaterializationIdentity, preparation: string, identity: WorktreeMaterializationIdentity) {
   const safe = laneGitInvocation(repositoryPath, repositoryPath, [
     'bundle', 'create', '--version=3', '-', snapshot.recoveryRef,
@@ -324,7 +325,7 @@ export async function executePreservationBankOperation(bank: Awaited<ReturnType<
 }
 
 /** Prove all source objects in an empty repository before publishing its bank receipt. */
-export async function preserveWorkspaceGitBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath: string, admission: PreservationBankAdmission): Promise<WorkspaceGitBundleReceipt> {
+async function preserveWorkspaceGitBundleNative(snapshot: WorkspaceSnapshotRecord, repositoryPath: string, admission: PreservationBankAdmission): Promise<WorkspaceGitBundleReceipt> {
   const settlements: MaterializationExecutionSettlement[] = [];
   try {
     return await writerAttempts.run({ admission, settlements }, () => preserveBundle(snapshot, repositoryPath, admission));
@@ -341,14 +342,21 @@ async function preserveBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath:
   if (!snapshot.recoveryRef.startsWith('refs/o8/recovery/')) throw new Error('Portable source needs a protected recovery ref.');
   const repositoryIdentity = await captureWorktreeMaterializationIdentity(repositoryPath);
   const sourceValues = async () => {
-    const ref = await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{commit}']);
-    const tree = await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--verify', snapshot.recoveryRef + '^{tree}']);
-    if (ref !== snapshot.headCommit || tree !== snapshot.treeSha) throw new Error('The protected Git source changed before portable preservation.');
-    return {
-      objectFormat: await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-parse', '--show-object-format']),
-      commitCount: Number(await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-list', '--count', snapshot.recoveryRef])),
-      objectCount: (await preservationGitValue(repositoryPath, repositoryIdentity, ['rev-list', '--objects', '--no-object-names', snapshot.recoveryRef])).split('\n').length,
-    };
+    const queries = [
+      ['rev-parse', '--verify', snapshot.recoveryRef + '^{commit}'],
+      ['rev-parse', '--verify', snapshot.recoveryRef + '^{tree}'],
+      ['rev-parse', '--show-object-format'],
+      ['rev-list', '--count', snapshot.recoveryRef],
+      ['rev-list', '--objects', '--no-object-names', snapshot.recoveryRef],
+    ];
+    const results = await Promise.allSettled(queries.map(args => preservationGitValue(repositoryPath, repositoryIdentity, args)));
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+    const values = results.map(result => (result as PromiseFulfilledResult<string>).value);
+    if (values[0] !== snapshot.headCommit || values[1] !== snapshot.treeSha) {
+      throw new Error('The protected Git source changed before portable preservation.');
+    }
+    return { objectFormat: values[2]!, commitCount: Number(values[3]), objectCount: values[4]!.split('\n').length };
   };
   const expected = await sourceValues();
   if (expected.objectFormat !== 'sha1' && expected.objectFormat !== 'sha256') throw new Error('Git object format is unsupported.');
@@ -377,19 +385,41 @@ async function preserveBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath:
     await assertBank(bank);
     await capturePreservationGitBundle(snapshot, repositoryPath, repositoryIdentity, preparation, identity);
     const before = await readBundleFile(path.join(preparation, 'source.bundle'));
-    await preservationGitValue(preparation, identity, ['init', '--bare', '--template=', '--object-format=' + expected.objectFormat, 'verify.git']);
-    // Empty-repository verification refuses every prerequisite, alternate, or missing parent object.
-    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'bundle', 'verify', 'source.bundle']);
-    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', '-c', 'fetch.unpackLimit=0', '-c', 'gc.auto=0',
-      '-c', 'maintenance.auto=false', '-c', 'fetch.writeCommitGraph=false', 'fetch', '--no-tags', '--no-recurse-submodules',
-      './source.bundle', snapshot.recoveryRef + ':refs/heads/recovered']);
-    await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'fsck', '--full', '--strict']);
-    const recovered = {
-      headCommit: await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{commit}']),
-      treeSha: await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{tree}']),
-      commitCount: Number(await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--count', 'refs/heads/recovered'])),
-      objectCount: (await preservationGitValue(preparation, identity, ['--git-dir=verify.git', 'rev-list', '--objects', '--no-object-names', 'refs/heads/recovered'])).split('\n').length,
-    };
+    // One settled wrapper owns the complete empty-repository verifier. Each
+    // nested command retains the ready/identity/ack/close writer protocol.
+    const commands = [
+      ['init', '--bare', '--template=', '--object-format=' + expected.objectFormat, 'verify.git'],
+      ['--git-dir=verify.git', 'bundle', 'verify', 'source.bundle'],
+      ['--git-dir=verify.git', '-c', 'fetch.unpackLimit=0', '-c', 'gc.auto=0',
+        '-c', 'maintenance.auto=false', '-c', 'fetch.writeCommitGraph=false', 'fetch', '--no-tags', '--no-recurse-submodules',
+        './source.bundle', snapshot.recoveryRef + ':refs/heads/recovered'],
+      ['--git-dir=verify.git', 'fsck', '--full', '--strict'],
+      ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{commit}', 'refs/heads/recovered^{tree}'],
+      ['--git-dir=verify.git', 'rev-list', '--count', 'refs/heads/recovered'],
+      ['--git-dir=verify.git', 'rev-list', '--objects', '--no-object-names', 'refs/heads/recovered'],
+    ].map(args => ({ command: 'git', args: laneGitArguments(args) }));
+    const { stdout } = await executePreservationNode(String.raw`
+      const input = JSON.parse(process.argv[1]);
+      const outputs = [];
+      for (const command of input.commands) {
+        let output = '';
+        await runChild(command.command, command.args, { identity: input.identity, stdout(chunk) {
+          output += chunk.toString();
+          if (Buffer.byteLength(output) > input.maxBytes) throw new Error('Verifier output exceeded its bound.');
+        } });
+        outputs.push(output.trim());
+      }
+      process.stdout.write(JSON.stringify(outputs));
+    `, { commands, identity, maxBytes: PRESERVATION_BANK_POLICY.gitOutputBytes }, identity, gitEnvironment(),
+    PRESERVATION_BANK_POLICY.gitOutputBytes);
+    const outputs = JSON.parse(stdout) as string[];
+    if (!Array.isArray(outputs) || outputs.length !== commands.length || outputs.some(value => typeof value !== 'string')) {
+      throw new Error('Independent verifier returned an invalid command receipt.');
+    }
+    const revision = outputs[4]!.split('\n');
+    if (revision.length !== 2) throw new Error('Independent verifier revision coverage is incomplete.');
+    const recovered = { headCommit: revision[0], treeSha: revision[1],
+      commitCount: Number(outputs[5]), objectCount: outputs[6]!.split('\n').length };
     const after = await readBundleFile(path.join(preparation, 'source.bundle'));
     const repeated = await sourceValues();
     if (before.sha256 !== after.sha256 || !sameFile(before.stat, after.stat)
@@ -415,4 +445,16 @@ async function preserveBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath:
       await executePreservationBankOperation(bank, { operation: 'remove', leaf, identity });
     }
   }
+}
+
+export function preservationGitValue(...args: Parameters<typeof preservationGitValueNative>): ReturnType<typeof preservationGitValueNative> {
+  return timeClosePhase('preservationGitValue', () => preservationGitValueNative(...args));
+}
+
+export function capturePreservationGitBundle(...args: Parameters<typeof capturePreservationGitBundleNative>): ReturnType<typeof capturePreservationGitBundleNative> {
+  return timeClosePhase('capturePreservationGitBundle', () => capturePreservationGitBundleNative(...args));
+}
+
+export function preserveWorkspaceGitBundle(...args: Parameters<typeof preserveWorkspaceGitBundleNative>): ReturnType<typeof preserveWorkspaceGitBundleNative> {
+  return timeClosePhase('preserveWorkspaceGitBundle', () => preserveWorkspaceGitBundleNative(...args));
 }

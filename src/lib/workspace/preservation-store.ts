@@ -1,3 +1,4 @@
+import { timeClosePhase } from '@/lib/orchestrator/close-timing';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath } from 'node:fs/promises';
@@ -197,7 +198,7 @@ export async function preservationReceiptForSnapshot(snapshot: WorkspaceSnapshot
   return receipt;
 }
 
-export async function preserveWorkspaceArtifacts(
+async function preserveWorkspaceArtifactsNative(
   snapshot: WorkspaceSnapshotRecord,
   repositoryPath: string,
   options: { discardSource?: boolean } = {},
@@ -343,6 +344,7 @@ export async function verifyPreservedArtifactsAtPath(
   preservationId: string,
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
+  options: { requireCleanSource?: true } = {},
 ): Promise<void> {
   const { payload } = await readWorkspacePreservation(preservationId);
   if (identity.device !== payload.identity.device || identity.inode !== payload.identity.inode) {
@@ -354,8 +356,13 @@ export async function verifyPreservedArtifactsAtPath(
     headCommit: payload.capture.headCommit,
     treeSha: payload.capture.treeSha,
     ...payload.capturePolicy,
+    ...options,
   });
   if (sha256(JSON.stringify(observed)) !== sha256(JSON.stringify(payload.capture))) {
     throw new Error('Unique ignored artifacts changed after verified capture; retirement remains held.');
   }
+}
+
+export function preserveWorkspaceArtifacts(...args: Parameters<typeof preserveWorkspaceArtifactsNative>): ReturnType<typeof preserveWorkspaceArtifactsNative> {
+  return timeClosePhase('preserveWorkspaceArtifacts', () => preserveWorkspaceArtifactsNative(...args));
 }
