@@ -5,6 +5,13 @@ import type { OwnedSessionRecord } from './types';
 
 interface Admission { correctionId: string; surfaceId: string; runId: string; allowInterrupted: boolean; check: () => void }
 const admission = new AsyncLocalStorage<Admission>();
+type ActionGuard = (session: OwnedSessionRecord | null, preparedRunId?: string) => void;
+const actionGuard = new AsyncLocalStorage<ActionGuard>();
+
+/** Keep a queued operator intent fenced through asynchronous spawn preparation. */
+export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promise<T>): Promise<T> {
+  return actionGuard.run(check, action);
+}
 
 /** An explicit correction may continue only the exact run the operator selected. */
 export function withOwnedActionAdmission<T>(input: Admission, action: () => Promise<T>): Promise<T> {
@@ -12,6 +19,7 @@ export function withOwnedActionAdmission<T>(input: Admission, action: () => Prom
 }
 
 export function assertOwnedActionAdmission(session: OwnedSessionRecord | null, preparedRunId?: string): void {
+  actionGuard.getStore()?.(session, preparedRunId);
   const expected = admission.getStore();
   if (!expected) return;
   expected.check();

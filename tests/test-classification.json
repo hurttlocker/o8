@@ -4918,6 +4918,12 @@
       ]
     },
     {
+      "path": "tests/steer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/steered-review-settlement-real-path.test.ts",
       "reasons": [
         "child-process",
