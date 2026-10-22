@@ -4,6 +4,15 @@ export interface DirectiveSummary {
   id: string; title: string; scope: string; repoName: string | null;
   priority: number | null; body: string; projects: string[]; file: string | null;
 }
+
+export function isIndexedDocumentation(directive: DirectiveSummary): boolean {
+  return directive.id.startsWith('spec-ingest:');
+}
+
+export function indexedDocumentationSource(directive: DirectiveSummary): string {
+  const source = directive.body.match(/^_Source: (.+) — auto-ingested from repo specs \(spec-ingest\)\._\s*$/m)?.[1];
+  return source ?? (directive.title.split(' — ')[0].trim() || 'Unknown source');
+}
 export interface ExternalServer {
   id: string; name: string; transport: 'stdio' | 'http'; command?: string | null;
   url?: string | null; enabled?: boolean;

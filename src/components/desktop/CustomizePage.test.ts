@@ -11,6 +11,103 @@ describe('CustomizePage skills', () => {
   let host: HTMLDivElement;
   let root: Root;
 
+  const instructionFixture = () => {
+    const personal = { id: 'personal', title: 'Personal guide', scope: 'global', repoName: null, body: 'Personal guidance', projects: [], priority: null, file: null };
+    const authored = [personal,
+      { ...personal, id: 'project', title: 'Project guide', scope: 'project', body: 'Project guidance', projects: ['sample'] },
+      { ...personal, id: 'repo', title: 'Repository guide', scope: 'repo', repoName: 'sample' },
+    ];
+    const references = Array.from({ length: 1700 }, (_, index) => {
+      const source = index < 1000 ? 'sample/docs/architecture.md' : 'sample/docs/operations.md';
+      return {
+        ...personal, id: `spec-ingest:sample:docs:${index}`, scope: 'repo', repoName: 'sample',
+        title: `${source} — Section ${index}`,
+        body: `Reference section ${index}${index === 1699 ? ' with unique reference needle' : ''}\n\n_Source: ${source} — auto-ingested from repo specs (spec-ingest)._`,
+        file: `/fixture/directives/section-${index}.md`,
+      };
+    });
+    const previous = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname !== '/api/cortex/directives') return previous(input, init);
+      return Promise.resolve(Response.json({ directives: url.searchParams.has('repoPath') ? [...authored, ...references] : [personal] }));
+    });
+    return {
+      project: { id: 'sample', name: 'Sample', repoPaths: ['/repo/sample'], createdAt: '' },
+      registeredRepos: [{ name: 'sample', localPath: '/repo/sample' }],
+    };
+  };
+
+  it('separates authored counts from indexed sections and browses bounded pages by source', async () => {
+    const openedFiles: string[] = [];
+    const onFile = (event: Event) => openedFiles.push((event as CustomEvent<{ path: string }>).detail.path);
+    window.addEventListener('o8:open-file', onFile);
+    try {
+      await act(async () => root.render(createElement(CustomizePage, instructionFixture())));
+      const tab = [...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Instructions'))!;
+      expect(tab.textContent).toBe('Instructions3');
+      expect(host.textContent).toContain('3 authored instructions');
+      expect(host.textContent).toContain('1700 indexed sections');
+      expect(host.textContent).toContain('Personal guide');
+      expect(host.textContent).toContain('Project guide');
+      expect(host.textContent).toContain('Repository guide');
+      const docs = host.querySelector<HTMLElement>('[aria-label="Indexed documentation"]')!;
+      expect(docs).not.toBeNull();
+      expect(docs.querySelectorAll('[role="button"]')).toHaveLength(20);
+      expect(docs.textContent).toContain('Indexed reference');
+      expect(docs.textContent).not.toContain('Repository rule');
+      expect(docs.textContent).toContain('Sections 1 to 20 of 1700');
+      const button = (label: string) => [...docs.querySelectorAll('button')].find((item) => item.textContent === label)!;
+      expect(button('Previous sections').disabled).toBe(true);
+      act(() => button('Next sections').click());
+      expect(docs.textContent).toContain('Sections 21 to 40 of 1700');
+      expect(docs.querySelectorAll('[role="button"]')).toHaveLength(20);
+      act(() => button('Previous sections').click());
+      expect(docs.textContent).toContain('Sections 1 to 20 of 1700');
+      act(() => button('Next sections').click());
+      const source = docs.querySelector<HTMLSelectElement>('[aria-label="Documentation source"]')!;
+      act(() => { source.value = 'sample/docs/operations.md'; source.dispatchEvent(new Event('change', { bubbles: true })); });
+      expect(docs.textContent).toContain('Sections 1 to 20 of 700');
+      act(() => docs.querySelector<HTMLElement>('[role="button"]')!.click());
+      expect(docs.textContent).toContain('Reference section 1000');
+      act(() => button('Open file ›').click());
+      expect(openedFiles).toEqual(['/fixture/directives/section-1000.md']);
+      expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    } finally { window.removeEventListener('o8:open-file', onFile); }
+  });
+
+  it('searches indexed bodies and sources while retaining authored totals and scope filtering', async () => {
+    await act(async () => root.render(createElement(CustomizePage, instructionFixture())));
+    const search = host.querySelector<HTMLInputElement>('[aria-label="Search Instructions"]')!;
+    const enter = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const docs = () => host.querySelector<HTMLElement>('[aria-label="Indexed documentation"]')!;
+    const tab = () => [...host.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Instructions'))!;
+    enter('unique reference needle');
+    expect(docs()).not.toBeNull();
+    expect(docs().querySelectorAll('[role="button"]')).toHaveLength(1);
+    expect(docs().textContent).toContain('Section 1699');
+    expect(tab().textContent).toBe('Instructions3');
+    enter('sample/docs/operations.md');
+    expect(docs().textContent).toContain('Sections 1 to 20 of 700');
+    const view = host.querySelector<HTMLSelectElement>('[aria-label="Customization view"]')!;
+    await act(async () => { view.value = 'personal'; view.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(host.textContent).toContain('No matching instructions');
+    expect(docs()).toBeNull();
+    expect(tab().textContent).toBe('Instructions1');
+    enter('');
+    expect(host.textContent).toContain('Personal guide');
+    expect(host.textContent).not.toContain('Project guide');
+    for (const scope of ['/repo/sample', 'all']) {
+      await act(async () => { view.value = scope; view.dispatchEvent(new Event('change', { bubbles: true })); });
+      expect(host.textContent).toContain('Project guide');
+      expect(docs().textContent).toContain('Sections 1 to 20 of 1700');
+      expect(tab().textContent).toBe('Instructions3');
+    }
+  });
+
   it('offers this project repositories inside Plugins without another section roundtrip', async () => {
     const fetcher = vi.mocked(fetch);
     const previous = fetcher.getMockImplementation()!;
