@@ -580,20 +580,13 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   rootDefault: path.join(getDataDir(), 'owned-gemini'),
   binaryName: 'gemini',
   binaryEnvOverride: 'O8_GEMINI_BIN',
-  // Gemini CLI in --output-format stream-json mode (which o8 uses for headless
-  // dispatch) requires GEMINI_API_KEY specifically — it does NOT honor
-  // GOOGLE_GENERATIVE_AI_API_KEY in that mode (verified empirically 2026-04-30,
-  // see epic-937 t3-parallel REPORT). If the user only has the GOOGLE_-prefixed
-  // alias set, translate it onto GEMINI_API_KEY for the spawned child so dispatch
-  // doesn't silently fail with "you must specify the GEMINI_API_KEY environment
-  // variable" cycling launching → idle.
-  extraSpawnEnv: (): Record<string, string> => {
-    const existing = resolveProviderKey('GEMINI_API_KEY')?.trim();
-    if (existing) return {};
-    const alias = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim()
-      || process.env.GOOGLE_AI_API_KEY?.trim();
-    return alias ? { GEMINI_API_KEY: alias } : {};
-  },
+  // The shared resolver already handles aliases and authoritative disable/removal.
+  // Override inherited credentials too, so the child cannot bypass that decision.
+  extraSpawnEnv: (): Record<string, string> => ({
+    GEMINI_API_KEY: resolveProviderKey('GEMINI_API_KEY')?.trim() ?? '',
+    GOOGLE_GENERATIVE_AI_API_KEY: '',
+    GOOGLE_AI_API_KEY: '',
+  }),
   humanLabel: 'Owned Gemini',
   squadShortName: 'Gemini',
   sessionIdPrefix: 'gemini-owned-',

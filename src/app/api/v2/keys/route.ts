@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { MasterKeyUnavailableError } from '@/lib/db/master-key';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { assertProviderStoreAvailable, mutateProviderKey, storedProviderKey, resolveProviderKey, updateManagedProviderKey, providerKeyEnabled } from '@/lib/providers/key-store';
@@ -268,7 +269,10 @@ async function handlePATCH(request: NextRequest) {
 function storageGuard(handler: (request: NextRequest) => Promise<NextResponse>) {
   return async (request: NextRequest) => {
     try { return await handler(request); }
-    catch { return NextResponse.json({ error: 'Credential store unavailable. Previous keys were preserved.', code: 'key_store_unavailable' }, { status: 503 }); }
+    catch (error) {
+      if (error instanceof MasterKeyUnavailableError) return NextResponse.json({ error: error.message, code: error.code }, { status: 503 });
+      return NextResponse.json({ error: 'Credential store unavailable. Previous keys were preserved.', code: 'key_store_unavailable' }, { status: 503 });
+    }
   };
 }
 export const GET = storageGuard(handleGET);

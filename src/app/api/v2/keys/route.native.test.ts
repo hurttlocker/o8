@@ -157,3 +157,23 @@ it('standard-base64 master overrides remain compatible and empty legacy entries 
   expect(native({ action: 'public' }, standard).value.gemini_api_key_set).toBe(false);
   expect(resolveProviderKey('GROQ_API_KEY')).toBe('fixture-groq');
 });
+
+it.each([['save', 'native'], ['remove', 'native'], ['save', 'node'], ['remove', 'node']])('API %s retries blocked legacy plaintext cleanup from %s readers after restart', async (action, reader) => {
+  writeFileSync(join(state.dir, 'dictation.json'), JSON.stringify({ openrouter_api_key: 'fixture-old-plaintext', language: 'en' }));
+  const prefsLock = new Database(join(state.dir, '.voice-prefs.lock'));
+  prefsLock.exec('BEGIN EXCLUSIVE');
+  try {
+    expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-authoritative-key' }))).status).toBe(200);
+    if (action === 'remove') expect((await routes.DELETE(request('DELETE', { provider: 'openrouter' }))).status).toBe(200);
+    expect(JSON.parse(readFileSync(join(state.dir, 'dictation.json'), 'utf8')).openrouter_api_key).toBe('fixture-old-plaintext');
+    expect(native({ action: 'read' }).value).toBe(action === 'remove' ? null : 'fixture-authoritative-key');
+  } finally { prefsLock.close(); }
+  const resolved = reader === 'native' ? native({ action: 'read' }).value : restartedNode('OPENROUTER_API_KEY');
+  expect(resolved).toBe(action === 'remove' ? null : 'fixture-authoritative-key');
+  expect(JSON.parse(readFileSync(join(state.dir, 'dictation.json'), 'utf8'))).toEqual({ language: 'en' });
+});
+it('API persistence cleans an existing plaintext slot without waiting for native use', async () => {
+  writeFileSync(join(state.dir, 'dictation.json'), JSON.stringify({ openrouter_api_key: 'fixture-old-plaintext', language: 'en' }));
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-api-key' }))).status).toBe(200);
+  expect(JSON.parse(readFileSync(join(state.dir, 'dictation.json'), 'utf8'))).toEqual({ language: 'en' });
+});

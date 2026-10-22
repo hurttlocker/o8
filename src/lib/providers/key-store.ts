@@ -5,7 +5,8 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
-import { decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
+import { cleanupLegacyProviderKeys } from './legacy-key-cleanup';
+import { assertMasterKeyAvailableForMutation, decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
 
 export const PROVIDER_ENV_KEYS = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY'] as const;
 const managedEnv = new Map<string, string>();
@@ -42,7 +43,9 @@ export function assertProviderStoreAvailable(): void {
   }
 }
 export function storedProviderKey(name: string): string | null {
-  const raw = snapshot().values.get(name);
+  const { values } = snapshot();
+  cleanupLegacyProviderKeys(values);
+  const raw = values.get(name);
   return raw ? decode(raw) || null : null;
 }
 export function providerKeyEnabled(name: string): boolean {
@@ -66,6 +69,7 @@ export function clearManagedProviderKey(name: string): void {
 export function resolveProviderKey(name: string): string | null {
   try {
     const { values } = snapshot();
+    cleanupLegacyProviderKeys(values);
     if (!providerKeyEnabled(name)) { clearManagedProviderKey(name); return null; }
     const raw = values.get(name);
     if (values.get(managedName(name)) === '1') {
@@ -88,9 +92,11 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
   // SQLite's OS lock is shared with Rust and released even after process termination.
   const lock = new Database(join(dir, '.provider-keys.lock'), { timeout: 0 });
   let temporary: string | undefined;
+  let committedValues: Map<string, string> | undefined;
   try {
     lock.exec('BEGIN EXCLUSIVE');
     const { raw, values } = snapshot();
+    assertMasterKeyAvailableForMutation();
     assertProviderStoreAvailable();
     const updates = new Map<string, string | null>();
     for (const provider of PROVIDER_ENV_KEYS) {
@@ -116,8 +122,10 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     temporary = join(dir, `.provider-keys.${randomUUID()}.tmp`);
     writeFileSync(temporary, lines.join('\n'), { mode: 0o600, flag: 'wx' });
     renameSync(temporary, join(dir, '.env.local'));
+    committedValues = parseKeyEnv(lines.join('\n'));
   } finally {
     if (temporary) { try { unlinkSync(temporary); } catch { /* Already renamed. */ } }
     lock.close();
   }
+  if (committedValues) cleanupLegacyProviderKeys(committedValues);
 }

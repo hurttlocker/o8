@@ -73,6 +73,8 @@ fn config_path() -> PathBuf {
 /// avoid a full parse on the hot path: only a `stat()` + an mtime compare when
 /// the file is unchanged.
 static PREF_WRITE: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+static FAIL_PREFERENCE_WRITE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CONFIG_CACHE: Mutex<Option<(Option<SystemTime>, serde_json::Value)>> = Mutex::new(None);
 
 /// Load `~/.o8/dictation.json` as a JSON value, reloading on mtime change.
@@ -201,8 +203,9 @@ fn redact_config(
 }
 
 /// Read public preferences without retrieving or migrating secret values.
-/// Secret migration remains in the explicit provider-use path.
+/// Retry cleanup only for slots already superseded by an authoritative persist.
 pub fn config_public() -> serde_json::Value {
+    cleanup_authoritative_preferences();
     let mut input = config();
     if !input.is_object() { input = serde_json::json!({}); }
     for key in SECRET_PREF_KEYS {
@@ -235,6 +238,7 @@ pub fn config_public() -> serde_json::Value {
 /// all other keys incl. secrets), then drop the cache so the next read reloads.
 pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
     let _write = PREF_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let _lock = lock_preferences()?;
     let path = config_path();
     let mut authoritative_commit = false;
     let mut obj = match std::fs::read_to_string(&path) {
@@ -251,10 +255,11 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
     } else if let Some(provider) = key.strip_suffix("_enabled").and_then(provider_env) {
         let enabled = value.as_bool().ok_or_else(|| "enabled must be boolean".to_string())?;
         o8_provider_keys::mutate(provider, None, Some(enabled))?;
-        return Ok(());
+        authoritative_commit = true;
     } else {
         obj.insert(key.to_string(), value);
     }
+    remove_authoritative_slots(&mut obj);
     match write_preferences(obj) {
         Ok(()) => Ok(()),
         Err(_) if authoritative_commit => { eprintln!("[keys] Credential saved; legacy preference cleanup pending"); Ok(()) },
@@ -262,7 +267,47 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
     }
 }
 
+// Shared with Node cleanup: serialize the complete preferences read/modify/write.
+fn lock_preferences() -> Result<rusqlite::Connection, String> {
+    std::fs::create_dir_all(o8_data_dir()).map_err(|_| "Voice preferences unavailable".to_string())?;
+    let lock = rusqlite::Connection::open(o8_data_dir().join(".voice-prefs.lock"))
+        .map_err(|_| "Voice preferences unavailable".to_string())?;
+    lock.busy_timeout(std::time::Duration::ZERO).map_err(|_| "Voice preferences unavailable".to_string())?;
+    lock.execute_batch("BEGIN EXCLUSIVE").map_err(|_| "Voice preferences busy".to_string())?;
+    Ok(lock)
+}
+
+fn remove_authoritative_slots(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut changed = false;
+    for key in SECRET_PREF_KEYS {
+        if provider_env(key).and_then(|name| o8_provider_keys::managed(name).ok()).unwrap_or(false) {
+            changed |= obj.remove(key).is_some();
+        }
+    }
+    changed
+}
+
+/// The persisted managed marker retries cleanup even after a failed write or restart.
+fn cleanup_authoritative_preferences() {
+    let _write = PREF_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let cleanup = || -> Result<(), String> {
+        if !config_path().try_exists().map_err(|_| "Voice preferences unavailable".to_string())? { return Ok(()); }
+        let _lock = lock_preferences()?;
+        let raw = std::fs::read_to_string(config_path()).map_err(|_| "Voice preferences unavailable".to_string())?;
+        let mut obj = serde_json::from_str::<serde_json::Value>(&raw).map_err(|_| "Voice preferences unavailable".to_string())?
+            .as_object().cloned().ok_or_else(|| "Voice preferences unavailable".to_string())?;
+        if remove_authoritative_slots(&mut obj) { write_preferences(obj)?; }
+        Ok(())
+    };
+    if cleanup().is_err() { eprintln!("[keys] Credential state preserved; legacy preference cleanup pending"); }
+}
+
 fn write_preferences(obj: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    // Deterministic test-only fault after secure persistence, before plaintext cleanup.
+    #[cfg(test)]
+    if FAIL_PREFERENCE_WRITE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        return Err("Voice preferences unavailable".into());
+    }
     let path = config_path();
     let serialized =
         serde_json::to_string_pretty(&serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
@@ -270,6 +315,9 @@ fn write_preferences(obj: serde_json::Map<String, serde_json::Value>) -> Result<
         let _ = std::fs::create_dir_all(parent);
     }
     let temporary = path.with_extension(format!("{}-{}.tmp", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+    struct Temporary(std::path::PathBuf);
+    impl Drop for Temporary { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+    let _temporary = Temporary(temporary.clone());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -301,9 +349,8 @@ fn write_preferences(obj: serde_json::Map<String, serde_json::Value>) -> Result<
     Ok(())
 }
 
-/// Read a provider secret without exposing it to the webview. On macOS the
-/// Keychain is authoritative. A value left by an older release is migrated on
-/// first use and then removed from the JSON preferences file.
+/// Map voice preferences onto the shared provider store. Legacy sources migrate
+/// only when no saved value or removal marker is authoritative.
 fn provider_env(key: &str) -> Option<&'static str> {
     match key {
         "gemini_api_key" | "gemini" => Some("GEMINI_API_KEY"),
@@ -316,6 +363,7 @@ fn provider_env(key: &str) -> Option<&'static str> {
 }
 fn stored_secret(key: &str) -> Option<String> {
     let name = provider_env(key)?;
+    cleanup_authoritative_preferences();
     let saved = o8_provider_keys::resolve(name).ok()?;
     if saved.is_some() { return saved; }
     if o8_provider_keys::managed(name).ok()? || !o8_provider_keys::enabled(name).ok()? { return None; }
@@ -333,14 +381,7 @@ fn stored_secret(key: &str) -> Option<String> {
     let current = o8_provider_keys::migrate_legacy(name, &legacy).ok()?;
     // A skipped migration (for example a concurrent disable) must retain its source.
     if !o8_provider_keys::managed(name).unwrap_or(false) { return current; }
-    // Cleanup is best effort after successful secure persistence. Never re-save legacy data.
-    let _write = PREF_WRITE.lock().unwrap_or_else(|p| p.into_inner());
-    if let Ok(raw) = std::fs::read_to_string(config_path()) {
-        if let Ok(serde_json::Value::Object(mut prefs)) = serde_json::from_str(&raw) {
-            prefs.remove(key);
-            let _ = write_preferences(prefs);
-        }
-    }
+    cleanup_authoritative_preferences();
     current
 }
 
@@ -379,9 +420,6 @@ fn openrouter_enabled_from(raw: Option<&str>) -> bool {
 /// o8 config file. Returns None while the OpenRouter connection is turned off,
 /// whatever the key's source; otherwise works in release.
 pub fn get_openrouter_key() -> Option<String> {
-    if !openrouter_enabled() {
-        return None;
-    }
     stored_secret("openrouter_api_key")
 }
 
@@ -492,5 +530,49 @@ mod public_read_tests {
             .output().unwrap();
         assert!(output.status.success(), "isolated public-read regression failed: {}{}",
             String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    }
+}
+
+#[cfg(test)]
+mod cleanup_retry_tests {
+    #[test]
+    fn authoritative_legacy_cleanup_retries_after_failure_and_restart() {
+        const STAGE: &str = "O8_TEST_NATIVE_CLEANUP_STAGE";
+        if let Ok(stage) = std::env::var(STAGE) {
+            let path = super::config_path();
+            if stage == "persist" {
+                o8_provider_keys::migrate_legacy("OPENROUTER_API_KEY", "fixture-migrated-key").unwrap();
+                let lock = super::lock_preferences().unwrap();
+                assert_eq!(super::get_openrouter_key().as_deref(), Some("fixture-migrated-key"));
+                assert!(std::fs::read_to_string(&path).unwrap().contains("fixture-plaintext"));
+                drop(lock);
+                super::FAIL_PREFERENCE_WRITE.store(true, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(super::get_openrouter_key().as_deref(), Some("fixture-migrated-key"));
+                assert!(!super::FAIL_PREFERENCE_WRITE.load(std::sync::atomic::Ordering::SeqCst), "cleanup must reach write_preferences");
+                assert!(std::fs::read_to_string(&path).unwrap().contains("fixture-plaintext"));
+            } else {
+                assert_eq!(super::get_openrouter_key().as_deref(), Some("fixture-migrated-key"));
+                let prefs: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                assert_eq!(prefs, serde_json::json!({"language":"en"}));
+            }
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("o8-native-cleanup-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Fixture(std::path::PathBuf);
+        impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _fixture = Fixture(dir.clone());
+        std::fs::write(dir.join("dictation.json"), br#"{"openrouter_api_key":"fixture-plaintext","language":"en"}"#).unwrap();
+        let module = module_path!().split_once("::").unwrap().1;
+        for stage in ["persist", "restart"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &format!("{module}::authoritative_legacy_cleanup_retries_after_failure_and_restart"), "--nocapture"])
+                .env(STAGE, stage).env("O8_DATA_DIR", &dir)
+                .env("O8_MASTER_KEY", "JSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSU")
+                .env("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS", "1").env_remove("OPENROUTER_API_KEY")
+                .output().unwrap();
+            assert!(output.status.success(), "cleanup stage failed: {}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
     }
 }

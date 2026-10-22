@@ -15,7 +15,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -39,18 +39,31 @@ function dataDir(): string {
  * platform without the macOS Keychain (SECURITY_AUDIT_2026-07-02 §MED-1). The
  * key is reproducible across restarts (persisted) but secret (random + 0600).
  */
-function readOrCreateKeyFile(): string {
+function securePath(path: string, directory: boolean): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) throw new Error('Unsafe master key path');
+  // Windows uses ACLs; chmod/stat cannot express Unix owner-only modes.
+  if (process.platform === 'win32') return;
+  const mode = directory ? 0o700 : 0o600;
+  if ((stat.mode & 0o777) !== mode) chmodSync(path, mode);
+  if ((lstatSync(path).mode & 0o777) !== mode) throw new Error('Unsafe master key permissions');
+}
+function readOrCreateKeyFile(create: boolean): string {
   const keyPath = join(dataDir(), 'master-key');
   if (existsSync(keyPath)) {
+    securePath(dataDir(), true);
+    securePath(keyPath, false);
     const existing = readFileSync(keyPath, 'utf-8').trim();
     if (Buffer.from(existing, 'base64url').length !== 32) throw new Error('Invalid persisted master key');
     return existing;
   }
+  if (!create) throw new Error('Master key unavailable');
   if (existsSync(join(dataDir(), '.env.local')) && /(?:^|\n)[^#\n=]+=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
     throw new Error('Encrypted credentials exist without an accessible master key');
   }
   const key = generateKey();
-  mkdirSync(dataDir(), { recursive: true });
+  mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+  securePath(dataDir(), true);
   writeFileSync(keyPath, key, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
   return key;
 }
@@ -127,17 +140,36 @@ function generateKey(): string {
  *   2. macOS Keychain via `security` CLI (creates entry on first call).
  *   3. Persisted random key file (reproducible across restarts, no Keychain needed).
  *
- * The result is cached in-process so Keychain is queried at most once.
+ * Reads may use the in-process cache; mutations always revalidate its source.
  */
 export function resolveMasterKeySync(): string {
-  if (_cachedKey) return _cachedKey;
+  return _cachedKey ?? (_cachedKey = resolveBackingKey(true));
+}
+
+export class MasterKeyUnavailableError extends Error {
+  readonly code = 'master_key_unavailable';
+  constructor() {
+    super('Master key unavailable or changed. Restore the original master key and retry. Previous keys were preserved.');
+  }
+}
+
+/** Re-read the backing source without rotating an established process identity. */
+export function assertMasterKeyAvailableForMutation(): string {
+  try {
+    const current = resolveBackingKey(_cachedKey === null);
+    if (_cachedKey && !decodeBase64Url(current).equals(decodeBase64Url(_cachedKey))) throw new Error('Master key changed');
+    _cachedKey = current;
+    return current;
+  } catch { throw new MasterKeyUnavailableError(); }
+}
+
+function resolveBackingKey(create: boolean): string {
 
   // 1. Env-var override.
   const envKey = process.env[ENV_MASTER_KEY];
   if (envKey) {
     if (Buffer.from(envKey, 'base64url').length !== 32) throw new Error('Invalid O8_MASTER_KEY');
-    _cachedKey = envKey;
-    return _cachedKey;
+    return envKey;
   }
 
   // 2. macOS Keychain (server-side direct CLI call).
@@ -161,8 +193,9 @@ export function resolveMasterKeySync(): string {
     let keychainKey = read.status === 'found' ? read.key : null;
     if (!keychainKey) {
       // Genuinely absent (first run) — generate and persist.
-      if (existsSync(join(dataDir(), 'master-key'))) return (_cachedKey = readOrCreateKeyFile());
+      if (existsSync(join(dataDir(), 'master-key'))) return readOrCreateKeyFile(create);
       if (existsSync(join(dataDir(), '.env.local')) && /=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
+      if (!create) throw new Error('Master key unavailable');
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {
         keychainKey = newKey;
@@ -176,15 +209,13 @@ export function resolveMasterKeySync(): string {
       console.log('[master-key] Resolved from macOS Keychain');
     }
     if (keychainKey) {
-      _cachedKey = keychainKey;
-      return _cachedKey;
+      return keychainKey;
     }
   }
 
   // 3. Persisted random key file (0600) — non-macOS, or if the Keychain is
   //    unavailable. NEVER a hardcoded constant (§MED-1).
-  _cachedKey = readOrCreateKeyFile();
-  return _cachedKey;
+  return readOrCreateKeyFile(create);
 }
 
 /**
@@ -214,7 +245,7 @@ function decodeBase64Url(s: string): Buffer {
  * @returns `{ ciphertext, iv }` — both are hex strings suitable for storage.
  */
 export function encryptValueSync(plaintext: string): { ciphertext: string; iv: string } {
-  const keyBuf = decodeBase64Url(resolveMasterKeySync());
+  const keyBuf = decodeBase64Url(assertMasterKeyAvailableForMutation());
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(CIPHER_ALGORITHM, keyBuf, iv, { authTagLength: AUTH_TAG_LENGTH });
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);

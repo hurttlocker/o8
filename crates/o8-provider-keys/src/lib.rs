@@ -83,6 +83,44 @@ fn create_private(path: &Path, raw: &[u8]) -> Result<(), String> {
         .and_then(|_| file.sync_all())
         .map_err(|_| "Credential store unavailable".to_string())
 }
+/// Read the file fallback only after tightening both directory and file permissions.
+pub fn read_master_key_file(path: &Path) -> Result<String, String> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| "Unsafe master key path".to_string())?;
+    for (target, is_directory, mode) in [(directory, true, 0o700), (path, false, 0o600)] {
+        let metadata =
+            fs::symlink_metadata(target).map_err(|_| "Master key unavailable".to_string())?;
+        if metadata.file_type().is_symlink()
+            || if is_directory {
+                !metadata.is_dir()
+            } else {
+                !metadata.is_file()
+            }
+        {
+            return Err("Unsafe master key path".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(target, fs::Permissions::from_mode(mode))
+                .map_err(|_| "Unsafe master key permissions".to_string())?;
+            if fs::metadata(target)
+                .map_err(|_| "Master key unavailable".to_string())?
+                .permissions()
+                .mode()
+                & 0o777
+                != mode
+            {
+                return Err("Unsafe master key permissions".into());
+            }
+        }
+    }
+    let raw = read(path)?;
+    valid_key(&raw)?;
+    Ok(raw.trim().into())
+}
+
 /// Never replace a denied, malformed or unreadable existing master key.
 pub fn master_key(create: bool) -> Result<String, String> {
     if let Ok(raw) = std::env::var("O8_MASTER_KEY") {
@@ -117,9 +155,7 @@ pub fn master_key(create: bool) -> Result<String, String> {
         .try_exists()
         .map_err(|_| "Master key unavailable".to_string())?
     {
-        let raw = read(&fallback)?;
-        valid_key(&raw)?;
-        return Ok(raw.trim().into());
+        return read_master_key_file(&fallback);
     }
     if !create || read(&data_dir().join(".env.local"))?.contains("=enc:") {
         return Err("Master key unavailable".into());
@@ -152,7 +188,7 @@ pub fn master_key(create: bool) -> Result<String, String> {
         if create_private(&fallback, raw.as_bytes()).is_err() {
             return master_key(false);
         }
-        Ok(raw)
+        read_master_key_file(&fallback)
     }
 }
 fn decrypt(raw: &str) -> Result<String, String> {
@@ -315,4 +351,48 @@ fn mutate_inner(
     });
     let _ = fs::remove_file(temporary);
     result
+}
+
+#[cfg(all(test, unix))]
+mod fallback_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn fallback_read_tightens_file_and_directory_permissions() {
+        let dir =
+            std::env::temp_dir().join(format!("o8-master-permissions-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("master-key");
+        let key = URL_SAFE_NO_PAD.encode([51u8; 32]);
+        fs::write(&path, &key).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(read_master_key_file(&path).unwrap(), key);
+        assert_eq!(
+            fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn fallback_read_refuses_symbolic_link_without_touching_target() {
+        let dir = std::env::temp_dir().join(format!("o8-master-symlink-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target");
+        fs::write(&target, URL_SAFE_NO_PAD.encode([52u8; 32])).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        symlink(&target, dir.join("master-key")).unwrap();
+        assert!(read_master_key_file(&dir.join("master-key")).is_err());
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
