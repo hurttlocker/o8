@@ -9,6 +9,23 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, Runtime};
 
+#[cfg(not(test))]
+pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+#[cfg(test)]
+pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(1);
+
+pub(crate) async fn download(
+    update: &tauri_plugin_updater::Update,
+    on_chunk: impl FnMut(usize, Option<u64>),
+    on_finish: impl FnOnce(),
+) -> Result<Vec<u8>, String> {
+    // The updater's check timeout is not inherited by its artifact transport.
+    tokio::time::timeout(DOWNLOAD_TIMEOUT, update.download(on_chunk, on_finish))
+        .await
+        .map_err(|_| "Update artifact download timed out. Retry installation.".to_string())?
+        .map_err(|error| error.to_string())
+}
+
 pub trait Effects: Send + Sync {
     fn data_directory(&self) -> Result<Option<std::path::PathBuf>, String> {
         Ok(None)
@@ -40,27 +57,7 @@ impl<R: Runtime> Effects for NativeEffects<R> {
             .data_directory()?
             .ok_or("Native update storage is unavailable")?;
         install_journal::InstallJournal::new(directory).check(version)?;
-        #[cfg(target_os = "windows")]
-        let app = self.app.clone();
-        let Some(update) = crate::update_ping::check_with(&self.app, |builder| {
-            #[cfg(target_os = "windows")]
-            {
-                let app = app.clone();
-                builder.on_before_exit(move || {
-                    // The plugin invokes this only after successful extraction. Its hook
-                    // cannot return Result, so unwind into install_candidate on refusal.
-                    if let Err(error) = commit_restart(&app) {
-                        std::panic::panic_any(error);
-                    }
-                })
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                builder
-            }
-        })
-        .await?
-        else {
+        let Some(update) = crate::update_ping::check(&self.app).await? else {
             return Ok(false);
         };
         if update.version != version {
@@ -117,10 +114,7 @@ impl<R: Runtime> NativeEffects<R> {
                 }
             }
         }
-        let bytes = update
-            .download(|_, _| {}, || {})
-            .await
-            .map_err(|e| e.to_string())?;
+        let bytes = download(&update, |_, _| {}, || {}).await?;
         let admission = control(
             &self.client,
             &format!("{}/api/panel/app/update-state", self.base),
@@ -129,34 +123,37 @@ impl<R: Runtime> NativeEffects<R> {
         )
         .await?;
         if admission["allowed"].as_bool() != Some(true) {
-            return Err(format!(
-                "Update deferred: {}",
-                admission["state"]["autoApply"]["blockers"]["live"]
-            ));
+            return Ok(false);
         }
-        journal.install(
+        let installed = journal.install_if_admitted(
             version,
-            || {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| update.install(bytes)))
-                    .map_err(|_| {
-                        "Native installer admission was refused; no restart was performed."
-                            .to_string()
-                    })?
-                    .map_err(|e| e.to_string())
+            || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                update.install(bytes)
+            })) {
+                Ok(result) => result.map(|_| true).map_err(|error| error.to_string()),
+                Err(error) if error.is::<crate::update_ping::RestartRefused>() => Ok(false),
+                Err(_) => Err("Native installer stopped unexpectedly.".into()),
             },
             || Ok(()),
         )?;
         // Windows success exits inside the plugin. Any returned error stays here,
         // and its durable marker prevents an unchanged launch from retrying it.
-        Ok(true)
+        Ok(installed)
     }
 }
 
 pub(crate) fn commit_restart<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    commit_restart_with_work(app, false)
+}
+
+pub(crate) fn commit_restart_with_work<R: Runtime>(
+    app: &AppHandle<R>,
+    force: bool,
+) -> Result<(), String> {
     let guard = app
         .try_state::<o8_restart_safety::RestartSafety>()
         .ok_or("Native restart safety is unavailable")?;
-    let reservation = guard.prepare()?;
+    let reservation = guard.prepare_with_work(force)?;
     if let Err(error) = guard.before_restart(Some(&reservation)) {
         let _ = guard.cancel(&reservation);
         return Err(error);
@@ -273,12 +270,13 @@ impl AutoApply {
                     attempt.installed = true;
                 }
                 outcome => {
-                    let error = outcome
-                        .err()
-                        .unwrap_or_else(|| "No update was available at install time.".into());
-                    self.failure_report = Some(
-                        json!({ "action": "failed", "attemptId": attempt.id, "error": error }),
-                    );
+                    self.failure_report = Some(match outcome {
+                        Ok(false) => json!({ "action": "wait", "attemptId": attempt.id }),
+                        Err(error) => {
+                            json!({ "action": "failed", "attemptId": attempt.id, "error": error })
+                        }
+                        Ok(true) => unreachable!(),
+                    });
                     self.attempt = None;
                     self.pending_id = None;
                     self.owner = None;

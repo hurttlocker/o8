@@ -69,6 +69,7 @@ import { fastForwardBaseBranch } from '@/lib/lane/operator-checkout-merge';
 import { withSessionMergePublication } from '@/lib/orchestrator/session-merge-restriction';
 import { canonicalRepoRoot } from '@/lib/worktree/root-layout';
 import { captureWorkspaceMaterializationSnapshot } from '@/lib/workspace/workspace-materialization-retirement';
+import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
 
 const BASE_ADVANCED_RETRY_LIMIT = 3;
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
@@ -401,18 +402,26 @@ async function retryBaseAdvancedAfterRebase(
 }
 
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
-  const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
-  const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
-  const result = await withRepoActionRecovery(
-    canonicalRepoPath,
-    {
-      laneId: input.command.laneId,
-      packetId: input.lane.packetId,
-      maxWaitMs: input.repoActionLeaseMaxWaitMs,
-    },
-    () => performWorktreeSideMergeInner(canonicalInput),
-  );
-  return settleReturnedMergeState(input.command.laneId, result, input.actor);
+  let admission;
+  try { admission = reserveWorkLaunch(`Merge ${input.command.laneId}`); }
+  catch (error) { return { ok: false, laneId: input.command.laneId, reason: 'app_restart_pending',
+    note: error instanceof Error ? error.message : 'Merge admission is unavailable.' }; }
+  // Keep this reader unacknowledged by a PID: even force cannot interrupt a
+  // publication. It owns admission through repository and lane settlement.
+  try {
+    const canonicalRepoPath = canonicalRepoRoot(input.command.canonicalRepoPath ?? input.lane.repoPath);
+    const canonicalInput = canonicalRepoPath === input.lane.repoPath ? input : { ...input, lane: { ...input.lane, repoPath: canonicalRepoPath } };
+    const result = await withRepoActionRecovery(
+      canonicalRepoPath,
+      {
+        laneId: input.command.laneId,
+        packetId: input.lane.packetId,
+        maxWaitMs: input.repoActionLeaseMaxWaitMs,
+      },
+      () => performWorktreeSideMergeInner(canonicalInput),
+    );
+    return settleReturnedMergeState(input.command.laneId, result, input.actor);
+  } finally { admission.release(); }
 }
 
 async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {

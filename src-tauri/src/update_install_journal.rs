@@ -34,6 +34,18 @@ impl InstallJournal {
         install: impl FnOnce() -> Result<(), String>,
         after_install: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
+        self.install_if_admitted(version, || install().map(|_| true), after_install)
+            .map(|_| ())
+    }
+
+    /// False is a proven admission refusal before any installer was launched.
+    /// Only that result may remove the marker; errors and interruption keep it.
+    pub fn install_if_admitted(
+        &self,
+        version: &str,
+        install: impl FnOnce() -> Result<bool, String>,
+        after_install: impl FnOnce() -> Result<(), String>,
+    ) -> Result<bool, String> {
         self.check(version)?;
         let path = self.path(version)?;
         std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -46,7 +58,16 @@ impl InstallJournal {
         file.write_all(b"{\"outcome\":\"attempting\"}")
             .and_then(|_| file.sync_all())
             .map_err(|e| e.to_string())?;
-        let result = install().and_then(|value| after_install().map(|_| value));
+        let result = install().and_then(|installed| {
+            if installed {
+                after_install()?;
+            }
+            Ok(installed)
+        });
+        if result == Ok(false) {
+            std::fs::remove_file(path).map_err(|error| error.to_string())?;
+            return Ok(false);
+        }
         // The pre-install marker already suppresses a retry if this write or the process fails.
         let _ = std::fs::write(
             path,

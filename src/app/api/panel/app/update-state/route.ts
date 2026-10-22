@@ -42,8 +42,8 @@ export async function POST(request: Request) {
   // An install outcome from the webview (#3588), separate from check results.
   if (isRecord(body) && isRecord(body.install)) {
     const { outcome, version, error } = body.install;
-    if (outcome !== 'started' && outcome !== 'installed' && outcome !== 'failed') {
-      return invalidState('invalid_install_outcome', 'install.outcome must be started, installed, or failed.');
+    if (outcome !== 'started' && outcome !== 'installed' && outcome !== 'failed' && outcome !== 'cancelled') {
+      return invalidState('invalid_install_outcome', 'install.outcome must be started, installed, failed, or cancelled.');
     }
     recoverStoppedNativeTask();
     if (['installing', 'restarting'].includes(getAppUpdateState().autoApply?.phase ?? '')) {

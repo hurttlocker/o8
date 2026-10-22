@@ -50,3 +50,36 @@ it('retains an uncertain PTY lease when recording the already spawned PID fails'
   exited?.();
   expect(readdirSync(directory)).toHaveLength(0);
 });
+
+it('settles a failed dashboard creation before allowing another restart', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { createDashTmuxSessionSync } = await import('@/lib/ws-server/dash-terminal-persistence');
+  const execFileSync = vi.fn(() => { throw Object.assign(new Error('tmux did not create a session'), { status: 1 }); });
+  expect(createDashTmuxSessionSync({ enabled: true, sessionName: 'failed-dash', cols: 80, rows: 24,
+    cwd: root, shell: 'sh', env: { NODE_ENV: 'test' } }, { resolveTmuxBinary: () => 'tmux', execFileSync,
+    recordHealth: vi.fn(), resolveProfileOwnerId: () => 'fixture' })).toBe(false);
+  expect(readdirSync(join(root, 'work-launches'))).toEqual([]);
+});
+
+it.each(['timeout', 'setup'])('retains the captured process when tmux %s follows a successful shell start', async failure => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { createDashTmuxSessionSync } = await import('@/lib/ws-server/dash-terminal-persistence');
+  const execFileSync = vi.fn((_file: unknown, args: readonly string[]) => {
+    if (args.includes('has-session')) throw Object.assign(new Error('absent'), { status: 1 });
+    if (args.includes('new-session')) {
+      if (failure === 'timeout') throw Object.assign(new Error('timed out after spawn'), { signal: 'SIGTERM', status: null });
+      return String(process.pid);
+    }
+    if (args.includes('display-message')) return String(process.pid);
+    if (args.includes('set-option')) throw new Error('setup failed');
+    return '';
+  });
+  expect(createDashTmuxSessionSync({ enabled: true, sessionName: `partial-${failure}`, cols: 80, rows: 24,
+    cwd: root, shell: 'sh', env: { NODE_ENV: 'test' } }, { resolveTmuxBinary: () => 'tmux', execFileSync: execFileSync as never,
+    recordHealth: vi.fn(), resolveProfileOwnerId: () => 'fixture' })).toBe(false);
+  const directory = join(root, 'work-launches');
+  const files = readdirSync(directory);
+  expect(files).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(directory, files[0]), 'utf8')).pid).toBe(process.pid);
+  rmSync(join(directory, files[0]));
+});

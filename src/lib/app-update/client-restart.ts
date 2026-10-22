@@ -113,11 +113,27 @@ export async function installUpdateAndRestart(
   let receivedBytes = 0;
   let totalBytes: number | null = null;
   options.onProgress?.({ stage: 'downloading', receivedBytes, totalBytes });
-  await result.downloadAndInstall((event) => {
+  const { invoke, Channel } = await import('@tauri-apps/api/core');
+  const channel = new Channel<import('@tauri-apps/plugin-updater').DownloadEvent>();
+  channel.onmessage = (event) => {
     if (event.event === 'Started') totalBytes = event.data.contentLength ?? null;
     else if (event.event === 'Progress') receivedBytes += event.data.chunkLength;
     options.onProgress?.({ stage: event.event === 'Finished' ? 'installing' : 'downloading', receivedBytes, totalBytes });
-  });
+  };
+  const downloadedRid = await invoke<number>('download_app_update', { rid: result.rid, onEvent: channel });
+  try {
+    if (result.installExits) {
+      // Windows exits in the native installer. Confirm against fresh work after
+      // download, then pass that consent to its final native exit guard.
+      const { waitForConnectedCliUpdates } = await import('./update-hub-client');
+      await waitForConnectedCliUpdates();
+      if (options.beforeRestart && !(await options.beforeRestart())) return { installed: false, version: result.version };
+    }
+    await invoke('install_app_update', { rid: downloadedRid,
+      force: (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true });
+  } finally {
+    await invoke('discard_app_update_download', { rid: downloadedRid }).catch(() => {});
+  }
   options.onProgress?.({ stage: 'restarting', receivedBytes, totalBytes });
   const restarted = await relaunchInstalledUpdate(options);
   return { installed: true, version: result.version, restartDeferred: !restarted };

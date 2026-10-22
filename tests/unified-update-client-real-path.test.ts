@@ -8,10 +8,12 @@ vi.mock('@/lib/app-update/check', () => ({ check: async () => fixture.hasUpdate 
   version: '0.1.902', downloadAndInstall: async () => { fixture.calls.push('app-download'); fixture.download(); },
 } : null }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string) => {
+  if (command === 'download_app_update') { fixture.calls.push('app-download'); fixture.download(); return 23; }
+  if (command === 'install_app_update' || command === 'discard_app_update_download') return;
   if (command === 'prepare_app_restart') { fixture.calls.push('reserve-restart'); return 'native-reservation'; }
   if (command !== 'restart_app') throw new Error(`Unexpected native command: ${command}`);
   fixture.calls.push('restart'); fixture.restart();
-} }));
+}, Channel: class { onmessage?: unknown } }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: fixture.restart }));
 const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
 beforeEach(() => {

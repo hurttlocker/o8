@@ -1,20 +1,22 @@
 // Compile the production command without starting the desktop app or sidecars.
 #[path = "../../../../src-tauri/src/launch_updater.rs"]
 mod launch_updater;
-#[path = "../../../../src-tauri/src/update_ping.rs"]
-mod update_ping;
 #[path = "../../../../src-tauri/src/restart_job_drain.rs"]
 mod restart_job_drain;
+#[path = "../../../../src-tauri/src/update_ping.rs"]
+mod update_ping;
 fn resolve_ws_token() -> String {
     "scheduler-fixture".into()
 }
 
 #[cfg(test)]
 mod tests {
-    mod scheduler_tests;
     mod auto_apply_failure_tests;
+    mod download_timeout_tests;
     mod install_journal_tests;
     mod production_install_tests;
+    mod scheduler_tests;
+    mod windows_install_tests;
     use super::update_ping;
     use std::{
         collections::BTreeMap,
@@ -129,7 +131,12 @@ mod tests {
         let app = mock_builder()
             .plugin(tauri_plugin_store::Builder::default().build())
             .plugin(tauri_plugin_updater::Builder::new().build())
-            .invoke_handler(tauri::generate_handler![update_ping::check_app_update])
+            .invoke_handler(tauri::generate_handler![
+                update_ping::check_app_update,
+                update_ping::download_app_update,
+                update_ping::install_app_update,
+                update_ping::discard_app_update_download
+            ])
             .build(context)
             .unwrap();
         app
@@ -165,13 +172,13 @@ mod tests {
         // This is the actual resource consumed by plugin:updater|download_and_install.
         let update = webview
             .resources_table()
-            .get::<tauri_plugin_updater::Update>(value["rid"].as_u64().unwrap() as u32)
+            .get::<update_ping::CheckedUpdate>(value["rid"].as_u64().unwrap() as u32)
             .unwrap();
         assert!(
-            update.headers.is_empty(),
+            update.update.headers.is_empty(),
             "ping ID must never accompany downloads"
         );
-        assert_eq!(update.signature, "fixture-signature");
+        assert_eq!(update.update.signature, "fixture-signature");
         assert_eq!(value["date"], "2026-09-30T12:00:00Z");
         value
     }

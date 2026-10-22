@@ -108,8 +108,19 @@ export function recordAutoApply(autoApply: AppUpdateAutoApplyState | null): AppU
   return state;
 }
 
+/** The native download ended without an installation effect. Release its claim. */
+export function recordAutoApplyWait(attemptId: string): void {
+  if (state.autoApply?.attemptId !== attemptId || state.autoApply.installed) return;
+  state = { ...state, lastInstall: state.lastInstall?.version === state.autoApply.version ? null : state.lastInstall,
+    autoApply: { ...state.autoApply, attemptId: null, phase: 'waiting', error: null, manualRetryRequired: false } };
+}
+
 /** Records the start or the failure of an install, with the error message for a failure. */
-export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed' | 'failed'; version?: string | null; error?: string | null }): AppUpdateState {
+export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed' | 'failed' | 'cancelled'; version?: string | null; error?: string | null }): AppUpdateState {
+  if (update.outcome === 'cancelled') {
+    if (state.lastInstall?.outcome === 'started' && state.lastInstall.version === (update.version ?? null)) state = { ...state, lastInstall: null };
+    return state;
+  }
   state = {
     ...state,
     autoApply: update.outcome === 'started' ? null : state.autoApply,

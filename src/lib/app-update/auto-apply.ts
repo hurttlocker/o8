@@ -7,7 +7,7 @@ import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { checkFreshness, UPDATE_CHECK_INTERVAL_MS } from './fresh-check';
 import { getUpdateIdleWindow } from './idle-window';
 import { isSelfUpdatableInstall, normalizeInstallPlatform } from './install-target';
-import { getAppUpdateState, recordAppUpdateInstall, recordAutoApply } from './relaunch-state';
+import { getAppUpdateState, recordAppUpdateInstall, recordAutoApply, recordAutoApplyWait } from './relaunch-state';
 import { describeUpdateBlockers } from './update-card-view';
 
 /** Native owns the timer and effects. Every admission reads current persisted work. */
@@ -18,15 +18,21 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     const protectedWork = idle.active.cliInstallers?.length || idle.active.restartPending;
     return { allowed: !protectedWork && (input.force === true || idle.idle || idle.idleExceptParked), idle };
   }
-  recoverStoppedNativeTask();
+  // A terminal wait report already proves the download ended without installing.
+  // Do not misreport its stopped-task receipt as an abandoned installation.
+  if (input.action !== 'wait') recoverStoppedNativeTask();
   const state = getAppUpdateState();
   const current = state.autoApply;
   const result = (allowed: boolean, extra: object = {}) => ({ allowed, state: getAppUpdateState(), ...extra });
-  if (input.action !== 'admit' && input.action !== 'install' && input.action !== 'restart' && input.action !== 'failed') {
+  if (input.action !== 'admit' && input.action !== 'install' && input.action !== 'restart' && input.action !== 'failed' && input.action !== 'wait') {
     return result(false, { error: { code: 'invalid_auto_apply_action' } });
   }
   if (input.action !== 'admit') {
     if (!current?.attemptId || input.attemptId !== current.attemptId) return result(false, { attemptMissing: true });
+    if (input.action === 'wait') {
+      recordAutoApplyWait(current.attemptId);
+      return result(false);
+    }
     if (input.action === 'failed') {
       const error = typeof input.error === 'string' ? input.error.slice(0, 1_000) : 'Native update failed.';
       recordAppUpdateInstall({ outcome: 'failed', version: current.version, error });

@@ -123,15 +123,18 @@ export function createDashTmuxSessionSync(
 
     const profileOwner = (dependencies.resolveProfileOwnerId ?? dashProfileOwnerId)();
     launch = reserveWorkLaunch(`Terminal ${input.sessionName}`);
-    dependencies.execFileSync(tmuxBin, dashTmuxArgs(
-      'new-session', '-d', '-s', input.sessionName,
+    const createdPane = dependencies.execFileSync(tmuxBin, dashTmuxArgs(
+      'new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),
       // tmux parses standalone semicolons even in execFile argv. Keep reviewed
       // arguments inside one shell script, quoting every byte as literal data.
       ...(input.command ? ['/bin/sh', '-c', `exec ${[input.command.file, ...input.command.args].map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ')}`] : [input.shell, '-l']),
       ...(input.retainExited ? [';', 'set-option', '-t', `${sessionTarget}:`, 'remain-on-exit', 'on'] : []),
-    ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env });
+    ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env, encoding: 'utf8' });
     created = true;
+    // Capture the process in the creation receipt before any setup can fail.
+    // A killed session then settles by PID liveness, even if setup threw.
+    launch.started(Number.parseInt(String(createdPane), 10));
     // Claim only a session this process created. Reusing legacy/foreign sessions
     // never grants automatic-retirement authority over their existing owner.
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
@@ -153,6 +156,24 @@ export function createDashTmuxSessionSync(
     console.log(`[persistent-terminals] created backing session: ${input.sessionName}`);
     return true;
   } catch (error) {
+    if (!created && launch) {
+      // A timed-out tmux client may already have created its detached shell.
+      // Reconcile that process before deciding the start had no effect.
+      try {
+        const pane = dependencies.execFileSync(tmuxBin, dashTmuxArgs('display-message', '-p', '-t', `${sessionTarget}:`, '#{pane_pid}'),
+          { windowsHide: true, timeout: 3000, encoding: 'utf8' });
+        const pid = Number.parseInt(String(pane), 10);
+        if (Number.isSafeInteger(pid) && pid > 0) { launch.started(pid); created = true; }
+      } catch { /* A separate absence check below distinguishes failure from uncertainty. */ }
+      if (!created) {
+        try {
+          dependencies.execFileSync(tmuxBin, dashTmuxArgs('has-session', '-t', sessionTarget), { windowsHide: true, timeout: 3000, stdio: 'ignore' });
+          created = true;
+        } catch (inspection) {
+          if ((inspection as { status?: number }).status === 1) launch.release();
+        }
+      }
+    }
     if (created) {
       try {
         dependencies.execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', sessionTarget), {

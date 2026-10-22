@@ -13,7 +13,7 @@ use std::{
 };
 use tauri::Manager;
 
-static SCHEDULER_ENV: Mutex<()> = Mutex::new(());
+pub(super) static SCHEDULER_ENV: Mutex<()> = Mutex::new(());
 
 struct FixtureEffects {
     app: tauri::AppHandle<tauri::test::MockRuntime>,

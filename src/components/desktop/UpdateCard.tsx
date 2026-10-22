@@ -34,7 +34,7 @@ import {
 import { subscribeRecordedUpdate } from '@/lib/app-update/recorded-update-client';
 
 /** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
-async function reportInstall(install: { outcome: 'started' | 'installed' | 'failed'; version: string | null; error?: string }) {
+async function reportInstall(install: { outcome: 'started' | 'installed' | 'failed' | 'cancelled'; version: string | null; error?: string }) {
   const response = await fetch('/api/panel/app/update-state', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -396,6 +396,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
           onProgress: setProgress,
         },
       );
+      if (!outcome.installed) await reportInstall({ outcome: 'cancelled', version: requestedVersion });
       if (outcome.downloadOpened) return;
       if (outcome.blocked) {
         // Kill-switch: this version was pulled post-release. Surface a quiet

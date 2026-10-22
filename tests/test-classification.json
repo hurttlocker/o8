@@ -5322,6 +5322,12 @@
       ]
     },
     {
+      "path": "tests/update-auto-apply-wait-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-check-state-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5337,6 +5343,22 @@
       ]
     },
     {
+      "path": "tests/update-install-entry-points-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/update-merge-reservation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/update-restart-parked-real-path.test.ts",
       "reasons": [
         "network-listener",
@@ -5348,6 +5370,7 @@
       "path": "tests/update-work-start-reservation.test.ts",
       "reasons": [
         "executable-fixture",
+        "process-signal",
         "terminal-host",
         "terminal-tool"
       ]

@@ -19,6 +19,7 @@ struct Service {
     base: String,
     events: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
+    admission: Arc<AtomicBool>,
 }
 impl Drop for Service {
     fn drop(&mut self) {
@@ -26,6 +27,8 @@ impl Drop for Service {
     }
 }
 fn service(valid: bool, pulled: bool, admission: bool) -> Service {
+    let admission = Arc::new(AtomicBool::new(admission));
+    let allowed_install = admission.clone();
     let socket = TcpListener::bind("127.0.0.1:0").unwrap();
     socket.set_nonblocking(true).unwrap();
     let base = format!("http://{}", socket.local_addr().unwrap());
@@ -74,7 +77,7 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
                 .unwrap()
                 .to_string();
             observed.lock().unwrap().push(path.clone());
-            let reply = if path == "/manifest" {
+            let reply = if path == "/manifest" || path.ends_with("/latest.json") {
                 serde_json::json!({"version":"0.2.0", "url": format!("{origin}/artifact"), "signature":
                     if valid { include_str!("../../artifacts/valid.signature.b64").trim() }
                     else { include_str!("../../artifacts/invalid.signature.b64").trim() }}).to_string().into_bytes()
@@ -97,7 +100,7 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
                 let allowed = if body["autoApply"]["action"] == "inspect-restart" {
                     true
                 } else {
-                    admission
+                    allowed_install.load(Ordering::SeqCst)
                 };
                 serde_json::json!({"allowed": allowed})
                     .to_string()
@@ -107,7 +110,12 @@ fn service(valid: bool, pulled: bool, admission: bool) -> Service {
             stream.write_all(&reply).unwrap();
         }
     });
-    Service { base, events, stop }
+    Service {
+        base,
+        events,
+        stop,
+        admission,
+    }
 }
 
 #[test]
@@ -154,14 +162,14 @@ fn production_install_boundary_uses_signed_artifact_health_admission_and_restart
                 .unwrap();
             effects.install_candidate(update, "fixture-attempt").await
         });
-        assert_eq!(outcome.is_ok(), valid && !pulled && admission);
+        assert_eq!(outcome == Ok(true), valid && !pulled && admission);
         assert_eq!(
             *cleanup.lock().unwrap(),
             0,
             "installation alone must not clean up on macOS"
         );
         let mut relaunches = 0;
-        if outcome.is_ok() {
+        if outcome == Ok(true) {
             assert_eq!(
                 std::fs::read_to_string(&executable).unwrap(),
                 "isolated updater fixture installed\n"
@@ -182,6 +190,38 @@ fn production_install_boundary_uses_signed_artifact_health_admission_and_restart
         } else {
             assert_eq!(std::fs::read_to_string(&executable).unwrap(), "old fixture");
             assert_eq!(relaunches, 0);
+        }
+        if valid && !pulled && !admission {
+            assert_eq!(
+                outcome,
+                Ok(false),
+                "temporary work is a wait, not an install failure"
+            );
+            assert!(!directory
+                .path()
+                .join("automatic-install-attempts/0.2.0.json")
+                .exists());
+            service.admission.store(true, Ordering::SeqCst);
+            let resumed = tauri::async_runtime::block_on(async {
+                let update = app
+                    .updater_builder()
+                    .endpoints(vec![format!("{}/manifest", service.base).parse().unwrap()])
+                    .unwrap()
+                    .pubkey(include_str!("../../artifacts/public-key.b64").trim())
+                    .executable_path(&executable)
+                    .build()
+                    .unwrap()
+                    .check()
+                    .await
+                    .unwrap()
+                    .unwrap();
+                effects.install_candidate(update, "retry-after-work").await
+            });
+            assert_eq!(resumed, Ok(true));
+            assert_eq!(
+                std::fs::read_to_string(&executable).unwrap(),
+                "isolated updater fixture installed\n"
+            );
         }
         if !valid {
             // The durable marker survives a replacement scheduler or application launch.
@@ -239,4 +279,82 @@ fn native_auto_apply_waits_for_task_ownership_storage_before_admission() {
         &effects,
     ));
     assert!(service.events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn webview_ipc_download_and_install_stage_signed_bytes_without_restarting() {
+    use tauri::{
+        test::{get_ipc_response, INVOKE_KEY},
+        WebviewWindowBuilder,
+    };
+    let service = service(true, false, true);
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("Fixture.app/Contents/MacOS/fixture");
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::write(&executable, "old fixture").unwrap();
+    let app = super::build_app(&service.base, &service.base, "0.1.0");
+    let view = WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let invoke = |command: &str, body: serde_json::Value| {
+        get_ipc_response(
+            &view,
+            tauri::webview::InvokeRequest {
+                cmd: command.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.into(),
+            },
+        )
+    };
+    let metadata = invoke("check_app_update", serde_json::json!({}))
+        .unwrap()
+        .deserialize::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(metadata["installExits"], false);
+    let mut checked = view
+        .resources_table()
+        .take::<crate::update_ping::CheckedUpdate>(metadata["rid"].as_u64().unwrap() as u32)
+        .unwrap();
+    // Redirect only the macOS replacement path into the fixture bundle. The
+    // production commands still own download, signature validation and install.
+    Arc::get_mut(&mut checked).unwrap().update = tauri::async_runtime::block_on(async {
+        app.updater_builder()
+            .endpoints(vec![format!("{}/manifest", service.base).parse().unwrap()])
+            .unwrap()
+            .pubkey(include_str!("../../artifacts/public-key.b64").trim())
+            .executable_path(&executable)
+            .build()
+            .unwrap()
+            .check()
+            .await
+            .unwrap()
+            .unwrap()
+    });
+    let rid = view.resources_table().add_arc(checked);
+    let downloaded = invoke(
+        "download_app_update",
+        serde_json::json!({"rid":rid,"onEvent":"__CHANNEL__:9"}),
+    )
+    .unwrap()
+    .deserialize::<u32>()
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&executable).unwrap(), "old fixture");
+    invoke(
+        "install_app_update",
+        serde_json::json!({"rid":downloaded,"force":false}),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&executable).unwrap(),
+        "isolated updater fixture installed\n"
+    );
+    assert!(invoke(
+        "install_app_update",
+        serde_json::json!({"rid":downloaded,"force":false})
+    )
+    .is_err());
 }
