@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PullRequestListItem } from '@/lib/github-broker/pull-request-list.types';
 import { RepositoryPullRequests } from './RepositoryPullRequests';
@@ -9,12 +10,21 @@ const sample = (number: number, author = 'operator'): PullRequestListItem => ({ 
 let host: HTMLDivElement;
 let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
-const render = (active = true, repoPath = '/workspace') => act(async () => root.render(createElement(RepositoryPullRequests, { repoPath, active })));
+let client: QueryClient;
+const settle = async () => {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+};
+const render = async (active = true, repoPath = '/workspace') => {
+  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(RepositoryPullRequests, { repoPath, active }))));
+  await settle();
+};
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 const rows = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button[aria-label^="PR #"]'));
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   fetchMock = vi.fn(async (input: string) => input === '/api/panel/github-status'
@@ -22,7 +32,7 @@ beforeEach(() => {
     : Response.json({ repo: 'example/repo', prs: Array.from({ length: 23 }, (_, index) => sample(index + 1, index < 20 ? 'operator' : 'other')), nextPage: null }));
   vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); });
 
 describe('workspace PR list', () => {
   it('shows branch dependencies through the layout control and preserves selection when returning', async () => {
@@ -49,6 +59,7 @@ describe('workspace PR list', () => {
     await act(async () => window.dispatchEvent(new CustomEvent('o8:pr-updated', { detail: { repo: 'example/other', number: 1 } })));
     expect(fetchMock).toHaveBeenCalledTimes(before);
     await act(async () => window.dispatchEvent(new CustomEvent('o8:pr-updated', { detail: { repo: 'example/repo', number: 1 } })));
+    await settle();
     expect(fetchMock).toHaveBeenCalledTimes(before + 1); expect(rows()).toHaveLength(20);
     expect(host.querySelector('[aria-current="true"]')?.getAttribute('aria-label')).toBe(selected); expect(scroller.scrollTop).toBe(150);
     await render(false);
@@ -141,6 +152,7 @@ describe('workspace PR list', () => {
     await act(async () => button('Sort pull requests').click());
     const oldest = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find((item) => item.textContent === 'Oldest')!;
     await act(async () => oldest.click());
+    await settle();
     expect(host.querySelector('[aria-current="true"]')?.getAttribute('aria-label')).toBe(selected);
   });
 
