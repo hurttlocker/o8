@@ -349,6 +349,7 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
       const currentAuthExit = findCurrentAuthExit(lane, events);
       const runtimeExited = currentAuthExit ? false : hasUnreconciledRuntimeExit(lane, events);
       const contextEvent = events.findLast((event) => event.verb === 'runtime_process_exit');
+      const provisionFailure = events.findLast((event) => event.verb === 'worktree_provision_failed');
       const failureMessage = currentAuthExit
         ? CODEX_AUTH_RECOVERY_MESSAGE
         : contextEvent?.payload.runtime === 'codex'
@@ -357,7 +358,9 @@ export function buildDomainLaneSummaries(packetIds?: ReadonlySet<string>): Domai
         && contextEvent.payload.runtimeOutcome === 'failed'
         ? (contextEvent.payload.authRecoveryRequired === true ? CODEX_AUTH_RECOVERY_MESSAGE
           : codexAuthRecoveryMessage(typeof contextEvent.payload.stderr === 'string' ? contextEvent.payload.stderr : ''))
-        : null;
+        : provisionFailure && lane.lastEventLabel === 'packet_worktree_provision_failed'
+          ? String(provisionFailure.payload.note ?? provisionFailure.payload.cause ?? 'Worktree provisioning failed')
+          : null;
       return {
         laneId: lane.id,
         packetId: lane.packetId!,

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Search } from './lucide-shims';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { useRepoIssues } from '@/lib/github-client';
 
 export interface LinkedIssueRef {
   repo: string;
@@ -16,14 +17,6 @@ interface RepoOption {
   name: string;
   slug: string;
   remoteUrl?: string | null;
-}
-
-interface IssueOption {
-  number: number;
-  title: string;
-  body?: string | null;
-  state?: string;
-  url?: string;
 }
 
 export function repoSlugFromRemoteUrl(remoteUrl?: string | null) {
@@ -69,10 +62,12 @@ export function IssueLinkPickerModal({
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<string>('');
-  const [issues, setIssues] = useState<IssueOption[]>([]);
-  const [issuesLoading, setIssuesLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const issuesQuery = useRepoIssues(open ? selectedRepo : null);
+  const issuesLoading = issuesQuery.isLoading;
+  const listError = error || issuesQuery.data?.error
+    || (issuesQuery.isError ? 'Unable to load GitHub issues for this repository.' : null);
 
   useEffect(() => {
     if (!open) return;
@@ -118,39 +113,6 @@ export function IssueLinkPickerModal({
   }, [open, preferredRepo?.remoteUrl, value?.repo]);
 
   useEffect(() => {
-    if (!open || !selectedRepo) return;
-    let active = true;
-    void (async () => {
-      if (active) {
-        setIssuesLoading(true);
-        setError(null);
-      }
-
-      try {
-        const response = await fetch(`/api/panel/issues?repo=${encodeURIComponent(selectedRepo)}`);
-        const data = await response.json() as { issues?: IssueOption[]; error?: string | null };
-        if (!active) return;
-        if (data.error) {
-          setError(data.error);
-        }
-        const nextIssues = (data.issues ?? []).filter((issue) => issue.state?.toLowerCase() === 'open');
-        setIssues(nextIssues);
-      } catch {
-        if (active) {
-          setIssues([]);
-          setError('Unable to load GitHub issues for this repository.');
-        }
-      } finally {
-        if (active) setIssuesLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [open, selectedRepo]);
-
-  useEffect(() => {
     if (!open) return;
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -160,13 +122,14 @@ export function IssueLinkPickerModal({
   }, [onClose, open]);
 
   const filteredIssues = useMemo(() => {
+    const issues = (issuesQuery.data?.issues ?? []).filter((issue) => issue.state?.toLowerCase() === 'open');
     const normalized = query.trim().toLowerCase();
     if (!normalized) return issues;
     return issues.filter((issue) => (
       issue.title.toLowerCase().includes(normalized)
       || String(issue.number).includes(normalized)
     ));
-  }, [issues, query]);
+  }, [issuesQuery.data?.issues, query]);
 
   if (!open || typeof document === 'undefined') return null;
 
@@ -408,7 +371,7 @@ export function IssueLinkPickerModal({
                   lineHeight: 1.5,
                 }}
               >
-                {error || 'No open issues matched this search.'}
+                {listError || 'No open issues matched this search.'}
               </div>
             )}
           </div>

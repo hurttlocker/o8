@@ -2506,6 +2506,18 @@
       ]
     },
     {
+      "path": "tests/finished-packet-retirement-cli-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "native-build",
+        "network-listener",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/fixed-reports-range.test.ts",
       "reasons": [
         "child-process",
@@ -2948,6 +2960,15 @@
         "child-process",
         "git-cli",
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/launch-provisioning-mission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -4894,6 +4915,12 @@
       "path": "tests/steer-packet-owned-resume.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/steer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {
