@@ -85,7 +85,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string) {
     return NextResponse.json({ ok: false, error: 'repoPath is required' }, { status: 400 });
   }
   if (!isolate && checkoutMode !== 'shared') {
-    return NextResponse.json({ ok: false, error: 'Shared checkout dispatch requires Fast mode and a parent orchestrator chat.' }, { status: 400 });
+    return NextResponse.json({ ok: false, error: 'Shared checkout dispatch requires Shared mode and a parent orchestrator chat.' }, { status: 400 });
   }
   // Generate a branch name from the task
   const slug = taskName

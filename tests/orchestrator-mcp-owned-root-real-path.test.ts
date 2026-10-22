@@ -10,7 +10,7 @@ import { toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
 import { toClaudeServersMap } from '@/lib/mcp/tool-spine/emit-claude';
 import { readSharedCheckoutTeam, recordSharedCheckoutMember, reserveSharedCheckoutMember } from '@/lib/orchestrator/shared-checkout-team';
 
-type ToolResult = { isError?: boolean; content: Array<{ text: string }> };
+type ToolResult = { isError?: boolean; content: Array<{ text: string }>; tools?: Array<{ name: string; description: string; inputSchema: { properties: Record<string, { description?: string }> } }> };
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 
@@ -22,7 +22,7 @@ function callTools(child: ChildProcessWithoutNullStreams) {
     const message = JSON.parse(line) as { id: number; result: ToolResult };
     pending.get(message.id)?.(message.result);
   });
-  return (name: string, args: Record<string, unknown> = {}) => new Promise<ToolResult>((resolve, reject) => {
+  return (name: string, args: Record<string, unknown> = {}, method = 'tools/call') => new Promise<ToolResult>((resolve, reject) => {
     const callId = ++id;
     const timer = setTimeout(() => {
       pending.delete(callId);
@@ -33,8 +33,8 @@ function callTools(child: ChildProcessWithoutNullStreams) {
       pending.delete(callId);
       resolve(result);
     });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: callId, method: 'tools/call',
-      params: { name, arguments: args } })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: callId, method,
+      params: method === 'tools/list' ? {} : { name, arguments: args } })}\n`);
   });
 }
 
@@ -101,6 +101,11 @@ describe('generated orchestration MCP owned-root identity', () => {
       return callTools(child);
     };
     const call = start();
+    const listed = await call('', {}, 'tools/list');
+    const launchTool = listed.tools!.find(tool => tool.name === 'cortex_launch_agent')!;
+    expect(launchTool.description).toContain('Shared workers share');
+    expect(launchTool.inputSchema.properties.checkoutMode.description).toContain('Shared mode');
+    expect(launchTool.inputSchema.properties.assignedPaths.description).toContain('Shared mode');
     const finish = { reviewSummary: 'Both read-only workers settled.', verification: 'Reviewed exact Git delta.' };
     expect((await call('cortex_finish_shared_team', finish)).isError).toBe(true);
     const status = JSON.parse((await call('cortex_shared_team_status')).content[0]!.text);
@@ -168,7 +173,9 @@ describe('generated orchestration MCP owned-root identity', () => {
       expect((await call('cortex_reconcile_shared_team', linked)).isError).toBe(true);
       unlinkSync(join(repoPath, 'link'));
     }
-    expect((await start()('cortex_finish_shared_team', finish)).isError).not.toBe(true);
+    const finished = await start()('cortex_finish_shared_team', finish);
+    expect(finished.isError).not.toBe(true);
+    expect(JSON.parse(finished.content[0]!.text).note).toContain('Shared team review');
     expect(readSharedCheckoutTeam(input)).toBeNull();
     expect({ head: git('rev-parse', 'HEAD'), status: git('status', '--porcelain'),
       diff: git('diff', '--binary', 'HEAD'), source: readFileSync(join(repoPath, 'existing.txt'), 'utf8') }).toEqual(before);
@@ -176,7 +183,9 @@ describe('generated orchestration MCP owned-root identity', () => {
     const receipt = JSON.parse(readFileSync(join(archive, readdirSync(archive)[0]!), 'utf8'));
     expect(receipt.baseHead).toBe(original.baseHead);
     expect(receipt.reconciliations).toHaveLength(process.platform === 'win32' ? 3 : 4);
-    expect(JSON.parse((await start()('cortex_shared_team_status')).content[0]!.text).team).toBeNull();
+    expect(JSON.parse((await start()('cortex_shared_team_status')).content[0]!.text)).toEqual({
+      team: null, note: 'No Shared workers have been launched from this chat.',
+    });
   }, 90_000);
 
   it('reads custom-root completion through stdio and retains absent or mismatched workers', async () => {

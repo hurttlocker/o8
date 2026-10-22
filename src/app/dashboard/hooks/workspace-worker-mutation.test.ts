@@ -3,7 +3,7 @@ import type { RealtimeEventEnvelope } from '@/lib/realtime/types';
 import { openWorkerFromMutation } from './workspace-worker-mutation';
 
 describe('native worker mutation bridge', () => {
-  it('opens a Fast launch in its parent split without a packet or lane', () => {
+  it('opens a Shared launch in its parent split without a packet or lane', () => {
     const openWorker = vi.fn(async () => {});
     const event = {
       channel: 'mutation', event: 'mutation.record',
@@ -18,7 +18,7 @@ describe('native worker mutation bridge', () => {
     } as RealtimeEventEnvelope;
     expect(openWorkerFromMutation(event, openWorker)).toBe(true);
     expect(openWorker).toHaveBeenCalledWith(expect.objectContaining({
-      sessionKey: 'codex-owned:fast-a', repoPath: '/repo/fast',
+      sessionKey: 'codex-owned:fast-a', repoPath: '/repo/fast', packetTitle: 'Shared worker',
       launchContext: expect.objectContaining({ parentThreadId: 'thoughts-fast-parent' }),
     }));
   });

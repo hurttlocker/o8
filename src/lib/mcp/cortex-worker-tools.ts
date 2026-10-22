@@ -66,7 +66,7 @@ export const CORTEX_WORKER_TOOLS = [
   {
     name: 'cortex_launch_agent',
     description:
-      'Launch a worker session for a new task. To start an existing prepared mission, call the operator dispatch_mission tool with its missionId; do not launch a worker to dispatch it. Isolated workers use governed packets; Fast workers share this chat’s checkout and appear beside the orchestrator. ' +
+      'Launch a worker session for a new task. To start an existing prepared mission, call the operator dispatch_mission tool with its missionId; do not launch a worker to dispatch it. Isolated workers use governed packets; Shared workers share this chat’s checkout and appear beside the orchestrator. ' +
       'Choose runtime/model per task from cortex_worker_catalog, honoring explicit choices in the conversation. Omitted choices use saved defaults; unavailable pins are refused. Returns the selected routing receipt ' +
       'plus a surfaceId you can use with cortex_steer_agent and cortex_read_transcript.',
     inputSchema: {
@@ -76,8 +76,8 @@ export const CORTEX_WORKER_TOOLS = [
         repoPath: { type: 'string', description: 'Absolute repo path. Defaults to the current repo.' },
         taskName: { type: 'string', description: 'Short task name shown in the UI.' },
         isolate: { type: 'boolean', description: 'Legacy isolation flag. False is accepted only with checkoutMode: "shared" from an o8 orchestrator chat.' },
-        checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Fast mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
-        assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Fast mode: exact non-overlapping relative files or directories this worker owns.' },
+        checkoutMode: { type: 'string', enum: ['isolated', 'shared'], description: 'Use shared only when the operator selected Shared mode. Workers then edit the orchestrator checkout together; the orchestrator owns the final review and commit.' },
+        assignedPaths: { type: 'array', items: { type: 'string' }, description: 'Required in Shared mode: exact non-overlapping relative files or directories this worker owns.' },
         runtime: {
           type: 'string',
           enum: listDispatchableRuntimes(),
