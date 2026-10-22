@@ -50,7 +50,7 @@ writeFileSync(binary, `#!${process.execPath}
 import { appendFileSync, readFileSync } from 'node:fs';
 import readline from 'node:readline';
 const argv = process.argv.slice(2);
-if (argv.includes('--version')) { console.log('pi 1.0.2'); process.exit(0); }
+if (argv.includes('--version')) { console.log('pi ' + (process.env.PI_FIXTURE_VERSION || '1.0.2')); process.exit(0); }
 const session = argv[argv.indexOf('--session') + 1];
 appendFileSync(process.env.PI_FIXTURE_RECEIPT, JSON.stringify({ argv, cwd: process.cwd(), agentDir: process.env.PI_CODING_AGENT_DIR, sessionDir: process.env.PI_CODING_AGENT_SESSION_DIR, pid: process.pid }) + '\\n');
 const input = readline.createInterface({ input: process.stdin });
@@ -132,6 +132,128 @@ describe.skipIf(process.platform === 'win32')('existing Pi setup through worker 
     });
     expect(JSON.stringify(payload)).not.toContain(marker);
     expect(await getOperatorDefaults()).toEqual(before);
+  });
+
+  it('reports the warming default, configured modes and old Pi versions through inventory', async () => {
+    const file = path.join(agentDir, 'settings.json');
+    const saved = readFileSync(file);
+    const priorVersion = process.env.PI_FIXTURE_VERSION;
+    try {
+      for (const mode of [undefined, 'off', 'streaming', 'idle']) {
+        writeFileSync(file, JSON.stringify({ cacheWarming: mode }));
+        const status = await detectRuntimeAuthStatus('pi');
+        expect(status).toMatchObject({ piSetup: { cacheWarming: mode ?? 'streaming', cacheWarmingSupported: true } });
+      }
+      process.env.PI_FIXTURE_VERSION = '0.85.9';
+      invalidateCliCache('pi');
+      expect(await detectRuntimeAuthStatus('pi')).toMatchObject({ piSetup: { version: '0.85.9', cacheWarmingSupported: false } });
+    } finally {
+      writeFileSync(file, saved);
+      if (priorVersion === undefined) delete process.env.PI_FIXTURE_VERSION;
+      else process.env.PI_FIXTURE_VERSION = priorVersion;
+      invalidateCliCache('pi');
+    }
+  });
+
+  it('writes only the global warming setting through the actual route and rereads it', async () => {
+    const { POST } = await import('@/app/api/setup/pi/cache-warming/route');
+    const file = path.join(agentDir, 'settings.json');
+    const saved = readFileSync(file);
+    const raw = '{\r\n\t"nested": { "cacheWarming": "off" },\r\n\t"cacheWarming" : "streaming",\r\n\t"other": [1, 2]\r\n}\r\n';
+    try {
+      writeFileSync(file, raw);
+      const response = await POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+        method: 'POST', body: JSON.stringify({ cacheWarming: 'idle' }),
+      }));
+      expect(response.status).toBe(200);
+      expect(readFileSync(file, 'utf8')).toBe(raw.replace('"cacheWarming" : "streaming"', '"cacheWarming" : "idle"'));
+      expect(await detectRuntimeAuthStatus('pi')).toMatchObject({ piSetup: { cacheWarming: 'idle' } });
+      writeFileSync(file, '{\n  "other": 42\n}\n');
+      const added = await POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+        method: 'POST', body: JSON.stringify({ cacheWarming: 'off' }),
+      }));
+      expect(added.status).toBe(200);
+      expect(readFileSync(file, 'utf8')).toBe('{\n  "other": 42,\n  "cacheWarming": "off"\n}\n');
+      expect(readFileSync(path.join(cwd, '.pi', 'settings.json'), 'utf8')).toBe(JSON.stringify({ defaultProvider: 'project-provider' }));
+      // Escaped top-level keys still refer to the same setting; nested objects
+      // must not be mistaken for the global mode.
+      writeFileSync(file, '{"cache\\u0057arming": {"old": true}, "keep": [1, 2]}');
+      expect((await POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+        method: 'POST', body: JSON.stringify({ cacheWarming: 'streaming' }),
+      }))).status).toBe(200);
+      expect(readFileSync(file, 'utf8')).toBe('{"cache\\u0057arming": "streaming", "keep": [1, 2]}');
+      rmSync(file);
+      expect((await POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+        method: 'POST', body: JSON.stringify({ cacheWarming: 'off' }),
+      }))).status).toBe(200);
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ cacheWarming: 'off' });
+    } finally { writeFileSync(file, saved); }
+  });
+
+  it('refuses symlinked, non-regular, malformed and oversized settings without changing them', async () => {
+    const { POST } = await import('@/app/api/setup/pi/cache-warming/route');
+    const file = path.join(agentDir, 'settings.json');
+    const saved = readFileSync(file);
+    const target = path.join(root, 'linked-settings.json');
+    writeFileSync(target, '{"cacheWarming":"off"}');
+    const post = () => POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+      method: 'POST', body: JSON.stringify({ cacheWarming: 'idle' }),
+    }));
+    try {
+      rmSync(file);
+      symlinkSync(target, file);
+      expect((await post()).status).toBe(409);
+      expect(readFileSync(target, 'utf8')).toBe('{"cacheWarming":"off"}');
+      rmSync(file);
+      mkdirSync(file);
+      expect((await post()).status).toBe(409);
+      rmSync(file, { recursive: true });
+      for (const raw of ['{broken', '[]', '{"cacheWarming":"off","cacheWarming":"idle"}', 'x'.repeat(65_537)]) {
+        writeFileSync(file, raw);
+        expect((await post()).status).toBe(409);
+        expect(readFileSync(file, 'utf8')).toBe(raw);
+      }
+    } finally { rmSync(file, { recursive: true, force: true }); writeFileSync(file, saved); }
+  });
+
+  it('preserves malformed UTF-8 and concurrent external edits by refusing the write', async () => {
+    const { POST } = await import('@/app/api/setup/pi/cache-warming/route');
+    const file = path.join(agentDir, 'settings.json');
+    const saved = readFileSync(file);
+    const post = () => POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+      method: 'POST', body: JSON.stringify({ cacheWarming: 'idle' }),
+    }));
+    const originalOpen = vi.mocked(fs.open).getMockImplementation()!;
+    try {
+      const invalid = Buffer.concat([Buffer.from('{"other":"'), Buffer.from([0xff]), Buffer.from('","cacheWarming":"off"}')]);
+      writeFileSync(file, invalid);
+      expect((await post()).status).toBe(409);
+      expect(readFileSync(file)).toEqual(invalid);
+      writeFileSync(file, '{"cacheWarming":"off"}');
+      vi.mocked(fs.open).mockImplementation(async (...args) => {
+        const handle = await originalOpen(...args);
+        if (String(args[0]).endsWith('.tmp')) writeFileSync(file, '{"external":"new setting"}');
+        return handle;
+      });
+      expect((await post()).status).toBe(409);
+      expect(readFileSync(file, 'utf8')).toBe('{"external":"new setting"}');
+    } finally { vi.mocked(fs.open).mockImplementation(originalOpen); writeFileSync(file, saved); }
+  });
+
+  it('rejects invalid choices and unsupported Pi versions without a settings write', async () => {
+    const { POST } = await import('@/app/api/setup/pi/cache-warming/route');
+    const file = path.join(agentDir, 'settings.json');
+    const saved = readFileSync(file);
+    const post = (cacheWarming: unknown) => POST(new Request('http://localhost/api/setup/pi/cache-warming', {
+      method: 'POST', body: JSON.stringify({ cacheWarming }),
+    }));
+    try {
+      expect((await post('yes')).status).toBe(400);
+      process.env.PI_FIXTURE_VERSION = '0.85.9';
+      invalidateCliCache('pi');
+      expect((await post('idle')).status).toBe(409);
+      expect(readFileSync(file)).toEqual(saved);
+    } finally { delete process.env.PI_FIXTURE_VERSION; invalidateCliCache('pi'); }
   });
 
   it('launches an o8 worker through the user binary, environment and cwd without granting trust', async () => {

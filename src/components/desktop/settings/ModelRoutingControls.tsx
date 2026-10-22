@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRuntimeInventory } from '../onboarding/useRuntimeInventory';
+import { PiCacheWarmingControl } from './PiCacheWarmingControl';
 import { WorkerPoolSettings } from './WorkerPoolSettings';
 import { RuntimeToolsPanel } from '../onboarding/RuntimeToolsPanel';
 import { AcpModelPickerPopover } from './AcpModelPickerPopover';
@@ -206,7 +207,7 @@ export function ModelRoutingControls({ data, busyField, updateField, advanced = 
           <WorkerPoolSettings data={data} inventory={tools.inventory} busy={busyField === 'workerRuntimes'} onChange={pool => updateField('workerRuntimes', pool)} />
           {piSetup?.detected ? <SettingsRow
             label="Your Pi setup"
-            subtitle={<span style={{ overflowWrap: 'anywhere' }}>{`${piSetup.binaryPath ?? 'CLI not found'}${piSetup.version ? ` (v${piSetup.version})` : ''}. ${piSetup.provider ?? 'Provider not set'} / ${piSetup.model ?? 'Model not set'}. ${piSetup.extensions} extensions, ${piSetup.skills} skills, ${piSetup.sessions} sessions${piSetup.countsTruncated ? ' (scan limit reached)' : ''}. Credentials ${piSetup.credentialsPresent ? 'present' : 'not found'}. Choose Pi in Default worker to use this setup.`}</span>}
+            subtitle={<div style={{ overflowWrap: 'anywhere' }}>{`${piSetup.binaryPath ?? 'CLI not found'}${piSetup.version ? ` (v${piSetup.version})` : ''}. ${piSetup.provider ?? 'Provider not set'} / ${piSetup.model ?? 'Model not set'}. ${piSetup.extensions} extensions, ${piSetup.skills} skills, ${piSetup.sessions} sessions${piSetup.countsTruncated ? ' (scan limit reached)' : ''}. Credentials ${piSetup.credentialsPresent ? 'present' : 'not found'}. Choose Pi in Default worker to use this setup.`}<PiCacheWarmingControl key={`${piSetup.agentDir}:${piSetup.version}:${piSetup.cacheWarming}`} setup={piSetup} onSaved={tools.refresh} /></div>}
           /> : null}
       </SettingsGroup>
     </section>
