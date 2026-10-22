@@ -133,6 +133,8 @@ export async function prepareLaunchWorktree(
   const isolate = await shouldIsolate(opts);
   if (!isolate) return null;
 
+  const { captureLaunchLaneValidation } = await import('./launch-lane');
+  const beforeReady = captureLaunchLaneValidation(opts);
   const mgr = getManager(opts.repoRoot);
 
   // #608 — claude-code packets now go through the same managed worktree path
@@ -151,6 +153,7 @@ export async function prepareLaunchWorktree(
     packetId: opts.packetId,
     laneId: opts.laneId,
     storageAdmissionReservationId: opts.storageAdmissionReservationId,
+    beforeReady,
     managed: opts.agentType === 'claude-code' ? true : undefined,
   });
 

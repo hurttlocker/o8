@@ -13,6 +13,9 @@ vi.mock('@/lib/runtime/inventory', () => ({
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
+vi.mock('@/lib/orchestrator/headless-loop', () => ({
+  runHeadlessSprintTick: vi.fn(async () => ({ launched: 0, active: 0 })),
+}));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-steer-run-admission-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -28,6 +31,7 @@ const { findManagedRun } = await import('@/lib/runtimes/managed-runs/registry');
 const steerRoute = await import('@/app/api/orchestrator/steer-packet/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
 const runsRoute = await import('@/app/api/panel/managed-runs/route');
+const tickRoute = await import('@/app/api/orchestrator/headless-tick/route');
 
 let sequence = 0;
 function fixture(operatorStopped = false) {
@@ -77,6 +81,30 @@ beforeEach(() => perform.mockReset());
 afterAll(() => { closeDb(); rmSync(dataDir, { recursive: true, force: true }); });
 
 describe('steered-turn managed-run admission through production routes', () => {
+  it('admits a delayed steer after the previous turn exits', async () => {
+    const { packet, lane, sessionKey } = fixture();
+    perform.mockResolvedValueOnce({ ok: false, status: 'unavailable', reason: 'surface_not_ready' });
+    expect((await steer(packet.id)).status).toBe(200);
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, exitCode: 0 });
+    perform.mockResolvedValue({ ok: true, status: 'queued', sessionKey, note: 'accepted' });
+    expect((await tickRoute.POST(request('/api/orchestrator/headless-tick', {}))).status).toBe(200);
+    closeDb();
+    const response = await register(packet);
+    expect(response.status, await response.clone().text()).toBe(200);
+  });
+
+  it('ignores an old run exit during delivery but closes admission on the accepted run exit', async () => {
+    const { packet, lane, sessionKey } = fixture();
+    perform.mockImplementationOnce(async () => {
+      recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, runId: 'old-turn', exitCode: 0 });
+      return { ok: true, status: 'queued', sessionKey, runId: 'accepted-turn', note: 'accepted' };
+    });
+    expect((await steer(packet.id)).status).toBe(200);
+    expect((await register(packet)).status).toBe(200);
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', { surfaceId: sessionKey, runId: 'accepted-turn', exitCode: 0 });
+    expect((await register(packet, 'afterAcceptedExit')).status).toBe(409);
+  });
+
   it.each(['awaiting_review', 'released'] as const)('admits an accepted %s turn across reopen, then refuses its exit', async (priorStatus) => {
     const { packet, lane, sessionKey } = fixture();
     if (priorStatus === 'released') {

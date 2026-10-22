@@ -98,7 +98,6 @@ async function isWorktreeDirty(worktreePath: string): Promise<'clean' | 'dirty' 
  */
 export async function removeMergedWorktree(
   lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>,
-  options: { preserveUncommittedSource?: true } = {},
 ): Promise<RemoveMergedWorktreeResult> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -130,7 +129,8 @@ export async function removeMergedWorktree(
       // Retirement records the real path; on macOS /tmp and the like resolve elsewhere.
       if (orphanCloseOwner(currentLane.id) && orphanCloseRetirement(currentLane)) {
         const removed = await getWorktreeManager(normalizedRepo).cleanup(path.basename(normalizedWorktree), {
-          force: true, deleteBranch: false, workspaceRetirementAction: 'discard',
+          force: true, deleteBranch: false,
+          workspaceRetirementAction: getWorkspaceRetirementAction(normalizedWorktree) ?? 'discard',
         });
         return removed ? { removed: true } : { removed: false, reason: 'retirement-refused', detail: orphanCloseRefusal(lane.id) };
       }
@@ -149,10 +149,10 @@ export async function removeMergedWorktree(
       return { removed: false, reason: 'ownership-unavailable' };
     }
 
-    // Post-merge callers require clean source. Explicit unmerged Close uses
-    // the manager's exact-owner preservation boundary to bank source first.
+    // Every retirement path requires clean source. The manager preserves the
+    // committed head and unique artifacts before removing the exact checkout.
     const cleanliness = await isWorktreeDirty(worktreePath);
-    if (cleanliness === 'dirty' && options.preserveUncommittedSource !== true) {
+    if (cleanliness === 'dirty') {
       console.log(
         '[worktree-cleanup]',
         `Lane ${lane.id} worktree at ${worktreePath} has uncommitted changes — skipping force-remove.`,
@@ -166,8 +166,8 @@ export async function removeMergedWorktree(
     const removed = await getWorktreeManager(normalizedRepo).cleanup(managed.metadata.id, {
       force: true,
       deleteBranch: false,
-      workspaceRetirementAction: orphanCloseOwner(currentLane.id) ? 'discard'
-        : getWorkspaceRetirementAction(normalizedWorktree) ?? 'cleanup',
+      workspaceRetirementAction: getWorkspaceRetirementAction(normalizedWorktree)
+        ?? (orphanCloseOwner(currentLane.id) ? 'discard' : 'cleanup'),
     });
     return removed ? { removed: true } : { removed: false, reason: 'retirement-refused', detail: orphanCloseRefusal(lane.id) };
   } catch (error) {

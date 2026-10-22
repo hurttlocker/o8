@@ -1,3 +1,4 @@
+import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
@@ -605,6 +606,7 @@ export function createOwnedRunController({
       : getOrCreateLocalWorkerToken();
     const spawnEnv = {
       ...adapterEnv,
+      ...packetCargoEnvironment(session),
       // Some coding CLIs trust the inherited PWD instead of asking the OS for
       // the spawned process cwd. Keep both values aligned so a worker cannot
       // silently operate in the o8 server's own checkout.

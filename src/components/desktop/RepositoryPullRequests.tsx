@@ -1,14 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { relativeTimeLabel } from '@/lib/format/relative-time';
 import { pullRequestStackRows } from '@/lib/github-broker/pull-request-stacks';
-import type { PullRequestListItem, PullRequestListPage, PullRequestListState, PullRequestListSort } from '@/lib/github-broker/pull-request-list.types';
+import type { PullRequestListItem, PullRequestListState, PullRequestListSort } from '@/lib/github-broker/pull-request-list.types';
 import { ArrowDown, ArrowUp, CheckCircle2, CircleUser, Clock, Eye, GitMerge, GitPullRequest, GitPullRequestDraft, Layers, Pencil, RefreshCw, Search, XCircle } from './lucide-shims';
 import { PrLabel } from './pr-panel/PrLabel';
 import { EMPTY_PR_FILTERS, PR_CONTROL, PullRequestFilters, PullRequestPicker } from './pull-requests/controls';
+import { useRepositoryPullRequests } from './pull-requests/useRepositoryPullRequests';
 
 type DisplayState = PullRequestListState | 'merged';
 type PersonalScope = 'all' | 'authored' | 'reviewing' | 'others';
@@ -23,66 +24,11 @@ export function RepositoryPullRequests({ repoPath, active = true }: { repoPath: 
   const [query, setQuery] = useState('');
   const [selection, setSelection] = useState<{ repoPath: string | null; number: number } | null>(null);
   const selected = selection && selection.repoPath === repoPath ? selection.number : null;
-  const [data, setData] = useState<PullRequestListPage | null>(null);
   const [viewer, setViewer] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [retryPage, setRetryPage] = useState(1);
   const [, setClockTick] = useState(0);
   const listId = useId();
   const apiState = state === 'merged' ? 'closed' : state;
-  const scope = `${repoPath ?? ''}:${apiState}:${sort}`;
-  const loadedScope = useRef<string | null>(null);
-  const currentScope = useRef(scope);
-  currentScope.current = scope;
-  const request = useRef<AbortController | null>(null);
-
-  const load = useCallback(async (page: number) => {
-    if (!repoPath || !active) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    setLoading(true);
-    setError(null);
-    setRetryPage(page);
-    try {
-      const params = new URLSearchParams({ repoPath, view: 'list', state: apiState, sort, page: String(page) });
-      const response = await ipcFetch(`/api/panel/prs?${params}`, { signal: controller.signal });
-      const result = await response.json() as PullRequestListPage;
-      if (controller.signal.aborted || currentScope.current !== scope) return;
-      if (!response.ok || result.error) throw new Error(result.error || 'Pull requests could not be loaded. Try again.');
-      loadedScope.current = scope;
-      setData((previous) => page === 1 ? result : {
-        ...result,
-        statsUnavailable: previous?.statsUnavailable || result.statsUnavailable,
-        prs: [...(previous?.prs ?? []), ...result.prs.filter((pr) => !previous?.prs.some((item) => item.number === pr.number))],
-      });
-    } catch (cause) {
-      if (!controller.signal.aborted && currentScope.current === scope) setError(cause instanceof Error ? cause.message : 'Pull requests could not be loaded. Try again.');
-    } finally {
-      if (!controller.signal.aborted && request.current === controller) setLoading(false);
-    }
-  }, [active, apiState, repoPath, scope, sort]);
-
-  useEffect(() => {
-    if (!active) { request.current?.abort(); setLoading(false); return; }
-    if (loadedScope.current === scope) return;
-    loadedScope.current = null;
-    setData(null);
-    void load(1);
-    return () => request.current?.abort();
-  }, [active, load, scope]);
-
-  useEffect(() => {
-    const onUpdated = (event: Event) => {
-      const changed = (event as CustomEvent<{ repo: string }>).detail;
-      if (changed?.repo !== data?.repo) return;
-      loadedScope.current = null;
-      if (active) void load(1);
-    };
-    window.addEventListener('o8:pr-updated', onUpdated);
-    return () => window.removeEventListener('o8:pr-updated', onUpdated);
-  }, [active, data?.repo, load]);
+  const { data, loading, error, refresh, retry, loadMore } = useRepositoryPullRequests(repoPath, apiState, sort, active);
 
   useEffect(() => {
     if (!active) return;
@@ -162,7 +108,7 @@ export function RepositoryPullRequests({ repoPath, active = true }: { repoPath: 
         <PullRequestPicker label="Pull request state" value={state} onChange={setState} active={active} icon={state === 'merged' ? <GitMerge size={15} /> : state === 'all' ? <Layers size={15} /> : <GitPullRequest size={15} />} options={[{ value: 'open', label: 'Open', icon: <GitPullRequest size={16} /> }, { value: 'closed', label: 'Closed', icon: <GitPullRequest size={16} /> }, { value: 'merged', label: 'Merged', icon: <GitMerge size={16} /> }, { value: 'all', label: 'All', icon: <Layers size={16} /> }]} />
         <PullRequestPicker label="Pull request involvement" value={personalScope} onChange={setPersonalScope} active={active} icon={personalScope === 'authored' ? <Pencil size={15} /> : personalScope === 'reviewing' ? <Eye size={15} /> : <Layers size={15} />} disabled={!viewer} options={[{ value: 'all', label: 'All authors', icon: <Layers size={16} /> }, { value: 'authored', label: 'Authored', icon: <Pencil size={16} /> }, { value: 'reviewing', label: 'Review requested', icon: <Eye size={16} /> }, { value: 'others', label: 'Others', icon: <CircleUser size={16} /> }]} />
         <PullRequestPicker label="Pull request layout" value={layout} onChange={setLayout} active={active} icon={layout === 'stacks' ? <Layers size={15} /> : <CircleUser size={15} />} options={[{ value: 'authors', label: 'By author' }, { value: 'stacks', label: 'Branch stacks' }]} />
-        <button type="button" aria-label="Refresh pull requests" disabled={loading || !repoPath} onClick={() => void load(1)} style={{ ...PR_CONTROL, width: 36, padding: 0, cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.5 : 1 }}><RefreshCw size={15} /></button>
+        <button type="button" aria-label="Refresh pull requests" disabled={loading || !repoPath} onClick={() => void refresh()} style={{ ...PR_CONTROL, width: 36, padding: 0, cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.5 : 1 }}><RefreshCw size={15} /></button>
       </div>
       <div role="status" aria-live="polite" style={{ marginTop: 12, fontSize: 12, color: 'var(--t-text-muted)' }}>{loading ? data ? 'Refreshing pull requests…' : 'Reading pull requests from GitHub…' : data ? `${visible.length} shown · ${sortLabels[sort]}` : 'Pull requests for this workspace'}</div>
       {data?.nextPage ? <p style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 6, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>Filters apply to the PRs shown. Load more to include older PRs.</p> : null}
@@ -170,7 +116,7 @@ export function RepositoryPullRequests({ repoPath, active = true }: { repoPath: 
       {layout === 'stacks' ? <p style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 6, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>Dependencies follow branches in the loaded PRs. This view does not change or merge them.</p> : null}
     </header>
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingTop: 0, paddingRight: 12, paddingBottom: 20, paddingLeft: 12, overscrollBehavior: 'contain' }}>
-      {error ? <div role="alert" style={{ marginTop: 8, marginRight: 12, marginBottom: 16, marginLeft: 12, fontSize: 13, lineHeight: 1.6 }}><p style={{ marginTop: 0, marginRight: 0, marginBottom: 8, marginLeft: 0 }}>{error}</p><button type="button" onClick={() => void load(retryPage)} style={PR_CONTROL}>Retry</button></div> : null}
+      {error ? <div role="alert" style={{ marginTop: 8, marginRight: 12, marginBottom: 16, marginLeft: 12, fontSize: 13, lineHeight: 1.6 }}><p style={{ marginTop: 0, marginRight: 0, marginBottom: 8, marginLeft: 0 }}>{error}</p><button type="button" onClick={() => void retry()} style={PR_CONTROL}>Retry</button></div> : null}
       {!repoPath || data?.unavailable ? <p style={{ marginTop: 28, marginRight: 12, marginBottom: 28, marginLeft: 12, fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.6 }}>{!repoPath ? 'Choose a repository in Projects to see its pull requests.' : 'This repository needs a GitHub origin to show pull requests.'}</p> : null}
       {data && !data.unavailable && !loading && !error && visible.length === 0 ? <p style={{ marginTop: 20, marginRight: 12, marginBottom: 20, marginLeft: 12, fontSize: 13, color: 'var(--t-text-secondary)' }}>{query || personalScope !== 'all' || Object.values(filters).some(Boolean) ? 'No pull requests shown match these filters.' : `No ${state === 'all' ? '' : `${state} `}pull requests.`}</p> : null}
       {data && !data.unavailable && layout === 'stacks' ? <ul aria-label="Branch stacks" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -184,7 +130,7 @@ export function RepositoryPullRequests({ repoPath, active = true }: { repoPath: 
         <ul aria-label={group.label} style={{ listStyle: 'none', padding: 0, margin: 0 }}>{group.prs.map((pr) => <li key={pr.number}><PullRequestRow pr={pr} repo={data.repo} selected={selected === pr.number} metadataId={`${listId}-${pr.number}`} onPick={() => pick(pr)} /></li>)}</ul>
         {!group.prs.length && group.label === 'Others' ? <p style={{ marginTop: 10, marginRight: 12, marginBottom: 12, marginLeft: 12, fontSize: 12, color: 'var(--t-text-muted)' }}>No other pull requests shown.</p> : null}
       </div>) : null}
-      {data?.nextPage ? <button type="button" disabled={loading} onClick={() => void load(data.nextPage!)} style={{ ...PR_CONTROL, display: 'flex', marginTop: 16, marginRight: 'auto', marginBottom: 0, marginLeft: 'auto', cursor: 'pointer' }}>{loading ? 'Loading…' : 'Load more pull requests'}</button> : null}
+      {data?.nextPage ? <button type="button" disabled={loading} onClick={() => void loadMore()} style={{ ...PR_CONTROL, display: 'flex', marginTop: 16, marginRight: 'auto', marginBottom: 0, marginLeft: 'auto', cursor: 'pointer' }}>{loading ? 'Loading…' : 'Load more pull requests'}</button> : null}
     </div>
   </section>;
 }

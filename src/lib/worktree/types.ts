@@ -115,6 +115,8 @@ export interface CreateWorktreeOptions {
   laneId?: string;
   /** Scheduler-owned reservation reused by the manager admission boundary. */
   storageAdmissionReservationId?: string;
+  /** Launch ownership must still hold before ready publication ends creation rollback. */
+  beforeReady?: (worktree: WorktreeInfo) => void;
 }
 
 /**

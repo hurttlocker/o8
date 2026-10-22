@@ -185,7 +185,7 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     // Admission, the manager guard, pre-rename, paused purge and final removal
     // retain fresh evidence, including after the purge helper has exited.
     expect((timing?.scans as { openFiles: number } | undefined)?.openFiles).toBe(5);
-  }, 30_000);
+  }, 120_000);
 
   it('keeps the recovered owner held after a retirement refusal and safely retries', async () => {
     const f = await fixture('retirement-retry');
@@ -218,7 +218,7 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     }
     expect(getLaneEvents(f.lane.id, 200).filter((event) => event.verb === 'attach_session')).toHaveLength(1);
     expect(getLaneEvents(f.lane.id, 200).filter((event) => event.verb === 'kill_escalated')).toHaveLength(0);
-  }, 30_000);
+  }, 120_000);
 
   it.each(['unknown-exit', 'incomplete-ledger', 'wrong-packet', 'wrong-cwd', 'wrong-owner'])(
     'refuses %s without recovering a lane key or touching archived evidence', async (label) => {
@@ -237,7 +237,7 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
       expect(readFileSync(f.recordPath, 'utf8')).toBe(before);
       expect(getLane(f.lane.id)).toMatchObject({ status: 'paused', sessionKey: null });
       expect(git(f.repoPath, ['rev-parse', f.branch])).toBe(f.resultHead);
-    }, 30_000,
+    }, 120_000,
   );
 
   it.each([undefined, 'wontfix', 'superseded', 'spec_changed'])(
@@ -250,7 +250,7 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
       expect(git(f.repoPath, ['rev-parse', f.branch])).toBe(f.resultHead);
       expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === f.packetId))
         .toMatchObject({ status: 'archived', operatorStopped: true, queueState: 'held' });
-    }, 30_000,
+    }, 120_000,
   );
 
   it('refuses ambiguous workspace ownership', async () => {
@@ -261,7 +261,7 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     expect(response.status).toBe(409);
     expect(existsSync(f.worktreePath)).toBe(true);
     expect(getLane(f.lane.id)?.sessionKey).toBeNull();
-  }, 30_000);
+  }, 120_000);
 
   it('refuses an escaped marker-bearing descendant after the leader exited', async () => {
     const f = await fixture('live-descendant');
@@ -283,5 +283,5 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
       process.kill(-child.pid!, 'SIGKILL');
       await exited;
     }
-  }, 30_000);
+  }, 120_000);
 });

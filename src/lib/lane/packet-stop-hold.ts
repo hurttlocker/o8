@@ -109,19 +109,31 @@ function acceptedSteerRunState(packetId: string): 'absent' | 'active' | 'closed'
     SELECT id FROM lane_events
     WHERE lane_id = ? AND verb IN (
       'steer_run_admitted', 'runtime_process_exit', 'status_change'
-    ) ORDER BY timestamp DESC, rowid DESC LIMIT 1
-  `).get(lane.id) as { id: string } | undefined;
+    ) AND (verb != 'runtime_process_exit' OR ? IS NULL
+      OR json_extract(payload_json, '$.runId') IS NULL OR json_extract(payload_json, '$.runId') = ?)
+    ORDER BY timestamp DESC, rowid DESC LIMIT 1
+  `).get(lane.id, payload.ownedRunId ?? null, payload.ownedRunId ?? null) as { id: string } | undefined;
   if (event?.id !== grant.id || typeof payload.steerEventId !== 'string') return 'closed';
   const intent = getSqlite().prepare(`
     SELECT rowid FROM lane_events WHERE id = ? AND lane_id = ? AND verb = 'steered_packet'
   `).get(payload.steerEventId, lane.id) as { rowid: number } | undefined;
   if (!intent) return 'closed';
+  // A queued intent can precede the OLD turn's exit. Only exits after this
+  // delivery attempt close the new grant; legacy immediate steers use intent.
+  const attempt = typeof payload.deliveryAttemptId === 'string'
+    ? getSqlite().prepare(`SELECT rowid FROM lane_events WHERE id = ? AND lane_id = ?
+      AND verb = 'steer_delivery' AND json_extract(payload_json, '$.state') = 'sending'
+      AND json_extract(payload_json, '$.steerEventId') = ? AND rowid > ?`)
+      .get(payload.deliveryAttemptId, lane.id, payload.steerEventId, intent.rowid) as { rowid: number } | undefined
+    : intent;
+  if (!attempt) return 'closed';
   // An immediate exit can precede the accepted-steer response. Insertion order
   // keeps equal-millisecond events distinct, including across a database reopen.
   const exited = getSqlite().prepare(`
     SELECT 1 FROM lane_events WHERE lane_id = ? AND verb = 'runtime_process_exit'
-    AND rowid > ? LIMIT 1
-  `).get(lane.id, intent.rowid);
+    AND rowid > ? AND (? IS NULL OR json_extract(payload_json, '$.runId') IS NULL
+      OR json_extract(payload_json, '$.runId') = ?) LIMIT 1
+  `).get(lane.id, attempt.rowid, payload.ownedRunId ?? null, payload.ownedRunId ?? null);
   return exited ? 'closed' : 'active';
 }
 

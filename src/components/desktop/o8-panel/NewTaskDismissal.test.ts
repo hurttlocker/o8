@@ -2,6 +2,7 @@
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { O8ThreadsPane } from './O8ThreadsPane';
@@ -18,10 +19,12 @@ const json = (payload: unknown, status = 200) => new Response(JSON.stringify(pay
 describe('New task dismissal through Threads', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let client: QueryClient;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     fetchMock = vi.fn(async (url: string) => json(url.includes('worker-availability')
       ? { available: true, connectedWorkers: 1, detail: '1 remote worker connected.' }
       : { tasks: [] }));
@@ -30,7 +33,7 @@ describe('New task dismissal through Threads', () => {
     document.body.append(container);
     root = createRoot(container);
   });
-  afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  afterEach(() => { act(() => root.unmount()); client.clear(); container.remove(); vi.unstubAllGlobals(); });
 
   async function show() {
     await act(async () => root.render(createElement(O8ThreadsPane, { active: true, repoPath: null, repos, allRepos: true })));
@@ -119,7 +122,7 @@ describe('New task dismissal through Threads', () => {
   });
 
   it('uses the real Control Room opener and preserves its parent draft across cancellation', async () => {
-    await act(async () => root.render(createElement(ControlRoomTab, { project, repos })));
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(ControlRoomTab, { project, repos }))));
     const source = container.querySelector<HTMLButtonElement>('[aria-label="Create task"]')!;
     await act(async () => { source.focus(); source.click(); });
     type(title()!, 'Control Room draft');
@@ -147,7 +150,7 @@ describe('New task dismissal through Threads', () => {
   });
 
   it.each(['Save task', 'Start task'])('protects the real Control Room toggle and Cancel during %s', async (action) => {
-    await act(async () => root.render(createElement(ControlRoomTab, { project, repos })));
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(ControlRoomTab, { project, repos }))));
     const source = container.querySelector<HTMLButtonElement>('[aria-label="Create task"]')!;
     await act(async () => source.click()); type(title()!, 'Pending Control Room draft');
     let resolveCreate!: (response: Response) => void;
