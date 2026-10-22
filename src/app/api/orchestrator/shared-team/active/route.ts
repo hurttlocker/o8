@@ -56,6 +56,6 @@ export async function GET(request: NextRequest) {
       } : null,
     });
   } catch {
-    return NextResponse.json({ error: 'Unable to read the active Fast team.' }, { status: 500 });
+    return NextResponse.json({ error: 'Unable to read the active Shared team.' }, { status: 500 });
   }
 }

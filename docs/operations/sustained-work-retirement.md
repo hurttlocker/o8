@@ -52,8 +52,8 @@ repository artifacts.
 | C3 | Completion, supersession and bounded restart or maintenance reconciliation retire eligible work under policy without repeated prompts or model calls. Holds remain visible and affect only their dependent resources. |
 | C4 | Ship attempts reuse bounded compiler caches. Successful and superseded attempts release disposable output while preserving required donors and designated release evidence. |
 | D1 | A small real fix runs through o8 implementation, verification, independent review, integration and recoverable cleanup without the independent helper. |
-| D2 | Prove composer Fast mode's requested and effective shared checkout, branch and scoped ownership through a real worker turn, including persistence, supported and unsupported handling, and honest usage semantics. |
-| D3 | Compare ordinary isolated mode and composer Fast mode on matched useful work: time to verified completion, correctness, retries, available usage evidence and storage growth. Preserve model and effort defaults. |
+| D2 | Prove composer Shared mode's requested and effective shared checkout, branch and scoped ownership through a real worker turn, including persistence, supported and unsupported handling, and honest usage semantics. |
+| D3 | Compare ordinary isolated mode and composer Shared mode on matched useful work: time to verified completion, correctness, retries, available usage evidence and storage growth. Preserve model and effort defaults. |
 | E1 | Verify [#2125](https://github.com/hurttlocker/o8/issues/2125) through real dispatch. Incremental growth and concurrent reservations admit fitting small jobs and hold jobs that cannot fit with actionable receipts. |
 | E2 | Appropriate remote builds and tests have one heavy job owner per host. Disconnect and reconnect preserve ownership; an unavailable host does not block independent eligible cleanup elsewhere. |
 | E3 | External worker adoption has explicit ownership and capability boundaries. Unsupported transcript purge and unknown resources remain held without blocking known eligible workspace cleanup. |
@@ -61,11 +61,13 @@ repository artifacts.
 | F2 | Installed user and agent entry points show the same completion state, retained evidence and reclaimed space for the delivered revision. Record release inclusion and any publication authorization separately. |
 | F3 | Reconcile issue, pull request and release receipts. Demonstrate a small fix and larger multi-worker workflow through o8. Declare helper retirement readiness only after every other check passes. |
 
-Composer Fast mode uses workers in the current orchestrator checkout with
+Composer Shared mode uses workers in the current orchestrator checkout with
 non-overlapping path ownership and one orchestrator-owned review and commit. It
 does not select a faster inference service tier. Its active branch may be an
-issue branch; Fast mode does not require main. Naming follow-up:
-[#3240](https://github.com/hurttlocker/o8/issues/3240).
+issue branch; Shared mode does not require main. The composer, tool help and
+agent instructions use Shared. Older receipts may call it Fast; the stored `fast`
+identifier is retained for saved selections and history
+([#3240](https://github.com/hurttlocker/o8/issues/3240)).
 
 ## Execution order
 
@@ -75,7 +77,7 @@ issue branch; Fast mode does not require main. Naming follow-up:
    slice through the existing lifecycle managers.
 4. Extend completion triggers, retention budgets, ship reuse and cross-host
    coverage.
-5. Prove composer Fast mode behavior, matched workflow parity and repeated
+5. Prove composer Shared mode behavior, matched workflow parity and repeated
    acceptance cycles.
 6. Verify the installed entry points and reconcile the final receipts.
 

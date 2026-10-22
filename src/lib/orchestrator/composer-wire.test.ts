@@ -15,6 +15,7 @@ const MODES: ComposerWireMode[] = ['solo', 'multitask', 'fast', 'moa'];
 /** Directives as o8 shipped them before #2153 — still on the wire from old clients. */
 const LEGACY_MULTITASK = '[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. Review and merge through the gate as they finish.';
 const LEGACY_FAST = '[Mode: Fast] Decompose independent work by file ownership. Call `cortex_launch_agent` once per worker in parallel in this turn with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.';
+const PRE_RENAME_FAST = '[Mode: Fast] Work in the current checkout. Work directly for small tasks and ordinary replies. Delegate only when the user asks or independent work benefits from workers; choosing Shared alone does not require a launch. Choose suitable enabled runtimes and models for each task. If delegating, divide independent work by file ownership and call `cortex_launch_agent` once per worker with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.';
 const LEGACY_MOA = '[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. Review and merge through the gate as they finish.';
 
 describe('composer mode directives', () => {
@@ -30,7 +31,8 @@ describe('composer mode directives', () => {
     expect(COMPOSER_MODE_DIRECTIVES.solo).not.toContain('cortex_launch_agent');
   });
 
-  it('requires scoped shared launches and a single orchestrator review in Fast mode', () => {
+  it('requires scoped shared launches and a single orchestrator review in Shared mode', () => {
+    expect(COMPOSER_MODE_DIRECTIVES.fast).toMatch(/^\[Mode: Shared\]/);
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('checkoutMode: "shared"');
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('assignedPaths');
     expect(COMPOSER_MODE_DIRECTIVES.fast).toContain('Delegate only when the user asks');
@@ -69,6 +71,8 @@ describe('composeComposerWireMessage', () => {
 describe('stripKnownComposerWirePreamble', () => {
   it('still strips the pre-#2153 directives sent by older clients', () => {
     expect(stripKnownComposerWirePreamble(`${LEGACY_FAST}\n\nInspect this`)).toBe('Inspect this');
+    expect(stripKnownComposerWirePreamble(`${PRE_RENAME_FAST}\n\nInspect this`)).toBe('Inspect this');
+    expect(resolveOrchestratorTranscriptMessage({ message: `${PRE_RENAME_FAST}\n\nInspect this` })).toBe('Inspect this');
     expect(stripKnownComposerWirePreamble(`${LEGACY_MULTITASK}\n\nFan this out`)).toBe('Fan this out');
     expect(stripKnownComposerWirePreamble(`${LEGACY_MOA}\n\nFan this out`)).toBe('Fan this out');
   });
@@ -90,6 +94,8 @@ describe('isKnownComposerPreambleTitle', () => {
   it('recognizes titles derived from the pre-#2153 directives', () => {
     expect(isKnownComposerPreambleTitle(LEGACY_MULTITASK.slice(0, 48))).toBe(true);
     expect(isKnownComposerPreambleTitle(LEGACY_MOA.slice(0, 48))).toBe(true);
+    expect(isKnownComposerPreambleTitle(PRE_RENAME_FAST.slice(0, 48))).toBe(true);
+    expect(isKnownComposerPreambleTitle('[Mode: Shared] Work in the current checkout')).toBe(true);
   });
 
   it('rejects operator-authored titles and non-strings', () => {

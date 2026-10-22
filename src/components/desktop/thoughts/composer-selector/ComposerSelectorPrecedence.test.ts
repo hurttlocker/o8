@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invalidateOperatorDefaultsValuesSnapshot } from '@/lib/operator/operator-defaults-values-client';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { ComposerArea } from '../chat-panel/ComposerArea';
-import { writeStoredComposerMode } from '../composer-mode-storage';
+import { composerModeStorageKey, readStoredComposerMode, writeStoredComposerMode } from '../composer-mode-storage';
 import type { ComposerSelectorMode } from './state';
 import type { ComposerWorkerDefaults } from './worker-settings';
 
@@ -123,6 +123,25 @@ describe('composer selector real-path precedence', () => {
     }
     expect(postBodies).toEqual([]);
     expect(operatorValues.defaultDispatchRuntime).toBe('gemini');
+  });
+
+  it('restores the legacy fast selection as Shared and explains checkout ownership', async () => {
+    writeStoredComposerMode('tab-shared', 'fast');
+    await act(async () => {
+      root.render(createElement(RealComposerHarness, { tabId: 'tab-shared', threadId: 'thread-shared' }));
+      await new Promise(resolve => setTimeout(resolve, 30));
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-mode"]')!;
+    expect(trigger.getAttribute('aria-label')).toBe('Mode: Shared');
+    expect(trigger.title).toContain('Workers share this checkout with separate file scopes');
+    expect(trigger.title).not.toMatch(/fast|speed|inference/i);
+    await act(async () => { trigger.click(); });
+    const selected = document.querySelector('[role="menuitemradio"][aria-checked="true"]');
+    expect(selected?.textContent).toContain('Shared');
+    expect(selected?.textContent).toContain('Workers share this checkout');
+    expect(readStoredComposerMode('tab-shared')).toBe('fast');
+    expect(localStorage.getItem(composerModeStorageKey('tab-shared'))).toBe('fast');
+    expect(postBodies).toEqual([]);
   });
 
   it('changes the lead without rewriting the configured worker or its effort', async () => {

@@ -165,7 +165,7 @@ describe('orchestrator-send backend entry', () => {
     vi.stubEnv('O8_DATA_DIR', mkdtempSync(join(tmpdir(), 'o8-fleet-prelude-')));
     const cases = [
       ['multitask', 'fleet', '[Mode: Multitask]'],
-      ['fast', 'fleet', '[Mode: Fast]'],
+      ['fast', 'fleet', '[Mode: Shared]'],
       ['moa', 'fleet', '[Mode: Mixture of Agents]'],
       ['fusion', 'fusion', '[Mode: Fusion]'],
     ] as const;
