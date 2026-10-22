@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
 
 import {
   getAppUpdateState,
@@ -22,7 +23,7 @@ function invalidState(code: string, message: string) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, state: getAppUpdateState() }, { headers: NO_STORE_HEADERS });
+  return NextResponse.json({ ok: true, state: getAppUpdateState(), checkRequestedAt: getRequestedCheckTime() }, { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(request: Request) {
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : null,
     checkOutcome,
     checkedAt: typeof body.checkedAt === 'string' ? body.checkedAt : null,
+    info: isRecord(body.info) ? body.info : null,
     checkError: typeof body.checkError === 'string' ? body.checkError : null,
   });
   return NextResponse.json({ ok: true, state }, { headers: NO_STORE_HEADERS });

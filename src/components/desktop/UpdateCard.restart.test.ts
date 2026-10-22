@@ -100,8 +100,8 @@ describe('operator update with waiting tasks', () => {
     await act(async () => { pending!.options.onProgress?.({ stage: 'installing', receivedBytes: 40 * 1_048_576, totalBytes: 40 * 1_048_576 }); });
     expect(lastView().progress?.stage).toBe('installing');
     await act(async () => {
-      // The strict gate refuses: two tasks are waiting.
-      expect(await pending!.options.beforeRestart!()).toBe(false);
+      // Parked tasks pass the idle gate; simulate a separate native restart deferral.
+      expect(await pending!.options.beforeRestart!()).toBe(true);
       pending!.resolve({ installed: true, restartDeferred: true });
     });
     expect(lastView().progress ?? null).toBeNull();
@@ -159,6 +159,19 @@ describe('operator update with waiting tasks', () => {
     await act(async () => { window.dispatchEvent(new Event('o8:install-app-update')); });
     expect(lastView().message).toBe('Update installed. Another restart is already in progress.');
     expect(lastView().blockers?.live).toEqual(['Another app restart is already reserved']);
+  });
+
+  it('passes parked-only remote apply through both webview idle checks', async () => {
+    vi.mocked(installUpdateAndRestart).mockResolvedValue({ installed: true });
+    await mount();
+    const detail = { data: { events: [{ data: { mutation: {
+      action: 'app-update-apply-requested', status: 'queued', mutationId: 'parked-remote-apply', force: false,
+    } } }] } };
+    await act(async () => { window.dispatchEvent(new CustomEvent('o8:realtime', { detail })); });
+    expect(installUpdateAndRestart).toHaveBeenCalledOnce();
+    const options = vi.mocked(installUpdateAndRestart).mock.calls[0]![1]!;
+    expect(await options.beforeRestart?.()).toBe(true);
+    expect(requestConfirm).not.toHaveBeenCalled();
   });
 
 });

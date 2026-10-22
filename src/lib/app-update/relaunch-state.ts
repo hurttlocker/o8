@@ -1,6 +1,7 @@
 import 'server-only';
 
 export interface AppUpdateState {
+  info: Record<string, unknown> | null;
   updatePending: boolean;
   version: string | null;
   updatedAt: string | null;
@@ -28,6 +29,7 @@ export interface AppUpdateCheckState {
 const NEVER_CHECKED_MESSAGE = 'No updater check has completed since the app server started.';
 
 let state: AppUpdateState = {
+  info: null,
   updatePending: false,
   version: null,
   updatedAt: null,
@@ -45,6 +47,7 @@ export function getAppUpdateState(): AppUpdateState {
 }
 
 export function setAppUpdateState(update: {
+  info?: Record<string, unknown> | null;
   updatePending: boolean;
   version?: string | null;
   checkOutcome?: AppUpdateCheckOutcome;
@@ -67,6 +70,7 @@ export function setAppUpdateState(update: {
       ? update.checkError?.trim().slice(0, 1_000) || 'The updater check failed without an error message.'
       : null;
   state = {
+    info: update.info ?? (update.updatePending ? state.info : null),
     updatePending: update.updatePending,
     version: update.updatePending ? update.version ?? null : null,
     updatedAt: new Date().toISOString(),

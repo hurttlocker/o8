@@ -1,9 +1,15 @@
 // Compile the production command without starting the desktop app or sidecars.
+#[path = "../../../../src-tauri/src/launch_updater.rs"]
+mod launch_updater;
 #[path = "../../../../src-tauri/src/update_ping.rs"]
 mod update_ping;
+fn resolve_ws_token() -> String {
+    "scheduler-fixture".into()
+}
 
 #[cfg(test)]
 mod tests {
+    mod scheduler_tests;
     use super::update_ping;
     use std::{
         collections::BTreeMap,

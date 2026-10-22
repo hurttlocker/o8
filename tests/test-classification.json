@@ -5331,6 +5331,12 @@
       ]
     },
     {
+      "path": "tests/update-fresh-apply-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-restart-parked-real-path.test.ts",
       "reasons": [
         "network-listener",

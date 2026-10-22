@@ -12,6 +12,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["time"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 tempfile = "3"
 time = { version = "0.3", features = ["formatting"] }
+
+chrono = "0.4"
+log = "0.4"
+tauri-plugin-notification = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+block2 = "0.6"

@@ -33,7 +33,7 @@ import {
   type InstallInfo,
 } from '@/lib/app-update/install-target';
 
-const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
+import { subscribeRecordedUpdate } from '@/lib/app-update/recorded-update-client';
 
 /** Tells the server about an install attempt, so a remote apply can read its outcome (#3588). */
 function reportInstall(install: { outcome: 'started' | 'failed'; version: string | null; error?: string }) {
@@ -278,25 +278,8 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   }, []);
 
   useEffect(() => {
-    void checkForUpdate();
-    const interval = window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
-    return () => window.clearInterval(interval);
-  }, [checkForUpdate]);
-
-  useEffect(() => {
-    if (checkReport.outcome === 'never') return;
-    fetch('/api/panel/app/update-state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        updatePending: Boolean(update),
-        version: update?.version ?? null,
-        checkOutcome: checkReport.outcome,
-        checkedAt: checkReport.checkedAt,
-        checkError: checkReport.error,
-      }),
-    }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
-  }, [checkReport, update]);
+    return subscribeRecordedUpdate((info, report) => { setUpdate(info); setCheckReport(report); });
+  }, []);
 
   useEffect(() => registerAppUpdateCheck(checkForUpdate), [checkForUpdate]);
 
@@ -342,7 +325,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     return await response.json().catch(() => null) as UpdateIdleResponse | null;
   }, []);
 
-  const checkUpdateIdle = useCallback(async (allowParked = false) => {
+  const checkUpdateIdle = useCallback(async (allowParked = true) => {
     const payload = await readUpdateIdle();
     if (payload?.idle?.idle === true) return true;
     return allowParked && payload?.idle?.idleExceptParked === true;

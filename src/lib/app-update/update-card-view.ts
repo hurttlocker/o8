@@ -21,7 +21,7 @@ export function describeInstallError(error: unknown): string {
   try { return JSON.stringify(error) ?? ''; } catch { return ''; }
 }
 
-interface UpdateIdleLaneView { label?: string; status?: string }
+interface UpdateIdleLaneView { label?: string; status?: string; processLive?: boolean }
 export interface UpdateIdleResponse {
   idle?: {
     idle?: boolean;
@@ -57,7 +57,7 @@ export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppU
   const parkedStatuses = new Set((idle?.parkedLanes ?? []).map(lane => lane.status));
   const live = [
     ...(idle?.active?.lanes ?? [])
-      .filter(lane => !parkedStatuses.has(lane.status))
+      .filter(lane => lane.processLive || !parkedStatuses.has(lane.status))
       .map(lane => `${name(lane.label, 'Task')} (${(lane.status ?? 'active').replace(/_/g, ' ')})`),
     ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
     ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),

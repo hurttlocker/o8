@@ -1,3 +1,5 @@
+#[path = "update_scheduler.rs"]
+pub(crate) mod scheduler;
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -200,41 +202,56 @@ pub fn start_launch_update_check<R: Runtime>(app: AppHandle<R>) {
         return;
     }
 
+    scheduler::observe_wake();
     tauri::async_runtime::spawn(async move {
         emit_bundle_integrity_warning(&app);
 
-        match crate::update_ping::check(&app).await {
-            Ok(Some(update)) => {
-                let payload = LaunchUpdatePayload {
-                    version: update.version.clone(),
-                    current_version: update.current_version.clone(),
-                    notes: update.body.clone(),
-                    date: update.date.map(|date| date.to_string()),
-                    release_url: release_url_from_raw_json(&update.raw_json),
-                    checked_at: checked_at(),
-                };
-                if let Err(err) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
-                    log::warn!("[launch-updater] emit update-available failed: {}", err);
-                }
-            }
-            Ok(None) => emit_clear(&app, "current", None),
-            Err(err) => {
-                log::warn!("[launch-updater] check failed: {}", err);
-                emit_clear(&app, "failed", Some(bounded_check_error(err)));
-            }
-        }
+        scheduler::run(app).await;
     });
 }
 
-fn emit_clear<R: Runtime>(app: &AppHandle<R>, outcome: &'static str, error: Option<String>) {
+pub(super) async fn run_check<R: Runtime>(app: &AppHandle<R>) -> serde_json::Value {
+    match crate::update_ping::check(app).await {
+        Ok(Some(update)) => {
+            let payload = LaunchUpdatePayload {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: update.body.clone(),
+                date: update.date.map(|date| date.to_string()),
+                release_url: release_url_from_raw_json(&update.raw_json),
+                checked_at: checked_at(),
+            };
+            let report = serde_json::json!({ "updatePending": true, "version": payload.version,
+                    "checkOutcome": "available", "checkedAt": payload.checked_at, "info": payload });
+            if let Err(err) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
+                log::warn!("[launch-updater] emit update-available failed: {}", err);
+            }
+            report
+        }
+        Ok(None) => emit_clear(app, "current", None),
+        Err(err) => {
+            log::warn!("[launch-updater] check failed: {}", err);
+            emit_clear(app, "failed", Some(bounded_check_error(err)))
+        }
+    }
+}
+
+fn emit_clear<R: Runtime>(
+    app: &AppHandle<R>,
+    outcome: &'static str,
+    error: Option<String>,
+) -> serde_json::Value {
     let payload = LaunchUpdateCheckPayload {
         outcome,
         checked_at: checked_at(),
         error,
     };
+    let report = serde_json::json!({ "updatePending": false, "checkOutcome": outcome,
+        "checkedAt": payload.checked_at, "checkError": payload.error });
     if let Err(err) = app.emit(UPDATE_CLEAR_EVENT, payload) {
         log::warn!("[launch-updater] emit update-clear failed: {}", err);
     }
+    report
 }
 
 fn checked_at() -> String {

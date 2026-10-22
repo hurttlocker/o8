@@ -4,12 +4,16 @@
  * and read back through the real GET /api/panel/update/apply route.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+const { publishRealtimeMutation } = vi.hoisted(() => ({ publishRealtimeMutation: vi.fn(async () => true) }));
+vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation }));
+let sessions: unknown[] = [];
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-parked-'));
 const previous = { CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, O8_DATA_DIR: process.env.O8_DATA_DIR, O8_WS_PORT: process.env.O8_WS_PORT };
@@ -22,7 +26,7 @@ let terminals: Server;
 beforeAll(async () => {
   terminals = createServer((request, response) => {
     response.setHeader('Content-Type', 'application/json');
-    response.end(request.url === '/terminal-voice-sessions' ? JSON.stringify({ sessions: [] }) : '{}');
+    response.end(request.url === '/terminal-voice-sessions' ? JSON.stringify({ sessions }) : '{}');
   });
   await new Promise<void>(resolve => terminals.listen(0, '127.0.0.1', resolve));
   process.env.O8_WS_PORT = String((terminals.address() as AddressInfo).port);
@@ -37,8 +41,9 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-const { createLane, setLaneStatus, getLane } = await import('@/lib/lane/registry');
-const { GET } = await import('@/app/api/panel/update/apply/route');
+const { createLane, setLaneStatus, getLane, attachSession } = await import('@/lib/lane/registry');
+const { GET, POST } = await import('@/app/api/panel/update/apply/route');
+const { setAppUpdateState } = await import('@/lib/app-update/relaunch-state');
 const { describeUpdateBlockers } = await import('@/components/desktop/UpdateCard');
 
 type IdlePayload = Parameters<typeof describeUpdateBlockers>[0] & {
@@ -86,5 +91,51 @@ describe('update restart with parked tasks', () => {
     expect(blockers.parked).toHaveLength(2);
     setLaneStatus(running, 'completed', 'system');
     expect((await readIdle()).idle.idleExceptParked).toBe(true);
+  });
+});
+
+async function apply() {
+  setAppUpdateState({ updatePending: true, version: '0.1.999' });
+  return POST(new Request('http://localhost/api/panel/update/apply', { method: 'POST', body: '{}' }));
+}
+
+describe('remote apply with persisted parked lanes', () => {
+  it('applies without force and preserves parked records', async () => {
+    const id = lane('Persist through restart', 'reviewing');
+    const response = await apply();
+    expect(response.status).toBe(202);
+    const payload = await response.json();
+    expect(payload.idle.parkedLanes).toEqual(expect.arrayContaining([expect.objectContaining({ id })]));
+    expect(getLane(id)?.status).toBe('reviewing');
+    expect(publishRealtimeMutation).toHaveBeenCalled();
+  });
+
+  it('blocks a live terminal despite parked-only lanes', async () => {
+    sessions = [{ name: 'live-worker', kind: 'managed-process', clientCount: 0 }];
+    expect((await apply()).status).toBe(409);
+    sessions = [];
+  });
+
+  it('blocks a live process even when its lane is reviewing', async () => {
+    const id = lane('Review with worker', 'reviewing');
+    attachSession(id, 'codex-owned:review-live');
+    const directory = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, 'review-live');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'session.json'), JSON.stringify({ surfaceId: 'codex-owned:review-live', activeRun: { pid: process.pid } }));
+    const response = await apply();
+    expect(response.status).toBe(409);
+    const payload = await response.json();
+    expect(payload.idle.parkedLanes.map((item: { id: string }) => item.id)).not.toContain(id);
+    expect(describeUpdateBlockers(payload).live).toContain('Review with worker (reviewing)');
+    setLaneStatus(id, 'completed', 'system');
+    rmSync(directory, { recursive: true });
+  });
+
+  it('preserves CLI installer admission including force', async () => {
+    const lock = join(dataDir, 'fixture-cli-update.lock');
+    writeFileSync(lock, 'fixture');
+    expect((await apply()).status).toBe(409);
+    expect((await POST(new Request('http://localhost/api/panel/update/apply', { method: 'POST', body: JSON.stringify({ force: true }) }))).status).toBe(409);
+    rmSync(lock);
   });
 });
