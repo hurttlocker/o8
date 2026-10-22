@@ -5,13 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // report one st_dev. df names the device each path lives on, diskutil its UUID.
 const SYSTEM_UUID = '6a21fd45-7a7b-43ee-b69c-1ebe49db0df9';
 const DATA_UUID = '70aa7edb-d15c-4653-ac9b-a55d5c916e77';
-const df = vi.hoisted(() => ({ failures: 0, diskFailures: 0, diskEmpty: 0, diskCalls: 0 }));
+const df = vi.hoisted(() => ({ failures: 0, diskFailures: 0, diskEmpty: 0, diskCalls: 0, device: '' }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
   const run = async (file: string, args: string[]) => {
     if (file === '/bin/df') {
       if (df.failures > 0) { df.failures -= 1; throw new Error('df timed out'); }
-      const device = args[1] === '/' ? '/dev/disk1s1s1' : '/dev/disk1s2';
+      const device = df.device || (args[1] === '/' ? '/dev/disk1s1s1' : '/dev/disk1s2');
       return { stdout: `Filesystem 512-blocks Used Available Capacity Mounted on\n${device} 1 1 1 1% /\n`, stderr: '' };
     }
     if (file === '/usr/sbin/diskutil') {
@@ -33,7 +33,7 @@ vi.mock('node:fs/promises', async (original) => ({
 
 const platform = process.platform;
 afterEach(() => {
-  df.failures = 0; df.diskFailures = 0; df.diskEmpty = 0; df.diskCalls = 0;
+  df.failures = 0; df.diskFailures = 0; df.diskEmpty = 0; df.diskCalls = 0; df.device = '';
   Object.defineProperty(process, 'platform', { value: platform });
   vi.resetModules();
 });
@@ -72,11 +72,20 @@ describe('resolveStorageVolumeId on macOS (#3748)', () => {
   it('retries failed probes, then refuses and uncaches the failure so a healthy probe can recover', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     const { resolveStorageVolumeId } = await import('./storage-telemetry');
-    df.diskFailures = 2;
+    df.device = '/dev/disk9s1'; df.diskFailures = 2;
     await expect(resolveStorageVolumeId('/fixture/worktrees')).rejects.toThrow('volume identity is unavailable');
     expect(df.diskCalls).toBe(2);
     await expect(resolveStorageVolumeId('/fixture/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
     expect(df.diskCalls).toBe(3);
+  });
+
+  it.each(['//host/share', '//user@host/share', 'host:/path'])('uses device identity for network source %s without invoking diskutil', async device => {
+    df.device = device; df.diskFailures = 2;
+    expect(await volumeIdsInOrder(['/fixture/share'])).toEqual({ '/fixture/share': 'device:16777220' });
+    expect(df.diskCalls).toBe(0);
+    vi.resetModules();
+    expect(await volumeIdsInOrder(['/fixture/share'])).toEqual({ '/fixture/share': 'device:16777220' });
+    expect(df.diskCalls).toBe(0);
   });
 
   it.each([0, 1])('records device identity when a successful probe has no UUID after %i failures', async failures => {

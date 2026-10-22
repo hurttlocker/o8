@@ -364,6 +364,8 @@ async function platformVolumeId(targetPath: string, mountDevice: string | null):
   if (process.platform === 'darwin') {
     const device = mountDevice ?? await darwinMountDevice(targetPath);
     if (!device) return null;
+    // Network mount sources have no diskutil UUID; retain their device identity.
+    if (!device.startsWith('/dev/')) return null;
     const { stdout } = await execFileAsync('/usr/sbin/diskutil', ['info', '-plist', device], {
       env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
       windowsHide: true,
