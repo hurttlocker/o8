@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // report one st_dev. df names the device each path lives on, diskutil its UUID.
 const SYSTEM_UUID = '6a21fd45-7a7b-43ee-b69c-1ebe49db0df9';
 const DATA_UUID = '70aa7edb-d15c-4653-ac9b-a55d5c916e77';
-const df = vi.hoisted(() => ({ failures: 0 }));
+const df = vi.hoisted(() => ({ failures: 0, diskFailures: 0, diskEmpty: 0, diskCalls: 0 }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
   const run = async (file: string, args: string[]) => {
@@ -15,6 +15,9 @@ vi.mock('node:child_process', async (original) => {
       return { stdout: `Filesystem 512-blocks Used Available Capacity Mounted on\n${device} 1 1 1 1% /\n`, stderr: '' };
     }
     if (file === '/usr/sbin/diskutil') {
+      df.diskCalls += 1;
+      if (df.diskFailures-- > 0) throw new Error('diskutil timed out');
+      if (df.diskEmpty-- > 0) return { stdout: '<plist></plist>', stderr: '' };
       const uuid = args[2] === '/dev/disk1s1s1' ? SYSTEM_UUID : DATA_UUID;
       return { stdout: `<key>VolumeUUID</key>\n<string>${uuid.toUpperCase()}</string>`, stderr: '' };
     }
@@ -30,7 +33,7 @@ vi.mock('node:fs/promises', async (original) => ({
 
 const platform = process.platform;
 afterEach(() => {
-  df.failures = 0;
+  df.failures = 0; df.diskFailures = 0; df.diskEmpty = 0; df.diskCalls = 0;
   Object.defineProperty(process, 'platform', { value: platform });
   vi.resetModules();
 });
@@ -60,4 +63,23 @@ describe('resolveStorageVolumeId on macOS (#3748)', () => {
     await expect(resolveStorageVolumeId('/Users/o8/other')).rejects.toThrow('volume identity is unavailable');
     await expect(resolveStorageVolumeId('/Users/o8/other')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
   });
+  it('retries a transient UUID failure rather than persisting a device fallback', async () => {
+    df.diskFailures = 1;
+    expect(await volumeIdsInOrder(['/fixture/worktrees'])).toEqual({ '/fixture/worktrees': `volume-uuid:${DATA_UUID}` });
+    expect(df.diskCalls).toBe(2);
+  });
+
+  it('refuses and uncaches an unavailable UUID so the next healthy probe can recover', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const { resolveStorageVolumeId } = await import('./storage-telemetry');
+    df.diskFailures = 2;
+    await expect(resolveStorageVolumeId('/fixture/worktrees')).rejects.toThrow('volume identity is unavailable');
+    await expect(resolveStorageVolumeId('/fixture/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
+    vi.resetModules();
+    const restarted = await import('./storage-telemetry');
+    df.diskEmpty = 2;
+    await expect(restarted.resolveStorageVolumeId('/fixture/worktrees')).rejects.toThrow('volume identity is unavailable');
+    await expect(restarted.resolveStorageVolumeId('/fixture/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
+  });
+
 });
