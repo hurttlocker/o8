@@ -3,13 +3,14 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FirstRunPreview } from './FirstRunPreview';
+import { ConsentScenario, createConsentPreviewRequest, FirstRunPreview } from './FirstRunPreview';
 
 const roots: Array<ReturnType<typeof createRoot>> = [];
 
-afterEach(() => {
-  roots.splice(0).forEach((root) => root.unmount());
+afterEach(async () => {
+  await act(async () => roots.splice(0).forEach((root) => root.unmount()));
   document.body.innerHTML = '';
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -20,6 +21,78 @@ async function settle(milliseconds = 80) {
 }
 
 describe('first-run preview route surface', () => {
+  it.each(['unanswered', 'one-choice'] as const)('keeps %s incomplete without saving', async (state) => {
+    const request = vi.fn(createConsentPreviewRequest(state));
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => root.render(createElement(ConsentScenario, { state, request })));
+    expect(container.querySelectorAll('[aria-pressed="true"]')).toHaveLength(state === 'one-choice' ? 1 : 0);
+    const save = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Save both choices');
+    expect(save?.disabled).toBe(true);
+    expect(request.mock.calls.filter(([init]) => init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it.each(['saving', 'error'] as const)('reaches %s with one fixture save when timed clicks batch before React commits', async (state) => {
+    vi.useFakeTimers();
+    const request = vi.fn(createConsentPreviewRequest(state));
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => root.render(createElement(ConsentScenario, { state, request })));
+    // All old timer callbacks run before React can commit either selection.
+    await act(async () => vi.advanceTimersByTime(100));
+
+    expect(container.textContent).toContain(state === 'saving'
+      ? 'Saving choices…' : 'Preview: choices could not be saved.');
+    const writes = () => request.mock.calls.filter(([init]) => init?.method === 'POST');
+    expect(writes()).toHaveLength(1);
+    expect(JSON.parse(String(writes()[0][0]?.body))).toEqual({
+      crashReportsEnabled: true,
+      productTelemetryEnabled: false,
+      telemetryConsentAnswered: true,
+    });
+    await act(async () => vi.advanceTimersByTime(100));
+    expect(writes()).toHaveLength(1);
+  });
+
+  it('does not drive another scenario while its own choices are still loading', async () => {
+    vi.useFakeTimers();
+    let releaseRead!: (response: Response) => void;
+    const delayedRequest = vi.fn(() => new Promise<Response>((resolve) => { releaseRead = resolve; }));
+    const unansweredRequest = vi.fn(createConsentPreviewRequest('unanswered'));
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+
+    await act(async () => root.render(createElement('div', null,
+      createElement(ConsentScenario, { state: 'saving', request: delayedRequest, key: 'loading' }),
+      createElement(ConsentScenario, { state: 'unanswered', request: unansweredRequest, key: 'unanswered' }),
+    )));
+    await act(async () => vi.advanceTimersByTime(100));
+    const selected = container.querySelectorAll('[aria-pressed="true"]');
+    expect(selected).toHaveLength(0);
+    expect(unansweredRequest.mock.calls.filter(([init]) => init?.method === 'POST')).toHaveLength(0);
+
+    // Replace the loading scenario before its response arrives, as a reset does.
+    await act(async () => root.render(createElement(ConsentScenario, {
+      state: 'unanswered', request: unansweredRequest, key: 'replacement',
+    })));
+    await act(async () => {
+      releaseRead(Response.json({ values: { telemetryConsentAnswered: false } }));
+      vi.advanceTimersByTime(100);
+    });
+    expect(container.querySelectorAll('[aria-pressed="true"]')).toHaveLength(0);
+    expect(unansweredRequest.mock.calls.filter(([init]) => init?.method === 'POST')).toHaveLength(0);
+    expect(delayedRequest).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the real consent card and drives its saving state from the harness', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
