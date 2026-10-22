@@ -288,3 +288,8 @@ ${text}
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  const { deleteRetainedMemory } = await import('@/lib/cortex/forget');
+  return deleteRetainedMemory(request, 'directive');
+}

@@ -2,7 +2,7 @@ import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realti
 import type { DispatchedWorkerLane } from './dispatched-worker-lane';
 import { dispatchedWorkerRuntime } from './dispatched-worker-lane';
 
-/** Convert live packet and Fast launch mutations into native workspace workers. */
+/** Convert live packet and Shared launch mutations into native workspace workers. */
 export function openWorkerFromMutation(
   event: RealtimeEventEnvelope,
   openWorker: (lane: DispatchedWorkerLane) => Promise<void>,
@@ -17,7 +17,7 @@ export function openWorkerFromMutation(
       runtime: dispatchedWorkerRuntime(mutation.runtime),
       repoPath: mutation.repoPath,
       status: 'launching',
-      packetTitle: mutation.note ?? 'Fast worker',
+      packetTitle: mutation.note ?? 'Shared worker',
       launchContext: mutation.launchContext,
     });
     return true;

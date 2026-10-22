@@ -13,6 +13,7 @@ export function RamsButton({
   busy = false,
   icon,
   width,
+  'aria-label': ariaLabel,
   'aria-expanded': ariaExpanded,
   'aria-controls': ariaControls,
 }: {
@@ -24,6 +25,7 @@ export function RamsButton({
   busy?: boolean;
   icon?: ReactNode;
   width?: number | string;
+  'aria-label'?: string;
   'aria-expanded'?: boolean;
   'aria-controls'?: string;
 }) {
@@ -48,6 +50,7 @@ export function RamsButton({
       onClick={onClick}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
+      aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
       aria-controls={ariaControls}
       style={{
