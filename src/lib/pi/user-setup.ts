@@ -3,6 +3,7 @@ import { access, open, opendir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { isPiCacheWarming, supportsPiCacheWarming, type PiCacheWarming } from '@/lib/pi/cache-warming';
 import type { RuntimeSession } from '@/lib/runtimes/types';
 
 const SETTINGS_BYTES = 64 * 1024;
@@ -22,6 +23,8 @@ export interface PiUserSetup {
   skills: number;
   sessions: number;
   countsTruncated: boolean;
+  cacheWarming?: PiCacheWarming;
+  cacheWarmingSupported?: boolean;
 }
 
 function configuredPath(value: string) {
@@ -221,6 +224,8 @@ export async function detectPiUserSetup(): Promise<PiUserSetup> {
     detected: Boolean(binary || agent?.isDirectory()), agentDir,
     binaryPath: binary?.path, version: binary?.version,
     provider: text(settings.defaultProvider), model: text(settings.defaultModel),
+    cacheWarming: isPiCacheWarming(settings.cacheWarming) ? settings.cacheWarming : 'streaming',
+    cacheWarmingSupported: supportsPiCacheWarming(binary?.version),
     credentialsPresent,
     extensions: extensions.files.length + configuredCount('extensions'),
     skills: skills.files.length + configuredCount('skills'),
