@@ -612,6 +612,12 @@
       ]
     },
     {
+      "path": "src/lib/mobile/relay-connector.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/lib/mobile/review-units.test.ts",
       "reasons": [
         "worktree-api"
@@ -3060,6 +3066,29 @@
       "path": "tests/managed-run-external-settlement-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/managed-run-read-only-receipts-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/managed-run-receipt-settlement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
       ]
     },
     {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Onboarding, type OnboardingStep } from '@/components/desktop/Onboarding';
 import { TelemetryConsentCard } from '@/components/desktop/TelemetryConsentCard';
 import type { OnboardingRequest } from '@/components/desktop/onboarding/request';
@@ -113,43 +113,60 @@ export function createConsentPreviewRequest(state: ConsentPreviewState) {
   };
 }
 
-function ConsentScenario({ state }: { state: ConsentPreviewState }) {
-  const request = useMemo(() => createConsentPreviewRequest(state), [state]);
+export function ConsentScenario({ state, request: injectedRequest }: {
+  state: ConsentPreviewState;
+  request?: ReturnType<typeof createConsentPreviewRequest>;
+}) {
+  const defaultRequest = useMemo(() => createConsentPreviewRequest(state), [state]);
+  const request = injectedRequest ?? defaultRequest;
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container || state === 'unanswered') return;
     let cancelled = false;
-    const timers = new Set<ReturnType<typeof setTimeout>>();
-    const later = (callback: () => void, delay: number) => {
-      const timer = setTimeout(() => {
-        timers.delete(timer);
-        if (!cancelled) callback();
-      }, delay);
-      timers.add(timer);
-    };
-    const findButton = (label: string) => Array.from(document.querySelectorAll('button'))
-      .find((button) => button.textContent?.trim() === label) as HTMLButtonElement | undefined;
+    let submitted = false;
+    const findButton = (label: string) => Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === label);
     const driveState = () => {
+      if (cancelled || submitted) return;
       const firstChoice = findButton('Share crash reports');
-      if (!firstChoice) {
-        later(driveState, 25);
+      if (!firstChoice || firstChoice.disabled) return;
+      if (firstChoice.getAttribute('aria-pressed') !== 'true') {
+        firstChoice.click();
         return;
       }
-      if (state === 'unanswered') return;
-      firstChoice.click();
-      if (state === 'one-choice') return;
-      later(() => {
-        findButton('Keep product usage off')?.click();
-        later(() => { findButton('Save both choices')?.click(); }, 25);
-      }, 25);
+      if (state === 'one-choice') {
+        observer.disconnect();
+        return;
+      }
+      const secondChoice = findButton('Keep product usage off');
+      if (!secondChoice || secondChoice.disabled) return;
+      if (secondChoice.getAttribute('aria-pressed') !== 'true') {
+        secondChoice.click();
+        return;
+      }
+      const save = findButton('Save both choices');
+      if (!save || save.disabled) return;
+      submitted = true;
+      observer.disconnect();
+      save.click();
     };
+    const observer = new MutationObserver(driveState);
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-pressed', 'disabled'],
+    });
     driveState();
     return () => {
       cancelled = true;
-      timers.forEach(clearTimeout);
+      observer.disconnect();
     };
   }, [state]);
 
-  return <TelemetryConsentCard request={request} />;
+  return <div ref={containerRef}><TelemetryConsentCard request={request} /></div>;
 }
 
 const controlStyle: React.CSSProperties = {
