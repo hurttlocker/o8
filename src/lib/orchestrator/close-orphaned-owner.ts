@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { getLane, getLaneEvents } from '@/lib/lane/registry';
@@ -14,6 +14,7 @@ import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-li
 import { archivedSessionPathForSurfaceId, assertArchivedWorkspaceSessionRestorable, ownedSessionRecordFingerprint } from '@/lib/runtimes/shared/owned-session/archive';
 import { readOwnedSessionMetadata } from '@/lib/runtimes/shared/owned-session/metadata-read';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
+import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import { readWorkspacePreservation } from '@/lib/workspace/preservation-store';
 import { readCapturedPurgeCwdSnapshot, type CapturedPurgeProcessWitness } from '@/lib/workspace/exact-directory-purge';
 import { readExactManagedFinalization } from '@/lib/workspace/exact-managed-finalization-state';
@@ -120,6 +121,43 @@ async function inspectOwner(laneId: string, candidatePath: string, capturedPurge
   }
 }
 
+/** Execution limits alone do not require keeping a clean checkout already on its base. */
+async function isRetirableReadOnlyCheckout(record: OwnedSessionRecord, lane: Lane, candidatePath: string): Promise<boolean> {
+  try {
+    const policy = createOwnedExecutionPolicy({ cwd: record.cwd, prompt: record.latestPrompt,
+      controlledTask: record.controlledTask, executionPolicy: 'single-attempt',
+      model: record.model, effort: record.effort, runtimeConfig: record.runtimeConfig }, lane.runtime);
+    if (!policy || digest(policy) !== digest(record.executionPolicy)) return false;
+    const git = promisify(execFile);
+    const options = { encoding: 'utf8' as const, timeout: 5_000,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } };
+    let head: string;
+    const admitted = orphanCloseOwner(lane.id);
+    const pending = admitted ? orphanCloseRetirement(lane) : null;
+    const entries = pending && candidatePath === pending.claim.claimPath
+      ? await readdir(candidatePath).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; }) : null;
+    if (entries?.length === 0 && pending?.claim.state === 'purging'
+      && digest(admitted) === digest(pending.owner)) {
+      // Final-empty checks run after Git has been unlinked. Only this trusted
+      // in-progress claim may use its already-admitted preservation revision.
+      const preservationId = pending.claim.authority?.preservationId;
+      if (typeof preservationId !== 'string') return false;
+      const { payload } = await readWorkspacePreservation(preservationId);
+      if (payload.laneId !== lane.id || payload.packetId !== lane.packetId
+        || payload.identity.device !== admitted!.device || payload.identity.inode !== admitted!.inode
+        || payload.identity.canonicalPath !== admitted!.sourcePath) return false;
+      head = payload.capture.headCommit;
+    } else {
+      const { stdout: dirty } = await git('git', ['status', '--porcelain=v1', '--untracked-files=all'], { ...options, cwd: candidatePath });
+      if (dirty.trim()) return false;
+      const result = await git('git', ['rev-parse', '--verify', 'HEAD^{commit}'], { ...options, cwd: candidatePath });
+      head = result.stdout.trim();
+    }
+    await git('git', ['merge-base', '--is-ancestor', head, lane.baseBranch], { ...options, cwd: lane.repoPath });
+    return true;
+  } catch { return false; }
+}
+
 async function inspectOwnerEvidence(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
   const lane = getLane(laneId);
   if (!lane?.packetId || !lane.worktreePath || lane.ownership !== 'managed') return null;
@@ -154,7 +192,8 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
       || record.runIdentityLedger?.version !== 1 || record.runIdentityLedger.complete !== true
       || record.runIdentityLedger.totalRuns !== record.recentRuns.length
       || ownedSessionRecordFingerprint(record) !== receipt.recordFingerprint
-      || record.executionPolicy !== undefined || record.controlledTask || record.activeRun || record.detachedAt
+      || ((record.executionPolicy !== undefined || record.controlledTask)
+        && !await isRetirableReadOnlyCheckout(record, lane, candidatePath)) || record.activeRun || record.detachedAt
       || receipt.surfaceId !== sessionKey || receipt.runtimeId !== lane.runtime || receipt.sessionState !== 'archived'
       || receipt.binding.packetId !== lane.packetId || receipt.binding.logicalWorkspaceId !== `packet:${lane.packetId}`
       || (receipt.binding.repositoryUuid !== null && receipt.binding.repositoryUuid !== repo.id)

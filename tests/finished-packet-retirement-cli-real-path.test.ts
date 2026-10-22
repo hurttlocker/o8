@@ -17,6 +17,17 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (original) => ({
 vi.mock('@/lib/lane/terminal-lane-cleanup', () => ({ scheduleTerminalLaneCleanup: vi.fn() }));
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-finished-retirement-'));
+const syscall = vi.hoisted(() => ({ preload: '' }));
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  return { ...actual, spawn: (...args: Parameters<typeof actual.spawn>) => {
+    if (syscall.preload && args[0] === process.execPath && Array.isArray(args[1])
+      && args[1][0] === '-e' && args[1][1]?.includes('O8_PURGE_CAPTURED')) {
+      return actual.spawn(args[0], ['--require', syscall.preload, ...args[1]], args[2]);
+    }
+    return Reflect.apply(actual.spawn, undefined, args);
+  } };
+});
 const dataDir = path.join(root, 'data');
 const token = 'preservation-operator-test-token';
 const workerToken = 'preservation-worker-test-token';
@@ -122,7 +133,9 @@ beforeAll(async () => {
   git(repoPath, 'config', 'user.email', 'o8@example.test');
   writeFileSync(path.join(repoPath, '.gitignore'), '.o8/\nnode_modules/\n');
   writeFileSync(path.join(repoPath, 'tracked.txt'), 'base source\n');
-  git(repoPath, 'add', '.gitignore', 'tracked.txt');
+  mkdirSync(path.join(repoPath, 'checked', 'nested'), { recursive: true });
+  writeFileSync(path.join(repoPath, 'checked', 'nested', 'evidence.txt'), 'outside bytes must survive\n');
+  git(repoPath, 'add', '.gitignore', 'tracked.txt', 'checked');
   git(repoPath, 'commit', '-qm', 'base');
   execFileSync(process.execPath, [path.join(process.cwd(), 'cli/esbuild.config.mjs')], { stdio: 'pipe' });
   server = createServer(async (request, response) => {
@@ -161,16 +174,38 @@ afterAll(async () => {
 });
 
 
-async function finishedPacket(packetId: string, status: 'archived' | 'completed' | 'failed' | 'reviewing' = 'archived') {
+async function finishedPacket(packetId: string, status: 'archived' | 'completed' | 'failed' | 'reviewing' | 'paused' = 'archived',
+  retainedSession?: 'ordinary' | 'read-only') {
   const repo = await addRepo(repoPath);
   const source = await ownedWorkspace(repo, packetId, 'main');
-  writeFileSync(path.join(source.workspacePath, 'tracked.txt'), 'completed source\n');
-  git(source.workspacePath, 'commit', '-qam', 'completed source');
+  if (retainedSession !== 'read-only') {
+    writeFileSync(path.join(source.workspacePath, 'tracked.txt'), 'completed source\n');
+    git(source.workspacePath, 'commit', '-qam', 'completed source');
+  }
   const head = git(source.workspacePath, 'rev-parse', 'HEAD');
   setLaneStatus(source.lane.id, status);
-  rmSync(path.join(root, 'sessions', 'codex-owned-' + packetId), { recursive: true });
+  const sessionDir = path.join(root, 'sessions', 'codex-owned-' + packetId);
+  if (retainedSession) {
+    const recordPath = path.join(sessionDir, 'session.json');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as OwnedSessionRecord;
+    record.laneId = source.lane.id;
+    if (retainedSession === 'read-only') {
+      record.model = 'gpt-6.1-sol';
+      record.effort = 'medium';
+      record.runtimeConfig = { workMode: 'read-only' };
+      record.executionPolicy = { version: 1, mode: 'single-attempt', runtime: 'codex',
+        model: record.model, effort: record.effort, runtimeConfig: record.runtimeConfig };
+    }
+    writeFileSync(recordPath, JSON.stringify(record));
+  } else rmSync(sessionDir, { recursive: true });
   const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
   resetOwnedSessionIndex();
+  if (retainedSession) {
+    await import('@/lib/runtimes');
+    const { getOwnedSessionLifecycle } = await import('@/lib/runtimes/shared/owned-session-lifecycle');
+    const archived = await getOwnedSessionLifecycle(source.lane.sessionKey!)!.archiveSession(source.lane.sessionKey!);
+    expect(archived?.archived, archived?.note).toBe(true);
+  }
   const mission = writeOrchestratorControlPlaneState({
     ...createEmptyOrchestratorMissionState(), missionId: 'mission-' + packetId,
     repoPath, runtime: 'codex', updatedAt: new Date().toISOString(),
@@ -191,7 +226,148 @@ async function finishedPacket(packetId: string, status: 'archived' | 'completed'
   return { repo, source, head };
 }
 
+async function archive(laneId: string) {
+  return fetch('http://127.0.0.1:' + port + '/api/lanes', {
+    method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+    body: JSON.stringify({ verb: 'archive', laneId }),
+  });
+}
+
 describe('finished packet checkout retirement', () => {
+  it.each(['file-open', 'final-stat'] as const)('archive refuses an intermediate symlink swap at the native %s seam without changing outside bytes', async (swapAt) => {
+    const packetId = 'finished-component-race-' + swapAt;
+    const { repo, source } = await finishedPacket(packetId, 'completed');
+    const armed = path.join(root, swapAt + '-race-armed');
+    const swapped = path.join(root, swapAt + '-race-swapped');
+    const outside = path.join(root, swapAt + '-escaped-component');
+    const preload = path.join(root, swapAt + '-purge-syscall-seam.cjs');
+    writeFileSync(preload, `
+      const fs = require('node:fs');
+      const fsp = require('node:fs/promises');
+      const path = require('node:path');
+      const open = fsp.open;
+      let evidenceFd;
+      let stats = 0;
+      function swap() {
+        if (fs.existsSync(${JSON.stringify(armed)}) && !fs.existsSync(${JSON.stringify(swapped)})) {
+          const candidate = fs.realpathSync('.');
+          const checked = candidate.includes('/checked/') ? candidate.slice(0, candidate.indexOf('/checked/') + 8) : path.join(candidate, 'checked');
+          fs.renameSync(checked, ${JSON.stringify(outside)});
+          fs.symlinkSync(${JSON.stringify(outside)}, checked, 'dir');
+          fs.writeFileSync(${JSON.stringify(swapped)}, 'swapped');
+        }
+      }
+      fsp.open = async function(name, ...args) {
+        if (path.basename(String(name)) === 'evidence.txt' && ${JSON.stringify(swapAt)} === 'file-open') swap();
+        const handle = await open.call(this, name, ...args);
+        if (path.basename(String(name)) === 'evidence.txt') evidenceFd = handle.fd;
+        return handle;
+      };
+      const fstat = fs.fstatSync;
+      fs.fstatSync = function(fd, ...args) {
+        const result = fstat.call(this, fd, ...args);
+        if (fd === evidenceFd && ++stats === 2 && ${JSON.stringify(swapAt)} === 'final-stat') swap();
+        return result;
+      };
+    `);
+    const purgeModule = await import('@/lib/workspace/exact-directory-purge');
+    const purge = purgeModule.purgeExactDirectory;
+    const seam = vi.spyOn(purgeModule, 'purgeExactDirectory').mockImplementation((candidate, identity, before, after, ...rest) =>
+      purge(candidate, identity, before, async (captured, witness) => {
+        await after?.(captured, witness);
+        writeFileSync(armed, 'armed');
+      }, ...rest));
+    syscall.preload = preload;
+    try {
+      const response = await archive(source.lane.id);
+      expect(response.status, await response.text()).toBe(200);
+      expect(existsSync(swapped)).toBe(true);
+      expect(readFileSync(path.join(outside, 'nested', 'evidence.txt'), 'utf8')).toBe('outside bytes must survive\n');
+      expect(getWorkspaceSnapshot(repo.id, packetId)?.state).not.toBe('retired');
+    } finally { syscall.preload = ''; seam.mockRestore(); }
+  }, 120_000);
+
+  it('archive retains a same-inode write after the native manifest and final authorization', async () => {
+    const { repo, source } = await finishedPacket('finished-late-inode-write', 'completed');
+    const purgeModule = await import('@/lib/workspace/exact-directory-purge');
+    const purge = purgeModule.purgeExactDirectory;
+    let retained = '';
+    const seam = vi.spyOn(purgeModule, 'purgeExactDirectory').mockImplementation((candidate, identity, before, after, ...rest) =>
+      purge(candidate, identity, before, async (captured, witness) => {
+        await after?.(captured, witness);
+        retained = path.join(captured, 'tracked.txt');
+        writeFileSync(retained, 'late source must survive\n');
+      }, ...rest));
+    try {
+      const response = await archive(source.lane.id);
+      expect(response.status, await response.text()).toBe(200);
+      expect(existsSync(retained)).toBe(true);
+      expect(readFileSync(retained, 'utf8')).toBe('late source must survive\n');
+      expect(getWorkspaceSnapshot(repo.id, 'finished-late-inode-write')?.state).not.toBe('retired');
+    } finally { seam.mockRestore(); }
+  }, 120_000);
+
+  it.each(['paused', 'reviewing'] as const)('archive does not retire a %s checkout before terminalization', async (status) => {
+    const { repo, source, head } = await finishedPacket('finished-nonterminal-' + status, status, 'ordinary');
+    const response = await archive(source.lane.id);
+    expect(response.status, await response.text()).toBe(200);
+    expect(existsSync(source.workspacePath)).toBe(true);
+    expect(git(source.workspacePath, 'rev-parse', 'HEAD')).toBe(head);
+    expect(getWorkspaceSnapshot(repo.id, 'finished-nonterminal-' + status)?.state).not.toBe('retired');
+  }, 120_000);
+
+  it('archive rechecks persisted terminal status after owner admission under the lifecycle lease', async () => {
+    const packetId = 'finished-terminal-recheck';
+    const { repo, source } = await finishedPacket(packetId, 'completed', 'ordinary');
+    const owners = await import('@/lib/orchestrator/close-orphaned-owner');
+    const prepare = owners.prepareOrphanCloseOwners;
+    const { getSqlite } = await import('@/lib/db');
+    const seam = vi.spyOn(owners, 'prepareOrphanCloseOwners').mockImplementation(async (targets) => {
+      const result = await prepare(targets);
+      expect(getSqlite().prepare('SELECT owner_pid FROM workspace_lifecycle_leases WHERE packet_id = ?').get(packetId))
+        .toMatchObject({ owner_pid: process.pid });
+      // Simulate a stale writer bypassing the normal terminal-transition guard.
+      getSqlite().prepare("UPDATE lanes SET status = 'reviewing' WHERE id = ?").run(source.lane.id);
+      return result;
+    });
+    try {
+      const response = await archive(source.lane.id);
+      expect(response.status, await response.text()).toBe(200);
+      expect(seam).toHaveBeenCalledOnce();
+      expect(existsSync(source.workspacePath)).toBe(true);
+      expect(getWorkspaceSnapshot(repo.id, packetId)?.state).not.toBe('retired');
+    } finally { seam.mockRestore(); }
+  }, 120_000);
+
+  it.each(['archive', 'close'] as const)('%s retires an archived read-only reviewer with a clean base head', async (entry) => {
+    const packetId = 'finished-read-only-' + entry;
+    const { repo, source, head } = await finishedPacket(packetId, 'archived', 'read-only');
+    expect(git(source.workspacePath, 'status', '--porcelain')).toBe('');
+    expect(git(repoPath, 'rev-parse', 'main')).toBe(head);
+    if (entry === 'archive') {
+      const response = await archive(source.lane.id);
+      expect(response.status, await response.text()).toBe(200);
+    } else {
+      const result = await cli(['packet', 'close', packetId, '--reason', 'superseded']);
+      expect(result.exitCode, result.stderr + result.stdout).toBe(0);
+    }
+    expect(existsSync(source.workspacePath)).toBe(false);
+    expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired', headCommit: head });
+    expect(existsSync(spawnReceipt)).toBe(false);
+  }, 120_000);
+
+  it.each(['dirty', 'unmerged'] as const)('archive keeps a read-only checkout with %s source', async (condition) => {
+    const packetId = 'finished-read-only-' + condition;
+    const { repo, source } = await finishedPacket(packetId, 'archived', 'read-only');
+    writeFileSync(path.join(source.workspacePath, 'tracked.txt'), 'unpreserved reviewer source\n');
+    if (condition === 'unmerged') git(source.workspacePath, 'commit', '-qam', 'unmerged reviewer source');
+    const response = await archive(source.lane.id);
+    expect(response.status, await response.text()).toBe(200);
+    expect(existsSync(source.workspacePath)).toBe(true);
+    expect(readFileSync(path.join(source.workspacePath, 'tracked.txt'), 'utf8')).toBe('unpreserved reviewer source\n');
+    expect(getWorkspaceSnapshot(repo.id, packetId)?.state).not.toBe('retired');
+  }, 120_000);
+
   it('compiled packet close retires a clean archived clone with a missing session and no legacy run ledger', async () => {
     const { repo, source, head } = await finishedPacket('finished-missing-session');
     const closed = await cli(['packet', 'close', 'finished-missing-session', '--reason', 'superseded']);
