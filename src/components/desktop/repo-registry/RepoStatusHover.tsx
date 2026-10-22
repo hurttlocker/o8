@@ -5,6 +5,7 @@
 
 import { memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRepoPullRequests } from '@/lib/github-client';
 import {
   formatRelativeTime,
   resolveFloatingPanelPosition,
@@ -229,39 +230,13 @@ function useCiSnapshot(slug: string | null, enabled: boolean): { state: CiSnapsh
 }
 
 function usePrSnapshot(slug: string | null, enabled: boolean): { state: PrSnapshot | null; loading: boolean } {
-  const [state, setState] = useState<PrSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || !slug) {
-      setState(null);
-      return;
-    }
-    let active = true;
-    setLoading(true);
-    const controller = new AbortController();
-    fetch(`/api/panel/prs?repo=${encodeURIComponent(slug)}`, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data: { prs?: Array<{ state?: string; reviewDecision?: string | null }> }) => {
-        if (!active) return;
-        const prs = data.prs ?? [];
-        const open = prs.filter((pr) => pr.state === 'OPEN').length;
-        const awaitingReview = prs.filter((pr) => pr.state === 'OPEN' && (!pr.reviewDecision || pr.reviewDecision === 'REVIEW_REQUIRED')).length;
-        setState({ open, awaitingReview });
-      })
-      .catch(() => {
-        if (active) setState(null);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [enabled, slug]);
-
-  return { state, loading };
+  const { data, isFetching } = useRepoPullRequests(enabled ? slug : null);
+  if (!enabled || !slug || !Array.isArray(data?.prs)) return { state: null, loading: enabled && isFetching };
+  const open = data.prs.filter(pr => pr.state === 'OPEN');
+  return {
+    state: { open: open.length, awaitingReview: open.filter(pr => !pr.reviewDecision || pr.reviewDecision === 'REVIEW_REQUIRED').length },
+    loading: isFetching,
+  };
 }
 
 function computeAgentSnapshot(agents: BranchAgent[]): AgentSnapshot {
