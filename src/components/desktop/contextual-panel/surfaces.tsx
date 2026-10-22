@@ -9,6 +9,7 @@ import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { BottomPanelSurfaceKind } from '../ContextualPanel';
 import { retryingLazy } from '@/lib/react/retrying-lazy';
+import { SideChatIntro } from '../o8-panel/SideChatIntro';
 const LazyOrchestratorTab = retryingLazy(() => import('../workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 // ── CLI Agents (terminal only, no chat modes) ──
@@ -126,7 +127,7 @@ interface BottomPanelSurface {
 
 export const BOTTOM_PANEL_SURFACES: BottomPanelSurface[] = [
   { id: 'files', label: 'Files', description: 'Browse project files', icon: FilesIcon },
-  { id: 'side-chat', label: 'Side chat', description: 'Start a side conversation', icon: ChatIcon },
+  { id: 'side-chat', label: 'Side chat', description: 'A separate conversation with its own messages', icon: ChatIcon },
   { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
   { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
   { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
@@ -211,20 +212,23 @@ export function BottomUtilitySurface({
 
   if (kind === 'side-chat') {
     return (
-      <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the bottom panel." />}>
-        <LazyOrchestratorTab
-          tabId={tabId}
-          active={active}
-          repoPath={repoPath}
-          repoLabel={repoLabel}
-          initialMode="fleet"
-          acceptHistoryThreadLoads={false}
-          restoreLastThread={false}
-          publishWorkspaceThread={false}
-          persistLastThread={false}
-          projectContextRailVisible={false}
-        />
-      </Suspense>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <SideChatIntro />
+        <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the bottom panel." />}>
+          <LazyOrchestratorTab
+            tabId={tabId}
+            active={active}
+            repoPath={repoPath}
+            repoLabel={repoLabel}
+            initialMode="fleet"
+            acceptHistoryThreadLoads={false}
+            restoreLastThread={false}
+            publishWorkspaceThread={false}
+            persistLastThread={false}
+            projectContextRailVisible={false}
+          />
+        </Suspense>
+      </div>
     );
   }
 

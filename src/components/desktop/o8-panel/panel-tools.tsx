@@ -43,7 +43,7 @@ export const PANEL_TOOLS: PanelToolDefinition[] = [
   tool('spec', 'o8.md', 'Workspace notes and instructions', 'Tools'),
   tool('threads', 'Threads', 'Project tasks and agent exchanges', 'More'),
   tool('activity', 'Activity', 'Repository history and mission decisions', 'More'),
-  tool('side-chat', 'Side chat', 'A separate conversation for this repository', 'More'),
+  tool('side-chat', 'Side chat', 'A separate conversation with its own messages', 'More'),
   tool('resources', 'Resources', 'Live session CPU and memory', 'Diagnostics'),
   tool('targets', 'Targeting', 'Find code to direct your agents toward', 'Diagnostics'),
 ];
