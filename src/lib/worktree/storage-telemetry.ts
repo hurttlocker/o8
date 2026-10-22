@@ -426,13 +426,14 @@ export async function resolveStorageVolumeId(targetPath: string): Promise<string
   let pending = stableVolumeIds.get(cacheKey);
   if (!pending) {
     pending = (async () => {
-      let volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(() => null);
-      if (process.platform === 'darwin' && !volumeId) {
-        volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(() => null);
-        if (!volumeId) {
-          throw new Error('Filesystem volume identity is unavailable: diskutil did not report a stable UUID.');
-        }
-      }
+      // A successful UUID-less probe uses the explicit device: identity below.
+      // Only probe failures are transient; retry those without recording a fallback.
+      const volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(async () => {
+        if (process.platform !== 'darwin') return null;
+        return platformVolumeId(resolvedPath, mountDevice).catch(() => {
+          throw new Error('Filesystem volume identity is unavailable: diskutil probe failed.');
+        });
+      });
       const repeated = await stat(resolvedPath, { bigint: true });
       if (repeated.dev !== identity.dev) {
         throw new Error('Filesystem volume changed during identity capture.');

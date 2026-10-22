@@ -17,7 +17,7 @@ vi.mock('node:child_process', async (original) => {
     if (file === '/usr/sbin/diskutil') {
       df.diskCalls += 1;
       if (df.diskFailures-- > 0) throw new Error('diskutil timed out');
-      if (df.diskEmpty-- > 0) return { stdout: '<plist></plist>', stderr: '' };
+      if (df.diskEmpty-- > 0) return { stdout: '<plist><dict><key>FilesystemType</key><string>smbfs</string></dict></plist>', stderr: '' };
       const uuid = args[2] === '/dev/disk1s1s1' ? SYSTEM_UUID : DATA_UUID;
       return { stdout: `<key>VolumeUUID</key>\n<string>${uuid.toUpperCase()}</string>`, stderr: '' };
     }
@@ -69,17 +69,24 @@ describe('resolveStorageVolumeId on macOS (#3748)', () => {
     expect(df.diskCalls).toBe(2);
   });
 
-  it('refuses and uncaches an unavailable UUID so the next healthy probe can recover', async () => {
+  it('retries failed probes, then refuses and uncaches the failure so a healthy probe can recover', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     const { resolveStorageVolumeId } = await import('./storage-telemetry');
     df.diskFailures = 2;
     await expect(resolveStorageVolumeId('/fixture/worktrees')).rejects.toThrow('volume identity is unavailable');
+    expect(df.diskCalls).toBe(2);
     await expect(resolveStorageVolumeId('/fixture/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
-    vi.resetModules();
-    const restarted = await import('./storage-telemetry');
-    df.diskEmpty = 2;
-    await expect(restarted.resolveStorageVolumeId('/fixture/worktrees')).rejects.toThrow('volume identity is unavailable');
-    await expect(restarted.resolveStorageVolumeId('/fixture/worktrees')).resolves.toBe(`volume-uuid:${DATA_UUID}`);
+    expect(df.diskCalls).toBe(3);
+  });
+
+  it.each([0, 1])('records device identity when a successful probe has no UUID after %i failures', async failures => {
+    df.diskFailures = failures; df.diskEmpty = 1;
+    expect(await volumeIdsInOrder(['/fixture/share'])).toEqual({ '/fixture/share': 'device:16777220' });
+    expect(df.diskCalls).toBe(failures + 1);
+    expect(await volumeIdsInOrder(['/fixture/share'])).toEqual({ '/fixture/share': 'device:16777220' });
+    expect(df.diskCalls).toBe(failures + 1);
+    vi.resetModules(); df.diskEmpty = 1;
+    expect(await volumeIdsInOrder(['/fixture/share'])).toEqual({ '/fixture/share': 'device:16777220' });
   });
 
 });
