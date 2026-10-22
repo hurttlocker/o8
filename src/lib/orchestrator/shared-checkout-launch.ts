@@ -31,10 +31,6 @@ export async function launchSharedCheckoutWorker(input: {
   const assignedPaths = validateSharedCheckoutPaths(input.assignedPaths);
   const origin = captureSharedWorkerOrigin(input.repoPath, input.parentThreadId);
   const team = await reserveSharedCheckoutMember({ ...input, runtime: input.runtime, paths: assignedPaths });
-  const recovered = await findOwnedLaunchByMutationId(input.clientMutationId);
-  if (recovered && recovered.cwd !== team.path) {
-    throw new Error('Worker mutation already belongs to another checkout.');
-  }
   const launchContext: WorkerLaunchContext = {
     source: 'agent',
     presentation: 'split',
@@ -52,6 +48,10 @@ export async function launchSharedCheckoutWorker(input: {
       + 'Report changed paths and verification to the orchestrator. The orchestrator owns group review and the single final commit.';
   let result;
   try {
+    const recovered = await findOwnedLaunchByMutationId(input.clientMutationId);
+    if (recovered && recovered.cwd !== team.path) {
+      throw new Error('Worker mutation already belongs to another checkout.');
+    }
     result = recovered ? {
       ok: recovered.outcome !== 'failed',
       surfaceId: recovered.surfaceId,
