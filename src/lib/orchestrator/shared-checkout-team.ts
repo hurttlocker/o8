@@ -101,7 +101,7 @@ function teamLocation(input: TeamInput): { id: string; file: string; lock: strin
 
 function currentCheckout(path: string): { branch: string; head: string } {
   if (realpathSync(git(path, 'rev-parse', '--show-toplevel')) !== path) {
-    throw new Error('Fast mode requires the exact checkout root.');
+    throw new Error('Shared mode requires the exact checkout root.');
   }
   let branch: string;
   try {
@@ -260,7 +260,7 @@ function pathsOverlap(left: string, right: string): boolean {
 
 export function validateSharedCheckoutPaths(paths: string[]): string[] {
   const normalized = [...new Set(paths.map(normalizeClaim))];
-  if (normalized.length === 0) throw new Error('Fast workers need explicit, non-overlapping file or directory scopes.');
+  if (normalized.length === 0) throw new Error('Shared workers need explicit, non-overlapping file or directory scopes.');
   return normalized;
 }
 
@@ -277,7 +277,7 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
   return withLock(location.lock, async () => {
     const paths = validateSharedCheckoutPaths(input.paths);
     if (!/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(input.parentThreadId)) {
-      throw new Error('Fast mode requires a durable orchestrator chat.');
+      throw new Error('Shared mode requires a durable orchestrator chat.');
     }
     const checkout = currentCheckout(location.path);
     const existingTeam = readFile(location.file);
@@ -308,7 +308,7 @@ export async function reserveSharedCheckoutMember(input: TeamInput & {
       return team;
     }
     if (paths.some((path) => team.initialChangedPaths.some((changed) => pathsOverlap(path, changed)))) {
-      throw new Error('Fast worker scope overlaps files that were dirty before the team started. Assign a clean scope.');
+      throw new Error('Shared worker scope overlaps files that were dirty before the team started. Assign a clean scope.');
     }
     // A failed launch with a created surface may still be running after an
     // unknown post-effect. Hold its scope until the entire team is reviewed.
@@ -347,7 +347,7 @@ export async function failSharedCheckoutMember(input: TeamInput & { clientMutati
 
 export async function ensureSharedCheckoutTeam(input: TeamInput): Promise<SharedCheckoutTeam> {
   if (!/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(input.parentThreadId)) {
-    throw new Error('Fast mode requires a durable orchestrator chat.');
+    throw new Error('Shared mode requires a durable orchestrator chat.');
   }
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
@@ -459,12 +459,12 @@ export async function finishSharedCheckoutTeam(input: TeamInput & {
   verification: string;
 }): Promise<{ team: SharedCheckoutTeam; reviewedHead: string; committedPaths: string[] }> {
   if (!input.reviewSummary.trim() || !input.verification.trim()) {
-    throw new Error('Finishing a Fast team requires a review summary and verification receipt.');
+    throw new Error('Finishing a Shared team requires a review summary and verification receipt.');
   }
   const location = teamLocation(input);
   return withLock(location.lock, async () => {
     const team = readFile(location.file);
-    if (!team) throw new Error('There is no active Fast team in this checkout.');
+    if (!team) throw new Error('There is no active Shared team in this checkout.');
     const checkout = currentCheckout(location.path);
     assertOwner(team, input, location.path, checkout.branch);
     await assertMembersSettled(team);

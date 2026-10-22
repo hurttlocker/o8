@@ -364,6 +364,8 @@ async function platformVolumeId(targetPath: string, mountDevice: string | null):
   if (process.platform === 'darwin') {
     const device = mountDevice ?? await darwinMountDevice(targetPath);
     if (!device) return null;
+    // Network mount sources have no diskutil UUID; retain their device identity.
+    if (!device.startsWith('/dev/')) return null;
     const { stdout } = await execFileAsync('/usr/sbin/diskutil', ['info', '-plist', device], {
       env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
       windowsHide: true,
@@ -426,7 +428,14 @@ export async function resolveStorageVolumeId(targetPath: string): Promise<string
   let pending = stableVolumeIds.get(cacheKey);
   if (!pending) {
     pending = (async () => {
-      const volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(() => null);
+      // A successful UUID-less probe uses the explicit device: identity below.
+      // Only probe failures are transient; retry those without recording a fallback.
+      const volumeId = await platformVolumeId(resolvedPath, mountDevice).catch(async () => {
+        if (process.platform !== 'darwin') return null;
+        return platformVolumeId(resolvedPath, mountDevice).catch(() => {
+          throw new Error('Filesystem volume identity is unavailable: diskutil probe failed.');
+        });
+      });
       const repeated = await stat(resolvedPath, { bigint: true });
       if (repeated.dev !== identity.dev) {
         throw new Error('Filesystem volume changed during identity capture.');

@@ -136,8 +136,8 @@ export const COMPOSER_SELECTOR_MODES: readonly ComposerSelectorModeSpec[] = [
     id: 'fast',
     long: 'Shared',
     short: 'Shared',
-    sublabel: 'Work here; delegate to suitable workers when useful',
-    placeholder: 'Ask anything · delegate when useful',
+    sublabel: 'Workers share this checkout with separate file scopes',
+    placeholder: 'Ask anything · workers share this checkout',
     directive: COMPOSER_MODE_DIRECTIVES.fast,
   },
   {

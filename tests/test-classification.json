@@ -649,6 +649,12 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/control-plane-lock.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/handoff-compaction.test.ts",
       "reasons": [
         "executable-fixture"
@@ -1901,12 +1907,32 @@
       ]
     },
     {
+      "path": "tests/close-artifact-reader-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/close-current-registry-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/close-orphaned-packet-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -4933,6 +4959,14 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/storage-volume-restart-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "real-path"
       ]
     },
     {
