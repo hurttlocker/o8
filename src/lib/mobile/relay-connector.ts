@@ -65,6 +65,9 @@ import { getDataDir } from '@/lib/data-dir-migration';
 const P = '[relay]';
 const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s deadline
 const HTTP_REPLAY_TIMEOUT_MS = 55_000; // must beat the mobile tunnel's 60s deadline
+// Same ping/pong settings as machine attach, with a 30s total detection budget.
+const DEFAULT_KEEP_ALIVE_INTERVAL_MS = 20_000;
+const DEFAULT_PONG_TIMEOUT_MS = 10_000;
 
 // v1.1 contract sequence: Mac-initiated E2EE handshake on bridge → device identified
 // by the client's init signature against the enrolled registry (mutual-auth, no plaintext
@@ -93,6 +96,8 @@ export interface RelayConnectorConfig {
   maxTunnelBytes?: number;
   /** Test/diagnostic override. Production is capped below the mobile deadline. */
   httpRequestTimeoutMs?: number;
+  keepAliveIntervalMs?: number;
+  pongTimeoutMs?: number;
 }
 
 export class RelayConnector {
@@ -100,18 +105,24 @@ export class RelayConnector {
   private readonly streams = new Map<string, StreamState>();
   private readonly reconnect = new RelayReconnectPolicy();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private stopped = false;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = true;
   private liveDeviceCount = 0;
   private readonly routingId: string;
   private readonly relayUrl: string;
   private readonly maxTunnelBytes: number;
   private readonly httpRequestTimeoutMs: number;
+  private readonly keepAliveIntervalMs: number;
+  private readonly pongTimeoutMs: number;
   private readonly httpRequests = new RelayHttpRequestRegistry();
 
   constructor(private readonly config: RelayConnectorConfig) {
     this.routingId = deriveRoutingId(getServerIdentity().publicKeyB64);
     this.relayUrl = (config.relayUrl || process.env.O8_RELAY_URL || DEFAULT_RELAY_URL).replace(/\/+$/, '');
     this.maxTunnelBytes = config.maxTunnelBytes ?? DEFAULT_MAX_TUNNEL_BYTES;
+    this.keepAliveIntervalMs = positiveInteger(config.keepAliveIntervalMs, DEFAULT_KEEP_ALIVE_INTERVAL_MS);
+    this.pongTimeoutMs = positiveInteger(config.pongTimeoutMs, DEFAULT_PONG_TIMEOUT_MS);
     const configuredTimeout = config.httpRequestTimeoutMs;
     this.httpRequestTimeoutMs =
       typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
@@ -124,6 +135,7 @@ export class RelayConnector {
   }
 
   start(): void {
+    if (!this.stopped) return;
     if (!this.config.licenseToken) {
       console.warn(`${P} connector not started — no license token available`);
       return;
@@ -136,14 +148,16 @@ export class RelayConnector {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.clearKeepAlive();
     for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
     this.httpRequests.abortAll('connector-stop');
+    const ws = this.ws;
+    this.ws = null;
     try {
-      this.ws?.close(1000, 'connector stop');
+      ws?.close(1000, 'connector stop');
     } catch {
       /* already gone */
     }
-    this.ws = null;
   }
 
   private dial(): void {
@@ -164,18 +178,27 @@ export class RelayConnector {
     this.ws = ws;
 
     ws.on('open', () => {
+      if (this.stopped || ws !== this.ws) return;
       this.reconnect.reset();
+      this.startKeepAlive(ws);
       console.log(`${P} connector up → ${this.relayUrl} (routingId=${this.routingId.slice(0, 8)}…)`);
     });
-    ws.on('message', (raw) => this.onRelayMessage(raw));
+    ws.on('pong', () => {
+      if (ws !== this.ws || !this.pongTimer) return;
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    });
+    ws.on('message', (raw) => {
+      if (ws === this.ws && !this.stopped) this.onRelayMessage(raw);
+    });
     ws.on('close', (code) => {
-      // 4409 = entitlement lapsed at the relay; stand down until re-evaluated.
+      if (ws !== this.ws) return;
+      this.ws = null;
+      this.clearKeepAlive();
+      // The relay checks current entitlement on each attach. Retry through the
+      // existing backoff so a renewed license recovers without a desktop restart.
       if (code === 4409) {
-        console.warn(`${P} connector closed 4409 entitlement_lapsed — standing down`);
-        this.stopped = true;
-        for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
-        this.httpRequests.abortAll('connector-stop');
-        return;
+        console.warn(`${P} connector closed 4409 entitlement_lapsed — retrying with backoff`);
       }
       this.scheduleReconnect();
     });
@@ -189,8 +212,40 @@ export class RelayConnector {
     for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
     const delay = this.reconnect.nextDelay();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.dial(), delay);
+    this.httpRequests.abortAll('connector-stop');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.dial();
+    }, delay);
     this.reconnectTimer.unref?.();
+  }
+
+  private startKeepAlive(ws: WebSocket): void {
+    this.clearKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      if (this.stopped || ws !== this.ws || ws.readyState !== WebSocket.OPEN || this.pongTimer) return;
+      try {
+        ws.ping();
+      } catch {
+        ws.terminate();
+        return;
+      }
+      this.pongTimer = setTimeout(() => {
+        this.pongTimer = null;
+        if (this.stopped || ws !== this.ws) return;
+        console.warn(`${P} keepalive timeout`);
+        ws.terminate();
+      }, this.pongTimeoutMs);
+      this.pongTimer.unref?.();
+    }, this.keepAliveIntervalMs);
+    this.keepAliveTimer.unref?.();
+  }
+
+  private clearKeepAlive(): void {
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.keepAliveTimer = null;
+    this.pongTimer = null;
   }
 
   // ── relay → connector ──
@@ -494,6 +549,12 @@ export function stopRelayConnector(): void {
 }
 
 // ── module-level helpers ──
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : fallback;
+}
+
 function parseJson(bytes: Buffer): Record<string, unknown> | null {
   return safeParse(bytes.toString('utf8'));
 }

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { describe, it, expect } from 'vitest';
+import type { Socket } from 'node:net';
+
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { WebSocket, WebSocketServer } from 'ws';
 
 import {
   O8_RELAY_SURFACE_HEADER,
@@ -17,6 +20,157 @@ import {
   relayConnectorEligible,
   RELAY_FORWARD_MARKER,
 } from './relay-connector-protocol';
+import { RelayConnector } from './relay-connector';
+
+const connectors: RelayConnector[] = [];
+const relayServers: WebSocketServer[] = [];
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('timed out waiting for relay recovery');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function startRelay(onConnection?: (socket: WebSocket, index: number) => void) {
+  const sockets: WebSocket[] = [];
+  const connectedAt: number[] = [];
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  relayServers.push(server);
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  server.on('connection', (socket, request) => {
+    expect(request.url).toBe('/mac');
+    expect(request.headers.authorization).toBe('Bearer fixture-license');
+    sockets.push(socket);
+    connectedAt.push(Date.now());
+    socket.send(JSON.stringify({ t: 'devices', count: 0 }));
+    onConnection?.(socket, sockets.length - 1);
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('relay fixture did not bind');
+  return { url: `ws://127.0.0.1:${address.port}`, sockets, connectedAt };
+}
+
+function startConnector(relayUrl: string, timing: {
+  keepAliveIntervalMs?: number;
+  pongTimeoutMs?: number;
+} = {}): RelayConnector {
+  const config = {
+    plan: 'pro' as const,
+    settingEnabled: true,
+    licenseToken: 'fixture-license',
+    blockedApprovalCount: () => 0,
+    relayUrl,
+    ...timing,
+  };
+  const connector = new RelayConnector(config);
+  connectors.push(connector);
+  connector.start();
+  return connector;
+}
+
+afterEach(async () => {
+  for (const connector of connectors.splice(0)) connector.stop();
+  await Promise.all(relayServers.splice(0).map(async (server) => {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }));
+  vi.restoreAllMocks();
+});
+
+describe('desktop relay socket recovery through /mac', () => {
+  it('redials a silently blackholed established socket within the production deadline', async () => {
+    let pings = 0;
+    let detectedAt = 0;
+    const warn = console.warn.bind(console);
+    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+      if (args[0] === '[relay] keepalive timeout') detectedAt = Date.now();
+      warn(...args);
+    });
+    const relay = await startRelay((socket) => socket.on('ping', () => { pings++; }));
+    startConnector(relay.url);
+    await waitFor(() => relay.sockets.length === 1);
+    // Pause the actual TCP receive path after upgrade. No close/error frame is
+    // sent, and the established socket cannot receive ping or return pong.
+    const socket = relay.sockets[0] as WebSocket & { _socket: Socket };
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    const blackholedAt = Date.now();
+    socket._socket.pause();
+
+    await waitFor(() => relay.sockets.length >= 2, 32_000);
+
+    const redialMs = relay.connectedAt[1] - blackholedAt;
+    const detectionMs = detectedAt - blackholedAt;
+    console.log(`[relay-recovery-test] detection=${detectionMs}ms blackhole-to-redial=${redialMs}ms`);
+    expect(detectionMs).toBeGreaterThan(0);
+    expect(detectionMs).toBeLessThanOrEqual(30_500);
+    expect(redialMs).toBeLessThanOrEqual(31_500);
+    expect(pings).toBe(0);
+  }, 35_000);
+
+  it('keeps a healthy idle socket connected and cancels timers on stop', async () => {
+    let pings = 0;
+    const relay = await startRelay((socket) => socket.on('ping', () => { pings++; }));
+    const connector = startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 80 });
+    await waitFor(() => pings >= 5);
+    expect(relay.sockets).toHaveLength(1);
+    connector.stop();
+    const stoppedAtPings = pings;
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(pings).toBe(stoppedAtPings);
+    expect(relay.sockets).toHaveLength(1);
+  });
+
+  it('rechecks entitlement after repeated 4409 and recovers when valid again', async () => {
+    let entitled = false;
+    const relay = await startRelay((socket) => {
+      if (!entitled) socket.close(4409, 'entitlement_lapsed');
+    });
+    startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 80 });
+    await waitFor(() => relay.sockets.length >= 2);
+    await waitFor(() => relay.sockets[1].readyState === WebSocket.CLOSED);
+    entitled = true;
+    await waitFor(() => relay.sockets.length >= 3);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(relay.sockets[2].readyState).toBe(WebSocket.OPEN);
+    expect(relay.sockets).toHaveLength(3);
+  });
+
+  it('cancels a pending 4409 retry when explicitly stopped', async () => {
+    const relay = await startRelay((socket) => socket.close(4409, 'entitlement_lapsed'));
+    const connector = startConnector(relay.url);
+    await waitFor(() => relay.sockets[0]?.readyState === WebSocket.CLOSED);
+    connector.stop();
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(relay.sockets).toHaveLength(1);
+  });
+
+  it('clears an outstanding pong deadline on stop and ignores stale socket callbacks on restart', async () => {
+    let pings = 0;
+    const relay = await startRelay((socket, index) => {
+      socket.on('ping', () => {
+        pings++;
+      });
+      if (index === 0) socket.once('ping', () => {
+        (socket as WebSocket & { _socket: Socket })._socket.pause();
+      });
+    });
+    const connector = startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 150 });
+    connector.start(); // idempotent: must not orphan an already-dialing socket
+    await waitFor(() => pings >= 1);
+    // The first ping was answered before pause; the second is now blackholed.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    connector.stop();
+    connector.start();
+    await waitFor(() => relay.sockets.length >= 2);
+    (relay.sockets[0] as WebSocket & { _socket: Socket })._socket.resume();
+    await waitFor(() => relay.sockets[0].readyState === WebSocket.CLOSED);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(relay.sockets).toHaveLength(2);
+    expect(relay.sockets[1].readyState).toBe(WebSocket.OPEN);
+  });
+});
 
 describe('HTTP replay cancellation', () => {
   it('accepts only a well-formed http-cancel frame', () => {
