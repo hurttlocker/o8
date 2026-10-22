@@ -6,23 +6,22 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cleanupLegacyProviderKeys } from './legacy-key-cleanup';
+import { parseKeyEnv } from './env-format';
+export { parseKeyEnv } from './env-format';
 import { assertMasterKeyAvailableForMutation, decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
 
 export const PROVIDER_ENV_KEYS = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY'] as const;
+export const PROVIDER_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  GEMINI_API_KEY: ['GOOGLE_AI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY'],
+  OPENAI_API_KEY: ['CODEX_API_KEY'],
+  ANTHROPIC_API_KEY: ['ANTHROPIC_AUTH_TOKEN'],
+};
 const managedEnv = new Map<string, string>();
 const managedName = (name: string) => `O8_KEY_MANAGED_${name}`;
 const disabledName = (name: string) => `O8_KEY_DISABLED_${name}`;
 function textFile(path: string): string {
   try { return readFileSync(path, 'utf8'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error; }
-}
-export function parseKeyEnv(raw: string): Map<string, string> {
-  const values = new Map<string, string>();
-  for (const line of raw.split('\n')) {
-    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (match) values.set(match[1], match[2].replace(/^(['"])(.*)\1$/, '$2'));
-  }
-  return values;
 }
 function snapshot() {
   const raw = textFile(join(getDataDir(), '.env.local'));
@@ -66,7 +65,7 @@ export function updateManagedProviderKey(name: string, value: string | null): vo
 export function clearManagedProviderKey(name: string): void {
   if (managedEnv.has(name) && process.env[name] === managedEnv.get(name)) updateManagedProviderKey(name, null);
 }
-export function resolveProviderKey(name: string): string | null {
+export function resolveProviderKey(name: string, ambient: Record<string, string | undefined> = process.env): string | null {
   try {
     const { values } = snapshot();
     cleanupLegacyProviderKeys(values);
@@ -77,9 +76,9 @@ export function resolveProviderKey(name: string): string | null {
       updateManagedProviderKey(name, value);
       return value;
     }
-    const ambient = process.env[name]?.trim()
-      || (name === 'GEMINI_API_KEY' ? process.env.GOOGLE_AI_API_KEY?.trim() || process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() : undefined);
-    if (ambient && ambient !== managedEnv.get(name)) return ambient;
+    const candidate = ambient[name]?.trim()
+      || PROVIDER_KEY_ALIASES[name]?.map(alias => ambient[alias]?.trim()).find(Boolean);
+    if (candidate && (ambient !== process.env || candidate !== managedEnv.get(name))) return candidate;
     const value = raw ? decode(raw) || null : null;
     updateManagedProviderKey(name, value);
     return value;

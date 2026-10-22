@@ -55,6 +55,12 @@ fn values(raw: &str) -> BTreeMap<String, String> {
         })
         .collect()
 }
+fn allow_master_key_creation(create: bool, raw: &str) -> Result<(), String> {
+    if !create || values(raw).values().any(|value| value.starts_with("enc:")) {
+        return Err("Master key unavailable".into());
+    }
+    Ok(())
+}
 fn valid_key(raw: &str) -> Result<[u8; 32], String> {
     let normalized = raw.trim().replace('-', "+").replace('_', "/");
     let padded = format!(
@@ -157,9 +163,7 @@ pub fn master_key(create: bool) -> Result<String, String> {
     {
         return read_master_key_file(&fallback);
     }
-    if !create || read(&data_dir().join(".env.local"))?.contains("=enc:") {
-        return Err("Master key unavailable".into());
-    }
+    allow_master_key_creation(create, &read(&data_dir().join(".env.local"))?)?;
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let raw = URL_SAFE_NO_PAD.encode(bytes);
@@ -394,5 +398,24 @@ mod fallback_tests {
             0o644
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cold_master_tests {
+    use super::*;
+    #[test]
+    fn missing_master_creation_refuses_quoted_ciphertext() {
+        for quote in ['\"', '\''] {
+            let raw = format!("OPENROUTER_API_KEY={quote}enc:fixture:fixture{quote}\n");
+            assert!(allow_master_key_creation(true, &raw).is_err());
+        }
+    }
+    #[test]
+    fn missing_master_creation_refuses_spaced_ciphertext() {
+        assert!(
+            allow_master_key_creation(true, "  OPENROUTER_API_KEY =  enc:fixture:fixture  ")
+                .is_err()
+        );
     }
 }

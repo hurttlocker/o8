@@ -169,6 +169,13 @@
       ]
     },
     {
+      "path": "src/app/api/v2/keys/route.launch.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "src/app/api/v2/keys/route.master-key.test.ts",
       "reasons": [
         "child-process",
@@ -1024,6 +1031,12 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/terminal/managed-command-launch.test.ts",
+      "reasons": [
+        "child-process"
       ]
     },
     {

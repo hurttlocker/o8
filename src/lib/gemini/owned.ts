@@ -1,4 +1,3 @@
-import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Gemini owned-session adapter.
  *
@@ -580,13 +579,6 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   rootDefault: path.join(getDataDir(), 'owned-gemini'),
   binaryName: 'gemini',
   binaryEnvOverride: 'O8_GEMINI_BIN',
-  // The shared resolver already handles aliases and authoritative disable/removal.
-  // Override inherited credentials too, so the child cannot bypass that decision.
-  extraSpawnEnv: (): Record<string, string> => ({
-    GEMINI_API_KEY: resolveProviderKey('GEMINI_API_KEY')?.trim() ?? '',
-    GOOGLE_GENERATIVE_AI_API_KEY: '',
-    GOOGLE_AI_API_KEY: '',
-  }),
   humanLabel: 'Owned Gemini',
   squadShortName: 'Gemini',
   sessionIdPrefix: 'gemini-owned-',

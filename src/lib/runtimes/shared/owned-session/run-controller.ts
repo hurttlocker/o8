@@ -667,13 +667,14 @@ export function createOwnedRunController({
 
         try {
           assertOwnedActionAdmission(session, runId);
-          if (session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          if (process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
                 shellCommand: shellCmd,
                 cwd: session.repoPath,
-                env: spawnEnv,
+                env: ownedSpawnEnvironment(session, spawnEnv, true),
+                resolvedEnvironment: true,
                 packetId: session.packetId ?? undefined,
                 laneId: session.laneId ?? undefined,
               });

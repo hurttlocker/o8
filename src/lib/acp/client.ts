@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Agent Client Protocol (ACP) stdio client.
  *
@@ -247,7 +248,7 @@ export class AcpClient {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
-      env: Object.fromEntries(Object.entries({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) }).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
+      env: Object.fromEntries(Object.entries(providerSpawnEnvironment({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) })).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));

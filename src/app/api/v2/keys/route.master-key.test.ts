@@ -81,3 +81,24 @@ it('accepts the Windows fallback without requiring POSIX mode bits', async () =>
   try { expect((await post('fixture-windows-key')).status).toBe(200); }
   finally { Object.defineProperty(process, 'platform', platform); }
 });
+
+it.each(['linux', 'darwin'].flatMap(platform => ['quoted', 'single-quoted', 'spaced'].map(format => [platform, format])))('cold %s route refuses replacement master creation for %s ciphertext', async (targetPlatform, format) => {
+  const { mkdirSync, existsSync } = await import('node:fs'); mkdirSync(state.dir);
+  // Valid ciphertext exists, but its original master key is unavailable at cold start.
+  vi.stubEnv('O8_MASTER_KEY', originalKey);
+  const { encryptValueSync } = await import('@/lib/db/master-key');
+  const encrypted = encryptValueSync('fixture-cold-secret');
+  const value = `enc:${encrypted.iv}:${encrypted.ciphertext}`;
+  const line = format === 'quoted' ? `OPENROUTER_API_KEY="${value}"` : format === 'single-quoted' ? `OPENROUTER_API_KEY='${value}'` : ` OPENROUTER_API_KEY =  ${value}  `;
+  writeFileSync(envPath(), line); clearMasterKeyCache(); vi.stubEnv('O8_MASTER_KEY', '');
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { value: targetPlatform }); security.mockClear();
+  try {
+    expect((await post('fixture-cold-refused')).status).toBe(503);
+    expect(existsSync(keyPath())).toBe(false);
+    expect(security.mock.calls.some(([command]) => String(command).includes('add-generic-password'))).toBe(false);
+    expect(readFileSync(envPath(), 'utf8')).toBe(line);
+    vi.stubEnv('O8_MASTER_KEY', originalKey); clearMasterKeyCache();
+    expect(resolveProviderKey('OPENROUTER_API_KEY')).toBe('fixture-cold-secret');
+  } finally { Object.defineProperty(process, 'platform', platform); }
+});

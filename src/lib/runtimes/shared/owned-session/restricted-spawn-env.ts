@@ -1,3 +1,4 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { controlledProviderPins } from './controlled-provider';
 import type { OwnedSessionRecord } from './types';
 
@@ -15,8 +16,20 @@ function pick(input: Record<string, string | undefined>, keys: string[]): Record
 }
 
 /** Native login is pinned by the adapter; ambient API keys and shell hooks are excluded. */
-export function ownedSpawnEnvironment(session: OwnedSessionRecord, env: Record<string, string>): NodeJS.ProcessEnv {
-  if (session.executionPolicy === undefined) return { ...process.env, ...env };
-  return { NODE_ENV: 'development', ...pick(process.env, BASE_KEYS), ...pick(env, [...ADAPTER_KEYS, ...RUN_KEYS,
-    ...(session.controlledTask && controlledProviderPins(session.model, session.effort, session.runtimeConfig) ? CONTROLLED_KEYS : [])]) };
+export function ownedSpawnEnvironment(session: OwnedSessionRecord, env: Record<string, string>, clearInherited = false): ReturnType<typeof providerSpawnEnvironment> {
+  const restricted = session.executionPolicy !== undefined;
+  const controlled = Boolean(session.controlledTask && controlledProviderPins(session.model, session.effort, session.runtimeConfig));
+  const input = restricted
+    ? { NODE_ENV: 'development', ...pick(process.env, BASE_KEYS), ...pick(env, [...ADAPTER_KEYS, ...RUN_KEYS,
+      ...(controlled ? CONTROLLED_KEYS : [])]) }
+    : { ...process.env, ...env };
+  const resolved = providerSpawnEnvironment(input, { inject: !restricted, clearInherited });
+  // Adapter blanks pin native sign-in (for example Muse); provider injection cannot override them.
+  for (const [name, value] of Object.entries(env)) if (value === '' && name in input) resolved[name] = '';
+  // These are explicit transport credentials, never inherited provider aliases.
+  const source = session.runtimeConfig?.modelSource;
+  if (session.surfaceId?.startsWith('claude-code-owned:') && (!restricted || controlled) && (source === 'openrouter' || source === 'codex-subscription') && env.ANTHROPIC_BASE_URL) {
+    for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) if (env[name] !== undefined) resolved[name] = env[name];
+  }
+  return resolved;
 }

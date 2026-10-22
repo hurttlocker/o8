@@ -308,14 +308,12 @@ async function detectGemini(): Promise<RuntimeAuthStatus> {
 
   const home = os.homedir();
   const authenticated = Boolean(
-    resolveProviderKey('GEMINI_API_KEY')
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    || process.env.GOOGLE_AI_API_KEY,
+    resolveProviderKey('GEMINI_API_KEY'),
   ) || await fileExists(path.join(home, '.gemini', 'oauth_creds.json'));
   return nowStatus('gemini', 'gemini', {
     installed: true,
     authenticated,
-    connection: localCredentialEvidence([resolveProviderKey('GEMINI_API_KEY') || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated, 'Google'),
+    connection: localCredentialEvidence([resolveProviderKey('GEMINI_API_KEY') ? 'Google' : ''].filter(Boolean), authenticated, 'Google'),
     detail: authenticated
       ? 'Gemini CLI is installed and has local sign-in or API-key evidence.'
       : 'Gemini CLI is installed but no local sign-in or API-key evidence was found.',
@@ -471,13 +469,12 @@ async function detectPi(): Promise<RuntimeAuthStatus> {
     resolveProviderKey('ANTHROPIC_API_KEY')
     || resolveProviderKey('OPENAI_API_KEY')
     || resolveProviderKey('GEMINI_API_KEY')
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
     || piSetup.credentialsPresent
   ));
   return nowStatus('pi', 'pi', {
     installed: Boolean(binaryPath),
     authenticated,
-    connection: localCredentialEvidence([resolveProviderKey('ANTHROPIC_API_KEY') ? 'Anthropic' : '', resolveProviderKey('OPENAI_API_KEY') ? 'OpenAI' : '', resolveProviderKey('GEMINI_API_KEY') || process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated),
+    connection: localCredentialEvidence([resolveProviderKey('ANTHROPIC_API_KEY') ? 'Anthropic' : '', resolveProviderKey('OPENAI_API_KEY') ? 'OpenAI' : '', resolveProviderKey('GEMINI_API_KEY') ? 'Google' : ''].filter(Boolean), authenticated),
     detail: !binaryPath
       ? process.platform === 'win32' ? 'Existing Pi setup detection is not available on Windows yet.' : 'Worker runtime "pi" is not installed. The built-in Pi worker that ships with o8 is runtime "pi-builtin".'
       : authenticated
@@ -503,13 +500,12 @@ async function detectPrimeAgent(): Promise<RuntimeAuthStatus> {
   const authenticated = Boolean(
     resolveProviderKey('ANTHROPIC_API_KEY')
     || resolveProviderKey('OPENAI_API_KEY')
-    || resolveProviderKey('GEMINI_API_KEY')
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    || resolveProviderKey('GEMINI_API_KEY'),
   ) || await fileExists(path.join(os.homedir(), '.prime'));
   return nowStatus('prime-agent', 'prime-agent', {
     installed: true,
     authenticated,
-    connection: localCredentialEvidence([resolveProviderKey('ANTHROPIC_API_KEY') ? 'Anthropic' : '', resolveProviderKey('OPENAI_API_KEY') ? 'OpenAI' : '', resolveProviderKey('GEMINI_API_KEY') || process.env.GOOGLE_GENERATIVE_AI_API_KEY ? 'Google' : ''].filter(Boolean), authenticated, undefined, 'runtime_config'),
+    connection: localCredentialEvidence([resolveProviderKey('ANTHROPIC_API_KEY') ? 'Anthropic' : '', resolveProviderKey('OPENAI_API_KEY') ? 'OpenAI' : '', resolveProviderKey('GEMINI_API_KEY') ? 'Google' : ''].filter(Boolean), authenticated, undefined, 'runtime_config'),
     detail: authenticated
       ? 'Prime Agent CLI is installed and has provider credentials.'
       : 'Prime Agent CLI is installed but no provider credentials were found.',

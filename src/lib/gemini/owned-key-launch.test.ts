@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ownedSpawnEnvironment } from '@/lib/runtimes/shared/owned-session/restricted-spawn-env';
 import type { OwnedRuntimeAdapter, OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
 
 const state = vi.hoisted(() => ({ dir: '', childKeys: null as Record<string, string | null> | null }));
@@ -14,7 +15,7 @@ vi.mock('@/lib/runtimes/shared/owned-session', () => ({
       const extra = await adapter.extraSpawnEnv?.({} as OwnedSessionRecord);
       state.childKeys = JSON.parse(execFileSync(process.execPath, ['-e',
         'process.stdout.write(JSON.stringify(Object.fromEntries(["GEMINI_API_KEY","GOOGLE_GENERATIVE_AI_API_KEY","GOOGLE_AI_API_KEY"].map(k=>[k,process.env[k]||null]))))'], {
-        encoding: 'utf8', env: { ...process.env, ...extra },
+        encoding: 'utf8', env: ownedSpawnEnvironment({} as OwnedSessionRecord, extra ?? {}),
       }));
       return { ok: true, surfaceId: 'gemini-owned:fixture', note: '' };
     },

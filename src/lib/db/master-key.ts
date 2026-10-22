@@ -18,6 +18,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { hasEncryptedKeyValues } from '@/lib/providers/env-format';
 
 // ── Constants ──
 
@@ -58,7 +59,7 @@ function readOrCreateKeyFile(create: boolean): string {
     return existing;
   }
   if (!create) throw new Error('Master key unavailable');
-  if (existsSync(join(dataDir(), '.env.local')) && /(?:^|\n)[^#\n=]+=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
+  if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
     throw new Error('Encrypted credentials exist without an accessible master key');
   }
   const key = generateKey();
@@ -194,7 +195,7 @@ function resolveBackingKey(create: boolean): string {
     if (!keychainKey) {
       // Genuinely absent (first run) — generate and persist.
       if (existsSync(join(dataDir(), 'master-key'))) return readOrCreateKeyFile(create);
-      if (existsSync(join(dataDir(), '.env.local')) && /=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
+      if (existsSync(join(dataDir(), '.env.local')) && hasEncryptedKeyValues(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
       if (!create) throw new Error('Master key unavailable');
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {
