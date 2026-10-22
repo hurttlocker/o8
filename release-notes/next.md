@@ -1,8 +1,0 @@
-- Delete a single saved instruction or outcome from recall, with an inline confirmation.
-- Show Settings and Customize as separate menu entries, each with a short description.
-- Clearer task creation wording; side chat explains that it is a separate conversation.
-- Rename Fast mode to Shared mode in labels and worker instructions.
-- Repository cards, hovers, branch links and mission lists share one GitHub pull request lookup, so the app makes far fewer GitHub requests.
-- Native webview tools (zoom, navigation, local storage) return their results again.
-- A recovered launch agent clears its crash-loop alert after five minutes of steady running.
-- macOS volume identity retries a failed probe and keeps working for repositories on network shares.
