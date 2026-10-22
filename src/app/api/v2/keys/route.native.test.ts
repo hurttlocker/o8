@@ -146,3 +146,14 @@ it.each([['openai', 'OPENAI_API_KEY'], ['anthropic', 'ANTHROPIC_API_KEY'], ['gem
   await routes.DELETE(request('DELETE', { provider }));
   expect(restartedNode(name)).toBeNull();
 });
+
+it('standard-base64 master overrides remain compatible and empty legacy entries remain absent', async () => {
+  const standard = Buffer.alloc(32, 251).toString('base64');
+  vi.stubEnv('O8_MASTER_KEY', standard); clearMasterKeyCache();
+  writeFileSync(join(state.dir, '.env.local'), 'GEMINI_API_KEY=\n');
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-standard-master' }))).status).toBe(200);
+  expect(native({ action: 'read' }, standard).value).toBe('fixture-standard-master');
+  expect(native({ action: 'save', pref: 'groq_api_key', value: 'fixture-groq' }, standard).ok).toBe(true);
+  expect(native({ action: 'public' }, standard).value.gemini_api_key_set).toBe(false);
+  expect(resolveProviderKey('GROQ_API_KEY')).toBe('fixture-groq');
+});

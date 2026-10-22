@@ -56,8 +56,14 @@ fn values(raw: &str) -> BTreeMap<String, String> {
         .collect()
 }
 fn valid_key(raw: &str) -> Result<[u8; 32], String> {
-    URL_SAFE_NO_PAD
-        .decode(raw.trim())
+    let normalized = raw.trim().replace('-', "+").replace('_', "/");
+    let padded = format!(
+        "{}{}",
+        normalized.trim_end_matches('='),
+        "=".repeat((4 - normalized.trim_end_matches('=').len() % 4) % 4)
+    );
+    base64::engine::general_purpose::STANDARD
+        .decode(padded)
         .map_err(|_| "Invalid master key".to_string())?
         .try_into()
         .map_err(|_| "Invalid master key".to_string())
@@ -271,7 +277,7 @@ fn mutate_inner(
     let mut updates: BTreeMap<String, Option<String>> = BTreeMap::new();
     for provider in PROVIDERS {
         if let Some(value) = map.get(provider) {
-            if !value.starts_with("enc:") {
+            if !value.trim().is_empty() && !value.starts_with("enc:") {
                 updates.insert(provider.into(), Some(encrypt(value)?));
             }
         }
