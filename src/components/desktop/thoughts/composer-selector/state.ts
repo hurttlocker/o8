@@ -182,7 +182,6 @@ export interface ResolveComposerSelectorInput {
   operatorDefaultEffort: ThinkingEffort;
   adaptiveEnabled: boolean;
   ultraEnabled?: boolean;
-  isFreePlan?: boolean;
   inSessionSettings?: ComposerSelectorSettingState;
   threadSettings?: ComposerSelectorSettingState;
   operatorDefaultSettings?: ComposerSelectorSettingState;
@@ -320,10 +319,9 @@ export function supportedEffortsForLead(
   backend: OrchestratorBackendSetting,
   modelId: string,
   _adaptiveEnabled: boolean,
-  _isFreePlan = false,
   ultraEnabled = false,
 ): readonly ThinkingEffort[] {
-  // The o8 lead has one setting on every plan (#2999), so it offers no effort control (#3660).
+  // The o8 lead has one managed setting (#2999), so it offers no effort control (#3660).
   if (backend === 'o8') return [];
   if (backend !== 'claude' && backend !== 'fable' && backend !== 'codex' && backend !== 'auto') return [];
   // Adaptive is a provider thinking mode, not a manual effort level.
@@ -379,7 +377,6 @@ export function resolveComposerSelectorState(input: ResolveComposerSelectorInput
     input.leadBackend,
     input.leadModelId,
     input.adaptiveEnabled,
-    input.isFreePlan,
     input.ultraEnabled,
   );
   const lockedEffortOptions: readonly ThinkingEffort[] = [];

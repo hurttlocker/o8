@@ -439,9 +439,9 @@ function brainRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
   let runtime: OrchestratorRuntime | null = null;
   let model: string | null = null;
   let reason = autoRouting && managedBrainEligible
-    ? 'Auto uses managed inference for this eligible plan. Availability or quota errors stay visible and do not spend another provider.'
+    ? 'Auto uses the authorized managed inference route. Availability or quota errors stay visible and do not spend another provider.'
     : autoRouting
-      ? 'Auto keeps the existing free-plan Brain route behavior.'
+      ? 'Auto uses the existing configured Brain route.'
     : 'Subscription mode uses the connected subscription CLI cascade.';
   let modelSource: RoleRouteSource = 'request-time';
 
@@ -468,7 +468,7 @@ function brainRoute(input: ProjectAgentRoleRoutesInput): AgentRoleRoute {
     ...(autoRouting
       ? managedBrainEligible
         ? ['Managed inference, with a visible managed error rather than another payer.']
-        : ['Free-plan legacy route behavior.']
+        : ['Existing configured Brain route.']
       : [localFallback, values.brainUseClaudeCli ? 'Signed-in Claude CLI' : 'Claude CLI is disabled for Brain', `Signed-in Codex CLI (${values.brainCodexModel})`, 'BYOK provider route', 'Deterministic heuristic answer']),
   ];
   const effective = choice({ backend, runtime, model, effort: null });
