@@ -378,8 +378,11 @@ describe('finished packet checkout retirement', () => {
       }
       expect(receipts[1].target).toBe(receipts[0].target);
       expect(before).toBeGreaterThan(0);
-      writeFileSync(path.join(process.cwd(), '.o8/packet-artifacts/pkt-346b8987-c8fe-4c64-a32a-9e6b5d02626d/rust-disk.json'),
-        JSON.stringify({ baselineLocalTargetBytes: before, after: receipts }, null, 2));
+      const receiptPath = process.env.O8_RUST_CACHE_DISK_RECEIPT;
+      if (receiptPath) {
+        mkdirSync(path.dirname(receiptPath), { recursive: true });
+        writeFileSync(receiptPath, JSON.stringify({ baselineLocalTargetBytes: before, after: receipts }, null, 2));
+      }
       finished = true;
     } finally {
       // Only this fixture repository's unique cache is removed.
