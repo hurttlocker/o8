@@ -10,6 +10,9 @@ import { resolveBrowserPath } from '../scripts/bench/measure-browser-boot.mjs';
 import { getPalette, resolveTheme } from '../src/lib/theme/registry';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sourceRoot = process.env.O8_SIDEBAR_SOURCE_ROOT || repoRoot;
+const proofDir = process.env.O8_SIDEBAR_PROOF_DIR;
+const proofState = process.env.O8_SIDEBAR_PROOF_STATE;
 const executablePath = resolveBrowserPath();
 const labels = ['Pinned', 'Recents', 'Today', 'Yesterday', 'Previous 7 days'];
 const fixture = `
@@ -24,6 +27,9 @@ window.mountSidebar = (width, labels) => {
   document.body.replaceChildren();
   const host = document.createElement('main');
   host.style.width = width + 'px';
+  host.style.background = 'var(--t-panel)';
+  host.style.color = 'var(--t-text)';
+  host.style.fontFamily = 'var(--font-sans-system)';
   document.body.append(host);
   window.opened = 0;
   window.selected = 0;
@@ -58,7 +64,8 @@ describe.skipIf(!executablePath)('sidebar review and section layout in a real br
       absWorkingDir: repoRoot, bundle: true, write: false, format: 'iife',
       platform: 'browser', target: ['chrome120'], jsx: 'automatic',
       define: { 'process.env.NODE_ENV': '"production"' },
-      alias: { '@': path.join(repoRoot, 'src') },
+      alias: { '@': path.join(sourceRoot, 'src') },
+      nodePaths: [path.join(repoRoot, 'node_modules')],
       legalComments: 'none', logLevel: 'silent',
     });
     bundle = result.outputFiles[0].text;
@@ -74,7 +81,7 @@ describe.skipIf(!executablePath)('sidebar review and section layout in a real br
       it(`preserves icon geometry, quiet feedback and header rhythm at ${width}px in ${theme}`, async () => {
         browserErrors.length = 0;
         const tokens = resolveTheme(getPalette(theme), 'solid').cssVars;
-        await page.setContent(`<!doctype html><html><head><style>${fs.readFileSync(path.join(repoRoot, 'src/app/globals.css'), 'utf8')}</style></head><body></body></html>`);
+        await page.setContent(`<!doctype html><html><head><style>${fs.readFileSync(path.join(sourceRoot, 'src/app/globals.css'), 'utf8')}</style></head><body></body></html>`);
         await page.evaluate((vars) => {
           for (const [key, value] of Object.entries(vars)) document.documentElement.style.setProperty(key, value);
         }, tokens);
@@ -111,8 +118,21 @@ describe.skipIf(!executablePath)('sidebar review and section layout in a real br
             rowSize: getComputedStyle(title).fontSize, rowWeight: getComputedStyle(title).fontWeight,
           };
         }));
+        console.info('sidebar-layout', JSON.stringify({ theme, width, measurements }));
+        // Capture before assertions so a baseline failure still carries visual proof.
+        if (proofDir && proofState && width === 240) {
+          fs.mkdirSync(proofDir, { recursive: true });
+          const panel = await page.locator('main').boundingBox();
+          const lastSection = await page.locator('section').last().boundingBox();
+          if (!panel || !lastSection) throw new Error('Sidebar screenshot has no rendered panel');
+          await page.screenshot({
+            path: path.join(proofDir, `sidebar-review-${theme}-${proofState}.png`),
+            clip: { ...panel, height: lastSection.y + lastSection.height - panel.y },
+          });
+        }
         expect(measurements).toHaveLength(labels.length);
         for (const metrics of measurements) {
+          expect(metrics.iconWidth, 'review SVG must have non-zero rendered width inside a sidebar row').toBeGreaterThan(0);
           expect(metrics.rowWidth).toBe(width);
           expect(metrics.buttonWidth).toBe(20); expect(metrics.buttonHeight).toBe(20);
           expect(metrics.iconWidth).toBe(15); expect(metrics.iconHeight).toBe(15);
