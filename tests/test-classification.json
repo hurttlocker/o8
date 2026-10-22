@@ -612,6 +612,12 @@
       ]
     },
     {
+      "path": "src/lib/mobile/relay-connector.test.ts",
+      "reasons": [
+        "network-listener"
+      ]
+    },
+    {
       "path": "src/lib/mobile/review-units.test.ts",
       "reasons": [
         "worktree-api"
