@@ -115,14 +115,14 @@ pub async fn handle_get_local_storage<R: Runtime>(
       default:
         throw new Error('Unsupported localStorage action: ' + action);
     }
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
