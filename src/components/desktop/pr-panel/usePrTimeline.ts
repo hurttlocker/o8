@@ -1,48 +1,59 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
-import type { PrTimelinePage } from './types';
+import { useMemo } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { issueListQuery } from '@/lib/github-client';
+import type { PrTimelineEvent, PrTimelinePage } from './types';
 import { readPrJson } from './read-pr-json';
+import { prTimelineQueryKey } from './timeline-query-key';
 
-type Snapshot = PrTimelinePage & { loadedAt: number };
+function validEvent(value: unknown): value is PrTimelineEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Partial<PrTimelineEvent>;
+  return typeof event.id === 'string' && Boolean(event.id)
+    && typeof event.kind === 'string' && typeof event.title === 'string'
+    && typeof event.actor === 'string' && typeof event.at === 'string'
+    && typeof event.body === 'string' && typeof event.url === 'string'
+    && (event.avatarUrl === null || typeof event.avatarUrl === 'string')
+    && (event.commitSha === undefined || typeof event.commitSha === 'string');
+}
 
 export function usePrTimeline(number: number, repo: string | null | undefined, active: boolean) {
-  const key = `pr-timeline:${repo || ''}:${number}`;
-  const subscribe = useCallback((listener: () => void) => subscribeSWR(key, listener), [key]);
-  const read = useCallback(() => getSWR<Snapshot>(key).data ?? null, [key]);
-  const data = useSyncExternalStore(subscribe, read, () => null);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const [failure, setFailure] = useState<{ key: string; message: string; page: number } | null>(null);
-  const empty = data === null;
-
-  const load = useCallback(async (page = 1) => {
-    setPendingKey(key); setFailure(null);
-    try {
-      await refreshSWR<Snapshot>(key, async () => {
-        const search = new URLSearchParams({ page: String(page) });
-        if (repo) search.set('repo', repo);
-        const result = await readPrJson<PrTimelinePage>(`/api/panel/prs/${number}/timeline?${search}`);
-        const previous = page > 1 ? getSWR<Snapshot>(key).data?.events ?? [] : [];
-        const merged = new Map([...previous, ...result.events].map((event) => [event.id, event]));
-        return { events: [...merged.values()], nextPage: result.nextPage, loadedAt: Date.now() };
-      });
-    } catch (error) {
-      setFailure({ key, page, message: error instanceof Error ? error.message : 'Activity could not be loaded.' });
-    } finally { setPendingKey((current) => current === key ? null : current); }
-  }, [key, number, repo]);
-
-  useEffect(() => {
-    const cached = getSWR<Snapshot>(key).data;
-    if (active && (!cached || Date.now() - cached.loadedAt > 60_000)) void load();
-  }, [active, key, load, empty]);
+  const slug = repo?.trim() || null;
+  const query = useInfiniteQuery({
+    ...issueListQuery(slug ?? ''),
+    // Timeline pages have a separate shape from repository issue/PR lists.
+    queryKey: prTimelineQueryKey(slug, number),
+    initialPageParam: 1,
+    queryFn: async ({ pageParam, signal }): Promise<PrTimelinePage> => {
+      const search = new URLSearchParams({ page: String(pageParam) });
+      if (slug) search.set('repo', slug);
+      const result = await readPrJson<PrTimelinePage & { error?: string }>(`/api/panel/prs/${number}/timeline?${search}`, signal);
+      if (!result || result.error || !Array.isArray(result.events) || !result.events.every(validEvent)
+        || !(result.nextPage === null || (Number.isSafeInteger(result.nextPage) && result.nextPage > pageParam))) {
+        throw new Error('Activity could not be loaded. Retry.');
+      }
+      return result;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextPage ?? undefined,
+    enabled: active,
+    // Opening and explicit Refresh/Retry are the timeline's existing triggers.
+    refetchInterval: false,
+    retry: false,
+  });
+  const data = useMemo(() => {
+    if (!query.data) return null;
+    const events = new Map(query.data.pages.flatMap(page => page.events).map(event => [event.id, event]));
+    return { events: [...events.values()], nextPage: query.data.pages.at(-1)?.nextPage ?? null };
+  }, [query.data]);
 
   return {
     data,
-    loading: pendingKey === key || Boolean(active && !data && failure?.key !== key),
-    error: failure?.key === key ? failure.message : null,
-    refresh: () => load(),
-    retry: () => load(failure?.key === key ? failure.page : 1),
-    loadMore: () => data?.nextPage ? load(data.nextPage) : Promise.resolve(),
+    loadedAt: query.dataUpdatedAt,
+    loading: query.isFetching || Boolean(active && query.isPending),
+    error: query.error?.message ?? null,
+    refresh: () => query.refetch(),
+    retry: () => query.isFetchNextPageError ? query.fetchNextPage() : query.refetch(),
+    loadMore: () => query.hasNextPage ? query.fetchNextPage() : Promise.resolve(),
   };
 }
