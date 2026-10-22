@@ -44,7 +44,8 @@ function recentStarts(startsMs: number[], nowMs: number): number[] {
 function readCounterFile(counterPath: string, nowMs: number): LaunchAgentCounterFile | null {
   try {
     const parsed = JSON.parse(readFileSync(counterPath, 'utf8')) as Partial<LaunchAgentCounterFile>;
-    if (typeof parsed.label !== 'string' || !parsed.label.trim() || !Array.isArray(parsed.startsMs)) {
+    if (typeof parsed.label !== 'string' || !parsed.label.trim() || !Array.isArray(parsed.startsMs)
+      || !parsed.startsMs.every((timestamp) => typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp <= nowMs)) {
       return null;
     }
     return { label: parsed.label, startsMs: recentStarts(parsed.startsMs, nowMs) };
