@@ -116,7 +116,7 @@ describe('CLI stop command parsing', () => {
     const cwd = '/tmp/o8 repo';
     const clearRouting = ['O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
       'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
-      'O8_OWNED_RUN_MARKER',
+      'O8_OWNED_RUN_MARKER', 'CARGO_TARGET_DIR',
       '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE'].map((key) => `unset ${key}`);
     expect(managedRunEnvironmentLines({ PATH: '/usr/bin' }, cwd)).toEqual([
       'unset NODE_OPTIONS',
@@ -127,6 +127,8 @@ describe('CLI stop command parsing', () => {
     const lines = managedRunEnvironmentLines({
       NODE_OPTIONS: '--trace-warnings --import=./scripts/register-server-only-stub.mjs',
     }, cwd);
+    expect(managedRunEnvironmentLines({ CARGO_TARGET_DIR: '/tmp/packet-shared-target' }, cwd))
+      .toContain("export CARGO_TARGET_DIR='/tmp/packet-shared-target'");
     const stubUrl = pathToFileURL(`${cwd}/scripts/register-server-only-stub.mjs`).href;
     expect(lines).toEqual([
       'unset NODE_OPTIONS',

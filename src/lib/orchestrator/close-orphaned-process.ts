@@ -1,6 +1,6 @@
 import { readCloseProcessTable } from '@/lib/runtime/close-process-table';
 import { parseOpenFileSnapshot, readCloseOpenFiles, readCloseOpenFileRows } from '@/lib/runtime/process-open-files-snapshot';
-import { hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { refreshCloseProcessObservation, hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { closeObservedHelperSettled, observeCloseProcess } from '@/lib/runtime/close-process-observation';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
@@ -48,11 +48,23 @@ function processName(commandLine: string): string {
 export async function assertOrphanProcessesAbsent(input: {
   capturedPurge?: CapturedPurgeProcessWitness;
   runtime: string;
+  packetId?: string;
   runs: OrphanRunIdentity[];
   sourcePath: string;
   candidatePath: string;
 }): Promise<void> {
-  if (!input.capturedPurge) return inspectOrphanProcesses(input);
+  if (!input.capturedPurge) {
+    for (let attempt = 0; ; attempt += 1) {
+      try { return await inspectOrphanProcesses(input); }
+      catch (error) {
+        if (attempt >= 3 || !(error instanceof OrphanCloseRefusal)
+          || (!error.message.includes('has an open file or cwd in the worktree')
+            && !error.message.includes('references the packet workspace'))) throw error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+        refreshCloseProcessObservation();
+      }
+    }
+  }
   try {
     await withCapturedPurgeProcessExclusion(input.capturedPurge, input.candidatePath,
       (isHelper) => inspectOrphanProcesses(input, isHelper));
@@ -63,7 +75,8 @@ export async function assertOrphanProcessesAbsent(input: {
 }
 
 async function inspectOrphanProcesses(input: {
-  runtime: string; runs: OrphanRunIdentity[]; sourcePath: string; candidatePath: string;
+  runtime: string; packetId?: string;
+  runs: OrphanRunIdentity[]; sourcePath: string; candidatePath: string;
 }, isHelper?: (pid: number) => boolean): Promise<void> {
   const raw = hasCloseProcessObservation() ? '' : await command('ps', ['axeww', '-o', 'pid=,pgid=,ppid=,command=']);
   if (!hasCloseProcessObservation() && !raw?.trim()) throw new OrphanCloseRefusal('ps returned no process identity snapshot');
@@ -72,6 +85,11 @@ async function inspectOrphanProcesses(input: {
     if (!match) throw new OrphanCloseRefusal('ps returned malformed process identity output');
     return { pid: Number(match[1]), group: Number(match[2]), parent: Number(match[3]), command: match[4]! };
   });
+  const packetProcess = processes.find(row => !isHelper?.(row.pid) && !closeObservedHelperSettled(row.pid) && (
+    (input.packetId && row.command.split(/\s+/).includes(`O8_WORKER_PACKET_ID=${input.packetId}`))
+    || (input.packetId && row.command.split(/\s+/).includes(`O8_PACKET_ID=${input.packetId}`))
+    || row.command.includes(input.sourcePath) || row.command.includes(input.candidatePath)));
+  if (packetProcess) throw new OrphanCloseRefusal(`live process PID ${packetProcess.pid} (${processName(packetProcess.command)}) references the packet workspace`);
   for (const run of input.runs) {
     const live = processes.find((row) => row.pid === run.pid || row.group === run.processGroupId
       || row.parent === run.pid || row.command.split(/\s+/).includes(`O8_OWNED_RUN_MARKER=${run.runId}`));

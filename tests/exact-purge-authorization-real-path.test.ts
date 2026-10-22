@@ -11,7 +11,10 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return { ...actual, spawn: (...args: unknown[]) => {
     const child = Reflect.apply(actual.spawn, undefined, args) as ChildProcess;
-    observed.children.push(child);
+    if (args[0] === process.execPath && Array.isArray(args[1]) && args[1][0] === '-e'
+      && typeof args[1][1] === 'string' && args[1][1].includes('O8_PURGE_CAPTURED')) {
+      observed.children.push(child);
+    }
     return child;
   } };
 });
@@ -36,6 +39,8 @@ it('settles the captured purge child without releasing bytes when authorization 
   let closed: Promise<number | null> | undefined;
   const operation = purgeExactDirectory(candidate, { device: identity.dev, inode: identity.ino }, undefined, async () => {
     const child = observed.children.at(-1)!;
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBeNull();
     closed = new Promise(resolve => child.once('close', resolve));
     throw refusal;
   });

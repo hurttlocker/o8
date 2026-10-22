@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { getLane, getLaneEvents } from '@/lib/lane/registry';
@@ -14,6 +14,7 @@ import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-li
 import { archivedSessionPathForSurfaceId, assertArchivedWorkspaceSessionRestorable, ownedSessionRecordFingerprint } from '@/lib/runtimes/shared/owned-session/archive';
 import { readOwnedSessionMetadata } from '@/lib/runtimes/shared/owned-session/metadata-read';
 import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/types';
+import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
 import { readWorkspacePreservation } from '@/lib/workspace/preservation-store';
 import { readCapturedPurgeCwdSnapshot, type CapturedPurgeProcessWitness } from '@/lib/workspace/exact-directory-purge';
 import { readExactManagedFinalization } from '@/lib/workspace/exact-managed-finalization-state';
@@ -99,12 +100,62 @@ function missingSessionRuns(lane: Lane, sessionKey: string | null): OrphanRunIde
   return rows;
 }
 
+function terminalMissingSessionRuns(lane: Lane): OrphanRunIdentity[] {
+  const rows = getSqlite().prepare(`SELECT lease_process_marker AS runId, lease_process_pid AS pid,
+    lease_process_group_id AS processGroupId FROM worker_tokens
+    WHERE packet_id = ? AND scope = 'local-packet' ORDER BY id LIMIT 17`).all(lane.packetId) as OrphanRunIdentity[];
+  if (rows.length > 16 || new Set(rows.map(row => row.runId)).size !== rows.length
+    || rows.some(row => typeof row.runId !== 'string' || !/^[A-Za-z0-9._-]{1,160}$/.test(row.runId)
+      || !Number.isSafeInteger(row.pid) || row.pid <= 0
+      || !Number.isSafeInteger(row.processGroupId) || row.processGroupId <= 0)) {
+    refuse('terminal packet retained process identity is incomplete');
+  }
+  return rows;
+}
+
 async function inspectOwner(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
   try { return await inspectOwnerEvidence(laneId, candidatePath, capturedPurge); }
   catch (error) {
     if (error instanceof OrphanCloseRefusal) throw error;
     refuse('persisted session or workspace ownership could not be read');
   }
+}
+
+/** Execution limits alone do not require keeping a clean checkout already on its base. */
+async function isRetirableReadOnlyCheckout(record: OwnedSessionRecord, lane: Lane, candidatePath: string): Promise<boolean> {
+  try {
+    const policy = createOwnedExecutionPolicy({ cwd: record.cwd, prompt: record.latestPrompt,
+      controlledTask: record.controlledTask, executionPolicy: 'single-attempt',
+      model: record.model, effort: record.effort, runtimeConfig: record.runtimeConfig }, lane.runtime);
+    if (!policy || digest(policy) !== digest(record.executionPolicy)) return false;
+    const git = promisify(execFile);
+    const options = { encoding: 'utf8' as const, timeout: 5_000,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } };
+    let head: string;
+    const admitted = orphanCloseOwner(lane.id);
+    const pending = admitted ? orphanCloseRetirement(lane) : null;
+    const entries = pending && candidatePath === pending.claim.claimPath
+      ? await readdir(candidatePath).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; }) : null;
+    if (entries?.length === 0 && pending?.claim.state === 'purging'
+      && digest(admitted) === digest(pending.owner)) {
+      // Final-empty checks run after Git has been unlinked. Only this trusted
+      // in-progress claim may use its already-admitted preservation revision.
+      const preservationId = pending.claim.authority?.preservationId;
+      if (typeof preservationId !== 'string') return false;
+      const { payload } = await readWorkspacePreservation(preservationId);
+      if (payload.laneId !== lane.id || payload.packetId !== lane.packetId
+        || payload.identity.device !== admitted!.device || payload.identity.inode !== admitted!.inode
+        || payload.identity.canonicalPath !== admitted!.sourcePath) return false;
+      head = payload.capture.headCommit;
+    } else {
+      const { stdout: dirty } = await git('git', ['status', '--porcelain=v1', '--untracked-files=all'], { ...options, cwd: candidatePath });
+      if (dirty.trim()) return false;
+      const result = await git('git', ['rev-parse', '--verify', 'HEAD^{commit}'], { ...options, cwd: candidatePath });
+      head = result.stdout.trim();
+    }
+    await git('git', ['merge-base', '--is-ancestor', head, lane.baseBranch], { ...options, cwd: lane.repoPath });
+    return true;
+  } catch { return false; }
 }
 
 async function inspectOwnerEvidence(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
@@ -141,12 +192,13 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
       || record.runIdentityLedger?.version !== 1 || record.runIdentityLedger.complete !== true
       || record.runIdentityLedger.totalRuns !== record.recentRuns.length
       || ownedSessionRecordFingerprint(record) !== receipt.recordFingerprint
-      || record.executionPolicy !== undefined || record.controlledTask || record.activeRun || record.detachedAt
+      || ((record.executionPolicy !== undefined || record.controlledTask)
+        && !await isRetirableReadOnlyCheckout(record, lane, candidatePath)) || record.activeRun || record.detachedAt
       || receipt.surfaceId !== sessionKey || receipt.runtimeId !== lane.runtime || receipt.sessionState !== 'archived'
       || receipt.binding.packetId !== lane.packetId || receipt.binding.logicalWorkspaceId !== `packet:${lane.packetId}`
       || (receipt.binding.repositoryUuid !== null && receipt.binding.repositoryUuid !== repo.id)
       || path.join(await realpath(path.dirname(receipt.binding.cwd)), path.basename(receipt.binding.cwd)) !== sourcePath || !receipt.retainedRunsComplete
-      || !receipt.retainedRunTotal || receipt.retainedRunTotal !== receipt.retainedRuns.length
+      || receipt.retainedRunTotal !== receipt.retainedRuns.length
       || receipt.retainedRuns.length > 16 || !receipt.recordFingerprint
       || record.recentRuns.some((run) => run.outcome !== 'finished' || !run.finishedAt
         || run.childExit?.code !== 0 || run.childExit.signal !== null || run.childExit.classification !== 'clean-exit')) {
@@ -157,7 +209,11 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
     runs = receipt.retainedRuns.map((run) => ({ runId: run.id, pid: run.pid, processGroupId: run.processGroupId! }));
     evidence = receipt;
   } else {
-    runs = missingSessionRuns(lane, sessionKey);
+    // Older terminal packets may outlive the session ledger. The durable
+    // exact owner and fresh native packet/path probes replace session metadata,
+    // never a live session or incomplete retained process identity.
+    runs = state === 'missing' && ['archived', 'completed', 'failed'].includes(lane.status)
+      ? terminalMissingSessionRuns(lane) : missingSessionRuns(lane, sessionKey);
     evidence = runs;
   }
   if (runs.some((run) => !Number.isSafeInteger(run.pid) || run.pid <= 0
@@ -166,7 +222,7 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
   // Independent read-only proofs share one boundary, not cached authority.
   // Settle both before returning, preserving native holder/refusal precedence.
   const [native, owned] = await Promise.allSettled([
-    assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath, capturedPurge }),
+    assertOrphanProcessesAbsent({ runtime: lane.runtime, packetId: lane.packetId, runs, sourcePath, candidatePath, capturedPurge }),
     state === 'archived' && sessionKey ? probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, {
       allowArchivedRetirement: true,
       ...(capturedPurge ? { readCwdSnapshot: () => readCapturedPurgeCwdSnapshot(capturedPurge, candidatePath) } : {}),

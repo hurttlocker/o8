@@ -1,3 +1,4 @@
+import { rebuildableCargoTargetPaths } from '@/lib/worktree/cargo-target-cache';
 import { timeClosePhase } from '@/lib/orchestrator/close-timing';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -212,6 +213,7 @@ async function preserveWorkspaceArtifactsNative(
     const capturePolicy = {
       rebuildablePaths: [
         'node_modules', '.o8-install-runtime', '.next/cache', '.turbo',
+        ...await rebuildableCargoTargetPaths(snapshot.originalPath, managed.identity),
       ],
       copiedEnvironment: Object.fromEntries(
         Object.entries(bindings).map(([relativePath, binding]) => [relativePath, binding.sourceContentFingerprint]),

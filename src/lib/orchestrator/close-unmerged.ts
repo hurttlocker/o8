@@ -345,6 +345,12 @@ async function closePacketUnmergedUnlocked(input: {
         status: 409,
       };
     }
+    const hadCheckout = Boolean(priorLane?.worktreePath && existsSync(priorLane.worktreePath));
+    const removed = hadCheckout && priorLane
+      ? await import('@/lib/lane/retire-finished-worktree').then(({ retireFinishedWorktree }) => retireFinishedWorktree(priorLane))
+      : false;
+    if (hadCheckout && !removed) return { ok: false, code: 'close_failed', status: 409,
+      message: 'Archived packet checkout retirement was not confirmed. The checkout remains held.' };
     return {
       ok: true,
       result: {
@@ -438,7 +444,15 @@ async function closePacketUnmergedUnlocked(input: {
       return !bindingKey || !retiredWorkerBindings.has(bindingKey);
     });
     const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(workerLanesToKill));
-    const survivors = kills.filter((outcome) => !outcome.confirmed && !outcome.alreadyDead);
+    const survivors = [] as typeof kills;
+    for (const outcome of kills.filter(entry => !entry.confirmed && !entry.alreadyDead)) {
+      const target = lanesToClose.find(entry => entry.id === outcome.laneId);
+      const gone = target && target.worktreePath
+        && missingWorktreeBindings.has(`${target.id}\0${target.worktreePath}`)
+        && await import('./close-gone-session').then(({ confirmGoneCloseSession }) => confirmGoneCloseSession(target));
+      if (gone && target) orphanLaneIds.add(target.id);
+      else survivors.push(outcome);
+    }
     const survivorLaneIds = new Set(survivors.map((outcome) => outcome.laneId));
     const unverifiedMissing = lanesToClose.find((target) => {
       const worktreePath = target.worktreePath?.trim();
@@ -547,7 +561,7 @@ async function closePacketUnmergedUnlocked(input: {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
           worktreePath: candidate.worktreePath,
-          cleanup: () => timeClosePhase('cleanup', () => removeMergedWorktree(candidate, { preserveUncommittedSource: true })),
+          cleanup: () => timeClosePhase('cleanup', () => removeMergedWorktree(candidate)),
           removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
         });
         const cleanup = cleanupAttempt.result;
