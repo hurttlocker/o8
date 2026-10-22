@@ -99,6 +99,19 @@ function missingSessionRuns(lane: Lane, sessionKey: string | null): OrphanRunIde
   return rows;
 }
 
+function terminalMissingSessionRuns(lane: Lane): OrphanRunIdentity[] {
+  const rows = getSqlite().prepare(`SELECT lease_process_marker AS runId, lease_process_pid AS pid,
+    lease_process_group_id AS processGroupId FROM worker_tokens
+    WHERE packet_id = ? AND scope = 'local-packet' ORDER BY id LIMIT 17`).all(lane.packetId) as OrphanRunIdentity[];
+  if (rows.length > 16 || new Set(rows.map(row => row.runId)).size !== rows.length
+    || rows.some(row => typeof row.runId !== 'string' || !/^[A-Za-z0-9._-]{1,160}$/.test(row.runId)
+      || !Number.isSafeInteger(row.pid) || row.pid <= 0
+      || !Number.isSafeInteger(row.processGroupId) || row.processGroupId <= 0)) {
+    refuse('terminal packet retained process identity is incomplete');
+  }
+  return rows;
+}
+
 async function inspectOwner(laneId: string, candidatePath: string, capturedPurge?: CapturedPurgeProcessWitness): Promise<OrphanCloseOwner | null> {
   try { return await inspectOwnerEvidence(laneId, candidatePath, capturedPurge); }
   catch (error) {
@@ -146,7 +159,7 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
       || receipt.binding.packetId !== lane.packetId || receipt.binding.logicalWorkspaceId !== `packet:${lane.packetId}`
       || (receipt.binding.repositoryUuid !== null && receipt.binding.repositoryUuid !== repo.id)
       || path.join(await realpath(path.dirname(receipt.binding.cwd)), path.basename(receipt.binding.cwd)) !== sourcePath || !receipt.retainedRunsComplete
-      || !receipt.retainedRunTotal || receipt.retainedRunTotal !== receipt.retainedRuns.length
+      || receipt.retainedRunTotal !== receipt.retainedRuns.length
       || receipt.retainedRuns.length > 16 || !receipt.recordFingerprint
       || record.recentRuns.some((run) => run.outcome !== 'finished' || !run.finishedAt
         || run.childExit?.code !== 0 || run.childExit.signal !== null || run.childExit.classification !== 'clean-exit')) {
@@ -157,7 +170,11 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
     runs = receipt.retainedRuns.map((run) => ({ runId: run.id, pid: run.pid, processGroupId: run.processGroupId! }));
     evidence = receipt;
   } else {
-    runs = missingSessionRuns(lane, sessionKey);
+    // Older terminal packets may outlive the session ledger. The durable
+    // exact owner and fresh native packet/path probes replace session metadata,
+    // never a live session or incomplete retained process identity.
+    runs = state === 'missing' && (lane.status === 'archived' || lane.status === 'completed')
+      ? terminalMissingSessionRuns(lane) : missingSessionRuns(lane, sessionKey);
     evidence = runs;
   }
   if (runs.some((run) => !Number.isSafeInteger(run.pid) || run.pid <= 0
@@ -166,7 +183,7 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
   // Independent read-only proofs share one boundary, not cached authority.
   // Settle both before returning, preserving native holder/refusal precedence.
   const [native, owned] = await Promise.allSettled([
-    assertOrphanProcessesAbsent({ runtime: lane.runtime, runs, sourcePath, candidatePath, capturedPurge }),
+    assertOrphanProcessesAbsent({ runtime: lane.runtime, packetId: lane.packetId, runs, sourcePath, candidatePath, capturedPurge }),
     state === 'archived' && sessionKey ? probeOwnedSessionProcessQuiescence(sessionKey, candidatePath, {
       allowArchivedRetirement: true,
       ...(capturedPurge ? { readCwdSnapshot: () => readCapturedPurgeCwdSnapshot(capturedPurge, candidatePath) } : {}),
