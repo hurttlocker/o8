@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 
 import type { Socket } from 'node:net';
 
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import {
   O8_RELAY_SURFACE_HEADER,
   O8_WEB_MACHINE_SURFACE,
 } from '@/lib/connect/web-machine-surface';
+import { readCachedEntitlement, writeCachedEntitlement } from '@/lib/entitlement/license';
+import type { Plan } from '@/lib/entitlement/types';
 import {
   base58Encode,
   buildHttpReplay,
@@ -20,7 +22,7 @@ import {
   relayConnectorEligible,
   RELAY_FORWARD_MARKER,
 } from './relay-connector-protocol';
-import { RelayConnector } from './relay-connector';
+import { startRelayConnectorIfEnabled, type RelayConnector } from './relay-connector';
 
 const connectors: RelayConnector[] = [];
 const relayServers: WebSocketServer[] = [];
@@ -33,42 +35,55 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-async function startRelay(onConnection?: (socket: WebSocket, index: number) => void) {
+async function startRelay(onConnection?: (socket: WebSocket, index: number, authorization?: string) => void) {
   const sockets: WebSocket[] = [];
   const connectedAt: number[] = [];
+  const authorizations: Array<string | undefined> = [];
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   relayServers.push(server);
   await new Promise<void>((resolve) => server.once('listening', resolve));
   server.on('connection', (socket, request) => {
     expect(request.url).toBe('/mac');
-    expect(request.headers.authorization).toBe('Bearer fixture-license');
+    expect(request.headers.authorization).toMatch(/^Bearer \S+$/);
     sockets.push(socket);
     connectedAt.push(Date.now());
-    socket.send(JSON.stringify({ t: 'devices', count: 0 }));
-    onConnection?.(socket, sockets.length - 1);
+    authorizations.push(request.headers.authorization);
+    onConnection?.(socket, sockets.length - 1, request.headers.authorization);
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: 'devices', count: 0 }));
   });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('relay fixture did not bind');
-  return { url: `ws://127.0.0.1:${address.port}`, sockets, connectedAt };
+  return { url: `ws://127.0.0.1:${address.port}`, sockets, connectedAt, authorizations };
 }
 
 function startConnector(relayUrl: string, timing: {
   keepAliveIntervalMs?: number;
   pongTimeoutMs?: number;
+  entitlementRetryIntervalMs?: number;
+  entitlementRetryRandom?: () => number;
+  blockedApprovalCount?: () => number;
 } = {}): RelayConnector {
+  vi.stubEnv('O8_RELAY_URL', relayUrl);
   const config = {
-    plan: 'pro' as const,
-    settingEnabled: true,
-    licenseToken: 'fixture-license',
     blockedApprovalCount: () => 0,
     relayUrl,
     ...timing,
   };
-  const connector = new RelayConnector(config);
+  const connector = startRelayConnectorIfEnabled(config);
+  if (!connector) throw new Error('relay fixture must start with eligible cached credentials');
   connectors.push(connector);
-  connector.start();
   return connector;
 }
+
+function cacheLicense(licenseKey: string | undefined = 'fixture-license', plan: Plan = 'pro'): void {
+  expect(writeCachedEntitlement({ plan, licenseKey, status: 'active', expiresAt: null })).toBe(true);
+}
+
+beforeEach(() => {
+  vi.stubEnv('O8_PLAN', '');
+  vi.stubEnv('O8_RELAY_CONNECTOR', 'on');
+  cacheLicense();
+});
 
 afterEach(async () => {
   for (const connector of connectors.splice(0)) connector.stop();
@@ -77,6 +92,7 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }));
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('desktop relay socket recovery through /mac', () => {
@@ -122,24 +138,77 @@ describe('desktop relay socket recovery through /mac', () => {
     expect(relay.sockets).toHaveLength(1);
   });
 
-  it('rechecks entitlement after repeated 4409 and recovers when valid again', async () => {
-    let entitled = false;
-    const relay = await startRelay((socket) => {
-      if (!entitled) socket.close(4409, 'entitlement_lapsed');
+  it('recovers after 4409 by reading refreshed token B from the cache without restarting', async () => {
+    let acceptedAttaches = 0;
+    cacheLicense('expired-token-a');
+    const relay = await startRelay((socket, _index, authorization) => {
+      if (authorization !== 'Bearer renewed-token-b') socket.close(4409, 'entitlement_lapsed');
     });
-    startConnector(relay.url, { keepAliveIntervalMs: 25, pongTimeoutMs: 80 });
+    startConnector(relay.url, {
+      entitlementRetryIntervalMs: 120,
+      entitlementRetryRandom: () => 0.5,
+      blockedApprovalCount: () => { acceptedAttaches++; return 0; },
+    });
+    await waitFor(() => relay.sockets[0]?.readyState === WebSocket.CLOSED);
+    cacheLicense('renewed-token-b');
+    expect(readCachedEntitlement()?.licenseKey).toBe('renewed-token-b');
     await waitFor(() => relay.sockets.length >= 2);
-    await waitFor(() => relay.sockets[1].readyState === WebSocket.CLOSED);
-    entitled = true;
+    expect(relay.authorizations).toEqual(['Bearer expired-token-a', 'Bearer renewed-token-b']);
+    expect(relay.sockets[1].readyState).toBe(WebSocket.OPEN);
+    // A relay devices frame acknowledges acceptance. A later transport failure
+    // must use the normal 500-1,000 ms first retry, rather than the 120 ms test cadence.
+    await waitFor(() => acceptedAttaches === 1);
+    const droppedAt = Date.now();
+    relay.sockets[1].terminate();
     await waitFor(() => relay.sockets.length >= 3);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(relay.connectedAt[2] - droppedAt).toBeGreaterThanOrEqual(450);
+    expect(relay.connectedAt[2] - droppedAt).toBeLessThanOrEqual(1_300);
+    expect(relay.authorizations[2]).toBe('Bearer renewed-token-b');
     expect(relay.sockets[2].readyState).toBe(WebSocket.OPEN);
-    expect(relay.sockets).toHaveLength(3);
+  });
+
+  it('reads the refreshed cached token on an ordinary transport reconnect', async () => {
+    const relay = await startRelay();
+    startConnector(relay.url);
+    await waitFor(() => relay.sockets.length === 1);
+    cacheLicense('renewed-token-b');
+    relay.sockets[0].terminate();
+    await waitFor(() => relay.sockets.length === 2);
+    expect(relay.authorizations).toEqual(['Bearer fixture-license', 'Bearer renewed-token-b']);
+  });
+
+  it('does not redial an unchanged rejected token faster than the slow entitlement cadence', async () => {
+    cacheLicense('expired-token-a');
+    const relay = await startRelay((socket) => socket.close(4409, 'entitlement_lapsed'));
+    startConnector(relay.url, { entitlementRetryIntervalMs: 2_000, entitlementRetryRandom: () => 0.5 });
+    await waitFor(() => relay.sockets[0]?.readyState === WebSocket.CLOSED);
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(relay.sockets).toHaveLength(1);
+    await waitFor(() => relay.sockets.length >= 3, 3_500);
+    expect(relay.authorizations).toEqual(Array(3).fill('Bearer expired-token-a'));
+    expect(relay.connectedAt[1] - relay.connectedAt[0]).toBeGreaterThanOrEqual(2_000);
+    expect(relay.connectedAt[2] - relay.connectedAt[1]).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it.each(['plan', 'token', 'toggle'] as const)('pauses reconnects while current %s is ineligible and rechecks later', async (changed) => {
+    const relay = await startRelay();
+    startConnector(relay.url, { entitlementRetryIntervalMs: 150, entitlementRetryRandom: () => 0.5 });
+    await waitFor(() => relay.sockets.length === 1);
+    if (changed === 'plan') cacheLicense('fixture-license', 'free');
+    if (changed === 'token') cacheLicense('');
+    if (changed === 'toggle') vi.stubEnv('O8_RELAY_CONNECTOR', 'off');
+    relay.sockets[0].terminate();
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(relay.sockets).toHaveLength(1);
+    cacheLicense('renewed-token-b');
+    vi.stubEnv('O8_RELAY_CONNECTOR', 'on');
+    await waitFor(() => relay.sockets.length === 2);
+    expect(relay.authorizations[1]).toBe('Bearer renewed-token-b');
   });
 
   it('cancels a pending 4409 retry when explicitly stopped', async () => {
     const relay = await startRelay((socket) => socket.close(4409, 'entitlement_lapsed'));
-    const connector = startConnector(relay.url);
+    const connector = startConnector(relay.url, { entitlementRetryIntervalMs: 100, entitlementRetryRandom: () => 0.5 });
     await waitFor(() => relay.sockets[0]?.readyState === WebSocket.CLOSED);
     connector.stop();
     await new Promise((resolve) => setTimeout(resolve, 1_200));
