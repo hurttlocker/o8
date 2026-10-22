@@ -41,7 +41,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
   const repoName = scope === 'personal' || !project ? 'Personal' : repos.find((repo) => repo.localPath === scope)?.name ?? project.name;
   const filtersRepositories = ['rules', 'skills', 'prompts', 'agents', 'hooks'].includes(tab);
   const explanations: Record<CustomizeTab, string> = {
-    rules: 'Project instructions are shared guidance. Additional rules below show their own scope and source.',
+    rules: 'The Instructions count shows authored guidance. Indexed documentation is listed separately as reference material, with its source.',
     skills: 'Reusable instructions for your agents. Browse skills by project or personal library.',
     prompts: 'Saved text you choose to insert into a task. Choose Personal or a repository when saving a prompt.',
     commands: 'Built-in shortcuts for the orchestrator. Type / in the composer to use them in your current task.',
@@ -66,7 +66,7 @@ export function CustomizeHeader({ tab, onTab, query, onQuery, repos, scope, onSc
             fontSize: 13, fontWeight: 300, fontFamily: 'inherit', cursor: 'pointer',
           }}>
             {item.label}
-            {counts[item.id] ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
+            {counts[item.id] || (item.id === 'rules' && counts.rules === 0) ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{counts[item.id]}</span> : null}
           </button>
         ))}
       </nav> : null}

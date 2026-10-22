@@ -7,7 +7,8 @@ import dynamic from 'next/dynamic';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import { RamsButton } from './settings/shared';
 import { ProjectInstructions } from './customize/ProjectInstructions';
-import { emptyInventory, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type DirectiveSummary, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
+import { emptyInventory, isIndexedDocumentation, loadCustomizeInventory, type CustomizeInventory, type CustomizeRepo, type ExternalServer, type AgentEntry, type HookEntry } from './customize/inventory';
+import { InstructionsTab } from './customize/InstructionsTab';
 import type { ProjectRecord } from './repo-registry/useProjects';
 import { CustomizeHeader, type CustomizeTab } from './customize/CustomizeHeader';
 import { useCustomizeTab } from './customize/navigation';
@@ -93,7 +94,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
 
   // Navigation counts show inventory totals rather than filtered results.
   const tabCounts: Partial<Record<CustomizeTab, number>> = {
-    rules: directives.length,
+    rules: directives.filter((d) => !isIndexedDocumentation(d)).length,
     commands: ORCHESTRATOR_SLASH_COMMANDS.length,
     skills: skills.length,
     connections: BUILTIN_CONNECTIONS.length + servers.length,
@@ -176,7 +177,7 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
         ) : inventoryError ? (
           <div role="alert" style={{ paddingTop: 24, color: 'var(--t-text-secondary)', fontSize: 13 }}>{inventoryError} <RamsButton variant="ghost" onClick={() => setRefreshCount((value) => value + 1)}>Retry</RamsButton></div>
         ) : tab === 'rules' ? (
-          <RulesTab query={query.trim()} inventoryCount={directives.length} directives={directives.filter((d) => matches(d.title, d.body, d.repoName))} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
+          <InstructionsTab key={requestKey} query={query.trim()} directives={directives} expandedRow={expandedRow} onToggleRow={setExpandedRow} onOpenFile={openFile} />
         ) : tab === 'connections' ? (
           <ConnectionsTab servers={servers.filter((s) => matches(s.name, s.command, s.url))} query={q} expandedRow={expandedRow} onToggleRow={setExpandedRow} />
         ) : tab === 'commands' ? (
@@ -209,76 +210,6 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
 }
 
 // ── Tabs ──
-
-function RulesTab({ directives, query, inventoryCount, expandedRow, onToggleRow, onOpenFile }: {
-  query: string;
-  inventoryCount: number;
-  directives: DirectiveSummary[];
-  expandedRow: string | null;
-  onToggleRow: (id: string | null) => void;
-  onOpenFile: (path: string) => void;
-}) {
-  const global = directives.filter((d) => !d.repoName);
-  const repoScoped = directives.filter((d) => d.repoName);
-  if (directives.length === 0) {
-    return (
-      <EmptyState
-        title={query && inventoryCount > 0 ? 'No matching instructions' : 'No additional rules'}
-        body={query && inventoryCount > 0
-          ? `No instructions match “${query}”. Change or clear the search to see your rules.`
-          : 'Rules appear here with their source and scope. Shared project instructions are managed separately in the project view.'}
-      />
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {global.length > 0 ? (
-        <>
-          <SectionHeader label="Shared rules" count={global.length} />
-          <TruncatedRows rows={global.map((d) => (
-            <Row
-              key={d.id}
-              title={d.title}
-              subtitle={d.body.replace(/\s+/g, ' ').slice(0, 160)}
-              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
-              expanded={expandedRow === d.id}
-              onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {d.body}
-                </div>
-                {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
-              </div>
-            </Row>
-          ))} />
-        </>
-      ) : null}
-      {repoScoped.length > 0 ? (
-        <>
-          <SectionHeader label="Repository guidance" count={repoScoped.length} />
-          <TruncatedRows rows={repoScoped.map((d) => (
-            <Row
-              key={d.id}
-              title={d.title}
-              subtitle={`${d.repoName} — ${d.body.replace(/\s+/g, ' ').slice(0, 120)}`}
-              pill={d.scope === 'project' ? 'Project rule' : d.repoName ? 'Repository rule' : 'Shared rule'}
-              expanded={expandedRow === d.id}
-              onClick={() => onToggleRow(expandedRow === d.id ? null : d.id)}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {d.body}
-                </div>
-                {d.file ? <OpenFileLink file={d.file} onOpenFile={onOpenFile} /> : null}
-              </div>
-            </Row>
-          ))} />
-        </>
-      ) : null}
-    </div>
-  );
-}
 
 function ConnectionsTab({ servers, query, expandedRow, onToggleRow }: {
   servers: ExternalServer[];
