@@ -137,7 +137,7 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
     expect(button('Plugins').getAttribute('aria-current')).toBe('page');
     await act(async () => button('More navigation').click());
     expect(document.activeElement).toBe(button('Projects'));
-    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
+    expect(document.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
     await key('ArrowDown');
     expect(document.activeElement).toBe(button('Customize'));
     await key('Escape');
@@ -145,6 +145,8 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
     expect(document.activeElement).toBe(button('More navigation'));
     await act(async () => button('More navigation').click());
     await key('End');
+    expect(document.activeElement).toBe(button('Settings'));
+    await key('ArrowUp');
     await act(async () => button('Customize').click());
     expect(customize).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[aria-label="More destinations"]')).toBeNull();
@@ -157,6 +159,41 @@ it('reaches Plugins directly, keeps Automations, and navigates the secondary dra
     await act(async () => root.unmount());
     host.remove();
   }
+});
+
+it('distinguishes app Settings from Customize before navigation and preserves the selected workspace capability', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const callbacks = { onHome: vi.fn(), onNewSession: vi.fn(), onCreateTerminal: vi.fn(), onOpenProjects: vi.fn(), onOpenSettings: vi.fn(), onOpenPRs: vi.fn(), onOpenUsage: vi.fn(), onOpenShortcuts: vi.fn() };
+  const customize = vi.fn(); window.addEventListener('o8:open-customize', customize);
+  const button = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+  setCustomizeTab('skills');
+  try {
+    await act(async () => root.render(createElement(CompactNavigationRail, { ...callbacks, activeDestination: 'agents', workspacePage: 'customize', glassSurface: false })));
+    await act(async () => button('More navigation').click());
+    const menu = document.querySelector<HTMLElement>('[aria-label="More destinations"]')!;
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.getAttribute('aria-label'))).toEqual(['Projects', 'Customize', 'Settings']);
+    for (const [label, description] of [['Customize', 'Agent and workspace capabilities'], ['Settings', 'Appearance and app preferences']]) {
+      const item = button(label);
+      expect(item.textContent).toContain(description);
+      expect(document.getElementById(item.getAttribute('aria-describedby')!)?.textContent).toBe(description);
+    }
+    expect(callbacks.onOpenSettings).not.toHaveBeenCalled(); expect(customize).not.toHaveBeenCalled();
+    await act(async () => button('Customize').click());
+    expect(customize).toHaveBeenCalledOnce(); expect((customize.mock.calls[0][0] as CustomEvent).detail).toEqual({ tab: 'skills' });
+    expect(document.activeElement).toBe(button('More navigation'));
+    await act(async () => button('More navigation').click());
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })));
+    expect(document.activeElement).toBe(button('Settings'));
+    await act(async () => (document.activeElement as HTMLButtonElement).click());
+    expect(callbacks.onOpenSettings).toHaveBeenCalledOnce(); expect(customize).toHaveBeenCalledOnce();
+    expect(theme.setPalette).not.toHaveBeenCalled();
+    expect(document.querySelector('[aria-label="More destinations"]')).toBeNull();
+    expect(document.activeElement).toBe(button('More navigation'));
+    await act(async () => button('More navigation').click());
+    await act(async () => button('Customize').click());
+    expect((customize.mock.calls[1][0] as CustomEvent).detail).toEqual({ tab: 'skills' });
+  } finally { window.removeEventListener('o8:open-customize', customize); await act(async () => root.unmount()); host.remove(); }
 });
 
 it('opens cached release notes from the updater and restores focus on Escape without reopening', async () => {

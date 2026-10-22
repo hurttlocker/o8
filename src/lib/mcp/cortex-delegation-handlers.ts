@@ -31,10 +31,10 @@ export function createCortexDelegationHandlers(config: {
       if (!repoPath) return textResult('repoPath is required (not available from env either)', true);
       const checkoutMode = args.checkoutMode === 'shared' ? 'shared' : 'isolated';
       if (checkoutMode === 'shared' && !config.parentThreadId) {
-        return textResult('Fast mode needs a persisted orchestrator chat. Open this conversation in an o8 workspace first.', true);
+        return textResult('Shared mode needs a persisted orchestrator chat. Open this conversation in an o8 workspace first.', true);
       }
       if (checkoutMode === 'shared' && repoPath !== config.repoPath) {
-        return textResult('Fast mode workers must use this orchestrator workspace checkout.', true);
+        return textResult('Shared mode workers must use this orchestrator workspace checkout.', true);
       }
       const result = await pollCorrelatedMcpApiMutation<Record<string, unknown>>({
         url: `${config.apiBase}/api/orchestrator/delegate`,
@@ -123,7 +123,7 @@ export function createCortexDelegationHandlers(config: {
     }
     try {
       const status = inspectSharedCheckoutTeam({ repoPath: config.repoPath, parentThreadId: config.parentThreadId });
-      if (!status) return jsonResult({ team: null, note: 'No Fast workers have been launched from this chat.' });
+      if (!status) return jsonResult({ team: null, note: 'No Shared workers have been launched from this chat.' });
       const memberOutcomes = await Promise.all(status.team.members.map(async (member) => {
         if (!member.surfaceId) return { taskName: member.taskName, surfaceId: null, outcome: member.state };
         const launch = await findOwnedLaunchByMutationId(member.clientMutationId);
@@ -155,9 +155,9 @@ export function createCortexDelegationHandlers(config: {
         verification,
       });
       return jsonResult({ ok: true, teamId: result.team.id, reviewedHead: result.reviewedHead,
-        committedPaths: result.committedPaths, note: 'Fast team review was archived and checkout ownership was released.' });
+        committedPaths: result.committedPaths, note: 'Shared team review was archived and checkout ownership was released.' });
     } catch (error) {
-      return textResult(`Fast team finish refused: ${safeErrorText(error)}`, true);
+      return textResult(`Shared team finish refused: ${safeErrorText(error)}`, true);
     }
   };
 

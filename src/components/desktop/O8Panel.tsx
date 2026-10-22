@@ -14,6 +14,7 @@ import { O8ActivityPane } from './O8ActivityPane';
 import { O8ThreadTools } from './o8-panel/O8ThreadTools';
 import { useHandoffSelection } from './o8-panel/useHandoffSelection';
 import { SurfaceEmptyState } from './o8-panel/SurfaceEmptyState';
+import { SideChatIntro } from './o8-panel/SideChatIntro';
 import { TerminalUnavailableState } from './o8-panel/TerminalUnavailableState';
 import { O8ResourcesPane } from './O8ResourcesPane';
 import { O8BrowserPane } from './O8BrowserPane';
@@ -302,6 +303,7 @@ export function O8Panel({
       // every palette × surface, so the side chat always reads as paper.
       return (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+          <SideChatIntro />
           <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the right panel." />}>
             <LazyOrchestratorTab
               tabId="right-side-chat"

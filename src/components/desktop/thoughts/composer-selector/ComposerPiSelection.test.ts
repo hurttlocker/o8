@@ -64,7 +64,7 @@ it('offers one built-in Pi lead under o8 without an installed CLI or a Customize
   await click('[data-testid="lead-row-o8-free"]');
   expect(container.querySelector('[data-testid="composer-selector-lead"]')?.textContent).toBe('o8');
   expect(container.querySelector('[data-testid="composer-selector-mode"]')?.getAttribute('aria-label')).toBe('Mode: Shared');
-  expect(container.querySelector('[data-testid="wire-mode"]')?.textContent).toContain('[Mode: Fast]');
+  expect(container.querySelector('[data-testid="wire-mode"]')?.textContent).toContain('[Mode: Shared]');
   await click('[data-testid="composer-selector-mode"]');
   const shared = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button => button.textContent?.includes('Shared'));
   expect(shared?.disabled).toBe(false);

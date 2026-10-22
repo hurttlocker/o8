@@ -87,6 +87,12 @@ export function CustomizePage({ onClose, project = null, registeredRepos = [], o
     return () => controller.abort();
   }, [requestKey, refreshCount, project?.id]);
 
+  useEffect(() => {
+    const refresh = () => setRefreshCount(count => count + 1);
+    window.addEventListener('o8:cortex-changes', refresh);
+    return () => window.removeEventListener('o8:cortex-changes', refresh);
+  }, []);
+
   const activeRepoName = repos.find((repo) => repo.localPath === repoPath)?.name ?? 'Personal';
   const q = query.trim().toLowerCase();
   const matches = (...fields: Array<string | null | undefined>) =>

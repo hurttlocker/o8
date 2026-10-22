@@ -15,7 +15,7 @@
  *   3. SYMBOL GRAPH     — `trace_path` neighbours for symbols mined from
  *                         the packet title/summary/issue body
  *
- * Data sources — all read-only:
+ * Read sources:
  *   - GET  /api/cortex/directives                  (#736)
  *   - GET  /api/cortex/codebase-memory             (#741, gates the symbol row)
  *   - GET  /api/cortex/recent-outcomes?repoPath=…  (this PR)
@@ -99,6 +99,7 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
   // fetch effect uses this as a dependency so the card re-fetches in place
   // without a manual collapse/reopen.
   const [directiveRefreshTick, setDirectiveRefreshTick] = useState(0);
+  const [outcomeRefreshTick, setOutcomeRefreshTick] = useState(0);
   // #899 — Same WS bridge also bumps this so the project-pulse row refreshes
   // on directive changes (a new directive may shift which projects matter).
   const [pulseRefreshTick, setPulseRefreshTick] = useState(0);
@@ -169,8 +170,8 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
         data?: { scope?: string };
       } | undefined;
       const scope = detail?.data?.scope;
-      // Only directive scope triggers a directive re-fetch — outcomes and
-      // codebase-memory will hook in here later if/when they need it.
+      // Refresh the matching retained-memory inventory after a write.
+      if (scope === 'outcome') { setOutcomeRefreshTick(tick => tick + 1); return; }
       if (scope !== 'directive' && scope) return;
       pending = true;
       if (timer) return;
@@ -219,7 +220,7 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
     return () => {
       cancelled = true;
     };
-  }, [repoPath]);
+  }, [repoPath, outcomeRefreshTick]);
 
   // ── Project pulse — keyed on repoPath, refreshes on cortex-changes ──
   // #899 wave 2. Failure modes — non-OK, throw, or repo not in any project —
@@ -391,6 +392,7 @@ export function ContextRecallCard({ packet, repoName }: ContextRecallCardProps) 
         loading={outcomesForCurrentRepo === null && !outcomesError}
         error={outcomesError}
         outcomes={outcomesForCurrentRepo ?? []}
+        repoPath={repoPath ?? undefined}
       />
       {showSymbolRow ? (
         <SymbolGraphRow

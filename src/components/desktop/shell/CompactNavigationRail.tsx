@@ -193,7 +193,7 @@ export function CompactNavigationRail({
         </RailActionButton>
         <RailMoreMenu buttonStyle={railButton} selected={activeDestination === 'projects' ? 'projects'
           : (workspacePage === 'customize' || activeDestination === 'customize' && customizeTab !== 'plugins') ? 'customize' : null}
-          onProjects={() => openNav('projects')} onCustomize={() => openNav('customize')} />
+          onProjects={() => openNav('projects')} onCustomize={() => openNav('customize')} onSettings={onOpenSettings} />
         <RailActionButton type="button" aria-label="PRs" onClick={onOpenPRs} style={{ ...railButton, flexShrink: 0 }}><GitPullRequest size={19} strokeWidth={1.8} /></RailActionButton>
       </div>
       <div style={{ width: 27, height: 1, marginTop: 6, marginBottom: 6, flexShrink: 0, background: 'var(--t-divider-subtle)' }} />

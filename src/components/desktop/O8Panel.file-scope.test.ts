@@ -4,6 +4,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { O8Panel } from './O8Panel';
 import { normalizePanelTab } from './o8-panel/types';
+import { BottomUtilitySurface } from './contextual-panel/surfaces';
+
+vi.mock('@/lib/react/retrying-lazy', () => ({ retryingLazy: () => (props: Record<string, unknown>) => createElement('textarea', {
+  'aria-label': 'Fixture side chat composer',
+  'data-side-chat-scope': JSON.stringify(props),
+}) }));
 
 // Keep the real panel's selection and tab routing, with unrelated tools inert.
 vi.mock('./O8ActivityPane', () => ({ O8ActivityPane: () => null }));
@@ -33,6 +39,17 @@ let host: HTMLDivElement; let root: Root;
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear(); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 describe('panel file scope', () => {
+  it.each(['right', 'bottom'])('explains side chat scope before the first message in the %s panel', async panel => {
+    await act(async () => root.render(panel === 'right'
+      ? createElement(O8Panel, { repoPath: '/fixture/repo', activeTab: 'side-chat' })
+      : createElement(BottomUtilitySurface, { kind: 'side-chat', tabId: 'bottom-side-chat', active: true, repoPath: '/fixture/repo', repoLabel: 'Repo', registeredRepos: [], previews: [], selectedFile: null, dirtyFiles: new Set<string>(), onSelectFile: vi.fn() })));
+    const explanation = host.querySelector('[aria-label="About side chat"]');
+    expect(explanation).not.toBeNull();
+    expect(explanation?.textContent).toContain('A separate conversation with its own messages. Your main conversation stays in place.');
+    const composer = host.querySelector('[aria-label="Fixture side chat composer"]')!;
+    expect(explanation!.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(JSON.parse(composer.getAttribute('data-side-chat-scope')!)).toMatchObject({ repoPath: '/fixture/repo', acceptHistoryThreadLoads: false, restoreLastThread: false, publishWorkspaceThread: false, persistLastThread: false });
+  });
   it('offers a single working route to the main terminal when the right bridge is unavailable', async () => {
     let finish: (() => void) | undefined;
     const onOpenMainTerminal = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));

@@ -19,21 +19,25 @@ const LAUNCH_TOOL_NAME = 'cortex_launch_agent';
 
 const DISPATCH_IMPERATIVE = `Dispatch means calling the \`${LAUNCH_TOOL_NAME}\` tool — call it once per packet, in parallel, in this turn, BEFORE you write any summary. A turn with no \`${LAUNCH_TOOL_NAME}\` call has dispatched nothing, however good the plan is; never claim work was dispatched without the tool results to show for it. Review and merge through the gate as they finish.`;
 
+/** Exact pre-#3240 wire text, retained for old clients and persisted history. */
+const LEGACY_FAST_COMPOSER_DIRECTIVE = '[Mode: Fast] Work in the current checkout. Work directly for small tasks and ordinary replies. Delegate only when the user asks or independent work benefits from workers; choosing Shared alone does not require a launch. Choose suitable enabled runtimes and models for each task. If delegating, divide independent work by file ownership and call `cortex_launch_agent` once per worker with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.';
+
 export const COMPOSER_MODE_DIRECTIVES: Readonly<Record<ComposerWireMode, string>> = {
   solo: '[Mode: Solo] Work directly in this session yourself — do NOT dispatch worker agents or create missions. Edit, run, and verify with your own tools.',
   multitask: `[Mode: Multitask] Work directly for small tasks and ordinary replies. Delegate only when the user asks or independent work benefits from workers. If delegating, create scoped worker packets in isolated worktrees. ${DISPATCH_IMPERATIVE}`,
-  fast: '[Mode: Fast] Work in the current checkout. Work directly for small tasks and ordinary replies. Delegate only when the user asks or independent work benefits from workers; choosing Shared alone does not require a launch. Choose suitable enabled runtimes and models for each task. If delegating, divide independent work by file ownership and call `cortex_launch_agent` once per worker with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.',
+  fast: LEGACY_FAST_COMPOSER_DIRECTIVE.replace('[Mode: Fast]', '[Mode: Shared]'),
   moa: `[Mode: Mixture of Agents] After the proposal round, decompose the work into parallel worker packets and dispatch them into isolated worktrees. ${DISPATCH_IMPERATIVE}`,
   fusion: `[Mode: Fusion] Run a deep parallel pass with native sub-agents and workers across every available runtime. ${DISPATCH_IMPERATIVE}`,
 };
 
 /**
- * Directive strings o8 shipped before #2153. A client running an older build
+ * Previously shipped directive strings. A client running an older build
  * still sends them, and history written by one still holds them, so the
  * persistence boundary keeps recognizing them — otherwise the operator's own
  * words get stored with a stale directive glued to the front.
  */
 const LEGACY_COMPOSER_MODE_DIRECTIVES: readonly string[] = [
+  LEGACY_FAST_COMPOSER_DIRECTIVE,
   `[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. ${DISPATCH_IMPERATIVE}`,
   '[Mode: Fast] Decompose independent work by file ownership. Call `cortex_launch_agent` once per worker in parallel in this turn with `checkoutMode: "shared"` and non-overlapping relative `assignedPaths`. Each worker edits the same current checkout. Tell them not to commit, reset, stash, or switch branches. Track each surface and resolve overlap before accepting edits. Call `cortex_shared_team_status` to inspect all changed and committed paths, review the combined diff and run checks, then make one orchestrator-owned commit of only your team edits. If independent changes block Finish, review their actual diff and explicitly call `cortex_reconcile_shared_team` with the exact status review ID, HEAD and all review paths; never commit or discard someone else’s work to clear the hold. Finally call `cortex_finish_shared_team` with review and verification receipts to release checkout ownership. Never claim a worker was launched without a tool receipt.',
   '[Mode: Multitask] Decompose this into parallel worker packets and dispatch them into isolated worktrees instead of working serially yourself. Review and merge through the gate as they finish.',
@@ -107,7 +111,7 @@ export function withSessionPrelude(
 export function isKnownComposerPreambleTitle(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const title = value.trim();
-  return Object.values(COMPOSER_MODE_DIRECTIVES).some((directive) => {
+  return [...Object.values(COMPOSER_MODE_DIRECTIVES), ...LEGACY_COMPOSER_MODE_DIRECTIVES].some((directive) => {
     const markerEnd = directive.indexOf(']');
     if (markerEnd < 0) return false;
     const marker = directive.slice(0, markerEnd + 1);

@@ -146,7 +146,7 @@ describe('contextual thread panel navigation', () => {
       ? json({ repos: [{ ...repo, id: 'other-repo', localPath: '/other' }] })
       : json({ tasks: [{ ...task('Other', 'running', '/other'), project: { id: 'focused-project' } }] }));
     await act(async () => root.render(createElement(O8ThreadsPane, { active: true, repoPath: '/other', repos: [repo] })));
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="Create thread"]')!.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Create task"]')!.disabled).toBe(false);
     expect(fetchMock.mock.calls.some((call) => call[0] === '/api/panel/repos')).toBe(true);
     expect(projectState.activeProject.id).toBe('project');
   });

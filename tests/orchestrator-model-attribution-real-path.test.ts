@@ -568,7 +568,7 @@ describe('orchestrator model attribution through the real WebSocket turn handler
     expect(assistant.model).toBe(assistant.receipt?.leadModel);
     if (hasPriorTurn) {
       expect(assistant.receipt?.effort).toBe('high');
-      expect(readFileSync(promptCapturePath, 'utf8')).toContain('[Mode: Fast] Work in the current checkout.');
+      expect(readFileSync(promptCapturePath, 'utf8')).toContain('[Mode: Shared] Work in the current checkout.');
     }
     expect(history.messages.filter((row) => row.role === 'user' && row.content === 'mobile reply')).toHaveLength(1);
     expect(history.repoPath).toBe(repoPath);

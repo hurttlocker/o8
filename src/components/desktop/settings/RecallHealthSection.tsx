@@ -95,7 +95,12 @@ export function RecallHealthSection() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const refresh = () => { void load(); };
+    window.addEventListener('o8:cortex-changes', refresh);
+    return () => window.removeEventListener('o8:cortex-changes', refresh);
+  }, [load]);
 
   return (
     <div>

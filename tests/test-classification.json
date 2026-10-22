@@ -4742,6 +4742,13 @@
       ]
     },
     {
+      "path": "tests/selective-forget-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/server-only-stub-node-options.test.ts",
       "reasons": [
         "child-process"
@@ -4958,6 +4965,14 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/storage-volume-restart-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "real-path"
       ]
     },
     {

@@ -74,13 +74,13 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
   const create = async (dispatch: boolean, runtime: TaskExecutionRuntime, model: string | null, effort: ThinkingEffort | null) => {
     if (busyKey || !project || !canCreate) return;
     setBusyKey('create');
-    setNotice(dispatch ? 'Creating and dispatching this thread…' : 'Creating this thread…');
+    setNotice(dispatch ? 'Saving task and requesting an agent…' : 'Saving task…');
     try {
       const result = await createTaskRequest({ title: title.trim(), summary: summary.trim() || null, projectId: project.id, repoPath: currentTargetRepo, workerIntent: intent, requestedRuntime: runtime, model, requestedEffort: effort }, dispatch);
       setNotice(result);
       setTitle(''); setSummary(''); setComposerOpen(false);
       pool.refresh();
-    } catch (err) { setNotice(err instanceof Error ? err.message : 'Unable to create this thread.'); }
+    } catch (err) { setNotice(err instanceof Error ? err.message : 'Unable to save this task.'); }
     finally { setBusyKey(null); }
   };
 
@@ -113,7 +113,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
         </> : (['threads', 'agents'] as const).map((tab) => <button key={tab} role="tab" aria-selected={view === tab} onClick={() => { setView(tab); if (tab === 'threads') backToThreads(); }} style={{ ...smallButtonStyle, background: view === tab ? 'var(--t-input-bg)' : 'transparent', color: view === tab ? 'var(--t-text)' : 'var(--t-text-muted)' }}>{tab === 'threads' ? 'Threads' : 'Agents'}</button>)}
         <span style={{ flex: 1 }} />
         <button type="button" onClick={pool.refresh} disabled={pool.loading} style={{ ...smallButtonStyle, flexShrink: 0 }}>Refresh</button>
-        {!boundSessionKey ? <button type="button" aria-label="Create thread" disabled={!canCreate || Boolean(busyKey)} onClick={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
+        {!boundSessionKey ? <button type="button" aria-label="Create task" disabled={!canCreate || Boolean(busyKey)} onClick={(event) => { composerOpener.current = event.currentTarget; if (composerOpen) event.currentTarget.focus(); setView('threads'); setSelection(null); setComposerOpen((open) => !open); }} style={smallButtonStyle}>+</button> : null}
       </div>
       {notice ? <div role="status" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 11, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>{notice}</div> : null}
       {pool.error ? <div role="alert" style={{ paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, fontSize: 12 }}>{pool.error}</div> : null}
@@ -128,7 +128,7 @@ export function O8ThreadsPane({ active, repoPath, repos, allRepos = false, initi
             <div style={{ marginTop: 6, marginBottom: 20, fontSize: 12, fontWeight: 300, color: 'var(--t-text-muted)' }}>{projects.loading || pool.loading && !tasks.length ? 'Reading project threads…' : waiting ? `${waiting} thread${waiting === 1 ? ' is' : 's are'} waiting on you.` : 'Nothing is waiting on you.'}</div>
             {composerOpen && canCreate ? <NewTaskComposer titleInputRef={composerTitle} repos={availableRepos} selectedRepo={availableRepos.find((repo) => repo.localPath === repoPath)} title={title} summary={summary} repoPath={currentTargetRepo} workerIntent={intent} busy={busyKey === 'create'} onTitleChange={setTitle} onSummaryChange={setSummary} onRepoPathChange={setTargetRepo} onWorkerIntentChange={setIntent} onCancel={() => { setComposerOpen(false); composerOpener.current?.focus(); }} onCreate={(runtime, model, effort) => { void create(false, runtime, model, effort); }} onCreateAndDispatch={(runtime, model, effort) => { void create(true, runtime, model, effort); }} /> : null}
             {pool.loading && !tasks.length ? <p style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Reading project threads…</p> : null}
-            {!pool.loading && !pool.error && !tasks.length ? <p style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Start a thread here or dispatch work from your conversation. Local and remote workers appear here with their recorded status.</p> : null}
+            {!pool.loading && !pool.error && !tasks.length ? <p style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Save a task here or start work from your conversation. Tasks appear as threads with their recorded status.</p> : null}
             {THREAD_GROUPS.map((group) => {
               const entries = tasks.filter((task) => task.group === group.id);
               if (!entries.length) return null;
