@@ -15,15 +15,15 @@ import {
   type GithubPullRequestList,
 } from './queries';
 
-export function useRepoPullRequests(repo: string | null | undefined) {
+export function useRepoPullRequests(repo: string | null | undefined, repoPath?: string | null) {
   const queryClient = useQueryClient();
   const query = useQuery<GithubPullRequestList>({
-    ...pullRequestListQuery(repo ?? ''),
+    ...pullRequestListQuery(repo ?? '', { repoPath }),
     enabled: Boolean(repo),
   });
   const refresh = useCallback(
-    () => (repo ? refreshGithubList(queryClient, repo, 'prs') : Promise.resolve(undefined)),
-    [queryClient, repo],
+    () => (repo ? refreshGithubList(queryClient, repo, 'prs', repoPath) : Promise.resolve(undefined)),
+    [queryClient, repo, repoPath],
   );
   return { ...query, refresh };
 }
