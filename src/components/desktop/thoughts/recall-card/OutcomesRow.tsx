@@ -8,6 +8,8 @@
  * Expanded: lists each outcome with summary, runtime, branch, and time.
  */
 
+import { ForgetMemoryButton } from '../../ForgetMemoryButton';
+
 import {
   Chevron,
   expandedSurfaceStyle,
@@ -26,9 +28,10 @@ interface OutcomesRowProps {
   loading: boolean;
   error: string | null;
   outcomes: RecentOutcome[];
+  repoPath?: string;
 }
 
-export function OutcomesRow({ open, onToggle, loading, error, outcomes }: OutcomesRowProps) {
+export function OutcomesRow({ open, onToggle, loading, error, outcomes, repoPath }: OutcomesRowProps) {
   const summary = (() => {
     if (loading) return 'Loading…';
     if (error) return 'Unable to load outcomes';
@@ -151,6 +154,7 @@ export function OutcomesRow({ open, onToggle, loading, error, outcomes }: Outcom
                     {' · '}
                     {formatRelative(o.completedAt)}
                   </div>
+                  {repoPath ? <ForgetMemoryButton key={o.id} kind="outcome" id={o.id} label={o.summary || `${tone.label} run`} repoPath={repoPath} /> : null}
                 </div>
               </div>
             );
