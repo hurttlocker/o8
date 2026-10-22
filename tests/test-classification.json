@@ -2951,6 +2951,15 @@
       ]
     },
     {
+      "path": "tests/launch-provisioning-mission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/lead-handoff-real-path.test.ts",
       "reasons": [
         "child-process",

@@ -670,6 +670,7 @@ export class WorktreeManager {
       }
     }
 
+    opts.beforeReady?.(info);
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
     if (info.dependencyMaterialization) {
@@ -876,6 +877,7 @@ export class WorktreeManager {
       }
       await this.resetTrackedWorkspaceChanges(worktreePath);
 
+      opts.beforeReady?.(info);
       info.status = 'ready';
       await this.updateMetaStatus(taskId, 'ready');
       if (info.dependencyMaterialization) {
