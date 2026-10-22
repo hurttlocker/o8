@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, createElement, useEffect, useState } from 'react';
+import { act, createElement, useEffect, useState, type ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { O8Panel } from './O8Panel';
@@ -35,12 +36,13 @@ vi.mock('./ContextualPanel', () => ({ ContextualPanel: () => null }));
 vi.mock('./o8-panel/workspace-rail/AllFilesTree', () => ({ AllFilesTree: ({ repoPath, onSelectFile }: { repoPath: string; onSelectFile: (path: string) => void }) => createElement('button', { 'data-tree-repo': repoPath, onClick: () => onSelectFile('src/file.ts') }, 'Select file') }));
 vi.mock('./o8-panel/workspace-rail/FileViewer', () => ({ FileViewer: ({ repoPath, selectedFile }: { repoPath: string; selectedFile: string | null }) => createElement('output', { 'data-repo': repoPath }, selectedFile ?? 'No selection') }));
 
-let host: HTMLDivElement; let root: Root;
-beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear(); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
+let host: HTMLDivElement; let root: Root; let client: QueryClient;
+const showPanel = (node: ReactNode) => root.render(createElement(QueryClientProvider, { client }, node));
+beforeEach(() => { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear(); reviewLifecycle.mounts = 0; reviewLifecycle.unmounts = 0; host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
 describe('panel file scope', () => {
   it.each(['right', 'bottom'])('explains side chat scope before the first message in the %s panel', async panel => {
-    await act(async () => root.render(panel === 'right'
+    await act(async () => showPanel(panel === 'right'
       ? createElement(O8Panel, { repoPath: '/fixture/repo', activeTab: 'side-chat' })
       : createElement(BottomUtilitySurface, { kind: 'side-chat', tabId: 'bottom-side-chat', active: true, repoPath: '/fixture/repo', repoLabel: 'Repo', registeredRepos: [], previews: [], selectedFile: null, dirtyFiles: new Set<string>(), onSelectFile: vi.fn() })));
     const explanation = host.querySelector('[aria-label="About side chat"]');
@@ -53,7 +55,7 @@ describe('panel file scope', () => {
   it('offers a single working route to the main terminal when the right bridge is unavailable', async () => {
     let finish: (() => void) | undefined;
     const onOpenMainTerminal = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
-    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    await act(async () => showPanel(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
     const recovery = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open main terminal');
     expect(recovery).toBeDefined();
     expect(host.textContent).toContain('The right-panel terminal is unavailable');
@@ -62,14 +64,14 @@ describe('panel file scope', () => {
     expect(recovery!.disabled).toBe(true);
     await act(async () => finish?.());
     expect(recovery!.disabled).toBe(false);
-    await act(async () => root.render(createElement(O8Panel, { activeTab: 'files', onOpenMainTerminal })));
-    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    await act(async () => showPanel(createElement(O8Panel, { activeTab: 'files', onOpenMainTerminal })));
+    await act(async () => showPanel(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
     expect(host.textContent).toContain('Open main terminal');
   });
 
   it('keeps a failed terminal recovery actionable and displays its actual reason', async () => {
     const onOpenMainTerminal = vi.fn().mockRejectedValueOnce(new Error('The workspace is still restoring.')).mockResolvedValue(undefined);
-    await act(async () => root.render(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
+    await act(async () => showPanel(createElement(O8Panel, { activeTab: 'terminal', onOpenMainTerminal })));
     const recovery = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Open main terminal');
     expect(recovery).toBeDefined();
     await act(async () => recovery!.click());
@@ -81,7 +83,7 @@ describe('panel file scope', () => {
 
   it('ignores foreign Browser navigation and can restore the same parent URL after a legacy override', async () => {
     const original = 'http://localhost/original'; const other = 'http://localhost/other';
-    await act(async () => root.render(createElement(O8Panel, { activeTab: 'browser', browserUrl: original, browserStateKey: 'owned-browser', onActiveTabChange: vi.fn() })));
+    await act(async () => showPanel(createElement(O8Panel, { activeTab: 'browser', browserUrl: original, browserStateKey: 'owned-browser', onActiveTabChange: vi.fn() })));
     const navigation = () => host.querySelector('[data-browser-navigation]')?.getAttribute('data-browser-navigation');
     await act(async () => window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: other, scopeKey: 'foreign-browser' } })));
     expect(navigation()).toBe(original);
@@ -91,7 +93,7 @@ describe('panel file scope', () => {
     expect(navigation()).toBe(original);
   });
   it('exposes Browser visibility only for the selected active host and its exact scope', async () => {
-    const render = (active: boolean, activeTab: 'browser' | 'review') => act(async () => root.render(createElement(O8Panel, { active, activeTab, browserStateKey: 'scoped-browser-host' })));
+    const render = (active: boolean, activeTab: 'browser' | 'review') => act(async () => showPanel(createElement(O8Panel, { active, activeTab, browserStateKey: 'scoped-browser-host' })));
     await render(true, 'review');
     expect(host.querySelector('[data-o8-browser-host="scoped-browser-host"]')?.getAttribute('data-o8-browser-visible')).toBe('false');
     await render(true, 'browser');
@@ -101,11 +103,11 @@ describe('panel file scope', () => {
   });
   it('restores the ordered tool tabs after remount and persists dismissal without crossing workspace scopes', async () => {
     const render = (activeTab: 'review' | 'inbox' | 'device', scope = 'restore-fixture') =>
-      act(async () => root.render(createElement(O8Panel, { browserStateKey: scope, repoPath: '/workspace/one', activeTab })));
+      act(async () => showPanel(createElement(O8Panel, { browserStateKey: scope, repoPath: '/workspace/one', activeTab })));
     const tabs = () => [...host.querySelectorAll('[role="tab"]')].map(tab => tab.getAttribute('aria-label'));
     await render('review'); await render('inbox'); await render('device');
     expect(tabs()).toEqual(['Review', 'Inbox', 'Devices']);
-    await act(async () => root.render(null));
+    await act(async () => showPanel(null));
     localStorage.setItem('o8ActiveTab', 'device');
     const savedSelection = normalizePanelTab(localStorage.getItem('o8ActiveTab'));
     expect(savedSelection).toBe('device');
@@ -113,38 +115,38 @@ describe('panel file scope', () => {
     expect(tabs()).toEqual(['Review', 'Inbox', 'Devices']);
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('Devices');
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close Inbox tab"]')!.click());
-    await act(async () => root.render(null)); await render('device');
+    await act(async () => showPanel(null)); await render('device');
     expect(tabs()).toEqual(['Review', 'Devices']);
     await render('inbox', 'another-fixture'); expect(tabs()).toEqual(['Inbox']);
     await render('device'); expect(tabs()).toEqual(['Review', 'Devices']);
   });
   it('leaves Activity unselected while a contextual pull request owns the header', async () => {
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'activity', prNumber: 5 })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'activity', prNumber: 5 })));
     expect(host.querySelector('[role="tab"]')?.getAttribute('aria-selected')).toBe('false');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'activity', prNumber: null })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'activity', prNumber: null })));
     expect(host.querySelector('[role="tab"]')?.getAttribute('aria-selected')).toBe('true');
   });
   it('keeps one tool instance and its state across splitting, hiding, and legacy navigation', async () => {
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'workspace' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'workspace' })));
     const memory = host.querySelector<HTMLButtonElement>('[data-review-memory]')!;
     await act(async () => memory.click());
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files', secondaryTab: 'review', onSecondaryTabChange: vi.fn() })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files', secondaryTab: 'review', onSecondaryTabChange: vi.fn() })));
     expect(host.querySelectorAll('[data-review-memory]')).toHaveLength(1);
     expect(host.querySelector('[data-review-memory]')).toBe(memory);
     expect(memory.textContent).toBe('Review stored'); expect(reviewLifecycle).toEqual({ mounts: 1, unmounts: 0 });
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review', active: false })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review', active: false })));
     expect(memory.closest('[inert]')).not.toBeNull();
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review' })));
     expect(host.querySelector('[data-review-memory]')).toBe(memory); expect(reviewLifecycle.unmounts).toBe(0);
   });
   it('retains a selection across tools, but never carries a local path into another repo', async () => {
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files' })));
     await act(async () => Array.from(host.querySelectorAll('button')).find(button => button.textContent === 'Select file')!.click());
     expect(host.querySelector('output')?.textContent).toBe('src/file.ts');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review' })));
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files' })));
     expect(host.querySelector('output')?.textContent).toBe('src/file.ts');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files', selectedFile: null })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files', selectedFile: null })));
     expect(host.querySelector('output')).toBeNull();
     expect(host.querySelector('[data-tree-repo]')?.getAttribute('data-tree-repo')).toBe('/workspace/two');
     await act(async () => host.querySelector<HTMLButtonElement>('[data-tree-repo]')!.click());
@@ -155,22 +157,22 @@ describe('panel file scope', () => {
   it('scopes a review action file to the repository named by the action', async () => {
     const onRepoPathChange = vi.fn();
     const onActiveTabChange = vi.fn();
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files', onRepoPathChange, onActiveTabChange })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'files', onRepoPathChange, onActiveTabChange })));
     await act(async () => window.dispatchEvent(new CustomEvent('o8:focus-review', { detail: { repoPath: '/workspace/two', file: 'src/review.ts' } })));
     expect(onRepoPathChange).toHaveBeenCalledWith('/workspace/two');
     expect(onActiveTabChange).toHaveBeenCalledWith('review');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files' })));
     expect(host.querySelector('output')?.textContent).toBe('src/review.ts');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/three', activeTab: 'files' })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/three', activeTab: 'files' })));
     expect(host.querySelector('output')).toBeNull();
     expect(host.querySelector('[data-tree-repo]')?.getAttribute('data-tree-repo')).toBe('/workspace/three');
   });
   it('opens review media in the right repository and clears the file selection when browsing a directory', async () => {
     const onRepoPathChange = vi.fn(); const onActiveTabChange = vi.fn(); const onSelectedFileChange = vi.fn();
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review', onRepoPathChange, onActiveTabChange, onSelectedFileChange })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/one', activeTab: 'review', onRepoPathChange, onActiveTabChange, onSelectedFileChange })));
     await act(async () => window.dispatchEvent(new CustomEvent('o8:browse-review-file', { detail: { repoPath: '/workspace/two', path: 'public/clip.mp4' } })));
     expect(onRepoPathChange).toHaveBeenCalledWith('/workspace/two'); expect(onActiveTabChange).toHaveBeenCalledWith('files');
-    await act(async () => root.render(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files', onSelectedFileChange })));
+    await act(async () => showPanel(createElement(O8Panel, { repoPath: '/workspace/two', activeTab: 'files', onSelectedFileChange })));
     expect(host.querySelector('output')?.textContent).toBe('public/clip.mp4');
     await act(async () => window.dispatchEvent(new CustomEvent('o8:browse-review-file', { detail: { repoPath: '/workspace/two', path: null } })));
     expect(onSelectedFileChange).toHaveBeenLastCalledWith(''); expect(host.querySelector('output')).toBeNull();
