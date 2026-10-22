@@ -74,8 +74,10 @@ export interface GithubIssueList extends GithubListMeta {
 }
 
 /** Repository slugs are case-insensitive on GitHub, so the key is too. */
-export function githubListQueryKey(repo: string, kind: GithubListKind): string[] {
-  return ['gh', repo.trim().toLowerCase(), kind];
+export function githubListQueryKey(repo: string, kind: GithubListKind, repoPath?: string | null): string[] {
+  const key = ['gh', repo.trim().toLowerCase(), kind];
+  // A display name can resolve to different remotes in different checkouts.
+  return repoPath ? [...key, 'checkout', repoPath] : key;
 }
 
 function windowHidden(): boolean {
@@ -92,19 +94,20 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function listUrl(repo: string, kind: GithubListKind, fresh: boolean): string {
-  const query = `repo=${encodeURIComponent(repo.trim())}${fresh ? '&fresh=1' : ''}`;
+function listUrl(repo: string, kind: GithubListKind, fresh: boolean, repoPath?: string | null): string {
+  const query = `repo=${encodeURIComponent(repo.trim())}${fresh ? '&fresh=1' : ''}${repoPath ? `&repoPath=${encodeURIComponent(repoPath)}` : ''}`;
   return kind === 'prs' ? `/api/panel/prs?${query}` : `/api/panel/issues?${query}`;
 }
 
 interface ListQueryOptions {
   isHidden?: () => boolean;
+  repoPath?: string | null;
 }
 
-function listQuery<T>(repo: string, kind: GithubListKind, { isHidden }: ListQueryOptions = {}) {
+function listQuery<T>(repo: string, kind: GithubListKind, { isHidden, repoPath }: ListQueryOptions = {}) {
   return {
-    queryKey: githubListQueryKey(repo, kind),
-    queryFn: ({ signal }: { signal?: AbortSignal }) => getJson<T>(listUrl(repo, kind, false), signal),
+    queryKey: githubListQueryKey(repo, kind, repoPath),
+    queryFn: ({ signal }: { signal?: AbortSignal }) => getJson<T>(listUrl(repo, kind, false, repoPath), signal),
     staleTime: GITHUB_LIST_FRESH_MS,
     gcTime: GITHUB_LIST_GC_MS,
     refetchInterval: githubRefreshInterval(isHidden),
@@ -131,12 +134,13 @@ export async function refreshGithubList(
   queryClient: QueryClient,
   repo: string,
   kind: GithubListKind,
+  repoPath?: string | null,
 ): Promise<GithubPullRequestList | GithubIssueList> {
-  const queryKey = githubListQueryKey(repo, kind);
-  await queryClient.cancelQueries({ queryKey });
+  const queryKey = githubListQueryKey(repo, kind, repoPath);
+  await queryClient.cancelQueries({ queryKey, exact: true });
   return queryClient.fetchQuery({
     queryKey,
-    queryFn: ({ signal }) => getJson<GithubPullRequestList | GithubIssueList>(listUrl(repo, kind, true), signal),
+    queryFn: ({ signal }) => getJson<GithubPullRequestList | GithubIssueList>(listUrl(repo, kind, true, repoPath), signal),
     staleTime: 0,
   });
 }

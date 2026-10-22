@@ -37,6 +37,30 @@ afterEach(() => {
 });
 
 describe('shared GitHub list cache', () => {
+  it('keeps checkout lookup context in both the request and cache identity', async () => {
+    await client.fetchQuery(pullRequestListQuery('sample', { repoPath: '/workspace/a' }));
+    await client.fetchQuery(pullRequestListQuery('sample', { repoPath: '/workspace/b' }));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/panel/prs?repo=sample&repoPath=%2Fworkspace%2Fa',
+      '/api/panel/prs?repo=sample&repoPath=%2Fworkspace%2Fb',
+    ]);
+    await refreshGithubList(client, 'sample', 'prs', '/workspace/a');
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/panel/prs?repo=sample&fresh=1&repoPath=%2Fworkspace%2Fa');
+  });
+
+  it('does not cancel another checkout lookup during an unscoped manual refresh', async () => {
+    let release: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce((_url: string, init?: { signal?: AbortSignal }) => new Promise<Response>((resolve, reject) => {
+      release = resolve;
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const scoped = client.fetchQuery(pullRequestListQuery('sample', { repoPath: '/workspace/a' })).catch(() => null);
+    await refreshGithubList(client, 'sample', 'prs');
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
+    release(listResponse({ repo: 'owner/a', prs: [] }));
+    expect(await scoped).toMatchObject({ repo: 'owner/a' });
+  });
+
   it('serves many readers of one repository from one request', async () => {
     const readers = Array.from({ length: 10 }, (_, index) =>
       client.fetchQuery(pullRequestListQuery(index % 2 ? 'Owner/Repo' : 'owner/repo')),

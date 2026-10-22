@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement, forwardRef, useCallback, useImperativeHandle, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { expect, it, vi } from 'vitest';
 import { useWorkspacePageLayouts } from '@/app/dashboard/hooks/useWorkspacePageLayouts';
 import { collectLeafNodes, replaceTileContent } from '@/lib/tiles/operations';
@@ -80,9 +81,11 @@ it('keeps an explicitly selected unsent chat and its terminal panes across reloa
     return Response.json({ conversations: [], paths: [] });
   }));
   const host = document.createElement('div'); document.body.append(host);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const workspace = () => createElement(QueryClientProvider, { client: queryClient }, createElement(Workspace));
   let root = createRoot(host);
   try {
-    await act(async () => root.render(createElement(Workspace)));
+    await act(async () => root.render(workspace()));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
     const originalId = host.firstElementChild?.getAttribute('data-active-tab');
     expect(originalId).toBeTruthy();
@@ -102,7 +105,7 @@ it('keeps an explicitly selected unsent chat and its terminal panes across reloa
     await act(async () => root.unmount());
     bootRepo = '/repo/selected';
     root = createRoot(host);
-    await act(async () => root.render(createElement(Workspace)));
+    await act(async () => root.render(workspace()));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1000)); });
     expect(host.firstElementChild?.getAttribute('data-active-tab')).toBe(originalId);
     expect(host.firstElementChild?.getAttribute('data-repo')).toBe('/repo/selected');
@@ -113,6 +116,6 @@ it('keeps an explicitly selected unsent chat and its terminal panes across reloa
     const reloadedPages = JSON.parse(localStorage.getItem('o8:dashboard-page-layouts:v1') ?? '{}');
     expect(collectLeafNodes(JSON.parse(reloadedPages[originalId!]).root)).toHaveLength(3);
   } finally {
-    await act(async () => root.unmount()); host.remove(); localStorage.clear(); vi.unstubAllGlobals(); bootRepo = '/repo/original';
+    await act(async () => root.unmount()); queryClient.clear(); host.remove(); localStorage.clear(); vi.unstubAllGlobals(); bootRepo = '/repo/original';
   }
 });
