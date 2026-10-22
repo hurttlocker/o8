@@ -36,6 +36,7 @@ import { detectWorktree, resolveLaneFromCwd } from './packet/worktree-resolve.js
 import {
   exitCodeFromStatus,
   initializeManagedRunReceipt,
+  managedRunReceiptPaths,
   readLastManagedRunReceipt,
   type ManagedRunReceiptMetadata,
 } from './run-receipts.js';
@@ -46,6 +47,7 @@ const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE'
 const CALLER_ROUTING_ENV = [
   'O8_API_PORT', 'O8_WS_PORT', 'WS_PORT', 'O8_API_TOKEN', 'O8_WORKER_TOKEN',
   'O8_WORKER_PACKET_ID', 'O8_SPECTATOR_TOKEN', 'O8_DATA_DIR', 'CORTEX_IDE_DATA_DIR',
+  'O8_OWNED_RUN_MARKER',
   // Packaged processes may create the shared terminal server. Their frontend
   // configuration must not survive when absent from the current caller.
   '__NEXT_PRIVATE_STANDALONE_CONFIG', 'O8_PACKAGED_APP', 'NEXT_PHASE',
@@ -396,9 +398,9 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
   } catch (error) {
     throw new CliError(
       'run_receipt_init_failed',
-      `Could not create the durable run receipt: ${error instanceof Error ? error.message : String(error)}`,
+      `Could not create the durable run receipt at ${managedRunReceiptPaths(id).logFile}: ${error instanceof Error ? error.message : String(error)}`,
       EXIT.INVALID_ARGS,
-      'Check write access to the configured o8 data directory.',
+      'Tooling fault: check write access to the receipt path before retrying the command.',
     );
   }
   const { logFile, exitFile, metadataFile } = receiptPaths;
@@ -536,6 +538,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         panePid,
         processGroupId,
         processMarker,
+        exitReceiptPath: exitFile,
         mode: detach ? 'detach' : 'stream',
         startedAt,
         ...(settlementLaunch ? { settlementBinding: settlementLaunch.binding } : {}),

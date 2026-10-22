@@ -14,8 +14,9 @@ export type PermId = 'microphone' | 'accessibility' | 'input-monitoring' | 'scre
 /** Display status. 'not-asked' is only distinguishable for Microphone (macOS
  * AVFoundation reports notDetermined); Accessibility / Input Monitoring / Screen
  * Recording collapse never-asked into 'denied' because their preflight APIs
- * cannot tell the two apart. 'unknown' is the pre-first-read state. */
-export type PermStatus = 'granted' | 'denied' | 'not-asked' | 'unknown';
+ * cannot tell the two apart. 'unknown' is the pre-first-read state.
+ * 'unavailable' means this platform has no applicable permission check. */
+export type PermStatus = 'granted' | 'denied' | 'not-asked' | 'unknown' | 'unavailable';
 
 export interface PermMeta {
   id: PermId;
@@ -104,6 +105,7 @@ export function permPillText(status: PermStatus): string {
     case 'granted': return 'Granted';
     case 'denied': return 'Denied';
     case 'not-asked': return 'Not asked';
+    case 'unavailable': return 'Not checked on this platform';
     default: return 'Checking…';
   }
 }
@@ -135,5 +137,5 @@ export function shouldPrompt(meta: PermMeta, status: PermStatus): boolean {
  * granted). Used to surface the relaunch affordance only for grants the user
  * just made — not permissions already granted at open. */
 export function isFreshGrant(prev: PermStatus, next: PermStatus): boolean {
-  return next === 'granted' && prev !== 'granted' && prev !== 'unknown';
+  return next === 'granted' && (prev === 'denied' || prev === 'not-asked');
 }
