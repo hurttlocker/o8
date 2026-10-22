@@ -187,7 +187,7 @@ it('shows an unavailable inventory error and retries the provider request', asyn
 });
 
 
-it.each([false, true])('saves OpenRouter once and reports native synchronization failure=%s', async (fails) => {
+it.each([false, true])('saves OpenRouter through one store despite native presence read failure=%s', async (fails) => {
   const container = document.createElement('div');
   const root = createRoot(container);
   const request = vi.fn(async (_url: string, options?: RequestInit) => ({ ok: true, status: 200, json: async () => options?.method === 'POST' ? ({ ok: true }) : ({ providers }) }));
@@ -205,8 +205,8 @@ it.each([false, true])('saves OpenRouter once and reports native synchronization
     native.prefsReadFails = fails;
     await act(async () => { [...row.querySelectorAll('button')].find(button => button.textContent === 'save key')!.click(); });
     expect(request.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
-    expect(native.writes).toContainEqual(['openrouter_api_key', 'fixture-router-key']);
-    expect(container.textContent).toContain(fails ? 'Symon and voice could not be updated' : 'Also saved for Symon and voice');
+    expect(native.writes).toHaveLength(0);
+    expect(container.textContent).toContain('Saved. New sessions use this key');
     expect(container.querySelector('input[type="password"]')).toBeNull();
   } finally { act(() => root.unmount()); }
 });
@@ -255,7 +255,7 @@ it('keeps one OpenRouter key: the voice slot has no separate editor and removal 
     await act(async () => { [...row.querySelectorAll('button')].find(button => /remove/i.test(button.textContent ?? ''))!.click(); });
     await act(async () => { [...container.querySelectorAll('button')].find(button => /confirm|remove key/i.test(button.textContent ?? '') && button.closest('div') !== null)!.click(); });
     expect(request.mock.calls.filter(([, options]) => options?.method === 'DELETE')).toHaveLength(1);
-    expect(native.writes).toContainEqual(['openrouter_api_key', '']);
+    expect(native.writes).toHaveLength(0);
     expect(container.textContent).toContain('Removed for o8, Symon and voice');
   } finally { act(() => root.unmount()); }
 });

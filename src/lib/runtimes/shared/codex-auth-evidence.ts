@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import 'server-only';
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -15,7 +16,7 @@ export async function codexAuthEvidence(binaryPath: string) {
     const value: unknown = JSON.parse(await readFile(path.join(os.homedir(), '.codex', 'auth.json'), 'utf-8'));
     if (value && typeof value === 'object' && !Array.isArray(value)) authJson = value as Record<string, unknown>;
   } catch { /* No readable credential evidence. */ }
-  const envCredential = Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_ACCESS_TOKEN);
+  const envCredential = Boolean(resolveProviderKey('OPENAI_API_KEY') || process.env.CODEX_ACCESS_TOKEN);
   const fileCredential = Boolean(authJson?.tokens && typeof authJson.tokens === 'object');
   let login: 'present' | 'absent' | 'unknown' = 'unknown';
   try {

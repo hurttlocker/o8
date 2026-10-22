@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Gemini owned-session adapter.
  *
@@ -587,7 +588,7 @@ const geminiAdapter: OwnedRuntimeAdapter = {
   // doesn't silently fail with "you must specify the GEMINI_API_KEY environment
   // variable" cycling launching → idle.
   extraSpawnEnv: (): Record<string, string> => {
-    const existing = process.env.GEMINI_API_KEY?.trim();
+    const existing = resolveProviderKey('GEMINI_API_KEY')?.trim();
     if (existing) return {};
     const alias = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim()
       || process.env.GOOGLE_AI_API_KEY?.trim();

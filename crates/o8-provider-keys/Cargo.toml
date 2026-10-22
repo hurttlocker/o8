@@ -1,0 +1,13 @@
+[package]
+name = "o8-provider-keys"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aes-gcm = "0.10"
+base64 = "0.22"
+hex = "0.4"
+serde_json = "1"
+
+rusqlite = { version = "0.31", features = ["bundled"] }

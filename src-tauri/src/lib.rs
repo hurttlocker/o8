@@ -117,99 +117,8 @@ use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 // On non-macOS platforms these functions are not compiled. The TypeScript
 // layer falls back to an env-var / config-file key on those platforms.
 
-/// Keychain service name — identifies the o8 application.
-const KEYCHAIN_SERVICE: &str = "ai.o8.master-key";
-/// Keychain account name — a single per-install master key slot.
-const KEYCHAIN_ACCOUNT: &str = "default";
-
 pub(crate) fn env_flag_enabled(name: &str) -> bool {
     matches!(std::env::var(name).as_deref(), Ok("1"))
-}
-
-/// Minimal URL-safe base64 encoder (no padding, no external crate).
-/// Used only for the 32-byte master key.
-fn base64_encode_url(data: &[u8]) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
-    let mut i = 0;
-    while i < data.len() {
-        let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() {
-            data[i + 1] as u32
-        } else {
-            0
-        };
-        let b2 = if i + 2 < data.len() {
-            data[i + 2] as u32
-        } else {
-            0
-        };
-        out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
-        out.push(TABLE[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
-        if i + 1 < data.len() {
-            out.push(TABLE[(((b1 << 2) | (b2 >> 6)) & 0x3f) as usize] as char);
-        }
-        if i + 2 < data.len() {
-            out.push(TABLE[(b2 & 0x3f) as usize] as char);
-        }
-        i += 3;
-    }
-    out
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_find_password() -> Option<String> {
-    let out = Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-            "-w",
-        ])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let pw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if pw.is_empty() {
-        None
-    } else {
-        Some(pw)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_add_password(password: &str) -> bool {
-    // -U updates an existing entry if one already exists.
-    Command::new("security")
-        .args([
-            "add-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-            "-w",
-            password,
-            "-U",
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Generate a cryptographically random 256-bit key encoded as URL-safe base64.
-#[cfg(target_os = "macos")]
-fn generate_master_key() -> String {
-    use std::io::Read;
-    let mut bytes = [0u8; 32];
-    // /dev/urandom is always available on macOS.
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        let _ = f.read_exact(&mut bytes);
-    }
-    base64_encode_url(&bytes)
 }
 
 fn require_main_window(window: &tauri::Window) -> Result<(), String> {
@@ -226,7 +135,7 @@ fn require_main_window(window: &tauri::Window) -> Result<(), String> {
 #[tauri::command]
 fn master_key_get(window: tauri::Window) -> Result<String, String> {
     require_main_window(&window)?;
-    keychain_find_password().ok_or_else(|| "keychain-miss".to_string())
+    o8_provider_keys::master_key(false)
 }
 
 /// Retrieve the master key, creating and storing a new one if absent.
@@ -238,20 +147,7 @@ fn master_key_ensure(window: tauri::Window) -> Result<String, String> {
     if env_flag_enabled("O8_PRESHIP_GATE") {
         return Err("preship-gate-keychain-disabled".to_string());
     }
-    if let Some(existing) = keychain_find_password() {
-        return Ok(existing);
-    }
-    let key = generate_master_key();
-    if keychain_add_password(&key) {
-        log::info!(
-            "[keychain] Master key created and stored (service={} account={})",
-            KEYCHAIN_SERVICE,
-            KEYCHAIN_ACCOUNT
-        );
-        Ok(key)
-    } else {
-        Err("keychain-write-failed".to_string())
-    }
+    o8_provider_keys::master_key(true)
 }
 
 // ── Data directory resolution ──

@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Cortex embedding service (#962).
  *
@@ -30,7 +31,7 @@ export function isAvailable(): boolean {
   // A local endpoint with an embed model makes the Brain work with zero cloud
   // keys; otherwise we need OpenAI. Either path satisfies "embeddings on".
   if (resolveLocalInferenceBaseUrlSync().trim() && resolveLocalEmbedModelSync().trim()) return true;
-  return !!process.env.OPENAI_API_KEY;
+  return !!resolveProviderKey('OPENAI_API_KEY');
 }
 
 /**
@@ -109,7 +110,7 @@ export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
     return embedBatchLocal(texts, localBaseUrl, localEmbedModel);
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = resolveProviderKey('OPENAI_API_KEY');
   if (!apiKey) {
     throw new Error(
       '[embeddings] OPENAI_API_KEY is not set. Set it to enable embedding generation.',

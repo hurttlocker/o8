@@ -72,6 +72,7 @@ fn config_path() -> PathBuf {
 /// (the Voice settings panel) takes effect WITHOUT an app relaunch. Reads still
 /// avoid a full parse on the hot path: only a `stat()` + an mtime compare when
 /// the file is unchanged.
+static PREF_WRITE: Mutex<()> = Mutex::new(());
 static CONFIG_CACHE: Mutex<Option<(Option<SystemTime>, serde_json::Value)>> = Mutex::new(None);
 
 /// Load `~/.o8/dictation.json` as a JSON value, reloading on mtime change.
@@ -202,7 +203,22 @@ fn redact_config(
 /// Read public preferences without retrieving or migrating secret values.
 /// Secret migration remains in the explicit provider-use path.
 pub fn config_public() -> serde_json::Value {
-    redact_config(config(), |key| {
+    let mut input = config();
+    if !input.is_object() { input = serde_json::json!({}); }
+    for key in SECRET_PREF_KEYS {
+        if provider_env(key).and_then(|name| o8_provider_keys::managed(name).ok()).unwrap_or(false) {
+            input.as_object_mut().unwrap().remove(key);
+        }
+    }
+    redact_config(input, |key| {
+        if let Some(name) = provider_env(key) {
+            match o8_provider_keys::present(name) {
+                Ok(true) => return true,
+                Err(_) => return false,
+                _ => {},
+            }
+            if o8_provider_keys::managed(name).unwrap_or(true) { return false; }
+        }
         #[cfg(target_os = "macos")]
         {
             keychain_secret_present(key)
@@ -218,52 +234,42 @@ pub fn config_public() -> serde_json::Value {
 /// Write a single key into `~/.o8/dictation.json` (read-modify-write, preserving
 /// all other keys incl. secrets), then drop the cache so the next read reloads.
 pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
+    let _write = PREF_WRITE.lock().unwrap_or_else(|p| p.into_inner());
     let path = config_path();
-    let mut obj = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default();
-
-    if SECRET_PREF_KEYS.contains(&key) {
-        let secret = value
-            .as_str()
-            .ok_or_else(|| format!("{key} must be a string"))?
-            .trim();
-
-        #[cfg(target_os = "macos")]
-        {
-            if secret.is_empty() {
-                // Deleting a missing item is harmless from the caller's point
-                // of view. Every other Keychain failure must stop the settings
-                // write so the UI cannot claim a secret was cleared when it
-                // remains in secure storage.
-                delete_keychain_secret(key)?;
-            } else {
-                security_framework::passwords::set_generic_password(
-                    KEYCHAIN_SERVICE,
-                    key,
-                    secret.as_bytes(),
-                )
-                .map_err(|e| format!("store {key} in macOS Keychain: {e}"))?;
-            }
-            obj.remove(key);
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Cross-platform secure storage is not wired yet. Preserve current
-            // behavior off macOS, but the file writer below constrains access.
-            obj.insert(key.to_string(), serde_json::Value::String(secret.to_string()));
-        }
+    let mut authoritative_commit = false;
+    let mut obj = match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw).map_err(|_| "Voice preferences unavailable".to_string())?
+            .as_object().cloned().ok_or_else(|| "Voice preferences unavailable".to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(_) => return Err("Voice preferences unavailable".into()),
+    };
+    if let Some(name) = provider_env(key) {
+        let secret = value.as_str().ok_or_else(|| format!("{key} must be a string"))?.trim();
+        o8_provider_keys::mutate(name, Some(if secret.is_empty() { None } else { Some(secret) }), None)?;
+        obj.remove(key);
+        authoritative_commit = true;
+    } else if let Some(provider) = key.strip_suffix("_enabled").and_then(provider_env) {
+        let enabled = value.as_bool().ok_or_else(|| "enabled must be boolean".to_string())?;
+        o8_provider_keys::mutate(provider, None, Some(enabled))?;
+        return Ok(());
     } else {
         obj.insert(key.to_string(), value);
     }
+    match write_preferences(obj) {
+        Ok(()) => Ok(()),
+        Err(_) if authoritative_commit => { eprintln!("[keys] Credential saved; legacy preference cleanup pending"); Ok(()) },
+        Err(error) => Err(error),
+    }
+}
+
+fn write_preferences(obj: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let path = config_path();
     let serialized =
         serde_json::to_string_pretty(&serde_json::Value::Object(obj)).map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    let temporary = path.with_extension(format!("{}-{}.tmp", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -274,21 +280,21 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
                 .map_err(|e| format!("secure dictation.json permissions: {e}"))?;
         }
         let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .mode(0o600)
-            .open(&path)
+            .open(&temporary)
             .map_err(|e| format!("open dictation.json: {e}"))?;
         file.write_all(serialized.as_bytes())
             .map_err(|e| format!("write dictation.json: {e}"))?;
         file.sync_all()
             .map_err(|e| format!("sync dictation.json: {e}"))?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("secure dictation.json permissions: {e}"))?;
     }
     #[cfg(not(unix))]
-    std::fs::write(&path, serialized).map_err(|e| format!("write dictation.json: {e}"))?;
+    std::fs::write(&temporary, serialized).map_err(|e| format!("write dictation.json: {e}"))?;
+    std::fs::rename(&temporary, &path).map_err(|_| "Voice preferences unavailable".to_string())?;
     if let Ok(mut guard) = CONFIG_CACHE.lock() {
         *guard = None;
     }
@@ -298,64 +304,58 @@ pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
 /// Read a provider secret without exposing it to the webview. On macOS the
 /// Keychain is authoritative. A value left by an older release is migrated on
 /// first use and then removed from the JSON preferences file.
+fn provider_env(key: &str) -> Option<&'static str> {
+    match key {
+        "gemini_api_key" | "gemini" => Some("GEMINI_API_KEY"),
+        "openrouter_api_key" | "openrouter" => Some("OPENROUTER_API_KEY"),
+        "groq_api_key" | "groq" => Some("GROQ_API_KEY"),
+        "elevenlabs_api_key" | "elevenlabs" => Some("ELEVENLABS_API_KEY"),
+        "google_tts_api_key" | "google_tts" => Some("GOOGLE_TTS_API_KEY"),
+        _ => None,
+    }
+}
 fn stored_secret(key: &str) -> Option<String> {
+    let name = provider_env(key)?;
+    let saved = o8_provider_keys::resolve(name).ok()?;
+    if saved.is_some() { return saved; }
+    if o8_provider_keys::managed(name).ok()? || !o8_provider_keys::enabled(name).ok()? { return None; }
     #[cfg(test)]
-    if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") {
-        return None;
-    }
-
+    if std::env::var("O8_TEST_DISABLE_VOICE_PROVIDER_KEYS").as_deref() == Ok("1") { return None; }
     #[cfg(target_os = "macos")]
-    {
-        if let Ok(raw) = security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, key) {
-            if let Ok(value) = String::from_utf8(raw) {
-                let value = value.trim().to_string();
-                if !value.is_empty() {
-                    return Some(value);
-                }
-            }
-        }
-
-        let legacy = config_string(key)?;
-        if security_framework::passwords::set_generic_password(
-            KEYCHAIN_SERVICE,
-            key,
-            legacy.as_bytes(),
-        )
-        .is_ok()
-        {
-            // Best-effort cleanup. The secret remains usable from Keychain even
-            // if a damaged preferences file cannot be rewritten immediately.
-            let _ = set_pref(key, serde_json::Value::String(legacy.clone()));
-        }
-        return Some(legacy);
-    }
-
+    let legacy = match security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, key) {
+        Ok(raw) => String::from_utf8(raw).ok(),
+        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => config_string(key),
+        Err(_) => return None,
+    };
     #[cfg(not(target_os = "macos"))]
-    {
-        config_string(key)
+    let legacy = config_string(key);
+    let legacy = legacy?;
+    let current = o8_provider_keys::migrate_legacy(name, &legacy).ok()?;
+    // A skipped migration (for example a concurrent disable) must retain its source.
+    if !o8_provider_keys::managed(name).unwrap_or(false) { return current; }
+    // Cleanup is best effort after successful secure persistence. Never re-save legacy data.
+    let _write = PREF_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Ok(raw) = std::fs::read_to_string(config_path()) {
+        if let Ok(serde_json::Value::Object(mut prefs)) = serde_json::from_str(&raw) {
+            prefs.remove(key);
+            let _ = write_preferences(prefs);
+        }
     }
+    current
 }
 
 /// Resolve the Gemini API key. Env-first (`GEMINI_API_KEY`), then the o8
 /// config file. UN-GATED — no dev gate, no product-mode check, works in
 /// release.
 pub fn get_gemini_key() -> Option<String> {
-    std::env::var("GEMINI_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| stored_secret("gemini_api_key"))
+    stored_secret("gemini_api_key")
 }
 
 /// Resolve the Groq API key (fast Whisper transcription — the latency A/B vs
 /// OpenRouter). Env-first (`GROQ_API_KEY`), then the o8 config file
 /// (`groq_api_key`). UN-GATED — works in release.
 pub fn get_groq_key() -> Option<String> {
-    std::env::var("GROQ_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| stored_secret("groq_api_key"))
+    stored_secret("groq_api_key")
 }
 
 /// The OpenRouter connection record the server writes (#3583). Holds no secret.
@@ -366,7 +366,7 @@ fn openrouter_connection_path() -> PathBuf {
 /// False only after the operator turns the OpenRouter connection off in
 /// Providers. A missing or unreadable record means on, matching the server.
 pub fn openrouter_enabled() -> bool {
-    openrouter_enabled_from(std::fs::read_to_string(openrouter_connection_path()).ok().as_deref())
+    o8_provider_keys::enabled("OPENROUTER_API_KEY").unwrap_or(false)
 }
 
 fn openrouter_enabled_from(raw: Option<&str>) -> bool {
@@ -382,32 +382,20 @@ pub fn get_openrouter_key() -> Option<String> {
     if !openrouter_enabled() {
         return None;
     }
-    std::env::var("OPENROUTER_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| stored_secret("openrouter_api_key"))
+    stored_secret("openrouter_api_key")
 }
 
 /// Resolve the ElevenLabs API key for premium read-aloud / Ask voices (voice P4
 /// TTS). Env-first (`ELEVENLABS_API_KEY`), then `~/.o8/dictation.json`. UN-GATED
 /// — the key's PRESENCE is the de-facto premium gate (no proxy, no license).
 pub fn get_elevenlabs_key() -> Option<String> {
-    std::env::var("ELEVENLABS_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| stored_secret("elevenlabs_api_key"))
+    stored_secret("elevenlabs_api_key")
 }
 
 /// Resolve the Google Cloud TTS API key (voice P4 TTS, direct — no proxy).
 /// Env-first (`GOOGLE_TTS_API_KEY`), then `~/.o8/dictation.json`.
 pub fn get_google_tts_key() -> Option<String> {
-    std::env::var("GOOGLE_TTS_API_KEY")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| stored_secret("google_tts_api_key"))
+    stored_secret("google_tts_api_key")
 }
 
 #[cfg(all(test, target_os = "macos"))]

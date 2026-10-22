@@ -169,6 +169,13 @@
       ]
     },
     {
+      "path": "src/app/api/v2/keys/route.native.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build"
+      ]
+    },
+    {
       "path": "src/app/api/v2/proxy/cli/route.test.ts",
       "reasons": [
         "child-process"

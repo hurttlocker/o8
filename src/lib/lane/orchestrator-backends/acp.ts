@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import { createHash } from 'node:crypto';
 import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
@@ -208,7 +209,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       modelUnconfirmed: false,
       completedTurns: 0,
       launchFingerprint: acpLaunchFingerprint(launch),
-      credentialFingerprint: createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex'),
+      credentialFingerprint: createHash('sha256').update(resolveProviderKey('OPENROUTER_API_KEY') ?? '').digest('hex'),
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
@@ -318,7 +319,7 @@ export function makeAcpBackend(config: AcpBackendConfig): OrchestratorBackend {
       if (id === 'opencode' || id === 'hermes' || (id === 'acp' && resolveLocalAcpLaunch()?.useOpenRouter)) {
         await resolveOpenRouterKey();
         const cold = sessions.get(sessionKey(id, repoPath, options?.threadId));
-        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== createHash('sha256').update(process.env.OPENROUTER_API_KEY ?? '').digest('hex')) {
+        if (cold && !cold.sessionId && cold.status !== 'busy' && cold.credentialFingerprint !== createHash('sha256').update(resolveProviderKey('OPENROUTER_API_KEY') ?? '').digest('hex')) {
           cold.client.kill(); cold.status = 'dead';
         }
       }

@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Sonnet adapter for the Cortex Q&A layer.
  *
@@ -104,7 +105,8 @@ async function detectTier(): Promise<TierResult> {
   // on EVERY call (cheap sync file read).
   const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/brain-routing');
   const cliAllowed = resolveBrainUseClaudeCliSync();
-  if (cachedTier && cachedTierCliAllowed === cliAllowed) return cachedTier;
+  if (cachedTier && cachedTierCliAllowed === cliAllowed
+    && (cachedTier.tier === 'cli' || (cachedTier.tier === 'api') === Boolean(resolveProviderKey('ANTHROPIC_API_KEY')))) return cachedTier;
   cachedTierCliAllowed = cliAllowed;
 
   // Test 1: Claude Code CLI available?
@@ -129,7 +131,7 @@ async function detectTier(): Promise<TierResult> {
   }
 
   // Test 2: ANTHROPIC_API_KEY present?
-  if (process.env.ANTHROPIC_API_KEY?.trim()) {
+  if (resolveProviderKey('ANTHROPIC_API_KEY')?.trim()) {
     cachedTier = { tier: 'api' };
     console.log('[qa] Sonnet provider: ANTHROPIC_API_KEY');
     return cachedTier;
@@ -336,7 +338,7 @@ export async function prewarmSonnetCli(): Promise<void> {
 async function callSonnetApi(
   opts: SonnetMessages & { stream?: boolean },
 ): Promise<{ text: string; tier: SonnetTier } | { tokens: AsyncIterable<string>; tier: SonnetTier }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY!;
+  const apiKey = resolveProviderKey('ANTHROPIC_API_KEY')!;
 
   const body = {
     model: MODEL_IDS.claudeQaDefault,
@@ -422,9 +424,7 @@ async function callFlashFallback(
   opts: SonnetMessages & { stream?: boolean },
 ): Promise<{ text: string; tier: SonnetTier } | { tokens: AsyncIterable<string>; tier: SonnetTier }> {
   const apiKey =
-    process.env.GOOGLE_AI_API_KEY ??
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-    process.env.GEMINI_API_KEY;
+    resolveProviderKey('GEMINI_API_KEY');
 
   if (!apiKey) {
     const msg = 'No LLM provider available (no Claude CLI, no ANTHROPIC_API_KEY, no Gemini key).';

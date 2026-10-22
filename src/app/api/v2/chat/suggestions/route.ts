@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_AI_API_KEY ?? '';
+const geminiKey = () => resolveProviderKey('GEMINI_API_KEY') ?? '';
 const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const SYSTEM_PROMPT = `You generate short suggested-reply chips for the next user turn in a coding assistant chat. The user is an engineer talking to an orchestrator AI.
@@ -78,6 +79,7 @@ function parseSuggestions(raw: string): string[] {
 }
 
 export async function POST(request: NextRequest) {
+  const GEMINI_API_KEY = geminiKey();
   try {
     const body = await request.json() as Partial<SuggestionRequest>;
     const messageId = isString(body.messageId) ? body.messageId : null;

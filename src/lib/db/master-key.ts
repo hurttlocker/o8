@@ -5,11 +5,11 @@
  *   1. O8_MASTER_KEY env var — CI / headless override, always wins.
  *   2. macOS Keychain via `security` CLI — creates a fresh 256-bit key on
  *      first call; subsequent calls retrieve the same key. Only on darwin.
- *   3. Static dev fallback — reproducible across restarts, used only when
+ *   3. Persisted random key file — reproducible across restarts, used only when
  *      Keychain is unavailable (e.g. `npm run dev` on non-macOS or in CI).
  *
  * The Tauri commands `master_key_get` / `master_key_ensure` (src-tauri/src/lib.rs)
- * expose the same Keychain entry to the frontend via IPC for future use.
+ * use the same native master-key resolver. Provider inventory never exposes secrets.
  *
  * The returned key is a URL-safe base64-encoded 256-bit value (no padding).
  */
@@ -41,17 +41,17 @@ function dataDir(): string {
  */
 function readOrCreateKeyFile(): string {
   const keyPath = join(dataDir(), 'master-key');
-  try {
-    if (existsSync(keyPath)) {
-      const existing = readFileSync(keyPath, 'utf-8').trim();
-      if (existing.length >= 40) return existing;
-    }
-  } catch {
-    // Unreadable — fall through to (re)create.
+  if (existsSync(keyPath)) {
+    const existing = readFileSync(keyPath, 'utf-8').trim();
+    if (Buffer.from(existing, 'base64url').length !== 32) throw new Error('Invalid persisted master key');
+    return existing;
+  }
+  if (existsSync(join(dataDir(), '.env.local')) && /(?:^|\n)[^#\n=]+=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) {
+    throw new Error('Encrypted credentials exist without an accessible master key');
   }
   const key = generateKey();
   mkdirSync(dataDir(), { recursive: true });
-  writeFileSync(keyPath, key, { encoding: 'utf-8', mode: 0o600 });
+  writeFileSync(keyPath, key, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
   return key;
 }
 
@@ -82,9 +82,8 @@ function readKeychainKey(): KeychainRead {
       `security find-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     ).trim();
-    // An existing-but-too-short entry is invalid (key is >=40 chars) — treat
-    // as absent so a valid key replaces it.
-    return out.length >= 40 ? { status: 'found', key: out } : { status: 'absent' };
+    // Malformed existing entries are unavailable, never permission to replace them.
+    return Buffer.from(out, 'base64url').length === 32 ? { status: 'found', key: out } : { status: 'error', detail: 'Invalid existing master key' };
   } catch (err) {
     const exitStatus = (err as { status?: number | null }).status;
     if (exitStatus === 44) return { status: 'absent' }; // errSecItemNotFound
@@ -104,7 +103,7 @@ function writeKeychainKey(key: string): boolean {
   try {
     const { execSync: exec } = require('node:child_process') as typeof import('node:child_process');
     exec(
-      `security add-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w '${key}' -U`,
+      `security add-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w '${key}'`,
       { stdio: 'ignore' },
     );
     return true;
@@ -126,16 +125,17 @@ function generateKey(): string {
  * Resolution order:
  *   1. O8_MASTER_KEY env var  (CI / headless override, always wins).
  *   2. macOS Keychain via `security` CLI (creates entry on first call).
- *   3. Static dev fallback (reproducible across restarts, no Keychain needed).
+ *   3. Persisted random key file (reproducible across restarts, no Keychain needed).
  *
  * The result is cached in-process so Keychain is queried at most once.
  */
-export async function resolveMasterKey(): Promise<string> {
+export function resolveMasterKeySync(): string {
   if (_cachedKey) return _cachedKey;
 
   // 1. Env-var override.
   const envKey = process.env[ENV_MASTER_KEY];
-  if (envKey && envKey.length >= 40) {
+  if (envKey) {
+    if (Buffer.from(envKey, 'base64url').length !== 32) throw new Error('Invalid O8_MASTER_KEY');
     _cachedKey = envKey;
     return _cachedKey;
   }
@@ -147,7 +147,7 @@ export async function resolveMasterKey(): Promise<string> {
     if (read.status === 'error') {
       // The entry may EXIST but be unreadable right now (locked Keychain,
       // ACL change after an OS update). Anything we'd do silently here is
-      // wrong: generating a fresh key with `add-generic-password -U` would
+      // wrong: generating a fresh key with `add-generic-password` would
       // OVERWRITE the real entry and orphan every previously-encrypted blob;
       // falling to the dev key would re-encrypt new secrets under a
       // non-secret value. Fail loudly — feature unavailable beats silent
@@ -161,12 +161,16 @@ export async function resolveMasterKey(): Promise<string> {
     let keychainKey = read.status === 'found' ? read.key : null;
     if (!keychainKey) {
       // Genuinely absent (first run) — generate and persist.
+      if (existsSync(join(dataDir(), 'master-key'))) return (_cachedKey = readOrCreateKeyFile());
+      if (existsSync(join(dataDir(), '.env.local')) && /=enc:/.test(readFileSync(join(dataDir(), '.env.local'), 'utf8'))) throw new Error('Encrypted credentials exist without a master key');
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {
         keychainKey = newKey;
         console.log('[master-key] Generated and stored new key in macOS Keychain');
       } else {
-        console.warn('[master-key] Failed to write key to Keychain, using persisted key file');
+        const retry = readKeychainKey();
+        if (retry.status === 'found') keychainKey = retry.key;
+        else throw new Error('Keychain write failed; existing state preserved');
       }
     } else {
       console.log('[master-key] Resolved from macOS Keychain');
@@ -209,8 +213,8 @@ function decodeBase64Url(s: string): Buffer {
  *
  * @returns `{ ciphertext, iv }` — both are hex strings suitable for storage.
  */
-export async function encryptValue(plaintext: string): Promise<{ ciphertext: string; iv: string }> {
-  const keyBuf = decodeBase64Url(await resolveMasterKey());
+export function encryptValueSync(plaintext: string): { ciphertext: string; iv: string } {
+  const keyBuf = decodeBase64Url(resolveMasterKeySync());
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(CIPHER_ALGORITHM, keyBuf, iv, { authTagLength: AUTH_TAG_LENGTH });
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -228,9 +232,9 @@ export async function encryptValue(plaintext: string): Promise<{ ciphertext: str
  *
  * @returns the plaintext, or `null` if decryption fails.
  */
-export async function decryptValue(ciphertext: string, iv: string): Promise<string | null> {
+export function decryptValueSync(ciphertext: string, iv: string): string | null {
   try {
-    const keyBuf = decodeBase64Url(await resolveMasterKey());
+    const keyBuf = decodeBase64Url(resolveMasterKeySync());
     const ivBuf = Buffer.from(iv, 'hex');
     const payload = Buffer.from(ciphertext, 'hex');
     // Last AUTH_TAG_LENGTH bytes are the auth tag.
@@ -244,3 +248,8 @@ export async function decryptValue(ciphertext: string, iv: string): Promise<stri
     return null;
   }
 }
+
+// Async compatibility for existing database callers.
+export async function resolveMasterKey(): Promise<string> { return resolveMasterKeySync(); }
+export async function encryptValue(plaintext: string): Promise<{ ciphertext: string; iv: string }> { return encryptValueSync(plaintext); }
+export async function decryptValue(ciphertext: string, iv: string): Promise<string | null> { return decryptValueSync(ciphertext, iv); }
