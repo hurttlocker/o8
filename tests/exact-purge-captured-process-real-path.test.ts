@@ -3,6 +3,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRetainedGeneratedOutputFixture } from './generated-output-fixture';
+import { closeProcessScanCounts, refreshCloseProcessObservation, withCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { readProcessCwdSnapshot } from '@/lib/runtime/process-cwd-snapshot';
 
 import { purgeExactDirectory, readCapturedPurgeCwdSnapshot,
   type CapturedPurgeProcessWitness } from '@/lib/workspace/exact-directory-purge';
@@ -17,6 +19,24 @@ async function fixture() {
 }
 
 describe('native purge process capability', () => {
+  it('attests the paused helper from a refreshed close-scoped full-file snapshot', async () => {
+    const { root, candidate, identity } = await fixture();
+    await withCloseProcessObservation(async () => {
+      expect((await readProcessCwdSnapshot()).status).toBe('ready');
+      await purgeExactDirectory(candidate, identity, undefined, async (_path, witness) => {
+        refreshCloseProcessObservation();
+        const snapshot = await readProcessCwdSnapshot();
+        expect(snapshot.status).toBe('ready');
+        expect(snapshot.rows.filter(row => row.cwd === candidate)).toHaveLength(1);
+        const excluded = await readCapturedPurgeCwdSnapshot(witness, root);
+        expect(excluded.status).toBe('ready');
+        expect(excluded.rows.some(row => row.cwd === candidate)).toBe(false);
+        expect(closeProcessScanCounts()?.openFiles).toBe(2);
+      });
+    });
+    await expect(stat(candidate)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 30_000);
+
   it('excludes only its attested helper and invalidates the capability after native close', async () => {
     const { root, candidate, identity } = await fixture();
     let captured: CapturedPurgeProcessWitness | undefined;

@@ -12,7 +12,8 @@ function singleLineMessage(value: unknown, maxLength = MAX_ERROR_LENGTH): string
 export class O8ApiError extends Error {
   readonly noRetry: boolean;
 
-  constructor(readonly status: number | null, readonly summary: string) {
+  constructor(readonly status: number | null, readonly summary: string,
+    readonly routeError: { code: string; message: string } | null = null) {
     super(summary);
     this.name = 'O8ApiError';
     this.noRetry = status !== null && status < 500;
@@ -38,6 +39,14 @@ export function apiError(path: string, status: number | null, body: string, deta
     try {
       const payload = JSON.parse(body) as { error?: unknown } | null;
       summary = singleLineMessage(payload?.error, MAX_ROUTE_ERROR_LENGTH) ?? summary;
+      // Only this operator route's documented envelope is exposed as structured close data.
+      if (path === '/api/orchestrator/discard-packet' && payload?.error && typeof payload.error === 'object') {
+        const route = payload.error as { code?: unknown; message?: unknown };
+        const message = singleLineMessage(route.message, MAX_ROUTE_ERROR_LENGTH);
+        if (typeof route.code === 'string' && /^[a-z][a-z0-9_]{0,99}$/.test(route.code) && message) {
+          return new O8ApiError(status, message, { code: route.code, message });
+        }
+      }
     } catch { /* use the fixed summary */ }
   }
   return new O8ApiError(status, summary);

@@ -1,3 +1,6 @@
+import { hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { closeProcessCommand } from '@/lib/runtime/close-process-table';
+import { observeCloseProcess } from '@/lib/runtime/close-process-observation';
 import { execFile } from 'node:child_process';
 import type { OwnedWorkspaceBindingReceipt } from '@/lib/runtimes/shared/owned-session';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
@@ -73,7 +76,9 @@ async function machineCwdSnapshot(
   run: NonNullable<OwnedProcessProbeOptions['run']>,
 ): Promise<ProcessCwdSnapshot> {
   if (options.readCwdSnapshot) return options.readCwdSnapshot();
-  if (!options.run) return readProcessCwdSnapshot({ forceRefresh: true });
+  // Close owns explicit refreshes at admission, rename, paused purge and final
+  // removal. Projections within one such boundary share its native evidence.
+  if (!options.run) return readProcessCwdSnapshot({ forceRefresh: !hasCloseProcessObservation() });
   const receipt = await run('lsof', ['-nP', '-d', 'cwd', '-F', 'pcn'], 3_000);
   if (receipt.code === 0) {
     return { status: 'ready', rows: parseProcessCwdSnapshot(receipt.stdout), capturedAt: Date.now() };
@@ -285,7 +290,10 @@ export async function probeOwnedSessionProcessQuiescence(
   options: OwnedProcessProbeOptions = {},
 ): Promise<ProcessQuiescenceReceipt> {
   const lifecycle = getOwnedSessionLifecycle(surfaceId);
-  const run = options.run ?? runCommand;
+  const run = options.run ?? ((command, args, timeoutMs) => observeCloseProcess(
+    JSON.stringify([command, args]), async () =>
+      (hasCloseProcessObservation() ? await closeProcessCommand(command, args) : null) ?? await runCommand(command, args, timeoutMs),
+  ));
   const now = options.now ?? (() => new Date());
   if (!lifecycle?.getWorkspaceBinding) {
     return synthesizeProcessQuiescence(

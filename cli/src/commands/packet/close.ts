@@ -30,7 +30,7 @@ interface CloseResponse {
     worktreeCleanup?: 'missing' | 'removed' | 'preserved';
     preservedBranch?: string | null;
   };
-  error?: { message?: string } | string;
+  error?: { code?: string; message?: string } | string;
 }
 
 function errorMessage(response: CloseResponse | null | undefined): string {
@@ -71,10 +71,11 @@ export async function runPacketClose(
       acknowledgeMissingWorktree: args.booleans.has('acknowledge-missing-worktree'),
       clientMutationId: args.values['idempotency-key']?.trim() || randomUUID(),
     },
-    { timeoutMs: SLOW_MUTATION_TIMEOUT_MS },
+    { timeoutMs: SLOW_MUTATION_TIMEOUT_MS, allowConflict: true },
   );
   if (!res.data?.ok || !res.data.result?.closed) {
-    throw new CliError('close_failed', errorMessage(res.data), EXIT.CONFLICT);
+    const code = typeof res.data?.error === 'object' ? res.data.error?.code : undefined;
+    throw new CliError(code || 'close_failed', errorMessage(res.data), EXIT.CONFLICT);
   }
 
   const result = res.data.result;

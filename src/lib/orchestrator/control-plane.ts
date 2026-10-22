@@ -182,7 +182,10 @@ async function acquireFsLock(): Promise<void> {
       writeFileSync(LOCK_META, JSON.stringify({ pid: process.pid, at: Date.now(), token }), 'utf8');
       heldLockToken = token;
       return;
-    } catch {
+    } catch (error) {
+      // Only an occupied lock is contention. Missing fixture parents, access
+      // errors and failed receipt writes must not become a synchronous spin.
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       const holder = judgeLockHolder();
       if (holder.kind === 'gone') continue;
       if (holder.kind === 'dead') {
@@ -256,7 +259,15 @@ async function acquireLock(options: ControlPlaneLockOptions = {}): Promise<void>
   } else {
     await waitForPrevious;
   }
-  await acquireFsLock();
+  try { await acquireFsLock(); }
+  catch (error) {
+    // A failed filesystem acquisition owns this FIFO slot, but no lock.
+    // Release the slot so a repaired parent can be acquired on the next call.
+    const index = lockReleases.indexOf(release);
+    if (index >= 0) lockReleases.splice(index, 1);
+    release();
+    throw error;
+  }
 }
 
 function releaseLock(): void {
