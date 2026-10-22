@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useId, useMemo, useState } from 'react';
 import {
   IconCheck,
   MOBILE_BODY_TRACKING,
@@ -68,8 +68,9 @@ function RiskBadge({ risk }: { risk: string }) {
 
 const GATE_LABELS: Record<string, string> = { security: 'Security', budget: 'Budget', integrity: 'Integrity' };
 
-function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palette: MobilePalette }) {
+export function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palette: MobilePalette }) {
   const [open, setOpen] = useState(false);
+  const violationsId = useId();
   const gate = approval.gateResult;
   if (!gate || gate.violations.length === 0) return null;
 
@@ -82,6 +83,7 @@ function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palet
         type="button"
         onClick={() => setOpen((p) => !p)}
         aria-expanded={open}
+        aria-controls={open ? violationsId : undefined}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -117,7 +119,7 @@ function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palet
       </button>
 
       {open ? (
-        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div id={violationsId} style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
           {(['security', 'budget', 'integrity'] as const).map((cat) => {
             const vs = gate.violations.filter((v) => v.category === cat);
             return (
