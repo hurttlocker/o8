@@ -20,6 +20,7 @@ vi.mock('@/lib/panel/api-port', async (importOriginal) => ({
 }));
 vi.mock('@/lib/ws-auth', () => ({ getOrCreateWsToken: () => 'test-token' }));
 
+import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session-index';
 import { launchSharedCheckoutWorker } from './shared-checkout-launch';
 import { readSharedCheckoutTeam } from './shared-checkout-team';
 
@@ -104,6 +105,17 @@ describe('Fast worker launch', () => {
       (receipt.launchContext as { parentThreadId?: string })?.parentThreadId === parentThreadId
     ))).toBe(true);
     expect(readSharedCheckoutTeam({ repoPath, parentThreadId })?.members.map((member) => member.state)).toEqual(['running', 'running']);
+  });
+
+  it('releases the reservation if recovered-launch lookup fails before launch', async () => {
+    const repoPath = fixture();
+    const input = { repoPath, parentThreadId: 'thoughts-recovery-failure', runtime: 'codex' as const, model: null,
+      readOnly: true, repoInProject: true, prompt: 'Inspect', taskName: 'Lookup failure',
+      clientMutationId: 'lookup-failure', assignedPaths: ['src/a'] };
+    vi.mocked(findOwnedLaunchByMutationId).mockRejectedValueOnce(new Error('Fixture recovery read failed'));
+    await expect(launchSharedCheckoutWorker(input)).rejects.toThrow('Fixture recovery read failed');
+    expect(readSharedCheckoutTeam(input)?.members[0]).toMatchObject({ state: 'failed', surfaceId: null });
+    expect(launchRuntimeSurface).not.toHaveBeenCalled();
   });
 
   it('retains a created surface when launch reports failure so review cannot miss it', async () => {
