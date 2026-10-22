@@ -434,6 +434,16 @@
       ]
     },
     {
+      "path": "src/lib/harness/improvement/runtime-artifact-observation.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "src/lib/inbox/card-copy.test.ts",
       "reasons": [
         "worktree-api"
@@ -2750,6 +2760,50 @@
     },
     {
       "path": "tests/harness-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-refinement-journal-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-refinement-launch-guard-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/harness-refinement-mission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-refinement-runtime-observation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/harness-refinement-service-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",

@@ -51,6 +51,8 @@ export function isOrchestratorBackendId(value: unknown): value is OrchestratorBa
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 
 export interface OrchestratorTurnOptions {
+  /** Codex-only one-attempt, no-prewarm transport. NOT launch approval or isolation. */
+  boundedRefinement?: true;
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
   /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */
@@ -99,6 +101,8 @@ export interface OrchestratorBackend {
   readonly id: OrchestratorBackendId;
   /** Human-readable label, used in logs. */
   readonly label: string;
+  /** Advertise only when the native source enforces these opt-in transport bounds. */
+  readonly boundedRefinement?: { version: 1; singleAttempt: true; noAuxiliaryModelCalls: true };
   /**
    * Look up the repo's session WITHOUT creating one — null if none exists.
    * `agent` selects the openclaw agent (openclaw backend only).

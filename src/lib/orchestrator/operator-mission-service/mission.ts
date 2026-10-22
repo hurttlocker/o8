@@ -1,3 +1,4 @@
+import { inspectImprovementMissionCapability, consumeImprovementMissionCapability } from '@/lib/harness/improvement/mission-capability';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
@@ -59,7 +60,6 @@ import {
   normalizeLoadedIssue,
 } from './shared';
 import type { CreateMissionInput, DispatchMissionInput, MissionStatusInput } from './types';
-
 const INLINE_BRANCH_MAX_LENGTH = 60;
 export const MISSION_CREATE_LOCK_WAIT_MS = 30_000;
 
@@ -94,6 +94,7 @@ export function resolveMissionDispatchTarget(missionId?: string): string {
 }
 
 export async function createMission(input: CreateMissionInput) {
+  const refinementPacketId = await inspectImprovementMissionCapability(input);
   const sealedContract = resolveSealedMissionContract(input, input.issues?.length === 1 && isInlineIssue(input.issues[0])) ?? input.qualitySearch?.taskContract;
   const repoPath = ensureRepoPath(input.repoPath);
   const projectContext = await captureMissionProject(repoPath, input.projectId);
@@ -121,7 +122,7 @@ export async function createMission(input: CreateMissionInput) {
   const hasExplicitDependencies = explicitDependencies.some((dependencies) => dependencies.length > 0);
 
   const missionId = buildMissionId();
-  const packetIds = loadedIssues.map(() => buildPacketId());
+  const packetIds = loadedIssues.map(() => refinementPacketId ?? buildPacketId());
   // #453 — Use "inline-N" labels for ad-hoc tasks, "P{N}" for GitHub issues
   const hasInlineIssues = loadedIssues.some(isInlineIssue);
   const referenceLabels = loadedIssues.map((issue, index) =>
@@ -309,6 +310,7 @@ export async function createMission(input: CreateMissionInput) {
   const persisted = await withMissionHandoffBarrier(async () => {
     const { state, result: outgoing } = await withLockedState(
       async (current) => {
+        await consumeImprovementMissionCapability(input, current, mission);
         if (supersedingThreadId) {
           cancelSupersededMissionPackets(current, {
             threadId: supersedingThreadId,
