@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -8,9 +9,9 @@ import {
 } from '@/lib/chat/injection';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { repoSlugFromRemote } from '../canvas-utils';
-import type { PRDetail, ReviewThread, ReviewThreadComment, PRSection, ActionResult } from './types';
+import type { ReviewThread, ReviewThreadComment, PRSection, ActionResult } from './types';
+import { prViewerDetailQuery, refreshPrViewerDetail } from './detail-query';
 import {
-  normalizePRDetail,
   normalizeReviewThread,
   normalizeReviewThreads,
   buildReviewThreadStorageKey,
@@ -24,9 +25,11 @@ export function usePRData(
   repo: string | undefined,
   onInjectChatContext: ((payload: AgentPanelChatInjectionPayload) => void) | undefined,
 ) {
-  const [pr, setPr] = useState<PRDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const detailQuery = useQuery(prViewerDetailQuery(repo, prNumber));
+  const pr = detailQuery.data ?? null;
+  const loading = detailQuery.isPending;
+  const error = !pr && detailQuery.error ? detailQuery.error.message : null;
   const [reloadNonce, setReloadNonce] = useState(0);
   const [activeSection, setActiveSection] = useState<PRSection>('overview');
   const [activeItemIndex, setActiveItemIndex] = useState(0);
@@ -71,57 +74,33 @@ export function usePRData(
         merged: 'PR merged',
         closed: 'PR closed',
       };
-      setActionResult({ type: 'success', message: labels[data.action] || 'Done' });
+      const message = labels[data.action] || 'Done';
+      setActionResult({ type: 'success', message });
       setCommentText('');
       // Refresh PR data
-      const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-      const fresh = await fetch(`/api/panel/prs/${prNumber}${repoParam}`);
-      if (fresh.ok) {
-        const freshData = await fresh.json();
-        setPr(normalizePRDetail(freshData.pr));
+      try {
+        await refreshPrViewerDetail(queryClient, repo, prNumber);
+      } catch {
+        setActionResult({ type: 'success', message: `${message}; refresh failed. Reopen to retry.` });
       }
     } catch (err) {
       setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed' });
     } finally {
       setActionLoading(null);
     }
-  }, [prNumber, repo]);
+  }, [prNumber, queryClient, repo]);
 
   /* ---------------------------------------------------------------- */
   /*  Data fetching effects                                            */
   /* ---------------------------------------------------------------- */
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
     setActionResult(null);
     setReviewThreads([]);
     setReviewThreadsError(null);
     setReviewThreadsLoaded(false);
     setReplyDrafts({});
     setThreadActionLoading({});
-
-    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    fetch(`/api/panel/prs/${prNumber}${repoParam}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setPr(normalizePRDetail(data.pr));
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err.message);
-          setLoading(false);
-        }
-      });
-
-    return () => { cancelled = true; };
   }, [prNumber, repo, reloadNonce]);
 
   useEffect(() => {
@@ -365,7 +344,11 @@ export function usePRData(
 
   const checkContextKey = useCallback((name?: string | null) => `check:${name ?? 'unknown'}`, []);
 
-  const reload = useCallback(() => setReloadNonce((current) => current + 1), []);
+  const reload = useCallback(() => {
+    setReloadNonce((current) => current + 1);
+    // Query state reports a failed Retry; keep the event handler settled.
+    void refreshPrViewerDetail(queryClient, repo, prNumber).catch(() => {});
+  }, [prNumber, queryClient, repo]);
 
   /* ---------------------------------------------------------------- */
   /*  Derived data                                                     */

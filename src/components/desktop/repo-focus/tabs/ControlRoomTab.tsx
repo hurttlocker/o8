@@ -7,7 +7,6 @@ import { REPO_FOCUS_FONT } from '../utils';
 import type {
   ControlRoomTabProps,
   GitHubIssueIntake,
-  PanelIssuePayload,
   TaskAction,
   TaskActionMenuState,
   TaskMutationPayload,
@@ -16,12 +15,9 @@ import type {
   SupervisorInboxPayload,
 } from './control-room/types';
 import {
-  issueAge,
   issueKey,
-  issueKind,
   findDispatchSessionKey,
   isStaleTask,
-  repoIssueParam,
   supervisorIncidentMatchesProject,
   taskMatchesProject,
   taskSessionKey,
@@ -40,6 +36,7 @@ import {
 } from './control-room/components';
 import { createTaskRequest, type TaskExecutionRuntime } from './control-room/create-task-request';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { useIssueIntake } from './control-room/useIssueIntake';
 const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
 
 export function ControlRoomTab({
@@ -54,10 +51,6 @@ export function ControlRoomTab({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [issueIntake, setIssueIntake] = useState<GitHubIssueIntake[]>([]);
-  const [issueLoading, setIssueLoading] = useState(false);
-  const [issueRefreshing, setIssueRefreshing] = useState(false);
-  const [issueError, setIssueError] = useState<string | null>(null);
   const [supervisorItems, setSupervisorItems] = useState<SupervisorInboxItem[]>([]);
   const [supervisorLoading, setSupervisorLoading] = useState(false);
   const [supervisorRefreshing, setSupervisorRefreshing] = useState(false);
@@ -96,85 +89,10 @@ export function ControlRoomTab({
     selectedRepo ? [selectedRepo] : repos
   ), [repos, selectedRepo]);
 
-  const loadIssueIntake = useCallback(async (quiet = false, cancelled?: () => boolean) => {
-    if (!quiet) setIssueLoading(true);
-    setIssueRefreshing(true);
-    try {
-      const results = await Promise.all(intakeRepos.map(async (repo) => {
-        const repoParam = repoIssueParam(repo);
-        const response = await fetch(`/api/panel/issues?repo=${encodeURIComponent(repoParam)}`, { cache: 'no-store' }).catch(() => null);
-        if (!response?.ok) {
-          return {
-            repo,
-            repoFullName: repoParam,
-            issues: [] as PanelIssuePayload[],
-            error: response ? `HTTP ${response.status}` : 'network',
-          };
-        }
-        const payload = await response.json().catch(() => ({})) as {
-          repo?: string;
-          issues?: PanelIssuePayload[];
-          error?: string | null;
-        };
-        return {
-          repo,
-          repoFullName: payload.repo || repoParam,
-          issues: Array.isArray(payload.issues) ? payload.issues : [],
-          error: payload.error ?? null,
-        };
-      }));
-
-      if (cancelled?.()) return;
-
-      const next: GitHubIssueIntake[] = [];
-      const errors: string[] = [];
-      for (const result of results) {
-        if (result.error) errors.push(`${result.repo.name}: ${result.error}`);
-        for (const issue of result.issues) {
-          const number = typeof issue.number === 'number' ? issue.number : Number(issue.number);
-          const title = typeof issue.title === 'string' ? issue.title.trim() : '';
-          if (!Number.isFinite(number) || !title) continue;
-          const labels = Array.isArray(issue.labels)
-            ? issue.labels.map((label) => {
-              if (typeof label === 'string') return label;
-              if (label && typeof label === 'object' && 'name' in label && typeof label.name === 'string') return label.name;
-              return '';
-            }).filter(Boolean)
-            : [];
-          const url = typeof issue.url === 'string' ? issue.url : '';
-          const updatedAt = typeof issue.updatedAt === 'string' ? issue.updatedAt : null;
-          const createdAt = typeof issue.createdAt === 'string' ? issue.createdAt : null;
-          next.push({
-            id: `${result.repoFullName}#${number}`,
-            kind: issueKind(labels),
-            repoId: result.repo.id,
-            repoName: result.repo.name,
-            repoPath: result.repo.localPath,
-            repoFullName: result.repoFullName,
-            number,
-            title,
-            body: typeof issue.body === 'string' ? issue.body.trim() : '',
-            url,
-            labels,
-            comments: typeof issue.comments === 'number' ? issue.comments : Number(issue.comments) || 0,
-            updatedAt,
-            age: issueAge({ updatedAt, createdAt }),
-          });
-        }
-      }
-      next.sort((left, right) => (right.updatedAt ?? '').localeCompare(left.updatedAt ?? ''));
-      setIssueIntake(next.slice(0, selectedRepo ? 10 : 18));
-      setIssueError(errors.length > 0 ? errors.slice(0, 2).join(' - ') : null);
-    } catch (err) {
-      if (cancelled?.()) return;
-      setIssueIntake([]);
-      setIssueError(err instanceof Error ? err.message : 'Unable to load GitHub intake.');
-    } finally {
-      if (cancelled?.()) return;
-      setIssueLoading(false);
-      setIssueRefreshing(false);
-    }
-  }, [intakeRepos, selectedRepo]);
+  const {
+    issues: issueIntake, loading: issueLoading, refreshing: issueRefreshing,
+    error: issueError, refresh: loadIssueIntake,
+  } = useIssueIntake(intakeRepos, selectedRepo ? 10 : 18);
 
   const loadSupervisorIncidents = useCallback(async (quiet = false, cancelled?: () => boolean) => {
     if (!quiet) setSupervisorLoading(true);
@@ -234,14 +152,6 @@ export function ControlRoomTab({
       window.clearInterval(timer);
     };
   }, [refresh]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadIssueIntake(false, () => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [loadIssueIntake]);
 
   useEffect(() => {
     let cancelled = false;
@@ -314,7 +224,7 @@ export function ControlRoomTab({
       setActionMenu(null);
       await refresh(true);
       if (action === 'remove') {
-        await loadIssueIntake(true);
+        await loadIssueIntake();
       }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : `Task ${action} failed.`);
@@ -421,7 +331,7 @@ export function ControlRoomTab({
       }
       setNotice(finalNote);
       await refresh(false);
-      await loadIssueIntake(true);
+      await loadIssueIntake();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Issue intake failed.');
     } finally {
@@ -670,7 +580,7 @@ export function ControlRoomTab({
             selectedRepoName={selectedRepo?.name ?? null}
             queuedIssueKeys={queuedIssueKeys}
             busyKey={busyKey}
-            onRefresh={() => { void loadIssueIntake(false); }}
+            onRefresh={() => { void loadIssueIntake(); }}
             onQueue={(issue) => { void createIssueTask(issue, false); }}
             onDispatch={(issue) => { void createIssueTask(issue, true); }}
           />
