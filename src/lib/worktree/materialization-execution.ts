@@ -143,6 +143,15 @@ process.once('message', async message => {
   if (message.phase !== 'run') return;
   process.disconnect();
   try {
+    if (input.identity) {
+      const fs = require('node:fs');
+      const actual = fs.lstatSync('.');
+      if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev !== input.identity.device
+        || actual.ino !== input.identity.inode || fs.realpathSync('.') !== input.identity.canonicalPath) {
+        throw new Error('Managed workspace ownership changed before nested execution.');
+      }
+      process.env.PWD = input.identity.canonicalPath;
+    }
     if (input.nodeScript) {
       process.argv[1] = JSON.stringify(input.payload);
       await new (Object.getPrototypeOf(async function() {}).constructor)('require', input.nodeScript)(require);
@@ -171,7 +180,7 @@ async function runChild(command, args, options = {}) {
   }
   // All preservation commands are resolved by the existing caller; the gate
   // must preserve the process identity recorded before execve.
-  const child = spawn(process.execPath, ['-e', gate, JSON.stringify({ command, args, nodeScript: options.nodeScript, payload: options.payload })], {
+  const child = spawn(process.execPath, ['-e', gate, JSON.stringify({ command, args, nodeScript: options.nodeScript, payload: options.payload, identity: options.identity })], {
     cwd: options.cwd || process.cwd(), env: process.env,
     stdio: ['ignore', 'pipe', 'pipe', ...(options.fd === undefined ? [] : [options.fd]), 'ipc'], windowsHide: true,
   });

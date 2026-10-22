@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -76,4 +78,28 @@ describe('control-plane cross-process lock (#1488)', () => {
     await Promise.all([holder, next]);
     expect(nextAcquired).toBe(true);
   });
+  it('fails promptly when teardown removed the parent and releases its queue slot for recovery', () => {
+    const childRoot = mkdtempSync(join(tmpdir(), 'o8-removed-lock-parent-'));
+    const moduleUrl = pathToFileURL(join(process.cwd(), 'src/lib/orchestrator/control-plane.ts')).href;
+    const script = `
+      import { mkdirSync, rmSync } from 'node:fs';
+      const imported = await import(${JSON.stringify(moduleUrl)});
+      const lock = imported.withControlPlaneLock ?? imported.default.withControlPlaneLock;
+      const root = process.env.O8_DATA_DIR;
+      rmSync(root, { recursive: true, force: true });
+      let code;
+      try { await lock(() => {}); } catch (error) { code = error.code; }
+      if (code !== 'ENOENT') throw new Error('Missing parent was not refused.');
+      mkdirSync(root);
+      await lock(() => process.stdout.write('recovered'));
+    `;
+    try {
+      const output = execFileSync(process.execPath, [
+        '--import=tsx', '--conditions=react-server', '--input-type=module', '--eval', script,
+      ], { cwd: process.cwd(), env: { ...process.env, O8_DATA_DIR: childRoot, CORTEX_IDE_DATA_DIR: childRoot },
+        encoding: 'utf8', stdio: 'pipe', timeout: 10_000 });
+      expect(output).toContain('recovered');
+    } finally { rmSync(childRoot, { recursive: true, force: true }); }
+  });
+
 });

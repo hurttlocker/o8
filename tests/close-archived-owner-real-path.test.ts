@@ -1,11 +1,11 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -61,6 +61,16 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+let currentLaneId: string | null = null;
+let caseStartedAt = 0;
+beforeEach(() => { currentLaneId = null; caseStartedAt = performance.now(); });
+afterEach(({ task }) => {
+  const timing = currentLaneId ? getLaneEvents(currentLaneId, 200).filter(event => event.verb === 'close_timing').map(event => event.payload) : [];
+  if (process.env.O8_CLOSE_TIMING_RECEIPTS) appendFileSync(process.env.O8_CLOSE_TIMING_RECEIPTS, JSON.stringify({
+    name: task.name, caseMs: performance.now() - caseStartedAt, timing,
+  }) + '\n');
+});
+
 async function fixture(label: string) {
   const fixtureRoot = mkdtempSync(join(root, `${label}-`));
   const repoPath = join(fixtureRoot, 'repo');
@@ -81,6 +91,7 @@ async function fixture(label: string) {
     repoPath, worktreePath, branch, baseBranch: 'main', runtime: 'codex',
     packetId, label, ownership: 'managed',
   });
+  currentLaneId = lane.id;
   const launched = await store.launch({ cwd: worktreePath, prompt: 'exit-clean', laneId: lane.id, packetId });
   attachSession(lane.id, launched.surfaceId, 'system', { fixture: label });
   const deadline = Date.now() + 10_000;
@@ -169,6 +180,11 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     const replay = await closeRoute.POST(request(f.packetId, 'adopted_elsewhere'));
     expect(replay.status).toBe(200);
     expect(await replay.json()).toMatchObject({ result: { alreadyClosed: true } });
+    const timing = eventsAfter.findLast(event => event.verb === 'close_timing')?.payload;
+    expect(timing).toMatchObject({ totalMs: expect.any(Number), artifactHelperStarts: 1 });
+    // Admission, the manager guard, pre-rename, paused purge and final removal
+    // retain fresh evidence, including after the purge helper has exited.
+    expect((timing?.scans as { openFiles: number } | undefined)?.openFiles).toBe(5);
   }, 30_000);
 
   it('keeps the recovered owner held after a retirement refusal and safely retries', async () => {
@@ -225,14 +241,15 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
   );
 
   it.each([undefined, 'wontfix', 'superseded', 'spec_changed'])(
-    'does not extend archived binding recovery to disposition %s', async (disposition) => {
+    'closes an idle archived owner for disposition %s without recovering its session', async (disposition) => {
       const f = await fixture(`ordinary-${disposition ?? 'default'}`);
       const response = await closeRoute.POST(request(f.packetId, disposition));
-      expect(response.status).toBe(409);
-      expect(existsSync(f.worktreePath)).toBe(true);
-      expect(getLane(f.lane.id)?.sessionKey).toBeNull();
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(existsSync(f.worktreePath)).toBe(false);
+      expect(getLane(f.lane.id)).toMatchObject({ status: 'archived', sessionKey: null });
+      expect(git(f.repoPath, ['rev-parse', f.branch])).toBe(f.resultHead);
       expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === f.packetId))
-        .toMatchObject({ operatorStopped: true, queueState: 'held' });
+        .toMatchObject({ status: 'archived', operatorStopped: true, queueState: 'held' });
     }, 30_000,
   );
 

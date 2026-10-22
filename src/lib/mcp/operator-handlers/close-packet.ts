@@ -1,4 +1,4 @@
-import { McpInputError } from '@/lib/mcp/api-error';
+import { McpInputError, O8ApiError } from '@/lib/mcp/api-error';
 import {
   type McpTool,
   type McpToolResult,
@@ -64,6 +64,7 @@ export async function handleClosePacketUnmerged(args: Record<string, unknown>): 
     );
     return jsonResult(result);
   } catch (error) {
+    if (error instanceof O8ApiError && error.routeError) return jsonResult({ ok: false, error: error.routeError }, true);
     console.error(`${'[mcp-operator]'} close_packet_unmerged failed: ${errorText(error)}`);
     return textResult(`Failed to close packet unmerged: ${errorText(error)}`, true);
   }

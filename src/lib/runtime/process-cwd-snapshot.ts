@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess, refreshCloseProcessObservation } from './close-process-observation';
+import { readCloseOpenFileRows } from './process-open-files-snapshot';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_SNAPSHOT_TTL_MS = 15_000;
@@ -111,26 +113,62 @@ function defaultExecFile(
 }
 
 /**
- * Read one machine-wide cwd snapshot. All callers share the same cache and
- * in-flight promise, so concurrent inventory, registry, and reaper reads never
- * fan out into overlapping lsof processes.
+ * Read one machine-wide cwd snapshot. Inventory callers share the cache and
+ * in-flight promise. Forced reads wait for preceding scans, then take their own
+ * fresh evidence without overlapping lsof processes.
  */
 export async function readProcessCwdSnapshot(
   options: ProcessCwdSnapshotOptions = {},
 ): Promise<ProcessCwdSnapshot> {
+  // A forced destructive-boundary read must replace every shared projection,
+  // including prior helper settlement, rather than returning a cached cwd.
+  if (options.forceRefresh) refreshCloseProcessObservation();
+  const snapshot = await observeCloseProcess('cwd', async (): Promise<ProcessCwdSnapshot> => {
+    if (!hasCloseProcessObservation() || options.execFile) return readNativeProcessCwdSnapshot(options);
+    const capturedAt = Date.now();
+    try {
+      // Linux's full-file listing can repeat a process's cwd for its tasks.
+      // Collapse only identical observations. Conflicting cwd records remain
+      // visible, so exact-helper attestation still requires one unique cwd.
+      const seen = new Set<string>();
+      const rows = (await readCloseOpenFileRows())
+        .filter(row => row.descriptor === 'cwd')
+        .filter(row => {
+          const key = JSON.stringify([row.pid, row.file]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .map(row => {
+          if (!path.isAbsolute(row.file)) throw new Error('Native cwd has no absolute namespace.');
+          return { pid: row.pid, cwd: row.file, commandName: row.commandName };
+        });
+      return { status: 'ready', rows, capturedAt };
+    } catch { return { status: 'unavailable', rows: [], capturedAt, reason: 'Native open-file snapshot is unavailable or inconclusive.' }; }
+  });
+  return snapshot.status === 'ready'
+    ? { ...snapshot, rows: snapshot.rows.filter(row => !closeObservedHelperSettled(row.pid)) } : snapshot;
+}
+
+async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions): Promise<ProcessCwdSnapshot> {
   const now = options.now ?? Date.now;
   const requestedAt = now();
   if (!options.forceRefresh && cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {
     cacheHits += 1;
     return cachedSnapshot.value;
   }
-  if (snapshotInflight) {
-    singleFlightJoins += 1;
-    return snapshotInflight;
+  while (snapshotInflight) {
+    if (!options.forceRefresh) {
+      singleFlightJoins += 1;
+      return snapshotInflight;
+    }
+    // An older scan may predate a new holder. Settle it without consuming its
+    // evidence, and recheck in case another forced caller started the next scan.
+    await snapshotInflight;
   }
 
   const run = options.execFile ?? defaultExecFile;
-  const startedAt = requestedAt;
+  const startedAt = now();
   lsofInvocations += 1;
   lastProbeAt = startedAt;
   const promise = (async (): Promise<ProcessCwdSnapshot> => {

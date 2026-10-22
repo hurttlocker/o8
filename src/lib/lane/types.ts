@@ -378,6 +378,7 @@ export type LaneEventVerb =
   // Discard could not prove its preserved branch exists. Payload:
   // { code, reason, packetId, branch, ref, note, gcRisk }
   | 'branch_preservation_failed'
+  | 'close_timing'
   // Packet dispatch refused to launch without a managed worktree.
   // Payload adds storageRelease: { decision, ownerGeneration,
   // releasedReservations, releasedBytes, retainedOwnerIds, reason }.
