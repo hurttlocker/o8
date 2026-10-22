@@ -9545,7 +9545,7 @@ async function bootstrapWsServer() {
   const checkLaunchAgentHealth = async () => {
     try {
       const { surfaceLaunchAgentCrashLoops } = await import('@/lib/supervisor/launch-agent-health');
-      const alerts = surfaceLaunchAgentCrashLoops();
+      const alerts = await surfaceLaunchAgentCrashLoops();
       for (const alert of alerts) {
         console.error(`[supervisor-inbox] ${alert.failureCount} recent ${alert.label} LaunchAgent failures surfaced to the Incident Queue`);
       }
