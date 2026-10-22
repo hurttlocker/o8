@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -129,6 +129,68 @@ describe('orchestrator Fast delegation entry', () => {
       expect.objectContaining({ selectedRuntime: 'claude-code', selectedModel: 'claude-sonnet-5', selectedEffort: 'high' }),
     ]);
     expect(getOperatorDefaultsSync().values).toEqual(saved);
+  });
+
+  it('releases a rejected recovered reservation and preserves replay, later work and team completion', async () => {
+    const { root, repoPath, state } = fixture();
+    vi.stubEnv('O8_DATA_DIR', state);
+    const ownedRoot = join(state, 'owned-codex');
+    vi.stubEnv('CORTEX_IDE_OWNED_CODEX_ROOT', ownedRoot);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-delegation-auth');
+    const { readSharedCheckoutTeam, finishSharedCheckoutTeam } = await import('@/lib/orchestrator/shared-checkout-team');
+    const { findOwnedLaunchByMutationId } = await import('@/lib/runtimes/shared/owned-session-index');
+    const { closeDb } = await import('@/lib/db');
+    closeDb(); // Bind this test's first receipt to its own temporary database.
+    const { POST } = await import('./route');
+    const parentThreadId = 'thoughts-fast-route';
+    const teamInput = { repoPath, parentThreadId };
+    const fastCapability = fastDelegationCapability(repoPath, parentThreadId);
+    const badId = `recovered-mismatch-${basename(root)}`;
+    const goodId = `recovered-valid-${basename(root)}`;
+    function seed(id: string, directory: string) {
+      const sessionDir = join(ownedRoot, id);
+      mkdirSync(sessionDir, { recursive: true });
+      const record = { surfaceId: `codex-owned:${id}`, launchMutationId: id, sessionDir,
+        cwd: directory, repoPath: directory, title: 'Fixture owned worker', createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(), latestPrompt: 'Fixture task', latestSummary: 'Finished fixture',
+        recentRuns: [{ id: 'fixture-run', mode: 'launch', outcome: 'finished', prompt: 'Fixture task', pid: 0,
+          startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), stdoutPath: '', stderrPath: '' }] };
+      const file = join(sessionDir, 'session.json');
+      writeFileSync(file, JSON.stringify(record));
+      return { file, bytes: readFileSync(file) };
+    }
+    const foreign = seed(badId, realpathSync(root));
+    seed(goodId, realpathSync(repoPath));
+    expect(await findOwnedLaunchByMutationId(badId)).toMatchObject({ cwd: realpathSync(root), outcome: 'finished' });
+    const send = (clientMutationId: string) => POST(new NextRequest('http://localhost/api/orchestrator/delegate', {
+      method: 'POST', body: JSON.stringify({ prompt: 'Inspect assigned scope', repoPath, taskName: clientMutationId,
+        runtime: 'codex', checkoutMode: 'shared', parentThreadId, fastCapability, assignedPaths: ['src/shared'],
+        readOnly: true, clientMutationId }),
+    }));
+    try {
+      const rejected = await send(badId);
+      expect(rejected.status).toBe(422);
+      expect(await rejected.json()).toMatchObject({ ok: false });
+      expect(readSharedCheckoutTeam(teamInput)?.members).toEqual([
+        expect.objectContaining({ clientMutationId: badId, state: 'failed', surfaceId: null }),
+      ]);
+      const afterFailure = readSharedCheckoutTeam(teamInput);
+      closeDb(); // Replay must use durable idempotency and membership, not process memory.
+      const replay = await send(badId);
+      expect(replay.status).toBe(422);
+      expect(await replay.json()).toMatchObject({ replayed: true, ok: false });
+      expect(readSharedCheckoutTeam(teamInput)).toEqual(afterFailure);
+      const valid = await send(goodId);
+      expect(valid.status).toBe(200);
+      expect(await valid.json()).toMatchObject({ ok: true, surfaceId: `codex-owned:${goodId}` });
+      expect(readSharedCheckoutTeam(teamInput)?.members.map(member => member.state)).toEqual(['failed', 'running']);
+      await expect(finishSharedCheckoutTeam({ ...teamInput,
+        reviewSummary: 'Fixture review: no checkout changes', verification: 'Fixture workers settled' })).resolves.toMatchObject({ committedPaths: [] });
+      expect(readSharedCheckoutTeam(teamInput)).toBeNull();
+      expect(launchRuntimeSurface).not.toHaveBeenCalled();
+      expect(readFileSync(foreign.file)).toEqual(foreign.bytes);
+    } finally { closeDb(); }
   });
 
   it('rejects a bearer caller spoofing the chat, capability, or selected mode', async () => {
