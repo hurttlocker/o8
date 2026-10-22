@@ -1,3 +1,6 @@
+import { hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { closeProcessCommand } from '@/lib/runtime/close-process-table';
+import { observeCloseProcess } from '@/lib/runtime/close-process-observation';
 import { execFile } from 'node:child_process';
 import type { OwnedWorkspaceBindingReceipt } from '@/lib/runtimes/shared/owned-session';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
@@ -285,7 +288,10 @@ export async function probeOwnedSessionProcessQuiescence(
   options: OwnedProcessProbeOptions = {},
 ): Promise<ProcessQuiescenceReceipt> {
   const lifecycle = getOwnedSessionLifecycle(surfaceId);
-  const run = options.run ?? runCommand;
+  const run = options.run ?? ((command, args, timeoutMs) => observeCloseProcess(
+    JSON.stringify([command, args]), async () =>
+      (hasCloseProcessObservation() ? await closeProcessCommand(command, args) : null) ?? await runCommand(command, args, timeoutMs),
+  ));
   const now = options.now ?? (() => new Date());
   if (!lifecycle?.getWorkspaceBinding) {
     return synthesizeProcessQuiescence(

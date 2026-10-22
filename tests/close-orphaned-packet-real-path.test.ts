@@ -298,6 +298,88 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
     }, 120_000);
   }
 
+  it('keeps clean-source refusal when a warm orphan context resumes a claim without an orphan descriptor', async () => {
+    const source = await fixture('missing');
+    const retire = exactRetirement.retireExactManagedDirectory;
+    const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation(input => retire({
+      ...input, afterRetirementRename: async () => {
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        const authority = { ...claim.authority };
+        delete authority.orphanCloseOwner;
+        // Model an earlier ordinary retirement that did not persist orphan authority.
+        getSqlite().prepare(`UPDATE workspace_exact_claims SET authority_json = ?
+          WHERE kind = 'managed-retirement' AND repository_path = ? AND worktree_id = ? AND operation_id = ?`)
+          .run(JSON.stringify(authority), canonicalRepoRoot(source.repoPath), source.worktree.id, claim.operationId);
+        writeFileSync(path.join(claim.claimPath, 'source.txt'), 'late unbanked warm-context source\n');
+      },
+    }));
+    try {
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toMatch(/unbanked source|source.*uncertain/i);
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+      expect(readFileSync(path.join(claim.claimPath, 'source.txt'), 'utf8')).toBe('late unbanked warm-context source\n');
+      expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+    } finally { interception.mockRestore(); }
+  }, 120_000);
+
+  it('checks the paused purge seam for a warm orphan claim without its persisted descriptor', async () => {
+    const source = await fixture('missing');
+    const retire = exactRetirement.retireExactManagedDirectory;
+    const purge = exactPurge.purgeExactDirectory;
+    let holder: ChildProcess | undefined;
+    const retirement = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation(input => retire({
+      ...input, afterRetirementRename: async () => {
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        const authority = { ...claim.authority };
+        delete authority.orphanCloseOwner;
+        getSqlite().prepare(`UPDATE workspace_exact_claims SET authority_json = ?
+          WHERE kind = 'managed-retirement' AND repository_path = ? AND worktree_id = ? AND operation_id = ?`)
+          .run(JSON.stringify(authority), canonicalRepoRoot(source.repoPath), source.worktree.id, claim.operationId);
+      },
+    }));
+    const capture = vi.spyOn(exactPurge, 'purgeExactDirectory').mockImplementation((candidate, identity, before, after, ...rest) =>
+      purge(candidate, identity, before, async (capturedPath, witness) => {
+        holder = spawn(process.execPath, ['-e', `
+          const fs = require('node:fs');
+          const fd = fs.openSync(process.argv[1], 'r+');
+          fs.writeFileSync(fd, 'late warm orphan bytes');
+          fs.ftruncateSync(fd, 22);
+          process.stdout.write('ready');
+          process.stdin.on('data', () => {
+            const bytes = Buffer.alloc(fs.fstatSync(fd).size);
+            fs.readSync(fd, bytes, 0, bytes.length, 0);
+            process.stdout.write(JSON.stringify({ content: bytes.toString() }));
+          });
+        `, path.join(capturedPath, 'source.txt')], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+        children.add(holder);
+        await once(holder.stdout!, 'data');
+        await after?.(capturedPath, witness);
+      }, ...rest));
+    try {
+      const response = await httpClose(source.packetId);
+      const body = await response.json();
+      expect(response.status).toBe(409);
+      expect(body.error.message).toContain(String(holder?.pid));
+      const observed = once(holder!.stdout!, 'data');
+      holder!.stdin!.write('inspect');
+      const [bytes] = await observed;
+      expect(JSON.parse(bytes.toString()).content).toBe('late warm orphan bytes');
+      expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+    } finally {
+      retirement.mockRestore();
+      capture.mockRestore();
+      if (holder) {
+        const closed = once(holder, 'close');
+        holder.kill();
+        await closed;
+        children.delete(holder);
+      }
+    }
+  }, 120_000);
+
   it('retains bytes written through a live descriptor after the purge helper captures the tree (P1-a)', async () => {
     const source = await fixture('missing');
     const purge = exactPurge.purgeExactDirectory;

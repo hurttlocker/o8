@@ -1,3 +1,4 @@
+import { timeClosePhase, withCloseTiming } from './close-timing';
 import { orphanCloseRetirement, withOrphanCloseContext, prepareOrphanCloseOwners } from './close-orphaned-owner';
 import { OrphanCloseRefusal } from './close-orphaned-process';
 import { existsSync } from 'node:fs';
@@ -424,11 +425,11 @@ async function closePacketUnmergedUnlocked(input: {
     }
 
     const archivedOwner = rawDisposition === 'adopted_elsewhere'
-      ? await recoverArchivedCloseOwner(input.packetId, lanesToClose) : null;
+      ? await timeClosePhase('recover_owner', () => recoverArchivedCloseOwner(input.packetId, lanesToClose)) : null;
     if (archivedOwner) {
       lanesToClose = archivedOwner.targets;
     }
-    const orphanLaneIds = await prepareOrphanCloseOwners(lanesToClose);
+    const orphanLaneIds = await timeClosePhase('admit_owners', () => prepareOrphanCloseOwners(lanesToClose));
     const retiredWorkerBindings = await confirmedRetiredWorkerBindings(input.packetId, lanesToClose);
     if (archivedOwner) retiredWorkerBindings.add(archivedOwner.bindingKey);
     const workerLanesToKill = lanesToClose.filter((target) => {
@@ -461,7 +462,7 @@ async function closePacketUnmergedUnlocked(input: {
       .filter((target) => target.repoPath.trim() && target.branch.trim())
       .map((target) => [`${target.repoPath}\0${target.branch}`, target] as const)).values()];
     for (const target of distinctTargets) {
-      const preservation = await classifyClosePreservation(input.packetId, target);
+      const preservation = await timeClosePhase('preserve_branch', () => classifyClosePreservation(input.packetId, target));
       preservationReceipts.push(preservation.receipt);
       if (preservation.receipt.reason.startsWith('preserved/')
         && !preservedBranches.includes(preservation.receipt.reason)) {
@@ -546,7 +547,7 @@ async function closePacketUnmergedUnlocked(input: {
         const cleanupAttempt = await runRuntimeAwareWorktreeCleanup({
           runtime: candidate.runtime,
           worktreePath: candidate.worktreePath,
-          cleanup: () => removeMergedWorktree(candidate, { preserveUncommittedSource: true }),
+          cleanup: () => timeClosePhase('cleanup', () => removeMergedWorktree(candidate, { preserveUncommittedSource: true })),
           removed: (result) => result.removed || result.reason === 'worktree-equals-repo',
         });
         const cleanup = cleanupAttempt.result;
@@ -753,9 +754,9 @@ export function closePacketUnmerged(input: {
         status: 409,
       };
     }
-    return withOrphanCloseContext(input.packetId, () => closePacketUnmergedUnlocked({
+    return withCloseTiming(input.packetId, () => withOrphanCloseContext(input.packetId, () => closePacketUnmergedUnlocked({
       ...input,
       acknowledgeMissingWorktree: input.acknowledgeMissingWorktree === true,
-    }));
+    })));
   });
 }

@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess } from './close-process-observation';
+import { readCloseOpenFileRows } from './process-open-files-snapshot';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_SNAPSHOT_TTL_MS = 15_000;
@@ -118,6 +120,24 @@ function defaultExecFile(
 export async function readProcessCwdSnapshot(
   options: ProcessCwdSnapshotOptions = {},
 ): Promise<ProcessCwdSnapshot> {
+  const snapshot = await observeCloseProcess('cwd', async (): Promise<ProcessCwdSnapshot> => {
+    if (!hasCloseProcessObservation() || options.execFile) return readNativeProcessCwdSnapshot(options);
+    const capturedAt = Date.now();
+    try {
+      const rows = (await readCloseOpenFileRows())
+        .filter(row => row.descriptor === 'cwd')
+        .map(row => {
+          if (!path.isAbsolute(row.file)) throw new Error('Native cwd has no absolute namespace.');
+          return { pid: row.pid, cwd: row.file, commandName: row.commandName };
+        });
+      return { status: 'ready', rows, capturedAt };
+    } catch { return { status: 'unavailable', rows: [], capturedAt, reason: 'Native open-file snapshot is unavailable or inconclusive.' }; }
+  });
+  return snapshot.status === 'ready'
+    ? { ...snapshot, rows: snapshot.rows.filter(row => !closeObservedHelperSettled(row.pid)) } : snapshot;
+}
+
+async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions): Promise<ProcessCwdSnapshot> {
   const now = options.now ?? Date.now;
   const requestedAt = now();
   if (!options.forceRefresh && cachedSnapshot && requestedAt < cachedSnapshot.expiresAt) {

@@ -1,3 +1,4 @@
+import { settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
 import { spawn } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -385,7 +386,10 @@ async function runCapturedPurge(
   let stderr = '';
   let witness: CapturedPurgeProcessWitness | undefined;
   const closed = new Promise<number | null>((resolve) => child.once('close', code => {
-    if (witness) capturedPurgeProcesses.delete(witness);
+    if (witness && child.pid) {
+      settleCloseObservedHelper(child.pid);
+      capturedPurgeProcesses.delete(witness);
+    }
     resolve(code);
   }));
   child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });

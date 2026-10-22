@@ -1,3 +1,7 @@
+import { readCloseProcessTable } from '@/lib/runtime/close-process-table';
+import { parseOpenFileSnapshot, readCloseOpenFiles, readCloseOpenFileRows } from '@/lib/runtime/process-open-files-snapshot';
+import { hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
+import { closeObservedHelperSettled, observeCloseProcess } from '@/lib/runtime/close-process-observation';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -14,7 +18,12 @@ export class OrphanCloseRefusal extends Error {
 
 export interface OrphanRunIdentity { runId: string; pid: number; processGroupId: number }
 
-async function command(file: string, args: string[], absentExit = false) {
+async function command(file: string, args: string[], absentExit = false): Promise<string | null> {
+  return observeCloseProcess(file === 'lsof' ? 'open-files' : JSON.stringify([file, args, absentExit]),
+    () => nativeCommand(file, args, absentExit));
+}
+
+async function nativeCommand(file: string, args: string[], absentExit: boolean) {
   try {
     const result = await execFileAsync(file, args, {
       encoding: 'utf8', timeout: 5_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
@@ -56,9 +65,9 @@ export async function assertOrphanProcessesAbsent(input: {
 async function inspectOrphanProcesses(input: {
   runtime: string; runs: OrphanRunIdentity[]; sourcePath: string; candidatePath: string;
 }, isHelper?: (pid: number) => boolean): Promise<void> {
-  const raw = await command('ps', ['axeww', '-o', 'pid=,pgid=,ppid=,command=']);
-  if (!raw?.trim()) throw new OrphanCloseRefusal('ps returned no process identity snapshot');
-  const processes = raw.trim().split('\n').map((line) => {
+  const raw = hasCloseProcessObservation() ? '' : await command('ps', ['axeww', '-o', 'pid=,pgid=,ppid=,command=']);
+  if (!hasCloseProcessObservation() && !raw?.trim()) throw new OrphanCloseRefusal('ps returned no process identity snapshot');
+  const processes = hasCloseProcessObservation() ? await readCloseProcessTable() : raw!.trim().split('\n').map((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/.exec(line);
     if (!match) throw new OrphanCloseRefusal('ps returned malformed process identity output');
     return { pid: Number(match[1]), group: Number(match[2]), parent: Number(match[3]), command: match[4]! };
@@ -75,57 +84,21 @@ async function inspectOrphanProcesses(input: {
   // Request file delimiters explicitly: Linux omits f fields unless selected.
   // Global descriptors also cover deleted files and the source-to-claim rename.
   // Never log this output; only report holders of the two exact namespaces.
-  const files = await command('lsof', ['-nP', '-Fpcftn']);
+  const files = hasCloseProcessObservation()
+    ? await readCloseOpenFiles().catch(() => { throw new OrphanCloseRefusal('lsof process probe is unavailable or inconclusive'); })
+    : await command('lsof', ['-nP', '-Fpcftn']);
   if (!files?.trim()) throw new OrphanCloseRefusal('lsof returned no open-file snapshot');
   const targets = [input.sourcePath, input.candidatePath].map((target) => path.resolve(target));
   let helperObserved = false;
-  let pid: number | null = null;
-  let name = 'process';
-  let hasCommand = false;
-  let hasFile = false;
-  let namedFile = false;
-  let fileType = '';
-  const pathlessKernelTypes = new Set(['PIPE', 'NPOLICY', 'NEXUS']);
-  const checkComplete = () => {
-    if (pid !== null && (!hasCommand || !hasFile || !namedFile)) {
-      throw new OrphanCloseRefusal('lsof returned incomplete open-file protocol');
-    }
-  };
-  for (const line of files.split('\n')) {
-    if (!line) continue;
-    if (line.startsWith('p')) {
-      checkComplete();
-      hasCommand = hasFile = namedFile = false;
-      pid = Number(line.slice(1));
-      name = 'process';
-      if (!Number.isSafeInteger(pid) || pid <= 0) throw new OrphanCloseRefusal('lsof returned malformed process identity');
-    } else if (line.startsWith('c')) {
-      if (pid === null || hasCommand || hasFile || !line.slice(1)) throw new OrphanCloseRefusal('lsof returned malformed command coverage');
-      hasCommand = true;
-      name = processName(line.slice(1));
-    } else if (line.startsWith('f')) {
-      if (!hasCommand || !line.slice(1) || (hasFile && !namedFile)) throw new OrphanCloseRefusal('lsof returned incomplete file coverage');
-      hasFile = true;
-      namedFile = false;
-      fileType = '';
-    } else if (line.startsWith('t')) {
-      if (!hasFile || namedFile || fileType || !line.slice(1)) throw new OrphanCloseRefusal('lsof returned malformed file type coverage');
-      fileType = line.slice(1);
-    } else if (line.startsWith('n')) {
-      if (pid === null || !hasFile || namedFile || (!line.slice(1) && !pathlessKernelTypes.has(fileType))) throw new OrphanCloseRefusal('lsof returned an unbound open file');
-      namedFile = true;
-      // These native kernel objects have no filesystem namespace. An empty
-      // regular/unknown file name still refuses rather than hiding a holder.
-      const file = line.slice(1).replace(/ \(deleted\)$/, '');
-      if (targets.some((target) => file === target || file.startsWith(target + path.sep))) {
-        if (isHelper?.(pid)) helperObserved = true;
-        else throw new OrphanCloseRefusal(`live process PID ${pid} (${name}) has an open file or cwd in the worktree`);
-      }
-    } else {
-      throw new OrphanCloseRefusal('lsof returned unexpected open-file protocol');
+  let entries;
+  try { entries = hasCloseProcessObservation() ? await readCloseOpenFileRows() : parseOpenFileSnapshot(files); }
+  catch (error) { throw new OrphanCloseRefusal(error instanceof Error ? error.message : 'lsof protocol is uncertain'); }
+  for (const row of entries) {
+    if (!targets.some(target => row.file === target || row.file.startsWith(target + path.sep))) continue;
+    if (isHelper?.(row.pid)) helperObserved = true;
+    else if (!closeObservedHelperSettled(row.pid)) {
+      throw new OrphanCloseRefusal(`live process PID ${row.pid} (${row.commandName}) has an open file or cwd in the worktree`);
     }
   }
-  checkComplete();
-  if (pid === null) throw new OrphanCloseRefusal('lsof open-file coverage is uncertain');
   if (isHelper && !helperObserved) throw new OrphanCloseRefusal('lsof did not cover the attested purge helper');
 }

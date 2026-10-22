@@ -1,3 +1,5 @@
+import { timeClosePhase } from '@/lib/orchestrator/close-timing';
+import { refreshCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { lstat, realpath, readdir } from 'node:fs/promises';
@@ -14,7 +16,7 @@ import {
 } from './exact-managed-finalization-state';
 import { renameExactChildDirectory } from './exact-parent-operation';
 import { assertWorkspaceRetentionReleased } from './retention-holds';
-import { admitRetirementAuthority, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
+import { admitRetirementAuthority, requiresPausedOrphanVerification, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
 import {
   listExactWorkspaceClaims,
   prepareExactWorkspaceClaim,
@@ -212,11 +214,12 @@ async function finishClaimUnlocked(
 
   if (claim.state === 'prepared') {
     if (original) {
+      await beforeRetirementRename?.();
+      refreshCloseProcessObservation();
       await verifyRetirementAuthority({
         authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.sourcePath,
         identity: expected, verifyContents: true,
       });
-      await beforeRetirementRename?.();
       await renameExactChildDirectory(
         path.dirname(claim.sourcePath), claim.parentIdentity,
         claim.sourcePath, claim.claimPath, expected,
@@ -269,6 +272,8 @@ async function finishClaimUnlocked(
     if (!sameIdentity(remainingClaim, expected)) {
       throw new Error('Exact managed retirement claim changed before purge.');
     }
+    const pausedOrphanVerification = await requiresPausedOrphanVerification(claim.authority);
+    if (!pausedOrphanVerification) refreshCloseProcessObservation();
     await verifyRetirementAuthority({
       authority: claim.authority, sourcePath: claim.sourcePath, candidatePath: claim.claimPath,
       identity: expected, verifyContents: false,
@@ -279,7 +284,7 @@ async function finishClaimUnlocked(
       throw new Error('Exact retirement has no durable pre-purge descendant manifest.');
     }
     await purgeExactDirectory(claim.claimPath, expected, undefined,
-      claim.authority?.orphanCloseOwner === undefined ? undefined : async (candidatePath, capturedPurge) => {
+      !pausedOrphanVerification ? undefined : async (candidatePath, capturedPurge) => {
         // Nonempty orphan verification includes source and ignored artifacts,
         // even in replay mode. Empty finalization needs no readable Git tree.
         await verifyRetirementAuthority({
@@ -319,7 +324,7 @@ async function finishClaimUnlocked(
 }
 
 /** Retire only authority first persisted in the trusted SQLite claim ledger. */
-export async function retireExactManagedDirectory(
+async function retireExactManagedDirectoryNative(
   input: ExactManagedDirectoryRetirementInput,
 ): Promise<void> {
   const claim = await prepareRetirement(input);
@@ -387,4 +392,8 @@ export async function finishPendingExactManagedDirectoryRetirements(
     }
   }
   return { completed, refused };
+}
+
+export function retireExactManagedDirectory(...args: Parameters<typeof retireExactManagedDirectoryNative>): ReturnType<typeof retireExactManagedDirectoryNative> {
+  return timeClosePhase('retireExactManagedDirectory', () => retireExactManagedDirectoryNative(...args));
 }

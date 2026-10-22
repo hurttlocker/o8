@@ -643,6 +643,12 @@
       ]
     },
     {
+      "path": "src/lib/orchestrator/control-plane-lock.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/orchestrator/handoff-compaction.test.ts",
       "reasons": [
         "executable-fixture"
@@ -1887,6 +1893,15 @@
     },
     {
       "path": "tests/close-archived-owner-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/close-artifact-reader-real-path.test.ts",
       "reasons": [
         "child-process",
         "git-cli",
