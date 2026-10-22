@@ -161,7 +161,7 @@ afterAll(async () => {
 });
 
 
-async function finishedPacket(packetId: string, status: 'archived' | 'completed' | 'reviewing' = 'archived') {
+async function finishedPacket(packetId: string, status: 'archived' | 'completed' | 'failed' | 'reviewing' = 'archived') {
   const repo = await addRepo(repoPath);
   const source = await ownedWorkspace(repo, packetId, 'main');
   writeFileSync(path.join(source.workspacePath, 'tracked.txt'), 'completed source\n');
@@ -203,8 +203,9 @@ describe('finished packet checkout retirement', () => {
     finished = true;
   }, 120_000);
 
-  it('archive route waits for retirement of a clean finished packet whose session is gone', async () => {
-    const { repo, source, head } = await finishedPacket('finished-archive', 'completed');
+  it.each(['completed', 'failed'] as const)('archive route waits for retirement of a clean %s packet whose session is gone', async (status) => {
+    const packetId = 'finished-archive-' + status;
+    const { repo, source, head } = await finishedPacket(packetId, status);
     const response = await fetch('http://127.0.0.1:' + port + '/api/lanes', {
       method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
       body: JSON.stringify({ verb: 'archive', laneId: source.lane.id }),
@@ -212,7 +213,7 @@ describe('finished packet checkout retirement', () => {
     expect(response.status, await response.text()).toBe(200);
     expect(existsSync(source.workspacePath)).toBe(false);
     expect(getLane(source.lane.id)).toMatchObject({ status: 'archived', worktreePath: null });
-    expect(getWorkspaceSnapshot(repo.id, 'finished-archive')).toMatchObject({ state: 'retired', headCommit: head });
+    expect(getWorkspaceSnapshot(repo.id, packetId)).toMatchObject({ state: 'retired', headCommit: head });
     finished = true;
   }, 120_000);
 

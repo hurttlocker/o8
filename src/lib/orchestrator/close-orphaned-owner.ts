@@ -173,7 +173,7 @@ async function inspectOwnerEvidence(laneId: string, candidatePath: string, captu
     // Older terminal packets may outlive the session ledger. The durable
     // exact owner and fresh native packet/path probes replace session metadata,
     // never a live session or incomplete retained process identity.
-    runs = state === 'missing' && (lane.status === 'archived' || lane.status === 'completed')
+    runs = state === 'missing' && ['archived', 'completed', 'failed'].includes(lane.status)
       ? terminalMissingSessionRuns(lane) : missingSessionRuns(lane, sessionKey);
     evidence = runs;
   }
