@@ -126,6 +126,9 @@ it('creates and activates a two-repo group, reloads it, searches it and opens ei
   expect(JSON.parse(readFileSync(path.join(dataDir, 'projects.json'), 'utf8')).activeProjectId).toBe(project.id);
   await act(async () => { root.render(createElement(Harness, { key: 'reloaded' })); });
   await until(() => button('Switch project').textContent?.includes('Product') === true);
+  // The unmeasured layout keeps one chip visible and discloses the rest.
+  expect(document.querySelector('button[aria-label="Open Site repository"]')).toBeNull();
+  await click('1 more repositories');
   await click('Open Site repository');
   expect(button('Open Site repository').getAttribute('aria-pressed')).toBe('true');
   await click('Switch project'); await type('Search projects', 'site');

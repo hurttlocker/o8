@@ -101,6 +101,7 @@ describe('agent control route through persisted lane state', () => {
       ownership: 'managed',
       packetId,
       worktreePath,
+      sessionKey,
       actor: 'system',
     });
     writeOrchestratorControlPlaneState({
@@ -153,13 +154,14 @@ describe('agent control route through persisted lane state', () => {
     });
     expect(getApproval(approval.id)?.status).toBe('pending');
 
+    h.kill.mockResolvedValue([{ laneId: lane.id, sessionKey, pid: null, confirmed: true, alreadyDead: true }]);
     const response = await route.POST(post({
       ref: { kind: 'lane', id: lane.id },
       action: { kind: 'hold' },
       clientMutationId: 'agent-control-correlated-target-once',
     }));
 
-    expect(response.status).toBe(200);
+    expect(response.status, await response.clone().text()).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       result: {
@@ -183,6 +185,15 @@ describe('agent control route through persisted lane state', () => {
         },
       },
     });
+    closeDb();
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ operatorStopped: true, queueState: 'held',
+      lane: { laneId: lane.id, sessionKey } });
+    expect(getLane(lane.id)?.status).toBe('paused');
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    const replay = await route.POST(post({ ref: { kind: 'lane', id: lane.id }, action: { kind: 'hold' },
+      clientMutationId: 'agent-control-correlated-target-once' }));
+    expect(replay.status).toBe(200);
+    expect(h.kill).toHaveBeenCalledTimes(1);
   });
 
   it('prefers the packet persisted lane binding over a newer stale lane row', async () => {

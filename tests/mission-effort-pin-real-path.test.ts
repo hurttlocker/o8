@@ -472,7 +472,7 @@ describe('mission effort pin — public route', () => {
     expect(packet?.workerRouting).toMatchObject({ requestedEffort: 'high', selectedEffort: 'high' });
   }, 30_000);
 
-  it('treats adaptive as an explicit reset to the runtime default (accepted, nulls persisted)', async () => {
+  it('treats adaptive as an explicit reset to the runtime default (preserves requested reset)', async () => {
     const repoPath = makeRepo();
     const response = await createMissionViaRoute({
       repoPath,
@@ -485,7 +485,7 @@ describe('mission effort pin — public route', () => {
     const json = await response.json() as { result: { packets: Array<{ id: string }> } };
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
     const packet = readOrchestratorControlPlaneState().packets.find((p) => p.id === json.result.packets[0]?.id);
-    expect(packet?.workerRouting).toMatchObject({ requestedEffort: null, selectedEffort: null });
+    expect(packet?.workerRouting).toMatchObject({ requestedEffort: 'adaptive', selectedEffort: null });
   }, 30_000);
 
   it('rejects a malformed effort string instead of silently nulling it', async () => {
