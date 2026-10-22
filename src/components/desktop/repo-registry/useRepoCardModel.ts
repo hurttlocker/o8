@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { pullRequestListQuery } from '@/lib/github-client';
 import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import {
   FOCUS_REPO_SETUP_EVENT,
@@ -85,9 +87,14 @@ export function useRepoCardModel({
   const [devLogs, setDevLogs] = useState('');
   const [hoveringHeader, setHoveringHeader] = useState(false);
   const [hoverPreviewRect, setHoverPreviewRect] = useState<DOMRect | null>(null);
-  const [prPreviewLoading, setPrPreviewLoading] = useState(false);
-  const [prPreview, setPrPreview] = useState<RepoPreviewPullRequest[]>([]);
-  const [prPreviewLoaded, setPrPreviewLoaded] = useState(false);
+  const githubSlug = useMemo(() => githubSlugFromRemote(repo.remoteUrl), [repo.remoteUrl]);
+  const prList = useQuery({
+    ...pullRequestListQuery(githubSlug ?? ''),
+    enabled: hoveringHeader && Boolean(githubSlug),
+  });
+  const prPreview = useMemo(() => (Array.isArray(prList.data?.prs) ? prList.data.prs : []).filter(pr => pr.state === 'OPEN'), [prList.data?.prs]);
+  const prPreviewLoaded = Array.isArray(prList.data?.prs);
+  const prPreviewLoading = prList.isFetching && !prPreviewLoaded;
   const [prPreviewDetail, setPrPreviewDetail] = useState<RepoPreviewPullRequestDetail | null>(null);
   const [prPreviewDetailLoading, setPrPreviewDetailLoading] = useState(false);
   const [worktreeSummary, setWorktreeSummary] = useState<RepoWorktreeSummary | null>(null);
@@ -96,7 +103,6 @@ export function useRepoCardModel({
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const branchHoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const branchHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prFetchStartedRef = useRef(false);
   const [checkoutTarget, setCheckoutTarget] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [checkoutDirty, setCheckoutDirty] = useState<{ files: string[]; fileCount: number } | null>(null);
@@ -404,43 +410,7 @@ export function useRepoCardModel({
   }, [newBranchName, newBranchWorktree, refreshBranches, refreshWorktreeSummary, repo.defaultBranch, repo.localPath]);
 
   const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
-  const githubSlug = useMemo(() => githubSlugFromRemote(repo.remoteUrl), [repo.remoteUrl]);
   const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
-
-  useEffect(() => {
-    if (!hoveringHeader || !githubSlug || prPreviewLoaded || prFetchStartedRef.current) return;
-    prFetchStartedRef.current = true;
-    const controller = new AbortController();
-    const abortTimeoutId = setTimeout(() => controller.abort(), 3_000);
-    let active = true;
-    const loadingDelayId = setTimeout(() => {
-      if (active) setPrPreviewLoading(true);
-    }, 500);
-    fetch(`/api/panel/prs?repo=${encodeURIComponent(githubSlug)}`, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return;
-        setPrPreview((data.prs ?? []).filter((pr: RepoPreviewPullRequest) => pr.state === 'OPEN'));
-        setPrPreviewLoaded(true);
-      })
-      .catch(() => {
-        if (active) {
-          setPrPreview([]);
-          setPrPreviewLoaded(true);
-        }
-      })
-      .finally(() => {
-        clearTimeout(abortTimeoutId);
-        clearTimeout(loadingDelayId);
-        if (active) setPrPreviewLoading(false);
-      });
-    return () => {
-      active = false;
-      clearTimeout(abortTimeoutId);
-      clearTimeout(loadingDelayId);
-      controller.abort();
-    };
-  }, [githubSlug, hoveringHeader, prPreviewLoaded]);
 
   useEffect(() => {
     return () => {
@@ -521,20 +491,23 @@ export function useRepoCardModel({
     }, 120);
   }, []);
 
+  const previewChecks = useMemo(() => Array.isArray(prPreview[0]?.statusCheckRollup)
+    ? prPreview[0].statusCheckRollup as NonNullable<RepoPreviewPullRequest['statusCheckRollup']>
+    : [], [prPreview]);
   const previewCheckCounts = useMemo(() => {
-    const checks = prPreview[0]?.statusCheckRollup ?? [];
+    const checks = previewChecks;
     return {
       passed: checks.filter((check) => check.conclusion?.toLowerCase() === 'success').length,
       failed: checks.filter((check) => check.conclusion?.toLowerCase() === 'failure').length,
       pending: checks.filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length,
     };
-  }, [prPreview]);
+  }, [previewChecks]);
   const previewFailingChecks = useMemo(
-    () => (prPreview[0]?.statusCheckRollup ?? [])
+    () => previewChecks
       .filter((check) => check.conclusion?.toLowerCase() === 'failure')
       .map((check) => check.name || 'Unknown check')
       .slice(0, 3),
-    [prPreview],
+    [previewChecks],
   );
   const mergeRisk = useMemo(() => mergeRiskLabel(prPreviewDetail), [prPreviewDetail]);
 
