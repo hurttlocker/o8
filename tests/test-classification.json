@@ -973,6 +973,12 @@
       ]
     },
     {
+      "path": "src/lib/supervisor/launch-agent-recovery.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/supervisor/liveness-probes.test.ts",
       "reasons": [
         "child-process",
