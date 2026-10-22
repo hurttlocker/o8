@@ -23,6 +23,7 @@ import type { OwnedTailEntry, OwnedTailGroup } from '@/lib/runtimes/shared/owned
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
+import { startPiRunUsage, finishPiRunUsage, piCacheWarmingReceipt, type PiRunUsage } from '@/lib/pi/run-usage';
 import { findUserPiSession, piUserAgentDir, PI_SESSION_COPY_BYTES, readPiFile } from '@/lib/pi/user-setup';
 
 export {
@@ -44,6 +45,7 @@ interface PiRunRecord {
   stdoutPath: string;
   stderrPath: string;
   pid?: number;
+  usage?: PiRunUsage;
 }
 
 interface PiSessionRecord {
@@ -342,7 +344,8 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
         const data = safeRecord(frame.data);
         session.piSessionId = readString(data, 'sessionId') ?? session.piSessionId;
         session.piSessionFile = readString(data, 'sessionFile') ?? session.piSessionFile;
-        void saveSession(session);
+        if (run.usage) run.usage.sessionFile ??= session.piSessionFile;
+        void (run.outcome === 'running' ? Promise.resolve() : finishPiRunUsage(run.usage)).then(() => saveSession(session));
       }
       if (frame.type === 'extension_ui_request') {
         void appendRunLine(run, { type: 'o8_permission_gate_requested', action: 'approval_or_safe_default' });
@@ -365,7 +368,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
         run.finishedAt = nowIso();
         session.activeRun = undefined;
         session.latestSummary = 'Pi turn completed.';
-        void saveSession(session);
+        void finishPiRunUsage(run.usage).then(() => saveSession(session));
         send(client, { id: commandId('state'), type: 'get_state' });
       }
     }
@@ -381,10 +384,11 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
       run.finishedAt = nowIso();
       session.activeRun = undefined;
     }
-    void saveSession(session);
+    void finishPiRunUsage(run.usage).then(() => saveSession(session));
   });
 
   await saveSession(session);
+  send(client, { id: commandId('state'), type: 'get_state' });
   send(client, { id: commandId(initialCommand), type: initialCommand, message: run.prompt });
   return client;
 }
@@ -398,6 +402,7 @@ async function startRun(session: PiSessionRecord, prompt: string, mode: PiRunMod
     prompt,
     startedAt: nowIso(),
     outcome: 'running',
+    usage: await startPiRunUsage(session.piSessionFile),
     stdoutPath: path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`),
     stderrPath: path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`),
   };
@@ -457,6 +462,9 @@ async function tailForSession(session: PiSessionRecord) {
   for (const run of runs) {
     const raw = await readFile(run.stdoutPath, 'utf8').catch(() => '');
     const parsed = parsePiRunLog(raw, run);
+    const summary = parsed.entries.at(-1)?.text ?? session.latestSummary;
+    const receipt = piCacheWarmingReceipt(run);
+    if (receipt) parsed.entries.push(receipt);
     session.piSessionId = session.piSessionId ?? parsed.sessionId;
     session.piSessionFile = session.piSessionFile ?? parsed.sessionFile;
     entries.push(...parsed.entries);
@@ -470,7 +478,7 @@ async function tailForSession(session: PiSessionRecord) {
       finishedAt: run.finishedAt,
       startedAtLabel: formatClock(run.startedAt),
       finishedAtLabel: formatClock(run.finishedAt),
-      summary: parsed.entries.at(-1)?.text ?? session.latestSummary,
+      summary,
       entries: parsed.entries,
     });
   }
@@ -659,6 +667,7 @@ export async function getOwnedPiTelemetrySources(surfaceId: string) {
   if (!session) return null;
   return {
     threadId: session.piSessionId,
+    runUsage: [...session.recentRuns].reverse().map(run => run.usage),
     stdoutPaths: [...session.recentRuns].reverse().map((run) => run.stdoutPath),
   };
 }
