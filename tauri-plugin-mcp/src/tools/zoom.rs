@@ -52,14 +52,14 @@ pub async fn handle_manage_zoom<R: Runtime>(
       devicePixelRatio: window.devicePixelRatio,
       visualViewportScale: visualScale,
     };
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data,
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,

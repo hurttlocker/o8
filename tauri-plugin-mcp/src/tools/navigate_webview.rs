@@ -83,14 +83,14 @@ pub async fn handle_navigate_webview<R: Runtime>(
     } else {
       throw new Error('Unknown navigate-webview action: ' + action);
     }
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: true,
       data: { action },
       error: null
     });
   } catch (err) {
-    await window.__TAURI_INTERNALS__.invoke('mcp_result'|'mcp_result', {
+    await window.__TAURI_INTERNALS__.invoke('mcp_result', {
       correlationId: {{correlationId}},
       ok: false,
       data: null,
