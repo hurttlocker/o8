@@ -151,6 +151,9 @@ export interface RepoActivityData {
   issues: ActivityItem[];
   ciRuns: ActivityItem[];
   workspaceError?: string;
+  remoteError?: string;
+  /** Remote-only history: local fallback rows must never survive failed folder validation. */
+  remoteCommits?: ActivityItem[];
 }
 
 export const EMPTY_DATA: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -178,29 +181,48 @@ function mapCommitRow(c: CommitRow, repoSlug: string): ActivityItem {
   };
 }
 
-export async function fetchRepoActivity(repoSlug: string | null, repoPath?: string | null): Promise<RepoActivityData> {
+export const REMOTE_ACTIVITY_DELAYED = 'GitHub sync delayed. Showing last successful activity where available.';
+
+export async function fetchRepoActivity(repoSlug: string | null, repoPath?: string | null, options?: {
+  previous?: RepoActivityData;
+  signal?: AbortSignal;
+}): Promise<RepoActivityData> {
   const enc = encodeURIComponent(repoSlug ?? '');
   const localLabel = repoSlug ?? repoPath ?? 'local';
-  const [commitsRes, prsRes, issuesRes, ciRes] = await Promise.all([
-    repoSlug ? fetch(`/api/panel/commits?repo=${enc}`).catch(() => null) : null,
-    repoSlug ? fetch(`/api/panel/prs?repo=${enc}`).catch(() => null) : null,
-    repoSlug ? fetch(`/api/panel/issues?repo=${enc}`).catch(() => null) : null,
-    repoSlug ? fetch(`/api/panel/ci?repo=${enc}`).catch(() => null) : null,
-  ]);
-
-  let commits: ActivityItem[] = [];
-  let workspaceError: string | undefined;
-  if (commitsRes?.ok) {
-    const data = await commitsRes.json();
-    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel));
+  async function readRemote(endpoint: string, field: string) {
+    if (!repoSlug) return { data: { [field]: [] }, failed: false };
+    try {
+      const response = await fetch(`/api/panel/${endpoint}?repo=${enc}`, { signal: options?.signal });
+      const data = await response.json();
+      if (!response.ok || data?.error || !Array.isArray(data?.[field])) throw new Error('Activity stream unavailable');
+      return { data, failed: false };
+    } catch {
+      return { data: null, failed: true };
+    }
   }
+  const [commitsRead, prsRead, issuesRead, ciRead] = await Promise.all([
+    readRemote('commits', 'commits'), readRemote('prs', 'prs'),
+    readRemote('issues', 'issues'), readRemote('ci', 'runs'),
+  ]);
+  let remoteError: string | undefined;
+  function retainOnFailure(failed: boolean, previous: ActivityItem[] | undefined, map: () => ActivityItem[]) {
+    if (!failed) {
+      try { return map(); } catch { /* Treat malformed rows as a failed stream, too. */ }
+    }
+    remoteError = REMOTE_ACTIVITY_DELAYED;
+    return previous ?? [];
+  }
+  const remoteCommits = retainOnFailure(commitsRead.failed, options?.previous?.remoteCommits,
+    () => (commitsRead.data.commits as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, localLabel)));
+  let commits = remoteCommits;
+  let workspaceError: string | undefined;
   // Validate the selected on-disk folder even when remote history exists.
   // A confirmed local read can also supply history without a GitHub remote.
   if (repoPath) {
-    const localRes = await fetch(`/api/panel/commits?workspace=${encodeURIComponent(repoPath)}&limit=50`).catch(() => null);
+    const localRes = await fetch(`/api/panel/commits?workspace=${encodeURIComponent(repoPath)}&limit=50`, { signal: options?.signal }).catch(() => null);
     try {
       const data = localRes ? await localRes.json() : null;
-      if (localRes?.ok && !data?.error) {
+      if (localRes?.ok && !data?.error && Array.isArray(data?.commits)) {
         if (commits.length === 0) commits = ((data?.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, localLabel));
       } else {
         workspaceError = typeof data?.error === 'string' ? data.error : 'Could not load local commit activity. Retry to check this folder again.';
@@ -210,9 +232,9 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
     }
   }
 
-  const prs: ActivityItem[] = [];
-  if (prsRes?.ok) {
-    const data = await prsRes.json();
+  const prs = retainOnFailure(prsRead.failed, options?.previous?.prs, () => {
+    const prs: ActivityItem[] = [];
+    const data = prsRead.data;
     for (const pr of (data.prs ?? []).slice(0, 8)) {
       const ts = pr.createdAt ? new Date(pr.createdAt).getTime() : 0;
       const checks = pr.statusCheckRollup ?? [];
@@ -237,11 +259,12 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
         repo: localLabel,
       });
     }
-  }
+    return prs;
+  });
 
-  const issues: ActivityItem[] = [];
-  if (issuesRes?.ok) {
-    const data = await issuesRes.json();
+  const issues = retainOnFailure(issuesRead.failed, options?.previous?.issues, () => {
+    const issues: ActivityItem[] = [];
+    const data = issuesRead.data;
     for (const issue of (data.issues ?? []).slice(0, 8)) {
       const ts = issue.createdAt ? new Date(issue.createdAt).getTime() : 0;
       issues.push({
@@ -259,11 +282,12 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
         body: (issue.body ?? '').trim(),
       });
     }
-  }
+    return issues;
+  });
 
-  const ciRuns: ActivityItem[] = [];
-  if (ciRes?.ok) {
-    const data = await ciRes.json();
+  const ciRuns = retainOnFailure(ciRead.failed, options?.previous?.ciRuns, () => {
+    const ciRuns: ActivityItem[] = [];
+    const data = ciRead.data;
     for (const run of (data.runs ?? []).slice(0, 6)) {
       const ts = run.createdAt ? new Date(run.createdAt).getTime() : 0;
       ciRuns.push({
@@ -280,9 +304,10 @@ export async function fetchRepoActivity(repoSlug: string | null, repoPath?: stri
         repo: localLabel,
       });
     }
-  }
+    return ciRuns;
+  });
 
-  return { commits, prs, issues, ciRuns, ...(workspaceError ? { workspaceError } : {}) };
+  return { commits, remoteCommits, prs, issues, ciRuns, ...(workspaceError ? { workspaceError } : {}), ...(remoteError ? { remoteError } : {}) };
 }
 
 // ── Render helpers ──
