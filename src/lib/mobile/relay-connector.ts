@@ -65,6 +65,10 @@ import { getDataDir } from '@/lib/data-dir-migration';
 const P = '[relay]';
 const STREAM_HANDSHAKE_DEADLINE_MS = 8_000; // must beat the relay's 10s deadline
 const HTTP_REPLAY_TIMEOUT_MS = 55_000; // must beat the mobile tunnel's 60s deadline
+// Same ping/pong settings as machine attach, with a 30s total detection budget.
+const DEFAULT_KEEP_ALIVE_INTERVAL_MS = 20_000;
+const DEFAULT_PONG_TIMEOUT_MS = 10_000;
+const DEFAULT_ENTITLEMENT_RETRY_INTERVAL_MS = 5 * 60_000;
 
 // v1.1 contract sequence: Mac-initiated E2EE handshake on bridge → device identified
 // by the client's init signature against the enrolled registry (mutual-auth, no plaintext
@@ -84,15 +88,21 @@ interface StreamState {
 }
 
 export interface RelayConnectorConfig {
+  /** The app factory supplies live getters; conformance callers may supply fixture credentials. */
   plan: Plan;
   settingEnabled: boolean;
-  relayUrl?: string;
   licenseToken: string | null;
+  relayUrl?: string;
   /** > 0 when a blocked approval is waiting — drives push-req when no phone is live. */
   blockedApprovalCount: () => number;
   maxTunnelBytes?: number;
   /** Test/diagnostic override. Production is capped below the mobile deadline. */
   httpRequestTimeoutMs?: number;
+  keepAliveIntervalMs?: number;
+  pongTimeoutMs?: number;
+  /** Rejected or locally ineligible credentials are rechecked at +/-20% of this interval. */
+  entitlementRetryIntervalMs?: number;
+  entitlementRetryRandom?: () => number;
 }
 
 export class RelayConnector {
@@ -100,18 +110,27 @@ export class RelayConnector {
   private readonly streams = new Map<string, StreamState>();
   private readonly reconnect = new RelayReconnectPolicy();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private stopped = false;
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = true;
+  private awaitingEntitlement = false;
   private liveDeviceCount = 0;
   private readonly routingId: string;
   private readonly relayUrl: string;
   private readonly maxTunnelBytes: number;
   private readonly httpRequestTimeoutMs: number;
+  private readonly keepAliveIntervalMs: number;
+  private readonly pongTimeoutMs: number;
+  private readonly entitlementRetryIntervalMs: number;
   private readonly httpRequests = new RelayHttpRequestRegistry();
 
   constructor(private readonly config: RelayConnectorConfig) {
     this.routingId = deriveRoutingId(getServerIdentity().publicKeyB64);
     this.relayUrl = (config.relayUrl || process.env.O8_RELAY_URL || DEFAULT_RELAY_URL).replace(/\/+$/, '');
     this.maxTunnelBytes = config.maxTunnelBytes ?? DEFAULT_MAX_TUNNEL_BYTES;
+    this.keepAliveIntervalMs = positiveInteger(config.keepAliveIntervalMs, DEFAULT_KEEP_ALIVE_INTERVAL_MS);
+    this.pongTimeoutMs = positiveInteger(config.pongTimeoutMs, DEFAULT_PONG_TIMEOUT_MS);
+    this.entitlementRetryIntervalMs = positiveInteger(config.entitlementRetryIntervalMs, DEFAULT_ENTITLEMENT_RETRY_INTERVAL_MS);
     const configuredTimeout = config.httpRequestTimeoutMs;
     this.httpRequestTimeoutMs =
       typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
@@ -124,10 +143,7 @@ export class RelayConnector {
   }
 
   start(): void {
-    if (!this.config.licenseToken) {
-      console.warn(`${P} connector not started — no license token available`);
-      return;
-    }
+    if (!this.stopped) return;
     this.stopped = false;
     this.dial();
   }
@@ -136,23 +152,30 @@ export class RelayConnector {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.clearKeepAlive();
     for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
     this.httpRequests.abortAll('connector-stop');
+    const ws = this.ws;
+    this.ws = null;
     try {
-      this.ws?.close(1000, 'connector stop');
+      ws?.close(1000, 'connector stop');
     } catch {
       /* already gone */
     }
-    this.ws = null;
   }
 
   private dial(): void {
     if (this.stopped) return;
     let ws: WebSocket;
     try {
+      const { plan, settingEnabled, licenseToken } = this.config;
+      if (!relayConnectorEligible(plan, settingEnabled) || !licenseToken?.trim()) {
+        this.scheduleReconnect(true);
+        return;
+      }
       ws = new WebSocket(`${this.relayUrl}/mac`, {
         headers: {
-          authorization: `Bearer ${this.config.licenseToken}`,
+          authorization: `Bearer ${licenseToken.trim()}`,
           'x-o8-routing-id': this.routingId,
         },
       });
@@ -164,33 +187,76 @@ export class RelayConnector {
     this.ws = ws;
 
     ws.on('open', () => {
-      this.reconnect.reset();
+      if (this.stopped || ws !== this.ws) return;
+      this.startKeepAlive(ws);
       console.log(`${P} connector up → ${this.relayUrl} (routingId=${this.routingId.slice(0, 8)}…)`);
     });
-    ws.on('message', (raw) => this.onRelayMessage(raw));
+    ws.on('pong', () => {
+      if (ws !== this.ws || !this.pongTimer) return;
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    });
+    ws.on('message', (raw) => {
+      if (ws === this.ws && !this.stopped) this.onRelayMessage(raw);
+    });
     ws.on('close', (code) => {
-      // 4409 = entitlement lapsed at the relay; stand down until re-evaluated.
+      if (ws !== this.ws) return;
+      this.ws = null;
+      this.clearKeepAlive();
       if (code === 4409) {
-        console.warn(`${P} connector closed 4409 entitlement_lapsed — standing down`);
-        this.stopped = true;
-        for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
-        this.httpRequests.abortAll('connector-stop');
-        return;
+        console.warn(`${P} connector closed 4409 entitlement_lapsed — waiting for refreshed entitlement`);
       }
-      this.scheduleReconnect();
+      this.scheduleReconnect(code === 4409);
     });
     ws.on('error', (err) => {
       console.warn(`${P} connector socket error: ${errMsg(err)}`);
     });
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(entitlementBlocked = false): void {
     if (this.stopped) return;
+    if (entitlementBlocked) this.awaitingEntitlement = true;
     for (const sid of [...this.streams.keys()]) this.teardownStream(sid);
-    const delay = this.reconnect.nextDelay();
+    // A WebSocket upgrade is not entitlement acceptance. Keep this cadence
+    // across failed attempts until the relay acknowledges a successful attach.
+    const delay = this.awaitingEntitlement
+      ? Math.round(this.entitlementRetryIntervalMs * (0.8 + 0.4 * (this.config.entitlementRetryRandom ?? Math.random)()))
+      : this.reconnect.nextDelay();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.dial(), delay);
+    this.httpRequests.abortAll('connector-stop');
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.dial();
+    }, delay);
     this.reconnectTimer.unref?.();
+  }
+
+  private startKeepAlive(ws: WebSocket): void {
+    this.clearKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      if (this.stopped || ws !== this.ws || ws.readyState !== WebSocket.OPEN || this.pongTimer) return;
+      try {
+        ws.ping();
+      } catch {
+        ws.terminate();
+        return;
+      }
+      this.pongTimer = setTimeout(() => {
+        this.pongTimer = null;
+        if (this.stopped || ws !== this.ws) return;
+        console.warn(`${P} keepalive timeout`);
+        ws.terminate();
+      }, this.pongTimeoutMs);
+      this.pongTimer.unref?.();
+    }, this.keepAliveIntervalMs);
+    this.keepAliveTimer.unref?.();
+  }
+
+  private clearKeepAlive(): void {
+    if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.keepAliveTimer = null;
+    this.pongTimer = null;
   }
 
   // ── relay → connector ──
@@ -205,6 +271,8 @@ export class RelayConnector {
         this.teardownStream(String(frame.sid));
         return;
       case 'devices':
+        this.awaitingEntitlement = false;
+        this.reconnect.reset();
         this.liveDeviceCount = typeof frame.count === 'number' ? frame.count : 0;
         this.maybePushOnDevices();
         return;
@@ -447,25 +515,30 @@ export function resolveRelayConnectorEnabled(): boolean {
 
 let activeConnector: RelayConnector | null = null;
 
+/** Read current persisted credentials and the same eligibility gates on every dial. */
+function readRelayEntitlement(): { plan: Plan; licenseToken: string } | null {
+  const plan = getEntitlementSync().plan;
+  if (!relayConnectorEligible(plan, resolveRelayConnectorEnabled())) return null;
+  const licenseToken = readCachedEntitlement()?.licenseKey?.trim();
+  return licenseToken ? { plan, licenseToken } : null;
+}
+
 /**
  * Start the off-network connector IFF entitled + toggled on + a license token is
  * cached. Fully guarded: any failure logs and returns null — the LAN path is never
  * affected. Called once from the ws-server bootstrap.
  */
-export function startRelayConnectorIfEnabled(): RelayConnector | null {
+export function startRelayConnectorIfEnabled(
+  overrides: Partial<Omit<RelayConnectorConfig, 'plan' | 'settingEnabled' | 'licenseToken'>> = {},
+): RelayConnector | null {
   try {
-    const enabled = resolveRelayConnectorEnabled();
-    const plan = getEntitlementSync().plan;
-    if (!relayConnectorEligible(plan, enabled)) return null; // free tier or toggled off
-    const licenseToken = readCachedEntitlement()?.licenseKey ?? null;
-    if (!licenseToken) {
-      console.warn(`${P} entitled (${plan}) but no license token cached — connector idle`);
-      return null;
-    }
+    const entitlement = readRelayEntitlement();
+    if (!entitlement) return null;
     const connector = new RelayConnector({
-      plan,
-      settingEnabled: enabled,
-      licenseToken,
+      // Resolve at dial time, including retries, instead of capturing startup values.
+      get plan() { return getEntitlementSync().plan; },
+      get settingEnabled() { return resolveRelayConnectorEnabled(); },
+      get licenseToken() { return readCachedEntitlement()?.licenseKey ?? null; },
       blockedApprovalCount: () => {
         try {
           return listApprovals({ status: 'pending' }).length;
@@ -473,10 +546,11 @@ export function startRelayConnectorIfEnabled(): RelayConnector | null {
           return 0;
         }
       },
+      ...overrides,
     });
     connector.start();
     activeConnector = connector;
-    console.log(`${P} off-network connector started (plan=${plan}, routingId=${connector.id.slice(0, 8)}…)`);
+    console.log(`${P} off-network connector started (plan=${entitlement.plan}, routingId=${connector.id.slice(0, 8)}…)`);
     return connector;
   } catch (err) {
     console.warn(`${P} connector bootstrap failed (LAN unaffected): ${errMsg(err)}`);
@@ -494,6 +568,12 @@ export function stopRelayConnector(): void {
 }
 
 // ── module-level helpers ──
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : fallback;
+}
+
 function parseJson(bytes: Buffer): Record<string, unknown> | null {
   return safeParse(bytes.toString('utf8'));
 }
