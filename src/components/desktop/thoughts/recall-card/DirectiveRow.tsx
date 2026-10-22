@@ -9,6 +9,8 @@
  * agent.
  */
 
+import { ForgetMemoryButton } from '../../ForgetMemoryButton';
+
 import {
   Chevron,
   expandedSurfaceStyle,
@@ -163,9 +165,10 @@ export function DirectiveRow({
             </div>
           ) : null}
           <RecentMergesList lines={topDirective?.recentMerges ?? []} />
+          {topDirective ? <ForgetMemoryButton key={topDirective.id} kind="directive" id={topDirective.id} label={topDirective.title} /> : null}
           {allDirectives.length > 1 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {allDirectives.slice(0, 6).map((d) => (
+              {allDirectives.filter(d => d.id !== topDirective?.id).slice(0, 6).map((d) => (
                 <div
                   key={d.id}
                   style={{
@@ -208,6 +211,7 @@ export function DirectiveRow({
                   >
                     {d.scope}
                   </span>
+                  <ForgetMemoryButton key={d.id} kind="directive" id={d.id} label={d.title} />
                 </div>
               ))}
             </div>

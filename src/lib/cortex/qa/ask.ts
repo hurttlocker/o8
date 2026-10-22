@@ -18,6 +18,7 @@
  */
 
 import 'server-only';
+import { readMemoryRevision } from '@/lib/cortex/memory-revision';
 
 import { createHash } from 'node:crypto';
 
@@ -74,7 +75,7 @@ interface CacheEntry {
 const answerCache = new Map<string, CacheEntry>();
 
 function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
-  return `${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
+  return `${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
 }
 
 /**
@@ -150,7 +151,7 @@ function cacheKey(
   terse = false,
 ): string {
   return createHash('sha256')
-    .update(`${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
+    .update(`${readMemoryRevision()}\x00${brainRouteCacheKeySync()}\x00${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
     .digest('hex');
 }
 
@@ -322,6 +323,7 @@ async function runAskCortexUncached(
   bypassCache: boolean,
   composeOptions: ComposeOptions,
 ): Promise<AskCortexResult> {
+  const memoryRevision = readMemoryRevision();
   // Semantic cache (#1226) — a cosine-near duplicate of an already-answered
   // question replays its answer instead of re-running the pipeline.
   if (!bypassCache) {
@@ -436,7 +438,7 @@ async function runAskCortexUncached(
     ...classifierMeta(classification),
   };
 
-  if (!bypassCache) {
+  if (!bypassCache && memoryRevision === readMemoryRevision()) {
     setCache(key, {
       answer: result.answer,
       citations,
@@ -464,6 +466,7 @@ export async function runAskPipeline(
   requestedProjectId?: string | null,
   options: ComposeOptions = {},
 ): Promise<void> {
+  const memoryRevision = readMemoryRevision();
   const projectId = requestedProjectId?.trim()
     || (await getActiveProjectScopeForRepo(repoPath)).projectId;
   const key = cacheKey(question, repoPath, projectId, options.terse === true);
@@ -588,7 +591,7 @@ export async function runAskPipeline(
   }
 
   // Store in cache for follow-up identical questions.
-  if (cachedAnswer.trim()) {
+  if (cachedAnswer.trim() && memoryRevision === readMemoryRevision()) {
     setCache(key, {
       answer: cachedAnswer.trim(),
       citations: cachedCitations,
