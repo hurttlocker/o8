@@ -45,6 +45,7 @@ beforeEach(async () => {
   (globalThis as BrainGlobal).__o8SymonBrain = Promise.resolve(brain);
   // The webview's fetch reaches the real record route.
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url === '/api/voice/live') return Response.json({ enabled: false });
     posted.push(JSON.parse(String(init.body)));
     return recordRoute(new NextRequest(`http://localhost${url}`, { method: init.method, headers: init.headers as HeadersInit, body: init.body as string }));
   });
@@ -72,7 +73,7 @@ describe('voice sessions recorded into the Symon store (#3455)', () => {
     document.body.append(container);
     root = createRoot(container);
     act(() => root!.render(createElement(RealtimeVoiceHost)));
-    act(() => { window.dispatchEvent(new Event('o8:symon-voice-toggle')); });
+    await act(async () => { window.dispatchEvent(new Event('o8:symon-voice-toggle')); });
     expect(h.sessions).toHaveLength(1);
     const onEvent = h.sessions[0].onEvent!;
 

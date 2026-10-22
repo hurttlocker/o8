@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
@@ -125,6 +125,7 @@ vi.mock('@/lib/push/notify', async (importOriginal) => ({
 }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
+  getDispatchableRuntimeAvailability: vi.fn(async () => [{ id: 'pi-builtin', available: true }]),
 }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: vi.fn(async () => ({
@@ -216,6 +217,7 @@ const { setLaneStatus } = await import('@/lib/lane/registry');
 const { withPiExclusive } = await import('@/lib/pi/sdk/command');
 const { refreshPolicyRules } = await import('@/lib/approvals/policies');
 const { getDataDir } = await import('@/lib/data-dir-migration');
+const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -280,6 +282,11 @@ async function toolCalls(sessionKey: string) {
 }
 
 beforeAll(() => { buildPiWriteHelper(); }, 600_000);
+beforeEach(async () => {
+  await updateOperatorDefaults({
+    workerRuntimes: ['pi-builtin'], defaultDispatchRuntime: 'pi-builtin', defaultDispatchModel: '',
+  });
+});
 
 afterAll(async () => {
   const { closeDb } = await import('@/lib/db');
@@ -448,6 +455,7 @@ describe('bundled Pi worker (#3258)', () => {
   it('runs two packets pinned to an OpenRouter model in separate worktrees, records each call and lands both (#3584)', async () => {
     const target = await makeRepo('openrouter-target');
     const pin = 'openrouter/deepseek/deepseek-v4.1-flash';
+    await updateOperatorDefaults({ defaultDispatchModel: pin });
     const managedBefore = model.managedModels.length;
     const workers = [];
     for (const [index, file] of ['left.txt', 'right.txt'].entries()) {
@@ -492,6 +500,7 @@ describe('bundled Pi worker (#3258)', () => {
 
   it('fails an OpenRouter pin visibly when the model cannot run Pi, without falling back', async () => {
     const target = await makeRepo('openrouter-refused');
+    await updateOperatorDefaults({ defaultDispatchModel: 'openrouter/unknown/no-tools-model' });
     const managedBefore = model.managedModels.length;
     const response = await delegatePost(new NextRequest('http://127.0.0.1/api/orchestrator/delegate', {
       method: 'POST',
