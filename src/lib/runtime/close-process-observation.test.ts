@@ -4,6 +4,8 @@ import {
   refreshCloseProcessObservation, settleCloseObservedHelper, withCloseProcessObservation,
 } from './close-process-observation';
 import { parseOpenFileSnapshot } from './process-open-files-snapshot';
+import * as openFiles from './process-open-files-snapshot';
+import { readProcessCwdSnapshot } from './process-cwd-snapshot';
 import { parseCloseProcessTable } from './close-process-table';
 
 describe('close-scoped native observations', () => {
@@ -59,5 +61,29 @@ describe('close-scoped native observations', () => {
       { pid: 12, group: 12, parent: 1, command: 'node O8_OWNED_RUN_MARKER=retained' },
     ]);
     expect(() => parseCloseProcessTable('12 unknown')).toThrow();
+  });
+
+  it('projects repeated identical task cwd records as one process observation', async () => {
+    const rows = parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/owned\np12\ncnode\nfcwd\ntDIR\nn/owned\n');
+    const read = vi.spyOn(openFiles, 'readCloseOpenFileRows').mockResolvedValue(rows);
+    try {
+      await withCloseProcessObservation(async () => {
+        expect(await readProcessCwdSnapshot()).toMatchObject({
+          status: 'ready', rows: [{ pid: 12, cwd: '/owned', commandName: 'node' }],
+        });
+      });
+    } finally { read.mockRestore(); }
+  });
+
+  it('preserves conflicting task cwd records instead of selecting one', async () => {
+    const rows = parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/owned\np12\ncnode\nfcwd\ntDIR\nn/other\n');
+    const read = vi.spyOn(openFiles, 'readCloseOpenFileRows').mockResolvedValue(rows);
+    try {
+      await withCloseProcessObservation(async () => {
+        expect(await readProcessCwdSnapshot()).toMatchObject({ status: 'ready', rows: [
+          { pid: 12, cwd: '/owned' }, { pid: 12, cwd: '/other' },
+        ] });
+      });
+    } finally { read.mockRestore(); }
   });
 });

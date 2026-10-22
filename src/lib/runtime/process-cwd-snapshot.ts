@@ -124,8 +124,18 @@ export async function readProcessCwdSnapshot(
     if (!hasCloseProcessObservation() || options.execFile) return readNativeProcessCwdSnapshot(options);
     const capturedAt = Date.now();
     try {
+      // Linux's full-file listing can repeat a process's cwd for its tasks.
+      // Collapse only identical observations. Conflicting cwd records remain
+      // visible, so exact-helper attestation still requires one unique cwd.
+      const seen = new Set<string>();
       const rows = (await readCloseOpenFileRows())
         .filter(row => row.descriptor === 'cwd')
+        .filter(row => {
+          const key = JSON.stringify([row.pid, row.file]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
         .map(row => {
           if (!path.isAbsolute(row.file)) throw new Error('Native cwd has no absolute namespace.');
           return { pid: row.pid, cwd: row.file, commandName: row.commandName };
