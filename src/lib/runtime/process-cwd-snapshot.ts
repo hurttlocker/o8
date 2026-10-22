@@ -113,9 +113,9 @@ function defaultExecFile(
 }
 
 /**
- * Read one machine-wide cwd snapshot. All callers share the same cache and
- * in-flight promise, so concurrent inventory, registry, and reaper reads never
- * fan out into overlapping lsof processes.
+ * Read one machine-wide cwd snapshot. Inventory callers share the cache and
+ * in-flight promise. Forced reads wait for preceding scans, then take their own
+ * fresh evidence without overlapping lsof processes.
  */
 export async function readProcessCwdSnapshot(
   options: ProcessCwdSnapshotOptions = {},
@@ -157,13 +157,18 @@ async function readNativeProcessCwdSnapshot(options: ProcessCwdSnapshotOptions):
     cacheHits += 1;
     return cachedSnapshot.value;
   }
-  if (snapshotInflight) {
-    singleFlightJoins += 1;
-    return snapshotInflight;
+  while (snapshotInflight) {
+    if (!options.forceRefresh) {
+      singleFlightJoins += 1;
+      return snapshotInflight;
+    }
+    // An older scan may predate a new holder. Settle it without consuming its
+    // evidence, and recheck in case another forced caller started the next scan.
+    await snapshotInflight;
   }
 
   const run = options.execFile ?? defaultExecFile;
-  const startedAt = requestedAt;
+  const startedAt = now();
   lsofInvocations += 1;
   lastProbeAt = startedAt;
   const promise = (async (): Promise<ProcessCwdSnapshot> => {
