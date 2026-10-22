@@ -516,6 +516,8 @@ export type LaneEventVerb =
   | 'steered_packet'
   // Accepted steered turn may register managed runs until its next lifecycle boundary.
   | 'steer_run_admitted'
+  // Durable delivery state linked to one steer intent.
+  | 'steer_delivery'
   // Design Mode follow-up reused the packet's warm lane. Payload: { packetId, elementSummary }
   | 'ui_loop_steered'
   // Design Mode steer did not settle before its writer deadline. Payload: { packetId, laneId, waitedMs }
