@@ -159,6 +159,9 @@ export interface ExactDirectoryManifestEntry {
   kind: 'directory' | 'symlink' | 'file' | 'other';
   mode: number;
   linkCount: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
 }
 
 export interface ExactDirectoryManifest {
@@ -172,24 +175,87 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const readline = require('node:readline');
+let rootCanonical;
+const directories = [];
+
+function verifyLocation() {
+  for (const directory of directories) {
+    const named = fs.lstatSync(path.join(rootCanonical, directory.relative));
+    const pinned = fs.fstatSync(directory.handle.fd);
+    if (!sameNamespaceIdentity(named, directory.entry) || named.isSymbolicLink()
+      || !sameNamespaceIdentity(pinned, directory.entry)) {
+      throw new Error('Exact purge directory component changed after open.');
+    }
+  }
+  const current = directories[directories.length - 1];
+  if (!sameNamespaceIdentity(fs.lstatSync('.'), current.entry)
+    || fs.realpathSync('.') !== path.join(rootCanonical, current.relative)
+    || (directories.length > 1 && !sameNamespaceIdentity(fs.lstatSync('..'), directories[directories.length - 2].entry))) {
+    throw new Error('Exact purge captured directory left its verified root.');
+  }
+}
+
+// Node has no openat/fchdir API. Enter one no-follow-opened component at a
+// time in this isolated helper, then re-verify both cwd and the named inode.
+// Every leaf syscall consequently uses a single name in an attested cwd.
+async function inDirectory(relative, expectedByPath, operation) {
+  const parts = relative === '.' ? [] : relative.split(path.sep);
+  if (parts.some(part => !part || part === '.' || part === '..')) throw new Error('Exact purge refused an unsafe component.');
+  async function enter(index) {
+    verifyLocation();
+    if (index === parts.length) return operation();
+    const part = parts[index];
+    const childRelative = path.join(directories[directories.length - 1].relative, part);
+    const expected = expectedByPath.get(childRelative);
+    const before = await fsp.lstat(part);
+    if (!expected || expected.kind !== 'directory' || !sameNamespaceIdentity(before, expected)) {
+      throw new Error('Exact purge ancestor is not its captured directory.');
+    }
+    const handle = await fsp.open(part, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    try {
+      verifyLocation();
+      if (!sameNamespaceIdentity(await handle.stat(), expected)
+        || !sameNamespaceIdentity(await fsp.lstat(part), expected)) {
+        throw new Error('Exact purge ancestor identity changed before entry.');
+      }
+      process.chdir(part);
+      directories.push({ relative: childRelative, entry: expected, handle });
+      try { verifyLocation(); return await enter(index + 1); }
+      finally { process.chdir('..'); directories.pop(); verifyLocation(); }
+    } finally { await handle.close(); }
+  }
+  try { return await enter(0); }
+  finally { verifyLocation(); }
+}
+
+function sameFileRevision(actual, expected, links = expected.linkCount) {
+  return actual.size === expected.size && actual.mtimeMs === expected.mtimeMs && actual.mode === expected.mode
+    && (links !== expected.linkCount || actual.ctimeMs === expected.ctimeMs);
+}
 
 async function manifestAt() {
   const entries = [];
+  const byPath = new Map([[ '.', directories[0].entry ]]);
   const pending = ['.'];
   while (pending.length > 0) {
     const relative = pending.pop();
-    const stat = await fsp.lstat(relative);
+    const stat = await inDirectory(path.dirname(relative), byPath, () => fsp.lstat(path.basename(relative)));
     const kind = stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
-    entries.push({
+    const entry = {
       relative,
       device: stat.dev,
       inode: stat.ino,
       kind,
       mode: stat.mode,
       linkCount: stat.nlink,
-    });
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+    };
+    entries.push(entry);
+    byPath.set(relative, entry);
     if (kind === 'directory') {
-      const names = (await fsp.readdir(relative)).sort().reverse();
+      const names = (await inDirectory(relative, byPath, () => fsp.readdir('.'))).sort().reverse();
       for (const name of names) pending.push(path.join(relative, name));
     }
   }
@@ -252,6 +318,9 @@ function verifyMonotonicManifest(current, expected) {
       if (actual.linkCount !== prior.linkCount - (originalNames - remainingNames)) {
         throw new Error('Exact purge file link identity changed outside monotonic namespace release.');
       }
+      if (!sameFileRevision(actual, prior, actual.linkCount)) {
+        throw new Error('Exact purge file contents changed after its durable manifest.');
+      }
     }
     let parent = path.dirname(actual.relative);
     while (parent !== '.' && parent !== actual.relative) {
@@ -264,59 +333,59 @@ function verifyMonotonicManifest(current, expected) {
 }
 
 async function releaseContent(manifest) {
-  // Refuse every unsupported node before releasing even one file's contents.
+  // Preflight the entire tree before unlinking anything. Never chmod or
+  // truncate: another name or an already-open descriptor may own those bytes.
   if (manifest.some((entry) => entry.kind === 'other')) {
     throw new Error('Exact purge refuses non-file workspace entries.');
   }
   const expectedChildNames = childNamesByParent(manifest);
+  const byPath = new Map(manifest.map(entry => [entry.relative, entry]));
   for (const expected of manifest) {
-    const actual = await fsp.lstat(expected.relative);
-    if (!sameIdentity(actual, expected)) throw new Error('Exact purge tree identity changed after capture.');
+    await inDirectory(path.dirname(expected.relative), byPath, async () => {
+      const actual = await fsp.lstat(path.basename(expected.relative));
+      if (!sameIdentity(actual, expected)) throw new Error('Exact purge tree identity changed after capture.');
+      if (expected.kind === 'file' && !sameFileRevision(actual, expected)) {
+        throw new Error('Exact purge file contents changed after capture.');
+      }
+    });
     if (expected.kind === 'directory') {
-      const actualNames = (await fsp.readdir(expected.relative)).sort();
+      const actualNames = (await inDirectory(expected.relative, byPath, () => fsp.readdir('.'))).sort();
       const expectedNames = expectedChildNames.get(expected.relative) || [];
       if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
         throw new Error('Exact purge directory entries changed after capture.');
       }
-    } else if (expected.kind === 'file') {
-      // A local clone may share Git object inodes with its source. Those links
-      // consume no clone-exclusive blocks, and truncating them would corrupt
-      // the source repository, so retain the zero-cost link in the retired tree.
-      if (expected.linkCount > 1) continue;
-      const readHandle = await fsp.open(expected.relative, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-      try {
-        const captured = await readHandle.stat();
-        if (!sameIdentity(captured, expected)) throw new Error('Exact purge read handle captured a replacement.');
-        await readHandle.chmod(expected.mode | 0o200);
-      } finally {
-        await readHandle.close();
-      }
-      const handle = await fsp.open(expected.relative, fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW);
-      try {
-        const captured = await handle.stat();
-        if (!sameIdentity(captured, expected)) throw new Error('Exact purge file handle captured a replacement.');
-        await handle.truncate(0);
-      } finally {
-        await handle.close();
-      }
-    } else if (expected.kind === 'other') {
-      throw new Error('Exact purge refuses non-file workspace entries.');
     }
   }
-  for (const expected of manifest) {
-    if (!sameIdentity(await fsp.lstat(expected.relative), expected)) {
-      throw new Error('Exact purge tree identity changed during content release.');
-    }
-  }
+  const releasedNames = new Map();
   let releasedEntries = 0;
   for (const expected of [...manifest].reverse()) {
     if (expected.relative === '.') continue;
-    const actual = await fsp.lstat(expected.relative);
-    if (!sameNamespaceIdentity(actual, expected)) {
-      throw new Error('Exact purge tree identity changed before namespace release.');
-    }
-    if (expected.kind === 'directory') await fsp.rmdir(expected.relative);
-    else await fsp.unlink(expected.relative);
+    await inDirectory(path.dirname(expected.relative), byPath, async () => {
+      const name = path.basename(expected.relative);
+      const key = inodeKey(expected);
+      const links = expected.linkCount - (releasedNames.get(key) || 0);
+      const handle = expected.kind === 'file'
+        ? await fsp.open(name, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK) : null;
+      try {
+        verifyLocation();
+        const actual = fs.lstatSync(name);
+        if (!sameNamespaceIdentity(actual, expected)
+          || (handle && (actual.nlink !== links || !sameFileRevision(actual, expected, links)
+            || !sameNamespaceIdentity(fs.fstatSync(handle.fd), expected)
+            || !sameFileRevision(fs.fstatSync(handle.fd), expected, links)))) {
+          throw new Error('Exact purge tree identity or file contents changed before namespace release.');
+        }
+        const final = fs.lstatSync(name);
+        if (!sameNamespaceIdentity(final, expected)
+          || (handle && (final.nlink !== links || !sameFileRevision(final, expected, links)))) {
+          throw new Error('Exact purge file changed during descriptor verification.');
+        }
+        verifyLocation();
+        if (expected.kind === 'directory') fs.rmdirSync(name);
+        else fs.unlinkSync(name);
+        if (handle) releasedNames.set(key, (releasedNames.get(key) || 0) + 1);
+      } finally { if (handle) await handle.close(); }
+    });
     releasedEntries += 1;
     if (releasedEntries === 1 && process.env.NODE_ENV === 'test'
       && process.env.O8_TEST_PURGE_STOP_MARKER) {
@@ -343,6 +412,9 @@ async function main() {
     || captured.dev !== expectedDevice || captured.ino !== expectedInode) {
     throw new Error('Exact purge captured an unexpected directory identity.');
   }
+  rootCanonical = fs.realpathSync('.');
+  const rootHandle = await fsp.open('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  directories.push({ relative: '.', entry: { device: captured.dev, inode: captured.ino, kind: 'directory' }, handle: rootHandle });
   const manifest = await manifestAt();
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
   const expectedFingerprint = process.env.O8_PURGE_EXPECTED_FINGERPRINT || '';
