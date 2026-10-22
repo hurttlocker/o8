@@ -2951,6 +2951,15 @@
       ]
     },
     {
+      "path": "tests/launch-provisioning-mission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/lead-handoff-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4894,6 +4903,12 @@
       "path": "tests/steer-packet-owned-resume.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/steer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 const performRuntimeActionMock = vi.hoisted(() => vi.fn());
 const ensureDispatchBackendReadyMock = vi.hoisted(() => vi.fn(async () => ({
@@ -37,6 +38,9 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 const tempDirs: string[] = [];
+const root = mkdtempSync(path.join(os.tmpdir(), 'o8-owned-codex-steer-'));
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = root;
+afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 afterEach(() => {
   performRuntimeActionMock.mockReset();
@@ -48,14 +52,12 @@ afterEach(() => {
 });
 
 describe('steerPacket owned Codex resume fallback', () => {
-  it('resumes an exited owned Codex session from its persisted thread id instead of refusing', async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), 'o8-owned-codex-steer-'));
+  it.each(['accept', 'stop-during-readiness'])('resumes a persisted thread with the final spawn fence: %s', async (mode) => {
     const repoPath = mkdtempSync(path.join(os.tmpdir(), 'o8-owned-codex-repo-'));
-    tempDirs.push(root, repoPath);
-    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = root;
+    tempDirs.push(repoPath);
     process.env.O8_CODEX_BIN = process.execPath;
 
-    const sessionId = 'codex-owned-steer-resume';
+    const sessionId = `codex-owned-steer-resume-${mode}`;
     const surfaceId = `codex-owned:${sessionId}`;
     const threadId = 'thread-steer-resume-1';
     const sessionDir = path.join(root, sessionId);
@@ -102,15 +104,33 @@ describe('steerPacket owned Codex resume fallback', () => {
       repoPath,
       branch: 'inline/owned-resume',
       runtime: 'codex',
-      packetId: 'pkt-owned-resume',
+      packetId: `pkt-owned-resume-${mode}`,
       sessionKey: surfaceId,
     });
 
+    if (mode === 'stop-during-readiness') {
+      const { advanceCorrectionStop } = await import('@/lib/db/worker-correction-fences');
+      const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+      const route = await import('@/app/api/orchestrator/steer-packet/route');
+      ensureDispatchBackendReadyMock.mockImplementationOnce(async () => {
+        advanceCorrectionStop(`worker:${surfaceId}`);
+        return { ready: true, reason: 'already_ready', waitedMs: 0, attempts: 0 };
+      });
+      const response = await route.POST(new NextRequest('http://localhost/api/orchestrator/steer-packet', {
+        method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ packetId: lane.packetId, message: 'This must lose to Stop', idempotencyKey: 'stop-at-final-spawn-fence' }),
+      }));
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(ensureDispatchBackendReadyMock).toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      return;
+    }
+
     await expect(steerPacket({
-      packetId: 'pkt-owned-resume',
+      packetId: lane.packetId!,
       message: 'continue from huddle approval',
     })).resolves.toMatchObject({
-      packetId: 'pkt-owned-resume',
+      packetId: lane.packetId,
       laneId: lane.id,
       // #1524 — the fallback resume's own note passes through (warm resume
       // here; an archived session would read 'Cold resume: …').

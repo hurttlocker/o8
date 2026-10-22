@@ -1,5 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { useRepoIssues, useRepoPullRequests } from '@/lib/github-client';
 
 import { repoSlugFromRemoteUrl } from '../IssueLinkPicker';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
@@ -37,8 +38,17 @@ export function useHistoryAndMission({
     ? JSON.stringify([preferredRepo?.localPath ?? '', preferredRepo?.name ?? '', preferredRepo?.remoteUrl ?? ''])
     : null;
   const [missionContext, setMissionContext] = useState<{ key: string; summary: MissionRepoSummary | null } | null>(null);
-  const missionContextResolved = missionContextKey !== null && missionContext?.key === missionContextKey;
-  const missionRepoSummary = missionContextResolved ? missionContext.summary : null;
+  const repoContextResolved = missionContextKey !== null && missionContext?.key === missionContextKey;
+  const resolvedRepo = repoContextResolved ? missionContext.summary : null;
+  const missionRepoSlug = resolvedRepo?.slug ?? null;
+  const issues = useRepoIssues(missionRepoSlug);
+  const prs = useRepoPullRequests(missionRepoSlug);
+  const missionContextResolved = repoContextResolved && (!missionRepoSlug || (!issues.isPending && !prs.isPending));
+  const missionRepoSummary = missionContextResolved && resolvedRepo ? {
+    ...resolvedRepo,
+    issueCount: Array.isArray(issues.data?.issues) ? issues.data.issues.length : null,
+    prCount: Array.isArray(prs.data?.prs) ? prs.data.prs.length : null,
+  } : null;
 
   const loadHistory = useCallback(async (search?: string) => {
     setHistoryLoading(true);
@@ -111,21 +121,6 @@ export function useHistoryAndMission({
         if (registeredCandidate) {
           nextRepoSummary = { name: registeredCandidate.name, localPath: registeredCandidate.localPath, remoteUrl: registeredCandidate.remoteUrl, slug: repoSlugFromRemoteUrl(registeredCandidate.remoteUrl), issueCount: null, prCount: null };
         }
-      }
-      if (nextRepoSummary?.slug) {
-        const [issuesResult, prsResult] = await Promise.allSettled([fetch(`/api/panel/issues?repo=${encodeURIComponent(nextRepoSummary.slug)}`), fetch(`/api/panel/prs?repo=${encodeURIComponent(nextRepoSummary.slug)}`)]);
-        if (!active) return;
-        let issueCount: number | null = null;
-        let prCount: number | null = null;
-        if (issuesResult.status === 'fulfilled' && issuesResult.value.ok) {
-          const issuesData = await issuesResult.value.json().catch(() => null) as { issues?: unknown[] } | null;
-          issueCount = Array.isArray(issuesData?.issues) ? issuesData.issues.length : 0;
-        }
-        if (prsResult.status === 'fulfilled' && prsResult.value.ok) {
-          const prsData = await prsResult.value.json().catch(() => null) as { prs?: unknown[] } | null;
-          prCount = Array.isArray(prsData?.prs) ? prsData.prs.length : 0;
-        }
-        nextRepoSummary = { ...nextRepoSummary, issueCount, prCount };
       }
       if (!active) return;
       setMissionContext({ key: missionContextKey, summary: nextRepoSummary });

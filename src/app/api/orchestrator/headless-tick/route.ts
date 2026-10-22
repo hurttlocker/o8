@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { runHeadlessSprintTick } from '@/lib/orchestrator/headless-loop';
 
+import { drainQueuedPacketSteers } from '@/lib/orchestrator/operator-mission-service/steer-queue';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await drainQueuedPacketSteers();
     const result = await runHeadlessSprintTick();
     return NextResponse.json({
       ok: true,

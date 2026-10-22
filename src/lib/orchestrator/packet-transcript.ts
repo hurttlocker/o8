@@ -6,6 +6,8 @@ import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getOwnedClaudeCodeTelemetrySources } from '@/lib/claude-code/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
+import { getSqlite } from '@/lib/db';
+import { operatorSteerFailure, QUEUED_STEER_NOTE } from '@/lib/orchestrator/operator-mission-service/steer-queue';
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
 import { readOwnedPiBuiltinTelemetryTail } from '@/lib/pi-builtin/telemetry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -244,21 +246,54 @@ function readTextPayload(payload: Record<string, unknown>, ...keys: string[]): s
 }
 
 function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
-  return getLaneEvents(laneId, 500)
-    .filter((event) => event.verb === 'steered_packet' || event.verb === 'steer_failed')
+  // Read intents separately so a long busy turn's delivery receipts cannot
+  // paginate the original message out of the pane.
+  const queued = getSqlite().prepare(`SELECT id, payload_json, timestamp FROM lane_events
+    WHERE lane_id = ? AND verb = 'steered_packet'
+      AND json_extract(payload_json, '$.deliveryState') = 'queued'
+    ORDER BY rowid DESC LIMIT 100`).all(laneId) as Array<{ id: string; payload_json: string; timestamp: string }>;
+  const events = [...new Map([
+    ...getLaneEvents(laneId, 500),
+    ...queued.map(row => ({ id: row.id, laneId, verb: 'steered_packet' as const,
+      actor: 'orchestrator' as const, payload: JSON.parse(row.payload_json), timestamp: row.timestamp })),
+  ].map(event => [event.id, event])).values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const intents = events.filter(event => event.verb === 'steered_packet');
+  const failures = new Map<string, typeof events[number]>();
+  for (const failure of events.filter(event => event.verb === 'steer_failed')) {
+    const intent = failure.payload.steerEventId
+      ? intents.find(event => event.id === failure.payload.steerEventId)
+      : [...intents].reverse().find(event => failure.payload.clientMutationId
+        ? event.payload.clientMutationId === failure.payload.clientMutationId
+        : event.timestamp <= failure.timestamp && event.payload.message === failure.payload.message);
+    if (intent) failures.set(intent.id, failure);
+  }
+  return events
+    .filter(event => event.verb === 'steered_packet' || (event.verb === 'steer_failed'
+      && ![...failures.values()].some(failure => failure.id === event.id)))
     .map((event, index) => {
       const source = readTextPayload(event.payload, 'source', 'actor') || event.actor || 'orchestrator';
       const text = readTextPayload(event.payload, 'message', 'text');
       const noteText = readTextPayload(event.payload, 'note', 'error');
       const stderrHead = readTextPayload(event.payload, 'stderrHead');
-      const note = [noteText, stderrHead].filter(Boolean).join('\n');
+      const delivery = event.payload.deliveryState === 'queued'
+        ? getSqlite().prepare(`SELECT payload_json FROM lane_events WHERE lane_id = ?
+          AND verb = 'steer_delivery' AND json_extract(payload_json, '$.steerEventId') = ?
+          ORDER BY rowid DESC LIMIT 1`).get(laneId, event.id) as { payload_json: string } | undefined
+        : undefined;
+      const receipt = delivery ? JSON.parse(delivery.payload_json) as { state: string; note: string } : null;
+      const failure = failures.get(event.id);
+      const failed = event.verb === 'steer_failed' || receipt?.state === 'failed' || Boolean(failure);
+      const note = operatorSteerFailure(receipt?.note ?? (event.payload.deliveryState === 'queued'
+        ? QUEUED_STEER_NOTE : failure
+          ? [readTextPayload(failure.payload, 'note', 'error'), readTextPayload(failure.payload, 'stderrHead')].filter(Boolean).join('\n')
+          : [noteText, stderrHead].filter(Boolean).join('\n')));
       return {
         seq: index + 1,
         ts: event.timestamp,
         type: 'steer',
         source,
         text: text || note || 'Steer requested.',
-        failed: event.verb === 'steer_failed',
+        failed,
         ...(note ? { note } : {}),
       };
     });
