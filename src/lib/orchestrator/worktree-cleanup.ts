@@ -149,8 +149,8 @@ export async function removeMergedWorktree(
       return { removed: false, reason: 'ownership-unavailable' };
     }
 
-    // Post-merge callers require clean source. Explicit unmerged Close uses
-    // the manager's exact-owner preservation boundary to bank source first.
+    // Every retirement path requires clean source. The manager preserves the
+    // committed head and unique artifacts before removing the exact checkout.
     const cleanliness = await isWorktreeDirty(worktreePath);
     if (cleanliness === 'dirty') {
       console.log(

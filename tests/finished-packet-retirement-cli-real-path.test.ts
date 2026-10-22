@@ -59,6 +59,8 @@ async function ownedWorkspace(repo: Awaited<ReturnType<typeof addRepo>>, packetI
   const workspacePath = path.join(resolveWorktreeRootLayout(repo.localPath).primaryBase, worktreeId);
   mkdirSync(path.dirname(workspacePath), { recursive: true });
   git(repo.localPath, 'clone', '--quiet', '--no-hardlinks', '--no-checkout', repo.localPath, workspacePath);
+  git(workspacePath, 'config', 'user.name', 'o8 regression');
+  git(workspacePath, 'config', 'user.email', 'o8@example.test');
   git(workspacePath, 'checkout', '-qb', branch, revision);
   const identity = await captureWorktreeMaterializationIdentity(workspacePath);
   const parentIdentity = await captureWorktreeMaterializationIdentity(path.dirname(workspacePath));
