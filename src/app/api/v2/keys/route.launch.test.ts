@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({ dir: '', runtime: '', envs: [] as NodeJS.Proce
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir, migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => undefined) }));
 vi.mock('@/lib/runtimes/shared/cli-resolver', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/cli-resolver')>(), resolveCli: vi.fn(async () => ({ path: process.execPath })) }));
+vi.mock('@/lib/runtimes/shared/cli-locate', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/cli-locate')>(), resolveClaudeBinary: () => process.execPath }));
 vi.mock('@/lib/runtimes/shared/owned-session/workspace-spawn-guard', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/owned-session/workspace-spawn-guard')>(), assertOwnedWorkspaceSpawnAvailable: vi.fn(async () => ({ status: 'available' })) }));
 vi.mock('@/lib/hermes/runtime-resolution', () => ({ resolveHermesBinary: () => process.execPath }));
 vi.mock('@/lib/deepseek-harness/runtime-resolution', () => ({ resolveDeepSeekHarnessLaunch: async () => ({ command: process.execPath, args: [] }) }));
