@@ -57,7 +57,9 @@ export function packetWorktreeProvisionError(
       );
     }
   }
-  if (lane?.status === 'launching') {
+  const timedOutPreparation = lane?.status === 'awaiting_orchestrator'
+    && lane.lastEventLabel === 'launch_stalled' && lane.sessionKey === null;
+  if (lane?.status === 'launching' || timedOutPreparation) {
     setLaneStatus(
       laneId,
       storageRelease.decision === 'deferred' ? 'awaiting_input' : laneStatus ?? 'failed',
