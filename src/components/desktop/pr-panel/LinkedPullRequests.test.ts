@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { LinkedPullRequests } from './LinkedPullRequests';
@@ -8,8 +9,8 @@ import { readLinkedPullRequests } from './linked-pr-store';
 
 vi.mock('../FloatingDialog', () => ({ FloatingDialog: ({ children, title }: { children: React.ReactNode; title: string }) => createElement('div', { role: 'dialog', 'aria-label': title }, children) }));
 const repos = [{ id: 'repo', name: 'repo', localPath: '/workspace/repo', remoteUrl: 'https://github.com/example/repo.git' }] as RepoRegistryEntry[];
-let host: HTMLDivElement; let root: Root; let fetchMock: ReturnType<typeof vi.fn>;
-const render = (context = 'tab:one', tabId: string | null = 'one', active = true) => act(async () => root.render(createElement(LinkedPullRequests, { context, tabId, active, repoPath: '/workspace/repo', repos })));
+let host: HTMLDivElement; let root: Root; let fetchMock: ReturnType<typeof vi.fn>; let client: QueryClient;
+const render = (context = 'tab:one', tabId: string | null = 'one', active = true) => act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(LinkedPullRequests, { context, tabId, active, repoPath: '/workspace/repo', repos }))));
 const click = (text: string) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === text)!.click());
 async function submit(value = '#17') {
   await click('Link PR');
@@ -22,13 +23,14 @@ async function submit(value = '#17') {
 }
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); window.localStorage.clear();
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   fetchMock = vi.fn(async (url: string) => url.includes('/api/panel/prs/17?')
     ? Response.json({ pr: { number: 17, title: 'Improve the extension flow', resolvedRepo: 'example/repo' } })
     : Response.json({ repo: 'example/repo', prs: [], nextPage: null }));
   vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('conversation-linked PR entry point', () => {
   it('verifies a PR, saves it, deduplicates it, and restores it after remounting', async () => {
     await render(); expect(fetchMock).not.toHaveBeenCalled();
