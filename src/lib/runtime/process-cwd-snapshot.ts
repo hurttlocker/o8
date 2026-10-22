@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess } from './close-process-observation';
+import { closeObservedHelperSettled, hasCloseProcessObservation, observeCloseProcess, refreshCloseProcessObservation } from './close-process-observation';
 import { readCloseOpenFileRows } from './process-open-files-snapshot';
 
 const execFileAsync = promisify(execFile);
@@ -120,6 +120,9 @@ function defaultExecFile(
 export async function readProcessCwdSnapshot(
   options: ProcessCwdSnapshotOptions = {},
 ): Promise<ProcessCwdSnapshot> {
+  // A forced destructive-boundary read must replace every shared projection,
+  // including prior helper settlement, rather than returning a cached cwd.
+  if (options.forceRefresh) refreshCloseProcessObservation();
   const snapshot = await observeCloseProcess('cwd', async (): Promise<ProcessCwdSnapshot> => {
     if (!hasCloseProcessObservation() || options.execFile) return readNativeProcessCwdSnapshot(options);
     const capturedAt = Date.now();

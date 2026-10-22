@@ -86,4 +86,34 @@ describe('close-scoped native observations', () => {
       });
     } finally { read.mockRestore(); }
   });
+
+  it('forceRefresh observes a new holder even when its PID was previously settled', async () => {
+    const read = vi.spyOn(openFiles, 'readCloseOpenFileRows')
+      .mockResolvedValueOnce(parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/neutral\n'))
+      .mockResolvedValueOnce(parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/claim\n'));
+    try {
+      await withCloseProcessObservation(async () => {
+        await readProcessCwdSnapshot();
+        settleCloseObservedHelper(12);
+        expect(await readProcessCwdSnapshot()).toMatchObject({ status: 'ready', rows: [] });
+        expect(await readProcessCwdSnapshot({ forceRefresh: true })).toMatchObject({
+          status: 'ready', rows: [{ pid: 12, cwd: '/claim' }],
+        });
+        expect(read).toHaveBeenCalledTimes(2);
+      });
+    } finally { read.mockRestore(); }
+  });
+
+  it('forceRefresh refuses newly inconclusive evidence after a clear cached observation', async () => {
+    const read = vi.spyOn(openFiles, 'readCloseOpenFileRows')
+      .mockResolvedValueOnce(parseOpenFileSnapshot('p12\ncnode\nfcwd\ntDIR\nn/neutral\n'))
+      .mockRejectedValueOnce(new Error('native coverage became inconclusive'));
+    try {
+      await withCloseProcessObservation(async () => {
+        expect((await readProcessCwdSnapshot()).status).toBe('ready');
+        expect((await readProcessCwdSnapshot({ forceRefresh: true })).status).toBe('unavailable');
+        expect(read).toHaveBeenCalledTimes(2);
+      });
+    } finally { read.mockRestore(); }
+  });
 });

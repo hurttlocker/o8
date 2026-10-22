@@ -65,15 +65,21 @@ function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
 }
 function readRevision() {
-  const headCommit = git(['rev-parse', '--verify', 'HEAD^{commit}']).trim();
-  const treeSha = git(['rev-parse', '--verify', 'HEAD^{tree}']).trim();
-  if (git(['ls-files', '-v', '-z']).split('\0').some((line) => /^[a-zS] /.test(line))) {
-    throw new Error('Artifact capture refuses hidden index flags.');
+  try {
+    const headCommit = git(['rev-parse', '--verify', 'HEAD^{commit}']).trim();
+    const treeSha = git(['rev-parse', '--verify', 'HEAD^{tree}']).trim();
+    if (git(['ls-files', '-v', '-z']).split('\0').some((line) => /^[a-zS] /.test(line))) {
+      throw new Error('Artifact capture refuses hidden index flags.');
+    }
+    if (git(['ls-files', '--stage', '-z']).split('\0').some((line) => line.startsWith('160000 '))) {
+      throw new Error('Artifact capture requires separate submodule preservation.');
+    }
+    return { headCommit, treeSha };
+  } catch {
+    // Failed source inspection, including hidden index flags, must retain its
+    // source-revision refusal instead of becoming an ignored-content failure.
+    throw Object.assign(new Error('Artifact source revision is uncertain.'), { code: 'unbanked_source' });
   }
-  if (git(['ls-files', '--stage', '-z']).split('\0').some((line) => line.startsWith('160000 '))) {
-    throw new Error('Artifact capture requires separate submodule preservation.');
-  }
-  return { headCommit, treeSha };
 }
 function verifyGit(input) {
   const truth = readRevision();

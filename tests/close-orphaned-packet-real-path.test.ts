@@ -428,6 +428,92 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
     }
   }, 120_000);
 
+  it.each(['live holder', 'inconclusive probe'] as const)(
+    'refuses %s arriving after purge settlement before final removal', async (evidence) => {
+      const source = await fixture('missing');
+      const purge = exactPurge.purgeExactDirectory;
+      let holder: ChildProcess | undefined;
+      const originalPath = process.env.PATH;
+      const interception = vi.spyOn(exactPurge, 'purgeExactDirectory').mockImplementation(
+        (candidate, identity, before, captured, released, ...rest) => purge(candidate, identity, before, captured,
+          async (candidatePath) => {
+            // Native content release and helper close have already completed.
+            // Enter the still-owned empty claim before its final authority check.
+            if (evidence === 'live holder') {
+              holder = spawn(process.execPath, ['-e', 'process.stdout.write("ready");process.stdin.resume();'], {
+                cwd: candidatePath, stdio: ['pipe', 'pipe', 'pipe'],
+              });
+              children.add(holder);
+              await once(holder.stdout!, 'data');
+            } else {
+              const shims = path.join(root, 'final-probe-shim-' + randomUUID());
+              mkdirSync(shims);
+              const shim = path.join(shims, 'lsof');
+              writeFileSync(shim, '#!/bin/sh\nprintf "native coverage unavailable" >&2\nexit 1\n');
+              chmodSync(shim, 0o755);
+              process.env.PATH = shims + path.delimiter + originalPath;
+            }
+            await released?.(candidatePath);
+          }, ...rest),
+      );
+      try {
+        const response = await httpClose(source.packetId);
+        const body = await response.json();
+        expect(response.status, JSON.stringify(body)).toBe(409);
+        expect(body.error.code).toBe('close_failed');
+        if (holder) expect(body.error.message).toContain(String(holder.pid));
+        else expect(body.error.message).toMatch(/lsof.*unavailable or inconclusive/);
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        expect(claim.state).toBe('purging');
+        expect(existsSync(claim.claimPath)).toBe(true);
+        expect(statSync(claim.claimPath).ino).toBe(claim.sourceIdentity?.inode);
+        expect(getLane(source.lane.id)?.status).not.toBe('archived');
+        expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      } finally {
+        process.env.PATH = originalPath;
+        interception.mockRestore();
+        if (holder) {
+          const closed = once(holder, 'close');
+          holder.stdin!.end();
+          await closed;
+          children.delete(holder);
+        }
+      }
+    }, 120_000,
+  );
+
+  it.each(['--skip-worktree', '--assume-unchanged'] as const)(
+    'keeps the original source-revision refusal for %s through HTTP, CLI and MCP', async (flag) => {
+      const source = await fixture('missing');
+      const retire = exactRetirement.retireExactManagedDirectory;
+      const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation(input => retire({
+        ...input, afterRetirementRename: async () => {
+          const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+          git(claim.claimPath, 'update-index', flag, 'source.txt');
+        },
+      }));
+      try {
+        const response = await httpClose(source.packetId);
+        const body = await response.json();
+        expect(response.status).toBe(409);
+        expect(body.error).toEqual({
+          code: 'close_failed',
+          message: 'Close refused: unbanked source or uncertain source/snapshot revision; preserve the edits before retrying. The checkout remains held.',
+        });
+        const cli = await cliClose(source.packetId);
+        expect(cli.exitCode).not.toBe(0);
+        expect(JSON.parse(cli.stderr.trim()).error).toMatchObject(body.error);
+        const mcp = await handleClosePacketUnmerged({ packetId: source.packetId, disposition: 'superseded' });
+        expect(mcp.isError).toBe(true);
+        expect(JSON.parse((mcp.content[0] as { text: string }).text)).toMatchObject({ error: body.error });
+        const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+        expect(readFileSync(path.join(claim.claimPath, 'source.txt'), 'utf8')).toBe('completed work\n');
+        expect(git(claim.claimPath, 'ls-files', '-v', 'source.txt')).toMatch(/^[Sh] /);
+        expect(exactSnapshot(source.worktree.path)?.state).not.toBe('retired');
+      } finally { interception.mockRestore(); }
+    }, 120_000,
+  );
+
   it('refuses a forged purge helper witness without releasing captured bytes', async () => {
     const source = await fixture('missing');
     const purge = exactPurge.purgeExactDirectory;

@@ -182,9 +182,9 @@ describe('explicit adopted-elsewhere Close with an archived terminal owner', () 
     expect(await replay.json()).toMatchObject({ result: { alreadyClosed: true } });
     const timing = eventsAfter.findLast(event => event.verb === 'close_timing')?.payload;
     expect(timing).toMatchObject({ totalMs: expect.any(Number), artifactHelperStarts: 1 });
-    // Admission, immediate pre-rename and paused pre-purge each need evidence
-    // from their own generation; the accepted ceiling preserves all three.
-    expect((timing?.scans as { openFiles: number } | undefined)?.openFiles).toBeLessThanOrEqual(3);
+    // Admission, the manager guard, pre-rename, paused purge and final removal
+    // retain fresh evidence, including after the purge helper has exited.
+    expect((timing?.scans as { openFiles: number } | undefined)?.openFiles).toBe(5);
   }, 30_000);
 
   it('keeps the recovered owner held after a retirement refusal and safely retries', async () => {

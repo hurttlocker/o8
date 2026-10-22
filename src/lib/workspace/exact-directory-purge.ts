@@ -1,4 +1,4 @@
-import { settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
+import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
 import { spawn } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -114,7 +114,10 @@ export async function readCapturedPurgeCwdSnapshot(
     || stat.ino !== captured.inode || await realpath(captured.candidatePath) !== captured.candidatePath) {
     throw new Error('Captured purge namespace changed during the process probe.');
   }
-  const snapshot = await readProcessCwdSnapshot({ forceRefresh: true });
+  // Close callers explicitly refresh after readers settle at the paused seam.
+  // Its bracketed helper checks share that generation; other callers force a
+  // native read on each check rather than relying on the inventory cache.
+  const snapshot = await readProcessCwdSnapshot({ forceRefresh: !hasCloseProcessObservation() });
   const probe = await probeMetadataLockProcessIdentity(captured.pid);
   if (snapshot.status !== 'ready' || probe.state !== 'live'
     || !sameMetadataLockProcessIdentity(probe.identity, captured.identity)

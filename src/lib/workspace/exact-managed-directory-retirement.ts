@@ -292,6 +292,9 @@ async function finishClaimUnlocked(
           identity: expected, verifyContents: false, capturedPurge,
         });
       }, async (candidatePath) => {
+      // Content release has settled the native helper. Holders may have entered
+      // since its paused proof; final removal needs its own evidence generation.
+      refreshCloseProcessObservation();
       await verifyFinalRemovalAuthority(claim);
       const emptyClaim = await directoryIdentity(candidatePath);
       if (!emptyClaim || !sameIdentity(emptyClaim, expected)) {
