@@ -63,7 +63,7 @@ function releaseOperation(directory: string, operation: Operation): boolean {
   } catch { return false; }
 }
 
-export function inspectCliOperationAdmission(): {
+export function inspectCliOperationAdmission(reservationId?: string): {
   blocked: boolean;
   installers: CliInstallerActivity[];
   code?: string;
@@ -94,7 +94,8 @@ export function inspectCliOperationAdmission(): {
     const runtime = name.slice(0, -'-cli-update.lock'.length);
     if (!installers.some(item => item.runtime === runtime)) installers.push({ runtime, state: 'unconfirmed', startedAt: null });
   }
-  const blocked = operation !== null || legacy.length > 0;
+  const ownRestart = operation && operation !== 'unknown' && operation.kind === 'restart' && operation.id === reservationId;
+  const blocked = (operation !== null && !ownRestart) || legacy.length > 0;
   const uncertain = operation === 'unknown' || installers.some(item => item.state !== 'active');
   return { blocked, installers, ...(blocked ? {
     code: uncertain ? 'cli_update_recovery_required' : operation && operation !== 'unknown' && operation.kind === 'restart' ? 'app_restart_pending' : 'cli_update_in_progress',
@@ -133,4 +134,12 @@ export function releaseOwnedCliUpdateLock(path: string, operationId: string): vo
     const owner = JSON.parse(readFileSync(path, 'utf8')) as { operationId?: unknown };
     if (owner.operationId === operationId) unlinkSync(path);
   } catch { /* Keep legacy, replaced and uncertain owners for explicit recovery. */ }
+}
+
+/** Only an authenticated native caller with the live reservation can inspect under it. */
+export function validRestartReservation(id: unknown): id is string {
+  if (typeof id !== 'string' || !ID.test(id)) return false;
+  const operation = readOperation(join(getDataDir(), DIRECTORY));
+  return Boolean(operation && operation !== 'unknown' && operation.kind === 'restart'
+    && operation.id === id && ownerAlive(operation.pid) === true);
 }

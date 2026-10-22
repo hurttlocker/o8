@@ -39,17 +39,25 @@ fn now_ms() -> u64 {
 }
 
 pub async fn run<R: Runtime>(app: AppHandle<R>) {
-    run_with_effects(
-        app,
-        |app, client, base, token| auto_apply::NativeEffects {
-            app,
-            client,
-            base,
-            token,
-        },
-        Duration::from_secs(60),
-    )
-    .await;
+    loop {
+        let owned = app.clone();
+        let result = tauri::async_runtime::spawn(async move {
+            run_with_effects(
+                owned,
+                |app, client, base, token| auto_apply::NativeEffects {
+                    app,
+                    client,
+                    base,
+                    token,
+                },
+                Duration::from_secs(60),
+            )
+            .await;
+        })
+        .await;
+        log::warn!("[updater] scheduler stopped: {result:?}; restarting task");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
@@ -74,6 +82,9 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
     let mut served_request = String::new();
     let mut auto_apply = auto_apply::AutoApply::new(auto_interval);
     loop {
+        // Only the deliberate sleep contributes to gap detection, not awaited I/O.
+        let signaled = WOKE.swap(false, Ordering::AcqRel);
+        let woke = schedule.due(now_ms(), false) || (signaled && schedule.wake(now_ms()));
         // Boot starts before port allocation. Never fall back to another running server.
         let url = std::env::var("O8_API_PORT")
             .ok()
@@ -94,11 +105,7 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             .as_ref()
             .and_then(|v| v["checkRequestedAt"].as_str())
             .unwrap_or_default();
-        if schedule.due(
-            now_ms(),
-            WOKE.swap(false, Ordering::AcqRel)
-                || (!request.is_empty() && request != served_request),
-        ) {
+        if woke || (!request.is_empty() && request != served_request) {
             report = Some(super::run_check(&app).await);
             served_request = request.to_string();
             // Checking the network can itself take seconds. That is not a sleep/wake gap.
@@ -127,6 +134,7 @@ pub(crate) async fn run_with_effects<R: Runtime, E: auto_apply::Effects>(
             );
             auto_apply.tick(&client, url, &token, &effects).await;
         }
+        schedule.awake(now_ms());
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }

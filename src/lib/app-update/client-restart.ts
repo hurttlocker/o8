@@ -19,7 +19,8 @@ export interface InstallUpdateOutcome {
 }
 
 export interface InstallUpdateOptions {
-  beforeRestart?: () => Promise<boolean>;
+  beforeRestart?: (() => Promise<boolean>) & { interruptWork?: () => boolean };
+  interruptWork?: () => boolean;
   /**
    * False when the running install cannot replace itself (a deb/rpm Linux
    * install — see `isSelfUpdatableInstall`). Such a call opens the release
@@ -71,7 +72,7 @@ export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}
   if (options.beforeRestart && !(await options.beforeRestart())) return false;
   const { invoke } = await import('@tauri-apps/api/core');
   let reservationId: string;
-  try { reservationId = await invoke<string>('prepare_app_restart'); }
+  try { reservationId = await invoke<string>('prepare_app_restart', { force: (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true }); }
   catch (error) { if (String(error).includes('cli_operation_blocked:')) return false; throw error; }
   if (typeof reservationId !== 'string' || !reservationId.trim()) throw new Error('Native restart reservation was not recorded.');
   try {

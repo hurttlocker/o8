@@ -1,3 +1,4 @@
+import { reserveWorkLaunch } from '@/lib/app-update/work-launch-admission';
 /**
  * Bundled Pi as a packet worker (#3258): the Pi SDK session from
  * `src/lib/pi/sdk/session.ts` behind the owned-session contract, on the managed
@@ -284,7 +285,8 @@ class PiStartTimeoutError extends Error {
 }
 
 async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' | 'resume') {
-  const { session, run } = await createRun(surfaceId, prompt, mode);
+  const admission = reserveWorkLaunch(`Agent session ${surfaceId}`);
+  const { session, run } = await createRun(surfaceId, prompt, mode).catch(error => { admission.release(); throw error; });
   let finished!: () => void;
   const turn: LiveTurn = { runId: run.id, log: Promise.resolve(), stopped: false,
     done: new Promise<void>((resolve) => { finished = resolve; }) };
@@ -342,7 +344,9 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     })]);
   } catch (error) {
     // A start that completes after the deadline is closed, never left running unowned.
-    if (error instanceof PiStartTimeoutError) void starting.then((late) => late.close()).catch(() => {});
+    if (error instanceof PiStartTimeoutError) {
+      void starting.then((late) => late.close()).finally(admission.release).catch(() => {});
+    } else admission.release();
     const detail = error instanceof Error ? error.message : String(error);
     const known = /^The Pi prototype (?:needs Node|does not support)/.test(detail)
       || (error instanceof Error && (error.name === 'PiModelChoiceError' || error instanceof PiStartTimeoutError));
@@ -356,6 +360,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     clearTimeout(deadline);
   }
   const started = turn.session;
+  try { admission.started(started.pid ?? process.pid); } catch { /* Retain startup ownership through session close. */ }
   void (async () => {
     await withSession(surfaceId, async () => {
       const current = await findSession(surfaceId, false);
@@ -369,7 +374,7 @@ async function dispatchPrompt(surfaceId: string, prompt: string, mode: 'launch' 
     await runTurn(turn, surfaceId, run, prompt);
   })().catch((error) => {
     console.error('[pi-builtin] turn settlement failed', error);
-  }).finally(finished);
+  }).finally(() => { admission.release(); finished(); });
   return {
     ok: true,
     note: mode === 'launch' ? 'Pi (built-in) started the first turn.' : 'Pi (built-in) started the follow-up turn.',

@@ -1,3 +1,4 @@
+import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
 import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
 import { controlAutoApply } from '@/lib/app-update/auto-apply';
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
     if (outcome !== 'started' && outcome !== 'installed' && outcome !== 'failed') {
       return invalidState('invalid_install_outcome', 'install.outcome must be started, installed, or failed.');
     }
+    recoverStoppedNativeTask();
     if (['installing', 'restarting'].includes(getAppUpdateState().autoApply?.phase ?? '')) {
       return NextResponse.json({ error: { code: 'update_install_in_progress',
         message: 'The native updater is already installing this update.' } }, { status: 409, headers: NO_STORE_HEADERS });

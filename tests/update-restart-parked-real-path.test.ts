@@ -4,6 +4,7 @@
  * and read back through the real GET /api/panel/update/apply route.
  */
 
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -133,6 +134,75 @@ describe('native auto-apply through the real state route without UpdateCard', ()
     await send({ action: 'failed', attemptId: admitted.attemptId, error: 'fixture finished' });
     await updateOperatorDefaults({ updateAutoApply: 'off' });
     expect((await send({ action: 'admit' })).allowed).toBe(false);
+  });
+
+  it('admits a replacement native task only after a stopped-task proof', async () => {
+    const { POST: control } = await import('@/app/api/panel/app/update-state/route');
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    const { recordAppUpdateInstall, recordAutoApply } = await import('@/lib/app-update/relaunch-state');
+    await updateOperatorDefaults({ updateAutoApply: 'idle' });
+    const id = randomUUID();
+    recordAppUpdateInstall({ outcome: 'started', version: '0.1.999' });
+    recordAutoApply({ attemptId: id, version: '0.1.999', installed: false, phase: 'installing', blockers: { live: [], parked: [] }, error: null });
+    setAppUpdateState({ updatePending: true, version: '0.1.999' });
+    const send = () => control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ autoApply: { action: 'admit', attemptId: randomUUID() } }),
+    }));
+    expect(await (await send()).json()).toMatchObject({ allowed: false });
+    mkdirSync(join(dataDir, 'native-update-tasks'), { recursive: true });
+    writeFileSync(join(dataDir, 'native-update-tasks', `${id}.json`), JSON.stringify({ attemptId: id, pid: process.pid, status: 'stopped' }));
+    expect(await (await send()).json()).toMatchObject({ allowed: true });
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'failed', error: 'fixture finished' });
+  });
+
+  it('inspects current work under its validated restart reservation before cleanup', async () => {
+    const { POST: control } = await import('@/app/api/panel/app/update-state/route');
+    const id = randomUUID();
+    const directory = join(dataDir, 'cli-operation-admission');
+    mkdirSync(directory);
+    writeFileSync(join(directory, `${id}.json`), JSON.stringify({ version: 1, id, kind: 'restart', pid: process.pid, startedAt: new Date().toISOString(), stage: 'preparing' }));
+    const inspect = (force = false) => control(new Request('http://localhost/api/panel/app/update-state', { method: 'POST',
+      body: JSON.stringify({ autoApply: { action: 'inspect-restart', reservationId: id, force } }),
+    }));
+    try {
+      expect(await (await inspect()).json()).toMatchObject({ allowed: true });
+      const { createInlineTerminalHost } = await import('@/lib/ws-server/terminal-host-client');
+      const spawn = vi.fn();
+      const host = createInlineTerminalHost({ spawn });
+      expect(() => host.spawn({ file: 'sh', args: [], cwd: dataDir, env: {}, cols: 80, rows: 24 })).toThrow(/restart/i);
+      expect(spawn).not.toHaveBeenCalled();
+      sessions = [{ name: 'Late terminal', kind: 'managed-process', clientCount: 0 }];
+      expect(await (await inspect()).json()).toMatchObject({ allowed: false });
+      expect(await (await inspect(true)).json()).toMatchObject({ allowed: true });
+      writeFileSync(join(dataDir, 'fixture-cli-update.lock'), 'CLI installer');
+      expect(await (await inspect(true)).json()).toMatchObject({ allowed: false });
+    } finally {
+      sessions = [];
+      rmSync(join(dataDir, 'fixture-cli-update.lock'), { force: true });
+      rmSync(directory, { recursive: true });
+    }
+  });
+
+  it('does not automatically readmit a failed installer version, but admits a new release', async () => {
+    const { POST: control } = await import('@/app/api/panel/app/update-state/route');
+    const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+    const { recordAppUpdateInstall, recordAutoApply } = await import('@/lib/app-update/relaunch-state');
+    await updateOperatorDefaults({ updateAutoApply: 'idle' });
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'failed', error: 'fixture reset' });
+    setAppUpdateState({ updatePending: true, version: '0.1.999' });
+    const send = async (autoApply: object) => (await control(new Request('http://localhost/api/panel/app/update-state', {
+      method: 'POST', body: JSON.stringify({ autoApply }),
+    }))).json();
+    const first = await send({ action: 'admit', attemptId: randomUUID() });
+    expect(first.allowed).toBe(true);
+    await send({ action: 'failed', attemptId: first.attemptId, error: 'Windows extraction failed' });
+    expect((await send({ action: 'admit', attemptId: randomUUID() })).allowed).toBe(false);
+    setAppUpdateState({ updatePending: true, version: '0.2.0' });
+    expect((await send({ action: 'admit', attemptId: randomUUID() })).allowed).toBe(true);
+    recordAutoApply(null);
+    recordAppUpdateInstall({ outcome: 'failed', error: 'fixture finished' });
   });
 
   it('does not claim a native install when manual installation starts during live inventory', async () => {

@@ -185,7 +185,7 @@ describe('explicit staged-update restart through the real rail and confirmation 
     await vi.waitFor(() => expect(button('Restart anyway')).toBeDefined());
     invoke.mockRejectedValueOnce('cli_operation_blocked: A CLI update started while confirming.');
     await act(async () => button('Restart anyway')!.click());
-    expect(invoke).toHaveBeenCalledExactlyOnceWith('prepare_app_restart');
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('prepare_app_restart', { force: true });
     expect(button('Restart anyway')).toBeUndefined();
   });
 

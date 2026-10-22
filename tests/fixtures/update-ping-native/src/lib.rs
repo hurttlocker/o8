@@ -3,6 +3,8 @@
 mod launch_updater;
 #[path = "../../../../src-tauri/src/update_ping.rs"]
 mod update_ping;
+#[path = "../../../../src-tauri/src/restart_job_drain.rs"]
+mod restart_job_drain;
 fn resolve_ws_token() -> String {
     "scheduler-fixture".into()
 }
@@ -11,6 +13,8 @@ fn resolve_ws_token() -> String {
 mod tests {
     mod scheduler_tests;
     mod auto_apply_failure_tests;
+    mod install_journal_tests;
+    mod production_install_tests;
     use super::update_ping;
     use std::{
         collections::BTreeMap,

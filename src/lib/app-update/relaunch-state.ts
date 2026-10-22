@@ -3,6 +3,7 @@ import type { AppUpdateBlockers } from './update-hub-client';
 
 export interface AppUpdateAutoApplyState {
   attemptId: string | null;
+  manualRetryRequired?: boolean;
   phase: 'installing' | 'restarting' | 'waiting' | 'failed';
   version: string;
   installed: boolean;

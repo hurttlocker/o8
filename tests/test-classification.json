@@ -5340,7 +5340,16 @@
       "path": "tests/update-restart-parked-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
+      "path": "tests/update-work-start-reservation.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "terminal-host",
+        "terminal-tool"
       ]
     },
     {

@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { recoverStoppedNativeTask } from './native-task';
+import { validRestartReservation } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { getOperatorDefaults } from '@/lib/operator/defaults';
 import { checkFreshness, UPDATE_CHECK_INTERVAL_MS } from './fresh-check';
@@ -10,6 +12,13 @@ import { describeUpdateBlockers } from './update-card-view';
 
 /** Native owns the timer and effects. Every admission reads current persisted work. */
 export async function controlAutoApply(input: Record<string, unknown>) {
+  if (input.action === 'inspect-restart') {
+    if (!validRestartReservation(input.reservationId)) return { allowed: false, error: { code: 'restart_reservation_invalid' } };
+    const idle = await getUpdateIdleWindow(input.reservationId);
+    const protectedWork = idle.active.cliInstallers?.length || idle.active.restartPending;
+    return { allowed: !protectedWork && (input.force === true || idle.idle || idle.idleExceptParked), idle };
+  }
+  recoverStoppedNativeTask();
   const state = getAppUpdateState();
   const current = state.autoApply;
   const result = (allowed: boolean, extra: object = {}) => ({ allowed, state: getAppUpdateState(), ...extra });
@@ -21,7 +30,7 @@ export async function controlAutoApply(input: Record<string, unknown>) {
     if (input.action === 'failed') {
       const error = typeof input.error === 'string' ? input.error.slice(0, 1_000) : 'Native update failed.';
       recordAppUpdateInstall({ outcome: 'failed', version: current.version, error });
-      recordAutoApply({ ...current, phase: 'failed', error });
+      recordAutoApply({ ...current, phase: 'failed', error, manualRetryRequired: true });
       return result(false);
     }
   }
@@ -36,6 +45,7 @@ export async function controlAutoApply(input: Record<string, unknown>) {
   if (!isSelfUpdatableInstall({ platform: normalizeInstallPlatform(process.platform), arch: process.arch,
     appImagePath: process.env.APPIMAGE ?? null, updaterSelfUpdatable: null })) return result(false);
   if (input.action === 'admit') {
+    if (current?.manualRetryRequired && current.version === state.version) return result(false);
     if (current?.attemptId && current.attemptId === input.attemptId && current.phase !== 'failed') {
       return result(true, { attemptId: current!.attemptId, version: current!.version, installed: current!.installed });
     }

@@ -14,6 +14,7 @@
  * `o8 run stop <runId>` kills a registered managed run.
  */
 
+import { reserveWorkLaunch } from '../../../src/lib/app-update/work-launch-admission';
 import { randomUUID } from 'node:crypto';
 import { extractRunCommand, loadRunSettlementBinding, registerRunWithReplay, settlementBindingDigest } from './run-settlement.js';
 import { execFileSync } from 'node:child_process';
@@ -444,6 +445,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     `exit $__o8_ec`,
   ].join('; ');
 
+  const workLaunch = reserveWorkLaunch(`Run: ${command[0]}`);
   try {
     execFileSync(
       'tmux',
@@ -451,6 +453,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
       { windowsHide: true, timeout: 10_000, stdio: 'ignore' },
     );
   } catch (err) {
+    workLaunch.release();
     for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
       try { rmSync(f, { force: true }); } catch {}
     }
@@ -474,6 +477,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     }).trim();
     panePid = Number.parseInt(out, 10) || null;
   } catch { /* informational only */ }
+  workLaunch.started(panePid ?? undefined);
   let processGroupId: number | null = null;
   if (panePid && process.platform !== 'win32') {
     try {
@@ -572,6 +576,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   try {
     writeFileSync(goFile, ''); // release — command starts only after registration
+    if (registered) workLaunch.release(); // Otherwise retain pane-PID ownership until confirmed exit.
   } catch (error) {
     process.off('SIGINT', onSigint);
     await discardUnreleasedManagedRun({

@@ -35,6 +35,7 @@ export interface UpdateIdleResponse {
       ownedSessions?: Array<{ surfaceId?: string }>;
       cloudJobs?: Array<{ id?: string }>;
       cliInstallers?: Array<{ runtime?: string; state?: string }>;
+      workLaunches?: Array<{ label?: string }>;
       restartPending?: boolean;
     };
   };
@@ -81,6 +82,7 @@ export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppU
     ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
     ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),
     ...(idle?.active?.ownedSessions ?? []).map(session => `Agent session ${name(session.surfaceId, '')}`.trim()),
+    ...(idle?.active?.workLaunches ?? []).map(work => name(work.label, 'Starting process')),
     ...(idle?.active?.cloudJobs ?? []).map(job => `Cloud job ${name(job.id, '')}`.trim()),
     ...(idle?.active?.restartPending ? ['Another app restart is already reserved'] : []),
     ...(idle?.active?.cliInstallers ?? []).map(installer => installer.state === 'active'

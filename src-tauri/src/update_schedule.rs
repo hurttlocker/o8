@@ -1,14 +1,29 @@
 //! Wall-clock heartbeats run on native time, including with no window mounted.
 const INTERVAL_MS: u64 = 30 * 60 * 1_000;
+const WAKE_DEBOUNCE_MS: u64 = 30_000;
 const WAKE_GAP_MS: u64 = 5_000;
 
 #[derive(Default)]
 pub struct UpdateSchedule {
     last_tick: Option<u64>,
     last_check: Option<u64>,
+    last_wake: Option<u64>,
 }
 
 impl UpdateSchedule {
+    pub fn awake(&mut self, now: u64) {
+        self.last_tick = Some(now);
+    }
+    pub fn wake(&mut self, now: u64) -> bool {
+        if self
+            .last_wake
+            .is_some_and(|last| now >= last && now.saturating_sub(last) < WAKE_DEBOUNCE_MS)
+        {
+            return false;
+        }
+        self.last_wake = Some(now);
+        true
+    }
     pub fn completed(&mut self, now: u64) {
         self.last_tick = Some(now);
         self.last_check = Some(now);
@@ -19,7 +34,7 @@ impl UpdateSchedule {
             .is_some_and(|last| now.saturating_sub(last) > WAKE_GAP_MS || now < last);
         self.last_tick = Some(now);
         let due = requested
-            || woke
+            || (woke && self.wake(now))
             || self
                 .last_check
                 .map_or(true, |last| now.saturating_sub(last) >= INTERVAL_MS);

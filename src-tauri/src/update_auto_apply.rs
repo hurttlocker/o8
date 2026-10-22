@@ -1,4 +1,8 @@
 //! Native automatic installs never depend on a webview listener or timer.
+#[path = "update_install_journal.rs"]
+pub(crate) mod install_journal;
+#[path = "update_task.rs"]
+mod task;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::future::Future;
@@ -6,6 +10,9 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, Runtime};
 
 pub trait Effects: Send + Sync {
+    fn data_directory(&self) -> Result<Option<std::path::PathBuf>, String> {
+        Ok(None)
+    }
     fn install(
         &self,
         version: &str,
@@ -22,9 +29,38 @@ pub struct NativeEffects<R: Runtime> {
 }
 
 impl<R: Runtime> Effects for NativeEffects<R> {
+    fn data_directory(&self) -> Result<Option<std::path::PathBuf>, String> {
+        self.app
+            .try_state::<o8_restart_safety::RestartSafety>()
+            .map(|guard| Some(guard.data_directory()))
+            .ok_or_else(|| "Native update ownership storage is not ready. Retry shortly.".into())
+    }
     async fn install(&self, version: &str, attempt_id: &str) -> Result<bool, String> {
-        // Fresh signed plugin result, including the existing primary/fallback policy.
-        let Some(update) = crate::update_ping::check(&self.app).await? else {
+        let directory = self
+            .data_directory()?
+            .ok_or("Native update storage is unavailable")?;
+        install_journal::InstallJournal::new(directory).check(version)?;
+        #[cfg(target_os = "windows")]
+        let app = self.app.clone();
+        let Some(update) = crate::update_ping::check_with(&self.app, |builder| {
+            #[cfg(target_os = "windows")]
+            {
+                let app = app.clone();
+                builder.on_before_exit(move || {
+                    // The plugin invokes this only after successful extraction. Its hook
+                    // cannot return Result, so unwind into install_candidate on refusal.
+                    if let Err(error) = commit_restart(&app) {
+                        std::panic::panic_any(error);
+                    }
+                })
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                builder
+            }
+        })
+        .await?
+        else {
             return Ok(false);
         };
         if update.version != version {
@@ -32,6 +68,34 @@ impl<R: Runtime> Effects for NativeEffects<R> {
                 "The available version changed; retry after the next recorded check.".into(),
             );
         }
+        self.install_candidate(update, attempt_id).await
+    }
+
+    fn restart(&self) -> Result<(), String> {
+        self.restart_with(|| self.app.restart())
+    }
+}
+
+impl<R: Runtime> NativeEffects<R> {
+    pub(crate) fn restart_with(
+        &self,
+        relaunch: impl FnOnce() -> Result<(), String>,
+    ) -> Result<(), String> {
+        commit_restart(&self.app)?;
+        relaunch()
+    }
+
+    pub(crate) async fn install_candidate(
+        &self,
+        update: tauri_plugin_updater::Update,
+        attempt_id: &str,
+    ) -> Result<bool, String> {
+        let version = &update.version;
+        let directory = self
+            .data_directory()?
+            .ok_or("Native update storage is unavailable")?;
+        let journal = install_journal::InstallJournal::new(directory);
+        journal.check(version)?;
         // Match the existing manual release-health kill switch, including fail-open transport.
         let mut health_url =
             reqwest::Url::parse(&format!("{}/api/panel/release-health", self.base))
@@ -70,25 +134,21 @@ impl<R: Runtime> Effects for NativeEffects<R> {
                 admission["state"]["autoApply"]["blockers"]["live"]
             ));
         }
-        // Windows installers can exit the process themselves. Commit cleanup first.
-        #[cfg(target_os = "windows")]
-        {
-            commit_restart(&self.app)?;
-            if let Err(error) = update.install(bytes) {
-                log::error!("[updater] install failed: {error}");
-            }
-            self.app.restart();
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            update.install(bytes).map_err(|e| e.to_string())?;
-            Ok(true)
-        }
-    }
-
-    fn restart(&self) -> Result<(), String> {
-        commit_restart(&self.app)?;
-        self.app.restart();
+        journal.install(
+            version,
+            || {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| update.install(bytes)))
+                    .map_err(|_| {
+                        "Native installer admission was refused; no restart was performed."
+                            .to_string()
+                    })?
+                    .map_err(|e| e.to_string())
+            },
+            || Ok(()),
+        )?;
+        // Windows success exits inside the plugin. Any returned error stays here,
+        // and its durable marker prevents an unchanged launch from retrying it.
+        Ok(true)
     }
 }
 
@@ -116,6 +176,7 @@ pub struct AutoApply {
     attempt: Option<Attempt>,
     pending_id: Option<String>,
     failure_report: Option<Value>,
+    owner: Option<task::TaskOwner>,
 }
 
 async fn control(client: &Client, url: &str, token: &str, action: Value) -> Result<Value, String> {
@@ -140,6 +201,7 @@ impl AutoApply {
             attempt: None,
             pending_id: None,
             failure_report: None,
+            owner: None,
         }
     }
     pub async fn tick(&mut self, client: &Client, url: &str, token: &str, effects: &impl Effects) {
@@ -173,6 +235,14 @@ impl AutoApply {
             let id = self
                 .pending_id
                 .get_or_insert_with(|| uuid::Uuid::new_v4().to_string());
+            if self.owner.is_none() {
+                if let Some(directory) = effects.data_directory()? {
+                    self.owner = Some(task::TaskOwner::new(
+                        directory.join("native-update-tasks"),
+                        id,
+                    )?);
+                }
+            }
             let admission = control(
                 client,
                 url,
@@ -211,6 +281,7 @@ impl AutoApply {
                     );
                     self.attempt = None;
                     self.pending_id = None;
+                    self.owner = None;
                     control(
                         client,
                         url,
@@ -233,6 +304,7 @@ impl AutoApply {
         if admission["attemptMissing"].as_bool() == Some(true) {
             self.attempt = None;
             self.pending_id = None;
+            self.owner = None;
             return Ok(());
         }
         if admission["allowed"].as_bool() == Some(true) {

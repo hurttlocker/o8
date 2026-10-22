@@ -1,5 +1,6 @@
 import { inspectCliOperationAdmission, type CliInstallerActivity } from '@/lib/setup/cli-operation-admission';
 import 'server-only';
+import { listWorkLaunches } from './work-launch-admission';
 
 import { isOwnedSessionKey, probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
 import { listLanes } from '@/lib/lane/registry';
@@ -78,6 +79,7 @@ export interface UpdateIdleWindow {
     ownedSessions: UpdateIdleOwnedSession[];
     cloudJobs: UpdateIdleCloudJob[];
     cliInstallers?: CliInstallerActivity[];
+    workLaunches?: Array<{ label: string }>;
     restartPending?: boolean;
   };
   unavailable: string[];
@@ -94,6 +96,7 @@ interface IdleWindowInput {
   cliAdmissionUnavailable?: boolean;
   restartPending?: boolean;
   terminalInventoryAvailable: boolean;
+  workLaunches?: Array<{ label: string }>;
   checkedAt?: string;
 }
 
@@ -111,6 +114,7 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     && input.ownedSessions.length === 0
     && (input.cloudJobs?.length ?? 0) === 0
     && (input.cliInstallers?.length ?? 0) === 0
+    && (input.workLaunches?.length ?? 0) === 0
     && !input.restartPending
     && unavailable.length === 0;
   return {
@@ -119,6 +123,7 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
     parkedLanes,
     active: {
       lanes: runningLanes,
+      workLaunches: input.workLaunches ?? [],
       terminalSessions,
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,
@@ -177,11 +182,11 @@ async function parkedLaneProcessLive(lane: ReturnType<typeof listLanes>[number])
   return await probeLaneSessionAlive(lane) !== false;
 }
 
-export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
+export async function getUpdateIdleWindow(reservationId?: string): Promise<UpdateIdleWindow> {
   const [terminalInventory, managedRuns, ownedSessions] = await Promise.all([
     readTerminalInventory(),
     listManagedRuns(),
-    listOwnedActiveRuns(),
+    listOwnedActiveRuns(Date.now(), Boolean(reservationId)),
   ]);
   const lanes = await Promise.all(listLanes().map(async (lane) => ({
     id: lane.id,
@@ -200,9 +205,10 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
       workerId: job.claimedBy ?? null,
       leaseExpiresAt: job.leaseExpiresAt ?? null,
     }));
-  const cliAdmission = inspectCliOperationAdmission();
+  const cliAdmission = inspectCliOperationAdmission(reservationId);
   return evaluateUpdateIdleWindow({
     lanes,
+    workLaunches: listWorkLaunches(),
     cliInstallers: cliAdmission.installers,
     cliAdmissionUnavailable: cliAdmission.blocked && cliAdmission.installers.length === 0 && cliAdmission.code !== 'app_restart_pending',
     restartPending: cliAdmission.code === 'app_restart_pending',

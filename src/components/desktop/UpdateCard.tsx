@@ -115,6 +115,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const installInfoRef = useRef<InstallInfo | null>(null);
   const installingRef = useRef(false);
   const restartDeferredRef = useRef(false);
+  const interruptWorkRef = useRef(false);
 
   useEffect(() => {
     publishAppUpdateView({ version: update?.version ?? null, currentVersion: update?.currentVersion ?? null, outcome: checkReport.outcome, installing,
@@ -347,12 +348,15 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
     setBlockers(describeUpdateBlockers(payload));
     setBlockedNote(describeWaitingUpdate(payload, true));
     const confirmed = await confirmExplicitRestart(payload);
+    interruptWorkRef.current = confirmed && !canRestartWhenIdle(payload);
     if (confirmed) setProgress({ stage: 'restarting', receivedBytes: 0, totalBytes: null });
     return confirmed;
   }, [readUpdateIdle]);
+  Object.assign(checkExplicitRestart, { interruptWork: () => interruptWorkRef.current });
 
   const handleInstall = useCallback(async (request: InstallRequest = {}) => {
     if (installingRef.current || updateInstallInFlight) return;
+    interruptWorkRef.current = request.requireIdle === false;
     const requestedVersion = updateRef.current?.version ?? null;
     const action = resolveUpdateAction(installInfoRef.current, updateRef.current?.version ?? null);
     if (action.kind === 'download' && !request.userInitiated) {
@@ -375,6 +379,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
       }
       if (action.kind === 'restart' && restartDeferredRef.current) {
         const restarted = await relaunchInstalledUpdate({
+          interruptWork: () => interruptWorkRef.current,
           beforeRestart: request.userInitiated ? checkExplicitRestart : request.requireIdle ? () => checkUpdateIdle() : undefined,
         });
         if (!restarted) setBlockedNote(await explainWaitingRestart());
@@ -386,6 +391,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         {
           beforeRestart: request.requireIdle ? () => checkUpdateIdle() : undefined,
           ...(request.interrupt ? { beforeRestart: checkExplicitRestart } : {}),
+          interruptWork: () => interruptWorkRef.current,
           selfUpdatable: action.kind === 'restart',
           onProgress: setProgress,
         },

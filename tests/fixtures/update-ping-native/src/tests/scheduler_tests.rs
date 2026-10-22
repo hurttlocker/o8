@@ -13,6 +13,8 @@ use std::{
 };
 use tauri::Manager;
 
+static SCHEDULER_ENV: Mutex<()> = Mutex::new(());
+
 struct FixtureEffects {
     app: tauri::AppHandle<tauri::test::MockRuntime>,
     installs: Arc<AtomicUsize>,
@@ -59,6 +61,7 @@ fn wait_for(read: impl Fn() -> bool) {
 
 #[test]
 fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_requests() {
+    let _serial = SCHEDULER_ENV.lock().unwrap();
     let primary = server("ok");
     let fallback = server("ok");
     let redirect_trap = server("ok");
@@ -232,4 +235,57 @@ fn scheduler_checks_and_retries_state_without_a_webview_then_honors_fresh_reques
         app.get_webview_window("main").is_none(),
         "auto-apply cannot require a mounted component"
     );
+}
+
+#[test]
+fn slow_local_state_transport_does_not_repeat_remote_checks_as_false_wakes() {
+    let _serial = SCHEDULER_ENV.lock().unwrap();
+    let primary = server("ok");
+    let fallback = server("ok");
+    let settings = tempfile::tempdir().unwrap();
+    let app = app(
+        &primary.url,
+        &fallback.url,
+        &settings.path().join("settings.json"),
+    );
+    assert!(app.get_webview_window("main").is_none());
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let done = stop.clone();
+    thread::spawn(move || {
+        while !done.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((socket, _)) => {
+                    thread::spawn(move || {
+                        thread::sleep(Duration::from_secs(3));
+                        drop(socket);
+                    });
+                }
+                Err(_) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+    });
+    let previous = std::env::var_os("O8_API_PORT");
+    std::env::set_var("O8_API_PORT", port.to_string());
+    let _running = Running(
+        tauri::async_runtime::spawn(crate::launch_updater::scheduler::run_with_effects(
+            app.handle().clone(),
+            |app, _, _, _| FixtureEffects {
+                app,
+                installs: Arc::new(AtomicUsize::new(0)),
+            },
+            Duration::ZERO,
+        )),
+        previous,
+        stop,
+    );
+    thread::sleep(Duration::from_secs(13));
+    assert_eq!(
+        primary.requests.try_iter().count(),
+        1,
+        "local timeouts must not trigger remote checks every five seconds"
+    );
+    assert!(fallback.requests.try_recv().is_err());
 }

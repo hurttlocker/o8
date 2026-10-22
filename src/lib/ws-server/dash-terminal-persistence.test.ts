@@ -127,6 +127,7 @@ describe('dashboard terminal persistence real fallback path', () => {
       ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', 'status', 'off'],
       ['-L', 'o8-dashboard', 'show-options', '-gv', 'terminal-overrides'],
       ['-L', 'o8-dashboard', 'set-option', '-ga', 'terminal-overrides', ',xterm*:indn@'],
+      ['-L', 'o8-dashboard', 'display-message', '-p', '-t', '=cortex-dash-test:', '#{pane_pid}'],
     ]);
     expect(recordHealth).toHaveBeenCalledWith('ready', 'session_created');
   });

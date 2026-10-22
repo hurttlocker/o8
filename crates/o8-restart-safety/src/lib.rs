@@ -28,6 +28,7 @@ struct Pending {
     id: String,
     deadline: Instant,
     committed: bool,
+    force: bool,
 }
 
 /// The app supplies its canonical data directory and existing child cleanup.
@@ -37,6 +38,7 @@ pub struct RestartSafety {
     data_dir: PathBuf,
     pending: Arc<Mutex<Option<Pending>>>,
     before_restart: Arc<dyn Fn() + Send + Sync>,
+    inspect_work: Arc<dyn Fn(&str, bool) -> Result<(), String> + Send + Sync>,
 }
 
 fn refusal(detail: &str) -> String {
@@ -103,10 +105,44 @@ pub fn resolve_data_directory(primary: Option<&str>, legacy: Option<&str>, home:
 
 impl RestartSafety {
     pub fn new(data_dir: PathBuf, before_restart: impl Fn() + Send + Sync + 'static) -> Self {
-        Self { data_dir, pending: Arc::new(Mutex::new(None)), before_restart: Arc::new(before_restart) }
+        Self { data_dir, pending: Arc::new(Mutex::new(None)), before_restart: Arc::new(before_restart), inspect_work: Arc::new(|_, _| Ok(())) }
     }
 
-    pub fn prepare(&self) -> Result<String, String> {
+    pub fn with_work_inspection(mut self, inspect: impl Fn(&str, bool) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        self.inspect_work = Arc::new(inspect);
+        self
+    }
+
+    fn check_launches(&self, force: bool) -> Result<(), String> {
+        let entries = match fs::read_dir(self.data_dir.join("work-launches")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(refusal("Work launch inventory is unavailable.")),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|_| refusal("Work launch ownership is unavailable."))?;
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| refusal("Work launch ownership changed."))?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() { return Err(refusal("Work launch ownership is unconfirmed.")); }
+            let work: serde_json::Value = serde_json::from_slice(&fs::read(entry.path()).map_err(|_| refusal("Work launch ownership is unavailable."))?)
+                .map_err(|_| refusal("Work launch ownership is unconfirmed."))?;
+            let id = work["id"].as_str().ok_or_else(|| refusal("Work launch ownership is unconfirmed."))?;
+            if Uuid::parse_str(id).is_err() || entry.file_name().to_str() != Some(&format!("{id}.json")) {
+                return Err(refusal("Work launch ownership is unconfirmed."));
+            }
+            let pid = work["pid"].as_u64().filter(|pid| *pid > 0 && *pid <= i32::MAX as u64);
+            if pid.is_some_and(|pid| owner_is_dead(pid as u32)) { continue; }
+            let label = work["label"].as_str().unwrap_or("Starting process");
+            // An unacknowledged spawn cannot be interrupted safely, even by force.
+            if !force || pid.is_none() { return Err(refusal(&format!("Waiting for {label}."))); }
+        }
+        Ok(())
+    }
+
+    pub fn data_directory(&self) -> PathBuf { self.data_dir.clone() }
+
+    pub fn prepare(&self) -> Result<String, String> { self.prepare_with_work(false) }
+
+    pub fn prepare_with_work(&self, force: bool) -> Result<String, String> {
         let mut pending = self.pending.lock().map_err(|_| refusal("Restart ownership is unavailable."))?;
         if let Some(existing) = pending.as_ref() {
             if existing.committed || existing.deadline > Instant::now() {
@@ -146,7 +182,8 @@ impl RestartSafety {
             release(&directory, &id);
             return Err(refusal("A CLI update lock needs completion or verified recovery."));
         }
-        *pending = Some(Pending { id: id.clone(), deadline: Instant::now() + PREPARE_TTL, committed: false });
+        if let Err(error) = self.check_launches(force) { release(&directory, &id); return Err(error); }
+        *pending = Some(Pending { id: id.clone(), deadline: Instant::now() + PREPARE_TTL, committed: false, force });
         let state = self.clone();
         let expiring = id.clone();
         std::thread::spawn(move || { std::thread::sleep(PREPARE_TTL); let _ = state.cancel(&expiring); });
@@ -173,6 +210,15 @@ impl RestartSafety {
         let legacy = fs::read_dir(&self.data_dir).map_err(|_| refusal("CLI update ownership could not be checked."))?
             .any(|entry| entry.map(|entry| entry.file_name().to_string_lossy().ends_with("-cli-update.lock")).unwrap_or(true));
         if legacy { return Err(refusal("A CLI update lock appeared before restart; verify its completion or recovery.")); }
+        self.check_launches(current.force)?;
+        (self.inspect_work)(&id, current.force)?;
+        // Inspection crosses the server boundary. Legacy installers may predate
+        // shared admission, so recheck their holds immediately before cleanup.
+        self.check_launches(current.force)?;
+        let legacy = fs::read_dir(&self.data_dir).map_err(|_| refusal("CLI update ownership could not be checked."))?
+            .any(|entry| entry.map(|entry| entry.file_name().to_string_lossy().ends_with("-cli-update.lock")).unwrap_or(true));
+        if legacy { return Err(refusal("A CLI update appeared during final inspection.")); }
+        if current.deadline <= Instant::now() { return Err(refusal("Restart inspection exceeded its reservation. Retry.")); }
         current.committed = true;
         drop(pending);
         (self.before_restart)();
@@ -302,4 +348,65 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn a_process_starting_after_an_earlier_idle_snapshot_refuses_cleanup() {
+        let (root, state, calls) = fixture();
+        fs::create_dir(root.join("work-launches")).unwrap();
+        let id = Uuid::new_v4().to_string();
+        fs::write(root.join("work-launches").join(format!("{id}.json")),
+            serde_json::json!({"id": id, "label": "Late terminal", "ownerPid": std::process::id(), "pid": std::process::id()}).to_string()).unwrap();
+        assert!(state.before_restart(None).is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn force_never_interrupts_cli_installers_or_unacknowledged_starts() {
+        let (root, state, calls) = fixture();
+        fs::write(root.join("codex-cli-update.lock"), "CLI installer").unwrap();
+        assert!(state.prepare_with_work(true).is_err());
+        fs::remove_file(root.join("codex-cli-update.lock")).unwrap();
+        fs::create_dir(root.join("work-launches")).unwrap();
+        let id = Uuid::new_v4().to_string();
+        let file = root.join("work-launches").join(format!("{id}.json"));
+        fs::write(&file, serde_json::json!({"id": id, "label": "Queued terminal", "ownerPid": std::process::id(), "pid": null}).to_string()).unwrap();
+        assert!(state.prepare_with_work(true).is_err());
+        fs::write(&file, serde_json::json!({"id": id, "label": "Live terminal", "ownerPid": std::process::id(), "pid": std::process::id()}).to_string()).unwrap();
+        let reservation = state.prepare_with_work(true).unwrap();
+        state.before_restart(Some(&reservation)).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn final_inspection_is_under_reservation_and_refuses_before_cleanup() {
+        let (root, state, calls) = fixture();
+        let directory = root.clone();
+        let state = state.with_work_inspection(move |id, _| {
+            assert_eq!(read_operation(&directory.join(DIRECTORY)).unwrap().id, id);
+            Err("Late managed run".into())
+        });
+        let id = state.prepare().unwrap();
+        assert!(state.before_restart(Some(&id)).is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        state.cancel(&id).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_legacy_installer_appearing_during_final_inspection_still_refuses_force() {
+        let (root, state, calls) = fixture();
+        let directory = root.clone();
+        let state = state.with_work_inspection(move |_, force| {
+            assert!(force);
+            fs::write(directory.join("codex-cli-update.lock"), "installer started during inspection").unwrap();
+            Ok(())
+        });
+        let id = state.prepare_with_work(true).unwrap();
+        assert!(state.before_restart(Some(&id)).is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        state.cancel(&id).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }

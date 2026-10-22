@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { appendFile, mkdir, readdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

@@ -65,6 +65,12 @@ fn macos_version() -> Option<String> {
 }
 
 pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
+    check_with(app, |builder| builder).await
+}
+
+pub(crate) async fn check_with<R: Runtime>(app: &AppHandle<R>,
+    configure: impl Fn(tauri_plugin_updater::UpdaterBuilder) -> tauri_plugin_updater::UpdaterBuilder,
+) -> Result<Option<Update>, String> {
     let config: tauri_plugin_updater::Config = serde_json::from_value(
         app.config()
             .plugins
@@ -122,7 +128,7 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, Str
                 .header("X-O8-Macos-Version", version)
                 .map_err(|e| e.to_string())?;
         }
-        let updater = builder.build().map_err(|e| e.to_string())?;
+        let updater = configure(builder).build().map_err(|e| e.to_string())?;
         // Also bound response-body parsing, including a stalled successful response.
         if let Ok(Ok(result)) = tokio::time::timeout(SERVICE_TIMEOUT, updater.check()).await {
             return Ok(result.map(|mut update| {
@@ -131,7 +137,7 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, Str
             }));
         }
     }
-    app.updater_builder()
+    configure(app.updater_builder())
         .clear_headers()
         .endpoints(fallback.to_vec())
         .map_err(|e| e.to_string())?

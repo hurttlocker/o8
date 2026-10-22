@@ -1,3 +1,4 @@
+import { reserveWorkLaunch, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
@@ -103,6 +104,7 @@ export function createDashTmuxSessionSync(
   }
 
   let created = false;
+  let launch: WorkLaunchLease | undefined;
   const sessionTarget = `=${input.sessionName}`;
   try {
     try {
@@ -120,6 +122,7 @@ export function createDashTmuxSessionSync(
     } catch { /* not present, create it below */ }
 
     const profileOwner = (dependencies.resolveProfileOwnerId ?? dashProfileOwnerId)();
+    launch = reserveWorkLaunch(`Terminal ${input.sessionName}`);
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
       'new-session', '-d', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),
@@ -144,6 +147,9 @@ export function createDashTmuxSessionSync(
     // entry/exit while making full-screen scrolling use line feeds xterm keeps.
     ensureDashTerminalOverride(tmuxBin, dependencies);
     recordHealthSafely(dependencies, 'ready', 'session_created');
+    const pane = dependencies.execFileSync(tmuxBin, dashTmuxArgs('display-message', '-p', '-t', `${sessionTarget}:`, '#{pane_pid}'),
+      { windowsHide: true, timeout: 3000, encoding: 'utf8' });
+    launch.started(Number.parseInt(String(pane), 10));
     console.log(`[persistent-terminals] created backing session: ${input.sessionName}`);
     return true;
   } catch (error) {
@@ -154,6 +160,8 @@ export function createDashTmuxSessionSync(
           timeout: 3000,
           stdio: 'ignore',
         });
+        // Keep ownership until a captured PID proves it exited; tmux success
+        // alone cannot prove a shell that ignored SIGHUP has stopped.
       } catch { /* cleanup is best effort; the durable degraded receipt remains */ }
     }
     recordHealthSafely(dependencies, 'degraded', 'session_create_failed');

@@ -2728,8 +2728,8 @@ fn restart_app(app: tauri::AppHandle, reservation_id: Option<String>) -> Result<
 }
 
 #[tauri::command]
-fn prepare_app_restart(app: tauri::AppHandle) -> Result<String, String> {
-    app.state::<o8_restart_safety::RestartSafety>().prepare()
+fn prepare_app_restart(app: tauri::AppHandle, force: Option<bool>) -> Result<String, String> {
+    app.state::<o8_restart_safety::RestartSafety>().prepare_with_work(force.unwrap_or(false))
 }
 
 #[tauri::command]
