@@ -24,6 +24,8 @@ import type {
 } from './types';
 import { externalSettlementQuiet, validProviderSessionId } from './settlement';
 import { inspectOwnedManagedRun } from './termination';
+import { resolveManagedRunExitReceipt } from './receipt-path';
+import { managedRunReceiptIo } from './receipt-io';
 
 /** keep at most this many records (running always kept; oldest terminal dropped) */
 const RETENTION = 50;
@@ -122,11 +124,10 @@ function persist(required = false, expected?: { session: string; record: Managed
  * Signal receipts map to their conventional shell exit codes. Returns null
  * while a live run has not written its receipt or for an unknown signal.
  */
-function readExitCode(id: string): number | null {
+function readExitCode(rec: ManagedRunRecord): number | null {
   try {
-    const path = join(getDataDir(), 'logs', 'run', `${id}.exit`);
-    if (!existsSync(path)) return null;
-    const raw = readFileSync(path, 'utf8').trim();
+    const raw = managedRunReceiptIo(rec)?.trim();
+    if (!raw) return null;
     if (/^\d+$/.test(raw)) return Number.parseInt(raw, 10);
     const signal = raw.match(/^signal:(HUP|INT|QUIT|KILL|TERM)$/)?.[1];
     if (!signal) return null;
@@ -137,14 +138,8 @@ function readExitCode(id: string): number | null {
   }
 }
 
-function retainUnknownExitReceipt(id: string): void {
-  try {
-    const directory = join(getDataDir(), 'logs', 'run');
-    const path = join(directory, `${id}.exit`);
-    if (existsSync(path)) return;
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    writeFileSync(path, 'signal:UNKNOWN', { flag: 'wx', mode: 0o600 });
-  } catch { /* best effort after an untrappable wrapper exit */ }
+function retainUnknownExitReceipt(rec: ManagedRunRecord): void {
+  managedRunReceiptIo(rec, true);
 }
 
 /** Load persisted records on first module init (per process), validating each. */
@@ -165,12 +160,16 @@ hydrate();
 // ── Mutations ──
 
 export function registerManagedRun(rec: ManagedRunRecord): ManagedRunRecord {
+  if (rec.exitReceiptPath !== undefined && !resolveManagedRunExitReceipt(rec.id, rec.exitReceiptPath)) {
+    throw new Error('invalid_exit_receipt_path');
+  }
   const existing = findManagedRun(rec.id) ?? findManagedRun(rec.session);
   if (existing) {
     const identity = (r: ManagedRunRecord) => JSON.stringify([
       r.id, r.session, r.command, r.title ?? null, r.cwd, r.repo ?? null,
       r.packetId ?? null, r.laneId ?? null, r.panePid ?? null,
       r.processGroupId ?? null, r.processMarker ?? null, r.mode,
+      r.exitReceiptPath ?? null,
       r.settlement?.binding ?? null,
     ]);
     if (identity(existing) !== identity(rec)) throw new Error('managed_run_registration_conflict');
@@ -339,7 +338,7 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
   const reconciled: ManagedRunRecord[] = [];
   for (const rec of runs.values()) {
     if (rec.settlement && (rec.status === 'running' || rec.status === 'settling') && !alive.has(rec.session)) {
-      const code = rec.exitCode ?? readExitCode(rec.id);
+      const code = rec.exitCode ?? readExitCode(rec);
       const quiet = await inspectOwnedManagedRun(rec);
       const next = finishManagedRun(rec.session, code, quiet);
       if (next?.status === 'finished') reconciled.push(next);
@@ -356,8 +355,8 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
       // their own finish, and reading the file under them would race the CLI's
       // own read+delete. A detach run's exit-file (when present) gives the real
       // code → finished; absent (killed mid-command / app was down) → gone.
-      const code = rec.mode === 'detach' ? readExitCode(rec.id) : null;
-      if (rec.mode === 'detach' && code === null) retainUnknownExitReceipt(rec.id);
+      const code = rec.mode === 'detach' ? readExitCode(rec) : null;
+      if (rec.mode === 'detach' && code === null) retainUnknownExitReceipt(rec);
       rec.status = code === null ? 'gone' : 'finished';
       rec.exitCode = code;
       rec.finishedAt = rec.finishedAt ?? now;

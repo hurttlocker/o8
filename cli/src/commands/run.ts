@@ -538,6 +538,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
         panePid,
         processGroupId,
         processMarker,
+        exitReceiptPath: exitFile,
         mode: detach ? 'detach' : 'stream',
         startedAt,
         ...(settlementLaunch ? { settlementBinding: settlementLaunch.binding } : {}),

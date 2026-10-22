@@ -3055,6 +3055,17 @@
       ]
     },
     {
+      "path": "tests/managed-run-receipt-settlement-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "network-listener",
+        "real-path",
+        "terminal-tool",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/managed-run-registry-termination.test.ts",
       "reasons": [
         "process-signal"
