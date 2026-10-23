@@ -43,7 +43,7 @@ export interface ThoughtsChatPanelChromeState {
   orchestratorBusyState: ThoughtsOrchestratorBusyState | null;
 }
 
-export type ThoughtsChatPermissionMode = 'full' | 'plan';
+export type ThoughtsChatPermissionMode = import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
 
 export interface ThoughtsHistoryListResponse {
   conversations?: Array<{

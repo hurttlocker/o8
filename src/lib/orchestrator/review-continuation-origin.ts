@@ -8,6 +8,7 @@ import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry'
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { isComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import type { ReviewContinuationLane } from '@/lib/orchestrator/review-continuation';
+import { isOrchestratorPermissionMode, supportsOutsideWorkspace } from './permission-mode';
 
 export interface ReviewChatOrigin {
   threadId: string;
@@ -16,7 +17,7 @@ export interface ReviewChatOrigin {
   model: string;
   effort: ThinkingEffort;
   mode: 'single' | 'fleet' | 'fusion';
-  permissionMode?: 'full' | 'plan';
+  permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   pickedMode?: 'solo' | 'multitask' | 'fast' | 'moa' | 'fusion';
   projectId?: string;
 }
@@ -70,7 +71,8 @@ export function resolveChatTurnOrigin({ threadId, turnId, repoPath }: {
   if (turns.length !== 1 || turn.role !== 'assistant' || !isOrchestratorBackendId(turn.backend)
     || typeof receipt?.leadModel !== 'string' || !receipt.leadModel.trim() || receipt.leadModel !== receipt.leadModel.trim()
     || receipt.leadModel.length > 256 || !isThinkingEffort(receipt.effort) || !isComposerWireMode(receipt.mode)
-    || (receipt.permissionMode !== undefined && receipt.permissionMode !== 'full' && receipt.permissionMode !== 'plan')
+    || (receipt.permissionMode !== undefined && !isOrchestratorPermissionMode(receipt.permissionMode))
+    || (receipt.permissionMode === 'outside-workspace' && !supportsOutsideWorkspace(turn.backend))
     || (turn.model && turn.model !== receipt.leadModel)) {
     return { kind: 'refused', reason: 'Review originating turn routing receipt is unavailable or conflicting.' };
   }
