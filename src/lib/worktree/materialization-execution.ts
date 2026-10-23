@@ -5,19 +5,10 @@ import path from 'node:path';
 import { probeMetadataLockProcessIdentity, type MetadataLockProcessIdentity } from './metadata-lock-process-identity';
 
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
+import { WORKSPACE_IDENTITY_CHECK } from './materialization-guard-script';
+import { tryPinnedWorkspaceGitRead } from './materialization-read-session';
 
 const materializationContext = new AsyncLocalStorage<ReadonlyMap<string, WorktreeMaterializationIdentity>>();
-
-const WORKSPACE_IDENTITY_CHECK = String.raw`
-const actual = fs.lstatSync('.');
-const canonicalPath = fs.realpathSync('.');
-if (!actual.isDirectory() || actual.isSymbolicLink()
-  || actual.dev !== expected.device || actual.ino !== expected.inode
-  || canonicalPath !== expected.canonicalPath) {
-  process.stderr.write('Managed workspace ownership changed before process execution.\n');
-  process.exit(78);
-}
-`;
 
 const WORKSPACE_EXEC_GUARD = String.raw`
 const fs = require('node:fs');
@@ -57,8 +48,8 @@ export function guardedWorkspaceInvocation(
   };
 }
 
-/** Run a controlled read script after the same captured-cwd guard, without another Node startup. */
-export function guardedWorkspaceReadScriptInvocation(
+/** Run a controlled script after the captured-cwd guard, without another Node startup. */
+export function guardedWorkspaceScriptInvocation(
   script: string,
   args: string[],
   identity: WorktreeMaterializationIdentity,
@@ -78,6 +69,8 @@ ${script}
     args: ['-e', guardedScript, JSON.stringify(identity), ...args],
   };
 }
+
+export const guardedWorkspaceReadScriptInvocation = guardedWorkspaceScriptInvocation;
 
 export function withWorktreeMaterializationExecution<T>(
   workspacePath: string,
@@ -106,6 +99,12 @@ export function materializationAwareExecFile(
   args: readonly string[],
   options: ExecFileOptions & { cwd?: string | URL } = {},
 ): Promise<{ stdout: string; stderr: string }> {
+  const resolved = typeof options.cwd === 'string' ? path.resolve(options.cwd) : null;
+  const identity = resolved ? materializationContext.getStore()?.get(resolved) : null;
+  if (command === 'git' && identity && resolved) {
+    const pending = tryPinnedWorkspaceGitRead(resolved, identity, args, options);
+    if (pending) return pending;
+  }
   const invocation = materializationAwareInvocation(command, args, options.cwd);
   return new Promise((resolve, reject) => {
     const { signal, ...execOptions } = options;
