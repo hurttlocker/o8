@@ -1,4 +1,6 @@
-| Arm | Stream CPU draw ms p50/p95/p99 | Scroll CPU draw ms p50/p95/p99 |
+| Arm | Stream CPU frame cost ms p50/p95/p99 | Scroll CPU frame cost ms p50/p95/p99 |
 | --- | --- | --- |
-| native | 3.45/5.05/7.58 | 3.19/5.27/6.51 |
-| terminal | 3.36/5.01/5.55 | 2.91/4.55/5.88 |
+| pure | 0.57/0.66/0.74 | 0.59/0.68/0.88 |
+| native | 2.19/3.84/4.10 | 2.64/4.30/4.84 |
+| web | 53.50/77.00/88.47 | 3.00/4.00/4.01 |
+| terminal | 2.64/3.99/4.48 | 2.48/4.25/6.82 |

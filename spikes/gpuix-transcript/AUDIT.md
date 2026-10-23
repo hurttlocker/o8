@@ -1,4 +1,24 @@
-# Current execution status
+# Pure GPUI extension
+
+The current comparison adds a successfully built pure Rust arm using the
+published gpui 0.2.2 registry package, with only font-kit enabled and default
+features disabled. Its UI code is original Apache-2.0 code and its only UI crate
+is gpui. No editor, terminal, markdown, or GPUIX application crate is copied or
+linked. The target-specific normal/build graph audit records 440 packages and
+zero GPL licenses. Transitive licenses include permissive and MPL-2.0 packages;
+this is not a claim that every dependency is Apache-only.
+
+Cargo.lock and source-pins.json retain registry checksum, lock hash and binary
+hash. The registry package is the source pin; its embedded VCS metadata reports
+a dirty publication, so the Git SHA alone is not a reproducibility guarantee.
+The pure engine snapshot differs from the GPUIX fork. Three runs for each of all
+four arms now include CPU frame cost, input completion, idle RSS and launch to
+first internal frame. See METHOD.md for endpoints and limitations.
+
+The earlier status below concerns the GPUIX build only. Product source and root
+dependencies remain unchanged; the new crate and build products stay isolated.
+
+# Previous execution status
 
 The blocked receipt below is historical. The preceding work completed a release
 addon build from the unchanged source pins, using Rust 1.97.1 and the available

@@ -25,6 +25,7 @@ result_path = Path(sys.argv[1]).resolve()
 ready = result_path.with_suffix('.ready')
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 48, 150, 1200, 816))
+launch_started = time.monotonic_ns() / 1e6
 pid = os.fork()
 if pid == 0:
     os.close(master)
@@ -127,7 +128,17 @@ try:
         except urllib.error.HTTPError as error:
             raise RuntimeError(error.read().decode()) from error
     wait_for(lambda: len(frames))
+    previous_frames = len(frames)
+    command('scroll', 1999)
+    wait_for(lambda: command('state')['paintedFixture'] and len(frames) > previous_frames)
+    cold_launch_ms = frames[-1]['atMs'] - launch_started
+    print(json.dumps({'kind': 'first-frame'}), flush=True)
     state = command('state')
+    def rss_mib(owned_pid):
+        import subprocess
+        return float(subprocess.check_output(['ps', '-p', str(owned_pid), '-o', 'rss='])) / 1024
+    renderer_rss = rss_mib(pid)
+    decoder_rss = rss_mib(os.getpid())
     command('focus')
     def measure(action, n=None):
         previous = len(frames)
@@ -164,6 +175,8 @@ try:
     assert final['input'] == 'w' * 20 and final['tokens'] == 80
     result_path.write_text(json.dumps({'surface': 'terminal', 'fixtureHash': state['fixtureHash'],
         'rows': 2000, 'width': 1200, 'height': 816, 'stream': stream, 'keys': keys, 'scroll': scroll,
+        'coldInAppMs': cold_launch_ms, 'idleRssMiB': renderer_rss + decoder_rss,
+        'memoryComponents': {'rendererMiB': renderer_rss, 'decoderMiB': decoder_rss},
         'tokens': 80, 'inputAcknowledged': len(final['input']), 'streamMs': stream_ms,
         'tokensPerSecond': 80 / (stream_ms / 1000), 'decodedFrames': len(frames),
         'measurement': 'Owned PTY inline Kitty RGBA decode completion; HTTP command overhead included; no terminal compositor'}, indent=2))

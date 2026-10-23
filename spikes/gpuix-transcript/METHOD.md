@@ -1,8 +1,9 @@
-# Isolated measurement method
+# Four-arm isolated measurement method
 
 Run from this directory with `npm run build && npm run bench`. The root app and
 root dependency graph are unchanged. The native addon must first be built from
 the source pins with `test-support`, `--release`, and the explicit target.
+Build the pure Rust arm as described in [pure-gpui/README.md](pure-gpui/README.md).
 Install the isolated browser with `npx playwright-core install webkit`.
 
 ## Boundaries
@@ -35,6 +36,42 @@ Install the isolated browser with `npx playwright-core install webkit`.
 No arm measures physical keyboard latency. Values with different completion
 boundaries must not be divided to claim a renderer speedup.
 
+## Pure Rust arm and added metrics
+
+The pure arm uses the published Apache-2.0 gpui 0.2.2 crate and locally authored
+text/list/inline-code/tool-row primitives. Its source and Cargo lock are isolated
+under pure-gpui. The linked macOS normal/build dependency audit rejects GPL and
+excluded application crates. No editor, terminal or markdown crate is copied.
+The formatter caches the initial rows and reparses the changing tail.
+
+A hidden, nonactivating 1200x816 offscreen window runs two direct GPUI CPU scene
+draws per step. GPUI invokes a canvas paint callback to acknowledge input/token
+state. Whole-step timing ends after those draws; the second draw's duration is
+the CPU frame-cost sample. This does not time Metal submission, GPU completion,
+compositor presentation, or physical pixels. Pure GPUI uses the published engine;
+GPUIX uses the separately pinned fork, so this is not an isolated bridge-cost test.
+
+All four arms were freshly measured three times with production React for the
+JavaScript arms. The initial arm order rotates; final pure/PTY passes were recollected separately after strengthening first-transcript-content acknowledgement. CPU frame cost uses GPUI
+build/layout/paint for pure/GPUIX/PTY and synchronous JS/React/forced layout for
+WebKit. Whole update and decode costs remain in the raw files; they are not
+silently relabeled as CPU frame costs.
+
+Launch-to-first-internal-frame starts before spawning the renderer process, or
+before launching the isolated WebKit browser, and ends when its initial fixture
+scene/ready marker arrives. It includes runtime/launch and IPC overhead. Servers
+and bundles are already built. Native markers acknowledge a transcript scene;
+WebKit uses its second ready rAF; PTY uses its first decoded frame. No endpoint
+is first displayed content. Cold filesystem caches are not controlled.
+
+Idle RSS uses the same ps resident-set metric after the first internal frame,
+before streaming. Pure/GPUIX are each one renderer process. WebKit totals its
+owned browser process tree and fresh same-bundle XPC content/GPU/network helpers
+whose process responsibility matches the launched browser. Attribution requires
+exactly one content process; component RSS is retained. PTY totals its renderer
+and owned decoder, with both components retained. This accounting includes host
+costs but omits unowned services and is not proportional/private memory.
+
 ## Fixture and schedule
 
 One turn is one invented transcript entry. All arms verify the identical SHA-256
@@ -52,16 +89,14 @@ visible ranges. A 20 ms target schedule is backpressured by measurement; achieve
 rate is reported, never assumed to equal 50 tokens/s. The second-rAF wait also
 limits the web driver. This short test is not a 300-second memory soak.
 
-Three fresh processes/browser instances per arm, with production React in all arms. The initial accepted batch
-rotated native/web/terminal, web/terminal/native, terminal/native/web. The final
-native and terminal passes were recollected separately to fix production React
-mode and enforce decoded composer-marker acknowledgement. Web samples did not
-change. Order and active-desktop background load were not fully controlled. Results contain every sample, counts,
+Three fresh processes/browser instances per arm were collected for this four-arm
+comparison. The final pure/PTY passes were collected together after first-content
+checks were added; native/WebKit retained the initial rotated-batch results. Operator/background load and filesystem caches were not controlled. Results contain every sample, counts,
 fixture hash, acknowledgements, and per-run p50/p95/p99. The report takes the
 median of those per-run percentiles. Headless WebKit uses millisecond timer
 precision. There is no controlled cold filesystem cache or refresh-rate claim.
 Rejected probes remain in ignored raw evidence with reasons summarized in
-results/rejected.json. Only the final accepted nine runs enter the summary.
+results/rejected.json. Only the final accepted twelve runs enter the summary.
 
 ## Needs an unattended on-screen run
 

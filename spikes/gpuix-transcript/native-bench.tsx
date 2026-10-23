@@ -1,5 +1,6 @@
 /** @jsxImportSource @gpuix/react */
 import React from 'react';
+import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { render, flushSync, createRenderer, startFrameLoop } from '@gpuix/react';
@@ -22,6 +23,17 @@ if (live) {
   startFrameLoop(live.renderer);
 }
 root?.render(<Native />);
+if (root) {
+  flushSync(() => api.scroll!(1999));
+  root.renderer.flush(); root.renderer.dispatchNativeEvents(); root.renderer.flush();
+  if (!root.renderer.getPaintedText().join(' ').includes('The invented observation')) throw Error('First transcript frame missing');
+}
+const coldInAppMs = performance.now() - started;
+let idleRssMiB: number | undefined;
+if (root) {
+  console.log(JSON.stringify({ kind: 'first-frame' }));
+  idleRssMiB = Number(execFileSync('ps', ['-p', String(process.pid), '-o', 'rss='], { encoding: 'utf8' }).trim()) / 1024;
+}
 // Frame-completion callback is inside this process. A test flush runs GPUI until
 // parked; a live terminal frame is acknowledged by its draw counter. Neither
 // timestamp asserts that a display presented the frame.
@@ -76,7 +88,7 @@ async function run() {
   const result = { surface: 'native', fixtureHash, rows: fixture.length, width: 1200, height: 816,
     stream, keys, scroll, inputAcknowledged: state.input.length, tokens: state.tokens,
     streamMs, tokensPerSecond: 80 / (streamMs / 1000), ranges: state.ranges,
-    processMs: performance.now() - started, measurement: 'GPUI test flush to in-process frame callback; no presentation' };
+    coldInAppMs, idleRssMiB, processMs: performance.now() - started, measurement: 'GPUI test flush to in-process frame callback; no presentation' };
   writeFileSync(process.env.BENCH_RESULT!, JSON.stringify(result, null, 2));
   root?.unmount(); clearTimeout(watchdog); process.exit(0);
 }
@@ -87,7 +99,7 @@ else {
       let body = ''; for await (const chunk of request) body += chunk;
       const command = JSON.parse(body);
       let result: unknown;
-      if (command.action === 'state') result = { ...state, size: live!.renderer.getWindowSize!(), fixtureHash, paintedInput: live!.renderer.getPaintedText!().includes(state.input) };
+      if (command.action === 'state') result = { ...state, size: live!.renderer.getWindowSize!(), fixtureHash, paintedInput: live!.renderer.getPaintedText!().includes(state.input), paintedFixture: live!.renderer.getPaintedText!().join(' ').includes('The invented observation') };
       else if (command.action === 'focus') {
         live!.renderer.focusElement(api.composer!());
         live!.renderer.tick();

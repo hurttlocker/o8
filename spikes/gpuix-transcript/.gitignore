@@ -5,3 +5,4 @@ raw/
 screenshots/
 *.log
 __pycache__/
+pure-gpui/target/

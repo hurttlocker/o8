@@ -7,7 +7,10 @@
   "scripts": {
     "build": "node build.mjs",
     "bench": "node measure.mjs",
-    "summarize": "node summarize.mjs"
+    "summarize": "node summarize.mjs",
+    "build:pure": "cargo +1.97.1 build --manifest-path pure-gpui/Cargo.toml --release --locked --target x86_64-apple-darwin",
+    "audit:pure": "node license-audit.mjs",
+    "verify:pure": "node validate-pure.mjs"
   },
   "dependencies": {
     "@gpuix/native": "0.11.0",

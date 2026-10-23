@@ -26,7 +26,7 @@
   },
   "status": "isolated-measurements-complete",
   "dependencyGraphInstalled": true,
-  "benchmarkRuns": 9,
+  "benchmarkRuns": 12,
   "nativeAddonSha256": "f3334bff7642999579dbf34405b6d3e21ba45d12e534903992bb5400152f311d",
   "web": {
     "engine": "Playwright WebKit",
@@ -46,5 +46,21 @@
     "diffs": 20,
     "codeBlocks": 125
   },
-  "reactMode": "production"
+  "reactMode": "production",
+  "pureGpui": {
+    "version": "0.2.2",
+    "source": "published registry package; a different engine snapshot from the GPUIX fork",
+    "license": "Apache-2.0",
+    "features": [
+      "font-kit"
+    ],
+    "defaultFeatures": false,
+    "crateChecksum": "979b45cfa6ec723b6f42330915a1b3769b930d02b2d505f9697f8ca602bee707",
+    "cargoLockSha256": "c1195cd60711afe47970338e0bbaa4a292e85cedc31f72c11c70ea2aaf90aaa1",
+    "binarySha256": "9cd90dd149f364c65851c2bf7f05f55c530ac174665e6dab7843d1ec6aa9c7c9",
+    "benchmarkRuns": 3,
+    "licenseAudit": "results/pure-license-audit.json",
+    "uiDependency": "gpui only",
+    "registry": "https://crates.io/crates/gpui/0.2.2"
+  }
 }

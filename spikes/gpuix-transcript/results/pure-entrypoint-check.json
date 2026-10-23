@@ -1,0 +1,7 @@
+{
+  "invalidFixture": "rejected at binary entry point before window/render initialization",
+  "exitStatus": 101,
+  "frameMarkerEmitted": false,
+  "resultEmitted": false,
+  "validFixture": "three accepted persisted runs, each with 20 input and 80 token paint acknowledgements"
+}
