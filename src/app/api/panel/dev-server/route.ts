@@ -1,7 +1,8 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 
 // ── Active dev server processes ──
@@ -73,11 +74,7 @@ export async function POST(req: NextRequest) {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
-      env: {
-        ...process.env,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-      },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
 
     const serverEntry = {

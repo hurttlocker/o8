@@ -5,7 +5,7 @@
  * Falls back to manual traversal for non-git repos.
  */
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import type { ScanOptions, SupportedLanguage } from './types';

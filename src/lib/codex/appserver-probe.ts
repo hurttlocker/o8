@@ -1,4 +1,5 @@
-import { execFile, spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile, spawn } from '@/lib/providers/child-process';
 import { constants as fsConstants } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -361,12 +362,7 @@ export async function probeCodexVoiceCapability(
   options: CodexVoiceProbeOptions = {},
 ): Promise<CodexVoiceCapability> {
   const home = options.home ?? os.homedir();
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...options.env,
-    FORCE_COLOR: '0',
-    NO_COLOR: '1',
-  };
+  const env: NodeJS.ProcessEnv = childEnvironment({ runtimeId: 'codex', env: { ...options.env, FORCE_COLOR: '0', NO_COLOR: '1' } });
   const codexHome = options.codexHome ?? env.CODEX_HOME?.trim() ?? path.join(home, '.codex');
   env.CODEX_HOME = codexHome;
   const authPath = path.join(codexHome, 'auth.json');

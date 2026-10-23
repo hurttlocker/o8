@@ -1,4 +1,4 @@
-import { providerConfigEnvironment } from '@/lib/providers/spawn-environment';
+import { prepareProviderMcpLaunch } from '@/lib/providers/mcp-launch';
 /**
  * Emitter: Claude orchestrator `--mcp-config` JSON (Set A).
  *
@@ -13,7 +13,7 @@ import { entriesForSurface, type ToolRegistry } from './registry';
 export function toClaudeServersMap(r: ToolRegistry): Record<string, OrchestratorMcpServerConfig> {
   const out: Record<string, OrchestratorMcpServerConfig> = {};
   for (const { name, config } of entriesForSurface(r, 'claude-orchestrator')) {
-    out[name] = config.type === 'stdio' && config.env ? { ...config, env: providerConfigEnvironment(config.env, 'claude-code') } : config;
+    out[name] = config.type === 'stdio' && config.env ? prepareProviderMcpLaunch(config, 'claude-code') : config;
   }
   return out;
 }

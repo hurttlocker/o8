@@ -21,7 +21,7 @@ import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
  * tools, so Hermes runs against a profile that denies native spawn.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 
 import { AcpClient, AcpRequestError, mapStopReason, type AcpConfigOption, type AcpMcpServer } from '@/lib/acp/client';

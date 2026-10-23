@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { access, mkdir, realpath, stat } from 'node:fs/promises';

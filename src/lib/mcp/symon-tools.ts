@@ -1,9 +1,10 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { onCredentialPolicyChange } from '@/lib/providers/policy-events';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   listEnabledExternalMcpServers,
@@ -131,7 +132,7 @@ class StdioSession implements McpSession {
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: providerMcpEnvironment({ ...process.env, ...(server.env ?? {}) }),
+      env: providerMcpEnvironment(childEnvironment({ env: { ...(server.env ?? {}) } })),
     });
     this.child.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
     this.child.stderr.on('data', () => {

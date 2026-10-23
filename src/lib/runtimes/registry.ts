@@ -5,7 +5,7 @@
  * The UI and API layer talk to the registry, never to a specific runtime.
  */
 
-import { exec } from 'child_process';
+import { exec } from '@/lib/providers/child-process';
 import { promisify } from 'util';
 import type { AgentRuntime, RuntimeId, RuntimeSession } from './types';
 

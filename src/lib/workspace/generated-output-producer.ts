@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';

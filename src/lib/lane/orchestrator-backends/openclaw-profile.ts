@@ -1,10 +1,11 @@
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
-import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
 export const OPENCLAW_PROFILE = 'o8';
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 export const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
@@ -199,7 +200,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8, gatewayPort,
   );
 
-  writeFileSync(OPENCLAW_O8_CONFIG, `${JSON.stringify(o8Config, null, 2)}\n`, { mode: 0o600 });
+  writeOwnedRuntimeArtifact(OPENCLAW_O8_CONFIG, 'openclaw', JSON.stringify(o8Config));
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
   // unrecognized keys inside its own config).
   mkdirSync(getDataDir(), { recursive: true });
@@ -220,7 +221,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     if (existsSync(destFile) && statSync(srcFile).mtimeMs <= statSync(destFile).mtimeMs) return;
     assertOwnedDirectory(join(destFile, '..')); assertOwnedFile(destFile);
     mkdirSync(join(destFile, '..'), { recursive: true });
-    cpSync(srcFile, destFile, { recursive: true });
+    copyRuntimeConfigFile(srcFile, destFile, 'openclaw');
     try { chmodSync(destFile, 0o600); } catch { /* directories keep their mode */ }
   };
 
@@ -228,7 +229,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
   const destCredentials = join(OPENCLAW_O8_HOME, 'credentials');
   assertOwnedDirectory(destCredentials);
   if (existsSync(sourceCredentials) && !existsSync(destCredentials)) {
-    cpSync(sourceCredentials, destCredentials, { recursive: true });
+    copyOpenclawCredentials(sourceCredentials, destCredentials);
   }
 
   // Carry each governed agent's per-agent auth — the credential index that
@@ -291,4 +292,18 @@ function assertOwnedDirectory(dir: string): void {
 function assertOwnedFile(file: string): void {
   const entry = existingEntry(file);
   if (entry && !entry.isFile()) throw new Error('OpenClaw owned credential files cannot follow links.');
+}
+
+/** Sanitize JSON before creating any owned destination, including nested credentials. */
+function copyOpenclawCredentials(source: string, destination: string): void {
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) throw new Error('OpenClaw credential copies cannot follow links.');
+    const from = join(source, entry.name); const to = join(destination, entry.name);
+    assertOwnedDirectory(destination);
+    if (!entry.isDirectory()) assertOwnedFile(to);
+    if (entry.isDirectory()) copyOpenclawCredentials(from, to);
+    else if (entry.isFile() && entry.name.endsWith('.json')) copyRuntimeConfigFile(from, to, 'openclaw');
+    else if (entry.isFile()) copyFileSync(from, to);
+  }
 }

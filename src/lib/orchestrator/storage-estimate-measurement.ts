@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';

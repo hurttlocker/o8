@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Codex Runtime Adapter
  *
@@ -415,7 +416,7 @@ export const codexRuntime: AgentRuntime = {
           note: 'The Codex session is missing or ambiguous across registered identities, so it was not resumed.',
         };
       }
-      const { execFile } = await import('node:child_process');
+      const { execFile } = await import('@/lib/providers/child-process');
       const { promisify } = await import('node:util');
       const os = await import('node:os');
       const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
@@ -444,12 +445,7 @@ export const codexRuntime: AgentRuntime = {
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,
-        env: {
-          ...process.env,
-          CODEX_HOME: providerSession.configHomeRef,
-          FORCE_COLOR: '0',
-          NO_COLOR: '1',
-        },
+        env: childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: providerSession.configHomeRef, FORCE_COLOR: '0', NO_COLOR: '1' } }),
         encoding: 'utf-8',
       });
       scheduleCodexUsageDispatch(sessionKey, startedAtMs, baseline);

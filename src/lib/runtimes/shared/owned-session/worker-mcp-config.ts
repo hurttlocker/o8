@@ -1,4 +1,4 @@
-import { providerConfigEnvironment } from '@/lib/providers/spawn-environment';
+import { prepareProviderMcpLaunch } from '@/lib/providers/mcp-launch';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { writeOwnedMcpArtifact } from '@/lib/providers/mcp-artifacts';
 import path from 'node:path';
@@ -75,7 +75,7 @@ export async function prepareOwnedWorkerMcpConfig({
   }
   if (resolution.servers.length === 0) return { sandboxReadPaths: [], servers: [] };
 
-  const injectableServers = resolution.servers.map(server => ({ ...server, env: providerConfigEnvironment(server.env ?? {}, adapter.runtimeId) }));
+  const injectableServers = resolution.servers.map(server => prepareProviderMcpLaunch(server, adapter.runtimeId));
   const commandReadPaths = sandboxEnabled
     ? injectableServers.map((server) => path.dirname(server.command))
     : [];

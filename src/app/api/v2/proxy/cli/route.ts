@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { NextResponse } from 'next/server';
 
@@ -246,7 +247,7 @@ export async function POST(request: Request) {
             windowsHide: true,
             cwd: repoRoot,
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: runtime }),
+            env: providerSpawnEnvironment(childEnvironment({ runtimeId: runtime, env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: runtime }),
           });
 
           let buffer = '';

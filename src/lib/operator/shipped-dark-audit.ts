@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import packageJson from '../../../package.json';

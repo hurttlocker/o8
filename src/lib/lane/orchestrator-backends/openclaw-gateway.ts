@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
@@ -64,7 +65,7 @@ export async function ensureOpenclawGateway(port: number, openclawBin: string): 
     openclawBin,
     ['--profile', OPENCLAW_PROFILE, 'gateway', 'run', '--port', String(port)],
     { windowsHide: true,
-      env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: 'openclaw' }),
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'openclaw', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'openclaw' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

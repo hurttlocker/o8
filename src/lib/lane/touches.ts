@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 
 import { getSqlite } from '@/lib/db';
 import type { LaneStatus } from './types';

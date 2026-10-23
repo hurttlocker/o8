@@ -30,7 +30,7 @@
 
 import { lstat, realpath, writeFile } from 'node:fs/promises';
 import { access, constants as fsConstants } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
@@ -198,6 +198,10 @@ function nodePackageRoot(binaryPath: string): string | null {
   return path.join(parsed.root, ...segments.slice(0, end));
 }
 
+export interface FinalCredentialPolicy {
+  lockPath: string; readFiles: string[]; readDirectories: string[];
+}
+
 export interface SeatbeltProfileInput {
   /** The worktree / repo cwd the worker runs in (read+write). */
   worktreePath: string;
@@ -242,6 +246,7 @@ export interface SeatbeltProfileInput {
    * deny-parent / re-open-child idiom other callers depend on.
    */
   readOnlyDenyWritePaths?: string[];
+  finalCredentialPolicy?: FinalCredentialPolicy;
 }
 
 /**
@@ -350,6 +355,15 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
   const finalAllowReadPaths = uniq(input.finalAllowReadPaths ?? []);
   const finalAllowExecPaths = uniq(input.finalAllowExecPaths ?? []);
   const readOnlyDenyWritePaths = uniq(input.readOnlyDenyWritePaths ?? []);
+  const policy = input.finalCredentialPolicy;
+  const policyReadFilters = policy ? [policy.lockPath, ...policy.readFiles].map(p => `(literal ${sbplString(p)})`).concat(policy.readDirectories.map(subpath)) : [];
+  if (policy) {
+    if ([policy.lockPath, ...policy.readFiles, ...policy.readDirectories].some(p => !path.isAbsolute(p)) || path.basename(policy.lockPath) !== '.provider-keys.lock') throw new SandboxUnavailableError('Invalid credential policy paths.');
+    assertNarrowRuntimeStateRegrants(policy.readDirectories, [home, ...secretRoots]);
+    if (policy.readDirectories.some(p => secretRoots.some(root => pathIsWithin(p, root)))
+      || policy.readFiles.some(p => secretRoots.some(root => pathIsWithin(p, root)) && p !== path.join(path.dirname(policy.lockPath), 'provider-launch-policy.json'))) throw new SandboxUnavailableError('Credential policy grant would expose protected data.');
+    assertNoRegrantOverlap([policy.lockPath], readOnlyDenyWritePaths);
+  }
 
   const lines: string[] = [
     '(version 1)',
@@ -489,6 +503,14 @@ export function buildSeatbeltProfile(input: SeatbeltProfileInput): string {
       ...finalAllowExecPaths.map((p) => `  (literal ${sbplString(p)})`),
       ')',
     ] : []),
+    ...(policy ? [
+      ';; final credential check: immutable policy/code reads and existing lock data only',
+      '(deny file-write* file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone',
+      ...policyReadFilters.map(filter => `  ${filter}`), ')',
+      '(allow file-read*', ...policyReadFilters.map(filter => `  ${filter}`), ')',
+      `(allow file-write-data (literal ${sbplString(policy.lockPath)}))`,
+      `(deny file-write-create file-write-unlink file-write-mode file-write-owner file-write-acl file-write-flags file-link file-clone (literal ${sbplString(policy.lockPath)}))`,
+    ] : []),
     ...(readOnlyDenyWritePaths.length ? [
       // DEAD LAST, deliberately. SBPL is last-match-wins, so emitting the
       // read-only denial after EVERY allow — including the narrow re-opens
@@ -568,6 +590,7 @@ export interface PrepareWorkerSandboxInput {
    * than granting un-denied git paths — fail-closed, never a silent widening.
    */
   enforceReadOnly?: boolean;
+  finalCredentialPolicy?: FinalCredentialPolicy;
 }
 
 /**
@@ -696,6 +719,12 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
   finalImmutableWrite.push(...ownerInstructions);
   finalAllowRead.push(...ownerInstructions);
   const finalAllowExec = await resolveAll(input.finalAllowExecPaths ?? []);
+  const finalCredentialPolicy = input.finalCredentialPolicy ? {
+    lockPath: await safeRealpath(input.finalCredentialPolicy.lockPath),
+    readFiles: await resolveAll(input.finalCredentialPolicy.readFiles),
+    readDirectories: await resolveAll(input.finalCredentialPolicy.readDirectories),
+  } : undefined;
+  if (input.finalCredentialPolicy && [input.finalCredentialPolicy.lockPath, ...input.finalCredentialPolicy.readFiles, ...input.finalCredentialPolicy.readDirectories].some(p => !path.isAbsolute(p))) throw new SandboxUnavailableError('Credential policy paths must be absolute.');
 
   // Runtime state may live inside the denied o8 data tree, but its grant must
   // stay narrower than HOME, any data root, and the session metadata root.
@@ -734,6 +763,7 @@ export async function prepareWorkerSandbox(input: PrepareWorkerSandboxInput): Pr
     finalAllowReadPaths: finalAllowRead,
     finalAllowExecPaths: finalAllowExec,
     readOnlyDenyWritePaths: readOnlyDenyWrite,
+    finalCredentialPolicy,
   });
 
   const profilePath = path.join(input.profileDir, `${input.runId}.sb`);

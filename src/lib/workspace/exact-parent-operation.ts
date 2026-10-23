@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn } from '@/lib/providers/child-process';
 import { once } from 'node:events';
 import path from 'node:path';
 import { promisify } from 'node:util';

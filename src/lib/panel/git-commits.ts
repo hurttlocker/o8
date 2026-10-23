@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { homedir } from 'node:os';
 import { assertReviewWorkspace, WorkspaceReviewError } from '@/lib/review/workspace-status';
 

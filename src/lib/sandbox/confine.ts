@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';

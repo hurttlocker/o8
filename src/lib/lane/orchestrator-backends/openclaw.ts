@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { ensureOpenclawGateway } from './openclaw-gateway';
 import { buildGovernedO8Profile as buildProfile, prepareOpenclawProfile, OPENCLAW_O8_CONFIG, OPENCLAW_SOURCE_CONFIG } from './openclaw-profile';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
@@ -22,7 +23,7 @@ import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
  * documented v1 limitation; see docs/internals/openclaw-integration.md.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -434,7 +435,7 @@ async function sendToOpenclawOrchestrator(
     const launch = cliInvocation(openclawBin, args);
     const proc = spawn(launch.command, launch.args, { windowsHide: true,
       cwd: session.repoPath,
-      env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' }, { runtimeId: 'openclaw' }),
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'openclaw', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'openclaw' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     session.proc = proc;

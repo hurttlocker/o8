@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';

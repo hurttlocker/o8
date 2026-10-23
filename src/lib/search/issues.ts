@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { ensureGitHubIssues, normalizeRepoSlug, resolveRepoSlug } from '@/lib/github-broker';
 import { listRepos } from '@/lib/repos/registry';

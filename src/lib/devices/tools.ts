@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { constants } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';

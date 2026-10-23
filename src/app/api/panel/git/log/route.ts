@@ -20,7 +20,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';

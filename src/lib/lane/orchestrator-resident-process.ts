@@ -1,5 +1,6 @@
+import { childEnvironment, retainChildTransportCredentials } from '@/lib/providers/spawn-environment';
 import { resolveProviderKey } from '@/lib/providers/key-store';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { closeSync } from 'node:fs';
 import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
 import { processStreamEvent, parseOrchestratorTurnUsage, type OrchestratorEvent } from './orchestrator-stream-events';
@@ -12,7 +13,6 @@ import { fableEnvOverride } from './fable-profile';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
-import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
 import { crashSurvivableOrchestratorEnabled, createOrchestratorTurnRecord, openAppendFile, updateOrchestratorTurnPid, discardOrchestratorTurnRecord, finishOrchestratorTurn, type OrchestratorTurnRecord } from './orchestrator-crash-survival';
 import type { WarmState, OrchestratorProcConfig } from './orchestrator-session-state';
@@ -311,20 +311,19 @@ export function spawnOrchestratorProc(
   // (which names the healthy binary) or a confusing mid-turn tool error.
   assertOrchestratorRepoPath(session.repoPath);
   const launch = cliInvocation(resolveClaudeBinary(), args);
+  const launchEnv = childEnvironment({ runtimeId: 'claude-code', env: {
+    PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1',
+    ...carrierEnv, ...(isFable && runtimeBillingMode('claude-code') === 'api' ? fableEnvOverride() : {}),
+  } });
+  if (config.modelSource === 'codex-subscription' || config.modelSource === 'openrouter') {
+    for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) if (carrierEnv[name] !== undefined) launchEnv[name] = carrierEnv[name];
+    retainChildTransportCredentials(launchEnv, ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
+  }
   const proc = spawn(launch.command, launch.args, { windowsHide: true,
     cwd: session.repoPath,
     // Fable key injection stays scoped; the selected harness carrier contributes
     // only its explicit environment through carrierEnv.
-    env: {
-      ...providerSpawnEnvironment(process.env, { runtimeId: 'claude-code' }),
-      // claude is a node shim on some installs — server's runtime on PATH (#1551).
-      PATH: pathWithNodeRuntime(),
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-      O8_MANAGED_SESSION: '1',
-      ...carrierEnv,
-      ...(isFable && runtimeBillingMode('claude-code') === 'api' ? fableEnvOverride() : {}),
-    },
+    env: launchEnv,
     detached: crashEnabled,
     stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
       ? ['pipe', stdoutFd, stderrFd]

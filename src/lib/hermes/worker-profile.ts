@@ -1,5 +1,5 @@
-import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
-import { chmodSync, cpSync, existsSync, mkdirSync } from 'node:fs';
+import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -41,7 +41,7 @@ export function prepareHermesWorkerHome(sessionDir: string): { hermesHome: strin
     const from = path.join(source, file);
     if (!existsSync(from)) continue;
     const to = path.join(hermesHome, file);
-    cpSync(from, to);
+    copyRuntimeConfigFile(from, to, 'hermes');
     reconcileRuntimeConfigFile(to, 'hermes');
     try { chmodSync(to, 0o600); } catch { /* best-effort on Windows */ }
   }

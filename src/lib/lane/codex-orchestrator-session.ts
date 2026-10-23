@@ -1,3 +1,4 @@
+import { childEnvironment, internalBrokerEnvironment } from '@/lib/providers/spawn-environment';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { sandboxFlagsForMode, reasoningEffortFromThinkingEffort, resolveOrchestratorModelSync, codexOrchestratorModelFlags } from './codex-orchestrator-options';
 export { resolveOrchestratorModelSync, codexOrchestratorModelFlags, buildCodexOrchestratorPrompt } from './codex-orchestrator-options';
@@ -20,7 +21,7 @@ export { resolveOrchestratorModelSync, codexOrchestratorModelFlags, buildCodexOr
  * PROPOSER stays cold while the Claude proposer + aggregator warm.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import type { ChildProcess } from 'node:child_process';
 import { closeSync, readFileSync } from 'node:fs';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
@@ -441,18 +442,13 @@ async function sendToCodexOrchestratorAttempt(
         message,
       ];
 
-  const baseEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    PATH: pathWithNodeRuntime(),
-    FORCE_COLOR: '0',
-    NO_COLOR: '1',
-    O8_MANAGED_SESSION: '1',
-    CODEX_HOME: codexHome,
-  };
+  const baseEnv: NodeJS.ProcessEnv = childEnvironment({ runtimeId: 'codex', env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1', CODEX_HOME: codexHome } });
   let spawnBinary = codexBin;
   let spawnArgs = args;
   let spawnEnv = baseEnv;
   let cleanupSingleLaunch = () => {};
+  let sealSingleLaunch = () => {};
+  let sealSingleInParent = false;
   if (codexApp) {
     try {
       const prompt = splitCodexOrchestratorPrompt(message);
@@ -489,6 +485,8 @@ async function sendToCodexOrchestratorAttempt(
       spawnArgs = prepared.args;
       spawnEnv = prepared.env;
       cleanupSingleLaunch = prepared.cleanup;
+      sealSingleLaunch = prepared.sealOnOutput;
+      sealSingleInParent = prepared.sealInParent;
     } catch (err) {
       session.status = 'dead';
       onEvent({ type: 'error', error: `Single mode unavailable: ${err instanceof Error ? err.message : String(err)}` });
@@ -501,7 +499,9 @@ async function sendToCodexOrchestratorAttempt(
     let crashRecord: OrchestratorTurnRecord | null = null;
     let stdoutFd: number | null = null;
     let stderrFd: number | null = null;
-    const crashEnabled = crashSurvivableOrchestratorEnabled();
+    // API Solo must relay its first output through the parent before sealing.
+    // A detached log descriptor would bypass that first-chunk boundary.
+    const crashEnabled = crashSurvivableOrchestratorEnabled() && !sealSingleInParent;
     if (crashEnabled) {
       crashRecord = createOrchestratorTurnRecord({
         backend: 'codex',
@@ -522,7 +522,7 @@ async function sendToCodexOrchestratorAttempt(
       const launch = cliInvocation(spawnBinary, spawnArgs);
       proc = spawn(launch.command, launch.args, { windowsHide: true,
         cwd: session.repoPath,
-        env: providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' }),
+        env: options.orchestrationMode === 'single' ? spawnEnv : codexApp ? internalBrokerEnvironment(providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' })) : providerSpawnEnvironment(spawnEnv, { runtimeId: 'codex' }),
         detached: crashEnabled || singleProcessGroup,
         stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
           ? ['ignore', stdoutFd, stderrFd]
@@ -565,7 +565,18 @@ async function sendToCodexOrchestratorAttempt(
     let processTimeout: ReturnType<typeof setTimeout> | null = null;
     let firstEventTimeout: ReturnType<typeof setTimeout> | null = null;
     let sawFirstEvent = false;
+    let singleSealError: string | null = null;
+    const sealBeforeOutput = (): boolean => {
+      if (singleSealError) return false;
+      try { sealSingleLaunch(); return true; }
+      catch (error) {
+        singleSealError = `Single mode seal failed: ${error instanceof Error ? error.message : String(error)}`;
+        proc.kill('SIGTERM');
+        return false;
+      }
+    };
     const handleCodexLine = (line: string) => {
+      if (!sealBeforeOutput()) return;
       if (codexApp) noteCodexAppTurnLine(line, { tabId: session.historyThreadId, repoPath: session.repoPath });
       const parsed = handleCodexJsonLine(line, lineState, onEvent, { isLocalModel, model, onActivity });
       if (parsed) {
@@ -641,6 +652,7 @@ async function sendToCodexOrchestratorAttempt(
     }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
+      if (!sealBeforeOutput()) return;
       lineBuffer += chunk.toString('utf-8');
       const lines = lineBuffer.split('\n');
       lineBuffer = lines.pop() ?? '';
@@ -672,10 +684,10 @@ async function sendToCodexOrchestratorAttempt(
       // Keep that diagnostic visible to the one-time missing-thread recovery.
       const resumeDiagnostic = diagnostic.split(/\r?\n/).find((line) => isMissingCodexRolloutResumeError(line)
         || isCodexSolUnsupported(model, line));
-      const error = code === 0
+      const error = singleSealError ?? (code === 0
         ? undefined
-        : (resumeDiagnostic || diagnostic).slice(0, 500) || `codex exited with code ${code}`;
-      settle(code === 0 ? 'ready' : 'dead', error, true);
+        : (resumeDiagnostic || diagnostic).slice(0, 500) || `codex exited with code ${code}`);
+      settle(code === 0 && !singleSealError ? 'ready' : 'dead', error, true);
     });
 
     if (!sawFirstEvent) {

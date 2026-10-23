@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import os from 'node:os';
 import { promisify } from 'node:util';
 
@@ -136,12 +137,7 @@ export async function submitCodexQueuedUserTurn(
     timeout: 10_000,
     maxBuffer: 1024 * 1024,
     cwd: target.worktreePath || os.homedir(),
-    env: {
-      ...process.env,
-      CODEX_HOME: providerSession.configHomeRef,
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-    },
+    env: childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: providerSession.configHomeRef, FORCE_COLOR: '0', NO_COLOR: '1' } }),
     encoding: 'utf-8',
   });
 }

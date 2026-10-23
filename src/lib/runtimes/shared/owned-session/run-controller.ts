@@ -1,3 +1,5 @@
+import { providerMcpLaunchRequiresPolicy } from '@/lib/providers/mcp-launch';
+import { credentialPolicySandbox } from '@/lib/providers/credential-sandbox';
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
 import { providerCredentialName } from '@/lib/providers/spawn-environment';
@@ -543,6 +545,7 @@ export function createOwnedRunController({
         const controlledSandbox = controlledProviderSandbox(session, spawnBinary);
         const prepared = await prepareWorkerSandbox({
           ...controlledSandbox,
+          finalCredentialPolicy: workerMcp.servers.some(providerMcpLaunchRequiresPolicy) ? credentialPolicySandbox() : undefined,
           runId,
           profileDir: path.join(session.sessionDir, RUNS_DIR),
           cwd: session.repoPath,

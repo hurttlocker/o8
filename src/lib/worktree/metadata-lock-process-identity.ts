@@ -1,4 +1,5 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn, spawnSync } from '@/lib/providers/child-process';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
@@ -33,7 +34,7 @@ function runCommand(command: string, args: string[]): Promise<CommandReceipt> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, { env: { ...process.env, LANG: 'C', LC_ALL: 'C' }, windowsHide: true,
+      child = spawn(command, args, { env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }), windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'] });
     } catch {
       resolve({ code: 127, stdout: '', stderr: '' });
@@ -205,7 +206,7 @@ export async function probeMetadataLockProcessIdentity(
 function runCommandSync(command: string, args: string[]): CommandReceipt {
   const receipt = spawnSync(command, args, {
     encoding: 'utf8',
-    env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+    env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
     maxBuffer: 64 * 1024,
     timeout: 2_000,
     windowsHide: true,

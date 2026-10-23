@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFileSync } from 'child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, statSync } from 'fs';
 import os from 'os';
 import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, lstatSync, readlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { realpathSync } from 'node:fs';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { resolvePublishedCloudBase } from './published-base';

@@ -1,7 +1,8 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { StringDecoder } from 'node:string_decoder';
@@ -61,8 +62,7 @@ export async function readLiveClaudeRuntimeCapacity(options: {
     '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
   ]);
   return new Promise((resolve, reject) => {
-    const env: NodeJS.ProcessEnv = { ...process.env, ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
-      CLAUDE_CODE_AUTO_CONNECT_IDE: '0', CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1' };
+    const env: NodeJS.ProcessEnv = childEnvironment({ runtimeId: 'claude-code', env: { ...options.env, ENABLE_CLAUDEAI_MCP_SERVERS: 'false', CLAUDE_CODE_AUTO_CONNECT_IDE: '0', CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: '1' } });
     delete env.FORCE_CODE_TERMINAL;
     const proc = spawn(invocation.command, invocation.args, {
       cwd: options.cwd ?? homedir(), env: providerSpawnEnvironment(env, { runtimeId: 'claude-code' }), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],

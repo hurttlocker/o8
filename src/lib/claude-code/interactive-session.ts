@@ -1,8 +1,9 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -380,11 +381,7 @@ function spawnSession(
   const proc = spawn(launch.command, launch.args, {
     windowsHide: true,
     cwd,
-    env: providerSpawnEnvironment({
-      ...process.env,
-      FORCE_COLOR: '0',
-      O8_MANAGED_SESSION: '1',
-    }, { runtimeId: 'claude-code' }),
+    env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' }),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 

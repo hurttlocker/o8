@@ -1,5 +1,6 @@
-import { reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -118,7 +119,8 @@ function syncCodexAuthFiles(codexHome: string): void {
     const sourcePath = join(USER_CODEX_HOME, fileName);
     if (!existsSync(sourcePath)) { if (fileName === 'auth.json') reconcileRuntimeConfigFile(join(codexHome, fileName), 'codex'); continue; }
     const destPath = join(codexHome, fileName);
-    copyFileSync(sourcePath, destPath);
+    if (fileName === 'auth.json') copyRuntimeConfigFile(sourcePath, destPath, 'codex');
+    else copyFileSync(sourcePath, destPath);
     if (fileName === 'auth.json') { reconcileRuntimeConfigFile(destPath, 'codex'); chmodSync(destPath, 0o600); }
   }
 }
@@ -147,8 +149,7 @@ export function prepareCodexHome(
     resolved.note,
   );
   const configPath = join(codexHome, 'config.toml');
-  writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
-  reconcileRuntimeConfigFile(configPath, 'codex');
+  writeOwnedRuntimeArtifact(configPath, 'codex', mergedConfig);
   chmodSync(configPath, 0o600);
   syncCodexAuthFiles(codexHome);
   return { codexHome, ...resolved };

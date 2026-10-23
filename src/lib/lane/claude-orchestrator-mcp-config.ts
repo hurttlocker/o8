@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { repoHash } from './orchestrator-session-core';
@@ -24,7 +25,7 @@ export function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: 
   // The caller fingerprints this exact object. Keeping construction out of the
   // writer prevents transient resolver state from making the stored hash differ
   // from the config the CLI actually reads.
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  writeOwnedRuntimeArtifact(configPath, 'claude-code', JSON.stringify(config, null, 2));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);
   return configPath;
 }

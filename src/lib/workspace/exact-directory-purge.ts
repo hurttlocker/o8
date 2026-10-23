@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { hasCloseProcessObservation, settleCloseObservedHelper } from '@/lib/runtime/close-process-observation';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -448,12 +449,7 @@ async function runCapturedPurge(
 ): Promise<void> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: namespace.canonicalPath,
-    env: {
-      ...process.env,
-      O8_PURGE_EXPECTED_DEVICE: String(identity.device),
-      O8_PURGE_EXPECTED_INODE: String(identity.inode),
-      ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}),
-    },
+    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), ...(expectedFingerprint ? { O8_PURGE_EXPECTED_FINGERPRINT: expectedFingerprint } : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -528,12 +524,7 @@ export async function captureExactDirectoryManifest(
 ): Promise<ExactDirectoryManifest> {
   const child = spawn(process.execPath, ['-e', PURGE_CAPTURE_SCRIPT], {
     cwd: candidatePath,
-    env: {
-      ...process.env,
-      O8_PURGE_EXPECTED_DEVICE: String(identity.device),
-      O8_PURGE_EXPECTED_INODE: String(identity.inode),
-      O8_PURGE_CAPTURE_ONLY: '1',
-    },
+    env: childEnvironment({ env: { O8_PURGE_EXPECTED_DEVICE: String(identity.device), O8_PURGE_EXPECTED_INODE: String(identity.inode), O8_PURGE_CAPTURE_ONLY: '1' } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });

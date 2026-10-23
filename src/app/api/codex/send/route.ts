@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextRequest } from 'next/server';
-import { spawn } from 'child_process';
+import { spawn } from '@/lib/providers/child-process';
 import os from 'os';
 
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
       const child = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd: workingDir,
-        env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: 'codex' }),
+        env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'codex' }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

@@ -5,7 +5,7 @@
  * reads transcripts from JSONL files, and manages lifecycle
  * via the `claude` CLI.
  */
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { access, open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

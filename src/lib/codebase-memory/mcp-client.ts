@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Minimal MCP-stdio JSON-RPC client for codebase-memory tool calls.
@@ -13,7 +14,7 @@ import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 
 import 'server-only';
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 
 const INIT_TIMEOUT_MS = 10_000;
 const DEFAULT_CALL_TIMEOUT_MS = 5 * 60_000; // 5 min — large repos take time to index
@@ -93,7 +94,7 @@ export async function withCodebaseMemoryToolSession<T>(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: input.cwd,
-      env: providerMcpEnvironment({ ...process.env }),
+      env: providerMcpEnvironment(childEnvironment()),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

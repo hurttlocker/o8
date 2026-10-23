@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -80,7 +81,7 @@ export const operatorOverHttp: O8ServerRequest = createOperatorOverHttp();
 async function openStdioServer(name: string, launch: { command: string; args?: string[]; env?: Record<string, string> },
   cwd: string): Promise<{ server: O8CommandServer; close: () => Promise<void> }> {
   const peer = new StdioJsonRpcPeer({ command: launch.command, args: launch.args ?? [], cwd,
-    env: providerMcpEnvironment({ ...process.env, ...launch.env }) }, SERVER_REQUEST_TIMEOUT_MS);
+    env: providerMcpEnvironment(childEnvironment({ runtimeId: 'pi', env: launch.env })) }, SERVER_REQUEST_TIMEOUT_MS);
   try {
     await peer.request('initialize', { protocolVersion: '2024-11-05', capabilities: {},
       clientInfo: { name: 'o8-pi-orchestrator', version: '1.0.0' } }, 60_000);

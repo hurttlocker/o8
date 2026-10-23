@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

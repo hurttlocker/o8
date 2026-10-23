@@ -49,7 +49,7 @@ import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArt
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';

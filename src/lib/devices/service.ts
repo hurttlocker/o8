@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from '@/lib/providers/child-process';
 import { createServer } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';

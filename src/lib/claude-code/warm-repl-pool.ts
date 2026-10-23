@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
@@ -29,7 +30,7 @@ import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -100,7 +101,7 @@ function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc
     child = spawn(launch.command, launch.args, {
       windowsHide: true,
       cwd: os.tmpdir(),
-      env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' }, { runtimeId: 'claude-code' }),
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' } }), { runtimeId: 'claude-code' }),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch {

@@ -16,7 +16,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';

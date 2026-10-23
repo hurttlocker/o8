@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { lstat } from 'node:fs/promises';
 import { expandHome, safeJoin } from '@/lib/fs/safe-path';
 import { openWorkspaceFile } from '@/lib/fs/workspace-file';
