@@ -8,6 +8,9 @@ import {
   MessageSquare,
 } from '../lucide-shims';
 import { runtimeFromSessionKeyId } from '@/lib/orchestrator/runtime-capabilities';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
+import { normalizeWorkspaceChatSessionKey } from './utils';
+import { OutsideConversationPane } from './OutsideConversationPane';
 import { O8ThreadsPane } from '@/components/desktop/o8-panel/O8ThreadsPane';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
@@ -736,7 +739,16 @@ function WorkspaceChatPaneBase({
 }
 
 export const WorkspaceChatPane = memo(function WorkspaceChatPane(props: WorkspaceChatPaneProps) {
-  const runtime = runtimeFromSessionKeyId(props.tab.chatSessionKey) ?? props.tab.chatRuntime;
+  const runtime = runtimeFromSessionKeyId(props.tab.chatSessionKey)
+    ?? (props.tab.chatSessionKey?.startsWith('codex-live:') ? 'codex' : props.tab.chatRuntime);
+  const sessionKey = normalizeWorkspaceChatSessionKey(runtime, props.tab.chatSessionKey);
+  // Reading a discovered thread grants no continuation authority over its writer.
+  if (runtime && sessionKey && isDiscoveredCliSessionKey(runtime, sessionKey)) return <OutsideConversationPane
+    sessionKey={sessionKey}
+    runtime={runtime}
+    tab={props.tab}
+    active={props.active}
+  />;
   // Remote attempts already have an authoritative task/evidence surface. They
   // must never enter the local CLI composer or inherit its default model.
   if (runtime === 'cloud') return <O8ThreadsPane

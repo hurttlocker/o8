@@ -63,6 +63,7 @@ export type OwnedCodexLaunchResponse = {
   runtime: 'codex';
   surfaceId: string;
   note: string;
+  sideEffect?: 'none' | 'unknown';
 };
 
 type OwnedReviewDisposition = 'watching' | 'resolved';
@@ -317,6 +318,7 @@ export async function launchOwnedCodexSession(
     runtime: 'codex',
     surfaceId: result.surfaceId,
     note: result.note,
+    sideEffect: result.sideEffect,
   };
 }
 

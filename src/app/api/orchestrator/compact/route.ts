@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null) as {
     repoPath?: unknown;
     runningTotal?: unknown;
+    contextSource?: unknown;
     messages?: unknown;
     threadId?: unknown;
     keepTailCount?: unknown;
@@ -45,6 +46,7 @@ export async function POST(request: NextRequest) {
       repoPath: repoRoot,
       threadId,
       runningTotal: typeof body?.runningTotal === 'number' ? body.runningTotal : undefined,
+      contextSource: typeof body?.contextSource === 'string' ? body.contextSource : undefined,
       keepTailCount: typeof body?.keepTailCount === 'number' ? body.keepTailCount : undefined,
       trigger: body?.trigger === 'manual' || body?.trigger === 'handoff' ? body.trigger : 'auto',
     });

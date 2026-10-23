@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import path from 'node:path';
 
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -18,7 +19,13 @@ export async function GET(request: NextRequest) {
   try {
     const after = request.nextUrl.searchParams.get('after') ?? '';
     if (after.length > 4_096) return operatorError('invalid_request', 'Invalid maintenance cursor.', 400);
-    return operatorSuccess({ ...readWorktreeMaintenanceStatus(after), policy: WORKTREE_MAINTENANCE_POLICY });
+    const scopes = request.nextUrl.searchParams.getAll('repoPath');
+    const repoPath = scopes[0];
+    if (scopes.length > 1 || (repoPath !== undefined
+      && (!path.isAbsolute(repoPath) || repoPath.includes('\0') || repoPath.length > 4_096))) {
+      return operatorError('invalid_request', 'Expected one absolute repository path.', 400);
+    }
+    return operatorSuccess({ ...readWorktreeMaintenanceStatus(after, 50, repoPath), policy: WORKTREE_MAINTENANCE_POLICY });
   } catch {
     return operatorError('maintenance_unavailable', 'Worktree maintenance inventory is unavailable.', 503);
   }
