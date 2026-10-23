@@ -20,16 +20,25 @@ export function RemoteTaskPreview({ taskId, jobId, attempt, onBack }: {
   const [stage, setStage] = useState('Checking preview support…');
   const serviceId = useRef<string | undefined>(undefined);
   const keepForReconnect = useRef(false);
+  const owner = useRef({ generation: 0, active: false });
+  // This cleanup runs before connection cleanup. A pending reconnect cannot
+  // preserve a service after its task/attempt scope has left the panel.
+  useEffect(() => {
+    owner.current = { generation: owner.current.generation + 1, active: true };
+    return () => { owner.current.active = false; };
+  }, [taskId, jobId, attempt]);
   useEffect(() => {
     if (!isTauri()) return;
     let active = true;
     let preserve = false;
+    const generation = owner.current.generation;
+    const sameOwner = () => owner.current.active && owner.current.generation === generation;
     let opened: RemotePreviewAccess | null = serviceId.current ? { serviceJobId: serviceId.current } : null;
     const controller = new AbortController();
     const endpoint = `/api/tasks/${encodeURIComponent(taskId)}/preview`;
     const close = (access: RemotePreviewAccess, keepService = false) => {
       void fetch(endpoint, { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: access.id, serviceJobId: access.serviceJobId, keepService }) }).catch(() => {});
+        body: JSON.stringify({ id: access.id, serviceJobId: access.serviceJobId, keepService: keepService && sameOwner() }) }).catch(() => {});
     };
     void remotePreviewSupported().then(async (supported) => {
       if (!supported) throw new Error('Remote previews currently require the macOS desktop app.');
@@ -52,7 +61,7 @@ export function RemoteTaskPreview({ taskId, jobId, attempt, onBack }: {
       }
     }).finally(() => { if (active) setConnecting(false); });
     return () => {
-      active = false; preserve = keepForReconnect.current; keepForReconnect.current = false;
+      active = false; preserve = keepForReconnect.current && sameOwner(); keepForReconnect.current = false;
       controller.abort();
       if (opened) close(opened, preserve);
       if (!preserve) serviceId.current = undefined;
