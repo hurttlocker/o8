@@ -34,65 +34,17 @@ export async function register(): Promise<void> {
     // current directory from EXECUTABLE lookup; explicit paths still work.
     if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
 
-    // A packaged API sidecar can restart while its WebSocket sibling stays up.
-    // Resume its durable queues without requiring another sibling startup POST.
-    // Keep builds and standalone development on the existing explicit-start path.
-    if (process.env.O8_PACKAGED_APP === '1' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
-      void import('@/lib/lane/review-drain-bootstrap')
-        .then(({ ensureReviewQueueDrainStarted }) => ensureReviewQueueDrainStarted())
-        .catch((error) => console.warn('[auto-review] Queue startup failed', { error: String(error) }));
-    }
-
-    // Crash telemetry (Rock 2): observe uncaught exceptions + unhandled
-    // rejections in the Next server process and persist them to the local crash
-    // store. Never throws; runs before any of the warm-up work below. The opt-in
-    // uploader loop is a cheap no-op unless the operator enabled telemetry.
+    // Local crash observers are needed before requests. All optional imports live
+    // behind the existing protected startup action, outside the health graph.
     try {
       const { installProcessCrashCapture } = await import('@/lib/telemetry/crash-capture');
       installProcessCrashCapture('next-server');
-      const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');
-      startTelemetryUploadLoop();
-      // Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget so a
-      // slow/failed SDK import can't delay boot. Crash semantics stay unchanged —
-      // the crash-capture monitor above still writes the local JSONL sink.
-      const { initSentryNode } = await import('@/lib/telemetry/sentry-node');
-      void initSentryNode('server');
     } catch {
       warnOptionalStartupFailure('telemetry');
     }
-
-    // One-time, marker-gated repair of transcripts flipped by the pre-v0.1.229
-    // assistant-timestamp bug — so every install self-heals its old threads on
-    // update (the persistence clamp already prevents new flips). Deferred to a
-    // microtask + never awaited so it can't block boot; idempotent after the
-    // marker lands.
-    void (async () => {
-      try {
-        const {
-          repairComposerPreamblePollution,
-          repairFlippedOrchestratorTranscripts,
-        } = await import('@/lib/mobile/orchestrator-thread-history');
-        repairFlippedOrchestratorTranscripts();
-        repairComposerPreamblePollution();
-      } catch {
-        warnOptionalStartupFailure('transcript-repair');
-      }
-    })();
-
-    // #3454 — o8's own Messages receiver for Symon. Off until the operator
-    // enables it; macOS only. Not during builds.
-    if (process.platform === 'darwin' && process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
-      void import('@/lib/symon/messages-receiver/loop')
-        .then(({ startMessagesReceiver }) => startMessagesReceiver())
-        .catch(() => console.warn('[symon] Messages receiver failed to start'));
+    if (process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+      const { scheduleNextServerStartup } = await import('@/lib/startup/schedule');
+      scheduleNextServerStartup();
     }
-
-    // #984 — legacy search ingestion is resumable and deliberately deferred so
-    // schema initialization and app boot never scan transcript/history stores.
-    setTimeout(() => {
-      void import('@/lib/search/backfill')
-        .then(({ runUnifiedSearchBackfills }) => runUnifiedSearchBackfills())
-        .catch((error) => console.warn('[search] backfill bootstrap failed', { error: String(error) }));
-    }, 1_500);
   }
 }

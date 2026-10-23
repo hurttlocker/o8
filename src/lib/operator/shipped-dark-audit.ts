@@ -16,7 +16,6 @@ import {
 } from './defaults';
 import {
   DEFAULT_SHIPPED_DARK_LIFECYCLE,
-  isShippedDarkPromotionCandidate,
   shippedDarkManifestEntry,
   type ShippedDarkLifecycle,
 } from './shipped-dark-manifest';
@@ -147,18 +146,7 @@ async function findLanding(
   };
 }
 
-/**
- * True when a dark flag is an unreviewed promotion candidate that has aged past
- * the warning threshold. Deliberate default-off flags stay visible and quiet.
- */
-export function isOverdueShippedDarkFlag(
-  flag: Pick<ShippedButDarkFlag, 'lifecycle' | 'darkForReleases'>,
-  thresholdReleases: number,
-): boolean {
-  return isShippedDarkPromotionCandidate(flag.lifecycle)
-    && flag.darkForReleases !== null
-    && flag.darkForReleases >= thresholdReleases;
-}
+export { isOverdueShippedDarkFlag } from './shipped-dark-receipt';
 
 /**
  * Lists settings-backed feature flags that remain inactive in both the shipped

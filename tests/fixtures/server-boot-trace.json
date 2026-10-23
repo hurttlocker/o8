@@ -1,0 +1,1149 @@
+{
+  "schema": "o8/server-boot-trace/v1",
+  "issue": 4393,
+  "baseline_commit": "7c7044741",
+  "environment": {
+    "node": "22.23.4",
+    "platform": "linux",
+    "desktop_or_accounts_used": false
+  },
+  "command": "node scripts/bench/measure-server-boot.mjs --launches=3 --out=work/server-boot.json",
+  "method": [
+    "scripts/speed/stack.mjs is absent. The retained benchmark launches the real Next dev CLI, separately bundled WS entry, and separately tsx-loaded WS entry.",
+    "Each launch uses an isolated data directory and fixture git repository. WS has no Next sibling, exposing the previous ten-second readiness timeout.",
+    "Health means a complete HTTP 200 JSON response identifying product o8, not the Ready console line.",
+    "Compiled WS uses the packaged esbuild bundle format, native externals and server-only stub. Compilation time is excluded from process bootstrap.",
+    "Next framework trace spans overlap and must not be summed. The original compile-path sequence covers instrumentation twice, middleware, then panel/status.",
+    "Normal persisted Next dev and tsx caches are retained between launches. OS cache is uncontrolled; these are repeated process boots, not an empty compiler-cache guarantee.",
+    "An earlier after-change Next cohort took 4459, 4332 and 4445 ms. The final idle cohort below meets three seconds with the normal persisted dev cache; the clean compiler-cache target remains unproven.",
+    "Initial diagnostic instrumentation was collected before implementation. Its Next times are cumulative process milliseconds; WS times are per-phase durations. The initial 500 ms probe timeout differs from the retained benchmark's uninterrupted 20 s timeout, so its totals are not the comparison cohort.",
+    "Raw application logs, local filesystem identities, and credentials are excluded."
+  ],
+  "healthy_summary": {
+    "next-source": {
+      "before_ms": [
+        30546,
+        28233,
+        29659
+      ],
+      "after_ms": [
+        2075,
+        2131,
+        2428
+      ],
+      "before_median_ms": 29659,
+      "after_median_ms": 2131
+    },
+    "ws-compiled": {
+      "before_ms": [
+        10896,
+        10888,
+        10832
+      ],
+      "after_ms": [
+        724,
+        798,
+        1230
+      ],
+      "before_median_ms": 10888,
+      "after_median_ms": 798
+    },
+    "ws-source": {
+      "before_ms": [
+        13364,
+        13204,
+        12457
+      ],
+      "after_ms": [
+        2105,
+        1931,
+        1778
+      ],
+      "before_median_ms": 13204,
+      "after_median_ms": 1931
+    }
+  },
+  "before": [
+    {
+      "lane": "next-source",
+      "launch": 1,
+      "ready_ms": 843,
+      "healthy_ms": 30546,
+      "phases": [
+        {
+          "phase": "compile-path",
+          "duration_ms": 15396
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 105
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 1387
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 18175
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 18951
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 9773
+        }
+      ]
+    },
+    {
+      "lane": "next-source",
+      "launch": 2,
+      "ready_ms": 730,
+      "healthy_ms": 28233,
+      "phases": [
+        {
+          "phase": "compile-path",
+          "duration_ms": 13849
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 70
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 1321
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 16549
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 17506
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 9007
+        }
+      ]
+    },
+    {
+      "lane": "next-source",
+      "launch": 3,
+      "ready_ms": 756,
+      "healthy_ms": 29659,
+      "phases": [
+        {
+          "phase": "compile-path",
+          "duration_ms": 14258
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 85
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 1913
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 17950
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 18618
+        },
+        {
+          "phase": "compile-path",
+          "duration_ms": 9498
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 1,
+      "ready_ms": 10858,
+      "healthy_ms": 10896,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 682,
+          "duration_ms": 682
+        },
+        {
+          "phase": "next-readiness",
+          "elapsed_ms": 10724,
+          "duration_ms": 10043
+        },
+        {
+          "phase": "database",
+          "elapsed_ms": 10725,
+          "duration_ms": 0
+        },
+        {
+          "phase": "approvals",
+          "elapsed_ms": 10725,
+          "duration_ms": 0
+        },
+        {
+          "phase": "branch-prune",
+          "elapsed_ms": 10755,
+          "duration_ms": 30
+        },
+        {
+          "phase": "worktree-maintenance",
+          "elapsed_ms": 10808,
+          "duration_ms": 53
+        },
+        {
+          "phase": "merged-incidents",
+          "elapsed_ms": 10809,
+          "duration_ms": 1
+        },
+        {
+          "phase": "launch-agent-health",
+          "elapsed_ms": 10814,
+          "duration_ms": 5
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10815,
+          "duration_ms": 2
+        },
+        {
+          "phase": "session-recovery",
+          "elapsed_ms": 10816,
+          "duration_ms": 1
+        },
+        {
+          "phase": "storage-reconciliation",
+          "elapsed_ms": 10818,
+          "duration_ms": 1
+        },
+        {
+          "phase": "resource-leases",
+          "elapsed_ms": 10820,
+          "duration_ms": 2
+        },
+        {
+          "phase": "dependency-images",
+          "elapsed_ms": 10830,
+          "duration_ms": 10
+        },
+        {
+          "phase": "workspace-lane-reconciliation",
+          "elapsed_ms": 10832,
+          "duration_ms": 2
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10835,
+          "duration_ms": 3
+        },
+        {
+          "phase": "polling",
+          "elapsed_ms": 10836,
+          "duration_ms": 0
+        },
+        {
+          "phase": "browser-discovery",
+          "elapsed_ms": 10836,
+          "duration_ms": 0
+        },
+        {
+          "phase": "attached-browser",
+          "elapsed_ms": 10836,
+          "duration_ms": 0
+        },
+        {
+          "phase": "runtime-refresh",
+          "elapsed_ms": 10836,
+          "duration_ms": 0
+        },
+        {
+          "phase": "inbox-refresh",
+          "elapsed_ms": 10836,
+          "duration_ms": 0
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 10838,
+          "duration_ms": 2
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 2,
+      "ready_ms": 10820,
+      "healthy_ms": 10888,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 621,
+          "duration_ms": 621
+        },
+        {
+          "phase": "next-readiness",
+          "elapsed_ms": 10678,
+          "duration_ms": 10057
+        },
+        {
+          "phase": "database",
+          "elapsed_ms": 10679,
+          "duration_ms": 0
+        },
+        {
+          "phase": "approvals",
+          "elapsed_ms": 10679,
+          "duration_ms": 0
+        },
+        {
+          "phase": "branch-prune",
+          "elapsed_ms": 10719,
+          "duration_ms": 40
+        },
+        {
+          "phase": "worktree-maintenance",
+          "elapsed_ms": 10764,
+          "duration_ms": 45
+        },
+        {
+          "phase": "merged-incidents",
+          "elapsed_ms": 10765,
+          "duration_ms": 1
+        },
+        {
+          "phase": "launch-agent-health",
+          "elapsed_ms": 10774,
+          "duration_ms": 9
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10775,
+          "duration_ms": 1
+        },
+        {
+          "phase": "session-recovery",
+          "elapsed_ms": 10779,
+          "duration_ms": 4
+        },
+        {
+          "phase": "storage-reconciliation",
+          "elapsed_ms": 10780,
+          "duration_ms": 1
+        },
+        {
+          "phase": "resource-leases",
+          "elapsed_ms": 10780,
+          "duration_ms": 0
+        },
+        {
+          "phase": "dependency-images",
+          "elapsed_ms": 10785,
+          "duration_ms": 5
+        },
+        {
+          "phase": "workspace-lane-reconciliation",
+          "elapsed_ms": 10798,
+          "duration_ms": 12
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "polling",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "browser-discovery",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "attached-browser",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "runtime-refresh",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "inbox-refresh",
+          "elapsed_ms": 10798,
+          "duration_ms": 0
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 10800,
+          "duration_ms": 2
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 3,
+      "ready_ms": 10799,
+      "healthy_ms": 10832,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 629,
+          "duration_ms": 629
+        },
+        {
+          "phase": "next-readiness",
+          "elapsed_ms": 10715,
+          "duration_ms": 10086
+        },
+        {
+          "phase": "database",
+          "elapsed_ms": 10715,
+          "duration_ms": 0
+        },
+        {
+          "phase": "approvals",
+          "elapsed_ms": 10715,
+          "duration_ms": 0
+        },
+        {
+          "phase": "branch-prune",
+          "elapsed_ms": 10731,
+          "duration_ms": 15
+        },
+        {
+          "phase": "worktree-maintenance",
+          "elapsed_ms": 10756,
+          "duration_ms": 26
+        },
+        {
+          "phase": "merged-incidents",
+          "elapsed_ms": 10757,
+          "duration_ms": 1
+        },
+        {
+          "phase": "launch-agent-health",
+          "elapsed_ms": 10763,
+          "duration_ms": 5
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10764,
+          "duration_ms": 1
+        },
+        {
+          "phase": "session-recovery",
+          "elapsed_ms": 10767,
+          "duration_ms": 3
+        },
+        {
+          "phase": "storage-reconciliation",
+          "elapsed_ms": 10767,
+          "duration_ms": 1
+        },
+        {
+          "phase": "resource-leases",
+          "elapsed_ms": 10768,
+          "duration_ms": 0
+        },
+        {
+          "phase": "dependency-images",
+          "elapsed_ms": 10773,
+          "duration_ms": 5
+        },
+        {
+          "phase": "workspace-lane-reconciliation",
+          "elapsed_ms": 10775,
+          "duration_ms": 2
+        },
+        {
+          "phase": "merged-ancestry",
+          "elapsed_ms": 10775,
+          "duration_ms": 0
+        },
+        {
+          "phase": "polling",
+          "elapsed_ms": 10775,
+          "duration_ms": 0
+        },
+        {
+          "phase": "browser-discovery",
+          "elapsed_ms": 10776,
+          "duration_ms": 0
+        },
+        {
+          "phase": "attached-browser",
+          "elapsed_ms": 10776,
+          "duration_ms": 0
+        },
+        {
+          "phase": "runtime-refresh",
+          "elapsed_ms": 10776,
+          "duration_ms": 0
+        },
+        {
+          "phase": "inbox-refresh",
+          "elapsed_ms": 10776,
+          "duration_ms": 0
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 10777,
+          "duration_ms": 1
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 1,
+      "ready_ms": 13325,
+      "healthy_ms": 13364,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 3078
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 2,
+      "ready_ms": 13160,
+      "healthy_ms": 13204,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 2892
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 3,
+      "ready_ms": 12397,
+      "healthy_ms": 12457,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 2042
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "lane": "next-source",
+      "launch": 1,
+      "ready_ms": 589,
+      "healthy_ms": 2075,
+      "phases": [
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 9
+        },
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 2
+        },
+        {
+          "phase": "compile-middleware",
+          "duration_ms": 50
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 511
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 839
+        },
+        {
+          "phase": "compile-api/panel/status",
+          "duration_ms": 362
+        }
+      ]
+    },
+    {
+      "lane": "next-source",
+      "launch": 2,
+      "ready_ms": 508,
+      "healthy_ms": 2131,
+      "phases": [
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 6
+        },
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 3
+        },
+        {
+          "phase": "compile-middleware",
+          "duration_ms": 41
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 554
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 839
+        },
+        {
+          "phase": "compile-api/panel/status",
+          "duration_ms": 475
+        }
+      ]
+    },
+    {
+      "lane": "next-source",
+      "launch": 3,
+      "ready_ms": 538,
+      "healthy_ms": 2428,
+      "phases": [
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 5
+        },
+        {
+          "phase": "compile-instrumentation",
+          "duration_ms": 2
+        },
+        {
+          "phase": "compile-middleware",
+          "duration_ms": 40
+        },
+        {
+          "phase": "setup-dev-bundler",
+          "duration_ms": 650
+        },
+        {
+          "phase": "start-dev-server",
+          "duration_ms": 1010
+        },
+        {
+          "phase": "compile-api/panel/status",
+          "duration_ms": 520
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 1,
+      "ready_ms": 684,
+      "healthy_ms": 724,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 489,
+          "duration_ms": 489
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 678,
+          "duration_ms": 189
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 2,
+      "ready_ms": 753,
+      "healthy_ms": 798,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 550,
+          "duration_ms": 550
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 748,
+          "duration_ms": 198
+        }
+      ]
+    },
+    {
+      "lane": "ws-compiled",
+      "launch": 3,
+      "ready_ms": 1188,
+      "healthy_ms": 1230,
+      "phases": [
+        {
+          "phase": "imports-and-top-level",
+          "elapsed_ms": 975,
+          "duration_ms": 975
+        },
+        {
+          "phase": "listen",
+          "elapsed_ms": 1177,
+          "duration_ms": 202
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 1,
+      "ready_ms": 1857,
+      "healthy_ms": 2105,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 1844
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 2,
+      "ready_ms": 1667,
+      "healthy_ms": 1931,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 1657
+        }
+      ]
+    },
+    {
+      "lane": "ws-source",
+      "launch": 3,
+      "ready_ms": 1554,
+      "healthy_ms": 1778,
+      "phases": [
+        {
+          "phase": "source-imports-through-crash-capture",
+          "elapsed_ms": 1544
+        }
+      ]
+    }
+  ],
+  "initial_diagnostic_before_fix": {
+    "next": {
+      "timing": "elapsed_ms",
+      "phases": {
+        "register": [
+          10051,
+          7750,
+          9036
+        ],
+        "crash-import-start": [
+          10051,
+          7751,
+          9036
+        ],
+        "crash-import-end": [
+          10057,
+          7753,
+          9039
+        ],
+        "uploader-import-start": [
+          10057,
+          7754,
+          9040
+        ],
+        "uploader-import-end": [
+          10083,
+          7772,
+          9060
+        ],
+        "sentry-import-start": [
+          10084,
+          7772,
+          9061
+        ],
+        "sentry-import-end": [
+          10100,
+          7788,
+          9080
+        ]
+      }
+    },
+    "ws-compiled": {
+      "timing": "duration_ms",
+      "phases": {
+        "imports-and-top-level": [
+          502,
+          498,
+          497
+        ],
+        "next-ready": [
+          10041,
+          10004,
+          10040
+        ],
+        "database": [
+          0,
+          0,
+          0
+        ],
+        "approvals": [
+          0,
+          0,
+          0
+        ],
+        "prune-branches": [
+          18,
+          16,
+          15
+        ],
+        "worktree-maintenance": [
+          18,
+          21,
+          19
+        ],
+        "merged-incidents": [
+          1,
+          0,
+          1
+        ],
+        "launch-health-setup": [
+          0,
+          0,
+          0
+        ],
+        "launch-health": [
+          5,
+          4,
+          6
+        ],
+        "launch-health-timer": [
+          0,
+          0,
+          0
+        ],
+        "merged-ancestry": [
+          1,
+          1,
+          1
+        ],
+        "rehydration": [
+          1,
+          1,
+          1
+        ],
+        "storage-admission": [
+          1,
+          1,
+          1
+        ],
+        "resource-leases": [
+          1,
+          0,
+          0
+        ],
+        "dependency-state": [
+          0,
+          0,
+          0
+        ],
+        "dependency-images": [
+          5,
+          4,
+          4
+        ],
+        "lane-workspace-reconcile": [
+          2,
+          2,
+          2
+        ],
+        "periodic-sweep": [
+          0,
+          0,
+          0
+        ],
+        "rules-promotion-timer": [
+          0,
+          0,
+          0
+        ],
+        "polling-loops": [
+          0,
+          0,
+          0
+        ],
+        "browser-discovery": [
+          0,
+          0,
+          0
+        ],
+        "attached-browser": [
+          0,
+          0,
+          0
+        ],
+        "runtime-refresh": [
+          0,
+          0,
+          0
+        ],
+        "inbox-refresh": [
+          0,
+          0,
+          0
+        ],
+        "listen": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "ws-source": {
+      "timing": "duration_ms",
+      "phases": {
+        "imports-and-top-level": [
+          5863,
+          1673,
+          1754
+        ],
+        "next-ready": [
+          10073,
+          10080,
+          10094
+        ],
+        "database": [
+          0,
+          0,
+          0
+        ],
+        "approvals": [
+          0,
+          0,
+          1
+        ],
+        "prune-branches": [
+          27,
+          18,
+          16
+        ],
+        "worktree-maintenance": [
+          52,
+          29,
+          22
+        ],
+        "merged-incidents": [
+          8,
+          3,
+          5
+        ],
+        "launch-health-setup": [
+          0,
+          0,
+          0
+        ],
+        "launch-health": [
+          23,
+          10,
+          13
+        ],
+        "launch-health-timer": [
+          0,
+          0,
+          0
+        ],
+        "merged-ancestry": [
+          35,
+          6,
+          8
+        ],
+        "rehydration": [
+          1,
+          1,
+          2
+        ],
+        "storage-admission": [
+          16,
+          6,
+          5
+        ],
+        "resource-leases": [
+          9,
+          3,
+          5
+        ],
+        "dependency-state": [
+          0,
+          0,
+          0
+        ],
+        "dependency-images": [
+          16,
+          6,
+          7
+        ],
+        "lane-workspace-reconcile": [
+          42,
+          10,
+          11
+        ],
+        "periodic-sweep": [
+          0,
+          0,
+          0
+        ],
+        "rules-promotion-timer": [
+          0,
+          0,
+          0
+        ],
+        "polling-loops": [
+          0,
+          0,
+          0
+        ],
+        "browser-discovery": [
+          0,
+          0,
+          0
+        ],
+        "attached-browser": [
+          0,
+          0,
+          0
+        ],
+        "runtime-refresh": [
+          0,
+          0,
+          0
+        ],
+        "inbox-refresh": [
+          0,
+          0,
+          0
+        ],
+        "listen": [
+          1,
+          1,
+          1
+        ]
+      }
+    }
+  },
+  "moved_work": {
+    "next_after_healthy": [
+      "telemetry upload and Sentry",
+      "packaged review queue drain",
+      "transcript repairs",
+      "platform messages receiver",
+      "codebase indexing, decay, proposers, signature, external merge and audit scheduling",
+      "delayed search backfill"
+    ],
+    "next_before_first_use": [
+      "persisted transcript repair before history reads and listing",
+      "hosted identity middleware before first hosted request; desktop does not load the SDK"
+    ],
+    "ws_after_healthy_before_stateful_use": [
+      "Next readiness",
+      "terminal host readiness",
+      "database and stale approvals",
+      "branch, worktree and merged incident maintenance",
+      "launch-agent health",
+      "merged ancestry and orchestrator session recovery",
+      "storage admission, resource lease and dependency image reconciliation",
+      "workspace lane reconciliation",
+      "review watchers, polling and browser loops"
+    ],
+    "ws_before_healthy": [
+      "module and native host imports",
+      "HTTP listener binding; /health and authenticated ping bypass recovery only"
+    ]
+  },
+  "red_evidence": [
+    {
+      "test_file": "tests/server-boot-real-path.test.ts",
+      "tail": [
+        "AssertionError: compiled WS must answer health within 3s while Next is unavailable: : expected undefined to be 200 // Object.is equality",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    },
+    {
+      "test_file": "src/app/api/panel/status/route.test.ts",
+      "tail": [
+        "AssertionError: expected \"vi.fn()\" to not be called at all, but actually been called 1 times",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 2 passed (3)"
+      ]
+    },
+    {
+      "test_file": "src/app/api/panel/status/route.test.ts",
+      "tail": [
+        "AssertionError: expected [ Array(1) ] to deeply equal []",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 3 skipped (4)"
+      ]
+    },
+    {
+      "test_file": "src/app/api/panel/status/route.test.ts",
+      "tail": [
+        "AssertionError: expected 400 to be 200 // Object.is equality",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 2 passed (3)"
+      ]
+    },
+    {
+      "test_file": "src/lib/mobile/orchestrator-thread-history.test.ts",
+      "tail": [
+        "AssertionError: expected [ { role: 'assistant', \u2026(1) }, \u2026(1) ] to deeply equal [ { role: 'user', \u2026(1) }, \u2026(1) ]",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 12 skipped (13)"
+      ]
+    },
+    {
+      "test_file": "tests/middleware-lazy-clerk.test.ts",
+      "tail": [
+        "Caused by: Error: hosted SDK must stay unloaded",
+        "Test Files  1 failed (1)",
+        "Tests  1 failed (1)"
+      ]
+    }
+  ],
+  "verification": {
+    "focused": {
+      "test_files_passed": 15,
+      "tests_passed": 507,
+      "tail": [
+        "Test Files  15 passed (15)",
+        "Tests  507 passed (507)"
+      ],
+      "command": "vitest run tests/server-boot-real-path.test.ts tests/startup-stage-diagnostics.test.ts tests/cold-start-instrumentation.test.ts tests/instrumentation-webpack-boundary.test.ts tests/packet-explainer-restart-real-path.test.ts tests/middleware-lazy-clerk.test.ts src/app/api/panel/status/route.test.ts src/lib/mobile/orchestrator-thread-history.test.ts tests/shipped-dark-scheduler-real-path.test.ts tests/shipped-dark-audit-real-path.test.ts tests/route-coverage.test.ts src/lib/ws-server/storage-admission-reconciliation.test.ts tests/realtime-protocol-negotiation-real-path.test.ts tests/orchestrator-replay-restart-real-path.test.ts tests/mobile-e2ee-required-real-path.test.ts"
+    },
+    "typescript": {
+      "command": "NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit",
+      "exit_code": 0
+    },
+    "eslint": {
+      "scope": "touched TypeScript and benchmark script",
+      "exit_code": 0
+    },
+    "rule_check": {
+      "command": "npm run rule-check -- --base=HEAD",
+      "exit_code": 0
+    },
+    "classification": {
+      "command": "node scripts/classify-tests.mjs --check",
+      "exit_code": 0
+    },
+    "full_npm_test": {
+      "command": "npm test",
+      "exit_code": 0,
+      "test_files_passed": 1191,
+      "test_files_skipped": 3,
+      "tests_passed": 8389,
+      "tests_skipped": 4,
+      "duration_seconds": 401.84,
+      "tail": [
+        "Test Files  1191 passed | 3 skipped (1194)",
+        "Tests  8389 passed | 4 skipped (8393)"
+      ]
+    },
+    "environment_note": "Fixture processes ran under a child subreaper because the container init does not reap orphan children; application liveness and recovery behavior were unchanged."
+  }
+}

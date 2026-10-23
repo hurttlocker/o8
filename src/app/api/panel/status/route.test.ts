@@ -1,4 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { build } from 'esbuild';
+
+vi.mock('@/lib/lane/registry', () => ({ getLane: vi.fn() }));
+vi.mock('@/lib/lane/auto-review', () => ({ triggerAutoReview: vi.fn() }));
+vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ ensureReviewQueueDrainStarted: vi.fn() }));
+vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: vi.fn() }));
+vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: vi.fn() }));
+vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
+  repairFlippedOrchestratorTranscripts: vi.fn(), repairComposerPreamblePollution: vi.fn(),
+}));
+vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: vi.fn() }));
 
 vi.mock('@/lib/codebase-memory/indexer', () => ({ ensureCodebaseMemoryBootIndex: vi.fn() }));
 vi.mock('@/lib/cortex/decay', () => ({ ensureDecayBootHook: vi.fn() }));
@@ -9,8 +21,8 @@ vi.mock('@/lib/cortex/external-merge-watcher', () => ({ ensureExternalMergeBootH
 const { ensureShippedDarkAuditBootHookMock } = vi.hoisted(() => ({
   ensureShippedDarkAuditBootHookMock: vi.fn(),
 }));
-vi.mock('@/lib/operator/shipped-dark-scheduler', () => ({
-  ensureShippedDarkAuditBootHook: ensureShippedDarkAuditBootHookMock,
+vi.mock('@/lib/operator/shipped-dark-scheduler', () => ({ ensureShippedDarkAuditBootHook: ensureShippedDarkAuditBootHookMock }));
+vi.mock('@/lib/operator/shipped-dark-receipt', () => ({
   currentShippedDarkAuditStatus: () => ({
     schema: 'o8/shipped-dark-audit-status/v2',
     status: 'attention',
@@ -49,6 +61,42 @@ afterEach(() => {
 });
 
 describe('GET /api/panel/status', () => {
+  it('keeps audit execution and model subsystems out of the health import graph', async () => {
+    const compiled = await build({ entryPoints: ['src/app/api/panel/status/route.ts'], bundle: true,
+      platform: 'node', format: 'esm', packages: 'external', write: false, metafile: true });
+    expect(Object.keys(compiled.metafile!.inputs).filter(file =>
+      /shipped-dark-audit\.ts|cortex\/proposer|codebase-memory\/indexer/.test(file))).toEqual([]);
+  });
+
+  it('answers health before starting background indexing and learning, then starts each hook', async () => {
+    vi.useFakeTimers();
+    const hooks = [
+      (await import('@/lib/codebase-memory/indexer')).ensureCodebaseMemoryBootIndex,
+      (await import('@/lib/cortex/decay')).ensureDecayBootHook,
+      (await import('@/lib/cortex/proposer')).ensureProposerBootTick,
+      (await import('@/lib/cortex/stack-signature')).ensureStackSignatureBoot,
+      (await import('@/lib/cortex/cross-repo-proposer')).ensureCrossRepoProposerBootTick,
+      (await import('@/lib/cortex/external-merge-watcher')).ensureExternalMergeBootHook,
+      ensureShippedDarkAuditBootHookMock,
+    ];
+    try {
+      const response = await GET();
+      expect(response.status).toBe(200);
+      for (const hook of hooks) expect(hook).not.toHaveBeenCalled();
+      const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+      const { POST } = await import('@/app/api/review/auto-review/route');
+      const started = await POST(new NextRequest('http://127.0.0.1/api/review/auto-review', {
+        method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+        body: JSON.stringify({ action: 'bootstrap' }),
+      }));
+      expect(started.status).toBe(200);
+      for (const hook of hooks) expect(hook).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    }
+  });
+
   it('identifies the unauthenticated liveness responder as o8', async () => {
     const response = await GET();
     expect(response.status).toBe(200);
@@ -71,7 +119,6 @@ describe('GET /api/panel/status', () => {
         })],
       },
     });
-    expect(ensureShippedDarkAuditBootHookMock).toHaveBeenCalledOnce();
   });
 
   it('reports the packaged build identity without reading a source checkout', async () => {
