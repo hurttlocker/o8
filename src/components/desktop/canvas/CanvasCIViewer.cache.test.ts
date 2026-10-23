@@ -11,6 +11,7 @@ const run = (databaseId: number, title = `Run ${databaseId}`) => ({
   databaseId, displayTitle: title, event: 'push', headBranch: 'feature', status: 'completed', conclusion: 'success',
   createdAt: '2026-10-22T12:00:00Z', updatedAt: '2026-10-22T12:01:00Z', workflowName: 'Build', url: 'https://example.invalid/run',
 });
+
 const list = (title = 'Known run', number = 11) => Response.json({ repo: repoA, runs: [run(number, title), run(12)] });
 const detail = (number: number, repo = repoA) => Response.json({
   run: { ...run(number, `Detail ${number} ${repo}`), jobs: [], annotations: [], botComments: [] }, logs: `Logs ${number} ${repo}`,
@@ -187,7 +188,7 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
 
   it('lets Retry cancel an older background read without losing the newer result', async () => {
     await render();
-    fetchMock.mockImplementation(async () => new Response(null, { status: 429 }));
+    fetchMock.mockImplementation(async () => new Response(null, { status: 503 }));
     await invalidate();
     const pending = deferred(); fetchMock.mockImplementationOnce(() => pending.promise);
     let background!: Promise<void>;
@@ -218,5 +219,91 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
     await invalidate();
     expect(host.textContent).not.toContain(`Logs 11 ${repoA}`);
     expect(host.textContent).toContain('Select a run to view details');
+  });
+});
+
+
+describe('CI run-list quota deadlines through the real viewer', () => {
+  const cases: Array<{ label: string; status: number; headers: () => HeadersInit; delay: number }> = [
+    { label: 'numeric', status: 429, headers: () => ({ 'retry-after': '360' }), delay: 360_000 },
+    { label: 'HTTP-date', status: 403, headers: () => ({ 'retry-after': new Date(Date.now() + 360_000).toUTCString() }), delay: 360_000 },
+    { label: 'reset', status: 403, headers: () => ({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Date.now() / 1000 + 360) }), delay: 360_000 },
+    { label: 'later reset', status: 429, headers: () => ({ 'retry-after': '10', 'x-ratelimit-reset': String(Date.now() / 1000 + 360) }), delay: 360_000 },
+    { label: 'missing', status: 429, headers: () => ({}), delay: 60_000 },
+    { label: 'invalid', status: 429, headers: () => ({ 'retry-after': 'invalid' }), delay: 60_000 },
+  ];
+
+  it.each(cases)('shares the $label pause across remounts and recovers mounted viewers at expiry', async ({ status, headers, delay }) => {
+    const deadline = Date.now() + delay;
+    fetchMock.mockImplementation(async () => new Response(null, { status, headers: headers() }));
+    await render(); expect(lists()).toHaveLength(1); expect(host.textContent).toContain('Unable to load CI runs');
+    await render(0); await settle(deadline - Date.now() - 1000); await render(3);
+    expect(lists()).toHaveLength(1); await invalidate(); expect(lists()).toHaveLength(1);
+    fetchMock.mockImplementation(async () => list('Recovered run'));
+    await settle(1100); await settle();
+    expect(lists()).toHaveLength(2); expect(host.textContent?.match(/Recovered run/g)).toHaveLength(3);
+  });
+
+  it('keeps known rows, age, selected detail and scroll while visible polling is paused', async () => {
+    await render(1, repoA, 11); const scroller = rows()[0].parentElement!; scroller.scrollTop = 140;
+    const detailCount = details().length;
+    fetchMock.mockImplementation(async input => String(input).startsWith('/api/panel/ci?')
+      ? new Response(null, { status: 429, headers: { 'retry-after': '360' } }) : detail(11));
+    await settle(60_000);
+    await act(async () => { await client.invalidateQueries({ queryKey: ['gh', repoA, 'ci'], exact: true }); });
+    await settle(); await settle();
+    expect(host.textContent).toContain('Showing last successful CI runs'); expect(host.textContent).toContain('1m ago');
+    await settle(300_000); expect(lists()).toHaveLength(2); expect(host.textContent).toContain('Known run');
+    expect(host.textContent).toContain(`Logs 11 ${repoA}`); expect(details()).toHaveLength(detailCount); expect(scroller.scrollTop).toBe(140);
+    fetchMock.mockImplementation(async () => list('Recovered run'));
+    await settle(60_100); await settle();
+    expect(lists()).toHaveLength(3); expect(host.textContent).toContain('Recovered run');
+    expect(host.textContent).not.toContain('Showing last successful CI runs');
+  });
+
+  it('suppresses hidden polling during a pause and resumes afterwards', async () => {
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    fetchMock.mockImplementation(async () => new Response(null, { status: 429, headers: { 'retry-after': '360' } }));
+    await render(3); await settle(300_000); expect(lists()).toHaveLength(1);
+    fetchMock.mockImplementation(async () => list('Recovered run'));
+    await settle(60_100); await settle(); expect(lists()).toHaveLength(2); expect(host.textContent?.match(/Recovered run/g)).toHaveLength(3);
+  });
+
+  it('does not use the normal immediate retry policy for a quota refusal', async () => {
+    client.setDefaultOptions({ queries: { retry: 1 } });
+    fetchMock.mockImplementation(async () => new Response(null, { status: 429, headers: { 'retry-after': '90' } }));
+    await render(); await settle(5000);
+    expect(lists()).toHaveLength(1); expect(host.textContent).toContain('Unable to load CI runs');
+  });
+
+  it('keeps the configured retry policy for ordinary failures', async () => {
+    client.setDefaultOptions({ queries: { retry: 1 } });
+    fetchMock.mockImplementationOnce(async () => new Response(null, { status: 503 }));
+    await render(); await settle(1100); await settle();
+    expect(lists()).toHaveLength(2); expect(host.textContent).toContain('Known run');
+  });
+
+  it('lets explicit Retry bypass the pause and clears the timer after success', async () => {
+    fetchMock.mockImplementation(async () => new Response(null, { status: 429, headers: { 'retry-after': '90' } }));
+    await render(); fetchMock.mockImplementation(async () => list('Manual run')); await retry();
+    expect(host.textContent).toContain('Manual run'); expect(lists()).toHaveLength(2);
+    await settle(91_000); expect(lists()).toHaveLength(2);
+  });
+
+  it('keeps repository pauses independent and does no work after the last viewer closes', async () => {
+    fetchMock.mockImplementation(async () => new Response(null, { status: 429, headers: { 'retry-after': '90' } }));
+    await render(); fetchMock.mockImplementation(async () => list('Other run'));
+    await render(1, repoB); expect(host.textContent).toContain('Other run'); expect(lists()).toHaveLength(2);
+    await render(); expect(lists()).toHaveLength(2); expect(host.textContent).toContain('Unable to load CI runs');
+    await render(0); await settle(91_000); expect(lists()).toHaveLength(2);
+    await render(); expect(lists()).toHaveLength(3); expect(host.textContent).toContain('Other run');
+  });
+
+  it('does not defer an ordinary 403 carrying nonexhausted quota metadata', async () => {
+    fetchMock.mockImplementation(async () => new Response(null, { status: 403, headers: {
+      'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': String(Date.now() / 1000 + 90),
+    } }));
+    await render(); await render(0); fetchMock.mockImplementation(async () => list()); await render();
+    expect(lists()).toHaveLength(2); expect(host.textContent).toContain('Known run');
   });
 });
