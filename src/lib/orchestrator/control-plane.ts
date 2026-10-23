@@ -505,11 +505,13 @@ async function persistMissionUnderLock(
   return writeOrchestratorControlPlaneState(reconcileOrchestratorControlPlaneState(merged, runtimeTruth));
 }
 
-export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
+// Sync always derives from the state read under the lock. Caller snapshots can
+// predate another writer; apply mutations through withLockedState instead.
+export async function syncOrchestratorControlPlaneState() {
   await acquireLock();
   try {
-    const base = state ? readPersistedControlPlaneState() : readOrchestratorControlPlaneState();
-    const current = normalizeOrchestratorMissionState(state ?? structuredClone(base));
+    const base = readOrchestratorControlPlaneState();
+    const current = structuredClone(base);
     return await persistMissionUnderLock(base, current);
   } finally {
     releaseLock();
