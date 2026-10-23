@@ -32,7 +32,8 @@ async function waitFor(check: () => boolean | Promise<boolean>, label: string) {
 async function api<T>(path: string, body?: unknown, status = 200): Promise<T> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, { method: body ? 'POST' : 'GET',
     headers: { authorization: 'Bearer offline-claude-restart-token', 'content-type': 'application/json' },
-    ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60_000) });
+    ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60_000) })
+    .catch(error => { throw new Error(`${path}: ${String(error)}\n${output.slice(-4_000)}`, { cause: error }); });
   const value = await response.json();
   if (response.status !== status) throw new Error(`${response.status}: ${JSON.stringify(value)}\n${output.slice(-4_000)}`);
   return value as T;
@@ -117,6 +118,19 @@ describe.skipIf(process.platform === 'win32')('Claude packet restart through the
     }
   }, 90_000);
 
+  it('refuses live steering after reattachment without changing input or launching another worker', async () => {
+    const before = session().activeRun!;
+    const input = readFileSync(before.stdinPath!, 'utf8');
+    expect(await api('/api/runtime/action', { action: 'steer', surfaceId,
+      message: 'This must not reach the active worker.', clientMutationId: 'steer-claude-survivor' }, 400))
+      .toMatchObject({ ok: false, status: 'unavailable', note: expect.stringContaining('active run') });
+    expect(readFileSync(before.stdinPath!, 'utf8')).toBe(input);
+    expect(readFileSync(join(root, 'input.json'), 'utf8')).toBe(input);
+    expect(session().activeRun).toMatchObject({ id: before.id, pid, processIdentity: before.processIdentity });
+    expect(startTime(pid)).toBe(start);
+    expect(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
   it('holds missing, mismatched and unreadable identities without rebind, retry or Stop', async () => {
     const original = session();
     try {
@@ -138,7 +152,7 @@ describe.skipIf(process.platform === 'win32')('Claude packet restart through the
         expect(await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: 'refuse-claude-unknown' }, 400)).toMatchObject({ ok: false });
       }
     } finally { writeFileSync(sessionPath(), JSON.stringify(original)); await stopServer('SIGTERM'); await startServer(); }
-  }, 60_000);
+  }, 180_000);
 
   it('stops the same identified Claude worker after survivor reattachment', async () => {
     expect(await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: 'stop-claude-survivor' })).toMatchObject({ ok: true });

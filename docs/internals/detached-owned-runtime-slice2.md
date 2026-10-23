@@ -30,6 +30,17 @@ or an escaped descendant without a start cookie.
 Finite input files are mode 0600 and exclusively created before process spawn.
 The child inherits its own descriptor; parent descriptors close after spawn.
 `stdinPath` stays with the run and follows archived metadata path rebasing.
+This is finite launch input, not a live steering channel. The runtime action
+route refuses a steer while the packet is running, including after rebind;
+it does not append to the input file or queue that request. The higher-level
+packet steer service retains busy requests in its existing durable lane-event
+queue for later delivery. Once the run settles, continuation starts a new
+process with `--resume` and the saved provider session ID.
+`owned-claude-restart-real-path.test.ts`
+proves the live refusal through the action route without changing input or
+launching another worker; `owned-claude-continuation-real-path.test.ts` proves
+follow-up delivery and conversation history for settled and archived sessions.
+Live streaming input remains a slice-3 supervisor concern.
 Claude's init event now supplies its provider session ID while work is running,
 without waiting for a terminal result. Batch launch wrappers retain unknown
 side-effect receipts so a refused identity proof cannot turn into a duplicate.
