@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { buildMissionRenderItems, ChatMessageList } from './ChatMessageList';
+import type { QueuedComposerSendRecord } from '@/lib/orchestrator/composer-queue-types';
 
 function entry(id: string, statusEvent?: MobileTranscriptEntry['statusEvent']): MobileTranscriptEntry {
   return {
@@ -15,6 +16,20 @@ function entry(id: string, statusEvent?: MobileTranscriptEntry['statusEvent']): 
 }
 
 describe('buildMissionRenderItems', () => {
+  it('renders a queued user message in the real transcript with a quiet delivery tag and live conversion action', () => {
+    const item: QueuedComposerSendRecord = { id: 'queued-task', sequence: 1, repoPath: '/repo', threadId: 'thoughts-test', intent: 'send-next',
+      status: 'queued', reason: null, createdAt: 1, updatedAt: 1, admittedAt: null, payload: { text: 'Use the smaller change', wireMessage: 'Use the smaller change', images: [],
+        routing: { backend: 'pi', model: 'pi', effort: 'low', permissionMode: 'plan', mode: 'single', pickedMode: 'solo', collide: false } } };
+    const html = renderToStaticMarkup(createElement(ChatMessageList, {
+      displayMessages: [{ id: 'working', role: 'assistant', text: 'Checking the change.' }], displayWaiting: true,
+      activeTargetLabel: 'Agent', activeTargetColor: 'var(--t-accent)', thoughtsMutedGlass: 'transparent',
+      thoughtsElevatedBorder: 'var(--t-divider)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
+      composerQueue: { items: [item], canSteer: true, onSteer: () => {}, onCancel: () => {} },
+    }));
+    expect(html).toContain('Use the smaller change');
+    expect(html).toContain('Queued');
+    expect(html).toContain('Steer now');
+  });
   it('groups consecutive packet terminal status cards', () => {
     const items = buildMissionRenderItems([
       entry('merge-1', { kind: 'merge', packetTitle: 'One', branch: 'main' }),

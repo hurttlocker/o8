@@ -50,6 +50,25 @@ async function client(options: Parameters<typeof createPiSdkSession>[0]) {
 }
 
 describe('managed Pi SDK real worker', () => {
+  it('acknowledges a live steer and consumes it in the running session without restarting the turn', async () => {
+    const paths = await fixture(); let started!: () => void; let finish!: () => void; let calls = 0;
+    const running = new Promise<void>(resolve => { started = resolve; });
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const contexts: string[] = [];
+    const session = await client({ ...paths, model, transport: async function* (context) {
+      contexts.push(JSON.stringify(context.messages));
+      if (++calls === 1) { started(); await gate; }
+      yield* events(message([{ type: 'text', text: calls === 1 ? 'Initial answer' : 'Followed the steer' }]));
+    } });
+    const result = session.prompt('Start the task');
+    await running;
+    try { expect(await session.steer('Use the smaller change')).toEqual({ accepted: true }); }
+    finally { finish(); }
+    expect((await result).text).toBe('Followed the steer');
+    expect(calls).toBe(2);
+    expect(contexts[1]).toContain('Use the smaller change');
+    expect(await readFile(session.sessionFile, 'utf8')).toContain('Use the smaller change');
+  }, 20_000);
   it('checks the prerequisite without installing or changing Node', () => {
     expect(() => requirePiNode('22.18.0')).toThrow('22.19');
     expect(() => requirePiNode('22.19.0')).not.toThrow();

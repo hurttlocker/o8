@@ -29,6 +29,7 @@ import { createO8CommandTools, listO8Commands, o8CommandPrompt } from '@/lib/pi/
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
 import type { PiModelRoute, PiUsageAttribution } from '@/lib/pi/openrouter-choice';
 import type { ManagedPiTransportOptions } from '@/lib/pi/sdk/transport';
+import { requirePiNode, requirePiPlatform } from '@/lib/pi/sdk/platform';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
 import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice';
 import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
@@ -351,10 +352,26 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   }
 
   const status = (name: string) => (active.has(name) ? 'busy' as const : 'ready' as const);
+  const liveSteer: NonNullable<OrchestratorBackend['liveSteer']> = async (repoPath, message, options) => {
+    assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
+    const route = await resolveLeadRoute(deps, options.model);
+    const routeId = route.carrier === 'openrouter' ? route.choice : route.model.id;
+    const name = nameFor(repoPath, options.threadId);
+    const pi = resident.get(name);
+    const surface = piSurfaceForTurn(options);
+    if (closing || !active.has(name) || !pi || !pi.session.running || pi.profile !== surface.profile
+      || pi.readOnly !== surface.readOnly || pi.outsideWorkspace !== surface.outsideWorkspace || pi.routeId !== routeId) return { accepted: false };
+    // Model lookup may await I/O. Recheck the saved claim at the last native handoff.
+    options.beforeAdmit();
+    return pi.session.steer(message);
+  };
 
   return {
     id: 'pi',
     label: 'Pi',
+    get liveSteer() {
+      try { requirePiPlatform(); requirePiNode(); return liveSteer; } catch { return undefined; }
+    },
     peekSession(repoPath, _agent, threadId): OrchestratorSessionInfo | null {
       const name = nameFor(repoPath, threadId);
       return ensured.has(name) ? { sessionName: name, status: status(name) } : null;
