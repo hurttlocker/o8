@@ -278,7 +278,7 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
       merged_at = excluded.merged_at,
       head_sha = excluded.head_sha,
       merge_commit = excluded.merge_commit,
-      repository_id = excluded.repository_id
+      repository_id = COALESCE(excluded.repository_id, github_pull_requests.repository_id)
   `).run(
     pull.pullRequestId,
     pull.repoFullName,
@@ -437,7 +437,7 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
       merged_at = excluded.merged_at,
       head_sha = excluded.head_sha,
       merge_commit = excluded.merge_commit,
-      repository_id = excluded.repository_id
+      repository_id = COALESCE(excluded.repository_id, github_pull_requests.repository_id)
   `);
 
   const closeMissing = sqlite.prepare(`

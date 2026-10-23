@@ -16,7 +16,7 @@ const { getOrCreateWsToken } = await import('@/lib/ws-auth');
 const { GET: historyGet } = await import('@/app/api/orchestrator/history/route');
 const linksApi = await import('@/app/api/orchestrator/pull-request-context/route');
 const { getSqlite } = await import('@/lib/db');
-const { upsertGitHubRepository, upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
+const { upsertGitHubRepository, upsertGitHubPullRequest, replaceGitHubPullRequests, getGitHubPullRequestByNumber } = await import('@/lib/github-broker/store');
 const { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } = await import('@/lib/llm/chat-history-store');
 const { createLane, updateLane, getLane, getLaneEvents } = await import('@/lib/lane/registry');
 const { getOrCreateLocalWorkerToken } = await import('@/lib/auth/worker-token');
@@ -107,6 +107,32 @@ it('attaches idempotently, survives database reopen, and keeps same-number cross
   const reverse = await linksApi.GET(request('GET', undefined, `?${query}`));
   expect((await reverse.json()).result.links.map((link: { threadId: string }) => link.threadId)).toEqual([f.threadId]);
   expect(getSqlite().prepare('SELECT COUNT(*) AS n FROM conversation_pr_context WHERE thread_id = ?').get(f.threadId)).toEqual({ n: 2 });
+});
+
+it.each(['upsert', 'replace'] as const)('keeps a known repository ID after a later %s omits it', async writer => {
+  const f = fixture();
+  const repoFullName = `fixture/repo-${sequence}`;
+  const current = getGitHubPullRequestByNumber(repoFullName, f.first.number)!;
+  expect(current.repositoryId).toBe(f.first.repositoryId);
+  const withoutId = { ...current, title: 'Updated without repository identity' };
+  delete withoutId.repositoryId;
+  if (writer === 'upsert') upsertGitHubPullRequest(withoutId);
+  else replaceGitHubPullRequests(repoFullName, [withoutId]);
+
+  closeDb();
+  expect(getGitHubPullRequestByNumber(repoFullName, f.first.number)).toMatchObject({
+    repositoryId: f.first.repositoryId,
+    title: 'Updated without repository identity',
+  });
+  expect(getSqlite().prepare('SELECT repository_id FROM github_pull_requests WHERE pull_request_id = ?')
+    .get(f.first.pullRequestId)).toEqual({ repository_id: f.first.repositoryId });
+  // The surviving mirror identity must still authorize a new explicit link
+  // through the actual operator API, rather than only a direct store read.
+  const attached = await linksApi.POST(request('POST', { threadId: f.threadId, ...f.first }));
+  expect(attached.status).toBe(201);
+  closeDb();
+  expect((await history(f.threadId)).pullRequestContext.links)
+    .toEqual([expect.objectContaining({ ...f.first, repositoryFullName: repoFullName })]);
 });
 
 it('retains immutable identities across rename and archive, then unlinks without changing history or primary delivery', async () => {
