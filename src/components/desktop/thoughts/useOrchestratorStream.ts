@@ -222,7 +222,7 @@ export function useOrchestratorStream(
   }, []);
 
   const { refreshTokenTelemetry, requestCompaction } = useOrchestratorTokenTelemetry({
-    repoPathRef, threadIdRef, lastBackendRef, updateRunningTotal, setTokenCount,
+    repoPathRef, threadIdRef, lastBackendRef, messagesRef, updateRunningTotal, setTokenCount,
     telemetryBindingRef, telemetryTotalRef,
   });
 

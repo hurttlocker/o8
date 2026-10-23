@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { act, createElement, useEffect, useRef, useState } from 'react';
+import { act, createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { startJudgmentEndpointFixture, type JudgmentEndpointFixture } from './fixtures/judgment-endpoint';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { RuntimeTelemetry } from '@/lib/runtimes/types';
 
 // Only discovery and the API's surrounding panel/repo checks are replaced.
@@ -87,6 +88,12 @@ chmodSync(binary, 0o700);
 const { codexRuntime } = await import('@/lib/runtimes/codex');
 const { handleCodexJsonLine } = await import('@/lib/lane/codex-orchestrator-events');
 const { POST } = await import('@/app/api/orchestrator/compact/route');
+const { GET } = await import('@/app/api/runtime/telemetry/route');
+const { readClaudeRuntimeTelemetry } = await import('@/lib/runtimes/claude-cost-attribution');
+const { piOrchestratorStateDir } = await import('@/lib/pi/orchestrator/context');
+const { sessionNameForRepo } = await import('@/lib/lane/orchestrator-session-core');
+const { upsertMobileOrchestratorAssistantMessage, readOrchestratorBackendSessionId } = await import('@/lib/mobile/orchestrator-thread-history');
+const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
 const { judgmentKeyPath } = await import('@/lib/judgment/key');
 const { setCompactionScorerTransportForTests } = await import('@/lib/orchestrator/compaction-scorer');
@@ -136,10 +143,13 @@ async function replay(threadId: string, promptTokens: number) {
   return { historyPath, telemetry: (await codexRuntime.getTelemetry!('codex:synthetic-context-thread'))! };
 }
 
-async function runTrigger(threadId: string, telemetry: RuntimeTelemetry) {
+async function runTrigger(threadId: string, telemetry: RuntimeTelemetry | undefined, backend: OrchestratorBackendId = 'codex', messages: MobileTranscriptEntry[] = []) {
+  let measuredTotal = 0;
   let compacted: Record<string, unknown> | undefined;
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    if (String(url).startsWith('/api/runtime/telemetry')) return Response.json({ telemetry });
+    if (String(url).startsWith('/api/runtime/telemetry')) {
+      return telemetry ? Response.json({ telemetry }) : GET(new NextRequest(`http://localhost${url}`));
+    }
     if (String(url).startsWith(fixture.endpoint)) return nativeFetch(url, init);
     const response = await POST(new NextRequest('http://localhost/api/orchestrator/compact', {
       ...init, signal: init?.signal ?? undefined,
@@ -151,10 +161,11 @@ async function runTrigger(threadId: string, telemetry: RuntimeTelemetry) {
   function Harness() {
     const [runningTotal, updateRunningTotal] = useState(0);
     const threadIdRef = useRef<string | null>(threadId);
-    const lastBackendRef = useRef<string | null>('codex');
+    const lastBackendRef = useRef<string | null>(backend);
     const [, setTokenCount] = useState(0);
     const { refreshTokenTelemetry, requestCompaction } = useOrchestratorTokenTelemetry({
-      repoPathRef: useRef(repoPath), threadIdRef, lastBackendRef, updateRunningTotal, setTokenCount,
+      repoPathRef: useRef(repoPath), threadIdRef, lastBackendRef, messagesRef: useRef(messages),
+      updateRunningTotal: useCallback((tokens: number) => { measuredTotal = tokens; updateRunningTotal(tokens); }, []), setTokenCount,
       telemetryBindingRef: useRef<string | null>(null), telemetryTotalRef: useRef<number | null>(null),
     });
     useEffect(() => { void refreshTokenTelemetry(); }, [refreshTokenTelemetry]);
@@ -169,9 +180,9 @@ async function runTrigger(threadId: string, telemetry: RuntimeTelemetry) {
   await act(async () => root.render(createElement(Harness)));
   // Let the production 800 ms between-turn timer run, including the actual processes and HTTP scorer.
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
-  if ((telemetry.contextTokens ?? 0) >= 300_000) await vi.waitFor(() => expect(compacted?.applied).toBeDefined(), { timeout: 10_000 });
+  if (measuredTotal >= (['pi', 'o8', 'fable'].includes(backend) ? 15_000 : 300_000)) await vi.waitFor(() => expect(compacted?.applied).toBeDefined(), { timeout: 10_000 });
   await act(async () => root.unmount());
-  return { compacted, fetchMock };
+  return { compacted, fetchMock, measuredTotal };
 }
 
 describe('auto compaction context through bridge, telemetry, trigger and persisted compact route', () => {
@@ -238,4 +249,87 @@ describe('auto compaction context through bridge, telemetry, trigger and persist
     expect((await runTrigger('thoughts-unknown-context', telemetry)).compacted).toBeUndefined();
     expect(readFileSync(historyPath, 'utf8')).toBe(before);
   });
+
+  it.each(['pi', 'o8', 'fable'] as const)('compacts a %s lead using a nonzero transcript estimate when context telemetry is absent', async (backend) => {
+    await updateOperatorDefaults({ judgmentProvider: 'off' });
+    const threadId = `thoughts-${backend}-fallback`;
+    const messages: MobileTranscriptEntry[] = [
+      { id: 'question', role: 'user', text: 'Inspect pagination.' },
+      { id: 'answer', role: 'assistant', backend,
+        text: `Finding: offsets skip records. Decision: use cursor pagination. ${'synthetic findings '.repeat(5_000)}` },
+    ];
+    const historyPath = join(dataDir, 'chat-history', `${threadId}.json`);
+    writeFileSync(historyPath, JSON.stringify({ repoPath, backend, messages: messages.map((entry) => ({ ...entry, content: entry.text })) }));
+    const { measuredTotal, compacted } = await runTrigger(threadId, undefined, backend, messages);
+    expect(measuredTotal).toBeGreaterThan(15_000);
+    expect(compacted?.applied).toBe(true);
+    const record = JSON.parse(readFileSync(historyPath, 'utf8')).messages[0].compaction;
+    expect(record.tokensBefore).toBe(measuredTotal);
+    expect(record.contextSource).toBe('transcript-estimate');
+    expect(record.summary).toContain('Use cursor pagination.');
+    const next = await GET(new NextRequest(`http://localhost/api/runtime/telemetry?threadId=${threadId}&backend=${backend}`));
+    // Auto-compaction leaves old cards visible. The estimate follows the saved
+    // active summary, so that visible archived prefix cannot re-trigger it.
+    expect((await next.json()).telemetry.contextTokens).toBeLessThan(15_000);
+  });
+
+  it('uses the latest Claude prompt usage rather than the sum across requests', async () => {
+    const path = join(rootDir, 'claude.jsonl');
+    writeFileSync(path, [350_000, 24_000].map((input) => JSON.stringify({ type: 'assistant', requestId: `request-${input}`,
+      message: { id: `message-${input}`, model: 'claude-sonnet-5', usage: {
+        input_tokens: input - 18_000, cache_read_input_tokens: 18_000, output_tokens: 100,
+      } },
+    })).join('\n'));
+    const telemetry = await readClaudeRuntimeTelemetry(path);
+    expect(telemetry?.contextTokens).toBe(24_000);
+    expect(telemetry?.contextSource).toBe('claude-last-request-input');
+    expect(telemetry?.totalTokens).toBe(374_200);
+  });
+
+  it.each(['pi', 'o8'] as const)('uses the last %s prompt usage instead of earlier calls or a larger transcript estimate', async (backend) => {
+    const threadId = `thoughts-${backend}-native`;
+    const messages: MobileTranscriptEntry[] = [{ id: 'answer', role: 'assistant', backend, text: 'synthetic findings '.repeat(5_000) }];
+    const historyPath = join(dataDir, 'chat-history', `${threadId}.json`);
+    writeFileSync(historyPath, JSON.stringify({ repoPath, backend, messages: messages.map((entry) => ({ ...entry, content: entry.text })) }));
+    const sessions = join(piOrchestratorStateDir(sessionNameForRepo('pi-orchestrator', repoPath, threadId)), 'sessions');
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, 'synthetic.jsonl'), [
+      { input: 300_000, cacheRead: 18_000, cacheWrite: 0, output: 100 },
+      { input: 1_500, cacheRead: 10_000, cacheWrite: 500, output: 100 },
+    ].map((usage) => JSON.stringify({ type: 'message', message: { role: 'assistant', usage } })).join('\n'));
+    const { measuredTotal, compacted } = await runTrigger(threadId, undefined, backend, messages);
+    expect(measuredTotal).toBe(12_000);
+    expect(compacted).toBeUndefined();
+    const response = await GET(new NextRequest(`http://localhost/api/runtime/telemetry?threadId=${threadId}&backend=${backend}`));
+    expect((await response.json()).telemetry.contextSource).toBe('pi-last-request-input');
+    // A later unmetered response must not reuse an earlier request's context.
+    appendFileSync(join(sessions, 'synthetic.jsonl'), '\n' + JSON.stringify({ type: 'message',
+      message: { role: 'assistant', usage: { input: 0, cacheRead: 0, cacheWrite: 0 } } }));
+    const fallback = await GET(new NextRequest(`http://localhost/api/runtime/telemetry?threadId=${threadId}&backend=${backend}`));
+    const estimated = (await fallback.json()).telemetry;
+    expect(estimated.contextSource).toBe('transcript-estimate');
+    expect(estimated.contextTokens).toBeGreaterThan(15_000);
+  });
+
+  it('binds a completed Fable turn to its Claude telemetry session through the persisted history entry point', async () => {
+    const threadId = 'thoughts-fable-bound';
+    writeFileSync(join(dataDir, 'chat-history', `${threadId}.json`), JSON.stringify({ repoPath, backend: 'fable',
+      messages: [{ id: 'fable-user', role: 'user', content: 'Inspect pagination.', timestamp: 1 }] }));
+    const path = join(rootDir, 'fable.jsonl');
+    writeFileSync(path, JSON.stringify({ type: 'assistant', message: { id: 'fable-native-answer',
+      model: 'claude-sonnet-5', usage: { input_tokens: 6_000, cache_read_input_tokens: 18_000, output_tokens: 100 } } }));
+    upsertMobileOrchestratorAssistantMessage({ tabId: threadId, repoPath, backend: 'fable', messageId: 'fable-answer',
+      content: 'Synthetic findings.', sessionId: 'synthetic-fable-native' });
+    expect(readOrchestratorBackendSessionId(threadId, 'claude')).toBe('synthetic-fable-native');
+    // Replace discovery only; the actual latest-request parser reads the file.
+    const native = vi.spyOn(claudeCodeRuntime, 'getTelemetry').mockImplementation(async (sessionKey) => {
+      expect(sessionKey).toBe('claude-code:synthetic-fable-native');
+      return readClaudeRuntimeTelemetry(path);
+    });
+    try {
+      const response = await GET(new NextRequest(`http://localhost/api/runtime/telemetry?threadId=${threadId}&backend=fable`));
+      expect((await response.json()).telemetry).toMatchObject({ contextTokens: 24_000, contextSource: 'claude-last-request-input' });
+    } finally { native.mockRestore(); }
+  });
+
 });
