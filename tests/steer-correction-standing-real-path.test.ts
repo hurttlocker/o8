@@ -7,11 +7,14 @@
  * side goes through the real `buildPacketPrompt` and the real Brain retrieval
  * merge — never the formatter or reader with hand-built corrections.
  */
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { runPacketSteer } from '../cli/src/commands/packet/recover';
 
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
@@ -28,6 +31,8 @@ vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-steer-standing-'));
 const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-steer-standing-repo-'));
 const OPERATOR_TOKEN = 'operator-steer-standing-0123456789abcdef';
+const DEVICE_TOKEN = 'fixture-device-steering-2426';
+writeFileSync(join(dataDir, 'mobile-device-tokens'), createHash('sha256').update(DEVICE_TOKEN).digest('hex') + '\n');
 const WORKER_TOKEN = 'local-worker-steer-standing-cafebabe012345';
 writeFileSync(join(dataDir, 'ws-token'), `${OPERATOR_TOKEN}\n`, 'utf8');
 writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf8');
@@ -51,6 +56,12 @@ afterAll(() => {
 beforeEach(() => {
   h.perform.mockReset();
   idempotency.__resetIdempotencyStoreForTests();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function packetFixture(id: string): OrchestratorPacket {
@@ -224,5 +235,107 @@ describe('#2395 steer route — operator standing versus machine steering', () =
     expect(machineRow?.citation.title).toMatch(/^Machine steer via orchestrator:/);
     expect(rowAuthority(machineRow!)).toBeLessThanOrEqual(0.6);
     expect(merged.indexOf(operatorRow!)).toBeLessThan(merged.indexOf(machineRow!));
+  });
+});
+
+describe('#2426 caller source survives the public entry points', () => {
+  it('an operator request without source persists operator standing through the prompt', async () => {
+    const packetId = 'pkt-2426-implicit-operator';
+    const lane = steerableLane(packetId);
+    const message = 'Human correction from a source-less client';
+    const res = await steerRoute.POST(steerRequest(OPERATOR_TOKEN, {
+      packetId, message, idempotencyKey: 'implicit-operator',
+    }));
+    expect(res.status).toBe(200);
+    expect(steerEventCount(lane.id)).toBe(1);
+    const prompt = await buildPacketPrompt(packetFixture(packetId), []);
+    expect(prompt).toContain('Operator corrections for this packet');
+    expect(prompt).toContain(message);
+    expect(prompt).not.toContain('Machine steering for this packet');
+  });
+
+  it('a source-less agent tool remains machine steering under the operator credential', async () => {
+    const packetId = 'pkt-2426-tool-default';
+    steerableLane(packetId);
+    const request = steerRequest(OPERATOR_TOKEN, {
+      packetId, message: 'Machine tool correction', idempotencyKey: 'tool-default',
+    });
+    request.headers.set('x-o8-agent-tool', '1');
+    expect((await steerRoute.POST(request)).status).toBe(200);
+    const prompt = await buildPacketPrompt(packetFixture(packetId), []);
+    expect(prompt).toContain('Machine steering for this packet');
+    expect(prompt).not.toContain('Operator corrections for this packet');
+  });
+
+  it.each(['human', 'agent'] as const)('the actual %s CLI steer reaches the route with the right standing', async (caller) => {
+    const packetId = `pkt-2426-cli-${caller}`;
+    const lane = steerableLane(packetId);
+    for (const key of ['O8_WORKER_TOKEN', 'O8_WORKER_PACKET_ID', 'O8_OWNED_RUN_MARKER',
+      'CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID', 'CLAUDECODE', 'AI_AGENT']) {
+      vi.stubEnv(key, '');
+    }
+    vi.stubEnv('O8_API_TOKEN', OPERATOR_TOKEN);
+    if (caller === 'agent') vi.stubEnv('CODEX_THREAD_ID', 'fixture-orchestrator-thread');
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/lanes') return Response.json({ lanes: [lane] });
+      if (url.pathname !== '/api/orchestrator/steer-packet') throw new Error(`Unexpected route ${url.pathname}`);
+      return steerRoute.POST(new NextRequest(url, { ...init, signal: init?.signal ?? undefined }));
+    });
+    expect(await runPacketSteer({ human: false, verbose: false }, [packetId, '--message', 'CLI correction'])).toBe(0);
+    expect(steerEventCount(lane.id)).toBe(1);
+    const prompt = await buildPacketPrompt(packetFixture(packetId), []);
+    expect(prompt).toContain(caller === 'human' ? 'Operator corrections for this packet' : 'Machine steering for this packet');
+    expect(prompt).not.toContain(caller === 'human' ? 'Machine steering for this packet' : 'Operator corrections for this packet');
+  });
+});
+
+describe('#2426 non-operator attribution stays bounded', () => {
+  it('a source-less device request retains machine standing', async () => {
+    const packetId = 'pkt-2426-device-default';
+    steerableLane(packetId);
+    const res = await steerRoute.POST(steerRequest(DEVICE_TOKEN, {
+      packetId, message: 'Device correction', idempotencyKey: 'device-default',
+    }));
+    expect(res.status).toBe(200);
+    const prompt = await buildPacketPrompt(packetFixture(packetId), []);
+    expect(prompt).toContain('Machine steering for this packet');
+    expect(prompt).not.toContain('Operator corrections for this packet');
+  });
+
+  it('invalid MCP provenance fails before calling the route', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { handleSteerPacket } = await import('@/lib/mcp/operator-handlers/status');
+    const result = await handleSteerPacket({ packetId: 'pkt-2426-invalid', message: 'Correction', source: 'invalid' });
+    expect(result.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['operator', ' Operator ', 'OPERATOR'])('a device cannot claim %s standing', async (source) => {
+    const packetId = `pkt-2426-device-${source.trim()}`;
+    const lane = steerableLane(packetId);
+    const res = await steerRoute.POST(steerRequest(DEVICE_TOKEN, {
+      packetId, source, message: 'Device correction', idempotencyKey: `device-${source}`,
+    }));
+    expect(res.status).toBe(403);
+    expect(steerEventCount(lane.id)).toBe(0);
+    expect(h.perform).not.toHaveBeenCalled();
+  });
+
+  it.each(['operator', 'orchestrator', undefined])('the MCP forwards %s provenance through the real route', async (source) => {
+    const packetId = `pkt-2426-mcp-${source}`;
+    const lane = steerableLane(packetId);
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      return steerRoute.POST(new NextRequest(String(input), { ...init, signal: init?.signal ?? undefined }));
+    });
+    const { handleSteerPacket } = await import('@/lib/mcp/operator-handlers/status');
+    const result = await handleSteerPacket({ packetId, message: 'MCP forwarded correction', source });
+    expect(result.isError).not.toBe(true);
+    expect(steerEventCount(lane.id)).toBe(1);
+    const prompt = await buildPacketPrompt(packetFixture(packetId), []);
+    expect(prompt).toContain(source === 'operator' ? 'Operator corrections for this packet' : 'Machine steering for this packet');
+    expect(prompt).not.toContain(source === 'operator' ? 'Machine steering for this packet' : 'Operator corrections for this packet');
   });
 });

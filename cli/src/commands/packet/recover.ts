@@ -261,6 +261,17 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
   return 0;
 }
 
+function steerSource(): 'operator' | 'orchestrator' {
+  // Match the existing agent-session markers used by lease ownership. These
+  // only lower attribution; the route still authenticates every request.
+  const agentSession = [
+    process.env.O8_WORKER_PACKET_ID, process.env.O8_OWNED_RUN_MARKER,
+    process.env.CODEX_SESSION_ID, process.env.CODEX_THREAD_ID,
+    process.env.CLAUDE_CODE_SESSION_ID, process.env.CLAUDECODE, process.env.AI_AGENT,
+  ].some(value => Boolean(value?.trim()));
+  return agentSession ? 'orchestrator' : 'operator';
+}
+
 async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number> {
   const args = parsePacketRecoveryArgs('steer', rest);
   const message = args.values.message?.trim();
@@ -277,6 +288,7 @@ async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number>
   const requestBody = {
     packetId,
     message,
+    source: steerSource(),
     idempotencyKey: args.values['idempotency-key']?.trim() || randomUUID(),
   };
   const res = await fetchCorrelatedPacketMutation<OperatorResponse<InProgressReceipt & { laneId?: string }>>(
