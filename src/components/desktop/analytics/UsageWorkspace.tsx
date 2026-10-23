@@ -1,5 +1,6 @@
 'use client';
 import { lazy, Suspense, useState } from 'react';
+import { TodayCacheShare } from './TodayCacheShare';
 import { RuntimeUsageSummary } from './RuntimeUsageSummary';
 import { useRuntimeUsage } from './use-runtime-usage';
 import { useUsageHistory } from './use-usage-history';
@@ -20,7 +21,8 @@ export function UsageWorkspace({ active = true }: { active?: boolean }) {
   const inventory = useUsageMachines(active && historyView);
   const capacity = useRuntimeUsage(active && view === 'limits');
   const history = useUsageHistory(active && historyView, days, machine);
-  const loading = view === 'limits' ? capacity.loading : history.loading;
+  const cacheHistory = useUsageHistory(active && view === 'limits', 7);
+  const loading = view === 'limits' ? capacity.loading || cacheHistory.loading : history.loading;
   const error = view === 'limits' ? capacity.error : historyView ? history.error : null;
   return <div data-mcp-scope="usage-workspace" style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none',
     paddingTop: 20, paddingRight: 28, paddingBottom: 40, paddingLeft: 28, background: 'transparent',
@@ -51,7 +53,7 @@ export function UsageWorkspace({ active = true }: { active?: boolean }) {
               onClick={() => setDays(value)}>{value === 1 ? 'Past 24h' : `${value} days`}</UsageControl>)}
           </div> : null}
           {view !== 'activity' ? <UsageControl aria-label="Refresh usage" description={loading ? 'Reading usage…' : 'Refresh usage'}
-            disabled={loading} onClick={() => { void (view === 'limits' ? capacity.refresh(true) : history.refresh(true)); }} style={{ width: 28, paddingLeft: 0, paddingRight: 0 }}>
+            disabled={loading} onClick={() => { if (view === 'limits') { void capacity.refresh(true); void cacheHistory.refresh(true); } else void history.refresh(true); }} style={{ width: 28, paddingLeft: 0, paddingRight: 0 }}>
             <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M20 7v5h-5M4 17v-5h5M6.1 6.1a8 8 0 0 1 13.5 4.4M17.9 17.9A8 8 0 0 1 4.4 13.5" />
             </svg>
@@ -64,6 +66,7 @@ export function UsageWorkspace({ active = true }: { active?: boolean }) {
         <p style={{ margin: 0, fontSize: 13, color: 'var(--t-text-secondary)' }}>Your connected accounts’ allowances and reset times.</p>
         {!capacity.snapshot && loading ? <span role="status" style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Reading connected accounts…</span> : null}
         <RuntimeUsageSummary snapshot={capacity.snapshot} />
+        {active ? <TodayCacheShare snapshot={cacheHistory.snapshot} loading={cacheHistory.loading} error={cacheHistory.error} /> : null}
         <p style={{ margin: 0, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Allowances are shared across the account. Token activity is shown separately when an account does not report its limits.</p>
       </section> : historyView ? <section role="tabpanel" id={`usage-${view}-panel`} aria-labelledby={`usage-${view}-tab`} style={{ display: 'grid', gap: 22 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>

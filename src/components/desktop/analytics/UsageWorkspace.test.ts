@@ -16,6 +16,7 @@ it('opens real workspace usage, renders both accounts, switches to recorded acti
         source: 'structured-cli', confidence: 'exact', observedAt: '2026-10-08T20:00:00Z', reason: null,
         buckets: [{ id: 'session', label: '5-hour', usedRatio: index ? 0.15 : 0.4, resetsAt: '2026-10-09T01:50:00Z' }] })),
     });
+    if (String(url).startsWith('/api/runtime/usage?')) return Response.json({}, { status: 503 });
     if (String(url).startsWith('/api/panel/analytics')) return Response.json({
       totals: { messages: 0 }, byAgent: {}, bySurface: {}, byModel: [], hourly: [], topSessions: [], autonomy: null, governance: null,
     });
@@ -49,7 +50,7 @@ it('opens real workspace usage, renders both accounts, switches to recorded acti
     await act(async () => limits.click()); await settle();
     fail = true;
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Refresh usage"]')!.click());
-    expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/runtime/capacity?fresh=1');
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/runtime/capacity?fresh=1')).toBe(true);
     expect(host.textContent).toContain('Previous observations remain visible');
     expect(host.querySelector('[aria-label="Claude usage"]')?.textContent).toContain('15% used');
     await act(async () => root.render(createElement(Canvas, { ...props, active: false })));
