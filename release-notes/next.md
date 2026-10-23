@@ -1,11 +1,13 @@
-- Worker panes read like a conversation. A worker's own words come first, and its commands fold into one line such as "Worked for 2m · Read 12 files · Ran 4 commands" that expands into a step list. Each command shows once, not twice.
-- Worker panes have short titles taken from the task, a one-line message box, and state pills (Paused, Blocked, Needs review, Waiting) with the matching actions. Repeated tab names now show the task title.
-- The sidebar shows real icons instead of empty boxes, and its section headings are quieter.
-- Steers you type in the canvas, a thread or an interactive terminal count as your corrections. Agent steers stay machine steering.
-- A project with several repositories is treated as one codebase. Each repository still gets its own packet, branch and review.
-- Usage shows today's cache share for Claude and Codex.
-- Brain indexes each repository's ROADMAP.md and CONTRIBUTING.md.
-- More GitHub panels wait for the real rate-limit reset and keep their last data when a refresh fails: Activity hovers, CI details, issue details and repository status.
-- Control-plane sync no longer replaces newer packets with an older snapshot.
-- Workspace service startup reports a cancellation and a service failure separately.
-- The first merged card can ask one optional feedback question. Nothing is sent unless you type and send it.
+- o8 opens faster. The window paints in about 0.7 seconds instead of about 4.4 in a release build, because permission rules are compiled once instead of once per command. That also frees about 480 MB of memory.
+- Workers start faster. Dispatch to a ready worktree takes about 8 seconds instead of about 35: installed dependencies are reused across commits, a ready copy is moved into place instead of copied, and the launch checks run in one process instead of ten.
+- Typing while an agent works now steers it by default, and the composer says so. Codex leads take the steer in the middle of their current turn instead of after it.
+- Task dispatch over MCP returns its receipt right away, and progress follows in mission_tail, so agents no longer time out waiting for a worker to start.
+- After a compaction the lead keeps its transcript in order, and compaction uses the conversation's own context.
+- Codex and other detached workers reconnect to their packets after o8 restarts.
+- Failed launches keep their cause. Backend readiness checks give up on time, queued dispatches say why they are waiting and when they retry, and lifecycle tools return the cause with a next step.
+- You can ask for a fresh update check.
+- Worker activity steps are grouped, dashboard tab titles match, and custom canvas backgrounds persist.
+- Merge and cleanup find Git even with a minimal PATH. Team presence follows the session instead of the process. Unsent steering drafts are kept per packet.
+- Effort choices that a runtime cannot honor are rejected before anything launches.
+- On Linux, workers recover their working directory without lsof.
+- The source repository moved to github.com/o8-run/o8. Old links redirect.
