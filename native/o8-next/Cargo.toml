@@ -14,3 +14,7 @@ ureq = { version = "=2.12.1", default-features = false, features = ["json"] }
 url = "=2.5.8"
 
 [workspace]
+
+# Published GPUI pins Taffy exactly; backport its internal Grid security update.
+[patch.crates-io]
+taffy = { path = "vendor/taffy" }

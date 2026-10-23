@@ -99,6 +99,10 @@ graph audit rejects GPL licenses and the excluded editor, terminal and markdown
 application crates. Transitive dependencies include other permissive and MPL-2.0
 licenses; the whole graph is not described as Apache-only.
 
+Published GPUI pins Taffy exactly 0.9.0. A documented MIT-licensed
+[manifest-only Taffy backport](vendor/README.md) selects patched Grid 1.0.1;
+Taffy's published Rust source is unchanged. No security checks are suppressed.
+
 ## Measurements and unattended work
 
 `--offscreen --benchmark FILE` runs the actual asynchronous session-loading path,

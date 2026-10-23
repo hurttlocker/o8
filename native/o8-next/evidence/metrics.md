@@ -8,10 +8,10 @@ mock response. No operator histories, installed app, OS input or visible windows
 
 | Run | Home/End to CPU scene acknowledgment, median ms | First changed scroll scene, median ms | Idle RSS MiB | Launch to first content scene ms | Streaming |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 3.08 | 1.75 | 41.25 | 219.23 | Deferred |
-| 2 | 3.23 | 1.76 | 40.91 | 220.55 | Deferred |
-| 3 | 3.20 | 1.77 | 41.30 | 219.02 | Deferred |
-| Median of runs | 3.20 | 1.76 | 41.25 | 219.23 | Deferred |
+| 1 | 2.80 | 1.79 | 41.48 | 197.79 | Deferred |
+| 2 | 2.74 | 1.57 | 40.97 | 217.82 | Deferred |
+| 3 | 2.51 | 1.57 | 41.06 | 219.56 | Deferred |
+| Median of runs | 2.74 | 1.57 | 41.06 | 217.82 | Deferred |
 
 Each run acknowledged the first and last content rows, with 100 distinct rows
 reaching paint over navigation. Even sample counts use the mean of the two middle
