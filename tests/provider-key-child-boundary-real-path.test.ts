@@ -23,7 +23,7 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', 'fixture-boundary-key'); vi.stubEnv('LOGIN_COPY', 'fixture-boundary-key');
   writeFileSync(join(state.dir, '.env.local'), '');
   mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-boundary-key' });
-  saveRuntimeBillingMode('codex', 'subscription');
+  saveRuntimeBillingMode('hermes', 'subscription');
 });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force: true }); });
 it.each(['spawnSync', 'execFileSync', 'execSync', 'spawn', 'execFile', 'promisified', 'fork'])('%s rejects implicit ambient provider credentials', async operation => {
@@ -39,9 +39,9 @@ it.each(['spawnSync', 'execFileSync', 'execSync', 'spawn', 'execFile', 'promisif
   expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual([null, null]);
 });
 it('rejects a prepared API environment after billing changes before the actual spawn', () => {
-  saveRuntimeBillingMode('codex', 'api');
-  const env = childEnvironment({ runtimeId: 'codex' });
-  saveRuntimeBillingMode('codex', 'subscription');
+  saveRuntimeBillingMode('hermes', 'api');
+  const env = childEnvironment({ runtimeId: 'hermes' });
+  saveRuntimeBillingMode('hermes', 'subscription');
   expect(() => cp.spawnSync(process.execPath, [script], { env })).toThrow(/changed during child preparation/);
 });
 it('rejects historical credential values retained in prepared arguments after a restart', async () => {
@@ -51,15 +51,15 @@ it('rejects historical credential values retained in prepared arguments after a 
   expect(() => fresh.spawnSync(process.execPath, [script, '--header=Bearer fixture-boundary-key'])).toThrow(/arguments contain/);
 });
 it('preserves API mode at the actual process boundary', () => {
-  saveRuntimeBillingMode('codex', 'api');
-  cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'codex' }) });
+  saveRuntimeBillingMode('hermes', 'api');
+  cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'hermes' }) });
   expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', 'fixture-boundary-key']);
 });
 it.each(['api', 'subscription'] as const)('preserves work admission and credential policy in %s', async mode => {
-  saveRuntimeBillingMode('codex', mode);
+  saveRuntimeBillingMode('hermes', mode);
   const { spawnWithWorkAdmission } = await import('@/lib/app-update/work-launch-admission');
   const { childEnvironment: admittedEnvironment } = await import('@/lib/providers/spawn-environment');
-  const child = spawnWithWorkAdmission(process.execPath, [script], mode === 'api' ? { env: admittedEnvironment({ runtimeId: 'codex' }) } : {});
+  const child = spawnWithWorkAdmission(process.execPath, [script], mode === 'api' ? { env: admittedEnvironment({ runtimeId: 'hermes' }) } : {});
   const leases = join(state.dir, 'work-launches');
   const records = readdirSync(leases);
   expect(records).toHaveLength(1);
@@ -72,9 +72,9 @@ it.each(['api', 'subscription'] as const)('preserves work admission and credenti
 });
 
 it('the real app bridge can reread an override-encrypted store without giving its runtime the master key', async () => {
-  saveRuntimeBillingMode('codex', 'api');
+  saveRuntimeBillingMode('codex', 'subscription');
   const target = join(state.dir, 'fixture-codex');
-  writeFileSync(target, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(output)},JSON.stringify({key:process.env.OPENAI_API_KEY,master:process.env.O8_MASTER_KEY??null}));process.exit(0);`);
+  writeFileSync(target, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(output)},JSON.stringify({key:process.env.OPENAI_API_KEY??null,master:process.env.O8_MASTER_KEY??null}));process.exit(0);`);
   chmodSync(target, 0o755);
   const spec = join(state.dir, 'bridge-spec.json');
   writeFileSync(spec, JSON.stringify({ codexBin: target, cwd: state.dir, threadId: null, developerInstructions: null, message: 'Fixture', imagePaths: [], model: 'fixture', effort: 'low', serviceTier: null, sandbox: 'read-only', config: {} }));
@@ -88,7 +88,7 @@ it('the real app bridge can reread an override-encrypted store without giving it
     child.once('error', reject);
     child.once('exit', () => stderr.includes('Credential store unavailable') ? reject(new Error(stderr)) : resolve());
   });
-  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ key: 'fixture-boundary-key', master: null });
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual({ key: null, master: null });
 }, 20_000);
 it.each(['subscription', 'remove'])('strips embedded provider copies from auxiliary env after %s', async mode => {
   if (mode === 'remove') mutateProviderKey('OPENAI_API_KEY', { key: null });
@@ -101,8 +101,8 @@ it.each(['subscription', 'remove'])('strips embedded provider copies from auxili
 });
 
 it('preserves policy and options with an explicitly omitted child argument array', async () => {
-  saveRuntimeBillingMode('codex', 'api');
-  const env = childEnvironment({ runtimeId: 'codex' });
+  saveRuntimeBillingMode('hermes', 'api');
+  const env = childEnvironment({ runtimeId: 'hermes' });
   const sync = cp.spawnSync(process.execPath, undefined, { env, input: 'process.stdout.write(process.env.OPENAI_API_KEY)', encoding: 'utf8' });
   expect(sync.stdout).toBe('fixture-boundary-key');
   const stdout = await new Promise<string>((resolve, reject) => {
@@ -113,9 +113,9 @@ it('preserves policy and options with an explicitly omitted child argument array
 });
 
 it.each(['subscription', 'api'] as const)('preserves unrelated service credentials at the real %s child boundary', mode => {
-  saveRuntimeBillingMode('codex', mode);
+  saveRuntimeBillingMode('hermes', mode);
   const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.BRAVE_API_KEY,process.env.GITHUB_TOKEN,process.env.SEARCH_API_KEY,process.env.MCP_API_KEY]))'], {
-    encoding: 'utf8', env: childEnvironment({ runtimeId: 'codex', env: { BRAVE_API_KEY: 'fixture-brave', GITHUB_TOKEN: 'fixture-github', SEARCH_API_KEY: 'fixture-search', MCP_API_KEY: 'fixture-mcp' } }),
+    encoding: 'utf8', env: childEnvironment({ runtimeId: 'hermes', env: { BRAVE_API_KEY: 'fixture-brave', GITHUB_TOKEN: 'fixture-github', SEARCH_API_KEY: 'fixture-search', MCP_API_KEY: 'fixture-mcp' } }),
   });
   expect(JSON.parse(result)).toEqual(['fixture-brave', 'fixture-github', 'fixture-search', 'fixture-mcp']);
 });
@@ -123,14 +123,14 @@ it.each(['subscription', 'api'] as const)('preserves unrelated service credentia
 it.each(['argv', 'shell'])('rejects an unsaved ambient provider credential copied into prepared %s', form => {
   writeFileSync(join(state.dir, '.env.local'), '');
   vi.stubEnv('OPENAI_API_KEY', 'fixture-unsaved-provider');
-  const env = childEnvironment({ runtimeId: 'codex' });
+  const env = childEnvironment({ runtimeId: 'hermes' });
   expect(() => form === 'argv'
     ? cp.execFileSync(process.execPath, ['-e', 'process.exit(0)', '--', '--header=Bearer fixture-unsaved-provider'], { env })
     : cp.execSync('echo "Bearer fixture-unsaved-provider"', { env })).toThrow(/arguments contain/);
 });
 
 it('rejects an unsaved explicit provider credential retained in prepared argv', () => {
-  const env = childEnvironment({ runtimeId: 'codex', inherit: false, env: { OPENAI_API_KEY: 'fixture-explicit-provider' } });
+  const env = childEnvironment({ runtimeId: 'hermes', inherit: false, env: { OPENAI_API_KEY: 'fixture-explicit-provider' } });
   expect(() => cp.execFileSync(process.execPath, ['-e', 'process.exit(0)', '--', 'Bearer fixture-explicit-provider'], { env })).toThrow(/arguments contain/);
 });
 it('preserves explicit local subscription transport at the actual child boundary', async () => {

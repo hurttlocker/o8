@@ -35,15 +35,14 @@ it('API opt-in never materializes provider secrets and restarted Node mutation s
   expect(JSON.parse(readFileSync(custom, 'utf8'))).toEqual({ oauth: { type: 'oauth', access: 'fixture-refreshed-oauth' }, service: { headers: { Authorization: 'fixture-service' } } });
 });
 
-it('the actual child launch revalidates an unregistered owned home without editing the operator source', async () => {
-  const home = join(state.dir, 'codex-orchestrator', 'legacy'); mkdirSync(home, { recursive: true });
-  const file = join(home, 'config.toml');
-  writeFileSync(file, `[model_providers.openai.http_headers]\nAuthorization="Bearer ${key}"\n`);
+it('the actual child launch revalidates an unregistered non-Codex owned home', async () => {
+  const home = join(state.dir, 'hermes-o8', 'legacy'); mkdirSync(home, { recursive: true });
+  const file = join(home, 'config.yaml');
+  writeFileSync(file, `model:\n  provider: openai\n  api_key: ${key}\n`);
   const { providerSpawnEnvironment } = await import('@/lib/providers/spawn-environment');
   const { execFileSync: launch } = await import('@/lib/providers/child-process');
-  const output = launch(process.execPath, ['-e', 'process.stdout.write(require("node:fs").readFileSync(require("node:path").join(process.env.CODEX_HOME,"config.toml"),"utf8"))'], { encoding: 'utf8', env: providerSpawnEnvironment({ CODEX_HOME: home }, { runtimeId: 'codex' }) });
+  const output = launch(process.execPath, ['-e', 'process.stdout.write(require("node:fs").readFileSync(require("node:path").join(process.env.HERMES_HOME,"config.yaml"),"utf8"))'], { encoding: 'utf8', env: providerSpawnEnvironment({ HERMES_HOME: home }, { runtimeId: 'hermes' }) });
   expect(output).not.toContain(key);
-  expect(output).toContain('env_http_headers');
   expect(readFileSync(join(state.dir, 'owned-credential-artifacts.json'), 'utf8')).toContain('"owner":"o8"');
 });
 
@@ -52,7 +51,7 @@ it('a tampered registry path fails closed before credential deletion or operator
   expect((await keys.POST(request({ provider: 'openai', key }))).status).toBe(200);
   const { writeOwnedRuntimeArtifact } = await import('@/lib/providers/owned-artifacts');
   const owned = join(state.home, 'tamper-owned.json');
-  writeOwnedRuntimeArtifact(owned, 'codex', JSON.stringify({ api_key: key }));
+  writeOwnedRuntimeArtifact(owned, 'hermes', JSON.stringify({ api_key: key }));
   const source = join(state.home, 'operator-source.json'); writeFileSync(source, JSON.stringify({ api_key: key }));
   const registry = join(state.dir, 'owned-credential-artifacts.json');
   const records = JSON.parse(readFileSync(registry, 'utf8')); records[0].path = source;
@@ -82,4 +81,19 @@ it('leaves deferred Solo supervisor homes unchanged during ordinary API mutation
   writeFileSync(join(home, 'auth.json'), raw);
   expect((await keys.POST(request({ provider: 'openai', key }))).status).toBe(200);
   expect(readFileSync(join(home, 'auth.json'), 'utf8')).toBe(raw);
+});
+
+it.each(['claude-code', 'gemini'])('revocation still scrubs unregistered owned-%s homes and archives', async runtime => {
+  const root = join(state.dir, `owned-${runtime}`);
+  const archive = join(state.home, `archive-${runtime}`);
+  for (const home of [root, archive, `${archive}-archive`]) {
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: key, oauth: { access_token: 'fixture-account' } }));
+  }
+  vi.stubEnv(`O8_OWNED_${runtime.toUpperCase().replaceAll('-', '_')}_ROOT`, archive);
+  const keys = await import('@/app/api/v2/keys/route');
+  expect((await keys.POST(request({ provider: 'openai', key }))).status).toBe(200);
+  for (const home of [root, archive, `${archive}-archive`]) {
+    expect(JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'))).toEqual({ oauth: { access_token: 'fixture-account' } });
+  }
 });

@@ -4,8 +4,6 @@ import { promisify } from 'node:util';
 import { assertChildArguments, childEnvironmentContext, refreshChildEnvironment, stampChildPolicy } from './spawn-environment';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
-import { isolateCodexHome } from './codex-home';
-import { isolateUnidentifiedHome } from './unidentified-home';
 import { assertOwnedArtifactsForLaunch } from './owned-artifacts';
 export type * from 'node:child_process';
 
@@ -43,8 +41,6 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    if (!context?.runtimeId) isolateUnidentifiedHome(env);
-    else if (context.runtimeId === 'codex') isolateCodexHome(env);
     assertOwnedArtifactsForLaunch(context?.runtimeId, env, args);
     stampChildPolicy(env);
     return create(env);

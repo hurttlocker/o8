@@ -101,7 +101,7 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
 /** The only ambient inheritance point. Runtime identity and persisted API opt-in are required. */
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
   const input = options.inherit === false ? options.env ?? {} : { ...process.env, ...options.env };
-  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && runtimeBillingMode(options.runtimeId!) === 'api', { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
+  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && options.runtimeId !== 'codex' && runtimeBillingMode(options.runtimeId!) === 'api', { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
 }
 
 export function childEnvironmentContext(env: Record<string, string | undefined> | undefined): Context | undefined {

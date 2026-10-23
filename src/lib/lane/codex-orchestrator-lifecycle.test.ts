@@ -189,8 +189,8 @@ describe('Codex orchestrator process lifecycle', () => {
     });
   });
 
-  it('keeps API Solo detached with durable output through the orchestrator entry point', async () => {
-    saveRuntimeBillingMode('codex', 'api');
+  it('keeps subscription-only Solo detached with durable output and no saved API key', async () => {
+    saveRuntimeBillingMode('codex', 'subscription');
     mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-solo-api' });
     process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
     const prepare = prepareSingleMock.getMockImplementation()!;
@@ -209,7 +209,7 @@ describe('Codex orchestrator process lifecycle', () => {
       await waitForSpawn();
       const options = spawnMock.mock.calls[0][2];
       expect(options.detached).toBe(true);
-      expect(options.env.OPENAI_API_KEY).toBe('fixture-solo-api');
+      expect(options.env.OPENAI_API_KEY || null).toBeNull();
       expect(options.stdio.slice(1).every((fd: unknown) => typeof fd === 'number')).toBe(true);
       const records = listOrchestratorTurnsForThread(threadId);
       expect(records).toHaveLength(1);

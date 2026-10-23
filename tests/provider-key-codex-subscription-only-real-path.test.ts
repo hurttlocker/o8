@@ -1,0 +1,69 @@
+import { afterAll, beforeEach, expect, it, vi } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NextRequest } from 'next/server';
+
+const fixture = vi.hoisted(() => ({ home: '', data: '' }));
+vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.home }));
+vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => fixture.data }));
+fixture.home = mkdtempSync(join(tmpdir(), 'o8-codex-subscription-'));
+fixture.data = join(fixture.home, 'data');
+const source = join(fixture.home, '.codex');
+mkdirSync(source); mkdirSync(fixture.data);
+const { mutateProviderKey } = await import('@/lib/providers/key-store');
+const { childEnvironment } = await import('@/lib/providers/spawn-environment');
+const cp = await import('@/lib/providers/child-process');
+const billing = await import('@/app/api/runtime/billing/route');
+const observer = `const f=require('node:fs'),p=require('node:path'),h=process.env.CODEX_HOME||p.join(process.env.HOME,'.codex');process.stdout.write(JSON.stringify({home:h,explicit:process.env.CODEX_HOME??null,auth:JSON.parse(f.readFileSync(p.join(h,'auth.json'),'utf8')),keys:['OPENAI_API_KEY','CODEX_API_KEY','LLM_API_KEY','GOOSE_API_KEY','COPILOT_PROVIDER_API_KEY','COPILOT_PROVIDER_BEARER_TOKEN'].map(n=>process.env[n]||null),service:process.env.BRAVE_API_KEY}));`;
+const request = (body: unknown) => new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify(body) });
+function forceApi(id: string): void {
+  mkdirSync(join(fixture.data, 'runtime-billing'), { recursive: true });
+  writeFileSync(join(fixture.data, 'runtime-billing', `${id}.json`), JSON.stringify({ version: 1, mode: 'api' }));
+}
+beforeEach(() => {
+  vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 65).toString('base64url'));
+  vi.stubEnv('HOME', fixture.home); vi.stubEnv('CODEX_HOME', undefined);
+  vi.stubEnv('OPENAI_API_KEY', 'fixture-codex-saved'); vi.stubEnv('CODEX_API_KEY', 'fixture-codex-saved');
+  rmSync(fixture.data, { force: true, recursive: true }); mkdirSync(fixture.data);
+  writeFileSync(join(source, 'config.toml'), 'cli_auth_credentials_store = "file"\n');
+  writeFileSync(join(source, 'auth.json'), JSON.stringify({ tokens: { refresh_token: 'fixture-operator-account' } }));
+  mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-codex-saved' });
+});
+afterAll(() => { vi.unstubAllEnvs(); rmSync(fixture.home, { force: true, recursive: true }); });
+
+it.each([false, true])('forced Codex API billing strips credentials and preserves main home selection (explicit=%s)', explicit => {
+  forceApi('codex');
+  const selected = explicit ? join(fixture.home, 'selected-account') : source;
+  mkdirSync(selected, { recursive: true });
+  const raw = JSON.stringify({ tokens: { refresh_token: 'fixture-selected-account' } });
+  writeFileSync(join(selected, 'auth.json'), raw);
+  const env = childEnvironment({ runtimeId: 'codex', env: {
+    ...(explicit ? { CODEX_HOME: selected } : {}), BRAVE_API_KEY: 'fixture-search',
+    LLM_API_KEY: 'fixture-codex-saved', LLM_PROVIDER: 'openai', GOOSE_API_KEY: 'fixture-codex-saved', GOOSE_PROVIDER: 'openai',
+    COPILOT_PROVIDER_API_KEY: 'fixture-codex-saved', COPILOT_PROVIDER_BEARER_TOKEN: 'fixture-codex-saved', COPILOT_PROVIDER_TYPE: 'openai',
+  } });
+  const result = JSON.parse(cp.execFileSync(process.execPath, ['-e', observer], { env, encoding: 'utf8' }));
+  expect(result.keys).toEqual([null, null, null, null, null, null]);
+  expect(result.home).toBe(selected);
+  expect(result.explicit).toBe(explicit ? selected : null);
+  expect(result.auth.tokens.refresh_token).toBe('fixture-selected-account');
+  expect(result.service).toBe('fixture-search');
+  expect(readFileSync(join(selected, 'auth.json'), 'utf8')).toBe(raw);
+  expect(existsSync(join(fixture.data, 'codex-policy-homes'))).toBe(false);
+});
+it('refuses Codex API mode through the authenticated route while ignoring a stale persisted opt-in', async () => {
+  forceApi('codex');
+  const response = await billing.POST(request({ runtimeId: 'codex', mode: 'api' }));
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ ok: false, code: 'CODEX_API_BILLING_UNAVAILABLE', issue: 'https://github.com/hurttlocker/o8/issues/4334' });
+  const current = await billing.GET(new NextRequest('http://localhost/api/runtime/billing?runtimeId=codex', { headers: { host: 'localhost' } }));
+  expect(await current.json()).toMatchObject({ mode: 'subscription' });
+});
+it('still delivers saved API credentials to a non-Codex runtime opted in through the billing route', async () => {
+  expect((await billing.POST(request({ runtimeId: 'hermes', mode: 'api' }))).status).toBe(200);
+  const result = cp.execFileSync(process.execPath, ['-e', 'process.stdout.write(process.env.OPENAI_API_KEY||"missing")'], {
+    env: childEnvironment({ runtimeId: 'hermes' }), encoding: 'utf8',
+  });
+  expect(result).toBe('fixture-codex-saved');
+});

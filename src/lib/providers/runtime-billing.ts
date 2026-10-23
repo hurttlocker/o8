@@ -13,7 +13,7 @@ const validId = (id: string) => /^[a-z0-9][a-z0-9-]*$/.test(id);
 
 /** Only an explicit persisted opt-in permits API credentials at a runtime boundary. */
 export function runtimeBillingMode(runtimeId: string): RuntimeBillingMode {
-  if (!validId(runtimeId)) return 'subscription';
+  if (!validId(runtimeId) || runtimeId === 'codex') return 'subscription';
   try {
     return JSON.parse(readFileSync(join(directory(), `${runtimeId}.json`), 'utf8')).mode === 'api' ? 'api' : 'subscription';
   } catch { return 'subscription'; }
@@ -21,6 +21,7 @@ export function runtimeBillingMode(runtimeId: string): RuntimeBillingMode {
 
 export function saveRuntimeBillingMode(runtimeId: string, mode: RuntimeBillingMode): void {
   if (!validId(runtimeId) || (mode !== 'api' && mode !== 'subscription')) throw new Error('Invalid runtime billing mode');
+  if (runtimeId === 'codex' && mode === 'api') throw new Error('API billing for Codex is not available yet. See #4334.');
   withProviderStoreLock(() => {
     invalidateLaunchPolicy();
     purgeOwnedRuntimeArtifacts();

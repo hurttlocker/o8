@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync as rawExec } from 'node:child_process';
-const s = vi.hoisted(() => ({ home: '', dir: '', authFile: '' }));
+const s = vi.hoisted(() => ({ home: '', dir: '' }));
 vi.mock('node:os', async (original) => ({ ...await original<typeof import('node:os')>(), homedir: () => s.home }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => s.dir, migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => ({ entries: [] }) }));
@@ -11,52 +11,31 @@ vi.mock('@/lib/mcp/tool-spine/emit-claude', () => ({ toClaudeJson: () => ({ mcpS
 s.home = mkdtempSync(join(tmpdir(), 'o8-pr4280-fixture-'));
 s.dir = join(s.home, 'data');
 mkdirSync(s.dir);
-const source = join(s.home, '.codex');
-mkdirSync(source);
-s.authFile = join(source, 'auth.json');
 const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
-const { childEnvironment } = await import('@/lib/providers/spawn-environment');
 const cp = await import('@/lib/providers/child-process');
 const { AcpClient } = await import('@/lib/acp/client');
 const { runRuleCheck } = await import('@/lib/supervisor/rule-check');
 const saved = 'fixture-review-provider';
-const observer = join(s.home, 'observe.cjs');
-writeFileSync(observer, `const fs=require('node:fs'),p=require('node:path');const home=process.env.CODEX_HOME;process.stdout.write(JSON.stringify({home,auth:fs.existsSync(p.join(home,'auth.json'))?JSON.parse(fs.readFileSync(p.join(home,'auth.json'),'utf8')):null}));`);
 beforeEach(() => {
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 73).toString('base64url'));
   vi.stubEnv('HOME', s.home);
-  vi.stubEnv('CODEX_HOME', source);
   vi.stubEnv('OPENAI_API_KEY', '');
   vi.stubEnv('CODEX_API_KEY', '');
   for (const f of ['.env.local', 'owned-credential-artifacts.json'])
     rmSync(join(s.dir, f), { force: true });
   rmSync(join(s.dir, 'runtime-billing'), { force: true, recursive: true });
-  writeFileSync(join(source, 'config.toml'), '');
-  writeFileSync(join(source, 'auth.json'), JSON.stringify({ tokens: { access_token: 'old-access', refresh_token: 'old-single-use-refresh' } }));
   mutateProviderKey('OPENAI_API_KEY', { key: saved });
 });
 afterAll(() => { vi.unstubAllEnvs(); rmSync(s.home, { force: true, recursive: true }); });
-it('preserves OAuth refreshed by the previous Codex child', () => {
-  const opts = () => ({ env: childEnvironment({ runtimeId: 'codex' }), encoding: 'utf8' as const });
-  const first = JSON.parse(cp.execFileSync(process.execPath, [observer], opts()));
-  const refresh = join(s.home, 'refresh.cjs');
-  writeFileSync(refresh, `require('node:fs').writeFileSync(require('node:path').join(process.env.CODEX_HOME,'auth.json'),JSON.stringify({tokens:{access_token:'fresh-access',refresh_token:'fresh-single-use-refresh'}}));`);
-  cp.execFileSync(process.execPath, [refresh], opts());
-  expect(JSON.parse(readFileSync(join(first.home, 'auth.json'), 'utf8')).tokens.refresh_token).toBe('fresh-single-use-refresh');
-  const second = JSON.parse(cp.execFileSync(process.execPath, [observer], opts()));
-  expect(second.auth.tokens.refresh_token).toBe('fresh-single-use-refresh');
-  writeFileSync(join(source, 'auth.json'), JSON.stringify({ tokens: { refresh_token: 'new-source-login' } }));
-  expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('new-source-login');
-});
-it('unidentified ACP launch does not receive a saved key from a prepared owned Codex home', async () => {
-  const home = join(s.dir, 'codex-orchestrator', 'prepared');
+it('unidentified ACP launch does not receive a saved key from a prepared owned Hermes home', async () => {
+  const home = join(s.dir, 'hermes-o8', 'prepared');
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: saved }));
-  writeFileSync(join(home, 'config.toml'), '');
+  writeFileSync(join(home, 'config.yaml'), '');
   const peer = join(s.home, 'acp-peer.cjs');
-  writeFileSync(peer, `const fs=require('node:fs'),p=require('node:path');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:1}:m.method==='session/new'?{sessionId:'review',configOptions:[{id:'model',type:'select',currentValue:String(JSON.parse(fs.readFileSync(p.join(process.env.CODEX_HOME,'auth.json'),'utf8')).OPENAI_API_KEY!==undefined),options:[]}]}:{}})+'\\n')});`.replaceAll("'\\\\n'", "'\\n'"));
-  const client = new AcpClient({ command: process.execPath, args: [peer], env: { CODEX_HOME: home } } as never);
+  writeFileSync(peer, `const fs=require('node:fs'),p=require('node:path');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:1}:m.method==='session/new'?{sessionId:'review',configOptions:[{id:'model',type:'select',currentValue:String(JSON.parse(fs.readFileSync(p.join(process.env.HERMES_HOME,'auth.json'),'utf8')).OPENAI_API_KEY!==undefined),options:[]}]}:{}})+'\\n')});`.replaceAll("'\\\\n'", "'\\n'"));
+  const client = new AcpClient({ command: process.execPath, args: [peer], env: { HERMES_HOME: home } } as never);
   try {
     await client.initialize();
     const session = await client.newSession(s.home, []);
@@ -140,22 +119,22 @@ it('malformed credential config does not leak a saved provider key in its error'
   expect((error as Error).message.includes(saved)).toBe(false);
 });
 
-it('observes account replacement without capturing or acknowledging an OAuth copy', () => {
-  const opts = () => ({ env: childEnvironment({ runtimeId: 'codex' }), encoding: 'utf8' as const });
-  cp.execFileSync(process.execPath, [observer], opts());
-  writeFileSync(s.authFile, JSON.stringify({ tokens: { refresh_token: 'fixture-new-account' } }));
-  expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('fixture-new-account');
-});
 
-it.each(['legacy', 'absent'])('honors source logout when adopting %s overlay state', mode => {
-  const launch = () => JSON.parse(cp.execFileSync(process.execPath, [observer], {
-    env: childEnvironment({ runtimeId: 'codex' }), encoding: 'utf8',
-  }));
-  const first = launch();
-  const sidecar = join(first.home, 'auth-source.sha256');
-  if (mode === 'legacy') writeFileSync(sidecar, 'a'.repeat(64));
-  else rmSync(sidecar, { force: true });
-  rmSync(s.authFile);
-  expect(launch().auth).toBeNull();
-  expect(launch().auth).toBeNull();
+it('YAML warnings never surface provider credential values at actual Hermes preparation', async () => {
+  const hermes = join(s.home, '.hermes'); mkdirSync(hermes, { recursive: true });
+  writeFileSync(join(hermes, 'config.yaml'), `model:\n  provider: openai\n  api_key: !unrecognized ${saved}\n`);
+  const warning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+  const { governHermesProfile } = await import('@/lib/lane/orchestrator-backends/hermes-profile');
+  let error: unknown;
+  try { governHermesProfile(process.execPath); } catch (caught) { error = caught; }
+  try {
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(saved);
+    expect(String(error ?? '')).not.toContain(saved);
+  } finally { warning.mockRestore(); }
+});
+it('preserves unrelated global Git configuration for utility children', () => {
+  writeFileSync(join(s.home, '.gitconfig'), '[user]\n  name = Fixture\n');
+  vi.stubEnv('GIT_CONFIG_GLOBAL', undefined);
+  const name = cp.execFileSync('git', ['config', '--global', 'user.name'], { encoding: 'utf8' });
+  expect(name.trim()).toBe('Fixture');
 });

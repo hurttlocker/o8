@@ -1,6 +1,4 @@
-import { prepareCodexAuth } from '@/lib/providers/codex-home';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -114,10 +112,8 @@ function pinCodexOrchestratorModel(
   return `${nextLines.join('\n').trimEnd()}\n`;
 }
 
-function syncCodexAuthFiles(codexHome: string, deferredSolo = false): void {
-  if (!deferredSolo) prepareCodexAuth(codexHome, USER_CODEX_HOME);
+function syncCodexAuthFiles(codexHome: string): void {
   for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
-    if (fileName === 'auth.json' && !deferredSolo) continue;
     const sourcePath = join(USER_CODEX_HOME, fileName);
     if (!existsSync(sourcePath)) continue;
     const destPath = join(codexHome, fileName);
@@ -131,7 +127,6 @@ export function prepareCodexHome(
   profile: ToolProfile = 'full',
   requestedModel: string = MODEL_IDS.codexDefault,
   threadId?: string | null,
-  deferredSolo = false,
 ): PreparedCodexHome {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
   const threadSuffix = threadId ? `-${createHash('sha256').update(threadId).digest('hex').slice(0, 12)}` : '';
@@ -151,11 +146,9 @@ export function prepareCodexHome(
     resolved.note,
   );
   const configPath = join(codexHome, 'config.toml');
-  // payer policy part c: Solo keeps its existing private-home preparation.
-  if (deferredSolo) writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
-  else writeOwnedRuntimeArtifact(configPath, 'codex', mergedConfig);
+  writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
   chmodSync(configPath, 0o600);
-  syncCodexAuthFiles(codexHome, deferredSolo);
+  syncCodexAuthFiles(codexHome);
   return { codexHome, ...resolved };
 }
 

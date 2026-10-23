@@ -112,7 +112,7 @@ const cases = [...[...generic, ...declarative].flatMap(runtime => ['direct', 'br
 it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys persisted %s for all provider families', async (runtime, mode, action) => {
   state.runtime = runtime;
   const billing = await import('@/app/api/runtime/billing/route');
-  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
+  expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(runtime === 'codex' ? 409 : 200);
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', mode === 'bridge' ? '0' : '1');
   for (const provider of providers) {
     await changeProvider(provider, { key: `fixture-saved-${provider}` });
@@ -127,12 +127,12 @@ it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(
       expect(readFileSync(join(env.HERMES_HOME!, 'config.yaml'), 'utf8')).not.toContain('fixture-stale-profile');
     }
     for (const [index, key] of keys.entries()) {
-      const enabled = action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
+      const enabled = runtime !== 'codex' && action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(enabled ? `fixture-saved-${providers[index]}` : null);
     }
     for (const key of aliases) {
       const provider = key === 'CODEX_API_KEY' ? 'openai' : key === 'ANTHROPIC_AUTH_TOKEN' ? 'anthropic' : 'gemini';
-      expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(action === 'enabled' && mode !== 'sdk' ? `fixture-saved-${provider}` : null);
+      expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(runtime !== 'codex' && action === 'enabled' && mode !== 'sdk' ? `fixture-saved-${provider}` : null);
     }
     if (mode !== 'sdk') { expect(env.XAI_API_KEY).toBe('fixture-unmanaged-xai'); expect(env.NOUS_API_KEY).toBe('fixture-unmanaged-nous'); }
   }
@@ -174,15 +174,15 @@ it.each(['disable', 'remove'])('generic aliases obey real API %s in owned spawn'
   for (const env of state.envs) for (const name of ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN']) expect(env[name] || null, name).toBeNull();
 });
 
-it.each(['codex', 'claude-code'])('%s saved API billing permits saved credentials and survives a fresh read', async runtime => {
+it.each(['codex', 'claude-code'])('%s API billing requests preserve the supported mode across a fresh read', async runtime => {
   state.runtime = runtime;
   const billing = await import('@/app/api/runtime/billing/route');
   const url = 'http://localhost/api/runtime/billing';
-  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
-  expect(await (await billing.GET(new NextRequest(`${url}?runtimeId=${runtime}`, { headers: { host: 'localhost' } }))).json()).toMatchObject({ mode: 'api' });
+  expect((await billing.POST(new NextRequest(url, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(runtime === 'codex' ? 409 : 200);
+  expect(await (await billing.GET(new NextRequest(`${url}?runtimeId=${runtime}`, { headers: { host: 'localhost' } }))).json()).toMatchObject({ mode: runtime === 'codex' ? 'subscription' : 'api' });
   expect((await routes.POST(request('POST', runtime === 'codex' ? 'openai' : 'anthropic', { key: 'fixture-billed-api' }))).status).toBe(200);
   expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
-  expect(state.envs.at(-1)?.[runtime === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY']).toBe('fixture-billed-api');
+  expect(state.envs.at(-1)?.[runtime === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY'] || null).toBe(runtime === 'codex' ? null : 'fixture-billed-api');
 });
 
 it('Copilot aliases use its provider selector when the generic LLM selector differs', async () => {

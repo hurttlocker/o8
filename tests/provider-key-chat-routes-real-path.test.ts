@@ -55,12 +55,12 @@ it('preserves deferred save-to-ambient behavior while the real ordinary chat sta
   expect(state.envs.at(-1)?.OPENAI_API_KEY || null).toBeNull();
 });
 it.each(targets.flatMap(target => ['subscription', 'api'].map(mode => [...target, mode] as const)))('%s (%s, %s, %s) applies %s billing at the real chat spawn', async (target, runtime, provider, canonical, mode) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode }))).status).toBe(200);
+  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode }))).status).toBe(runtime === 'codex' && mode === 'api' ? 409 : 200);
   await save(provider); await chat(target, runtime);
-  expect(state.envs.at(-1)?.[canonical] || null).toBe(mode === 'api' ? 'fixture-saved-chat-key' : null);
+  expect(state.envs.at(-1)?.[canonical] || null).toBe(runtime !== 'codex' && mode === 'api' ? 'fixture-saved-chat-key' : null);
 });
 it.each(targets.flatMap(target => ['disable', 'remove'].map(action => [...target, action] as const)))('%s (%s, %s, %s) strips keys after API %s', async (target, runtime, provider, _canonical, action) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode: 'api' }))).status).toBe(200);
+  expect((await billing.POST(request('runtime/billing', { runtimeId: runtime, mode: 'api' }))).status).toBe(runtime === 'codex' ? 409 : 200);
   await save(provider);
   for (const name of names) vi.stubEnv(name, 'fixture-stale-alias');
   if (provider === 'gemini') mutateProviderKey('GEMINI_API_KEY', action === 'disable' ? { enabled: false } : { key: null });

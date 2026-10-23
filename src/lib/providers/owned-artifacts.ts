@@ -1,10 +1,10 @@
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
-import { assertCodexAccountAuth, sanitizeRuntimeConfigText } from './runtime-config';
+import { sanitizeRuntimeConfigText } from './runtime-config';
 import { withProviderStoreLock } from './store-lock';
 
 interface Artifact { path: string; runtime: string; owner: 'o8'; replacement: string }
@@ -34,7 +34,7 @@ function registry(): Artifact[] {
   return records.map(record => {
     if (!record || typeof record.path !== 'string' || !isAbsolute(record.path) || typeof record.runtime !== 'string' || typeof record.replacement !== 'string' || record.owner !== 'o8') throw unsafe();
     return record as Artifact;
-  });
+  }).filter(record => record.runtime !== 'codex');
 }
 function encode(path: string, runtime: string, contents: string): string {
   const { iv, ciphertext } = encryptValueSync(JSON.stringify({ path, runtime, owner: 'o8', contents }));
@@ -85,6 +85,7 @@ function replaceOpened(file: string, contents: string): void {
   } finally { closeSync(fd); }
 }
 export function writeOwnedRuntimeArtifact(file: string, runtime: string, contents: string): void {
+  if (runtime === 'codex') throw new Error('Codex credential artifacts are not managed. See #4334.');
   const safe = sanitizeRuntimeConfigText(file, contents, runtime);
   file = canonical(file);
   withProviderStoreLock(() => {
@@ -92,43 +93,6 @@ export function writeOwnedRuntimeArtifact(file: string, runtime: string, content
     register(file, runtime, safe);
     replaceOpened(file, safe);
   });
-}
-
-/** Explicit cleanup registration establishes ownership; directory containment does not. */
-export function registeredRuntimeHome(home: string, runtime: string): boolean {
-  if (!existsSync(home)) return false;
-  const directory = realpathSync(home);
-  return registry().some(record => {
-    if (record.runtime !== runtime || dirname(record.path) !== directory || !['config.toml', 'auth.json'].includes(basename(record.path))) return false;
-    decode(record);
-    return true;
-  });
-}
-
-/** The auth link is borrowed account state, never an owned scrub destination. */
-export function setCodexAuthSource(home: string, source: string | null): void {
-  withProviderStoreLock(() => {
-    if (!registeredRuntimeHome(home, 'codex')) throw unsafe();
-    const file = canonical(join(home, 'auth.json'));
-    const records = registry();
-    for (const record of records) if (record.path === file) decode(record);
-    let stat;
-    try { stat = lstatSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    if (stat && !stat.isSymbolicLink()) assertRegular(file);
-    // Drop legacy copy ownership before installing a link: revocation must never
-    // follow that link into the operator's account file.
-    persist(records.filter(record => record.path !== file));
-    if (stat?.isSymbolicLink() && source && resolve(dirname(file), readlinkSync(file)) === resolve(source)) return;
-    if (stat) unlinkSync(file);
-    if (source) symlinkSync(source, file);
-  });
-}
-
-function borrowedCodexAuth(file: string, runtime: string): boolean {
-  if (runtime !== 'codex' || basename(file) !== 'auth.json' || !lstatSync(file).isSymbolicLink()) return false;
-  // Recheck at the launch boundary; a borrowed link may never expose an API key.
-  assertCodexAccountAuth(readFileSync(file, 'utf8'));
-  return true;
 }
 
 /** Bounded migration of ordinary generated destinations, including archived homes. */
@@ -146,20 +110,22 @@ function discovered(): { path: string; runtime: string }[] {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory() && depth > 0 && !['sessions', 'npm', 'plugins', 'node_modules', '.git', '.single-turns'].includes(entry.name)) walk(path, runtime, depth - 1);
       else if (entry.isFile() && (/^(auth(?:-profiles|-state)?\.json|(?:config|requirements|managed_config)\.(?:toml|yaml|yml|json)|openclaw\.json|\.env|models_dev_cache\.json)$/.test(entry.name)
-        || /^orchestrator-.*\.json$/.test(entry.name) || /^o8-codex-app-.*\.json$/.test(entry.name)
+        || /^orchestrator-.*\.json$/.test(entry.name)
         || (runtime === 'openclaw' && dir.includes(`${join('credentials', '')}`) && entry.name.endsWith('.json')))) found.push({ path, runtime });
     }
   };
-  for (const [name, runtime, depth] of [['codex-orchestrator', 'codex', 6], ['hermes-o8', 'hermes', 3], ['mcp', 'claude-code', 1]] as const) walk(join(getDataDir(), name), runtime, depth);
-  if (existsSync(getDataDir())) for (const entry of readdirSync(getDataDir(), { withFileTypes: true })) if (/^owned-[a-z0-9-]+$/.test(entry.name)) walk(join(getDataDir(), entry.name), entry.name.includes('hermes') ? 'hermes' : 'codex', 6);
-  for (const [name, value] of Object.entries(process.env)) if (/^(O8|CORTEX_IDE)_OWNED_[A-Z0-9_]+_ROOT$/.test(name) && value) {
+  for (const [name, runtime, depth] of [['hermes-o8', 'hermes', 3], ['mcp', 'claude-code', 1]] as const) walk(join(getDataDir(), name), runtime, depth);
+  if (existsSync(getDataDir())) for (const entry of readdirSync(getDataDir(), { withFileTypes: true })) {
+    if (!/^owned-[a-z0-9-]+$/.test(entry.name) || entry.name.includes('codex')) continue;
+    walk(join(getDataDir(), entry.name), entry.name.slice('owned-'.length), 6);
+  }
+  for (const [name, value] of Object.entries(process.env)) if (/^(O8|CORTEX_IDE)_OWNED_[A-Z0-9_]+_ROOT$/.test(name) && !name.includes('CODEX') && value) {
     if (!isAbsolute(value)) throw unsafe();
-    walk(value, name.includes('HERMES') ? 'hermes' : 'codex', 6);
-    walk(`${value.replace(/\/+$/, '')}-archive`, name.includes('HERMES') ? 'hermes' : 'codex', 6);
+    const runtime = name.split('_OWNED_')[1].replace(/_ROOT$/, '').toLowerCase().replaceAll('_', '-');
+    walk(value, runtime, 6);
+    walk(`${value.replace(/\/+$/, '')}-archive`, runtime, 6);
   }
   walk(join(homedir(), '.openclaw-o8'), 'openclaw', 5);
-  // Temporary app specs from processes predating the durable registry.
-  if (existsSync(tmpdir())) for (const entry of readdirSync(tmpdir(), { withFileTypes: true })) if (/^o8-codex-app-.*\.json$/.test(entry.name)) found.push({ path: join(tmpdir(), entry.name), runtime: 'codex' });
   return found;
 }
 /** Caller holds .provider-keys.lock. Used by both mutation and actual child launch. */
@@ -197,8 +163,7 @@ export function assertOwnedArtifactsForLaunch(runtimeId: string | undefined, env
   const records = registry();
   const candidates: { file: string; runtime: string }[] = [];
   for (const [name, value] of Object.entries(env)) {
-    if (!value || !isAbsolute(value) || !(name === 'CODEX_HOME' ? registeredRuntimeHome(value, 'codex') : knownOwnedPath(value))) continue;
-    if (name === 'CODEX_HOME') for (const file of ['config.toml', 'auth.json', 'requirements.toml', 'managed_config.toml']) candidates.push({ file: join(value, file), runtime: 'codex' });
+    if (!value || !isAbsolute(value) || !knownOwnedPath(value)) continue;
     if (name === 'CLAUDE_CONFIG_DIR') for (const file of ['settings.json', 'settings.local.json', '.claude.json', 'auth.json']) candidates.push({ file: join(value, file), runtime: 'claude-code' });
     if (name === 'HERMES_HOME' || name === 'HOME' && runtimeId === 'hermes') {
       const home = name === 'HOME' ? join(value, '.hermes') : value;
@@ -210,7 +175,6 @@ export function assertOwnedArtifactsForLaunch(runtimeId: string | undefined, env
   for (const candidate of candidates) {
     if (!existsSync(candidate.file)) continue;
     const path = canonical(candidate.file);
-    if (borrowedCodexAuth(path, candidate.runtime)) continue;
     if (records.some(record => record.path === path)) continue;
     assertRegular(path);
     const raw = readFileSync(path, 'utf8');
@@ -222,7 +186,7 @@ export function assertOwnedArtifactsForLaunch(runtimeId: string | undefined, env
   }
   let changed = false;
   for (const record of records) {
-    const selected = Object.entries(env).some(([name, value]) => /^(CODEX_HOME|CLAUDE_CONFIG_DIR|HERMES_HOME|OPENCLAW_CONFIG_PATH)$/.test(name) && value && (record.path === value || record.path.startsWith(`${value}/`)))
+    const selected = Object.entries(env).some(([name, value]) => /^(CLAUDE_CONFIG_DIR|HERMES_HOME|OPENCLAW_CONFIG_PATH)$/.test(name) && value && (record.path === value || record.path.startsWith(`${value}/`)))
       || args.some(arg => arg === record.path || arg.endsWith(`=${record.path}`));
     if ((!runtimeId || record.runtime !== runtimeId) && !selected) continue;
     assertRegular(record.path);

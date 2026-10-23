@@ -29,7 +29,6 @@ export function filterRuntimeConfig(value: unknown, runtimeId: string, provider 
     || location[0] === 'model' || (location.includes('providers') && location.some(part => Object.hasOwn(PROVIDERS, part)))
     || (typeof record.provider === 'string' && Object.hasOwn(PROVIDERS, record.provider));
   const out: Record<string, unknown> = {};
-  const references: Record<string, unknown> = {};
   for (const [name, item] of Object.entries(record)) {
     if (providerName(name)) continue;
     if (providerLocation && ((location.at(-1) !== 'headers' && /^(api_?key|experimental_bearer_token)$/i.test(name))
@@ -39,12 +38,10 @@ export function filterRuntimeConfig(value: unknown, runtimeId: string, provider 
       const retained: Record<string, unknown> = {};
       for (const [header, raw] of Object.entries(item)) {
         if (typeof raw === 'string' && matchesProviderCredential(raw, materials)) {
-          if (name !== 'env_http_headers' && credentialHeader.test(header) && runtimeId === 'codex' && modelProviders >= 0 && PROVIDERS[selected]) references[header] = PROVIDERS[selected];
           continue;
         }
         if (!credentialHeader.test(header)) retained[header] = raw;
         else if (name === 'env_http_headers' && typeof raw === 'string' && PROVIDER_NAMES.has(raw)) retained[header] = raw;
-        else if (name !== 'env_http_headers' && runtimeId === 'codex' && modelProviders >= 0 && PROVIDERS[selected]) references[header] = PROVIDERS[selected];
       }
       out[name] = retained;
     } else {
@@ -52,27 +49,12 @@ export function filterRuntimeConfig(value: unknown, runtimeId: string, provider 
       if (filtered !== undefined) out[name] = filtered;
     }
   }
-  if (Object.keys(references).length) out.env_http_headers = { ...references, ...(out.env_http_headers as object ?? {}) };
-  if (runtimeId === 'codex' && out.auth_mode === 'apikey') delete out.auth_mode;
   return out;
 }
 
 function parseWithoutSecrets<T>(parse: () => T): T {
   try { return parse(); }
   catch { throw new Error('Runtime credential configuration is invalid. Fix its syntax and retry.'); }
-}
-
-/** Empty API-key slots in an OAuth account file carry no credential. */
-export function assertCodexAccountAuth(raw: string): void {
-  const original: unknown = parseWithoutSecrets(() => JSON.parse(raw));
-  const filtered = filterRuntimeConfig(original, 'codex');
-  const removed = (before: unknown, after: unknown): boolean => {
-    if (before === null || before === undefined || before === '') return false;
-    if (typeof before !== 'object') return before !== after;
-    const retained = after && typeof after === 'object' ? after as Record<string, unknown> : {};
-    return Object.entries(before).some(([name, value]) => removed(value, retained[name]));
-  };
-  if (removed(original, filtered)) throw new Error('Codex subscription authentication contains an API credential. Remove it from the account file or select API billing.');
 }
 
 /** Parse before writing a destination, so even interrupted preparation has no plaintext window. */

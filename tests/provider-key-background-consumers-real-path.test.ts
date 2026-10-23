@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { force: true, recursive: true }); });
 it.each(['digest', 'compact', 'catalogue'].flatMap(target => ['subscription', 'api', 'disable', 'remove'].map(action => [target, action])))('%s obeys %s for saved and matching login credentials', async (target, action) => {
-  expect((await billing.POST(request('runtime/billing', { runtimeId: 'codex', mode: action === 'subscription' ? 'subscription' : 'api' }))).status).toBe(200);
+  expect((await billing.POST(request('runtime/billing', { runtimeId: 'codex', mode: action === 'subscription' ? 'subscription' : 'api' }))).status).toBe(action === 'subscription' ? 200 : 409);
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-login-provider' }))).status).toBe(200);
   if (action === 'disable') expect((await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH'))).status).toBe(200);
   if (action === 'remove') expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
@@ -41,5 +41,5 @@ it.each(['digest', 'compact', 'catalogue'].flatMap(target => ['subscription', 'a
     expect((await autoCompactOrchestratorThread({ repoPath: state.dir, threadId, keepTailCount: 2, force: true })).applied).toBe(true);
   }
   const seen = JSON.parse(readFileSync(state.record, 'utf8'));
-  expect(seen).toEqual({ key: action === 'api' ? 'fixture-login-provider' : null, alias: action === 'api' ? 'fixture-login-provider' : null, copy: action === 'api' ? 'fixture-login-provider' : null });
+  expect(seen).toEqual({ key: null, alias: null, copy: null });
 });

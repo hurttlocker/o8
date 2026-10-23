@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request); if (denied) return denied;
   const body = await request.json().catch(() => null);
   if (!body || !known(body.runtimeId) || !['subscription', 'api'].includes(body.mode)) return NextResponse.json({ ok: false, error: 'Choose a runtime and subscription or api billing.' }, { status: 400 });
+  if (body.runtimeId === 'codex' && body.mode === 'api') return NextResponse.json({ ok: false, code: 'CODEX_API_BILLING_UNAVAILABLE', error: 'API billing for Codex is not available yet. See #4334.', issue: 'https://github.com/hurttlocker/o8/issues/4334' }, { status: 409 });
   try { saveRuntimeBillingMode(body.runtimeId, body.mode); return response(body.runtimeId); }
   catch { return NextResponse.json({ ok: false, error: 'Billing mode could not be saved. Previous mode is unchanged.' }, { status: 503 }); }
 }
