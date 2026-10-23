@@ -29,6 +29,7 @@ interface TransformState {
 interface SessionTransformMenuProps {
   runtimeId: string;
   sessionKey: string;
+  size?: number;
 }
 
 function transformUrl(runtimeId: string, sessionKey: string) {
@@ -65,7 +66,7 @@ export async function submitSessionTransform(
   return payload;
 }
 
-export function SessionTransformMenu({ runtimeId, sessionKey }: SessionTransformMenuProps) {
+export function SessionTransformMenu({ runtimeId, sessionKey, size = 32 }: SessionTransformMenuProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [state, setState] = useState<TransformState | null>(null);
   const [open, setOpen] = useState(false);
@@ -151,9 +152,13 @@ export function SessionTransformMenu({ runtimeId, sessionKey }: SessionTransform
           setOpen((current) => !current);
         }}
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: 9,
+          width: size,
+          height: size,
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+          borderRadius: 8,
           borderWidth: 0,
           background: open ? 'var(--t-hover)' : 'transparent',
           color: 'var(--t-text-secondary)',

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { humanizeActivity } from './worker-activity';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -98,6 +99,7 @@ function parseToolCallArgs(raw: string | undefined): Record<string, unknown> | u
 export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTranscriptEntry[] {
   const entries: MobileTranscriptEntry[] = [];
   let pendingTools: MobileTranscriptToolCall[] = [];
+  const calls: MobileTranscriptToolCall[] = [];
 
   const tsMs = (ts: string): number => {
     const parsed = new Date(ts).getTime();
@@ -123,30 +125,32 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
 
   for (const event of events) {
     switch (event.type) {
-      case 'tool_call':
-        pendingTools = [
-          ...pendingTools,
-          {
-            name: event.tool,
-            status: 'running',
-            preview: event.summary || undefined,
-            args: parseToolCallArgs(event.args),
-          },
-        ];
+      case 'tool_call': {
+        const existing = event.callId ? calls.find(tool => tool.id === event.callId) : undefined;
+        if (existing) {
+          existing.args = parseToolCallArgs(event.args) ?? existing.args;
+          break;
+        }
+        const tool: MobileTranscriptToolCall = {
+          id: event.callId ?? `pkt-tool-${event.seq}`, name: event.tool, status: 'running',
+          startedAt: tsMs(event.ts), preview: event.summary || undefined, args: parseToolCallArgs(event.args),
+        };
+        calls.push(tool);
+        pendingTools.push(tool);
         break;
+      }
       case 'tool_result': {
-        // Close the most recent matching pending call; else append a done card.
-        const reversedIdx = [...pendingTools].reverse().findIndex((tool) => tool.name === event.tool);
-        if (reversedIdx >= 0) {
-          const realIdx = pendingTools.length - 1 - reversedIdx;
-          pendingTools = pendingTools.map((tool, idx) => (
-            idx === realIdx ? { ...tool, status: 'done', preview: event.summary || tool.preview } : tool
-          ));
+        const tool = event.callId ? calls.find(call => call.id === event.callId)
+          : calls.find(call => call.name === event.tool && call.status === 'running');
+        if (tool) {
+          tool.status = event.ok ? 'done' : 'error';
+          tool.finishedAt = tsMs(event.ts);
+          tool.result = event.summary;
+          tool.preview = event.summary || tool.preview;
         } else {
-          pendingTools = [
-            ...pendingTools,
-            { name: event.tool, status: 'done', preview: event.summary || undefined },
-          ];
+          pendingTools.push({ id: event.callId ?? `pkt-result-${event.seq}`, name: event.tool,
+            status: event.ok ? 'done' : 'error', result: event.summary, preview: event.summary || undefined,
+            finishedAt: tsMs(event.ts) });
         }
         break;
       }
@@ -154,6 +158,7 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
         flush(`pkt-${event.seq}`, event.text, event.ts);
         break;
       case 'steer':
+        if (pendingTools.length) flush(`pkt-tools-${pendingTools[0].id}`, '', event.ts);
         entries.push({
           id: `pkt-steer-${event.seq}`,
           role: 'user',
@@ -174,28 +179,18 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
   // Trailing in-flight tool calls with no closing assistant turn yet — surface
   // them so the operator watches the agent work mid-turn.
   if (pendingTools.length > 0) {
-    const last = entries[entries.length - 1];
-    if (last && last.role === 'assistant' && (!last.toolCalls || last.toolCalls.length === 0)) {
-      last.toolCalls = pendingTools;
-    } else {
-      entries.push({ id: `pkt-live-${entries.length}`, role: 'assistant', text: '', toolCalls: pendingTools });
-    }
+    entries.push({ id: `pkt-live-${pendingTools[0].id}`, role: 'assistant', text: '', toolCalls: pendingTools });
   }
 
   return entries;
 }
 
 function packetToolActivityLabel(event: Extract<TranscriptEvent, { type: 'tool_call' }>): string {
-  if (event.tool === 'exec_command') return 'Running terminal command…';
-  if (event.tool === 'read_file' || event.tool === 'Read') return 'Reading files…';
-  if (event.tool === 'list_files' || event.tool === 'Glob') return 'Listing files…';
-  if (event.tool === 'search_code' || event.tool === 'Grep') return 'Searching code…';
-  if (event.tool === 'search_web' || event.tool === 'WebSearch') return 'Searching web…';
-  if (event.tool === 'Edit' || event.tool === 'Write' || event.tool === 'NotebookEdit') return 'Editing files…';
-  return `Running ${event.tool}…`;
+  return humanizeActivity({ name: event.tool, args: parseToolCallArgs(event.args), preview: event.summary }).liveLabel;
 }
 
 export function derivePacketTranscriptActivity(events: TranscriptEvent[]): PacketTranscriptActivity | null {
+  if (events.at(-1)?.type === 'done') return null;
   const latest = [...events].reverse().find((event) => event.type !== 'done');
   if (!latest) return null;
   if (latest.type === 'tool_call') return { label: packetToolActivityLabel(latest), startedAt: latest.ts };

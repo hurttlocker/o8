@@ -1,7 +1,10 @@
 'use client';
 
 import { memo } from 'react';
-import { DesktopAgentMessage } from '@/components/desktop/DesktopAgentMessage';
+import { WorkerProse } from './chat-renderers/WorkerProse';
+import { WorkerActivityTrace } from './chat-renderers/WorkerActivityTrace';
+import { PacketWorkerHandback, WorkerHandback, type WorkerHandbackData } from './chat-renderers/WorkerHandback';
+import { workerTranscriptBlocks } from './worker-activity';
 import { PacketHeaderCard } from '@/components/desktop/workspace-terminal/PacketHeaderCard';
 import { AgentPeerMessageCard } from '@/components/desktop/workspace-terminal/AgentPeerMessageCard';
 import { WorkspaceTranscriptEventExtras } from '@/components/desktop/workspace-terminal/chat-renderers/WorkspaceTranscriptEventExtras';
@@ -14,8 +17,6 @@ import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { useTranscriptVisualizations } from '@/components/desktop/visualizations/useTranscriptVisualizations';
 import { MessageVisualizations } from '@/components/desktop/visualizations/MessageVisualizations';
 import { placeTranscriptVisualizations } from '@/lib/visualizations/transcript';
-
-import { TranscriptTurns } from '../transcript/TranscriptTurns';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 
@@ -39,6 +40,9 @@ interface WorkspaceTranscriptProps {
   active?: boolean;
   markLast?: boolean;
   isStreaming?: boolean;
+  laneId?: string | null;
+  onOpenReview?: () => void;
+  handback?: WorkerHandbackData;
   onRunInTerminal?: (command: string) => void;
   onPermissionDecision?: (request: PermissionRequest, decision: ClaudePermissionDecision) => Promise<void> | void;
 }
@@ -124,60 +128,70 @@ export const WorkspaceTranscript = memo(function WorkspaceTranscript({
   isStreaming = false,
   onRunInTerminal,
   onPermissionDecision,
+  laneId,
+  onOpenReview,
+  handback,
 }: WorkspaceTranscriptProps) {
   const renderItems = composeWorkspaceTranscriptWithPeers(entries, peerMessages, packetHeader);
   const references = useTranscriptVisualizations({ packetId, active, length: entries.length });
   const buckets = placeTranscriptVisualizations(references, entries);
   const byEntry = new Map(entries.map((entry, index) => [entry.id, buckets.get(index)]));
 
-  return <><MessageVisualizations references={buckets.get(-1)} /><TranscriptTurns busy={isStreaming || !markLast} repoPath={repoPath}
-    entries={renderItems.map(item => item.kind === 'message' ? item.entry : { id: item.key, role: item.kind === 'packet-header' ? 'user' : 'system', text: '' })}
-    nodes={renderItems.map((item) => {
-    if (item.kind === 'earlier-peers') {
-      return <div key={item.key} style={{ color: 'var(--t-text-faint)', fontSize: 10.5 }}>Showing the latest 8 agent messages · {item.count} earlier in Handoffs</div>;
-    }
-    if (item.kind === 'peer-message') {
-      return <AgentPeerMessageCard key={item.key} message={item.message} selfName={peerName ?? ''} />;
-    }
-    if (item.kind === 'packet-header') {
-      return (
-        <div key={item.key} data-o8-message-id={item.key}><PacketHeaderCard
-          title={packetHeader?.title ?? 'Dispatched packet'}
-          branch={packetHeader?.branch}
-          runtime={packetHeader?.runtime}
-          status={packetHeader?.status}
-          repo={packetHeader?.repo}
-          launchContext={packetHeader?.launchContext}
-          prompt={item.prompt}
-        /></div>
-      );
-    }
+  const itemById = new Map(renderItems.map(item => [item.key, item]));
+  const blocks = workerTranscriptBlocks(renderItems.map(item => item.kind === 'message' ? item.entry
+    : { id: item.key, role: item.kind === 'packet-header' ? 'user' : 'system', text: '\u200b' }), isStreaming || !markLast);
+  return <div data-worker-transcript style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, width: '100%', fontSize: 13, fontWeight: 300 }}>
+    <MessageVisualizations references={buckets.get(-1)} />
+    {blocks.map((block, index) => {
+      if (block.kind === 'activity') return <WorkerActivityTrace key={block.id} block={block} />;
+      const item = itemById.get(block.id);
+      if (!item) return null;
+      if (item.kind === 'earlier-peers') {
+        return <div key={item.key} style={{ color: 'var(--t-text-faint)', fontSize: 10.5 }}>Showing the latest 8 agent messages · {item.count} earlier in Handoffs</div>;
+      }
+      if (item.kind === 'peer-message') {
+        return <AgentPeerMessageCard key={item.key} message={item.message} selfName={peerName ?? ''} />;
+      }
+      if (item.kind === 'packet-header') {
+        return (
+          <div key={item.key} data-o8-message-id={item.key}><PacketHeaderCard
+            title={packetHeader?.title ?? 'Dispatched packet'}
+            branch={packetHeader?.branch}
+            runtime={packetHeader?.runtime}
+            status={packetHeader?.status}
+            repo={packetHeader?.repo}
+            launchContext={packetHeader?.launchContext}
+            prompt={item.prompt}
+          /></div>
+        );
+      }
 
-    return (
-      <div
-        key={item.key}
-        data-o8-message-id={item.entry.id}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'stretch',
-          width: '100%',
-        }}
-      >
-        <DesktopAgentMessage
-          entry={item.entry}
-          isLast={item.isLast && markLast}
-          isStreaming={item.isLast && isStreaming}
-          repoPath={repoPath}
-          visualizations={item.entry.role === 'assistant' ? byEntry.get(item.entry.id) : undefined}
-          onRunInTerminal={onRunInTerminal}
-        />
-        {item.entry.role !== 'assistant' ? <MessageVisualizations references={byEntry.get(item.entry.id)} /> : null}
-        <WorkspaceTranscriptEventExtras
-          entry={item.entry}
-          onPermissionDecision={onPermissionDecision}
-        />
-      </div>
-    );
-  })} /></>;
+      return (
+        <div
+          key={item.key}
+          data-o8-message-id={item.entry.id}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            width: '100%',
+            marginTop: index > 0 && block.entry.role === 'user' ? 8 : 0,
+          }}
+        >
+          <WorkerProse
+            entry={block.entry}
+            repoPath={repoPath}
+            onRunInTerminal={onRunInTerminal}
+          />
+          <MessageVisualizations references={byEntry.get(item.entry.id)} />
+          <WorkspaceTranscriptEventExtras
+            entry={item.entry}
+            onPermissionDecision={onPermissionDecision}
+          />
+        </div>
+      );
+    })}
+    {handback && markLast && !isStreaming ? <WorkerHandback data={handback} repoPath={repoPath} onReview={onOpenReview} />
+      : <PacketWorkerHandback laneId={laneId ?? packetId} repoPath={repoPath} finished={markLast && !isStreaming} revision={entries.at(-1)?.id ?? ''} onReview={onOpenReview} />}
+  </div>;
 });

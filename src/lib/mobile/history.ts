@@ -107,6 +107,7 @@ export function mobileEntriesFromRuntimeTranscript(
       args: tool.args,
       preview: tool.preview,
       status: tool.status,
+      result: tool.result,
     })) ?? (entry.role === 'tool' && entry.toolName
       ? [{ name: entry.toolName, status: 'done' as const }]
       : undefined);

@@ -874,6 +874,7 @@ function utf8ByteLength(str: string): number {
 // ── Main markdown renderer ──
 
 export function renderLLMMarkdown(text: string, opts?: {
+  compact?: boolean;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
@@ -1070,19 +1071,19 @@ export function renderLLMMarkdown(text: string, opts?: {
 
     // Headings
     if (line.startsWith('#### ')) {
-      nodes.push(<div key={`h4-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 13, fontWeight: 600, marginTop: 12, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(5))}</div>);
+      nodes.push(<div key={`h4-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 13, fontWeight: opts?.compact ? 400 : 600, marginTop: opts?.compact ? 8 : 12, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(5))}</div>);
       i++; continue;
     }
     if (line.startsWith('### ')) {
-      nodes.push(<div key={`h3-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 14, fontWeight: 600, marginTop: 14, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(4))}</div>);
+      nodes.push(<div key={`h3-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: opts?.compact ? 13 : 14, fontWeight: opts?.compact ? 400 : 600, marginTop: opts?.compact ? 8 : 14, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(4))}</div>);
       i++; continue;
     }
     if (line.startsWith('## ')) {
-      nodes.push(<div key={`h2-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 16, fontWeight: 600, marginTop: 16, marginBottom: 4, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(3))}</div>);
+      nodes.push(<div key={`h2-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: opts?.compact ? 14 : 16, fontWeight: opts?.compact ? 400 : 600, marginTop: opts?.compact ? 8 : 16, marginBottom: 4, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(3))}</div>);
       i++; continue;
     }
     if (line.startsWith('# ')) {
-      nodes.push(<div key={`h1-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 18, fontWeight: 700, marginTop: 18, marginBottom: 6, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(2))}</div>);
+      nodes.push(<div key={`h1-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: opts?.compact ? 14 : 18, fontWeight: opts?.compact ? 400 : 700, marginTop: opts?.compact ? 8 : 18, marginBottom: 6, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(2))}</div>);
       i++; continue;
     }
 
@@ -1090,7 +1091,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     const olMatch = line.match(/^(\d+)\.\s+(.+)/);
     if (olMatch) {
       nodes.push(
-        <div key={`ol-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
+        <div key={`ol-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: opts?.compact ? 13 : 14, lineHeight: opts?.compact ? 1.5 : 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
           <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, fontWeight: 500, minWidth: 16, textAlign: 'right' }}>{olMatch[1]}.</span>
           <span>{renderInline(olMatch[2])}</span>
         </div>
@@ -1101,7 +1102,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     // Unordered list
     if (line.match(/^[-*+]\s+/)) {
       nodes.push(
-        <div key={`ul-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
+        <div key={`ul-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: opts?.compact ? 13 : 14, lineHeight: opts?.compact ? 1.5 : 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
           <span style={{ color: 'var(--t-text-muted)', flexShrink: 0 }}>•</span>
           <span>{renderInline(line.replace(/^[-*+]\s+/, ''))}</span>
         </div>
@@ -1114,17 +1115,14 @@ export function renderLLMMarkdown(text: string, opts?: {
     // don't smash into the paragraph above. Bumped from 8 → 14 on
     // 2026-05-27 for professional spacing across all chats.
     if (!line.trim()) {
-      nodes.push(<div key={`br-${i}`} style={{ height: 14 }} />);
+      nodes.push(<div key={`br-${i}`} style={{ height: opts?.compact ? 6 : 14 }} />);
       i++; continue;
     }
 
-    // Regular paragraph — marginBottom: 8 so consecutive paragraphs ALWAYS
-    // separate cleanly even when the source has no blank line between them.
-    // Combined with the empty-line spacer, an explicit `\n\n` reads as a
-    // strong section break (~22px); adjacent sentences without a blank
-    // still get the 8px breathing room.
+    // Consecutive paragraphs stay distinct without a blank source line.
+    // Worker panes use tighter gaps than full-size chat.
     nodes.push(
-      <div key={`p-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)', marginBottom: 8, ...ttsWash(lineActive) }}>
+      <div key={`p-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: opts?.compact ? 13 : 14, lineHeight: opts?.compact ? 1.5 : 1.7, color: 'var(--t-text)', marginBottom: opts?.compact ? 2 : 8, ...ttsWash(lineActive) }}>
         {renderInline(line)}
       </div>
     );

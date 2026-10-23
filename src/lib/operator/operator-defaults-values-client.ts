@@ -4,8 +4,10 @@ const VALUES_SNAPSHOT_TTL_MS = 1_000;
 
 let snapshot: { response: Response; expiresAt: number } | null = null;
 let inFlight: Promise<Response> | null = null;
+let version = 0;
 
 export function invalidateOperatorDefaultsValuesSnapshot(): void {
+  version += 1;
   snapshot = null;
   inFlight = null;
 }
@@ -13,9 +15,10 @@ export function invalidateOperatorDefaultsValuesSnapshot(): void {
 export async function fetchOperatorDefaultsValues(): Promise<Response> {
   if (snapshot && snapshot.expiresAt > Date.now()) return snapshot.response.clone();
   if (!inFlight) {
+    const requestVersion = version;
     const request = fetch(OPERATOR_DEFAULTS_VALUES_URL, { cache: 'no-store' })
       .then((response) => {
-        if (response.ok) {
+        if (response.ok && version === requestVersion) {
           snapshot = {
             response: response.clone(),
             expiresAt: Date.now() + VALUES_SNAPSHOT_TTL_MS,

@@ -13,7 +13,7 @@ import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components
 import { repoColor } from '@/lib/repos/repo-color';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
-import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
+import { workerTabLabels } from './worker-pane-chrome';
 import { packetStateColorScheme, type PacketStateKey } from '@/lib/packet-state-colors';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 
@@ -106,6 +106,7 @@ export const TabBar = memo(function TabBar({
   showTabList = true,
   headerLabel = null,
 }: TabBarProps) {
+  const labels = workerTabLabels(tabs.map(tab => ({ ...tab, label: workspaceTabPrimaryLabel(tab) })));
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
@@ -171,7 +172,7 @@ export const TabBar = memo(function TabBar({
         position: 'relative',
       }}
     >
-      <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'visible' }}>
+      <div style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, overflow: 'hidden' }}>
         {!showTabList ? (
           // Chat / conversation title sits IN the header strip (Codex /
           // Claude pattern), filling the dead space between the left edge
@@ -261,6 +262,7 @@ export const TabBar = memo(function TabBar({
           style={{
             display: showTabList ? 'flex' : 'none',
             flex: 1,
+            minWidth: 0,
             gap: TAB_GAP,
             height: TAB_BAR_HEIGHT + 1,
             marginBottom: -1,
@@ -274,7 +276,7 @@ export const TabBar = memo(function TabBar({
             scrollbarWidth: 'none',
           }}
         >
-          {tabs.map((tab) => {
+          {tabs.map((tab, index) => {
             // An orchestrator tab is "permanent" (no close X) only when
             // it's the ONLY fleet-mode orchestrator tab — closing the
             // last one would leave the workspace without a default
@@ -287,19 +289,9 @@ export const TabBar = memo(function TabBar({
             const isOrchestrator = tab.kind === 'orchestrator';
             const isSingleRuntimeTab = isOrchestrator && tab.mode === 'single';
             const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single' && orchestratorTabCount <= 1;
-            const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
             const packetTitle = tab.orchestrationPacket?.title ?? null;
-            const compactLabel = packetTitle ? compactPacketLabel(packetTitle) : '';
-            const primaryLabel = compactLabel
-              ? compactLabel
-              : ((isOrchestrator
-                  || rawLabel === 'Assistant'
-                  || rawLabel === 'Agent'
-                  || rawLabel === 'Chat'
-                ) && chatTabMeta?.summary
-                ? chatTabMeta.summary
-                : rawLabel);
+            const primaryLabel = labels[index];
             const tabDetail = tab.orchestrationPacket
               ? (chatTabMeta?.detail ?? tab.orchestrationPacket.branchTarget ?? null)
               : (chatTabMeta?.summary ?? chatTabMeta?.detail ?? null);
@@ -314,7 +306,7 @@ export const TabBar = memo(function TabBar({
               ? formatDispatchedAt(latestDispatchedAt)
               : null;
             const fullPacketTitle = packetTitle ?? null;
-            const tabTitle = [fullPacketTitle, dispatchTooltip, tabDetail, chatTabMeta?.fullSummary]
+            const tabTitle = [fullPacketTitle, tab.orchestrationPacket?.branchTarget, dispatchTooltip, tabDetail, chatTabMeta?.fullSummary]
               .filter((value): value is string => Boolean(value))
               .join(' · ')
               || primaryLabel
@@ -352,6 +344,7 @@ export const TabBar = memo(function TabBar({
             return (
               <button
                 type="button"
+                data-worker-tab-label={primaryLabel}
                 key={tab.id}
                 draggable={!isOrchestrator && !!onReorderTabs}
                 onDragStart={(e) => {
@@ -381,6 +374,7 @@ export const TabBar = memo(function TabBar({
                   alignItems: 'center',
                   gap: 6,
                   boxSizing: 'border-box',
+                  flexShrink: 0,
                   height: FLAT_TAB_HEIGHT,
                   minHeight: FLAT_TAB_HEIGHT,
                   paddingTop: 0,

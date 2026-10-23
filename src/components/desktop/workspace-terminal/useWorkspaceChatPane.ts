@@ -485,7 +485,7 @@ export function useWorkspaceChatPane({
                 ? event.status
                 : 'running';
               const nextTool: MobileTranscriptToolCall = {
-                name: event.name,
+                id: event.id, name: event.name, startedAt: Date.now(),
                 status: toolStatus,
                 args: event.args,
               };
@@ -505,13 +505,13 @@ export function useWorkspaceChatPane({
             }
 
             if (event.type === 'tool_result') {
-              const lastTool = event.name
-                ? liveToolCallsRef.current.find((tool) => tool.name === event.name)
-                : liveToolCallsRef.current[liveToolCallsRef.current.length - 1];
+              const lastTool = event.id
+                ? liveToolCallsRef.current.find((tool) => tool.id === event.id)
+                : [...liveToolCallsRef.current].reverse().find((tool) => (!event.name || tool.name === event.name) && (tool.status === 'running' || tool.status === 'calling'));
               if (lastTool) {
                 const nextTools = upsertWorkspaceToolCall(liveToolCallsRef.current, {
                   ...lastTool,
-                  status: 'done',
+                  status: event.isError ? 'error' : 'done', finishedAt: Date.now(),
                   preview: event.preview ?? lastTool.preview,
                   result: event.output ?? lastTool.result,
                 });
