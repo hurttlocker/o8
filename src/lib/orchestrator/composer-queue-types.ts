@@ -37,4 +37,3 @@ export interface QueuedComposerSendRecord extends ComposerQueueTarget {
   updatedAt: number;
   admittedAt: number | null;
 }
-export const COMPOSER_STEER_UNAVAILABLE_REASON = 'Live steering is unavailable for this runtime. Use Send next; the current turn will continue.';

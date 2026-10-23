@@ -8,7 +8,7 @@ import { isOrchestratorServiceTier } from './service-tier';
 import { isThinkingEffort } from './thinking-effort';
 import { isComposerWireMode } from './composer-wire';
 import { assertOrchestratorPermissionMode, isOrchestratorPermissionMode } from './permission-mode';
-import { COMPOSER_STEER_UNAVAILABLE_REASON, type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
+import { type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
 
 interface Row {
   sequence: number; id: string; repo_path: string; thread_id: string;
@@ -75,8 +75,7 @@ export function listComposerQueueTargets(): ComposerQueueTarget[] {
     WHERE status IN ('queued','dispatching','held') GROUP BY repo_path, thread_id ORDER BY MIN(sequence)`).all() as ComposerQueueTarget[];
 }
 export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; intent: QueuedComposerSendRecord['intent']; payload: unknown }): QueuedComposerSendRecord {
-  if (input.intent === 'steer-now') throw new Error(COMPOSER_STEER_UNAVAILABLE_REASON);
-  if (input.intent !== 'send-next' || typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(input.id)) throw new Error('A valid queue identity is required.');
+  if (!['send-next', 'steer-now'].includes(input.intent) || typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(input.id)) throw new Error('A valid queue identity is required.');
   const target = validateComposerQueueTarget(input);
   const payload = validateComposerQueuePayload(input.payload);
   const serialized = JSON.stringify(payload);
@@ -99,10 +98,38 @@ export function enqueueComposerSend(input: ComposerQueueTarget & { id: string; i
 export function claimNextComposerSend(target: ComposerQueueTarget): QueuedComposerSendRecord | null {
   return getSqlite().transaction(() => {
     const first = listQueuedComposerSends(target)[0];
-    if (first?.status !== 'queued') return null;
-    const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued'`).run(Date.now(), first.id);
+    if (first?.status !== 'queued' || first.intent !== 'send-next') return null;
+    const claimed = getSqlite().prepare(`UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'send-next'`).run(Date.now(), first.id);
     return claimed.changes ? readComposerSend(first.id) : null;
   })();
+}
+
+/** A promotion changes intent only; the saved destination and routing stay frozen. */
+export function promoteComposerSend(target: ComposerQueueTarget, id: string): QueuedComposerSendRecord {
+  return getSqlite().transaction(() => {
+    const item = readComposerSend(id);
+    if (!item || item.repoPath !== composerQueueRepoKey(target.repoPath) || item.threadId !== target.threadId) throw new Error('This queued message was not found in this chat.');
+    if (item.intent === 'steer-now') return item;
+    if (item.status !== 'queued' || item.admittedAt !== null || item.payload.afterTaskId) throw new Error('This message cannot be steered after delivery has started.');
+    getSqlite().prepare("UPDATE composer_send_queue SET intent = 'steer-now', updated_at = ? WHERE id = ?").run(Date.now(), id);
+    return readComposerSend(id)!;
+  })();
+}
+
+export function claimComposerSteer(id: string): QueuedComposerSendRecord | null {
+  const changed = getSqlite().prepare("UPDATE composer_send_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'queued' AND intent = 'steer-now' AND admitted_at IS NULL").run(Date.now(), id);
+  return changed.changes ? readComposerSend(id) : null;
+}
+
+/** A definite refusal can safely become a next turn. Unknown delivery stays held. */
+export function deferComposerSteer(id: string, reason: string): void {
+  getSqlite().prepare("UPDATE composer_send_queue SET intent = 'send-next', status = 'queued', admitted_at = NULL, reason = ?, updated_at = ? WHERE id = ? AND status = 'dispatching'").run(reason, Date.now(), id);
+}
+
+export function listComposerTranscriptSends(target: ComposerQueueTarget): QueuedComposerSendRecord[] {
+  const applied = getSqlite().prepare("SELECT * FROM composer_send_queue WHERE repo_path = ? AND thread_id = ? AND intent = 'steer-now' AND status = 'applied' ORDER BY sequence DESC LIMIT 40")
+    .all(composerQueueRepoKey(target.repoPath), target.threadId) as Row[];
+  return [...applied.map(view), ...listQueuedComposerSends(target)].sort((a, b) => a.sequence - b.sequence);
 }
 /** Recheck after every asynchronous preparation step, immediately before provider admission. */
 export function assertComposerSendClaim(id: string): void {

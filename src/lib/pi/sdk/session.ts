@@ -187,6 +187,10 @@ export async function createPiSdkSession(options: PiSdkSessionOptions) {
     surfaceId,
     get pid() { return peer.pid; },
     get running() { return peer.running; },
+    async steer(message: string): Promise<{ accepted: boolean }> {
+      if (closed || !run || !message.trim() || Buffer.byteLength(message) > PI_PROMPT_MAX_BYTES) return { accepted: false };
+      return peer.request('steer', { message }, 5_000);
+    },
     async prompt(message: string): Promise<PiRunResult> {
       if (closed || run) throw new Error('Session is closed or busy');
       if (!message.trim() || Buffer.byteLength(message) > PI_PROMPT_MAX_BYTES) throw new Error('Invalid prompt');
