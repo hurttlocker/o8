@@ -20,6 +20,7 @@ import {
   normalizeBackend,
   normalizeErrorMessage,
   normalizeSessionIds,
+  updateNativeSessionId,
   projectOrchestratorThread as projectThread,
   repoNameFromPath,
   trimTitle,
@@ -658,18 +659,9 @@ export function upsertMobileOrchestratorAssistantMessage(input: OrchestratorAssi
       ?? inferBackendFromSessionIds(existing)
       ?? DEFAULT_BACKEND;
 
-    const nextSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
-    let sessionIdsTouched = false;
-    if ((nextBackend === 'claude' || nextBackend === 'codex')
-      && typeof input.sessionId === 'string'
-      && input.sessionId.trim()
-    ) {
-      const trimmed = input.sessionId.trim();
-      if (nextSessionIds[nextBackend] !== trimmed) {
-        nextSessionIds[nextBackend] = trimmed;
-        sessionIdsTouched = true;
-      }
-    }
+    const { ids: nextSessionIds, touched: sessionIdsTouched } = updateNativeSessionId(
+      existing.orchestratorSessionIds, nextBackend, input.sessionId,
+    );
 
     const explicitModel = typeof input.model === 'string' && input.model.trim()
       ? input.model.trim()

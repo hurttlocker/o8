@@ -49,6 +49,18 @@ export function apiError(path: string, status: number | null, body: string, deta
       }
     } catch { /* use the fixed summary */ }
   }
+  if (status !== null && status >= 400
+    && ['/api/orchestrator/steer-packet', '/api/orchestrator/reset-packet'].includes(path)) {
+    try {
+      const route = JSON.parse(body)?.error as { code?: unknown; message?: unknown } | undefined;
+      // Lifecycle routes deliberately write 4xx messages for their caller.
+      // Server exceptions keep fixed text; only their bounded cause code survives.
+      const message = status < 500 ? singleLineMessage(route?.message, MAX_ROUTE_ERROR_LENGTH) : summary;
+      if (typeof route?.code === 'string' && /^[a-z][a-z0-9_]{0,99}$/.test(route.code) && message) {
+        return new O8ApiError(status, message, { code: route.code, message });
+      }
+    } catch { /* use the fixed summary */ }
+  }
   return new O8ApiError(status, summary);
 }
 

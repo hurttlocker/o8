@@ -73,12 +73,15 @@ describe('thread-bound runtime telemetry', () => {
     ]);
   });
 
-  it('fails closed when a fresh thread has no persisted provider binding', async () => {
+  it('estimates the transcript without borrowing another provider session when a thread is unbound', async () => {
     persistThread('thoughts-fresh', {});
 
     const response = await GET(request({ threadId: 'thoughts-fresh', backend: 'claude' }));
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    expect((await response.json()).telemetry).toMatchObject({
+      contextTokens: expect.any(Number), contextSource: 'transcript-estimate',
+    });
     expect(mocks.getTelemetry).not.toHaveBeenCalled();
   });
 });

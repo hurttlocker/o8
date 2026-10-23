@@ -403,6 +403,7 @@ export interface MobileTranscriptEntry {
   compaction?: {
     timestamp: number;
     tokensBefore?: number;
+    contextSource?: string;
     tokensAfter?: number;
     trigger: CompactionTrigger;
     source?: 'explicit' | 'summary' | 'inferred';

@@ -14,6 +14,8 @@ import {
 } from '@/lib/llm/mobile-chat-session';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
+import { EFFORT_CHOICE_LIST } from '@/lib/orchestrator/effort-pin';
+import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +24,7 @@ interface MobileChatSendBody {
   sessionKey?: string;
   message?: string;
   model?: string;
-  effort?: string;
+  effort?: unknown;
   repoPath?: string;
 }
 
@@ -118,6 +120,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'message is required' }, { status: 400 });
   }
 
+  const effort = body?.effort;
+  if (effort !== undefined && !isThinkingEffort(effort)) {
+    return NextResponse.json({
+      error: `effort must be one of: ${EFFORT_CHOICE_LIST}.`, code: 'invalid_effort',
+    }, { status: 400 });
+  }
+
   const tabId = sessionKey.replace(/^llm-chat:/, '');
   const existing = ensurePersistedMobileLlmChatSession(tabId, { model: requestedModel });
   const model = requestedModel || existing.model || defaultMobileLlmModel();
@@ -138,7 +147,6 @@ export async function POST(request: NextRequest) {
   invalidateInboxCache();
 
   const useCli = isCliModel(model);
-  const effort = body?.effort?.trim();
   const proxyEndpoint = useCli ? '/api/v2/proxy/cli' : '/api/v2/proxy/llm';
   const repoPath = body?.repoPath?.trim() || existing.repoPath;
   const proxyBody = useCli

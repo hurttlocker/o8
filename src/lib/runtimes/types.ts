@@ -319,6 +319,8 @@ export interface RuntimeTelemetry {
   totalTokens?: number;
   /** Tokens that entered this session's own context window; excludes child internals. */
   contextTokens?: number;
+  /** Origin of the context measurement, separate from billable usage. */
+  contextSource?: string;
   remainingTokens?: number;
   estimatedCostUsd?: number;
   costSource?: PacketCostSource;

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { runtimeIdFromSessionKey } from '@/lib/runtime/transcript';
-import { readOrchestratorBackendSessionId } from '@/lib/mobile/orchestrator-thread-history';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { readOrchestratorContextTelemetry } from '@/lib/orchestrator/context-telemetry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,16 +11,17 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const threadId = request.nextUrl.searchParams.get('threadId')?.trim();
   const backend = request.nextUrl.searchParams.get('backend')?.trim();
-  let sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
+  const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
   if (threadId || backend) {
-    if (!threadId?.startsWith('thoughts-') || (backend !== 'claude' && backend !== 'codex')) {
+    if (!threadId?.startsWith('thoughts-') || !isOrchestratorBackendId(backend)) {
       return NextResponse.json({ error: 'threadId and a supported backend are required' }, { status: 400 });
     }
-    const providerSessionId = readOrchestratorBackendSessionId(threadId, backend);
-    if (!providerSessionId) {
-      return NextResponse.json({ error: `No ${backend} session is bound to thread: ${threadId}` }, { status: 404 });
+    try {
+      const telemetry = await readOrchestratorContextTelemetry(threadId, backend);
+      return NextResponse.json({ telemetry }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Unable to load context telemetry' }, { status: 500 });
     }
-    sessionKey = `${backend === 'claude' ? 'claude-code' : 'codex'}:${providerSessionId}`;
   }
   if (!sessionKey) {
     return NextResponse.json({ error: 'sessionKey is required' }, { status: 400 });
