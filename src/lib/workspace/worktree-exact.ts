@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { lstat, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -494,13 +495,13 @@ async function parkExactWorktreeInTransaction(
     );
     await verifyDestructiveDirectoryIdentity(destructiveIdentity);
     const [{ stdout: branch }, { stdout: head }, { stdout: status }] = await Promise.all([
-      execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+      execFileAsync(resolveGitBinary(), ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
         windowsHide: true, cwd: verificationPath, timeout: 5_000,
       }),
-      execFileAsync('git', ['rev-parse', 'HEAD'], {
+      execFileAsync(resolveGitBinary(), ['rev-parse', 'HEAD'], {
         windowsHide: true, cwd: verificationPath, timeout: 5_000,
       }),
-      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      execFileAsync(resolveGitBinary(), ['status', '--porcelain=v1', '--untracked-files=all'], {
         windowsHide: true, cwd: verificationPath, timeout: 10_000,
       }),
     ]);
@@ -516,10 +517,10 @@ async function parkExactWorktreeInTransaction(
     }
   };
   const [{ stdout: branch }, { stdout: head }] = await Promise.all([
-    execFileAsync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+    execFileAsync(resolveGitBinary(), ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
       windowsHide: true, cwd: verificationPath, timeout: 5_000,
     }),
-    execFileAsync('git', ['rev-parse', 'HEAD'], {
+    execFileAsync(resolveGitBinary(), ['rev-parse', 'HEAD'], {
       windowsHide: true, cwd: verificationPath, timeout: 5_000,
     }),
   ]);

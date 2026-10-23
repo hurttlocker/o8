@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -34,7 +35,7 @@ export async function shouldClassifyFetchAsOriginMissing(
     return false;
   }
   try {
-    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'remote', 'get-url', 'origin'], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['-C', worktreePath, 'remote', 'get-url', 'origin'], {
       windowsHide: true,
       timeout: 5_000,
     });
