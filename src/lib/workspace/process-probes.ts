@@ -1,7 +1,7 @@
 import { hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { closeProcessCommand } from '@/lib/runtime/close-process-table';
 import { observeCloseProcess } from '@/lib/runtime/close-process-observation';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import type { OwnedWorkspaceBindingReceipt } from '@/lib/runtimes/shared/owned-session';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 import {

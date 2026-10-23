@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +51,7 @@ export async function probeClaudeLoginState(
       ({ stdout } = await execFileAsync(probe.command, probe.args, {
         windowsHide: true,
         timeout: Math.max(1, Math.min(timeoutMs, CLAUDE_PROBE_TIMEOUT_MS)),
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
         maxBuffer: 64 * 1024,
       }));
       break;

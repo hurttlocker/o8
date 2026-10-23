@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { rebuildableCargoTargetPaths } from '@/lib/worktree/cargo-target-cache';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -13,7 +14,7 @@ import { captureIgnoredArtifacts } from './ignored-artifact-io';
 const REBUILDABLE_PATHS = ['node_modules', '.o8-install-runtime', '.next/cache', '.turbo'];
 
 async function git(cwd: string, args: string[]): Promise<string> {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+  const env: NodeJS.ProcessEnv = childEnvironment({ env: { GIT_OPTIONAL_LOCKS: '0' } });
   for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
   const { stdout } = await materializationAwareExecFile('git', args, {
     cwd, env, windowsHide: true, timeout: 20_000, maxBuffer: 32 * 1024 * 1024,

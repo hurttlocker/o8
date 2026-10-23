@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * CLI probe for the Engineering Brain Indexer (#915 north star #2).
  *
@@ -16,7 +17,7 @@
 
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { resolveBrainUseClaudeCliSync, resolveBrainUseCodexCliSync } from '@/lib/operator/brain-routing';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
@@ -62,7 +63,7 @@ async function resolveBin(
       const { stdout } = await execFileAsync(sh, ['-l', '-c', `command -v ${name}`], {
         windowsHide: true,
         timeout: 10_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
       });
       const found = stdout.trim();
       if (found) return found;
@@ -81,7 +82,7 @@ async function verifyBin(bin: string): Promise<boolean> {
     await execFileAsync(probe.command, probe.args, {
       windowsHide: true,
       timeout: 5_000,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
     return true;
   } catch {

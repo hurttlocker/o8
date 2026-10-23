@@ -14,7 +14,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { synthesizeEdgeNeural } from '@/lib/tts/edge-neural';
 import { ensureEdgeTtsInstalled } from '@/lib/tts/ensure-edge-tts';
 

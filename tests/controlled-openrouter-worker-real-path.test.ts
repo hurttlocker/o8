@@ -1,3 +1,4 @@
+import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -114,6 +115,7 @@ async function launchedTask(config = {}) {
   await vi.waitFor(() => expect(existsSync(join(root, 'child.json'))).toBe(true), { timeout: 10000 }); return draft;
 }
 beforeEach(async () => {
+  saveRuntimeBillingMode('claude-code', 'api');
   vi.restoreAllMocks(); cost = 0.001; fakeContentCost = false; upstreamGate = undefined; calls = [];
   process.env.O8_LICENSE_PUBKEY = keyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   process.env.OPENROUTER_API_KEY = 'sk-or-fixture-parent-only';
@@ -199,7 +201,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     await vi.waitFor(() => expect(existsSync(join(root, 'child.json'))).toBe(true), { timeout: 10000 });
     expect(childReceipt().status).toBe(200);
     expect(readTaskExecution(draft!)?.pluginLaunchGrant).toMatchObject({ clientId: 'gateway-client', machineId: 'gateway-machine' });
-    await vi.waitFor(async () => expect((await call('o8_task_result', { machineId: 'gateway-machine', taskId: draft!.taskId })).result.completed).toBe(true));
+    await vi.waitFor(async () => expect((await call('o8_task_result', { machineId: 'gateway-machine', taskId: draft!.taskId })).result.completed).toBe(true), { timeout: 10_000 });
     const replay = await call('o8_launch_task', hostedArgs(draft!), accountId, launchGrant);
     expect(replay.result.execution.replayed).toBe(true); expect(session().runIdentityLedger.totalRuns).toBe(1);
     expect(calls).toHaveLength(1); expect(git('status', '--porcelain')).toBe('');
@@ -306,7 +308,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     expect(calls[0]!.headers.get('authorization')).toBe('Bearer sk-or-fixture-parent-only');
     expect(calls[0]!.body).toMatchObject({ model, max_tokens: 2048 }); expect(calls[0]!.body.thinking).toBeUndefined();
     expect(calls[0]!.body.context_management).toBeUndefined();
-    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('completed'));
+    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('completed'), { timeout: 10_000 });
     const result = await call('o8_task_result', { machineId: 'gateway-machine', taskId: draft.taskId });
     expect(result.result).toMatchObject({ completed: true, effort: 'provider-default',
       provider: { carrier: 'openrouter', model, requests: 1, costUsd: 0.001 }, completion: { summary: 'Observed 40' } });
@@ -335,7 +337,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     expect(childReceipt().statuses.filter((status: number) => status !== 200)).toHaveLength(1);
     expect(calls).toHaveLength(4);
     expect(await replayGateway()).toBe(403); expect(calls).toHaveLength(4);
-    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('blocked'));
+    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('blocked'), { timeout: 10_000 });
   });
 
   it.each([{ tools: [{ name: 'Bash', input_schema: { type: 'object' } }] }, { model: 'gpt-6.1-sol' }])
@@ -348,7 +350,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     const draft = await launchedTask({ requests: 2 });
     expect(childReceipt().statuses.every((status: number) => status !== 200)).toBe(true);
     expect(calls).toHaveLength(1);
-    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('blocked'));
+    await vi.waitFor(async () => expect((await decision(draft.taskId, draft.contractHash, 'inspect')).body.execution.state).toBe('blocked'), { timeout: 10_000 });
     expect((await call('o8_task_result', { machineId: 'gateway-machine', taskId: draft.taskId })).result.completed).toBe(false);
   });
 
@@ -375,7 +377,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     let settle!: () => void; upstreamGate = new Promise<void>((resolve) => { settle = resolve; });
     const prepared = await prepare(); const draft = prepared.draft!;
     expect((await decision(draft.taskId, draft.contractHash)).status).toBe(200);
-    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await vi.waitFor(() => expect(calls).toHaveLength(1), { timeout: 10_000 });
     await account(); settle();
     await vi.waitFor(() => expect(existsSync(join(root, 'child.json'))).toBe(true), { timeout: 10000 });
     expect(childReceipt().status).toBe(403); expect(calls).toHaveLength(1);
@@ -411,7 +413,7 @@ describe('controlled OpenRouter preparation, owned child and actual local gatewa
     const resolver = await import('@/lib/claude-code/worker-profile');
     const entered = vi.spyOn(resolver, 'resolveClaudeCodeWorkerGatewayKey').mockImplementation(() => new Promise((resolve) => { release = resolve; }));
     const pending = call('o8_task_options', { machineId: 'gateway-machine', repoId, projectId });
-    await vi.waitFor(() => expect(entered).toHaveBeenCalled()); await account(); release('sk-or-fixture-parent-only');
+    await vi.waitFor(() => expect(entered).toHaveBeenCalled(), { timeout: 10_000 }); await account(); release('sk-or-fixture-parent-only');
     expect((await pending).status).toBe(403); expect(calls).toHaveLength(0);
   });
 

@@ -9,7 +9,7 @@
  * All scans are non-blocking. Failures are logged and swallowed.
  */
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { scanRepo } from './index';
 import { getAllCached } from './store';
 

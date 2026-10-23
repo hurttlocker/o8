@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import { detectTypecheckSkip, isMissingTscOutput } from '@/lib/lane/typecheck-availability';
@@ -39,7 +40,7 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
       cwd,
       timeout: TYPECHECK_TIMEOUT_MS,
       maxBuffer: COMMAND_MAX_BUFFER,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: { ...childEnvironment(), FORCE_COLOR: '0', NO_COLOR: '1' },
     });
 
     return {

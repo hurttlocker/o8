@@ -1,8 +1,9 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { access, realpath } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { isAbsolute, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { performance } from 'node:perf_hooks';
@@ -254,7 +255,7 @@ async function listGithubRepos(limit: number): Promise<unknown[]> {
   const { stdout } = await execFileAsync(
     'gh',
     ['api', `/user/repos?per_page=${perPage}&sort=updated&affiliation=owner,collaborator,organization_member`],
-    { windowsHide: true, timeout: 15_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } },
+    { windowsHide: true, timeout: 15_000, maxBuffer: 8 * 1024 * 1024, env: childEnvironment({ env: { GH_NO_UPDATE_NOTIFIER: '1' } }) },
   );
   const parsed = JSON.parse(stdout) as unknown;
   return Array.isArray(parsed) ? parsed : [];

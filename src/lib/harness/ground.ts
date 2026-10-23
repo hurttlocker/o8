@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';

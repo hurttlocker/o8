@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

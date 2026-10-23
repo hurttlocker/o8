@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);

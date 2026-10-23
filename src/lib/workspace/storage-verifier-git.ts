@@ -1,5 +1,6 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile } from '@/lib/providers/child-process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -14,7 +15,7 @@ export const defaultRunGit: WorkspaceScanGitRunner = (args, cwd) => new Promise(
   execFile(resolveGitBinary(), args, {
     cwd,
     encoding: 'buffer',
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+    env: childEnvironment({ env: { GIT_OPTIONAL_LOCKS: '0' } }),
     maxBuffer: 32 * 1024 * 1024,
     timeout: 10_000,
     windowsHide: true,

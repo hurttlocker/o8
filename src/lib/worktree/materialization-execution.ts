@@ -1,7 +1,8 @@
-import { spawn, execFile, type ChildProcess, type ExecFileOptions } from 'node:child_process';
+import { spawn, execFile, type ChildProcess, type ExecFileOptions } from '@/lib/providers/child-process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import { resolveGitBinary } from '@/lib/git/binary';
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 
 import { probeMetadataLockProcessIdentity, type MetadataLockProcessIdentity } from './metadata-lock-process-identity';
 
@@ -11,7 +12,7 @@ import { tryPinnedWorkspaceGitRead } from './materialization-read-session';
 
 const materializationContext = new AsyncLocalStorage<ReadonlyMap<string, WorktreeMaterializationIdentity>>();
 
-const WORKSPACE_EXEC_GUARD = String.raw`
+const WORKSPACE_EXEC_GUARD = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const expected = JSON.parse(process.argv[1]);
@@ -26,7 +27,7 @@ if (!command.includes(path.sep)) {
   command = match;
 }
 process.env.PWD = canonicalPath;
-process.execve(command, [command, ...args], process.env);
+withO8ChildPolicy(env => process.execve(command, [command, ...args], env), { preserveStamp: expected.preserveCredentialPolicy });
 `;
 
 const MATERIALIZATION_REFUSAL_EXIT_CODE = 78;
@@ -46,7 +47,7 @@ export function guardedWorkspaceInvocation(
   if (!identity) return { command, args };
   return {
     command: process.execPath,
-    args: ['-e', WORKSPACE_EXEC_GUARD, JSON.stringify(identity), command, ...args],
+    args: ['-e', WORKSPACE_EXEC_GUARD, JSON.stringify({ ...identity, preserveCredentialPolicy: true }), command, ...args],
   };
 }
 
@@ -164,7 +165,7 @@ export interface MaterializationExecutionSettlement {
 // The same ready/identity/ack discipline as generated-output-bank-io. This
 // opt-in runner is only for controlled preservation scripts. Child stdout is
 // data, never a receipt. IPC gates each nested exec before it can do work.
-const NESTED_EXEC_GATE = String.raw`
+const NESTED_EXEC_GATE = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const input = JSON.parse(process.argv[1]);
 process.once('message', async message => {
   if (message.phase !== 'run') return;
@@ -182,13 +183,13 @@ process.once('message', async message => {
     if (input.nodeScript) {
       process.argv[1] = JSON.stringify(input.payload);
       await new (Object.getPrototypeOf(async function() {}).constructor)('require', input.nodeScript)(require);
-    } else process.execve(input.command, [input.command, ...input.args], process.env);
+    } else withO8ChildPolicy(env => process.execve(input.command, [input.command, ...input.args], env), { preserveStamp: input.preserveCredentialPolicy });
   } catch (error) { process.stderr.write(String(error.message) + '\n'); process.exitCode = 1; }
 });
 process.send({ phase: 'ready' });
 `;
 
-const SETTLED_NODE_RUNNER = String.raw`
+const SETTLED_NODE_RUNNER = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const input = JSON.parse(process.argv[1]);
@@ -207,10 +208,10 @@ async function runChild(command, args, options = {}) {
   }
   // All preservation commands are resolved by the existing caller; the gate
   // must preserve the process identity recorded before execve.
-  const child = spawn(process.execPath, ['-e', gate, JSON.stringify({ command, args, nodeScript: options.nodeScript, payload: options.payload, identity: options.identity })], {
-    cwd: options.cwd || process.cwd(), env: process.env,
+  const child = withO8ChildPolicy(env => spawn(process.execPath, ['-e', gate, JSON.stringify({ command, args, nodeScript: options.nodeScript, payload: options.payload, identity: options.identity, preserveCredentialPolicy: true })], {
+    cwd: options.cwd || process.cwd(), env,
     stdio: ['ignore', 'pipe', 'pipe', ...(options.fd === undefined ? [] : [options.fd]), 'ipc'], windowsHide: true,
-  });
+  }), { preserveStamp: true });
   nested.set(child.pid, child);
   let error;
   const closed = new Promise(resolve => {

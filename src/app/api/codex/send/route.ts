@@ -1,11 +1,13 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextRequest } from 'next/server';
-import { spawn } from 'child_process';
+import { spawn } from '@/lib/providers/child-process';
 import os from 'os';
 
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
       const child = spawn(launch.command, launch.args, {
         windowsHide: true,
         cwd: workingDir,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'codex', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'codex' }),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

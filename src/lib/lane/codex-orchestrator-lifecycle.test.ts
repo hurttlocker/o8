@@ -1,3 +1,7 @@
+import { readFileSync, writeSync } from 'node:fs';
+import { mutateProviderKey } from '@/lib/providers/key-store';
+import { saveRuntimeBillingMode } from '@/lib/providers/runtime-billing';
+import { listOrchestratorTurnsForThread } from './orchestrator-crash-survival';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -183,6 +187,39 @@ describe('Codex orchestrator process lifecycle', () => {
         cacheWriteTokens: 0,
       },
     });
+  });
+
+  it('keeps API Solo detached with durable output through the orchestrator entry point', async () => {
+    saveRuntimeBillingMode('codex', 'api');
+    mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-solo-api' });
+    process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
+    const prepare = prepareSingleMock.getMockImplementation()!;
+    prepareSingleMock.mockImplementation(async input => ({ ...await prepare(input), sealInParent: true, sealOnOutput: vi.fn() }));
+    const proc = new FakeCodexProc();
+    const line = '{"type":"item.completed","item":{"type":"agent_message","text":"Fixture durable output"}}\n';
+    spawnMock.mockImplementation((_command, _args, options) => {
+      if (typeof options.stdio[1] === 'number') writeSync(options.stdio[1], line);
+      else queueMicrotask(() => proc.stdout.emit('data', Buffer.from(line)));
+      return proc;
+    });
+    const threadId = `thoughts-solo-durable-${Date.now()}`;
+    const session = ensureCodexOrchestratorSession(process.cwd(), threadId);
+    const turn = sendToCodexOrchestrator(session, 'Fixture', () => {}, { orchestrationMode: 'single', model: 'gpt-5.5' });
+    try {
+      await waitForSpawn();
+      const options = spawnMock.mock.calls[0][2];
+      expect(options.detached).toBe(true);
+      expect(options.env.OPENAI_API_KEY).toBe('fixture-solo-api');
+      expect(options.stdio.slice(1).every((fd: unknown) => typeof fd === 'number')).toBe(true);
+      const records = listOrchestratorTurnsForThread(threadId);
+      expect(records).toHaveLength(1);
+      expect(readFileSync(records[0].stdoutPath, 'utf8')).toContain('Fixture durable output');
+      expect(proc.unref).toHaveBeenCalledOnce();
+    } finally {
+      proc.exitCode = 0; proc.emit('close', 0); await turn;
+      mutateProviderKey('OPENAI_API_KEY', { key: null });
+      saveRuntimeBillingMode('codex', 'subscription');
+    }
   });
 
   it('wraps a Single turn before spawn and disables config plus native fan-out', async () => {

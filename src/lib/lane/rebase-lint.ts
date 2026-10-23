@@ -1,5 +1,5 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import * as nodeModule from 'node:module';
 import {
   existsSync,

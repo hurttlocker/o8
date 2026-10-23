@@ -1,3 +1,5 @@
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
+
 // The clone is first captured in a private staging directory. Only that exact
 // descriptor is published, atomically and without replacing an existing name.
 const NATIVE_CLONE = String.raw`
@@ -45,7 +47,7 @@ finally:
     os.close(stagefd)
 `;
 
-export const APFS_DIRECTORY_CLONE_SCRIPT = String.raw`
+export const APFS_DIRECTORY_CLONE_SCRIPT = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 async function cloneDirectory(sourcePath, targetPath) {
   if (process.platform !== 'darwin') return false;
   const source = fs.openSync(sourcePath, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
@@ -58,9 +60,9 @@ async function cloneDirectory(sourcePath, targetPath) {
     if (!sameSource(fs.lstatSync(sourcePath))) throw new Error('Pinned clone source changed before capture.');
     await waitForStep('clone-source');
     if (!sameSource(fs.lstatSync(sourcePath))) throw new Error('Pinned clone source changed before cloning.');
-    const result = require('node:child_process').spawnSync('/usr/bin/python3', [
+    const result = withO8ChildPolicy(env => require('node:child_process').spawnSync('/usr/bin/python3', [
       '-c', ${JSON.stringify(NATIVE_CLONE)}, targetPath,
-    ], { stdio: ['ignore', 'pipe', 'pipe', source, parent], timeout: 60000 });
+    ], { env, stdio: ['ignore', 'pipe', 'pipe', source, parent], timeout: 60000 }));
     if (result.status !== 0) {
       try { fs.lstatSync(targetPath); throw new Error('Pinned clone left an unreceipted target.'); }
       catch (error) { if (error.code !== 'ENOENT') throw error; }

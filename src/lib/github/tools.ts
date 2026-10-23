@@ -9,7 +9,7 @@
  * All mutating tools require user approval before execution.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 
 interface GitHubToolResult {
   content: string;

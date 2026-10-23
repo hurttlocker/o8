@@ -1,5 +1,6 @@
 import { resolveGitBinary } from '@/lib/git/binary';
-import { execFile, execFileSync, type ExecFileSyncOptions } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFile, execFileSync, type ExecFileSyncOptions } from '@/lib/providers/child-process';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { devNull } from 'node:os';
 import path from 'node:path';
@@ -15,7 +16,7 @@ export class LaneGitMetadataError extends Error {
 
 /** Inherited Git routing, config injection and executable overrides are untrusted. */
 export function laneGitEnvironment(ignoreGlobalConfig = false): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  const env = childEnvironment();
   for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key];
   delete env.NODE_OPTIONS;
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',

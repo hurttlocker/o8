@@ -20,7 +20,7 @@ import { resolveGitBinary } from '@/lib/git/binary';
  * because it walks *all* lanes, not just watched agents.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { appendEvent, archiveLane, getLane, updateLane } from '@/lib/lane/registry';

@@ -1,7 +1,8 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -61,7 +62,7 @@ async function sourceJobs(binary: string) {
   const { stdout } = await execFileAsync(binary, ['cron', 'list', '--all', '--json'], {
     timeout: 15_000,
     maxBuffer: 2_000_000,
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
   });
   const parsed = JSON.parse(stdout) as { jobs?: unknown };
   if (!Array.isArray(parsed.jobs)) throw new Error('invalid job list');
@@ -103,7 +104,7 @@ export async function PATCH(request: NextRequest) {
     await execFileAsync(binary, ['cron', body.enabled ? 'enable' : 'disable', body.id], {
       timeout: 15_000,
       maxBuffer: 128_000,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
     });
     const job = (await sourceJobs(binary)).find((entry) => entry.id === body.id);
     if (!job || job.enabled !== body.enabled) {

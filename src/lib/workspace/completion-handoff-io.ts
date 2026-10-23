@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from '@/lib/providers/child-process';
 
 export interface HandoffFileReceipt {
   content: string;
@@ -96,7 +97,7 @@ export function completionHandoffFileIo(
   const result = spawnSync(process.execPath, ['-e', HANDOFF_IO], {
     cwd: identity.canonicalPath, stdio: ['pipe', 'pipe', 'pipe', descriptor],
     input: JSON.stringify({ ...request, identity }),
-    env: { ...process.env, NODE_OPTIONS: '' }, timeout: 5_000, maxBuffer: 128 * 1024,
+    env: childEnvironment({ env: { NODE_OPTIONS: '' } }), timeout: 5_000, maxBuffer: 128 * 1024,
     encoding: 'utf8', windowsHide: true,
   });
   if (result.error || result.status !== 0) {

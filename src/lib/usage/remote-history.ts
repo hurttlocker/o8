@@ -1,5 +1,5 @@
 import 'server-only';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import type { SavedSshMachine } from '@/lib/panel/saved-ssh-machines';
 import { readHistoryPricing } from './history-pricing';
 import { REMOTE_USAGE_PROBE } from './remote-probe.generated';

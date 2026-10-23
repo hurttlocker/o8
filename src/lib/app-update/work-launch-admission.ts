@@ -1,5 +1,5 @@
 /** Cross-process readers for process starts. Native restart is the exclusive writer. */
-import { spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { constants, existsSync, closeSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';

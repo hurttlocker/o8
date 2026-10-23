@@ -2,7 +2,7 @@ import { readCloseProcessTable } from '@/lib/runtime/close-process-table';
 import { parseOpenFileSnapshot, readCloseOpenFiles, readCloseOpenFileRows } from '@/lib/runtime/process-open-files-snapshot';
 import { refreshCloseProcessObservation, hasCloseProcessObservation } from '@/lib/runtime/close-process-observation';
 import { closeObservedHelperSettled, observeCloseProcess } from '@/lib/runtime/close-process-observation';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { tmuxSessionName } from '@/lib/terminal/tmux';

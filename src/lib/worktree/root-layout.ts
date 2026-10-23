@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { once } from 'node:events';
 import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { lstat, realpath, stat } from 'node:fs/promises';

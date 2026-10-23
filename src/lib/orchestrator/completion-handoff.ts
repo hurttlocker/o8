@@ -1,5 +1,5 @@
 import 'server-only';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { laneGit, laneGitInvocation } from '@/lib/lane/lane-git';

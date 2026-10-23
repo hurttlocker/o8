@@ -38,7 +38,7 @@ async function scanDevPorts(): Promise<number[]> {
     // The panel/ports route holds an internal cache, but it's not exported.
     // For now, do a thin lsof scan inline. If this ever grows we can extract
     // a shared helper — single use-case here.
-    const { execSync } = await import('node:child_process');
+    const { execSync } = await import('@/lib/providers/child-process');
     const raw = execSync(
       'lsof -i -P -n -sTCP:LISTEN -F pn 2>/dev/null',
       { windowsHide: true, encoding: 'utf-8', timeout: 3000 },

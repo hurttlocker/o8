@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFile, execSync, spawn } from 'child_process';
+import { execFile, execSync, spawn } from '@/lib/providers/child-process';
 import type { Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';

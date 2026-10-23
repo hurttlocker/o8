@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { constants, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -21,7 +22,7 @@ const fileName = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).max(128).refin
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 // Keep the action in a separate process group, with an IPC watchdog that survives
 // the host long enough to terminate the group if the host exits unexpectedly.
-const actionRunner = String.raw`
+const actionRunner = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const { spawn } = require('node:child_process');
 const entry = process.argv[1];
 const args = process.argv.slice(2);
@@ -30,7 +31,7 @@ process.on('disconnect', stop);
 process.on('SIGTERM', stop);
 const timer = setTimeout(stop, Number(process.env.O8_ACTION_TIMEOUT_MS) + 1000);
 let action;
-try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); }
+try { action = withO8ChildPolicy(env => spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env }), { env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); }
 catch (error) { process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)); }
 if (action) {
   action.on('error', (error) => process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)));

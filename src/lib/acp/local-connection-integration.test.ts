@@ -108,6 +108,7 @@ it('refreshes an unused child after the connection changes and excludes unchecke
 });
 
 it('uses the latest opted-in key when hydration happened after ensureSession but before sendTurn', async () => {
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('acp', 'api');
   connect('default', true);
   acpBackend.ensureSession(state.dir, 'default', 'key-change');
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-new');

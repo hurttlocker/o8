@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execSync } from '@/lib/providers/child-process';
 
 /**
  * POST /api/panel/browse-folder

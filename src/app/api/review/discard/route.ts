@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { execFileSync } from 'child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

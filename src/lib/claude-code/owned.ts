@@ -1,3 +1,4 @@
+import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
 import { controlledProviderConfig, providerFromConfig } from '@/lib/runtimes/shared/owned-session/controlled-provider';
 import { prepareControlledGateway } from './controlled-gateway';
 import { mkdir } from 'node:fs/promises';
@@ -53,6 +54,7 @@ export const claudeCodeOwnedAdapter: OwnedRuntimeAdapter = {
     const source = configuredSource === 'openrouter' || configuredSource === 'codex-subscription'
       ? configuredSource
       : 'native';
+    if (source === 'openrouter' && runtimeBillingMode('claude-code') !== 'api') throw new Error('Set Claude Code billing to My API key in Settings before using OpenRouter.');
     const { configDir: isolatedConfigDir, credentialEnv } = await prepareClaudeCodeWorkerConfig(session.sessionDir, source);
     // Shell scratch must use the same private grant as other runtime state,
     // not a shared system-temp directory outside the worker sandbox.

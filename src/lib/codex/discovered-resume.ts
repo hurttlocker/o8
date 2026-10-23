@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -36,12 +37,7 @@ export async function resumeDiscoveredCodexSession(
     cwd: process.env.HOME || os.homedir(),
     timeout: 120_000,
     maxBuffer: 10 * 1024 * 1024,
-    env: {
-      ...process.env,
-      CODEX_HOME: providerSession.configHomeRef,
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-    },
+    env: childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: providerSession.configHomeRef, FORCE_COLOR: '0', NO_COLOR: '1' } }),
     encoding: 'utf-8',
   });
 

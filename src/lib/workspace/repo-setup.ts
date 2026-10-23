@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { lstat, readlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -253,17 +254,9 @@ function createPinnedBinding(
       timeout: 30_000,
       maxBuffer: 64 * 1024,
       windowsHide: true,
-      env: {
-        ...process.env,
-        O8_BINDING_TARGET_NAME: prepared.targetName,
-        O8_BINDING_PARENT_DEVICE: String(prepared.parentDevice),
-        O8_BINDING_PARENT_INODE: String(prepared.parentInode),
-        O8_BINDING_PARENT_CANONICAL: prepared.canonicalParentPath,
-        O8_BINDING_MODE: input.mode,
-        ...(input.mode === 'copy'
+      env: childEnvironment({ env: { O8_BINDING_TARGET_NAME: prepared.targetName, O8_BINDING_PARENT_DEVICE: String(prepared.parentDevice), O8_BINDING_PARENT_INODE: String(prepared.parentInode), O8_BINDING_PARENT_CANONICAL: prepared.canonicalParentPath, O8_BINDING_MODE: input.mode, ...(input.mode === 'copy'
           ? { O8_BINDING_SOURCE: input.source }
-          : { O8_BINDING_LINK_TARGET: input.linkTarget }),
-      },
+          : { O8_BINDING_LINK_TARGET: input.linkTarget }) } }),
     }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr.trim() || 'Pinned repo setup destination creation failed.'));

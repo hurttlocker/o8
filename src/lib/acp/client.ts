@@ -1,3 +1,6 @@
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { childEnvironment, childEnvironmentContext } from '@/lib/providers/spawn-environment';
 /**
  * Agent Client Protocol (ACP) stdio client.
  *
@@ -191,6 +194,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 }
 
 export interface AcpClientOptions {
+  runtimeId: string;
   command: string;
   args: string[];
   /** Working directory used to boot the ACP agent and its private service. */
@@ -218,6 +222,8 @@ export interface AcpClientOptions {
  */
 export class AcpClient {
   private proc: ChildProcess;
+  private readonly credentialRuntimeId?: string;
+  private readonly credentialPolicy?: string;
   private nextId = 1;
   private readonly pending = new Map<number, {
     resolve: (v: unknown) => void;
@@ -243,11 +249,14 @@ export class AcpClient {
     // see below.
     const launch = cliInvocation(opts.command, opts.args);
     this.viaInterpreter = spawnsViaInterpreter(opts.command);
+    const env = childEnvironment({ runtimeId: opts.runtimeId, omitEnv: opts.omitEnv, env: { ...(opts.cwd ? { PWD: opts.cwd } : {}), ...opts.env } });
+    this.credentialRuntimeId = opts.runtimeId;
+    this.credentialPolicy = childEnvironmentContext(env)?.policy;
     this.proc = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: opts.cwd,
-      env: Object.fromEntries(Object.entries({ ...process.env, ...(opts.cwd ? { PWD: opts.cwd } : {}), ...(opts.env ?? {}) }).filter(([name]) => !opts.omitEnv?.includes(name))) as NodeJS.ProcessEnv,
+      env,
     });
     this.proc.stdout?.setEncoding('utf8');
     this.proc.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
@@ -438,10 +447,14 @@ export class AcpClient {
   /** Run one prompt turn. Resolves with the stopReason when the agent finishes;
    *  streaming arrives via onEvent in between. */
   async prompt(sessionId: string, text: string, timeoutMs?: number): Promise<AcpStopReason> {
-    const result = asRecord(await this.request('session/prompt', {
-      sessionId,
-      prompt: [{ type: 'text', text }],
-    }, timeoutMs));
+    const pending = withProviderStoreLock(() => {
+      if (this.credentialRuntimeId && this.credentialPolicy !== credentialPolicyFingerprint(this.credentialRuntimeId)) {
+        this.kill();
+        throw new Error('Credentials or billing changed during ACP initialization. Retry the launch.');
+      }
+      return this.request('session/prompt', { sessionId, prompt: [{ type: 'text', text }] }, timeoutMs);
+    });
+    const result = asRecord(await pending);
     const stopReason = result && str(result.stopReason);
     if (!stopReason) throw new Error('ACP session/prompt returned no stopReason');
     return stopReason;

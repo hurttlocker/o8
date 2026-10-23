@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { CliNotFoundError, resolveCli, type ResolvedCli } from './cli-resolver';
 import { cliInvocation } from './cli-spawn';
 import { assertExecutionCarrierRuntimeBinary } from './execution-carrier-launch';
@@ -61,7 +62,7 @@ export async function probeExecutionCarrierAuth(binary: string): Promise<boolean
     const child = spawn(invocation.command, invocation.args, {
       windowsHide: true,
       stdio: 'ignore',
-      env: process.env,
+      env: childEnvironment(),
     });
     const timeout = setTimeout(() => { child.kill(); finish(false); }, 10_000);
     child.once('error', () => finish(false));

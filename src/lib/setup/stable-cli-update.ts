@@ -1,7 +1,8 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { withCliInstallerReservation, releaseOwnedCliUpdateLock, type CliInstallerReservation } from './cli-operation-admission';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -121,11 +122,11 @@ async function performStableCliUpdate(
       } finally { await rm(scratch, { recursive: true, force: true }); }
     } else if (installation.manager === 'native') {
       await run(selected.path, runtime === 'grok' ? ['--no-auto-update', 'update'] : ['update'], { timeout: 120_000, maxBuffer: 1024 * 1024,
-        cwd: path.dirname(selected.path), env: { ...process.env, NO_COLOR: '1' } });
+        cwd: path.dirname(selected.path), env: childEnvironment({ env: { NO_COLOR: '1' } }) });
     } else {
       await run(installation.brew!, ['upgrade', installation.packageKind === 'cask' ? '--cask' : '--formula', installation.package!], {
         timeout: 180_000, maxBuffer: 1024 * 1024, cwd: installation.root,
-        env: { ...process.env, HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_ENV_HINTS: '1' },
+        env: childEnvironment({ env: { HOMEBREW_NO_INSTALL_CLEANUP: '1', HOMEBREW_NO_ENV_HINTS: '1' } }),
       });
     }
     report('verifying');

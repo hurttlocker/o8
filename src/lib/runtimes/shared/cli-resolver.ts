@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Shared CLI binary resolver for o8 runtime adapters.
  *
@@ -15,7 +16,7 @@
  *   4. Static fallback paths           — ~/.npm-global, ~/.asdf/shims, etc.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { access, constants, stat } from 'node:fs';
 import path from 'node:path';
 
@@ -220,8 +221,7 @@ async function probeVersion(
       windowsHide: true,
       timeout: spec.versionTimeoutMs ?? 5_000,
       maxBuffer: 64 * 1024,
-      env: { ...process.env, PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1',
-        ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) },
+      env: childEnvironment({ env: { PATH: pathWithNodeRuntime(), FORCE_COLOR: '0', NO_COLOR: '1', ...(spec.runtimeId === 'muse' ? { MUSE_NO_AUTO_UPDATE: '1' } : {}) } }),
     });
     const combined = `${stdout}\n${stderr}`;
     const match = combined.match(pattern);
@@ -336,7 +336,7 @@ async function resolveViaLoginShell(
         const { stdout } = await execFileAsync(sh, ['-l', '-c', `command -v ${name}`], {
           windowsHide: true,
           timeout: 10_000,
-          env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+          env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
         });
         const found = stdout.trim();
         if (!found) continue;

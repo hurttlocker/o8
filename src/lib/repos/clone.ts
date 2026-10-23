@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
 /**
@@ -16,7 +17,7 @@ import 'server-only';
  * All spawns are execFile array-args — no shell interpolation.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { access, mkdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -93,7 +94,7 @@ export async function cloneRepoToDefaultLocation(cloneUrl: string, explicitName?
 
   await mkdir(root, { recursive: true });
 
-  const execOpts = { windowsHide: true, timeout: CLONE_TIMEOUT_MS, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } };
+  const execOpts = { windowsHide: true, timeout: CLONE_TIMEOUT_MS, env: childEnvironment({ env: { GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' } }) };
 
   if (isGitHubUrl(url)) {
     try {

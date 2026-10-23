@@ -44,7 +44,7 @@ import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.161.0'); process.exit(0); }
-const record = (entry) => appendFileSync(process.env.O8_FAKE_CODEX_LOG, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME }) + '\\n');
+const record = (entry) => appendFileSync(process.env.O8_FAKE_CODEX_LOG, JSON.stringify({ ...entry, codexHome: process.env.CODEX_HOME, sqliteHome: process.env.CODEX_SQLITE_HOME }) + '\\n');
 if (args[0] !== 'app-server') {
   record({ argv: args });
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'exec-thread' }));
@@ -105,7 +105,7 @@ interface CallParams extends Record<string, unknown> {
   config?: { mcp_servers: Record<string, unknown>; plugins: Record<string, unknown> };
   input?: unknown;
 }
-interface Call { argv?: string[]; method?: string; params?: CallParams; codexHome?: string }
+interface Call { argv?: string[]; method?: string; params?: CallParams; codexHome?: string; sqliteHome?: string }
 function calls(): Call[] {
   return existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
 }
@@ -141,7 +141,7 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     expect(events).toContainEqual({ type: 'text', text: 'Answer from exec' });
   });
 
-  it('runs a Multitask turn as a Codex app thread in the operator Codex home', async () => {
+  it('runs a Multitask turn with isolated credentials and the operator session state', async () => {
     await updateOperatorDefaults({ codexAppThreads: true });
     const cwd = repo('app-thread');
     const start = calls().length;
@@ -149,7 +149,7 @@ describe.skipIf(process.platform === 'win32')('Codex orchestrator chats in the C
     const made = since(start);
 
     expect(made.some((call) => call.argv)).toBe(false);
-    expect(made.every((call) => call.codexHome === userCodexHome)).toBe(true);
+    expect(made.every((call) => call.codexHome !== userCodexHome && call.sqliteHome === userCodexHome)).toBe(true);
     const threadStart = made.find((call) => call.method === 'thread/start')!;
     expect(threadStart.params).toMatchObject({ cwd, sandbox: 'danger-full-access', approvalPolicy: 'never' });
     expect(threadStart.params!.developerInstructions).toContain('ENGINEERING BRAIN');

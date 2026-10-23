@@ -1,6 +1,7 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import {
@@ -483,7 +484,7 @@ async function probeVersion(binaryPath: string): Promise<string | null> {
     const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
       windowsHide: true,
       timeout: VERSION_TIMEOUT_MS,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
       maxBuffer: 64 * 1024,
     });
     return `${stdout}\n${stderr}`
@@ -515,7 +516,7 @@ async function probeGrokModelCatalogue(binaryPath: string) {
     const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
       windowsHide: true,
       timeout: MODEL_CATALOGUE_TIMEOUT_MS,
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+      env: childEnvironment({ env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
       maxBuffer: 128 * 1024,
     });
     const parsed = parseGrokModelCatalogue(`${stdout}\n${stderr}`);

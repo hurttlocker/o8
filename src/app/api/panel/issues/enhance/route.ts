@@ -1,13 +1,15 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { ensureGitHubIssues, fetchGitHubLabels, resolveRepoSlug } from '@/lib/github-broker';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const geminiKey = () => resolveProviderKey('GEMINI_API_KEY');
 const GEMINI_MODEL = 'gemini-2.0-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export async function POST(request: Request) {
+  const GEMINI_API_KEY = geminiKey();
   const body = await request.json();
   const { title, description, repo } = body as {
     title?: string;

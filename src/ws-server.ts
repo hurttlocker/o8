@@ -1,4 +1,5 @@
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
+import { managedCommandLaunch } from './lib/terminal/managed-command-launch';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 /**
  * Unified WebSocket server for o8 mobile.
@@ -49,7 +50,7 @@ import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArt
 import { watch, existsSync } from 'node:fs';
 import { readFile, stat, access } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -1008,6 +1009,7 @@ interface TerminalAttachment {
 }
 
 interface InternalTerminalSpawnPayload {
+  resolvedEnvironment?: boolean;
   sessionName?: string;
   shellCommand?: string;
   cwd?: string;
@@ -1682,28 +1684,16 @@ function spawnManagedCommandPty(
   cols: number,
   rows: number,
   envOverrides?: Record<string, string>,
+  resolvedEnvironment = false,
 ) {
   if (!terminalHost) {
     throw new Error('node-pty not available');
   }
 
-  const shell = resolvePreferredShell();
-  const env = {
-    ...sanitizePtyEnv(),
-    ...(envOverrides ?? {}),
-    CORTEX_TERMINAL_SESSION_NAME: sessionName,
-  };
-
-  console.log(`[ws-server] Spawning managed PTY session: ${shell} -lc <command> (${sessionName})`);
-  return terminalHost.spawn({
-    file: shell,
-    args: ['-l', '-c', shellCommand],
-    name: 'xterm-256color',
-    cols,
-    rows,
-    cwd,
-    env,
-  });
+  const launch = managedCommandLaunch(resolvePreferredShell(), shellCommand, sanitizePtyEnv(), {
+    ...(envOverrides ?? {}), CORTEX_TERMINAL_SESSION_NAME: sessionName,
+  }, resolvedEnvironment);
+  return terminalHost.spawn({ ...launch, name: 'xterm-256color', cols, rows, cwd });
 }
 
 function trimScrollback(att: TerminalAttachment) {
@@ -7744,7 +7734,7 @@ const httpServer = createServer((req, res) => {
       }
 
       try {
-        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env);
+        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env, payload?.resolvedEnvironment === true);
         const now = Date.now();
         const attachment: TerminalAttachment = {
           id: randomUUID(),

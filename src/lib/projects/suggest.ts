@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * #899 — AI project semantics, Stage 2 (LLM groupings).
  *
@@ -245,12 +246,7 @@ interface LlmResponseShape {
 
 /** Resolve the Gemini API key the same way the operator route does. */
 function resolveGeminiKey(): string | null {
-  return (
-    process.env.GOOGLE_AI_API_KEY
-    || process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    || process.env.GEMINI_API_KEY
-    || null
-  );
+  return resolveProviderKey('GEMINI_API_KEY');
 }
 
 /**

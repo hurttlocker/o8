@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Question classifier for the Cortex Q&A composer (epic #915 sub-2,
  * provider chain rewired in path-to-70 phase 1.7 v2,
@@ -232,7 +233,7 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   // the exact disease #1115 cured for OpenRouter. The 503-churn worry that
   // originally demoted Flash is handled by falling through to the CLI tiers
   // below on any failure.
-  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  const apiKey = resolveProviderKey('GEMINI_API_KEY');
   if (apiKey) {
     const flashResult = await tryFlash(question, apiKey);
     if (flashResult) {
@@ -301,7 +302,7 @@ export async function classifyQuestionForRecall(question: string): Promise<Class
   // Gemini key after its sole managed payer is unavailable or capped.
   if (managedOnly) return null;
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  const apiKey = resolveProviderKey('GEMINI_API_KEY');
   if (!apiKey) return null;
   const flashResult = await tryFlash(question, apiKey);
   if (flashResult) setCachedClassification(question, flashResult);

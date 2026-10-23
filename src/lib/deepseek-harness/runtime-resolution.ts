@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -58,8 +59,8 @@ function providerRoute(): HarnessProvider {
       'O8_DEEPSEEK_HARNESS_PROVIDER must be "deepseek-official" or "openrouter".',
     );
   }
-  if (isOpenRouterEnabled() && process.env.OPENROUTER_API_KEY?.trim()) return 'openrouter';
-  return process.env.DEEPSEEK_API_KEY?.trim() ? 'deepseek-official' : 'openrouter';
+  if (isOpenRouterEnabled() && resolveProviderKey('OPENROUTER_API_KEY')?.trim()) return 'openrouter';
+  return resolveProviderKey('DEEPSEEK_API_KEY')?.trim() ? 'deepseek-official' : 'openrouter';
 }
 
 function providerModel(provider: HarnessProvider, requested?: string): string {

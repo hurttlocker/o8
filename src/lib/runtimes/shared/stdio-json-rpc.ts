@@ -1,3 +1,4 @@
+import { refreshChildEnvironment } from '@/lib/providers/spawn-environment';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { EventEmitter } from 'node:events';
@@ -87,7 +88,7 @@ export class StdioJsonRpcPeer extends EventEmitter {
     const child = spawn(this.launch.command, this.launch.args ?? [], {
       windowsHide: true,
       cwd: this.launch.cwd,
-      env: this.launch.env ?? process.env,
+      env: refreshChildEnvironment(this.launch.env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child = child;

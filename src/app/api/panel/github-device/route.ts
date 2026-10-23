@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { execFileSync } from '@/lib/providers/child-process';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { fetchGitHubUser, fetchGitHubEmail } from '@/lib/auth/github';
@@ -85,7 +86,7 @@ function execGhWithToken(token: string) {
       encoding: 'utf-8',
       timeout: 15000,
       input: `${token}\n`,
-      env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
+      env: childEnvironment({ env: { PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } }),
     },
   );
 }
@@ -98,7 +99,7 @@ function execGhLogout(user: string) {
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 15000,
-      env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
+      env: childEnvironment({ env: { PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` } }),
     },
   );
 }

@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Haiku CLI adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.6,
  * REPL migration #1124).
@@ -27,7 +28,7 @@
 
 import 'server-only';
 
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 
 import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
@@ -78,7 +79,7 @@ async function resolveClaudeBin(): Promise<string | null> {
       const { stdout } = await execFileAsync(sh, ['-l', '-c', 'command -v claude'], {
         windowsHide: true,
         timeout: 10_000,
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        env: childEnvironment({ runtimeId: 'claude-code', env: { FORCE_COLOR: '0', NO_COLOR: '1' } }),
       });
       const found = stdout.trim();
       if (found) {

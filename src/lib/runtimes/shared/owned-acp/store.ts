@@ -1,3 +1,4 @@
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +42,7 @@ const RUNS_DIR = 'runs';
 const DEFAULT_TURN_TIMEOUT_MS = 14_400_000;
 
 interface ActiveAcpProcess {
+  credentialPolicy: string;
   client: AcpClient;
   sessionId: string;
 }
@@ -250,15 +252,18 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
 
   async function ensureProcess(session: OwnedAcpSessionRecord): Promise<ActiveAcpProcess> {
     const existing = activeProcesses.get(session.surfaceId);
-    if (existing?.client.alive) return existing;
+    if (existing?.client.alive && existing.credentialPolicy === credentialPolicyFingerprint(adapter.runtimeId)) return existing;
+    if (existing?.client.alive) { existing.client.kill(); activeProcesses.delete(session.surfaceId); }
     await retireUnattachedProcess(session);
     const launch = await adapter.resolveLaunch(session);
     const activeProcess: ActiveAcpProcess = {
+      credentialPolicy: credentialPolicyFingerprint(adapter.runtimeId),
       client: new AcpClient({
         command: launch.command,
         args: launch.args,
         cwd: session.repoPath,
         env: launch.env,
+        runtimeId: adapter.runtimeId,
         requestTimeoutMs: 30_000,
         onNotification: (notification) => {
           // Resume can replay prior turns before the session response arrives.
@@ -319,6 +324,7 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
         }
         await saveSession(current);
       });
+      if (activeProcess.credentialPolicy !== credentialPolicyFingerprint(adapter.runtimeId)) throw new Error('Credentials or billing changed during ACP initialization. Retry the launch.');
       return activeProcess;
     } catch (error) {
       activeProcesses.delete(session.surfaceId);
@@ -376,6 +382,10 @@ export function createOwnedAcpSessionStore(adapter: OwnedAcpRuntimeAdapter): Own
       const session = await findSession(surfaceId, false);
       if (!session) throw new Error(`${adapter.humanLabel} session was not found.`);
       process = await ensureProcess(session);
+      if (process.credentialPolicy !== credentialPolicyFingerprint(adapter.runtimeId)) {
+        process.client.kill();
+        throw new Error('Credentials or billing changed during ACP initialization. Retry the launch.');
+      }
     } catch (error) {
       await settlePrompt(surfaceId, run.id, null, error);
       return {

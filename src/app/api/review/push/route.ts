@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from '@/lib/providers/child-process';
 import { homedir } from 'node:os';
 
 export const runtime = 'nodejs';

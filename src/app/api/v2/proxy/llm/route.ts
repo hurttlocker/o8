@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
@@ -425,8 +426,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const abuseError = checkOperatorAbuseLimit();
     if (abuseError) return abuseError;
 
-    const geminiKey = process.env.GOOGLE_AI_API_KEY ?? null;
-    const openRouterKey = isOpenRouterEnabled() ? process.env.OPENROUTER_API_KEY ?? null : null;
+    const geminiKey = resolveProviderKey('GEMINI_API_KEY');
+    const openRouterKey = isOpenRouterEnabled() ? resolveProviderKey('OPENROUTER_API_KEY') ?? null : null;
     // Resolve the same OpenAI-compatible route the Brain uses: managed proxy,
     // local runtime, or an encrypted stored BYOK key. Credentials stay inside
     // the resolver-provided headers, so this route never needs to unwrap them.
