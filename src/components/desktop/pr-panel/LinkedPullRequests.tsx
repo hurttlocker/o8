@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { linkedPullRequestListQuery } from '@/lib/github-client/linked-pr-list';
 import { FloatingDialog } from '../FloatingDialog';
 import { RamsButton } from '../settings/RamsButton';
 import { GitPullRequest, X } from '../lucide-shims';
 import { repoSlugFromRemote } from '../canvas-utils';
 import { pullRequestStackRows } from '@/lib/github-broker/pull-request-stacks';
-import type { PullRequestListItem, PullRequestListPage } from '@/lib/github-broker/pull-request-list.types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { parsePullRequestLink, linkedPrIdentity } from './linked-pr-store';
 import { useLinkedPullRequests } from './useLinkedPullRequests';
@@ -21,23 +22,17 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<{ repo: string; prs: PullRequestListItem[]; partial: boolean } | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const contextRef = useRef(context); contextRef.current = context;
   const requestRef = useRef<AbortController | null>(null);
   const selectedRepo = repos.find((repo) => repo.localPath === repoPath);
   const slug = repoSlugFromRemote(selectedRepo?.remoteUrl)?.toLowerCase() ?? null;
-  useEffect(() => {
-    if (!active || !slug || !links.some((entry) => entry.repo === slug)) return;
-    const controller = new AbortController();
-    void ipcFetch(`/api/panel/prs?${new URLSearchParams({ repo: slug, view: 'list', state: 'open', page: '1' })}`, { signal: controller.signal })
-      .then(async (response) => {
-        const body = await response.json() as PullRequestListPage;
-        if (!response.ok || body.error || body.repo?.toLowerCase() !== slug || !Array.isArray(body.prs)) throw new Error('Branch dependencies could not be loaded. Linked PRs are still available.');
-        if (!controller.signal.aborted) { setSnapshot({ repo: slug, prs: body.prs, partial: Boolean(body.nextPage) }); setReadError(null); }
-      }).catch(() => { if (!controller.signal.aborted) setReadError('Branch dependencies unavailable. Your saved links are still here.'); });
-    return () => controller.abort();
-  }, [active, slug, links]);
+  const dependencies = useQuery({
+    ...linkedPullRequestListQuery(slug ?? ''),
+    enabled: Boolean(active && slug && links.some((entry) => entry.repo === slug)),
+  });
+  const snapshot = dependencies.data;
+  const dependencyError = dependencies.isError ? 'Branch dependencies unavailable. Your saved links are still here.' : null;
   useEffect(() => () => requestRef.current?.abort(), [context, active]);
   const related = useMemo(() => {
     const stackRows = slug && snapshot?.repo === slug ? pullRequestStackRows(snapshot.prs, slug) : [];
@@ -85,10 +80,10 @@ export function LinkedPullRequests({ context, tabId, repoPath, repos, active, on
     {!expanded && links.length > 2 ? <button type="button" onClick={() => setExpanded(true)} style={{ border: 0, padding: 0, marginTop: 6, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 10, cursor: 'pointer' }}>Show {links.length - 2} more</button> : null}
     {expanded ? <div style={{ marginTop: 8, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{context.startsWith('worktree:') ? 'Saved for this worktree' : 'Saved for this conversation'}</div> : null}
     {expanded && related.some((row) => row.parent) ? <div style={{ marginTop: 8 }}>
-      <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 4 }}>Branch dependencies{snapshot?.partial ? ' · partial list' : ''}</div>
+      <div style={{ color: 'var(--t-text-faint)', fontSize: 10, marginBottom: 4 }}>Branch dependencies{snapshot?.nextPage ? ' · partial list' : ''}</div>
       {related.map((row) => <button key={row.pull.number} type="button" onClick={() => slug && onOpen?.(row.pull.number, slug)} style={{ display: 'block', maxWidth: '100%', textAlign: 'left', paddingTop: 4, paddingBottom: 4, paddingLeft: Math.min(row.depth, 5) * 10, paddingRight: 0, border: 0, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.depth ? '↳ ' : ''}#{row.pull.number} · {row.pull.headRefName}{row.ambiguous ? ' · dependency unclear' : ''}</button>)}
     </div> : null}
-    {expanded && readError ? <div role="status" style={{ marginTop: 6, color: 'var(--t-text-muted)', fontSize: 11 }}>{readError}</div> : null}
+    {expanded && (readError || dependencyError) ? <div role="status" style={{ marginTop: 6, color: 'var(--t-text-muted)', fontSize: 11 }}>{readError || dependencyError}</div> : null}
     {persistenceError ? <div role="alert" style={{ marginTop: 6, color: 'var(--t-warning)', fontSize: 11 }}>{persistenceError}</div> : null}
     {openContext === context && active ? <FloatingDialog title="Link pull request" onClose={close} width={420} overlay>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}><GitPullRequest size={16} /><span style={{ flex: 1, fontSize: 15, fontWeight: 300 }}>Link pull request</span><button type="button" aria-label="Close link pull request" onClick={close} style={{ width: 28, height: 28, border: 0, borderRadius: 7, padding: 0, display: 'grid', placeItems: 'center', background: 'transparent', color: 'var(--t-text-muted)', cursor: 'pointer' }}><X size={14} /></button></div>

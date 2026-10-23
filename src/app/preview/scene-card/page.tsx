@@ -55,39 +55,6 @@ const labelStyle: CSSProperties = {
 const ink = '#fff';
 const shadow = '0 1px 14px rgba(40,24,8,0.4)';
 
-function PricingCard(t: Tune) {
-  return (
-    <SceneCard {...t} width={360} height={470}>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: 26, color: ink }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'color-mix(in srgb, currentColor 80%, transparent)', textShadow: shadow }}>Pro · Lifetime</div>
-          <div style={{ marginTop: 10, display: 'flex', alignItems: 'baseline', gap: 6, textShadow: shadow }}>
-            <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.5px' }}>One-time purchase</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, fontSize: 13.5, fontWeight: 440, textShadow: shadow }}>
-          {['Full governed fleet — no extra sub', 'Priority on the build-in-public roadmap', 'Pro · Lifetime status & voice', 'Lifetime — never a locked door'].map((f) => (
-            <div key={f} style={{ display: 'flex', gap: 9, alignItems: 'center', color: 'rgba(255,255,255,0.94)' }}>
-              <span style={{ width: 16, height: 16, borderRadius: 999, background: 'rgba(255,255,255,0.22)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0 }}>✓</span>
-              {f}
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          style={{
-            width: '100%', paddingTop: 13, paddingBottom: 13, borderRadius: 12, border: '1px solid rgba(255,255,255,0.5)',
-            background: 'rgba(255,255,255,0.92)', color: '#2a1c0c', fontSize: 14.5, fontWeight: 560, letterSpacing: '-0.2px', cursor: 'pointer',
-            backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
-          }}
-        >
-          Get Pro · Lifetime
-        </button>
-      </div>
-    </SceneCard>
-  );
-}
-
 function FeatureCard(t: Tune) {
   return (
     <SceneCard {...t} width={360} height={300} grassHeight={t.grassHeight + 0.02}>
@@ -138,7 +105,7 @@ export default function SceneCardPreviewPage() {
       <header style={{ maxWidth: 1180, margin: '0 auto', marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 440, letterSpacing: '-0.4px', margin: 0 }}>Scene card lab</h1>
         <p style={{ fontSize: 13, color: 'var(--t-text-muted, #6b7280)', marginTop: 6, lineHeight: 1.5, maxWidth: 720 }}>
-          The sunrise-landscape look as a <strong>card / pricing / modal</strong> background — drifting valley fog,
+          The sunrise-landscape look as a <strong>card / modal</strong> background with drifting valley fog,
           a glowing sun disc, layered hazy ridges, lit grass. Content sits over a warm scrim. Authored from scratch.
         </p>
       </header>
@@ -159,11 +126,8 @@ export default function SceneCardPreviewPage() {
 
       <div style={{ maxWidth: 1180, margin: '0 auto', display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {PricingCard(t)}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {FeatureCard(t)}
-          <div style={{ fontSize: 11, color: 'var(--t-text-muted, #6b7280)', textAlign: 'center' }}>feature card · pricing card · modal</div>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted, #6b7280)', textAlign: 'center' }}>feature card · modal</div>
         </div>
         <div>{ModalMock(t)}</div>
       </div>

@@ -119,8 +119,8 @@ describe('composer selector state', () => {
   });
 
   it('hides Ultra until enabled and clamps a stored Ultra effort to Max', () => {
-    const hidden = supportedEffortsForLead('codex', 'gpt-6-astra', true, false, false);
-    const shown = supportedEffortsForLead('codex', 'gpt-6-astra', true, false, true);
+    const hidden = supportedEffortsForLead('codex', 'gpt-6-astra', true, false);
+    const shown = supportedEffortsForLead('codex', 'gpt-6-astra', true, true);
 
     expect(hidden).not.toContain('ultra');
     expect(shown).toContain('ultra');
@@ -132,7 +132,7 @@ describe('composer selector state', () => {
     expect(['low', 'medium', 'adaptive', 'high'].some((effort) => isHotComposerEffort(effort as ThinkingEffort))).toBe(false);
   });
 
-  it.each([true, false])('keeps o8 on Low with no effort options, ignoring a saved High (free plan: %s)', (isFreePlan) => {
+  it('keeps o8 on Low with no effort options, ignoring a saved High', () => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -142,7 +142,6 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'max',
       adaptiveEnabled: true,
-      isFreePlan,
       workerRuntimeLabel: 'Codex',
     });
 
@@ -152,7 +151,7 @@ describe('composer selector state', () => {
     expect(resolved.atRestText).toBe('o8 / workers Codex');
   });
 
-  it.each([true, false])('defaults o8 to Low without a saved preference (free plan: %s)', (isFreePlan) => {
+  it('defaults o8 to Low without a saved preference', () => {
     const resolved = resolveComposerSelectorState({
       mode: 'solo',
       leadModelId: 'o8-free',
@@ -162,15 +161,14 @@ describe('composer selector state', () => {
       threadEffortByModel: {},
       operatorDefaultEffort: 'high',
       adaptiveEnabled: true,
-      isFreePlan,
     });
     expect(resolved.effort).toBe('low');
     expect(resolved.effortClampedFrom).toBeNull();
     expect(resolved.lockedEffortOptions).toEqual([]);
   });
 
-  it.each([true, false])('offers the o8 lead no effort options (free plan: %s)', (isFreePlan) => {
-    expect(supportedEffortsForLead('o8', 'o8-free', true, isFreePlan)).toEqual([]);
+  it('offers the o8 lead no effort options', () => {
+    expect(supportedEffortsForLead('o8', 'o8-free', true)).toEqual([]);
   });
 
   it('maps lead families and worker runtimes to provider marks', () => {

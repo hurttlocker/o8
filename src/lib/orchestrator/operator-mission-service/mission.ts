@@ -516,6 +516,7 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
         return 'running';
       case 'awaiting_input':
       case 'awaiting_orchestrator':
+      case 'awaiting_human':
         return 'blocked';
       case 'idle':
       case 'paused':
@@ -738,7 +739,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
         title: packet.title,
         wave: node.wave,
         status: packet.status, runtime: lane?.runtime ?? packet.runtime, model: lane?.model ?? packet.lane?.model ?? packet.model ?? packet.workerRouting?.selectedModel ?? packet.assignedModel ?? null,
-        queueState: packet.queueState,
+        queueState: packet.status === 'blocked' && lane && ['awaiting_input', 'awaiting_orchestrator', 'awaiting_human'].includes(lane.status) ? 'held' : packet.queueState,
         releaseState: packet.releaseState,
         blockedBy: node.blockedBy,
         blockedReason: packet.blockedReason ?? null,

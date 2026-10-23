@@ -670,6 +670,7 @@ export class WorktreeManager {
       }
     }
 
+    opts.beforeReady?.(info);
     info.status = 'ready';
     await this.updateMetaStatus(taskId, 'ready');
     if (info.dependencyMaterialization) {
@@ -876,6 +877,7 @@ export class WorktreeManager {
       }
       await this.resetTrackedWorkspaceChanges(worktreePath);
 
+      opts.beforeReady?.(info);
       info.status = 'ready';
       await this.updateMetaStatus(taskId, 'ready');
       if (info.dependencyMaterialization) {
@@ -1816,7 +1818,7 @@ export class WorktreeManager {
 
   /**
    * Remove a worktree and optionally its branch.
-   * Checks for uncommitted changes first and auto-commits to preserve agent work.
+   * Refuses uncommitted changes so retirement never rewrites unfinished work.
    */
   async cleanup(worktreeId: string, opts?: CleanupOptions): Promise<boolean> {
     try {
@@ -2440,14 +2442,13 @@ export class WorktreeManager {
   // ── Private Helpers ──
 
   /**
-   * Check for uncommitted changes in a worktree and auto-commit them.
-   * Returns 'committed' if work was saved, 'clean' if nothing to save,
-   * or 'skip' if we couldn't save and should abort the prune.
+   * Check for uncommitted changes without rewriting source or its index.
+   * Dirty or uncertain source must remain in its checkout.
    */
   private async preserveUncommittedWork(
     worktreePath: string,
     worktreeId: string,
-  ): Promise<'committed' | 'clean' | 'skip'> {
+  ): Promise<'clean' | 'skip'> {
     try {
       // #1404 belt-and-suspenders: even if a caller slips an unsafe path past
       // the cleanup guard, never add/commit unless the git toplevel IS the
@@ -2468,23 +2469,8 @@ export class WorktreeManager {
       );
       if (!status.trim()) return 'clean';
 
-      console.log(`[worktree-prune] ${worktreeId} has uncommitted changes — preserving work`);
-
-      try {
-        await execFileAsync(
-          'git', ['add', '-A'],
-          { windowsHide: true, cwd: worktreePath, timeout: 10_000 },
-        );
-        await execFileAsync(
-          'git', ['commit', '-m', 'chore: preserve agent work before worktree cleanup'],
-          { windowsHide: true, cwd: worktreePath, timeout: 10_000 },
-        );
-        console.log(`[worktree-prune] Auto-committed changes in ${worktreeId}`);
-        return 'committed';
-      } catch {
-        console.log(`[worktree-prune] Auto-commit failed for ${worktreeId}, skipping prune to preserve work`);
-        return 'skip';
-      }
+      console.log(`[worktree-prune] ${worktreeId} has uncommitted changes; retaining checkout`);
+      return 'skip';
     } catch {
       // The caller captured a live directory identity before entering this
       // guard, so an unreadable Git state is unknown work, never clean work.

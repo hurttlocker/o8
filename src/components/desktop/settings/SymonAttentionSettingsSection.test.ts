@@ -146,7 +146,7 @@ describe('Symon proactive attention settings', () => {
   });
 
   it('makes commentary discoverable in Settings search', () => {
-    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'automatic commentary', { founder: false }))
+    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'automatic commentary'))
       .toContainEqual(expect.objectContaining({ tab: 'voice', label: 'Automatic AI commentary' }));
   });
 });

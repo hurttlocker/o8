@@ -965,6 +965,10 @@ async function dispatchUnlocked(
     }
 
     case 'archive': {
+      const lane = getLane(command.laneId);
+      if (lane?.packetId && lane.worktreePath && lane.ownership === 'managed') {
+        await import('./retire-finished-worktree').then(({ retireFinishedWorktree }) => retireFinishedWorktree(lane));
+      }
       const updated = archiveLane(command.laneId, actor, command.outcome ? {
         outcome: command.outcome,
         outcomeNote: command.outcomeNote,

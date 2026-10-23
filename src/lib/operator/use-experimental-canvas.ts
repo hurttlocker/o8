@@ -1,6 +1,5 @@
 'use client';
 
-import { useEarlyAccess } from '@/lib/entitlement/use-early-access';
 import { fetchOperatorDefaultsValues } from '@/lib/operator/operator-defaults-values-client';
 import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
@@ -25,12 +24,10 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useExperimentalCanvasFlag(): boolean {
-  const earlyAccess = useEarlyAccess();
   // Canvas is OUT OF BETA (Q ruling 2026-07-14): the button and mechanics are
   // on for everyone, including every look and cosmetic control. The hook shape
-  // survives so call sites don't churn; the remote flag + early-access read stay
+  // survives so call sites don't churn; the remote flag read stays
   // wired for a future kill-switch but can no longer turn Canvas off.
   void useRetryingRemoteFlag(fetchFlag, cache);
-  void earlyAccess;
   return true;
 }

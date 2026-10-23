@@ -445,32 +445,11 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.localChatModel = body.localChatModel.trim();
   }
 
-  if (body.experimentalOpencode !== undefined) {
-    if (typeof body.experimentalOpencode !== 'boolean') {
-      throw new Error('experimentalOpencode must be boolean.');
-    }
-    update.experimentalOpencode = body.experimentalOpencode;
-  }
-
-  if (body.experimentalGemini !== undefined) {
-    if (typeof body.experimentalGemini !== 'boolean') {
-      throw new Error('experimentalGemini must be boolean.');
-    }
-    update.experimentalGemini = body.experimentalGemini;
-  }
-
-  if (body.experimentalChat !== undefined) {
-    if (typeof body.experimentalChat !== 'boolean') {
-      throw new Error('experimentalChat must be boolean.');
-    }
-    update.experimentalChat = body.experimentalChat;
-  }
-
-  if (body.experimentalCanvas !== undefined) {
-    if (typeof body.experimentalCanvas !== 'boolean') {
-      throw new Error('experimentalCanvas must be boolean.');
-    }
-    update.experimentalCanvas = body.experimentalCanvas;
+  for (const field of ['experimentalOpencode', 'experimentalGemini', 'experimentalChat', 'experimentalCanvas', 'nativeBrowserView'] as const) {
+    const value = body[field];
+    if (value === undefined) continue;
+    if (typeof value !== 'boolean') throw new Error(`${field} must be boolean.`);
+    update[field] = value;
   }
 
   if (body.classAComposer !== undefined) {

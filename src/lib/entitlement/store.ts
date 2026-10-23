@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { clampPlan, readDevPlanOverride, readDevPlanOverrideSync } from './dev-override';
+import { clampServicePlan, readServiceSuppression, readServiceSuppressionSync } from './legacy-service-suppression';
 import { resolveFlags } from './flags';
 import type { EntitlementState, Plan } from './types';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -17,13 +17,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
  * The optional hosted-license path writes the file. With no hosted service
  * configured, a missing file resolves directly to the open-build free plan.
  *
- * View-as clamp (#1517): after the real plan resolves (env > file > free), the
- * dev `~/.o8/dev-plan-override` switch is applied as `min(realPlan, override)`,
- * so the effective plan can only ever DOWNGRADE. env `O8_PLAN` is a RAW dev
- * override (trusted, can raise/lower); the file override is the min-clamped
- * "view as free" switch. The clamp lives HERE, the single server-side chokepoint
- * every consumer reads through, so a downgrade can never be bypassed by a caller
- * comparing plan strings directly. See dev-override.ts.
+ * Existing local suppression stays read-only until funded services migrate.
+ * The application no longer exposes edition simulation or override writers.
  */
 
 const ENTITLEMENT_FILE = 'entitlement.json';
@@ -70,7 +65,7 @@ function toState(
   source: EntitlementState['source'],
   overridePlan: Plan | null,
 ): EntitlementState {
-  const effective = clampPlan(realPlan, overridePlan);
+  const effective = clampServicePlan(realPlan, overridePlan);
   return {
     plan: effective,
     flags: resolveFlags(effective),
@@ -81,7 +76,7 @@ function toState(
 }
 
 export async function getEntitlement(): Promise<EntitlementState> {
-  const overridePlan = await readDevPlanOverride();
+  const overridePlan = await readServiceSuppression();
   const envPlan = getEnvPlan();
   if (envPlan) return toState(envPlan, 'env', overridePlan);
 
@@ -99,7 +94,7 @@ export async function getEntitlement(): Promise<EntitlementState> {
 }
 
 export function getEntitlementSync(): EntitlementState {
-  const overridePlan = readDevPlanOverrideSync();
+  const overridePlan = readServiceSuppressionSync();
   const envPlan = getEnvPlan();
   if (envPlan) return toState(envPlan, 'env', overridePlan);
 
