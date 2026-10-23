@@ -43,3 +43,21 @@ it.each(['digest', 'compact', 'catalogue'].flatMap(target => ['subscription', 'a
   const seen = JSON.parse(readFileSync(state.record, 'utf8'));
   expect(seen).toEqual({ key: null, alias: null, copy: null });
 });
+
+it('the native worker identity probe filters saved and inherited provider credentials at its real child entry point', async () => {
+  expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-login-provider' }))).status).toBe(200);
+  const helper = join(state.dir, 'fixture-identity');
+  writeFileSync(helper, `#!/usr/bin/env node
+const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(state.record)},JSON.stringify({key:!!process.env.OPENAI_API_KEY,alias:!!process.env.CODEX_API_KEY,copy:!!process.env.LOGIN_PROVIDER_COPY,master:!!process.env.O8_MASTER_KEY,service:process.env.BRAVE_API_KEY}));
+process.stdout.write(JSON.stringify({version:1,platform:'darwin',bootId:'fixture-boot',startId:'kernel:1:000001'}));
+`); chmodSync(helper, 0o755);
+  vi.stubEnv('O8_PI_WRITE_BIN', helper); vi.stubEnv('BRAVE_API_KEY', 'fixture-search-service');
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  try {
+    // Select the native branch on every runner; the executable and child environment are real.
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const { probeOwnedProcessIdentity } = await import('@/lib/runtimes/shared/owned-session/process-identity');
+    expect(await probeOwnedProcessIdentity(process.pid, 'native-helper')).toMatchObject({ state: 'live', source: 'native-helper' });
+    expect(JSON.parse(readFileSync(state.record, 'utf8'))).toEqual({ key: false, alias: false, copy: false, master: false, service: 'fixture-search-service' });
+  } finally { Object.defineProperty(process, 'platform', platform); }
+});
