@@ -1,4 +1,5 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { estimateOrchestratorContext } from '@/lib/orchestrator/context-estimate';
 import { queueOrchestratorSessionPrelude } from '@/lib/orchestrator/store';
 import {
   ORCHESTRATOR_CONTEXT_LIMIT,
@@ -6,6 +7,7 @@ import {
   type CompactResponsePayload,
 } from './shared';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { mergeCompactionMarkers } from '@/lib/transcripts/compaction';
 
 interface RefLike<T> {
   current: T;
@@ -15,8 +17,10 @@ interface RefreshTokenTelemetryOptions {
   repoPath: string | null;
   threadId: string | null;
   backend: OrchestratorBackendId | null;
+  messages?: readonly MobileTranscriptEntry[];
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
+  setContextSource?: (value: string | undefined) => void;
   telemetryBindingRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
 }
@@ -25,6 +29,7 @@ interface RuntimeTelemetryResponse {
   telemetry?: {
     totalTokens?: number | null;
     contextTokens?: number | null;
+    contextSource?: string;
     estimatedCostUsd?: number | null;
     model?: string | null;
   };
@@ -36,64 +41,50 @@ export async function refreshOrchestratorTokenTelemetry(
   const activeRepoPath = options.repoPath;
   const threadId = options.threadId?.trim() ?? '';
   const backend = options.backend;
-  if (!activeRepoPath || !threadId.startsWith('thoughts-') || (backend !== 'claude' && backend !== 'codex')) {
+  if (!activeRepoPath || !threadId.startsWith('thoughts-') || !backend) {
     options.telemetryBindingRef.current = null;
     options.telemetryTotalRef.current = null;
     return null;
   }
 
+  const binding = `${threadId}\0${backend}`;
+  if (options.telemetryBindingRef.current !== binding) {
+    options.telemetryBindingRef.current = binding;
+    options.telemetryTotalRef.current = null;
+  }
+  let telemetry: RuntimeTelemetryResponse['telemetry'];
   try {
-    const binding = `${threadId}\0${backend}`;
-    if (options.telemetryBindingRef.current !== binding) {
-      options.telemetryBindingRef.current = binding;
-      options.telemetryTotalRef.current = null;
-    }
     const params = new URLSearchParams({ threadId, backend });
     const response = await fetch(`/api/runtime/telemetry?${params.toString()}`, { cache: 'no-store' });
-    if (options.telemetryBindingRef.current !== binding) return null;
-    if (!response.ok) {
-      options.telemetryTotalRef.current = null;
-      return null;
-    }
+    if (response.ok) telemetry = (await response.json() as RuntimeTelemetryResponse).telemetry;
+  } catch { /* An unavailable provider or endpoint still leaves a transcript estimate. */ }
+  if (options.telemetryBindingRef.current !== binding) return null;
 
-    const payload = await response.json() as RuntimeTelemetryResponse;
-    if (options.telemetryBindingRef.current !== binding) return null;
-    // Runtime totalTokens is the billable rollup and may include native child
-    // work. Auto-compact and the context meter use only the tokens that entered
-    // this parent session's own window.
-    const rawContextTokens = typeof payload.telemetry?.contextTokens === 'number'
-      ? payload.telemetry.contextTokens
-      : payload.telemetry?.totalTokens;
-    const totalTokens = typeof rawContextTokens === 'number'
-      ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, rawContextTokens))
-      : null;
-    const estimatedCostUsd = typeof payload.telemetry?.estimatedCostUsd === 'number'
-      ? payload.telemetry.estimatedCostUsd
-      : null;
-    const telemetryModel = typeof payload.telemetry?.model === 'string' ? payload.telemetry.model : null;
-    if (totalTokens == null) {
-      return { totalTokens: null, estimatedCostUsd, model: telemetryModel };
-    }
+  // Never substitute billing totals: tool requests repeatedly bill the same
+  // prompt. An absent, zero or invalid context report uses a named estimate.
+  const rawContextTokens = telemetry?.contextTokens;
+  const measured = typeof rawContextTokens === 'number' && Number.isFinite(rawContextTokens) && rawContextTokens > 0;
+  const totalTokens = Math.min(ORCHESTRATOR_CONTEXT_LIMIT, measured
+    ? rawContextTokens : estimateOrchestratorContext(options.messages ?? []));
+  const source = measured ? telemetry?.contextSource ?? 'runtime-context' : 'transcript-estimate';
+  const estimatedCostUsd = typeof telemetry?.estimatedCostUsd === 'number' ? telemetry.estimatedCostUsd : null;
+  const telemetryModel = typeof telemetry?.model === 'string' ? telemetry.model : null;
+  const previousTotal = options.telemetryTotalRef.current;
+  const nextTokenCount = previousTotal === null || totalTokens < previousTotal
+    ? 0 : Math.max(0, totalTokens - previousTotal);
+  options.telemetryTotalRef.current = totalTokens;
+  options.setTokenCount(nextTokenCount);
+  options.setRunningTotal(totalTokens);
+  options.setContextSource?.(source);
+  emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
+  return { totalTokens, estimatedCostUsd, model: telemetryModel };
 
-    const previousTotal = options.telemetryTotalRef.current;
-    const nextTokenCount = previousTotal === null || totalTokens < previousTotal
-      ? 0
-      : Math.max(0, totalTokens - previousTotal);
-
-    options.telemetryTotalRef.current = totalTokens;
-    options.setTokenCount(nextTokenCount);
-    options.setRunningTotal(totalTokens);
-    emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
-    return { totalTokens, estimatedCostUsd, model: telemetryModel };
-  } catch {
-    return null;
-  }
 }
 
 export async function requestOrchestratorCompaction(
   activeRepoPath: string,
   nextRunningTotal: number,
-  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
+  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null; contextSource?: string },
 ): Promise<CompactResponsePayload | null> {
   const response = await fetch('/api/orchestrator/compact', {
     method: 'POST',
@@ -102,6 +93,7 @@ export async function requestOrchestratorCompaction(
       repoPath: activeRepoPath,
       threadId: options?.threadId,
       runningTotal: nextRunningTotal,
+      contextSource: options?.contextSource,
       keepTailCount: options?.keepTailCount,
       trigger: options?.trigger,
     }),
@@ -118,7 +110,6 @@ interface PrimeCompactedSessionOptions {
   setMessages: (entries: MobileTranscriptEntry[]) => void;
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
-  setTranscript?: boolean;
   telemetrySessionKeyRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
   isCurrent?: () => boolean;
@@ -146,10 +137,11 @@ export async function primeCompactedOrchestratorSession(
   options.telemetrySessionKeyRef.current = null;
   options.telemetryTotalRef.current = nextTotal;
 
-  if (options.setTranscript !== false) {
-    options.messagesRef.current = payload.transcript;
-    options.setMessages(payload.transcript);
-  }
+  // The primed transcript is model context, not new conversation turns.
+  // Even silent compaction adds its boundary while keeping the visible history.
+  const display = mergeCompactionMarkers(options.messagesRef.current, payload.transcript);
+  options.messagesRef.current = display;
+  options.setMessages(display);
 
   options.setTokenCount(0);
   options.setRunningTotal(nextTotal);

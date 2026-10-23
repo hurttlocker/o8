@@ -96,8 +96,8 @@ it('refuses real PR publication under a native reservation before pushing or cre
   } finally { const exited = once(native, 'exit'); native.stdin.end('cancel\n'); await exited; }
 }, 90_000);
 
-it('reclaims a killed real merge owner before normal native restart', async () => {
-  const { repo, origin, lane } = await makeLane('crashed');
+it.each(['merge', 'publication'] as const)('reclaims a killed %s owner before Git or publication starts', async (operation) => {
+  const { repo, origin, lane } = await makeLane(`crashed-${operation}`);
   const { withRepoActionLock } = await import('@/lib/lane/repo-action-lock');
   let unlock!: () => void;
   let locked!: () => void;
@@ -105,7 +105,7 @@ it('reclaims a killed real merge owner before normal native restart', async () =
   const holding = withRepoActionLock(repo, async () => { locked(); await new Promise<void>(resolve => { unlock = resolve; }); });
   await ready;
   const child = spawn(process.execPath, ['./node_modules/vitest/vitest.mjs', 'run',
-    'tests/fixtures/worktree-side-merge-child.test.ts', '--reporter=dot'], { env: { ...process.env,
+    `tests/fixtures/worktree-${operation === 'merge' ? 'side-merge' : 'publication'}-child.test.ts`, '--reporter=dot'], { env: { ...process.env,
       O8_TEST_DATA_DIR_PINNED: join(root, 'data'), O8_TEST_MERGE_LANE_ID: lane.id,
       O8_TEST_MERGE_RESULT_PATH: join(root, 'crash-result') }, stdio: 'pipe' });
   let output = ''; child.stdout.on('data', chunk => { output += String(chunk); }); child.stderr.on('data', chunk => { output += String(chunk); });
@@ -120,6 +120,8 @@ it('reclaims a killed real merge owner before normal native restart', async () =
     expect(() => execFileSync(join(process.cwd(), 'src-tauri/target/debug/examples/admission'), [join(root, 'data')], { stdio: 'pipe' })).toThrow();
     const exited = once(child, 'exit'); process.kill(ownerPid!, 'SIGKILL'); await exited;
     expect(git(origin, 'show', 'main:file.txt')).toBe('base');
+    expect(git(origin, 'for-each-ref', '--format=%(refname)', `refs/heads/${lane.branch}`)).toBe('');
+    expect(getLane(lane.id)?.prNumber).toBeNull();
     expect(existsSync(join(root, 'crash-result'))).toBe(false);
     execFileSync(join(process.cwd(), 'src-tauri/target/debug/examples/admission'), [join(root, 'data')], { stdio: 'pipe' });
     expect(readdirSync(join(root, 'data/work-launches'))).toEqual([]);

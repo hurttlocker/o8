@@ -16,6 +16,8 @@ const children = new Set<ChildProcess>();
 let server: Server | null = null;
 let apiPort = 0;
 let emulateNativeCheck = false;
+let nativeVersion: string | null = null;
+let unavailableResponse = false;
 
 function stateRequest(body: unknown) {
   return new Request('http://127.0.0.1/api/panel/app/update-state', {
@@ -29,6 +31,9 @@ async function forwardUpdateApply(request: import('node:http').IncomingMessage) 
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   const body = Buffer.concat(chunks).toString('utf8');
+  if (unavailableResponse) return Response.json({ ok: false, requested: false,
+    checkedAt: '2026-10-23T14:00:00.000Z', checkAgeMs: 25_000,
+    error: { code: 'update_check_unavailable', message: 'Native check did not respond.', retryable: true, retryAfterMs: 5_000 } }, { status: 503 });
   const pending = updateApplyRoute.POST(new Request('http://127.0.0.1/api/panel/update/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -38,8 +43,8 @@ async function forwardUpdateApply(request: import('node:http').IncomingMessage) 
     await new Promise(resolve => setTimeout(resolve, 10));
     const control = await (await updateStateRoute.GET()).json();
     expect(control.checkRequestedAt).toEqual(expect.any(String));
-    await updateStateRoute.POST(stateRequest({ updatePending: false, checkOutcome: 'failed',
-      checkedAt: new Date().toISOString(), checkError: 'synthetic native feed failure' }));
+    await updateStateRoute.POST(stateRequest({ updatePending: Boolean(nativeVersion), checkOutcome: nativeVersion ? 'available' : 'failed',
+      version: nativeVersion, checkedAt: new Date().toISOString(), checkError: nativeVersion ? null : 'synthetic native feed failure' }));
   }
   return pending;
 }
@@ -120,6 +125,16 @@ afterAll(async () => {
 });
 
 describe('update check state through the real route and CLI parser', () => {
+  it('preserves structured unavailable details through the built CLI', async () => {
+    unavailableResponse = true;
+    try {
+      const result = await runCli(['update', 'check']);
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toMatchObject({ schema: 'o8/cli/update.check/v1', ok: false,
+        checkedAt: '2026-10-23T14:00:00.000Z', checkAgeMs: 25_000,
+        error: { code: 'update_check_unavailable', retryable: true, retryAfterMs: 5_000 } });
+    } finally { unavailableResponse = false; }
+  });
   it('refreshes an absent check and keeps native failure distinct from current, including force', async () => {
     emulateNativeCheck = true;
     const result = await runCli(['update', 'apply']);
@@ -200,5 +215,15 @@ describe('update check state through the real route and CLI parser', () => {
     await expect(olderStateResponse.json()).resolves.toMatchObject({
       state: { check: { outcome: 'current', checkedAt, error: null } },
     });
+  });
+  it('lets the built CLI request a fresh check while the last current result is recent', async () => {
+    await updateStateRoute.POST(stateRequest({ updatePending: false, checkOutcome: 'current', checkedAt: new Date().toISOString() }));
+    emulateNativeCheck = true; nativeVersion = '0.1.999';
+    try {
+      const result = await runCli(['update', 'check']);
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ schema: 'o8/cli/update.check/v1', requested: false,
+        result: 'check_available', version: '0.1.999', checkAgeMs: expect.any(Number), check: { outcome: 'available' } });
+    } finally { emulateNativeCheck = false; nativeVersion = null; }
   });
 });
