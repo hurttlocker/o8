@@ -4934,6 +4934,14 @@
       ]
     },
     {
+      "path": "tests/speed-render-samples-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/stable-cli-update-real-path.test.ts",
       "reasons": [
         "child-process",
