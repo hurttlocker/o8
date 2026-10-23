@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { pullRequestListQuery } from '@/lib/github-client/queries';
 import type { CIRun } from './useCanvasCIRuns';
@@ -45,6 +45,22 @@ export interface CIRunDetail extends CIRun {
 }
 
 interface CIRunSnapshot { run: CIRunDetail; logs: string }
+class CIReadDeferredError extends Error {
+  constructor(readonly retryAt: number) { super('Unable to load run details'); }
+}
+
+function quotaDeadline(response: Response): number | null {
+  if (response.status !== 429 && response.status !== 403) return null;
+  const now = Date.now();
+  const retry = response.headers.get('retry-after');
+  const seconds = Number(retry);
+  const retryAt = Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1000 : Date.parse(retry ?? '');
+  if (response.status === 403 && !(retryAt > now) && response.headers.get('x-ratelimit-remaining') !== '0') return null;
+  const resetAt = Number(response.headers.get('x-ratelimit-reset')) * 1000;
+  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0);
+  return Math.min(now + 24 * 60 * 60_000, deadline > now ? deadline : now + 60_000);
+}
+
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const optionalText = (value: unknown) => value === undefined || typeof value === 'string';
@@ -81,6 +97,8 @@ function ciDetailQuery(repo: string | undefined, id: number, resolvedRepo?: stri
     queryFn: async ({ signal }): Promise<CIRunSnapshot> => {
       const repoParam = slug ? `?repo=${encodeURIComponent(slug)}` : '';
       const response = await fetch(`/api/panel/ci/${id}${repoParam}`, { signal });
+      const retryAt = quotaDeadline(response);
+      if (retryAt !== null) throw new CIReadDeferredError(retryAt);
       if (!response.ok) throw new Error('Unable to load run details');
       const data = await response.json();
       if (!record(data) || data.error || !validRun(data.run, id) || !optionalText(data.logs)
@@ -95,7 +113,18 @@ function ciDetailQuery(repo: string | undefined, id: number, resolvedRepo?: stri
 
 export function useCanvasCIDetail(repo: string | undefined, id: number | null, resolvedRepo?: string) {
   const client = useQueryClient();
-  const query = useQuery({ ...ciDetailQuery(repo, id ?? 0, resolvedRepo), enabled: id !== null });
+  const [now, setNow] = useState(() => Date.now());
+  const query = useQuery({
+    ...ciDetailQuery(repo, id ?? 0, resolvedRepo),
+    // Capture the clock per render so the deadline changes enabled from false to true.
+    enabled: entry => id !== null && !(entry.state.error instanceof CIReadDeferredError
+      && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
+  });
+  useEffect(() => {
+    if (id === null || !(query.error instanceof CIReadDeferredError)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, query.error.retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [id, query.error]);
   const refresh = useCallback(async () => {
     if (id === null) return;
     const options = ciDetailQuery(repo, id, resolvedRepo);

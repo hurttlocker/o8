@@ -151,3 +151,92 @@ it('supports a registered repository name and shares its resolved detail with th
   expect(reads()[0][0]).toBe('/api/panel/ci/11?repo=Sample');
   await render([{ repo: 'Org/Sample', runId: 11 }]); expectSnapshot(); expect(reads()).toHaveLength(1);
 });
+
+describe('Canvas CI detail quota recovery through the real viewer', () => {
+  const retryCases: Array<{ label: string; status: number; headers: () => HeadersInit; delay: number }> = [
+    { label: 'numeric Retry-After', status: 429, headers: () => ({ 'retry-after': '90' }), delay: 90_000 },
+    { label: 'HTTP-date Retry-After', status: 403, headers: () => ({ 'retry-after': new Date(Date.now() + 90_000).toUTCString() }), delay: 90_000 },
+    { label: 'primary reset', status: 403, headers: () => ({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Date.now() / 1000 + 90) }), delay: 90_000 },
+    { label: 'later reset than Retry-After', status: 429, headers: () => ({ 'retry-after': '10', 'x-ratelimit-reset': String(Date.now() / 1000 + 90) }), delay: 90_000 },
+    { label: 'missing deadline', status: 429, headers: () => ({}), delay: 60_000 },
+    { label: 'invalid deadline', status: 429, headers: () => ({ 'retry-after': 'invalid' }), delay: 60_000 },
+  ];
+
+  it.each(retryCases)('pauses initial reads across remounts and resumes mounted observers at $label', async ({ status, headers, delay }) => {
+    const transport = fetchMock.getMockImplementation()!;
+    const refusal = new Response(null, { status, headers: headers() });
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/') ? Promise.resolve(refusal) : transport(input));
+    await render(); expect(reads()).toHaveLength(1);
+    expect(host.textContent).toContain('Unable to load run details');
+    await render([]); await act(async () => vi.advanceTimersByTimeAsync(delay - 1000));
+    await render([{ repo: 'org/sample', runId: 11 }, { repo: 'ORG/SAMPLE', runId: 11 }]);
+    expect(reads()).toHaveLength(1);
+    await invalidate(); expect(reads()).toHaveLength(1);
+    fetchMock.mockImplementation(transport);
+    await act(async () => vi.advanceTimersByTimeAsync(1100)); await flush();
+    expect(reads()).toHaveLength(2); expectSnapshot();
+    expect(host.textContent?.match(/Known logs 11/g)).toHaveLength(2);
+  });
+
+  it('keeps the full snapshot and its age during backoff and refreshes after the deadline', async () => {
+    await render(); const transport = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 429, headers: { 'retry-after': '90' } })) : transport(input));
+    await invalidate(); expect(reads()).toHaveLength(2); expectSnapshot();
+    await render([]); await act(async () => vi.advanceTimersByTimeAsync(60_000)); await render();
+    expect(reads()).toHaveLength(2); expectSnapshot();
+    expect(host.textContent).toContain('Showing last successful run details'); expect(host.textContent).toContain('1m ago');
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/') ? Promise.resolve(detail(11, 'Recovered')) : transport(input));
+    await act(async () => vi.advanceTimersByTimeAsync(30_100)); await flush();
+    expect(reads()).toHaveLength(3); expectSnapshot('Recovered');
+    expect(host.textContent).not.toContain('Showing last successful run details');
+  });
+
+  it('lets explicit Retry bypass an unexpired pause', async () => {
+    const transport = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 429, headers: { 'retry-after': '90' } })) : transport(input));
+    await render(); fetchMock.mockImplementation(transport); await retry();
+    expectSnapshot(); expect(reads()).toHaveLength(2);
+  });
+
+  it('isolates pauses by repository and run', async () => {
+    const transport = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 429, headers: { 'retry-after': '90' } })) : transport(input));
+    await render(); fetchMock.mockImplementation(transport);
+    await render([{ repo: 'org/other', runId: 11 }]); expectSnapshot();
+    await render([{ repo: 'org/sample', runId: 12 }]); expectSnapshot('Known', 12);
+    await render(); expect(reads()).toHaveLength(3); expect(host.textContent).toContain('Unable to load run details');
+  });
+
+  it.each([false, true])('does not turn an ordinary permission refusal into a quota pause (quota headers: %s)', async withHeaders => {
+    const transport = fetchMock.getMockImplementation()!;
+    const headers: HeadersInit = withHeaders ? { 'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': String(Date.now() / 1000 + 90) } : {};
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 403, headers })) : transport(input));
+    await render(); await render([]); fetchMock.mockImplementation(transport); await render();
+    expectSnapshot(); expect(reads()).toHaveLength(2);
+  });
+
+  it('honors a second refusal while the same viewer stays mounted', async () => {
+    const transport = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 429, headers: { 'retry-after': '30' } })) : transport(input));
+    await render(); expect(reads()).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTimeAsync(30_100)); await flush(); expect(reads()).toHaveLength(2);
+    await invalidate(); expect(reads()).toHaveLength(2);
+    fetchMock.mockImplementation(transport);
+    await act(async () => vi.advanceTimersByTimeAsync(30_100)); await flush();
+    expect(reads()).toHaveLength(3); expectSnapshot();
+  });
+
+  it('does no detail work after closing and fetches once when reopened after the pause', async () => {
+    const transport = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input: string) => String(input).startsWith('/api/panel/ci/')
+      ? Promise.resolve(new Response(null, { status: 429, headers: { 'retry-after': '30' } })) : transport(input));
+    await render(); await render([]);
+    await act(async () => vi.advanceTimersByTimeAsync(31_000)); expect(reads()).toHaveLength(1);
+    fetchMock.mockImplementation(transport); await render(); expect(reads()).toHaveLength(2); expectSnapshot();
+  });
+});
