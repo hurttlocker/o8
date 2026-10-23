@@ -3081,6 +3081,12 @@
       ]
     },
     {
+      "path": "tests/lifecycle-mcp-errors-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/live-process-guard-deletion-seam.test.ts",
       "reasons": [
         "child-process",
@@ -3626,6 +3632,12 @@
       "reasons": [
         "child-process",
         "native-build",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/native-pr-stack-read-real-path.test.ts",
+      "reasons": [
         "real-path"
       ]
     },
@@ -5767,6 +5779,13 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "worktree"
+      ]
+    },
+    {
+      "path": "tests/worktree-maintenance-inventory-scope-real-path.test.ts",
+      "reasons": [
+        "real-path",
         "worktree"
       ]
     },
