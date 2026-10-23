@@ -38,6 +38,7 @@ import { ensureV69GeneratedOutputSchema } from '@/lib/db/v69-generated-output-mi
 import { ensureV70WorkerReturnSchema } from '@/lib/db/v70-worker-return-migration';
 import { ensureV71ComposerQueueSchema } from '@/lib/db/v71-composer-queue-migration';
 import { ensureV72WorkerCorrectionsSchema } from '@/lib/db/v72-worker-corrections-migration';
+import { ensureV73ConversationPrContextSchema } from '@/lib/db/v73-conversation-pr-context-migration';
 
 /**
  * Keep the current additive migrations behind one boot hook. `db/index.ts` is
@@ -87,4 +88,5 @@ export function ensurePostAutomationSchemas(sqlite: Database.Database): void {
   ensureV70WorkerReturnSchema(sqlite);
   ensureV71ComposerQueueSchema(sqlite);
   ensureV72WorkerCorrectionsSchema(sqlite);
+  ensureV73ConversationPrContextSchema(sqlite);
 }
