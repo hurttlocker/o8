@@ -1,4 +1,4 @@
-import { buildSlashCommandEntry, buildRecallPrelude, collectFocusedTranscript, excerptTranscriptEntries } from './shared';
+import { buildSlashCommandEntry, buildRecallPrelude, collectFocusedTranscript, excerptNewestFirst } from './shared';
 import type { ParsedOrchestratorSlashCommand, SlashCommandContext, SlashCommandExecutionResult } from './types';
 
 export async function handleFocusSlashCommand(
@@ -43,7 +43,7 @@ export async function handleFocusSlashCommand(
   const nextTranscript = liveMatches.length > 0 ? liveMatches : context.transcript.slice(-4);
   const preludeSections = [
     `Focused scope: ${scope}`,
-    excerptTranscriptEntries(nextTranscript, 8, 2600) || 'Live thread context unavailable.',
+    excerptNewestFirst(nextTranscript, 8, 2600) || 'Live thread context unavailable.',
   ];
   if (archiveMatches.length > 0) {
     preludeSections.push(buildRecallPrelude(scope, archiveMatches.slice(0, 2)));

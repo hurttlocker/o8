@@ -10,12 +10,12 @@ import {
 import type { OrchestratorSendHandle } from '../useOrchestratorStream';
 import type { ThoughtsAttachedImage } from './useThoughtsComposerAttachments';
 import type { ComposerQueuePayload } from '@/lib/orchestrator/composer-queue-types';
-import { COMPOSER_STEER_UNAVAILABLE_REASON } from '@/lib/orchestrator/composer-queue-types';
 import { useDurableComposerQueue } from './useDurableComposerQueue';
 
 interface UseDefaultComposerSendBufferOptions {
   active: boolean;
   backend: string;
+  capabilityBackend?: string;
   busy: boolean;
   threadId: string | null;
   repoPath: string | null;
@@ -36,6 +36,7 @@ interface UseDefaultComposerSendBufferOptions {
 export function useDefaultComposerSendBuffer({
   active,
   backend,
+  capabilityBackend = backend,
   busy,
   threadId,
   repoPath,
@@ -68,7 +69,7 @@ export function useDefaultComposerSendBuffer({
     return () => { queueOwnerRef.current = null; };
   }, [repoPath, threadId]);
   const imagesRef = useRef(attachedImages); imagesRef.current = attachedImages;
-  const durable = useDurableComposerQueue(active && threadId && repoPath ? { repoPath, threadId } : null, busy);
+  const durable = useDurableComposerQueue(active && threadId && repoPath ? { repoPath, threadId } : null, busy, capabilityBackend);
   const restoreDraft = useCallback((text: string, images: ComposerSendImage[]) => {
     setInput(text);
     latestInputRef.current = text;
@@ -97,7 +98,7 @@ export function useDefaultComposerSendBuffer({
     scopeRef.current = { threadId, repoPath };
   }, [clearSendBuffer, repoPath, threadId]);
 
-  const handleSend = useCallback(() => {
+  const submit = useCallback((intent: 'send-next' | 'steer-now') => {
     if (savingRef.current) return;
     const draft = latestInputRef.current;
     const text = latestInputRef.current.trim() || (attachedImages.length > 0 ? '[Image attached]' : '');
@@ -132,7 +133,7 @@ export function useDefaultComposerSendBuffer({
       setSaving(true);
       void (async () => {
         try {
-          const confirm = await durable.enqueue({ text, images }, () => captureQueuedSend(text, images));
+          const confirm = await durable.enqueue({ text, images }, () => captureQueuedSend(text, images), intent);
           if (queueOwnerRef.current !== owner) return;
           confirm();
           if (latestInputRef.current === draft && JSON.stringify(imagesRef.current.map(image => ({ name: image.name, dataUri: image.dataUri }))) === attachmentSnapshot) {
@@ -151,7 +152,9 @@ export function useDefaultComposerSendBuffer({
     clearAttachments();
   }, [active, attachedImages, backend, busy, captureQueuedSend, clearAttachments, durable, latestInputRef, sendBuffer, sendUnbuffered, setInput, shouldBypass]);
 
-  const handleSteer = useCallback(() => { setAttachmentError(COMPOSER_STEER_UNAVAILABLE_REASON); }, []);
+  const handleSend = useCallback(() => submit('send-next'), [submit]);
+  const supportsSteer = durable.canSteer;
+  const handleSteer = useCallback(() => submit(supportsSteer ? 'steer-now' : 'send-next'), [supportsSteer, submit]);
   const queued = durable.items.map(item => ({
     id: item.sequence, text: item.payload.text, images: item.payload.images,
     status: item.status, reason: item.reason,

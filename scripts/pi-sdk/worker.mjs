@@ -86,6 +86,11 @@ async function command(method, params = {}) {
   if (method === 'shutdown') { if (session) { await session.abort(); session.dispose(); } return {}; }
   if (!session) throw new Error('Worker is not initialized');
   if (method === 'abort') { await session.abort(); return {}; }
+  if (method === 'steer') {
+    if (!active || !session.isStreaming) return { accepted: false };
+    await session.steer(params.message);
+    return { accepted: true };
+  }
   if (method === 'prompt') {
     if (active) throw new Error('A run is already active');
     active = true;

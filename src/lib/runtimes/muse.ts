@@ -12,7 +12,7 @@ museRuntime.launch = async opts => {
     clientMutationId: opts.clientMutationId, laneId: opts.laneId, packetId: opts.packetId,
     model: opts.model, effort: opts.effort, executionPolicy: opts.executionPolicy, controlledTask: opts.controlledTask,
     runtimeConfig: opts.workMode ? { workMode: opts.workMode } : undefined });
-  return { ok: result.ok, note: result.note, sessionKey: result.surfaceId };
+  return { ok: result.ok, note: result.note, sessionKey: result.surfaceId, sideEffect: result.sideEffect };
 };
 
 registerOwnedSessionLifecycle({ ...museOwnedAdapter, commandLabel: 'Muse Code', store: museOwnedStore });

@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { FileText } from './lucide-shims';
 import { DesktopMediaImage } from './DesktopMediaAttachment';
 import { ttsEngine, type TTSEngineState } from '@/lib/tts/engine';
@@ -40,6 +40,7 @@ import {
 } from '@/lib/orchestrator/store';
 
 interface DesktopAgentMessageProps {
+  userDelivery?: ReactNode;
   entry: MobileTranscriptEntry;
   isLast?: boolean;
   /** True only for the in-flight assistant message — drives the smooth
@@ -182,6 +183,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onRunInTerminal,
   onRetryDelivery,
   visualizations,
+  userDelivery,
 }: DesktopAgentMessageProps) {
   const isUser = entry.role === 'user';
   // Sanitize regex chain runs on every render unless memoized — heavy on
@@ -444,6 +446,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
           </div>
         ) : null}
         {designDrawContext ? <DesignDrawContextCard context={designDrawContext} /> : null}
+        {userDelivery}
         {renderMetaRow('flex-end')}
       </div>
     );

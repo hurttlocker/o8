@@ -402,6 +402,7 @@ export function createO8Backend(deps: O8BackendDeps = {}): OrchestratorBackend {
   return {
     id: 'o8',
     label: 'o8',
+    get liveSteer() { return blocker() ? undefined : pi.liveSteer; },
     peekSession(repoPath, agent, threadId): OrchestratorSessionInfo | null {
       if (!blocker()) return pi.peekSession(repoPath, agent, threadId);
       const sessionName = o8SessionName(repoPath, threadId);

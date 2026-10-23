@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { listDeclarativeRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import type { OwnedRunRecord, OwnedSessionRecord } from './types';
 
 const { nativeProbe, platformProbe, markerProbe } = vi.hoisted(() => ({
@@ -32,6 +33,18 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe.skipIf(process.platform === 'win32')('owned identity source selection', () => {
+  it.each(['codex', 'claude-code', 'gemini', 'opencode', 'cursor', 'prime-agent', 'muse', ...listDeclarativeRuntimes()])(
+    'captures and holds a changed packet identity for detached %s', async (runtimeId) => {
+      const identity = { version: 1, platform: process.platform, bootId: 'boot', startId: 'unit-start' };
+      platformProbe.mockResolvedValue({ state: 'live', identity });
+      const { run, session } = fixture();
+      await captureOwnedRunIdentity(session, runtimeId, run);
+      expect(run).toMatchObject({ processIdentityRequired: true, processIdentity: identity,
+        processIdentitySource: process.platform === 'darwin' ? 'ps' : 'platform' });
+      platformProbe.mockResolvedValue({ state: 'live', identity: { ...identity, startId: 'reused-pid' } });
+      await expect(assertOwnedSessionProcessIdentity(session, runtimeId)).rejects.toThrow('identity is mismatch');
+    });
+
   it('keeps a self-launched run legacy and warns once when no capture source works', async () => {
     platformProbe.mockResolvedValue({ state: 'unknown', detail: 'process start time unavailable' });
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
