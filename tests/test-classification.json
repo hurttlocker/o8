@@ -927,6 +927,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/process-identity.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
       "reasons": [
         "child-process",
@@ -2677,6 +2683,12 @@
       ]
     },
     {
+      "path": "tests/fixtures/worktree-publication-child.test.ts",
+      "reasons": [
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/fixtures/worktree-side-merge-child.test.ts",
       "reasons": [
         "worktree"
@@ -3897,6 +3909,16 @@
       ]
     },
     {
+      "path": "tests/owned-codex-restart-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-codex-resume-pinning-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3913,6 +3935,14 @@
     },
     {
       "path": "tests/owned-marker-process-proof-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-process-identity-real-path.test.ts",
       "reasons": [
         "child-process",
         "process-signal",
