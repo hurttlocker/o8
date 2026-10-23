@@ -1837,6 +1837,15 @@
       ]
     },
     {
+      "path": "tests/claude-linux-cwd-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/cli-chat-effort-real-path.test.ts",
       "reasons": [
         "executable-fixture",

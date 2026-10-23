@@ -11,6 +11,7 @@ import { useTerminalMode } from '@/components/desktop/workspace-terminal/use-ter
 import { useOutsideWorkerSplitMount } from '@/components/desktop/workspace-terminal/use-outside-worker-split-mount';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
+import { workerTabThreadTitle } from '@/components/desktop/workspace-terminal/worker-pane-chrome';
 import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
@@ -203,6 +204,12 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       controller.visibleTabs.map((tab) => ({
         id: tab.id,
         label: tab.label ?? '',
+        labelSource: tab.labelSource,
+        llmSummary: workerTabThreadTitle(tab),
+        orchestrationPacket: tab.orchestrationPacket ? {
+          title: tab.orchestrationPacket.title,
+          branchTarget: tab.orchestrationPacket.branchTarget,
+        } : undefined,
         kind: tab.kind,
         runtime: tab.kind === 'orchestrator'
           ? (tab.singleRuntime ?? 'claude-code')
