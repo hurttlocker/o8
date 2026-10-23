@@ -110,7 +110,7 @@ export function childEnvironmentContext(env: Record<string, string | undefined> 
 export function refreshChildEnvironment(env?: Record<string, string | undefined>): ReturnType<typeof resolvedEnvironment> {
   const context = childEnvironmentContext(env);
   const result = childEnvironment({ ...context, env, inherit: env === undefined });
-  const authorized = new Set(Object.entries(result).filter(([name]) => providerCredentialName(name)).map(([, value]) => value));
+  const authorized = new Set(Object.entries(result).filter(([name]) => providerCredentialName(name)).map(([, value]) => value).filter((value): value is string => typeof value === 'string'));
   const denied = credentialMaterials({}, authorized);
   for (const [name, value] of Object.entries(context?.transport ?? {})) if (!matchesProviderCredential(value, denied)) result[name] = value;
   if (context?.brokerKey) { result.O8_MASTER_KEY = context.brokerKey; contexts.get(result)!.brokerKey = context.brokerKey; }
