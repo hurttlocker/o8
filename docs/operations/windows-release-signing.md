@@ -11,7 +11,7 @@ uses `Get-AuthenticodeSignature` to fail unless every installer is valid.
    validation, and create a certificate profile.
 2. Create an application registration with permission to sign through that
    certificate profile.
-3. Add these encrypted GitHub Actions secrets to `hurttlocker/o8`:
+3. Add these encrypted GitHub Actions secrets to `o8-run/o8`:
 
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`

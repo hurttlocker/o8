@@ -55,6 +55,11 @@ export async function POST(request: Request) {
     }, 400);
   }
   const body = parsed ?? {};
+  for (const field of ['checkNow', 'checkOnly']) {
+    if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+      return response({ ok: false, error: { code: 'invalid_request', message: `${field} must be boolean.` } }, 400);
+    }
+  }
   if (body.force !== undefined && typeof body.force !== 'boolean') {
     return response({
       ok: false,
@@ -63,10 +68,19 @@ export async function POST(request: Request) {
   }
 
   const force = body.force === true;
-  if (!await ensureFreshUpdateCheck()) return response({ ok: false, requested: false,
+  if (!await ensureFreshUpdateCheck(body.checkNow === true || body.checkOnly === true)) return response({ ok: false, requested: false,
     error: { code: 'update_check_unavailable', message: 'A fresh native updater check did not finish within 25 seconds.', ...UPDATE_RETRY },
     state: getAppUpdateState() }, 503);
   const state = getAppUpdateState();
+  if (body.checkOnly === true) {
+    const failed = state.check.outcome === 'failed' || state.check.outcome === 'never';
+    return response({ ok: !failed, requested: false, state,
+      result: { code: `check_${state.check.outcome}` },
+      message: failed ? state.check.error ?? 'The native updater check failed.'
+        : state.updatePending ? `Update ${state.version} is ready.` : 'o8 is up to date.',
+      ...(failed ? { error: { code: state.check.errorCode ?? 'update_check_failed', message: state.check.error ?? 'The native updater check failed.' } } : {}),
+    }, failed ? 409 : 200);
+  }
   if (!state.updatePending) {
     if (state.check.outcome === 'current') {
       return response({

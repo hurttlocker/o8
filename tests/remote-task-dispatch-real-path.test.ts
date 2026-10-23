@@ -140,7 +140,7 @@ describe('remote placement through ordinary authenticated task routes', () => {
       .toMatchObject({ runtime: 'cloud', workerRouting: { requestedEffort: 'medium', selectedEffort: 'medium' } });
     const response = await run(taskId);
     const body = await response.json();
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(body)).toBe(200);
     expect(body.ok, body.note).toBe(true);
     expect(body.workerRouting).toMatchObject({ selectedRuntime: 'cloud', selectedModel: 'gpt-6.1-sol', selectedEffort: 'medium' });
     expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === taskId))

@@ -99,7 +99,7 @@ No approval, merge, dispatch or persistent-session backend is part of S2.
 ## Provenance
 
 Authority boundary, build order and acceptance criteria:
-https://github.com/hurttlocker/o8/issues/3365
+https://github.com/o8-run/o8/issues/3365
 
 The TSP protocol and SDK are maintained upstream:
 https://github.com/stencil-hq/tern-sdk

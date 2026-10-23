@@ -1,5 +1,6 @@
 import { signalBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { timestampMillis } from '@/lib/util/relative-age';
+import { assertOwnedSessionProcessIdentity } from './process-identity';
 
 import {
   archiveOwnedSessionDir,
@@ -230,6 +231,9 @@ export function createFleetComputer({
       }
       return true;
     }
+    // Orphan sweeps also load raw legacy records. Never archive or signal an
+    // unidentified packet survivor, even when it has no current lane owner.
+    await assertOwnedSessionProcessIdentity(session, runtimeId);
     const costLine = await runController.readCostLine(activeRun);
     const orphanedAt = nowIso();
     let stopFailed = false;

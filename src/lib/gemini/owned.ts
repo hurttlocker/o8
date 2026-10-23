@@ -49,6 +49,7 @@ export type OwnedGeminiLaunchResponse = {
   runtime: 'gemini';
   surfaceId: string;
   note: string;
+  sideEffect?: 'none' | 'unknown';
 };
 
 type OwnedReviewDisposition = 'watching' | 'resolved';
@@ -650,6 +651,7 @@ export async function launchOwnedGeminiSession(
     runtime: 'gemini',
     surfaceId: result.surfaceId,
     note: result.note,
+    sideEffect: result.sideEffect,
   };
 }
 

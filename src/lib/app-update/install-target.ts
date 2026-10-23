@@ -29,7 +29,7 @@ export type UpdateAction =
   | { kind: 'restart' }
   | { kind: 'download'; url: string };
 
-const RELEASES_BASE = 'https://github.com/hurttlocker/o8/releases';
+const RELEASES_BASE = 'https://github.com/o8-run/o8/releases';
 
 export const RELEASES_LATEST_URL = `${RELEASES_BASE}/latest`;
 

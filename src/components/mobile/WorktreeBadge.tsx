@@ -4,7 +4,7 @@
  * Shows: branch name, dirty file count, conflict warning.
  * Designed to be compact — fits inside the existing agent pill layout.
  *
- * @see https://github.com/hurttlocker/o8/issues/67
+ * @see https://github.com/o8-run/o8/issues/67
  */
 
 import { memo } from 'react';

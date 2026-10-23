@@ -13,6 +13,11 @@ export function withOwnedActionGuard<T>(check: ActionGuard, action: () => Promis
   return actionGuard.run(check, action);
 }
 
+/** Assert only the surrounding action guard, including before lane attachment. */
+export function assertOwnedActionGuard(): void {
+  actionGuard.getStore()?.(null);
+}
+
 /** An explicit correction may continue only the exact run the operator selected. */
 export function withOwnedActionAdmission<T>(input: Admission, action: () => Promise<T>): Promise<T> {
   return admission.run(input, action);

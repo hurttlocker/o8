@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -52,7 +53,7 @@ function branchCandidates(target: PostMergeCleanupTarget) {
 
 async function localBranchExists(repoPath: string, branch: string) {
   try {
-    await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+    await execFileAsync(resolveGitBinary(), ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
       windowsHide: true,
       cwd: repoPath,
       timeout: 5000,
@@ -66,7 +67,7 @@ async function localBranchExists(repoPath: string, branch: string) {
 async function canInspectBranches(repoPath: string) {
   if (!existsSync(repoPath)) return false;
   try {
-    await execFileAsync('git', ['rev-parse', '--git-dir'], {
+    await execFileAsync(resolveGitBinary(), ['rev-parse', '--git-dir'], {
       windowsHide: true,
       cwd: repoPath,
       timeout: 5000,
@@ -85,7 +86,7 @@ async function deleteBranch(repoPath: string, branch: string) {
   }
 
   try {
-    await execFileAsync('git', ['branch', '-d', branch], {
+    await execFileAsync(resolveGitBinary(), ['branch', '-d', branch], {
       windowsHide: true,
       cwd: repoPath,
       timeout: 10_000,
@@ -117,7 +118,7 @@ async function deleteBranches(target: PostMergeCleanupTarget) {
 
 async function pruneWorktrees(repoRoot: string) {
   try {
-    await execFileAsync('git', ['worktree', 'prune'], {
+    await execFileAsync(resolveGitBinary(), ['worktree', 'prune'], {
       windowsHide: true,
       cwd: repoRoot,
       timeout: 10_000,
@@ -183,7 +184,7 @@ export async function capturePostMergeCleanupTarget(lane: CleanupLane): Promise<
   const worktreePath = lane.worktreePath?.trim();
   if (worktreePath) {
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      const { stdout } = await execFileAsync(resolveGitBinary(), ['rev-parse', '--abbrev-ref', 'HEAD'], {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 5000,

@@ -92,13 +92,13 @@ export function creditsForSubjects(subjects, lookups) {
 }
 
 // CLI: subjects on stdin, `<pull>\t<login>` lines on stdout.
-//   node scripts/lib/contributor-credits.mjs --repo hurttlocker/o8 --since 2026-10-01
+//   node scripts/lib/contributor-credits.mjs --repo o8-run/o8 --since 2026-10-01
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const option = (name) => {
     const index = process.argv.indexOf(name);
     return index === -1 ? undefined : process.argv[index + 1];
   };
-  const repo = option('--repo') ?? 'hurttlocker/o8';
+  const repo = option('--repo') ?? 'o8-run/o8';
   const since = option('--since');
   let input = '';
   process.stdin.setEncoding('utf8');

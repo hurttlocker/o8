@@ -168,7 +168,7 @@ export function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): Parsed
   const providerFailed = done?.isError === true || terminalMissing;
 
   return {
-    threadId: done?.sessionId,
+    threadId: done?.sessionId ?? parser.getState().sessionId ?? undefined,
     entries,
     outcome: providerFailed ? 'failed' : done ? 'finished' : 'running',
     completedTurn: Boolean(done && !providerFailed),

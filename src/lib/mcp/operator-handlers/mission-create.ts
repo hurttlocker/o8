@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { McpInputError } from '@/lib/mcp/api-error';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { createMission, createMissionInline, dispatchMission } from '@/lib/mcp/operator-mission-tools';
@@ -10,6 +11,10 @@ import { parseExistingBranchPolicy, parseWorkerIntent } from './mission-input';
 export async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repoPath = requiredString(args, 'repoPath');
+    if (args.idempotencyKey !== undefined && (typeof args.idempotencyKey !== 'string' || !args.idempotencyKey.trim())) {
+      throw new McpInputError('idempotencyKey must be a non-empty string.');
+    }
+    const idempotencyKey = optionalString(args, 'idempotencyKey') || undefined;
     const runtime = parseMissionRuntime(args.runtime);
     const workerIntent = parseWorkerIntent(args.workerIntent);
     const requestedProvider = parseWorkerProvider(args.requestedProvider);
@@ -42,9 +47,12 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     if (!candidateMode.ok) return textResult(candidateMode.error, true);
     const { comparisonModels, qualitySearch } = candidateMode;
     if (inlineIssues) {
-      // #453 — Auto-assign synthetic numbers when not provided. Centralized so
-      // every inline creator uses the same collision-resistant allocator.
-      const syntheticNumbers = nextInlineIssueNumbers(inlineIssues.length);
+      // A caller retry must send the same canonical body even in a new MCP process.
+      // Keep the existing random allocation for separate unkeyed creations.
+      const syntheticNumbers = idempotencyKey
+        ? inlineIssues.map((_, index) => 90_000_000_000 + Number.parseInt(createHash('sha256')
+          .update(JSON.stringify([idempotencyKey, index])).digest('hex').slice(0, 12), 16))
+        : nextInlineIssueNumbers(inlineIssues.length);
       const parsed = inlineIssues.map((entry, index) => {
         if (typeof entry !== 'object' || entry === null) throw new McpInputError('Each inline issue must be an object.');
         const e = entry as Record<string, unknown>;
@@ -55,6 +63,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       });
       const createResult = await createMissionInline({
         issues_inline: parsed,
+        idempotencyKey,
         repoPath,
         projectId,
         runtime, origin,
@@ -72,7 +81,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         qualitySearch, sealedTaskContract,
         orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
       });
-      if (shouldDispatch && createResult && !('error' in createResult)) {
+      if (shouldDispatch && createResult && !('error' in createResult) && !('replayed' in createResult && createResult.replayed === true)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
         // combined create+dispatch path often exceeds the MCP client's
         // tool-call timeout (~60s), which closes the transport while the
@@ -93,6 +102,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
 
     const createResult = await createMission({
       issues: parseIssueList(args.issues),
+      idempotencyKey,
       repoPath,
       projectId,
       runtime, origin,
@@ -110,7 +120,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       qualitySearch,
       orchestratorThreadId, orchestratorTurnId, parentWorkspaceId, caller, readOnly,
     });
-    if (shouldDispatch && createResult && !('error' in createResult)) {
+    if (shouldDispatch && createResult && !('error' in createResult) && !('replayed' in createResult && createResult.replayed === true)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
         console.error('[mcp-operator] background dispatch failed', errorText(err));
       });

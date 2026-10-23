@@ -9,7 +9,7 @@
     "url": "https://o8.run"
   },
   "homepage": "https://o8.run",
-  "repository": "https://github.com/hurttlocker/o8",
+  "repository": "https://github.com/o8-run/o8",
   "license": "MIT",
   "keywords": [
     "coding agents",
@@ -33,7 +33,7 @@
           "Start local repository work"
         ],
         "websiteURL": "https://o8.run",
-        "supportURL": "https://github.com/hurttlocker/o8/issues",
+        "supportURL": "https://github.com/o8-run/o8/issues",
         "privacyPolicyURL": "https://o8.run/privacy",
         "termsOfServiceURL": "https://o8.run/terms",
         "defaultPrompt": [

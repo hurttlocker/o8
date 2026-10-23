@@ -28,7 +28,7 @@ function presenceFile(repo: string, identity: string): string {
 }
 
 function options(repo: string, identity: string) {
-  return { cwd: repo, env: { O8_AGENT_ID: identity }, ppid: 300 };
+  return { cwd: repo, env: { O8_AGENT_ID: identity } };
 }
 
 afterEach(() => {
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('team CLI session identity', () => {
-  it('prefers explicit and packet bindings, ignores terminal ids, and walks stable ancestry', () => {
+  it('prefers explicit and packet bindings and supports runtime session ids', () => {
     expect(resolveAgentIdentity({
       env: {
         O8_AGENT_ID: 'explicit-session',
@@ -55,15 +55,15 @@ describe('team CLI session identity', () => {
       env: { CLAUDE_CODE_SESSION_ID: 'claude-session' },
     })).toBe('claude-session');
 
-    const rows = new Map([
-      [300, { pid: 300, ppid: 200, command: '/bin/sh -lc o8 team status working' }],
-      [200, { pid: 200, ppid: 100, command: '/usr/local/bin/agent-runtime' }],
-    ]);
     expect(resolveAgentIdentity({
-      env: { TERM_SESSION_ID: 'shared-terminal' },
-      ppid: 300,
-      readProcess: (pid) => rows.get(pid) ?? null,
-    })).toBe('pid-200');
+      env: { CODEX_SESSION_ID: ' session ', CODEX_THREAD_ID: 'thread' },
+    })).toBe('session');
+    expect(resolveAgentIdentity({
+      env: { CODEX_SESSION_ID: ' ', CODEX_THREAD_ID: ' thread ' },
+    })).toBe('thread');
+    expect(() => resolveAgentIdentity({
+      env: { TERM_SESSION_ID: 'shared-terminal', AI_AGENT: 'shared-host' },
+    })).toThrow('Set O8_AGENT_ID');
   });
 
   it('keeps the first agent byte-unchanged when a second agent writes status in the same checkout', () => {
@@ -140,7 +140,7 @@ describe('team CLI session identity', () => {
     const repo = createRepo();
     let caught: unknown;
     try {
-      runTeam(jsonMode, 'status', ['unresolved'], { cwd: repo, env: {}, ppid: 1 });
+      runTeam(jsonMode, 'status', ['unresolved'], { cwd: repo, env: {} });
     } catch (error) {
       caught = error;
     }

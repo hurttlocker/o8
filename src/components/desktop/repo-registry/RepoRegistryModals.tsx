@@ -70,8 +70,8 @@ function useExperimentalGeminiFlag(): boolean {
 }
 
 // Normalise a remote URL to a friendly "owner/repo" label.
-// https://github.com/hurttlocker/o8.git → hurttlocker/o8
-// git@github.com:hurttlocker/o8.git     → hurttlocker/o8
+// https://github.com/o8-run/o8.git → o8-run/o8
+// git@github.com:o8-run/o8.git     → o8-run/o8
 function prettyRemoteLabel(remoteUrl: string): string {
   const trimmed = remoteUrl.trim().replace(/\.git$/, '');
   const sshMatch = trimmed.match(/git@([^:]+):(.+)$/);

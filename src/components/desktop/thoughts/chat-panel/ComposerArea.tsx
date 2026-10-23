@@ -33,7 +33,6 @@ import { useComposerSelectorState } from '../composer-selector/useComposerSelect
 import { ComposerContextRow } from './ComposerContextRow';
 import { ComposerPermissionChip, WORKSPACE_FULL_ACCESS_DETAIL } from './ComposerPermissionChip';
 import { ComposerFileTags } from './ComposerFileTags';
-import { ComposerQueueActions } from './ComposerQueueActions';
 import { WorkerCorrections } from './WorkerCorrections';
 import { addComposerFileReference, readComposerFileReferences, writeComposerFileReferences } from './composer-file-references';
 const subscribeToComposerSelectorFlag = () => () => undefined;
@@ -105,6 +104,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   contextLocationSlot,
   composerLeadingExtras,
   onSteer,
+  canSteerLive = false,
   queueSaving = false,
   sendBufferStatus,
   promptStash,
@@ -192,10 +192,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   const isDisabled = inputDisabled || (!acceptsDirectInput && !targetAgentExists);
   useComposerImageBridge(composerCenterRef, activeComposer, isDisabled, JSON.stringify([repoPath, selectedRepoPath, sessionRulesThreadId, composerModeStorageId]), attachedImages, onUploadDiskFiles);
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
-  const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
+  const isWorkingLocked = isOrchestratorMode && (displayWaiting || runningTools.length > 0);
+  const [preferredSendMode, setPreferredSendMode] = useState<'Steer' | 'Queue'>('Steer');
+  const sendMode = canSteerLive && onSteer ? preferredSendMode : 'Queue';
+  const submit = isWorkingLocked && sendMode === 'Steer' ? onSteer! : onSubmit;
+  const toggleSendMode = () => setPreferredSendMode(current => current === 'Steer' ? 'Queue' : 'Steer');
   let composerPlaceholder = `Message ${activeTargetLabel}…`;
   if (isWorkingLocked) {
-    composerPlaceholder = 'Queue for next turn';
+    composerPlaceholder = sendMode === 'Steer' ? 'Steer the agent…' : 'Queue for the next turn…';
   } else if (isOrchestratorMode) {
     // Cursor-parity (Q 2026-07-17): the placeholder teaches the active mode;
     // the chip beside "+" is the persistent indicator.
@@ -575,10 +579,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
-              // Steering requires an actual live-runtime acknowledgement.
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.shiftKey && isWorkingLocked && canSteerLive) {
+                event.preventDefault(); toggleSendMode(); return;
+              }
+              // Keep the direct steering shortcut, gated by the same capability.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
-                if ((!input.trim() && attachedImages.length === 0) || !onSteer) return;
+                if ((!input.trim() && attachedImages.length === 0) || !canSteerLive || !onSteer || queueSaving) return;
                 onSteer();
                 if (event.currentTarget) {
                   event.currentTarget.style.height = 'auto';
@@ -589,7 +596,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 event.preventDefault();
                 if (isWorkingLocked) {
                   if ((!input.trim() && attachedImages.length === 0) || queueSaving) return;
-                  onSubmit();
+                  submit();
                   if (event.currentTarget) {
                     event.currentTarget.style.height = 'auto';
                   }
@@ -659,7 +666,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               overflowWrap: 'anywhere',
             }}
           />
-          {!footerOverride && isOrchestratorMode && isWorkingLocked ? <ComposerQueueActions canSend={Boolean(input.trim() || attachedImages.length)} saving={queueSaving} onSend={onSubmit} /> : null}
           {footerOverride}
           {/* Keep the chat's Live owner mounted when the visible footer changes. */}
           {footerOverride != null && !voiceControl ? null : <ComposerPopoverVisibilityContext.Provider value={footerOverride == null}>
@@ -671,7 +677,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 preEnhanceInput={preEnhanceInput}
                 onEnhance={onEnhance}
                 onUndoEnhance={onUndoEnhance}
-                onSubmit={onSubmit}
+                onSubmit={submit}
+                sendDisabled={queueSaving}
                 modelLabel={modelLabel}
                 modelId={isOrchestratorMode ? selectorModelId : undefined}
                 onModelChange={isOrchestratorMode ? selectorControls.onModelChange : undefined}
@@ -683,7 +690,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 sessionRulesThreadId={sessionRulesThreadId}
                 repoLabel={null}
                 displayMessagesCount={displayMessagesCount}
-                working={isOrchestratorMode && displayWaiting}
+                working={isOrchestratorMode && displayWaiting && !input.trim() && attachedImages.length === 0}
                 onStop={isOrchestratorMode ? onStop : undefined}
                 onUploadDiskFiles={onUploadDiskFiles}
                 composerMode={composerMode}
@@ -694,7 +701,9 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 workspaceTargets={workspaceTargets}
                 selectedRepoPath={selectedRepoPath}
                 onSelectRepoPath={onSelectRepoPath}
-                inlineLeadingExtras={composerLeadingExtras}
+                inlineLeadingExtras={composerLeadingExtras || (isWorkingLocked && canSteerLive && onSteer) ? <>{composerLeadingExtras}{isWorkingLocked && canSteerLive && onSteer ? <button type="button"
+                  aria-label={`Message mode: ${sendMode}`} title={`Switch to ${sendMode === 'Steer' ? 'Queue' : 'Steer'} (Cmd/Ctrl+Shift+Enter)`}
+                  onClick={toggleSendMode} style={{ border: 0, padding: 0, background: 'transparent', color: 'var(--t-text-muted)', font: 'inherit', fontSize: 11, fontWeight: 300, cursor: 'pointer' }}>{sendMode}</button> : null}</> : undefined}
                 managedVoiceControl={voiceControl}
                 permissionControl={isOrchestratorMode && permissionMode && onPermissionModeChange
                   ? <ComposerPermissionChip mode={permissionMode} onChange={onPermissionModeChange}

@@ -1,12 +1,12 @@
 # Governed task evaluation
 
-Status: protocol [#2290](https://github.com/hurttlocker/o8/pull/2290) is merged under [#2289](https://github.com/hurttlocker/o8/issues/2289). The formal paired pilot in [#2288](https://github.com/hurttlocker/o8/issues/2288) remains deliberately deferred for capacity. [#2296](https://github.com/hurttlocker/o8/issues/2296) is a separate incremental real-work dogfood round; no sample has started. This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
+Status: protocol [#2290](https://github.com/o8-run/o8/pull/2290) is merged under [#2289](https://github.com/o8-run/o8/issues/2289). The formal paired pilot in [#2288](https://github.com/o8-run/o8/issues/2288) remains deliberately deferred for capacity. [#2296](https://github.com/o8-run/o8/issues/2296) is a separate incremental real-work dogfood round; no sample has started. This protocol does not authorize a run, release, restart, model trial, policy change, or product change.
 
 ## Purpose and boundary
 
 The formal paired pilot asks whether the existing o8 workflow helps an operator finish correct, acceptable work with less active operator effort. It compares final task completion and operator effort. Initial-patch quality is a diagnostic, not the product claim.
 
-[#1684](https://github.com/hurttlocker/o8/issues/1684) remains open and parked. Its first-diff research, original rule, and recorded results stay intact. The fresh tasks in this pilot are not its historical recurrence set. A future intervention study must declare its own question and protocol.
+[#1684](https://github.com/o8-run/o8/issues/1684) remains open and parked. Its first-diff research, original rule, and recorded results stay intact. The fresh tasks in this pilot are not its historical recurrence set. A future intervention study must declare its own question and protocol.
 
 The formal paired pilot is a bounded decision aid, not a test of statistical significance or a population claim. It covers one governed task loop across the two tested runtime families. It does not establish multi-mission or fleet throughput, remote-operation benefit, or a general effect across tasks, operators, or runtimes.
 
@@ -25,11 +25,11 @@ Use each task's normal scope, worker, review, and delivery checks, and reuse the
 
 Review the first three attempts together, or stop earlier for a material failure or capacity limit. A partial round preserves its receipts but does not prove a controlled effect. Fix findings through the normal issue and pull-request process between packets, record the change, and do not rewrite earlier outcomes or pool changed versions into a causal claim.
 
-This round records reliability and friction on the observed tasks and guides fixes. It does not establish savings against another workflow or improve [#1684](https://github.com/hurttlocker/o8/issues/1684)'s first-patch result.
+This round records reliability and friction on the observed tasks and guides fixes. It does not establish savings against another workflow or improve [#1684](https://github.com/o8-run/o8/issues/1684)'s first-patch result.
 
 ## Comparison design
 
-This and the remaining sections define only the formal [#2288](https://github.com/hurttlocker/o8/issues/2288) pilot. Its sealed manifest, fixed workflow, and decision rubric do not restrict normal fixes between #2296 packets.
+This and the remaining sections define only the formal [#2288](https://github.com/o8-run/o8/issues/2288) pilot. Its sealed manifest, fixed workflow, and decision rubric do not restrict normal fixes between #2296 packets.
 
 Use three fresh tasks and two established runtime families. Each task and runtime combination is one pair, for six pairs and twelve initial workflow runs.
 

@@ -88,7 +88,7 @@ export const TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
-        repo: { type: 'string', description: 'Repository in owner/name format (e.g. hurttlocker/o8)' },
+        repo: { type: 'string', description: 'Repository in owner/name format (e.g. o8-run/o8)' },
         title: { type: 'string', description: 'Issue title' },
         body: { type: 'string', description: 'Issue body in markdown' },
         labels: { type: 'array', items: { type: 'string' }, description: 'Optional labels' },

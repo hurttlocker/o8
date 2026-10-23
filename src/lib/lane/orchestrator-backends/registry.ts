@@ -5,7 +5,7 @@
  * `OrchestratorBackend` implementation living in its own sibling file
  * (`claude.ts`, `codex.ts`, `openclaw.ts`, `acp.ts`) — registered here in
  * `BACKENDS`. The Codex/Claude delegates call straight into the existing,
- * UNMODIFIED `orchestrator-session.ts` / `codex-orchestrator-session.ts`
+ * `orchestrator-session.ts` / `codex-orchestrator-session.ts`
  * modules. Adding a backend is one new file + one entry in `BACKENDS`.
  *
  * Orchestrator call sites use `getActiveOrchestratorBackend()` instead of
@@ -15,7 +15,7 @@
 
 import { resolveOrchestratorBackendId, resolveReviewerBackendId } from './active-backend';
 import { claudeBackend } from './claude';
-import { codexBackend } from './codex';
+import { codexBackend, codexLiveSteerForThread } from './codex';
 import { openclawBackend } from './openclaw';
 import { acpBackend, hermesBackend, opencodeBackend } from './acp';
 import { collideBackend } from './moa';
@@ -71,8 +71,10 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
 /** The default backend — also the fallback for any unregistered id. */
 const DEFAULT_BACKEND = BACKENDS.codex!;
 
-export function getOrchestratorBackend(id: OrchestratorBackendId): OrchestratorBackend {
-  return BACKENDS[id] ?? DEFAULT_BACKEND;
+export function getOrchestratorBackend(id: OrchestratorBackendId, target?: { repoPath: string; threadId: string }): OrchestratorBackend {
+  const backend = BACKENDS[id] ?? DEFAULT_BACKEND;
+  return id === 'codex' && target
+    ? { ...backend, liveSteer: codexLiveSteerForThread(target.repoPath, target.threadId) } : backend;
 }
 
 // Active-id resolution lives in the server leaf `active-backend.ts`; billing

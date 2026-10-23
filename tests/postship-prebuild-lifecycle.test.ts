@@ -18,7 +18,13 @@ it('journals postship disposal and reuses the verified artifact across later pre
   mkdirSync(scripts, { recursive: true });
   mkdirSync(home);
   mkdirSync(path.join(repo, '.fixture'));
-  writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\no8.release.json\n');
+  writeFileSync(path.join(repo, '.gitignore'), '.next\nout\nnode_modules\n.fixture\n.o8-generated-output-store\no8.release.json\n.env*\n.claude\n');
+  const outside = path.join(root, 'sibling-checkout');
+  mkdirSync(outside);
+  writeFileSync(path.join(outside, 'keep'), 'outside sentinel');
+  mkdirSync(path.join(repo, '.claude/worktrees'), { recursive: true });
+  symlinkSync(outside, path.join(repo, '.claude/worktrees/plugin'), 'dir');
+  for (const name of ['.env', '.env.production']) writeFileSync(path.join(repo, name), 'SYNTHETIC_FIXTURE=preserve-source');
   const publicClientKey = 'pk_test_release_config_only';
   const releaseConfigPath = path.join(repo, 'o8.release.json');
   const releaseConfig = JSON.stringify({ clerkPublishableKey: publicClientKey });
@@ -60,6 +66,9 @@ it('journals postship disposal and reuses the verified artifact across later pre
     fs.mkdirSync('.next/cache', { recursive: true });
     fs.writeFileSync('.next/cache/proof.bin', 'fixture cache');
     fs.writeFileSync('.next/BUILD_ID', 'native fixture');
+    fs.mkdirSync('.next/standalone/.next/server', { recursive: true });
+    for (const name of ['.env', '.env.production']) fs.copyFileSync(name, '.next/standalone/' + name);
+    fs.writeFileSync('.next/standalone/.next/server/runtime.js', 'runtime');
     fs.appendFileSync('.fixture/compiler-calls', 'build\\n');
   `);
   for (const args of [['init', '--initial-branch=main'], ['add', '.'],
@@ -87,6 +96,10 @@ it('journals postship disposal and reuses the verified artifact across later pre
   const prebuild = [process.env.O8_PREBUILD_TEST_SCRIPT || path.join(source, 'scripts/tauri-prebuild.mjs')];
   const first = run(prebuild);
   expect(first.status, first.stderr + first.stdout).toBe(0);
+  for (const name of ['.env', '.env.production']) {
+    expect(existsSync(path.join(repo, '.next/standalone', name))).toBe(false);
+    expect(readFileSync(path.join(repo, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
+  }
   const smoke = JSON.parse(readFileSync(path.join(repo, '.fixture/profile.json'), 'utf8'));
   expect(smoke.publicClientKey).toBe(publicClientKey);
   const profile = smoke.modern as string;
@@ -190,11 +203,14 @@ it('journals postship disposal and reuses the verified artifact across later pre
   }
   const cleaned = run(postship);
   expect(cleaned.status, cleaned.stderr + cleaned.stdout).toBe(0);
+  expect(cleaned.stdout).toContain('refused=0');
   expect(existsSync(path.join(repo, '.next'))).toBe(false);
   expect(readFileSync(manifestPath, 'utf8')).toBe(originalManifest);
   expect(readFileSync(artifactPath, 'utf8')).toBe(originalArtifact);
   expect(readFileSync(releaseConfigPath, 'utf8')).toBe(releaseConfig);
   expect(readFileSync(path.join(repo, 'package.json'), 'utf8')).toContain('"name":"o8"');
+  expect(readFileSync(path.join(outside, 'keep'), 'utf8')).toBe('outside sentinel');
+  for (const name of ['.env', '.env.production']) expect(readFileSync(path.join(repo, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
   const reused = run(prebuild);
   expect(reused.status, reused.stderr + reused.stdout).toBe(0);
   expect(reused.stdout).toContain('reused verified artifact');

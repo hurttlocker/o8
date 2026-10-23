@@ -446,7 +446,7 @@ pub fn transcribe_file(path: &str) -> Result<WhisperTranscription, Transcription
         .post(&target.url)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", target.bearer))
-        .header("HTTP-Referer", "https://github.com/hurttlocker/o8")
+        .header("HTTP-Referer", "https://github.com/o8-run/o8")
         .header("X-Title", "o8")
         .timeout(request_timeout)
         .json(&body);

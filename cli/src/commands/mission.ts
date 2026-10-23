@@ -49,6 +49,7 @@ interface CreateMissionResult {
 }
 
 interface DispatchMissionResult {
+  queued?: Array<{ packetId: string; detail: string }>;
   initiated?: boolean;
   dispatched?: number;
   missionId?: string | null;
@@ -60,6 +61,7 @@ interface DispatchMissionResult {
 interface MissionStatusPacket {
   id: string;
   title?: string;
+  blockedReason?: string | null;
   status?: string;
   wave?: number;
 }
@@ -400,7 +402,7 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
     cfg,
     '/api/orchestrator/dispatch',
     { ...(missionId ? { missionId } : {}), wait, idempotencyKey: randomUUID() },
-    { timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined },
+    { timeoutMs: wait ? SLOW_MUTATION_TIMEOUT_MS : undefined, acceptQueuedAdmission: true },
   );
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
   const inProgress = res.status === 202 || result.inProgress === true || result.status === 'in_progress';
@@ -421,10 +423,13 @@ async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<num
         'result',
         inProgress
           ? 'already in progress (not dispatched twice)'
+          : result.status === 'queued'
+            ? `queued (${result.queued?.length ?? 0} packet(s)); ${wait ? 'returned before launch' : 'admitted, awaiting launch'}`
           : wait
             ? `dispatched ${result.dispatched ?? '?'} packet(s)`
             : 'initiated (track: o8 mission status)',
       ],
+      ...(result.queued ?? []).map((entry) => [entry.packetId, entry.detail] as [string, string]),
     ]);
   } else {
     printJson(payload);
@@ -506,7 +511,7 @@ async function runMissionStatus(mode: OutputMode, rest: string[]): Promise<numbe
         ['control', `${result.funnel.interventionCount ?? 0} interventions · ${result.funnel.recoveryEventCount ?? 0} recoveries`],
         ['autonomy', `${result.funnel.strictAutonomousCloseCount ?? 0} strict · ${result.funnel.governedAutonomousCloseCount ?? 0} approval-only`],
       ] as Array<[string, string]> : []),
-      ...(result.packets ?? []).map((p) => [`  · ${p.id}`, `${p.status ?? '?'} — ${p.title ?? ''}`] as [string, string]),
+      ...(result.packets ?? []).map((p) => [`  · ${p.id}`, `${p.status ?? '?'} — ${p.title ?? ''}${p.blockedReason ? ` — ${p.blockedReason}` : ''}`] as [string, string]),
     ]);
   } else {
     printJson(payload);

@@ -243,7 +243,7 @@ echo '[]'
     const args = readFileSync(ghArgs, 'utf8').trim().split('\n');
     expect(args.slice(args.indexOf('--repo'), args.indexOf('--repo') + 2)).toEqual([
       '--repo',
-      'hurttlocker/o8',
+      'o8-run/o8',
     ]);
   });
 

@@ -32,6 +32,7 @@ import {
 } from './dependency-manager-executable';
 import { dependencyCacheRoot } from './dependency-cache-root';
 import { acquireDependencyCache, type DependencyCachePolicy, type DependencyCacheRetentionReceipt } from './dependency-cache-retention';
+import { dependencyCloneLifecycleInputs } from './dependency-clone-inputs';
 
 const execFileAsync = promisify(execFile);
 
@@ -56,6 +57,7 @@ export interface DependencyInstallRecipe {
   installArgs: string[];
   lifecycleScripts: 'enabled' | 'disabled';
   gitTreeSha: string;
+  cloneLifecycleInputs?: string[];
   lockfile: { path: string; digest: string };
   inputDigests: Array<{ path: string; digest: string }>;
   localDependencyDigests: Array<{ identity: string; digest: string }>;
@@ -435,6 +437,11 @@ export async function deriveDependencyInstallRecipe(
   })));
   for (const input of inputs) assertSafeDependencyManagerConfig(input.path, input.bytes);
   const rootPackage = inputs.find((entry) => entry.path === 'package.json')!;
+  const cloneLifecycleInputs = dependencyCloneLifecycleInputs(rootPackage.bytes, tracked);
+  for (const inputPath of cloneLifecycleInputs ?? []) {
+    if (!inputPathSet.has(inputPath)) inputs.push({ path: inputPath, bytes: await regularFileBytes(workspacePath, inputPath) });
+  }
+  inputs.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   const declared = parsePackageManagerDeclaration(packageManagerField(rootPackage.bytes));
   const version = options.resolveVersion
     ? await options.resolveVersion(parsed.manager)
@@ -474,6 +481,7 @@ export async function deriveDependencyInstallRecipe(
     installArgs: parsed.args,
     lifecycleScripts,
     gitTreeSha: initialTreeSha,
+    ...(cloneLifecycleInputs === null ? {} : { cloneLifecycleInputs }),
     lockfile: { path: lockfilePath, digest: digestBytes(lockfileBytes) },
     inputDigests,
     localDependencyDigests: locals,

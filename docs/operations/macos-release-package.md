@@ -30,10 +30,10 @@ and import checks still apply.
 
 ## CPU-specific packages in development
 
-CPU delivery is off by default. [#3646](https://github.com/hurttlocker/o8/issues/3646)
+CPU delivery is off by default. [#3646](https://github.com/o8-run/o8/issues/3646)
 tracks signed-package and installed update acceptance. Intel delivery can be
 accepted separately while Apple Silicon remains on the universal package.
-[#3656](https://github.com/hurttlocker/o8/issues/3656) tracks Apple Silicon
+[#3656](https://github.com/o8-run/o8/issues/3656) tracks Apple Silicon
 installed acceptance before enabling a dedicated arm64 package.
 
 Both CPU apps come from the same final universal app. Only the four native

@@ -2,6 +2,7 @@
 
 import { Fragment, forwardRef, useRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
+import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import { ShimmerLine } from './turn-line';
@@ -73,6 +74,7 @@ export function buildMissionRenderItems(messages: MobileTranscriptEntry[]): Miss
 }
 
 interface ChatMessageListProps {
+  composerQueue?: ComposerTranscriptQueue;
   logLabel?: string;
   displayMessages: MobileTranscriptEntry[];
   threadId?: string | null;
@@ -140,6 +142,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   composeFirst = false,
   topContent,
   bottomContent,
+  composerQueue,
   turnContent,
   isOrchestratorMode = false,
   suggestedReplyMessageId,
@@ -318,6 +321,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                   repoPath={repoPath}
                   onRetryDelivery={onRetryDelivery}
                   visualizations={msg.role === 'assistant' ? visualsByIndex.get(index) : undefined}
+                  userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />}
                 />
               </div>
               {renderTaskArtifacts(index)}
@@ -339,6 +343,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
         {renderTaskArtifacts(-1)}
         {bottomContent}
+        {composerQueue ? <ComposerQueuedMessages queue={composerQueue} messages={displayMessages} /> : null}
 
         {isCompacting ? (
           <div style={{
@@ -365,7 +370,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
           // Cursor's trailing anchor (vid2 study): while the turn is live, a
           // shimmering status line sits at the bottom of the process block and
           // is pushed down as new lines land above it. Text, never a bubble.
-          <ShimmerLine style={{ alignSelf: 'flex-start' }}>Planning next moves</ShimmerLine>
+          <ShimmerLine style={{ alignSelf: 'flex-start', flexShrink: 0 }}>Planning next moves</ShimmerLine>
         ) : null}
 
         {displayWaiting && !isCompacting && !isOrchestratorMode ? (

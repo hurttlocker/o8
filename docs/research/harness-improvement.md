@@ -2,7 +2,7 @@
 
 This tooling admits supplied proposals for optional context notes, analyzes supplied probe receipts and can deterministically combine explicitly chosen proposals into an untested successor. It does not generate proposals with a model, run probes, install prompts, change component lifecycle, or establish real-work benefit. Reports are advisory data. A valid report is not approval, and a supplied digest is an identity check, not proof that a trusted verifier ran.
 
-Tracking: [offline foundation milestone](https://github.com/hurttlocker/o8/issues/3985), [proposal admission](https://github.com/hurttlocker/o8/issues/3986). The milestone has a fixed 100-point acceptance denominator. Completion of that milestone does not complete broader adaptation, release acceptance or live benefit validation.
+Tracking: [offline foundation milestone](https://github.com/o8-run/o8/issues/3985), [proposal admission](https://github.com/o8-run/o8/issues/3986). The milestone has a fixed 100-point acceptance denominator. Completion of that milestone does not complete broader adaptation, release acceptance or live benefit validation.
 
 ## Existing seams and ownership
 
@@ -83,7 +83,7 @@ Held-out comparison and operator approval are o8 constraints added to this offli
 
 ## Deterministic composition scaffolding
 
-The additional source-only milestone [#3989](https://github.com/hurttlocker/o8/issues/3989) extends the same offline entrypoint with `--compose request.json`, mutually exclusive with `--evidence`. It combines explicitly selected admitted proposals, without running a model, reading evaluation reports or choosing parents by held-out scores. This does not authenticate how an operator chose the parent IDs; operator-side leakage is outside this artifact check.
+The additional source-only milestone [#3989](https://github.com/o8-run/o8/issues/3989) extends the same offline entrypoint with `--compose request.json`, mutually exclusive with `--evidence`. It combines explicitly selected admitted proposals, without running a model, reading evaluation reports or choosing parents by held-out scores. This does not authenticate how an operator chose the parent IDs; operator-side leakage is outside this artifact check.
 
 The strict request has exactly `schema: "o8/harness-composition-request/v1"`, `parentIds` (2–20 unique admitted IDs), `maxChanges` (1–20) and `maxTextBytes` (1–160000). These are artifact-size limits, not a claim that runtime, dollar or attempt costs were measured. UTF-8 note bytes are counted across all selected changes. Existing manifest execution budgets remain unchanged and are enforced when fresh receipts are analyzed. Composition and subsequent evaluation costs must be included in that later all-in ledger; this command invents no zero-cost receipt.
 

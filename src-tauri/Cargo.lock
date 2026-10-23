@@ -6490,8 +6490,6 @@ dependencies = [
 [[package]]
 name = "tauri-codegen"
 version = "2.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08279169ff42f8fc45a1dbc9dcae888893ba95288142e5880c59b93a26d2cfc5"
 dependencies = [
  "base64 0.22.1",
  "brotli",

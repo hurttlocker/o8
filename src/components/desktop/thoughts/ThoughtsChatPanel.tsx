@@ -1820,6 +1820,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
 
   const { sendBuffer, durable, handleSend: handleComposerSend, handleSteer, saving: queueSaving, attachmentError } = useDefaultComposerSendBuffer({
     active: isOrchestratorMode, backend: orchestratorBackend,
+    capabilityBackend: collideEnabled && resolveComposerExecutionMode(composerMode, soloOrchestrator) !== 'single' ? 'collide' : orchestratorBackend,
     busy: displayWaiting,
     threadId,
     repoPath: resolvedRepoPath,
@@ -1981,6 +1982,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
             ref={chatEndRef}
             displayMessages={displayMessages}
             displayWaiting={displayWaiting}
+            composerQueue={{ items: durable.transcriptItems, canSteer: durable.canSteer, onSteer: id => { void durable.steer(id); }, onCancel: sendBuffer.cancelQueued, removing: durable.removing, promoting: durable.promoting, steerableIds: durable.steerableIds }}
             repoPath={resolvedRepoPath}
             activeTargetLabel={activeTargetLabel}
             activeTargetColor={activeTargetColor}
@@ -2067,16 +2069,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, ThoughtsCha
         onUndoEnhance={handleUndoEnhance}
         onSubmit={handleComposerSend}
         onStop={sendBuffer.stopOrUndo}
-        onSteer={handleSteer} queueSaving={queueSaving}
-        sendBufferStatus={isOrchestratorMode || attachmentError ? (
-          <ComposerSendBufferStatus
-            attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}
-            undoSequence={sendBuffer.undoSequence}
-            queued={isOrchestratorMode ? sendBuffer.queued : []}
-            onUndo={sendBuffer.stopOrUndo}
-            onCancelQueued={sendBuffer.cancelQueued}
-          />
-        ) : null}
+        onSteer={handleSteer} canSteerLive={durable.canSteer} queueSaving={queueSaving}
+        sendBufferStatus={<ComposerSendBufferStatus attachmentError={attachmentError} undoArmed={isOrchestratorMode && sendBuffer.undoArmed}
+          undoSequence={sendBuffer.undoSequence} queued={[]} onUndo={sendBuffer.stopOrUndo} onCancelQueued={sendBuffer.cancelQueued} />}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? activeBackendLabel ?? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
         modelId={isOrchestratorMode ? orchestratorModel : undefined}

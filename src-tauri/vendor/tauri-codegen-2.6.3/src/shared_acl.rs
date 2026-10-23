@@ -1,0 +1,125 @@
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use std::{collections::BTreeMap, convert::identity};
+use tauri_utils::{
+  acl::{
+    resolved::{Resolved, ResolvedCommand},
+    ExecutionContext,
+  },
+  tokens::{map_lit, str_lit, vec_lit},
+};
+
+pub(crate) fn tokens(resolved: &Resolved) -> TokenStream {
+  // RemoteUrlPattern already clones its Arc-backed matcher. Bind each exact
+  // pattern once per context; keep parsing and all authority decisions upstream.
+  let mut patterns = BTreeMap::new();
+  for command in resolved
+    .allowed_commands
+    .values()
+    .chain(resolved.denied_commands.values())
+    .flatten()
+  {
+    if let ExecutionContext::Remote { url } = &command.context {
+      let next = patterns.len();
+      patterns
+        .entry(url.as_str())
+        .or_insert_with(|| format_ident!("__tauri_acl_url_{next}"));
+    }
+  }
+  let bindings = patterns.iter().map(|(pattern, name)| {
+    quote! {
+      let #name: ::tauri::utils::acl::RemoteUrlPattern = #pattern.parse().unwrap();
+    }
+  });
+  let command_tokens = |command: &ResolvedCommand| {
+    let mut command = command.clone();
+    let context = match &command.context {
+      ExecutionContext::Local => quote!(::tauri::utils::acl::ExecutionContext::Local),
+      ExecutionContext::Remote { url } => {
+        let name = &patterns[url.as_str()];
+        quote!(::tauri::utils::acl::ExecutionContext::Remote { url: #name.clone() })
+      }
+    };
+    // Reuse upstream serialization for every other field (including scopes and
+    // debug references); replace only the context with the shared matcher.
+    command.context = ExecutionContext::Local;
+    quote!({
+      let mut command = #command;
+      command.context = #context;
+      command
+    })
+  };
+  let allowed_commands = map_lit(
+    quote!(::std::collections::BTreeMap),
+    &resolved.allowed_commands,
+    str_lit,
+    |commands| vec_lit(commands, command_tokens),
+  );
+  let denied_commands = map_lit(
+    quote!(::std::collections::BTreeMap),
+    &resolved.denied_commands,
+    str_lit,
+    |commands| vec_lit(commands, command_tokens),
+  );
+  let command_scope = map_lit(
+    quote!(::std::collections::BTreeMap),
+    &resolved.command_scope,
+    identity,
+    identity,
+  );
+  let global_scope = map_lit(
+    quote!(::std::collections::BTreeMap),
+    &resolved.global_scope,
+    str_lit,
+    identity,
+  );
+  let has_app_acl = resolved.has_app_acl;
+  quote!({
+    #(#bindings)*
+    ::tauri::utils::acl::resolved::Resolved {
+      has_app_acl: #has_app_acl,
+      allowed_commands: #allowed_commands,
+      denied_commands: #denied_commands,
+      command_scope: #command_scope,
+      global_scope: #global_scope,
+    }
+  })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use tauri_utils::acl::{resolved::ResolvedCommand, ExecutionContext};
+
+  #[test]
+  fn compiles_each_distinct_remote_pattern_once_across_allow_and_deny() {
+    let remote = |url: &str| ResolvedCommand {
+      context: ExecutionContext::Remote {
+        url: url.parse().unwrap(),
+      },
+      ..Default::default()
+    };
+    let mut resolved = Resolved::default();
+    resolved.allowed_commands.insert(
+      "first".into(),
+      vec![remote("http://localhost:*"), remote("https://localhost:*")],
+    );
+    resolved.allowed_commands.insert(
+      "second".into(),
+      vec![remote("http://localhost:*"), ResolvedCommand::default()],
+    );
+    resolved
+      .denied_commands
+      .insert("denied".into(), vec![remote("http://localhost:*")]);
+    let generated = tokens(&resolved);
+    assert_eq!(
+      generated.to_string().matches(". parse ()").count(),
+      2,
+      "one parse per distinct pattern, including repeated allow/deny entries"
+    );
+  }
+}

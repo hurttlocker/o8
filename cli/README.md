@@ -209,5 +209,5 @@ npx tsc --noEmit -p cli/tsconfig.json
 
 ## See also
 
-- Epic [#926](https://github.com/hurttlocker/o8/issues/926) — full
+- Epic [#926](https://github.com/o8-run/o8/issues/926) — full
   command surface and design principles.

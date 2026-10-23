@@ -42,7 +42,7 @@ function passesSiteValidator(value: unknown): boolean {
     !isBoundedString(ship.title, LIMITS.title) ||
     !isBoundedString(ship.summary, LIMITS.summary) ||
     !isBoundedString(ship.releaseUrl, LIMITS.releaseUrl) ||
-    !ship.releaseUrl.startsWith('https://github.com/hurttlocker/o8/releases/tag/') ||
+    !ship.releaseUrl.startsWith('https://github.com/o8-run/o8/releases/tag/') ||
     !Array.isArray(commits) ||
     commits.length < 1 ||
     commits.length > 50 ||
@@ -81,7 +81,7 @@ describe('latest ship builder', () => {
       version: '0.1.739',
       tag: 'v0.1.739',
       publishedAt: '2026-09-06T19:15:00Z',
-      releaseUrl: 'https://github.com/hurttlocker/o8/releases/tag/v0.1.739',
+      releaseUrl: 'https://github.com/o8-run/o8/releases/tag/v0.1.739',
       commits: [
         {
           sha: '1234567890abcdef1234567890abcdef12345678',

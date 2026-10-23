@@ -116,7 +116,12 @@ describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
   it('preserves current agents, lane fallback, approvals, activity and runtime output for the same fixture', async () => {
     const source = await statusGET(new NextRequest('http://localhost/api/operator/status'));
     const legacy = await source.json();
-    const result = await call();
+    const compact = await call();
+    for (const agent of compact.data.agents) {
+      expect(agent).toHaveProperty('statusEvidence.evidenceCount');
+      expect(agent).not.toHaveProperty('statusEvidence.evidence');
+    }
+    const result = await call({ includeEvidence: true });
     expect(result.summary).toBe(legacy.summary);
     const { snapshot, ...data } = result.data;
     expect(data).toEqual({ agents: legacy.agents, approvals: legacy.approvals.items,
@@ -124,7 +129,7 @@ describe('o8_status coalesced snapshot through /api/mcp (#4392)', () => {
       runtimeConnections: { status: 'available', runtimes: connections.dispatchableRuntimes } });
     expect(data.agents.map((agent) => agent.sessionKey)).toEqual(expect.arrayContaining(['pi-owned:snapshot', 'pi-owned:fallback']));
     expect(snapshot).toMatchObject({ capturedAt: new Date(clock).toISOString(), ageMs: 0 });
-    const filtered = await call({ sessionKey: 'pi-owned:snapshot' });
+    const filtered = await call({ sessionKey: 'pi-owned:snapshot', includeEvidence: true });
     const filteredSource = await statusGET(new NextRequest('http://localhost/api/operator/status?sessionKey=pi-owned%3Asnapshot'));
     expect(filtered.data.agents).toEqual((await filteredSource.json()).agents);
     expect(filtered.data.agents).toHaveLength(1);

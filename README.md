@@ -4,7 +4,7 @@
 
 # o8
 
-[![CI](https://github.com/hurttlocker/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/hurttlocker/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/hurttlocker/o8)](https://github.com/hurttlocker/o8/releases) [![Benchmark](https://img.shields.io/badge/benchmark-published%20with%20losses-8A5CF6)](./docs/user/honest-benchmark-2026-08.md)
+[![CI](https://github.com/o8-run/o8/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/o8-run/o8/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/o8-run/o8)](https://github.com/o8-run/o8/releases) [![Benchmark](https://img.shields.io/badge/benchmark-published%20with%20losses-8A5CF6)](./docs/user/honest-benchmark-2026-08.md)
 
 **Run a fleet of coding agents. Approve what ships.**
 
@@ -46,14 +46,14 @@ o8 finds the coding-agent CLIs you already have installed and runs them behind o
 
 ## Get it
 
-**Easiest:** the latest signed build from [Releases](https://github.com/hurttlocker/o8/releases). It auto-updates.
+**Easiest:** the latest signed build from [Releases](https://github.com/o8-run/o8/releases). It auto-updates.
 
 **From source** needs Node 22.x (native modules are built against the Node 22 ABI), Rust stable, and Xcode Command Line Tools.
 
 Install `nvm` before using the commands below. If Node 22.x is already installed another way, verify it with `node --version` and skip the two `nvm` commands.
 
 ```bash
-git clone https://github.com/hurttlocker/o8.git
+git clone https://github.com/o8-run/o8.git
 cd o8
 nvm install && nvm use   # .nvmrc pins Node 22
 npm install
@@ -108,7 +108,7 @@ o8 is building toward an operating system for delegated work: models and agents 
 
 ## Contributing
 
-Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/hurttlocker/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/hurttlocker/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the detailed agent and `o8` CLI reference is [`AGENT_REFERENCE.md`](./AGENT_REFERENCE.md).
+Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and the issues labeled [`claimable`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3Aclaimable) or [`help wanted`](https://github.com/o8-run/o8/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22). UI changes read [`docs/design`](./docs/design/DESIGN.md) first. The full documentation index is [`docs/README.md`](./docs/README.md); the detailed agent and `o8` CLI reference is [`AGENT_REFERENCE.md`](./AGENT_REFERENCE.md).
 
 Community: [Discord](https://discord.gg/TFK2x9A5WS) · Built in public by [@marquisehurtt](https://x.com/marquisehurtt)
 

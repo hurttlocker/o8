@@ -73,21 +73,20 @@ describe('linux AppImage updater signature', () => {
     const { calls, deps } = harness();
     const result = await signLinuxAppImage({
       tag: TAG,
-      repos: ['hurttlocker/o8', 'hurttlocker/o8-releases'],
       workDir: '/work',
       deps,
     });
 
     expect(result.assetName).toBe(ASSET);
     expect(calls.filter((call) => call.name === 'fetchRelease').map((call) => call.args.repo))
-      .toEqual(['hurttlocker/o8', 'hurttlocker/o8-releases']);
+      .toEqual(['o8-run/o8', 'hurttlocker/o8-releases']);
     expect(calls.find((call) => call.name === 'downloadAsset')?.args)
-      .toMatchObject({ repo: 'hurttlocker/o8', assetName: ASSET, destDir: '/work' });
+      .toMatchObject({ repo: 'o8-run/o8', assetName: ASSET, destDir: '/work' });
     expect(calls.find((call) => call.name === 'signAppImage')?.args)
       .toEqual({ filePath: `/work/${ASSET}`, signingKey: 'operator-key' });
 
     const uploads = calls.filter((call) => call.name === 'uploadAssets');
-    expect(uploads.map((call) => call.args.repo)).toEqual(['hurttlocker/o8', 'hurttlocker/o8-releases']);
+    expect(uploads.map((call) => call.args.repo)).toEqual(['o8-run/o8', 'hurttlocker/o8-releases']);
     for (const upload of uploads) {
       expect(upload.args.files).toEqual([`/work/${ASSET}.sig`, `/work/${LATEST_JSON_ASSET}`]);
     }

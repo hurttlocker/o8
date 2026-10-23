@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +11,7 @@ export interface GitCommandResult {
 export type WorkspaceScanGitRunner = (args: string[], cwd: string) => Promise<GitCommandResult>;
 
 export const defaultRunGit: WorkspaceScanGitRunner = (args, cwd) => new Promise((resolve, reject) => {
-  execFile('git', args, {
+  execFile(resolveGitBinary(), args, {
     cwd,
     encoding: 'buffer',
     env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },

@@ -14,9 +14,9 @@
  *
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  *
- * @see https://github.com/hurttlocker/o8/issues/65
- * @see https://github.com/hurttlocker/o8/issues/66
- * @see https://github.com/hurttlocker/o8/issues/608
+ * @see https://github.com/o8-run/o8/issues/65
+ * @see https://github.com/o8-run/o8/issues/66
+ * @see https://github.com/o8-run/o8/issues/608
  */
 
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
@@ -108,7 +108,7 @@ import {
   sameMetadataLockProcessIdentity,
 } from './metadata-lock-process-identity';
 import { writeManagedWorkspaceSafetyHooks } from './safety-hooks';
-import { timeWorktreePreparation } from './preparation-timing';
+import { recordDependencySelection, timeWorktreePreparation } from './preparation-timing';
 
 const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
@@ -1009,16 +1009,17 @@ export class WorktreeManager {
       // will land on; rebase onto it when it's ahead. (Diverged histories
       // keep origin — a conflict there is real and must surface.)
       try {
-        const { stdout: aheadRaw } = await execFileAsync(
-          'git',
-          ['rev-list', '--count', `${target}..${baseBranch}`],
-          { windowsHide: true, cwd, timeout: 5000 },
-        );
-        const { stdout: behindRaw } = await execFileAsync(
-          'git',
-          ['rev-list', '--count', `${baseBranch}..${target}`],
-          { windowsHide: true, cwd, timeout: 5000 },
-        );
+        const comparisons = await Promise.allSettled([
+          execFileAsync('git', ['rev-list', '--count', `${target}..${baseBranch}`],
+            { windowsHide: true, cwd, timeout: 5000 }),
+          execFileAsync('git', ['rev-list', '--count', `${baseBranch}..${target}`],
+            { windowsHide: true, cwd, timeout: 5000 }),
+        ]);
+        const [aheadResult, behindResult] = comparisons;
+        if (aheadResult.status === 'rejected') throw aheadResult.reason;
+        if (behindResult.status === 'rejected') throw behindResult.reason;
+        const aheadRaw = aheadResult.value.stdout;
+        const behindRaw = behindResult.value.stdout;
         const ahead = Number.parseInt(aheadRaw.trim(), 10) || 0;
         const behind = Number.parseInt(behindRaw.trim(), 10) || 0;
         if (ahead > 0 && behind === 0) {
@@ -1340,6 +1341,8 @@ export class WorktreeManager {
         const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
           cloneSourceWorkspace: this.repoRoot,
+          useDependencyPool: true,
+          onSelection: (selection) => recordDependencySelection(launch, selection),
           persistReceipt: (receipt) => (
             receipt
               ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)

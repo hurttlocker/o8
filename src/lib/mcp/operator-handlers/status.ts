@@ -11,6 +11,7 @@ import {
 } from './shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { readStatusSnapshot } from './status-snapshot';
+import { projectOperatorDefaults, projectStatusAgent } from '@/lib/mcp/operator-handlers/response-projections';
 
 const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
 const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
@@ -58,7 +59,7 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Includes snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Agent status includes authority, observation time and evidence count; includeEvidence opts into full evidence arrays. Includes snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -70,6 +71,7 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Wait for a coalesced refresh instead of using the bounded snapshot. May take longer.',
         },
+        includeEvidence: { type: 'boolean', description: 'Include full agent status evidence arrays. Default false.' },
       },
     },
   },
@@ -164,10 +166,13 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_operator_defaults',
     description:
-      'Read or set the global operator-panel defaults that govern dispatches — the programmatic equivalent of Settings → Operator. Call with NO args to read the current defaults. Pass any subset to update; returns the updated defaults. USE THIS to pick the orchestrator brain before a mission (e.g. Sonnet for routine sweeps, Opus for hard problems) or to tune governance for a sprint. Settings are GLOBAL and persist across missions: read first, change what you need, restore prior values after if the change was for one mission only. Example: o8_operator_defaults({orchestratorModel: "claude-sonnet-5", thinkingEffort: "high"}).',
+      'Read or set global operator-panel defaults. Returns all values and their sources; includeReceipts, includeAuth and includeDetails opt into routing receipts, CLI auth and other diagnostics respectively. Settings persist across missions: read first, change what you need, restore prior values after a temporary change. Example: o8_operator_defaults({orchestratorModel: "claude-sonnet-5", thinkingEffort: "high"}).',
     inputSchema: {
       type: 'object',
       properties: {
+        includeReceipts: { type: 'boolean', description: 'Include recent role routing receipts. Default false.' },
+        includeAuth: { type: 'boolean', description: 'Include CLI authentication diagnostics. Default false.' },
+        includeDetails: { type: 'boolean', description: 'Include settings TOML, role routes and other diagnostics. Default false.' },
         orchestratorModel: {
           type: 'string',
           description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-5". Non-empty string.',
@@ -427,7 +432,7 @@ const OPERATOR_DEFAULTS_KEYS = [
 
 export async function handleOperatorDefaults(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
-    const supportedKeys = new Set<string>(OPERATOR_DEFAULTS_KEYS);
+    const supportedKeys = new Set<string>([...OPERATOR_DEFAULTS_KEYS, 'includeReceipts', 'includeAuth', 'includeDetails']);
     const unknownKeys = Object.keys(args)
       .filter((key) => !supportedKeys.has(key))
       .sort();
@@ -439,7 +444,7 @@ export async function handleOperatorDefaults(args: Record<string, unknown>): Pro
             code: 'unknown_operator_default_keys',
             message: `Unsupported o8_operator_defaults key${unknownKeys.length === 1 ? '' : 's'}: ${unknownKeys.join(', ')}`,
             unknownKeys,
-            supportedKeys: [...OPERATOR_DEFAULTS_KEYS],
+            supportedKeys: [...supportedKeys],
           },
         }),
         isError: true,
@@ -462,7 +467,7 @@ export async function handleOperatorDefaults(args: Record<string, unknown>): Pro
     if (data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)) {
       return textResult(`o8_operator_defaults failed: ${(data as Record<string, unknown>).error}`, true);
     }
-    return jsonResult(data);
+    return jsonResult(projectOperatorDefaults(data, args));
   } catch (err) {
     console.error(`[o8-operator] o8_operator_defaults failed: `, err);
     return textResult(`Failed to read/update operator defaults: ${errorText(err)}`, true);
@@ -585,7 +590,7 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
       data: {
         runtimeConnections,
         snapshot,
-        agents,
+        agents: agents.map((agent) => projectStatusAgent(agent, args.includeEvidence === true)),
         approvals: approvalItems,
         approvalCount,
         recentActivity,

@@ -10,23 +10,25 @@ import { useDefaultComposerSendBuffer } from './useDefaultComposerSendBuffer';
 import { useBufferedOrchestratorSend } from './useBufferedOrchestratorSend';
 import { managedVoiceFollowup } from './managed-voice-followup';
 import { ComposerArea } from './ComposerArea';
+import { ChatMessageList } from './ChatMessageList';
 import { ComposerSendBufferStatus } from './ComposerSendBufferStatus';
 
 const { ws } = vi.hoisted(() => ({ ws: { options: null as null | { onRealtimeEvent: (event: unknown) => void } } }));
 vi.mock('@/components/desktop/hooks/DesktopWebSocketContext', () => ({ useSharedDesktopWs: (_: unknown, options: typeof ws.options) => { ws.options = options; } }));
-vi.mock('../InputButtons', () => ({ InputButtons: () => null, RepoTargetChip: () => null }));
+vi.mock('../InputButtons', () => ({ InputButtons: ({ inlineLeadingExtras, sendDisabled }: { inlineLeadingExtras: React.ReactNode; sendDisabled: boolean }) => createElement('footer', null, inlineLeadingExtras, createElement('button', { disabled: sendDisabled, 'aria-label': 'Send message' }, 'Send')), RepoTargetChip: () => null }));
 vi.mock('./SlashCommandPicker', () => ({ SlashCommandPicker: () => null }));
 vi.mock('./ComposerStatusBar', () => ({ ComposerStatusBar: () => null }));
 vi.mock('../../composer-center-registry', () => ({ registerComposerCenter: () => () => undefined }));
+vi.mock('@/lib/pretext', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/pretext')>(), usePretextHeight: () => 24 }));
 vi.mock('@/lib/analytics/track', () => ({ track: vi.fn() }));
 
 const send = vi.fn(() => null);
 const image = { name: 'proof.png', dataUri: 'data:image/png;base64,YQ==', mimeType: 'image/png' };
 type Controller = { setDraft: (text: string) => void; enqueueVoice: () => Promise<string>; cancelVoice: () => Promise<string> };
 const control = createRef<Controller>();
-const Harness = forwardRef<Controller, { threadId: string; model?: string; mode?: ComposerMode; busy?: boolean; backend?: 'codex' | 'pi' }>(function Harness({ threadId, model = 'original-model', mode = 'solo', busy = true, backend = 'codex' }, ref) {
+const Harness = forwardRef<Controller, { threadId: string; model?: string; mode?: ComposerMode; busy?: boolean; backend?: 'codex' | 'pi'; imagesEnabled?: boolean }>(function Harness({ threadId, model = 'original-model', mode = 'solo', busy = true, backend = 'codex', imagesEnabled = true }, ref) {
   const [input, setInput] = useState('Queue this message');
-  const [images, setImages] = useState([image]);
+  const [images, setImages] = useState(imagesEnabled ? [image] : []);
   const latestInputRef = useRef(input); const inputRef = useRef<HTMLTextAreaElement>(null);
   const { dispatch, capture } = useBufferedOrchestratorSend({ active: true, backend, model, mode, solo: false,
     effort: 'low', permissionMode: 'plan', collide: false, projectId: 'original-project', context: 'Original context', send });
@@ -36,22 +38,34 @@ const Harness = forwardRef<Controller, { threadId: string; model?: string; mode?
   const voice = managedVoiceFollowup(result.durable, text => capture(text, []));
   useImperativeHandle(ref, () => ({ setDraft: text => { latestInputRef.current = text; setInput(text); },
     enqueueVoice: () => voice.enqueue('voice-test', 'Do the follow-up', 'original-task'), cancelVoice: voice.cancel }));
-  return createElement(ComposerArea, { input, inputLabel: 'Queue test composer', onInputChange: text => { latestInputRef.current = text; setInput(text); },
+  return createElement('div', null, createElement(ChatMessageList, { displayMessages: [], displayWaiting: busy, activeTargetLabel: 'Agent', activeTargetColor: 'var(--t-accent)',
+    thoughtsMutedGlass: 'transparent', thoughtsElevatedBorder: 'var(--t-divider)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
+    composerQueue: { items: result.durable.transcriptItems, canSteer: result.durable.canSteer, onSteer: id => { void result.durable.steer(id); },
+      onCancel: result.sendBuffer.cancelQueued, removing: result.durable.removing, promoting: result.durable.promoting } }), createElement(ComposerArea, { input, inputLabel: 'Queue test composer', onInputChange: text => { latestInputRef.current = text; setInput(text); },
     activeComposer: true, isOrchestratorMode: true, displayWaiting: busy, chatMessages: [], activeTargetLabel: 'Codex', targetAgentExists: true,
     thoughtsBodyBackground: 'transparent', enhancing: false, preEnhanceInput: null, onEnhance: vi.fn(), onUndoEnhance: vi.fn(),
-    onSubmit: result.handleSend, onSteer: result.handleSteer, queueSaving: result.saving, onSlashCommand: vi.fn(), modelLabel: model,
+    onSubmit: result.handleSend, onSteer: result.handleSteer, canSteerLive: result.durable.canSteer, queueSaving: result.saving, onSlashCommand: vi.fn(), modelLabel: model,
     effort: 'low', onEffortChange: vi.fn(), adaptiveEnabled: false, displayMessagesCount: 0, hasAssistantActivity: false, attachedImages: images,
-    sendBufferStatus: createElement(ComposerSendBufferStatus, { attachmentError: result.attachmentError, queued: result.sendBuffer.queued,
+    sendBufferStatus: createElement(ComposerSendBufferStatus, { attachmentError: result.attachmentError, queued: [],
       undoArmed: false, undoSequence: 0, onUndo: vi.fn(), onCancelQueued: result.sendBuffer.cancelQueued }),
-  });
+  }));
 });
-let host: HTMLDivElement; let root: Root; let rows: QueuedComposerSendRecord[]; let posts: Array<{ id: string; threadId: string; payload: ComposerQueuePayload }>;
+let host: HTMLDivElement; let root: Root; let rows: QueuedComposerSendRecord[]; let posts: Array<{ id: string; threadId: string; payload: ComposerQueuePayload; intent: string }>;
+let canSteer = false; let patchCount = 0;
+let steerOutcome: 'applied' | 'refused' | 'unconfirmed' = 'applied';
+let delayPatch: (() => Promise<void>) | null = null;
+function applySteer(item: QueuedComposerSendRecord) {
+  if (steerOutcome === 'applied') Object.assign(item, { status: 'applied', admittedAt: 1 });
+  else if (steerOutcome === 'refused') Object.assign(item, { intent: 'send-next', status: 'queued', reason: 'Steer declined; queued for the next turn.' });
+  else Object.assign(item, { status: 'held', admittedAt: 1, reason: 'Steer unconfirmed; queued for inspection.' });
+}
 let failAfterPersist = false;
 let delayPost: (() => Promise<void>) | null = null;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  rows = []; posts = []; failAfterPersist = false; delayPost = null; send.mockClear(); localStorage.clear();
+  rows = []; posts = []; canSteer = false; patchCount = 0; steerOutcome = 'applied'; delayPatch = null; failAfterPersist = false; delayPost = null; send.mockClear(); localStorage.clear();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const response = (data: unknown) => ({ ok: true, json: async () => data });
     if (!url.startsWith('/api/orchestrator/composer-queue')) return response({});
@@ -59,17 +73,22 @@ beforeEach(() => {
       const body = JSON.parse(init.body as string); posts.push(body); await delayPost?.();
       let item = rows.find(row => row.id === body.id);
       if (!item) { item = { ...body, sequence: rows.length + 1, status: 'queued', reason: null, createdAt: 1, updatedAt: 1, admittedAt: null }; rows.push(item!); }
+      if (body.intent === 'steer-now') applySteer(item!);
       if (failAfterPersist) { failAfterPersist = false; throw new Error('Response lost. Retry the same draft.'); }
       return response({ item });
     }
+    if (init?.method === 'PATCH') {
+      patchCount++; await delayPatch?.(); const body = JSON.parse(init.body as string); const item = rows.find(row => row.id === body.id)!;
+      item.intent = 'steer-now'; applySteer(item); return response({ item });
+    }
     if (init?.method === 'DELETE') { const body = JSON.parse(init.body as string); rows = rows.filter(row => row.id !== body.id); return response({ ok: true }); }
     const thread = new URL(url, 'http://localhost').searchParams.get('threadId');
-    return response({ items: rows.filter(row => row.threadId === thread && ['queued', 'dispatching', 'held'].includes(row.status)).map(row => structuredClone(row)) });
+    return response({ canSteer, items: rows.filter(row => row.threadId === thread && row.status !== 'cancelled' && (row.status !== 'applied' || row.intent === 'steer-now')).map(row => structuredClone(row)) });
   }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
-async function render(threadId = 'thoughts-one', model = 'original-model', mode: ComposerMode = 'solo', busy = true, backend: 'codex' | 'pi' = 'codex') {
-  await act(async () => root.render(createElement(Harness, { ref: control, threadId, model, mode, busy, backend })));
+async function render(threadId = 'thoughts-one', model = 'original-model', mode: ComposerMode = 'solo', busy = true, backend: 'codex' | 'pi' = 'codex', imagesEnabled = true) {
+  await act(async () => root.render(createElement(Harness, { ref: control, threadId, model, mode, busy, backend, imagesEnabled })));
 }
 async function enter(metaKey = false) {
   await act(async () => host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey, bubbles: true, cancelable: true })));
@@ -98,7 +117,7 @@ describe('durable Send next through the normal composer', () => {
     expect(host.querySelector('[role="list"]')?.textContent).not.toContain('Another chat');
     await act(async () => root.unmount()); root = createRoot(host);
     await render('thoughts-one');
-    expect(host.querySelector('[role="list"]')?.textContent).toContain('1 image');
+    expect(host.querySelector('[role="list"] img')).not.toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>('[title="Cancel queued message"]')!.click());
     expect(rows.map(row => row.threadId)).toEqual(['thoughts-two']);
     await act(async () => root.unmount()); root = createRoot(host); await render('thoughts-one');
@@ -115,18 +134,48 @@ describe('durable Send next through the normal composer', () => {
     expect(rows.map(row => row.payload.routing.model)).toEqual(['original-model', 'new-model']);
   });
 
-  it('keeps the draft intact for unavailable steering and creates no held FIFO blocker', async () => {
+  it('uses Queue without a mode toggle or unavailable sentence when native steering is unavailable', async () => {
     await render();
-    const steer = [...host.querySelectorAll('button')].find(button => button.textContent === 'Steer now')!;
-    expect(steer.disabled).toBe(true);
+    expect(host.querySelector('[aria-label^="Message mode:"]')).toBeNull();
+    expect(host.textContent).not.toContain('Live steering is unavailable');
     await enter(true);
-    expect(posts).toHaveLength(0);
-    expect(host.querySelector('textarea')!.value).toBe('Queue this message');
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Live steering is unavailable');
-    await enter();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe('queued');
+    expect(posts).toHaveLength(0); expect(host.querySelector('textarea')!.value).toBe('Queue this message');
+    await enter(); expect(rows).toHaveLength(1); expect(rows[0].status).toBe('queued');
     expect(host.querySelector('textarea')!.value).toBe('');
+    expect(host.textContent).not.toContain('Steer now');
+  });
+
+  it('defaults to acknowledged live steering on Enter and shows one normal message with its Steer arrow tag', async () => {
+    canSteer = true; await render('thoughts-one', 'pi', 'solo', true, 'pi', false); await enter();
+    expect(posts[0].intent).toBe('steer-now');
+    expect(host.querySelector('textarea')!.value).toBe('');
+    expect(host.querySelector('[role="list"]')?.textContent).toContain('Queue this message');
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Steer →');
+    expect(host.querySelectorAll('[data-composer-message]')).toHaveLength(1);
+  });
+
+  it('renders Queue in the transcript and converts that exact message with immediate busy feedback', async () => {
+    canSteer = true; await render('thoughts-one', 'pi', 'solo', true, 'pi', false);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Message mode: Steer"]')!.click());
+    await enter(); expect(posts[0].intent).toBe('send-next');
+    const saved = structuredClone(rows[0]);
+    const action = [...host.querySelectorAll('button')].find(button => button.textContent === 'Steer now')!;
+    expect(action).toBeDefined();
+    let release!: () => void; delayPatch = () => new Promise(resolve => { release = resolve; });
+    await act(async () => { action.click(); action.click(); });
+    expect(patchCount).toBe(1); expect(action.disabled).toBe(true); expect(action.textContent).toBe('Steering…');
+    await act(async () => release());
+    expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject({ id: saved.id, payload: saved.payload, status: 'applied' });
+    expect(host.querySelector('[role="status"]')?.textContent).toBe('Steer →');
+    expect(host.textContent).not.toContain('Steer now');
+  });
+
+  it.each(['refused', 'unconfirmed'] as const)('keeps a %s steer in the transcript with a queued explanation', async outcome => {
+    canSteer = true; steerOutcome = outcome; await render('thoughts-one', 'pi', 'solo', true, 'pi', false); await enter();
+    expect(rows).toHaveLength(1); expect(rows[0].status).toBe(outcome === 'refused' ? 'queued' : 'held');
+    expect(host.querySelector('[role="status"]')?.textContent).toContain(outcome === 'refused' ? 'Queued · Steer declined' : 'Queued · Steer unconfirmed');
+    expect(host.querySelector('textarea')!.value).toBe('');
+    expect(host.textContent).not.toContain('Steer →');
   });
 
   it('reuses the same mutation identity after an uncertain response instead of duplicating the message', async () => {
@@ -179,9 +228,9 @@ describe('durable Send next through the normal composer', () => {
       return normal(url, init);
     }));
     await enter();
-    expect(host.textContent).toContain('Saving message');
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(true);
     await act(async () => vi.advanceTimersByTimeAsync(15_001));
-    expect(host.textContent).not.toContain('Saving message');
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('not confirmed');
     expect(host.querySelector('textarea')!.value).toBe('Queue this message');
     expect(posts).toHaveLength(1);
@@ -270,7 +319,7 @@ describe('durable Send next through the normal composer', () => {
     expect(host.querySelector<HTMLButtonElement>('[title="Cancel queued message"]')!.disabled).toBe(true);
     rows[0] = { ...rows[0], status: 'held', reason: 'Delivery interrupted. Inspect the chat.' };
     await act(async () => window.dispatchEvent(new Event('o8:lifecycle-reconcile')));
-    expect(host.querySelector('[role="list"]')?.textContent).toContain('Needs attention: Delivery interrupted. Inspect the chat.');
+    expect(host.querySelector('[role="status"]')?.getAttribute('title')).toContain('Delivery interrupted. Inspect the chat.');
     expect(host.querySelector<HTMLButtonElement>('[title="Cancel queued message"]')!.disabled).toBe(false);
     expect(host.textContent).not.toMatch(/Steering applied|Steer applied/);
   });

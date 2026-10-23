@@ -84,7 +84,8 @@ export interface ComposerAreaProps {
   onPermissionModeChange?: (mode: ThoughtsChatPermissionMode) => void;
   contextLocationSlot?: ReactNode;
   composerLeadingExtras?: ReactNode;
-  /** ⌘⏎ requests steering; Return while busy queues the next turn. */
+  /** Live input is opt-in and must be acknowledged by the selected runtime. */
+  canSteerLive?: boolean;
   queueSaving?: boolean;
   onSteer?: () => void;
   sendBufferStatus?: ReactNode;
