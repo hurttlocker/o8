@@ -2462,6 +2462,12 @@
       ]
     },
     {
+      "path": "tests/detached-owned-catalogue-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dev-stack-cleanup-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3900,6 +3906,16 @@
     },
     {
       "path": "tests/owned-claude-continuation-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-claude-restart-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",

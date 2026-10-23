@@ -66,6 +66,8 @@ export interface OwnedRunRecord {
   spawnState?: 'prepared' | 'started' | 'reconciled_clear';
   stdoutPath: string;
   stderrPath: string;
+  /** Finite provider input inherited as a regular file, independent of server stdin. */
+  stdinPath?: string;
   outcome: OwnedRunOutcome;
   interruptRequestedAt?: string;
   tmuxSession?: string;
