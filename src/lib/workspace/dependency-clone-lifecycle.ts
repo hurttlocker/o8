@@ -32,10 +32,10 @@ export async function finishDependencyClone(input: {
   nativeFiles: string[];
 }): Promise<void> {
   const { workspace, identity, recipe, options, nativeFiles } = input;
-  const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv) => {
+  const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv, timeoutMs = 60_000) => {
     const guarded = guardedWorkspaceInvocation(command, args, identity);
     return materializationAwareExecFile(guarded.command, guarded.args, {
-      cwd: workspace, env, timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
+      cwd: workspace, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024,
     });
   };
   await profileDependencyClone('native-bindings', async () => {
@@ -67,8 +67,8 @@ export async function finishDependencyClone(input: {
   try {
     const args = ['rebuild', '.', ...recipe.installArgs.slice(1)];
     await profileDependencyClone('lifecycle-execute', async () => {
-      if (options.run) await options.run({ command: execution.executable, args, cwd: workspace, env, timeoutMs: 60_000 });
-      else await execute(execution.executable, args, env);
+      if (options.run) await options.run({ command: execution.executable, args, cwd: workspace, env, timeoutMs: 45 * 60_000 });
+      else await execute(execution.executable, args, env, 45 * 60_000);
     });
   } finally {
     await profileDependencyClone('lifecycle-retire', () => purgeExactDirectory(runtime, receipt, undefined, options.afterRuntimeTreeCapture));
