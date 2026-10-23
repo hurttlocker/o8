@@ -4,17 +4,18 @@ import { useId, type ReactNode } from 'react';
 import { SectionLabel } from './shared';
 import { useCollapsedShelf } from './use-collapsed-shelf';
 
-export function ChatHistoryShelf({ label, storageKey, initiallyCollapsed = false, action, children }: {
+export function ChatHistoryShelf({ label, storageKey, initiallyCollapsed = false, action, children, followsHeader = false }: {
   label: string;
   storageKey?: string;
   initiallyCollapsed?: boolean;
   action?: ReactNode;
+  followsHeader?: boolean;
   children: ReactNode;
 }) {
   const [collapsed, toggle] = useCollapsedShelf(storageKey ?? `o8:chat-${label.toLowerCase()}-collapsed`, initiallyCollapsed);
   const id = useId();
   return <section aria-label={`${label} conversations`}>
-    <SectionLabel label={label} compact collapsed={collapsed} onToggle={toggle} action={action} controls={id} />
+    <SectionLabel label={label} compact collapsed={collapsed} onToggle={toggle} action={action} controls={id} followsHeader={followsHeader} />
     {!collapsed ? <div id={id}>{children}</div> : null}
   </section>;
 }

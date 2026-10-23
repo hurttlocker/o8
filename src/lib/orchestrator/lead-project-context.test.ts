@@ -176,6 +176,12 @@ describe('persistent lead project context', () => {
     expect(modelPrompt).toContain('Project instructions:\nInitial binding guidance.');
     expect(modelPrompt).toContain('Product App');
     expect(modelPrompt).toContain('Product Site');
+    expect(modelPrompt).toContain('one codebase');
+    expect(modelPrompt).toContain(primaryRepoPath);
+    expect(modelPrompt).toContain(siblingRepoPath);
+    expect(modelPrompt).toContain('Plan a separate packet for each repository');
+    expect(modelPrompt).toContain('Each packet stays within its assigned repository');
+    expect(modelPrompt).not.toContain('product anchor');
     expect(modelPrompt).toContain(original);
     const record = JSON.parse(
       readFileSync(loaded.safeOrchestratorHistoryPath(started.lead.threadId), 'utf8'),

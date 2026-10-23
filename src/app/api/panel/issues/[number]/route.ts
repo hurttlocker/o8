@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_GITHUB_REPO, fetchGitHubIssueDetail, resolveRepoSlug } from '@/lib/github-broker';
+import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 
 export async function GET(
   request: NextRequest,
@@ -24,6 +25,12 @@ export async function GET(
     const issue = await fetchGitHubIssueDetail(repo, issueNumber);
     return NextResponse.json({ issue, repo });
   } catch (error) {
+    if (error instanceof GitHubRequestDeferredError) {
+      return NextResponse.json({ error: error.message, repo }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil((error.retryAt - Date.now()) / 1000))) },
+      });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Issue not found', repo },
       { status: 404 },
