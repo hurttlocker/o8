@@ -5,6 +5,7 @@ import { useActivityExtras } from './useActivityExtras';
 import { ActivityFeedControls } from './ActivityFeedControls';
 import { ActivityFeedTimeline } from './ActivityFeedTimeline';
 import { useActivityPrHoverDetail } from './useActivityPrHoverDetail';
+import { useActivityCiHoverDetail } from './useActivityCiHoverDetail';
 import {
   ActivityFeedEmptyState,
   activityItemKey,
@@ -17,7 +18,6 @@ import {
 import type {
   ActivityItem,
   AgentDetail,
-  CIHoverDetail,
   CommitSummary,
   EventEntry,
   FeedFilter,
@@ -72,7 +72,6 @@ export const ActivityFeed = memo(function ActivityFeed({
   const [hoveredItemKey, setHoveredItemKey] = useState<string | null>(null);
   const [hoveredItemRect, setHoveredItemRect] = useState<DOMRect | null>(null);
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
 
   useEffect(() => {
     ipcFetch('/api/panel/repos')
@@ -219,6 +218,10 @@ export const ActivityFeed = memo(function ActivityFeed({
   const prHover = useActivityPrHoverDetail(hoveredPr?.kind === 'pr' ? hoveredPr.repo : null,
     hoveredPr?.kind === 'pr' ? hoveredPr.number : null);
   const prHoverDetails = prHover.detail && hoveredItemKey && hoveredPr ? { [hoveredItemKey]: prHover.detail } : {};
+  const hoveredCi = filtered.find((item) => item.kind === 'ci' && activityItemKey(item) === hoveredItemKey);
+  const ciHover = useActivityCiHoverDetail(hoveredCi?.kind === 'ci' ? hoveredCi.repo : null,
+    hoveredCi?.kind === 'ci' ? hoveredCi.id : null);
+  const ciHoverDetails = ciHover.detail && hoveredItemKey && hoveredCi ? { [hoveredItemKey]: ciHover.detail } : {};
 
   const openHoverCard = useCallback((key: string, rect: DOMRect) => {
     if (hoverCloseTimerRef.current) {
@@ -243,38 +246,6 @@ export const ActivityFeed = memo(function ActivityFeed({
       hoverCloseTimerRef.current = null;
     }
   }, []);
-
-  useEffect(() => {
-    if (!hoveredItemKey) return;
-    const hoveredItem = items.find((item) => activityItemKey(item) === hoveredItemKey);
-    if (!hoveredItem) return;
-
-    if (hoveredItem.kind === 'ci' && !ciHoverDetails[hoveredItemKey]) {
-      fetch(`/api/panel/ci/${hoveredItem.id}?repo=${encodeURIComponent(hoveredItem.repo)}`)
-        .then((response) => response.json())
-        .then((detail) => {
-          if (detail?.error) return;
-          const jobs = detail.run?.jobs ?? [];
-          const failingJobs = jobs
-            .filter((job: { conclusion?: string | null }) => job.conclusion?.toLowerCase() === 'failure')
-            .map((job: { name: string; steps?: Array<{ name?: string | null; conclusion?: string | null }> }) => ({
-              name: job.name,
-              failingStep: job.steps?.find((step) => step.conclusion?.toLowerCase() === 'failure')?.name ?? null,
-            }))
-            .slice(0, 3);
-          const summaryLine = String(detail.logs ?? '')
-            .split('\n')
-            .find((line) => line.includes('##[error]') || line.toLowerCase().includes('error ts') || line.toLowerCase().includes('failed'))
-            ?.replace(/^.*##\[error\]/, '')
-            .trim() ?? null;
-          setCiHoverDetails((current) => ({
-            ...current,
-            [hoveredItemKey]: { failingJobs, summaryLine },
-          }));
-        })
-        .catch(() => {});
-    }
-  }, [ciHoverDetails, hoveredItemKey, items]);
 
   const grouped = useMemo(() => {
     const groups: Array<{ label: string; items: ActivityItem[] }> = [];
@@ -344,6 +315,7 @@ export const ActivityFeed = memo(function ActivityFeed({
         prHoverDetails={prHoverDetails}
         prHoverStatus={prHover.status}
         ciHoverDetails={ciHoverDetails}
+        ciHoverStatus={ciHover.status}
         commitStack={commitStack}
         onOpenHoverCard={openHoverCard}
         onUpdateHoveredRect={setHoveredItemRect}

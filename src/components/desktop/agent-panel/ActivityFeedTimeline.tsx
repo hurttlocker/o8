@@ -37,6 +37,7 @@ import type {
 } from './types';
 import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
 import type { ActivityPrHoverStatus } from './useActivityPrHoverDetail';
+import type { ActivityCiHoverStatus } from './useActivityCiHoverDetail';
 
 const FEED_ICON: Record<string, { icon: ReactNode; bg: string; color: string }> = {
   commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
@@ -101,6 +102,7 @@ interface ActivityFeedTimelineProps {
   prHoverDetails: Record<string, PRHoverDetail>;
   prHoverStatus: ActivityPrHoverStatus;
   ciHoverDetails: Record<string, CIHoverDetail>;
+  ciHoverStatus: ActivityCiHoverStatus;
   commitStack: Array<Extract<ActivityItem, { kind: 'commit' }>>;
   onOpenHoverCard: (key: string, rect: DOMRect) => void;
   onUpdateHoveredRect: (rect: DOMRect) => void;
@@ -126,6 +128,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
   prHoverDetails,
   prHoverStatus,
   ciHoverDetails,
+  ciHoverStatus,
   commitStack,
   onOpenHoverCard,
   onUpdateHoveredRect,
@@ -476,6 +479,15 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <BlueGlassMetricPill label="Result" value={item.conclusion || item.status} color={item.conclusion === 'success' ? '#16a34a' : item.conclusion === 'failure' ? '#dc2626' : '#d97706'} />
                           <BlueGlassMetricPill label="Age" value={item.age} color="var(--t-text)" />
+                        </div>
+                        <div role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                          {ciHoverStatus.isFetching ? (ciDetail ? 'Refreshing CI details…' : 'Loading CI details…') : null}
+                          {ciHoverStatus.error ? `CI details delayed: ${ciHoverStatus.error}. ` : null}
+                          {ciHoverStatus.error && ciDetail && ciHoverStatus.ageSeconds !== null
+                            ? `Showing last known details (${ciHoverStatus.ageSeconds}s old). ` : null}
+                          <button type="button" onClick={() => { void ciHoverStatus.retry(); }} style={{
+                            border: 0, padding: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', font: 'inherit',
+                          }}>Retry CI details</button>
                         </div>
                         <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
