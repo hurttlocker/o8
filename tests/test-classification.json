@@ -1528,6 +1528,15 @@
       ]
     },
     {
+      "path": "tests/automatic-continuation-permission-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/automatic-release-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -1834,6 +1843,15 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/claude-linux-cwd-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
       ]
     },
     {
@@ -3533,6 +3551,12 @@
       ]
     },
     {
+      "path": "tests/mobile-chat-send-effort-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mobile-e2ee-required-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4024,6 +4048,24 @@
       "reasons": [
         "git-cli",
         "network-listener",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-outside-workspace-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-outside-workspace-ws-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
