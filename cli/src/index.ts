@@ -266,7 +266,8 @@ commands:
   evaluate-diff        independent skeptic review of a supplied or git diff
   ci [--config path]   run the versioned o8/ci/v1 local check contract
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
-  update apply [--force]  apply an available update when idle; --force overrides live-work refusal
+  update check          request a fresh native update check without installing
+  update apply [--check] [--force]  apply an available update; --check checks first, --force overrides live-work refusal
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
   browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)

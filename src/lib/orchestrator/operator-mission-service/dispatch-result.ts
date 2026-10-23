@@ -1,3 +1,4 @@
+import { missionDispatchQueue } from './dispatch-queue';
 import { getDispatchBlocker } from '@/lib/orchestrator/dispatch';
 import { packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
@@ -145,10 +146,12 @@ function classifySkippedPacket(
 export function summarizeDispatchMission(
   beforeDispatch: OrchestratorMissionState,
   afterDispatch: OrchestratorMissionState,
-): { dispatched: number; skipped: DispatchMissionSkippedPacket[] } {
+) {
   const beforeByPacketId = new Map(beforeDispatch.packets.map((packet) => [packet.id, hasLaneBinding(packet)] as const));
   let dispatched = 0;
   const skipped: DispatchMissionSkippedPacket[] = [];
+  const queued = missionDispatchQueue(afterDispatch);
+  const queuedById = new Map(queued.map((entry) => [entry.packetId, entry]));
 
   for (const packet of afterDispatch.packets) {
     const launched = !beforeByPacketId.get(packet.id) && hasLaneBinding(packet);
@@ -156,8 +159,16 @@ export function summarizeDispatchMission(
       dispatched += 1;
       continue;
     }
-    skipped.push(classifySkippedPacket(packet, afterDispatch.packets));
+    const queue = queuedById.get(packet.id);
+    const skip = classifySkippedPacket(packet, afterDispatch.packets);
+    skipped.push(queue && skip.reason === 'scheduler-deferred'
+      ? { ...skip, detail: queue.detail, suggestedAction: 'wait' }
+      : skip);
   }
 
-  return { dispatched, skipped };
+  return {
+    dispatched, skipped, queued,
+    status: dispatched > 0 ? 'dispatched' : queued.length > 0 ? 'queued' : 'not-dispatched',
+    ...(queued.length > 0 ? { note: `Dispatch returned with ${queued.length} packet(s) still queued. ${queued[0].detail}` } : {}),
+  };
 }

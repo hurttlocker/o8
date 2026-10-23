@@ -33,6 +33,8 @@ import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execu
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
+import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
+import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
@@ -118,7 +120,7 @@ export function createOwnedRunController({
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
-    notify: emitRuntimeFallbackNotification, invalidateFleetCache, retryDelayMs });
+    notify: (session, from, to, reason) => emitRuntimeFallbackNotification(runtimeId, session, from, to, reason), invalidateFleetCache, retryDelayMs });
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -343,39 +345,6 @@ export function createOwnedRunController({
     }
   }
 
-  async function emitRuntimeFallbackNotification(
-    session: OwnedSessionRecord,
-    fromModel: string,
-    toModel: string,
-    reason: string,
-  ) {
-    try {
-      const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
-      publishRealtimeMutation({
-        mutation: {
-          mutationId: `runtime-fallback-${session.surfaceId}-${Date.now()}`,
-          source: 'server',
-          action: 'runtime-fallback',
-          status: 'completed',
-          runtime: runtimeId as OrchestratorRuntime,
-          surfaceId: session.surfaceId,
-          sessionKey: session.surfaceId,
-          note: `${runtimeId} ${fromModel} → ${toModel}: ${reason}`,
-          createdAt: nowIso(),
-          settledAt: nowIso(),
-          fromModel,
-          toModel,
-          reason,
-        } as unknown as Parameters<typeof publishRealtimeMutation>[0]['mutation'],
-        refreshTargets: ['global', 'sessionHistory'],
-        sessionKeys: [session.surfaceId],
-        fresh: true,
-      });
-    } catch (err) {
-      console.error(`[owned-store] emitRuntimeFallbackNotification failed:`, err);
-    }
-  }
-
   async function reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord> {
     let dirty = false;
     for (let index = 0; index < session.recentRuns.length; index += 1) {
@@ -398,6 +367,7 @@ export function createOwnedRunController({
   }
 
   async function refreshSession(session: OwnedSessionRecord, surfaceLockHeld = false, allowRetry = true) {
+    await assertOwnedSessionProcessIdentity(session, runtimeId);
     let dirty = false;
 
     for (const run of session.recentRuns) {
@@ -649,6 +619,7 @@ export function createOwnedRunController({
           prompt,
           startedAt: nowIso(),
           pid: 0,
+          processIdentityRequired: crashSurvivableWorkersEnabled() && runtimeId === 'codex' && Boolean(session.packetId) && process.platform !== 'win32',
           commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
           spawnState: 'prepared',
@@ -757,6 +728,7 @@ export function createOwnedRunController({
           tmuxSession: terminalSessionName,
           detachMode,
         };
+        await captureOwnedRunIdentity(session, runtimeId, run);
 
         if (session.packetId && session.executionPolicy === undefined) {
           try {
@@ -781,6 +753,7 @@ export function createOwnedRunController({
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
           });
         }
+        await assertOwnedSessionProcessIdentity(session, runtimeId);
         return run;
       });
     } catch (error) {

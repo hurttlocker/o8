@@ -10,10 +10,12 @@ import {
 export const UPDATE_TOOLS: McpTool[] = [
   {
     name: 'o8_update_apply',
-    description: 'Apply the staged or available o8 update through the desktop webview. Refreshes stale checks, preserves parked lanes, and refuses live work unless force is true.',
+    description: 'Check or apply an o8 update through the native scheduler. checkOnly requests a fresh check without installing; checkNow checks before applying. Reports check age, preserves parked lanes, and refuses live work unless force is true.',
     inputSchema: {
       type: 'object',
       properties: {
+        checkOnly: { type: 'boolean', description: 'Request a fresh native check and report its result without applying an update.' },
+        checkNow: { type: 'boolean', description: 'Request a fresh native check before applying, even if the previous check is recent.' },
         force: {
           type: 'boolean',
           description: 'Override the live-work safety gate. Use only after the operator explicitly accepts an interrupted restart.',
@@ -26,13 +28,18 @@ export const UPDATE_TOOLS: McpTool[] = [
 ];
 
 export async function handleUpdateApply(args: Record<string, unknown>): Promise<McpToolResult> {
+  for (const field of ['checkNow', 'checkOnly']) {
+    if (args[field] !== undefined && typeof args[field] !== 'boolean') return textResult(`${field} must be boolean`, true);
+  }
   if (args.force !== undefined && typeof args.force !== 'boolean') {
     return textResult('force must be boolean', true);
   }
   try {
     const result = await apiFetch('/api/panel/update/apply', {
       method: 'POST',
-      body: JSON.stringify({ force: args.force === true }),
+      body: JSON.stringify({ force: args.force === true,
+        ...(args.checkNow === undefined ? {} : { checkNow: args.checkNow }),
+        ...(args.checkOnly === undefined ? {} : { checkOnly: args.checkOnly }) }),
       acceptedErrorStatuses: [409, 503],
       timeoutMs: 35_000,
     }) as { ok?: boolean };
