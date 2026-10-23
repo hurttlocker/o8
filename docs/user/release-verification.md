@@ -10,7 +10,7 @@ Download an installer, install the GitHub CLI, and run:
 
 ```bash
 gh attestation verify ./o8_0.1.663_linux_amd64_preview.AppImage \
-  --repo hurttlocker/o8
+  --repo o8-run/o8
 ```
 
 Use the same command for the Windows MSI or EXE and the Linux DEB or RPM. A

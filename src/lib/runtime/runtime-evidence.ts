@@ -20,7 +20,7 @@ import { listOwnedSessionLifecycles } from '@/lib/runtimes/shared/owned-session-
 const execFileAsync = promisify(execFile);
 const VERSION_TIMEOUT_MS = 5_000;
 const MODEL_CATALOGUE_TIMEOUT_MS = 5_000;
-const INTERNAL_CONTRACT_URL = 'https://github.com/hurttlocker/o8/blob/main/docs/internals/runtime-adapter-contract.md';
+const INTERNAL_CONTRACT_URL = 'https://github.com/o8-run/o8/blob/main/docs/internals/runtime-adapter-contract.md';
 
 export type RuntimeEvidenceConfidence = 'verified' | 'reported' | 'unknown';
 export type RuntimeEvidenceFreshness = 'fresh' | 'stale' | 'missing';

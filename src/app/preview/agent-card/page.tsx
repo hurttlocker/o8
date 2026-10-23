@@ -510,7 +510,7 @@ function PrResult() {
           Pinned dock + split-tab orchestrator modals
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>
-          #374 · hurttlocker/o8
+          #374 · o8-run/o8
           <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: '#a371f7', flexShrink: 0 }} />
           merged
         </span>

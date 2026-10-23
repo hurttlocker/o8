@@ -5,7 +5,7 @@
  * Public key is embedded in the mobile client at subscription time; private
  * key signs the JWT in the Authorization header on each push send.
  *
- * Issue: https://github.com/hurttlocker/o8/issues/639
+ * Issue: https://github.com/o8-run/o8/issues/639
  */
 
 import 'server-only';

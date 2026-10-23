@@ -48,4 +48,4 @@ A missing Ori binary is a `missing-carrier` failure with `O8_ORI_BIN` guidance. 
 
 The spawned root command is Ori, so the durable run records the resolved Ori executable path as its command identity, even when `sandbox-exec` wraps it. The Ori child inherits the owned-run marker and belongs to the same detached process tree or process group. On macOS and Linux, interrupt and orphan cleanup require the live process marker and recorded process group, including when a wrapper has executed another binary. Unavailable or mismatched proof holds the run without signaling it or claiming an interruption. The Windows command check accepts only the executable position, not a later argument mentioning the path. All operator-facing lifecycle and review records continue to attribute that tree to Codex.
 
-This design is the bounded follow-up to [issue #2034](https://github.com/hurttlocker/o8/issues/2034). It does not change the Copilot CLI or Crush runtime adapters landed there.
+This design is the bounded follow-up to [issue #2034](https://github.com/o8-run/o8/issues/2034). It does not change the Copilot CLI or Crush runtime adapters landed there.

@@ -1,11 +1,11 @@
 # Connection, identity and plan-use boundaries
 
 This is the account and consent design for
-[#3248](https://github.com/hurttlocker/o8/issues/3248), and implementation input to
-[#2951](https://github.com/hurttlocker/o8/issues/2951). It does not activate Sign
+[#3248](https://github.com/o8-run/o8/issues/3248), and implementation input to
+[#2951](https://github.com/o8-run/o8/issues/2951). It does not activate Sign
 in with ChatGPT or broaden the hosted plugin grant. Source and official guidance
 were checked October 6, 2026. The desktop plan connection is prepared separately
-in [PR #3304](https://github.com/hurttlocker/o8/pull/3304). That draft connects an
+in [PR #3304](https://github.com/o8-run/o8/pull/3304). That draft connects an
 existing signed-in o8 account to a ChatGPT plan; it does not replace o8 account
 sign-in. Its source tests do not establish installed acceptance or qualification.
 
@@ -132,7 +132,7 @@ expiry test. A successful read inside that lifetime does not prove refresh.
 
 ## Controlled worker credential preparation
 
-Controlled worker credential source under [#3310](https://github.com/hurttlocker/o8/issues/3310)
+Controlled worker credential source under [#3310](https://github.com/o8-run/o8/issues/3310)
 uses a per-run bearer with zero API capability, filters ambient service secrets and
 shell preload variables, and supplies no operator MCP attachments. Config-file
 adapters receive an explicit empty MCP configuration. Middleware refuses the bearer
@@ -149,7 +149,7 @@ qualification remain open under #3249.
 
 ## Controlled task admission preparation
 
-Source under [#3312](https://github.com/hurttlocker/o8/issues/3312) adds the local
+Source under [#3312](https://github.com/o8-run/o8/issues/3312) adds the local
 operator-only `POST /api/plugins/task-drafts/control` decision. Its exact body is
 `action` (`launch`, `inspect` or `stop`), `taskId` and `contractHash`. The route is
 absent from the hosted MCP catalogue. Read, follow-up and prepare grants cannot use it.
@@ -211,8 +211,8 @@ state. These fixtures do not establish installed or live-provider acceptance.
 - [Principal tests through the real route](../../tests/plugin-principal-real-path.test.ts)
 - [Hosted submission boundary](./openai-plugin-submission.md)
 - [Usage measurement](./chatgpt-plugin-usage.md)
-- [Sign in with ChatGPT implementation and eligibility](https://github.com/hurttlocker/o8/issues/2951)
-- [Connection lifecycle acceptance](https://github.com/hurttlocker/o8/issues/2952)
+- [Sign in with ChatGPT implementation and eligibility](https://github.com/o8-run/o8/issues/2951)
+- [Connection lifecycle acceptance](https://github.com/o8-run/o8/issues/2952)
 
 This design grants no production access and does not establish plan inference,
 new remote task creation or public readiness.

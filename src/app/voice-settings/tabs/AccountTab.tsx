@@ -22,11 +22,11 @@ export default function AccountTab() {
           <ControlRow label="Version" detail="o8 updates install automatically in the background.">
             <span style={{ fontSize: 13, color: TEXT_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{version ? `v${version}` : '-'}</span>
           </ControlRow>
-          <ControlRow label="Release channel" detail="Signed builds from hurttlocker/o8.">
+          <ControlRow label="Release channel" detail="Signed builds from o8-run/o8.">
             <span style={{ fontSize: 13, color: ACCENT_LIGHT }}>Stable</span>
           </ControlRow>
           <div style={{ marginTop: 14 }}>
-            <GhostButton label="Release notes" onClick={() => { window.open('https://github.com/hurttlocker/o8/releases', '_blank'); }} />
+            <GhostButton label="Release notes" onClick={() => { window.open('https://github.com/o8-run/o8/releases', '_blank'); }} />
           </div>
         </SectionCard>
       </div>

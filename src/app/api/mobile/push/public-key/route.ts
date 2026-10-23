@@ -5,7 +5,7 @@
  * pushManager.subscribe({ applicationServerKey }). The public key is —
  * by definition — public, so this route is allow-listed in middleware.
  *
- * Issue: https://github.com/hurttlocker/o8/issues/639
+ * Issue: https://github.com/o8-run/o8/issues/639
  */
 
 import { NextResponse } from 'next/server';

@@ -43,7 +43,7 @@ interface PanelRepo {
 
 function repoSlugFromRemoteUrl(url: string | undefined): string | null {
   if (!url) return null;
-  // https://github.com/hurttlocker/o8.git → hurttlocker/o8
+  // https://github.com/o8-run/o8.git → o8-run/o8
   const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
   return match ? match[1] : null;
 }

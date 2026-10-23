@@ -1,6 +1,6 @@
 # o8 connected plugin and submission
 
-The package for [#2952](https://github.com/hurttlocker/o8/issues/2952) includes a
+The package for [#2952](https://github.com/o8-run/o8/issues/2952) includes a
 hosted MCP connection in its first submission. Source preparation does not
 establish a live service, Directory acceptance, or public availability.
 

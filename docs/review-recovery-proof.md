@@ -6,8 +6,8 @@ symptom, the invariant, the shape of the shipped fix, the regression files that 
 and the releases that carry it — so the next person to meet one of these states does not
 have to re-derive the class from a stalled lane.
 
-- Issue [#1844](https://github.com/hurttlocker/o8/issues/1844) — *A steered packet can become permanently unmergeable: the second pass never re-runs at the new HEAD*
-- Issue [#1856](https://github.com/hurttlocker/o8/issues/1856) — *Second pass agrees, merge never dispatches: a fully-authorized packet parks in reviewing with no attempt and no failure recorded*
+- Issue [#1844](https://github.com/o8-run/o8/issues/1844) — *A steered packet can become permanently unmergeable: the second pass never re-runs at the new HEAD*
+- Issue [#1856](https://github.com/o8-run/o8/issues/1856) — *Second pass agrees, merge never dispatches: a fully-authorized packet parks in reviewing with no attempt and no failure recorded*
 
 The issue links are the upstream record; the code paths described below are merged and
 released. Their open or closed state does not change this durable account of the defect
@@ -179,11 +179,11 @@ advancing the proof marker.
 
 | Release | Date | Carries |
 |---|---|---|
-| [v0.1.704](https://github.com/hurttlocker/o8/releases/tag/v0.1.704) | 2026-08-23 | the #1844 side: blind review re-armed from the review-recording path, latest-verdict recency honored before a blind pass, and the scheduling helper extracted |
-| [v0.1.705](https://github.com/hurttlocker/o8/releases/tag/v0.1.705) | 2026-08-24 | the #1856 side: recorded merge dispatch, review-skip receipts, stall reconciliation, interrupted-transition recovery, deferred recoverable outcomes, and the merge branch-probe hardening |
-| [v0.1.706](https://github.com/hurttlocker/o8/releases/tag/v0.1.706) | 2026-08-24 | exact-HEAD review and merge recovery hardening used by the first live canary |
-| [v0.1.707](https://github.com/hurttlocker/o8/releases/tag/v0.1.707) | 2026-08-24 | exact review-claim settlement, busy deferral, startup repair, strict release evidence, and merged-ancestry truth |
-| [v0.1.708](https://github.com/hurttlocker/o8/releases/tag/v0.1.708) | 2026-08-24 | exact receipt-lineage recovery for a stale machine-generated awaiting-human alarm; the current release |
+| [v0.1.704](https://github.com/o8-run/o8/releases/tag/v0.1.704) | 2026-08-23 | the #1844 side: blind review re-armed from the review-recording path, latest-verdict recency honored before a blind pass, and the scheduling helper extracted |
+| [v0.1.705](https://github.com/o8-run/o8/releases/tag/v0.1.705) | 2026-08-24 | the #1856 side: recorded merge dispatch, review-skip receipts, stall reconciliation, interrupted-transition recovery, deferred recoverable outcomes, and the merge branch-probe hardening |
+| [v0.1.706](https://github.com/o8-run/o8/releases/tag/v0.1.706) | 2026-08-24 | exact-HEAD review and merge recovery hardening used by the first live canary |
+| [v0.1.707](https://github.com/o8-run/o8/releases/tag/v0.1.707) | 2026-08-24 | exact review-claim settlement, busy deferral, startup repair, strict release evidence, and merged-ancestry truth |
+| [v0.1.708](https://github.com/o8-run/o8/releases/tag/v0.1.708) | 2026-08-24 | exact receipt-lineage recovery for a stale machine-generated awaiting-human alarm; the current release |
 
 The versions to cite for the complete shipped review-recovery behavior are **v0.1.704
 through v0.1.708**. v0.1.705 made the invariant enforceable on both transitions; the later

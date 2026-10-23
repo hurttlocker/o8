@@ -1,5 +1,5 @@
 /**
- * Resolve a GitHub repo full name (e.g., "hurttlocker/o8") to a local
+ * Resolve a GitHub repo full name (e.g., "o8-run/o8") to a local
  * filesystem path using the canonical o8 data-dir repo registry.
  */
 

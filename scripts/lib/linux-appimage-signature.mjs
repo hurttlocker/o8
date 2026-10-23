@@ -15,7 +15,7 @@ export const SIGNING_KEY_PASSWORD_ENV = 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD';
 export const SIGNING_KEY_RELATIVE_PATH = ['.tauri', 'cortex-ide.key'];
 export const DARWIN_UPDATER_ASSET = 'o8.app.tar.gz';
 export const LATEST_JSON_ASSET = 'latest.json';
-export const DEFAULT_REPOS = ['hurttlocker/o8', 'hurttlocker/o8-releases'];
+export const DEFAULT_REPOS = ['o8-run/o8', 'hurttlocker/o8-releases'];
 
 const TAG_PATTERN = /^v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
 

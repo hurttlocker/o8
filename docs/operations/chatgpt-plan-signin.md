@@ -1,7 +1,7 @@
 # ChatGPT plan sign-in development acceptance
 
 This is the source acceptance record for the desktop text-chat increment of
-[#2951](https://github.com/hurttlocker/o8/issues/2951). It is separate from the
+[#2951](https://github.com/o8-run/o8/issues/2951). It is separate from the
 [hosted plugin connection](./openai-plugin-submission.md). Source preparation
 does not establish installed acceptance, OpenAI qualification, or publication.
 
@@ -82,7 +82,7 @@ expose that route or provide a ChatGPT API lead or Symon integration.
 - Equivalent OS credential stores on supported non-macOS platforms.
 - Explicit integration with the orchestrator API lead and Symon text work.
 - Hosted worker creation under a separate grant, tracked in
-  [#3249](https://github.com/hurttlocker/o8/issues/3249), and an installed
+  [#3249](https://github.com/o8-run/o8/issues/3249), and an installed
   ChatGPT-to-worker round trip on a disposable repository.
 - The attributable planning/execution allowance experiment in
   [the usage protocol](./chatgpt-plugin-usage.md).

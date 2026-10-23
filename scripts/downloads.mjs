@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process';
 
-const REPO = 'hurttlocker/o8';
+const REPO = 'o8-run/o8';
 const DEFAULT_COUNT = 10;
 const MAX_COUNT = 100;
 

@@ -20,7 +20,7 @@ and a result preview only when the user requested it. Do not expose credentials,
 full transcripts, or unrelated repository details.
 
 If o8 cannot be found, explain that the native app installs the CLI after its
-first launch and link to [o8 downloads](https://github.com/hurttlocker/o8/releases).
+first launch and link to [o8 downloads](https://github.com/o8-run/o8/releases).
 If the CLI exists but the server is unreachable, run the read-only `o8 doctor
 --json` and report its finding. Do not restart the app, repair configuration,
 reap processes, or change settings merely to answer a status request.

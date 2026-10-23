@@ -14,9 +14,9 @@
  *
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  *
- * @see https://github.com/hurttlocker/o8/issues/65
- * @see https://github.com/hurttlocker/o8/issues/66
- * @see https://github.com/hurttlocker/o8/issues/608
+ * @see https://github.com/o8-run/o8/issues/65
+ * @see https://github.com/o8-run/o8/issues/66
+ * @see https://github.com/o8-run/o8/issues/608
  */
 
 import { access, lstat, realpath, rm, stat } from 'node:fs/promises';
