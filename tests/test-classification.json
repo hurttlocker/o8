@@ -3946,6 +3946,13 @@
       ]
     },
     {
+      "path": "tests/pi-dev-imports-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-inbox-approval-real-path.test.ts",
       "reasons": [
         "real-path"

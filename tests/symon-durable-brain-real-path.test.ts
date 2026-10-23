@@ -141,7 +141,7 @@ describe('durable Symon brain (#3453)', () => {
 describe('Symon managed provider', () => {
   it('sends through the host-resolved route and streams the answer', async () => {
     const requests: Array<{ url: string; authorization: string | null; body: Record<string, unknown> }> = [];
-    const provider = createSymonManagedProvider({
+    const provider = await createSymonManagedProvider({
       resolveRoute: async () => ({ via: 'proxy', url: 'https://relay.test/v1/inference', headers: { authorization: 'Bearer host-only' } }) as never,
       fetch: async (input, init) => {
         requests.push({
@@ -168,7 +168,7 @@ describe('Symon managed provider', () => {
   it('carries the durable brain prompt and thread history in the managed request body', async () => {
     const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
     const models = createModels();
-    models.setProvider(createSymonManagedProvider({
+    models.setProvider(await createSymonManagedProvider({
       resolveRoute: async () => ({ via: 'proxy', url: 'https://relay.test/v1/inference', headers: {} }) as never,
       fetch: async (_input, init) => {
         bodies.push(JSON.parse(String(init?.body)));
@@ -192,7 +192,7 @@ describe('Symon managed provider', () => {
   });
 
   it('reports a missing entitlement as o8 text and nothing else', async () => {
-    const provider = createSymonManagedProvider({ resolveRoute: async () => null });
+    const provider = await createSymonManagedProvider({ resolveRoute: async () => null });
     const models = createModels();
     models.setProvider(provider);
     const model = models.getModel(SYMON_MANAGED_MODEL.provider, SYMON_MANAGED_MODEL.id)!;
