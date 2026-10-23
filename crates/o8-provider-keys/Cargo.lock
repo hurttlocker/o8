@@ -234,6 +234,7 @@ dependencies = [
  "aes-gcm",
  "base64",
  "hex",
+ "libc",
  "rusqlite",
  "serde_json",
 ]

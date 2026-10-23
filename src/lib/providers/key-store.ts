@@ -1,4 +1,5 @@
 import { credentialPolicyChanged } from './policy-events';
+import { purgeOwnedMcpArtifacts } from './mcp-artifacts';
 /** Shared Node/native credential protocol. See crates/o8-provider-keys. */
 import 'server-only';
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -104,6 +105,7 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     if (change.enabled !== undefined) updates.set(disabledName(name), change.enabled ? '0' : '1');
     const lines = raw.split('\n').filter(line => !updates.has(line.split('=')[0].trim()));
     for (const [key, value] of updates) if (value !== null) lines.push(`${key}=${value}`);
+    purgeOwnedMcpArtifacts();
     // Preserve all untouched ciphertext and unrelated lines, including comments.
     temporary = join(dir, `.provider-keys.${randomUUID()}.tmp`);
     writeFileSync(temporary, lines.join('\n'), { mode: 0o600, flag: 'wx' });

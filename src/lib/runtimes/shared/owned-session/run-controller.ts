@@ -1,16 +1,18 @@
 import { packetCargoEnvironment } from '@/lib/worktree/cargo-target-cache';
 import { controlledProviderSandbox } from './controlled-provider-sandbox';
+import { providerCredentialName } from '@/lib/providers/spawn-environment';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { assertLaunchCredentialPolicy, spawnCredentialCheckedChild } from './credential-spawn';
 import { revokeControlledGateway } from '@/lib/claude-code/controlled-gateway';
 import { mintReadOnlyWorkerToken, revokeReadOnlyWorkerToken } from '@/lib/auth/read-only-worker-token';
 import { ownedSpawnEnvironment } from './restricted-spawn-env';
-import { assertControlledLaunchGrantCurrent, withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
+import { withControlledTaskSpawn } from '@/lib/mcp/task-execution-admission';
 import { currentRecoveryRun, recoveryInterrupted } from './automatic-recovery';
 import { assertOwnedActionAdmission } from './action-admission';
 import { withOwnedArtifactAdmission } from './artifact-admission';
 import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
-import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { closeSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,7 +29,6 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { executionCarrierCommandIdentity, executionCarrierSandboxReadPaths, executionCarrierSpawnPath, resolveExecutionCarrierInvocation } from '@/lib/runtimes/shared/execution-carrier-launch';
 import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execution';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
@@ -517,6 +518,7 @@ export function createOwnedRunController({
     // for normal packets and defaults off. See resolveReadOnlySandboxPlan.
     const readOnlySandbox = resolveReadOnlySandboxPlan(session);
     const sandboxEnabled = workerSandboxEnabled() || readOnlySandbox.enforced;
+    const credentialPolicy = credentialPolicyFingerprint(runtimeId);
     const { args, stdinPayload, workerMcp } = await prepareOwnedLaunchArgs({
       adapter,
       session,
@@ -667,13 +669,17 @@ export function createOwnedRunController({
 
         try {
           assertOwnedActionAdmission(session, runId);
-          if (process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
+          assertLaunchCredentialPolicy(runtimeId, credentialPolicy);
+          const bridgeEnv = ownedSpawnEnvironment(session, spawnEnv, true);
+          const hasProviderCredentials = Object.entries(bridgeEnv).some(([name, value]) => value && providerCredentialName(name));
+          // Credential-bearing launches require policy validation at OS spawn.
+          if (!hasProviderCredentials && !workerMcp.configPath && workerMcp.servers.length === 0 && process.platform !== 'win32' && session.executionPolicy === undefined && !carrierLaunch.carried && !crashSurvivableWorkersEnabled()) {
             try {
               const result = await spawnBridgeTerminalSession({
                 sessionName: bridgeSessionName,
                 shellCommand: shellCmd,
                 cwd: session.repoPath,
-                env: ownedSpawnEnvironment(session, spawnEnv, true),
+                env: bridgeEnv,
                 resolvedEnvironment: true,
                 packetId: session.packetId ?? undefined,
                 laneId: session.laneId ?? undefined,
@@ -689,36 +695,12 @@ export function createOwnedRunController({
             const stdoutFd = openSync(stdoutPath, 'a');
             const stderrFd = openSync(stderrPath, 'a');
             try {
-              // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
-              // installs), and Node refuses to execute one without an interpreter —
-              // it fails before a process exists, so the run dies in milliseconds with
-              // pid 0 and an empty stderr, which reads like the agent instantly gave
-              // up. cliInvocation is the identity for real executables. See #1758.
-              const winLaunch = cliInvocation(spawnBinary, spawnArgs);
-              const directLaunch = process.platform === 'win32'
-                ? guardedWorkspaceInvocation(winLaunch.command, winLaunch.args, materializationIdentity)
-                : guardedWorkspaceInvocation(
-                    '/usr/bin/nice',
-                    ['-n', '10', spawnBinary, ...spawnArgs],
-                    materializationIdentity,
-                  );
-              assertControlledLaunchGrantCurrent(session);
-              assertOwnedActionAdmission(session, runId);
-              const child = process.platform === 'win32'
-                ? spawn(directLaunch.command, directLaunch.args, {
-                    windowsHide: true,
-                    cwd: session.repoPath,
-                    detached: true,
-                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-                    env: ownedSpawnEnvironment(session, spawnEnv),
-                  })
-                : spawn(directLaunch.command, directLaunch.args, {
-                    windowsHide: true,
-                    cwd: session.repoPath,
-                    detached: true,
-                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
-                    env: ownedSpawnEnvironment(session, spawnEnv),
-                  });
+              const child = spawnCredentialCheckedChild({
+                session, runtimeId, policy: credentialPolicy, runId,
+                binary: spawnBinary, args: spawnArgs, env: spawnEnv,
+                stdinPayload, stdoutFd, stderrFd, mcpConfigPath: workerMcp.configPath,
+                materializationIdentity,
+              });
               detachedChild = child;
               observeChildExit(child, (childExit) => {
                 if (!runPersisted) {

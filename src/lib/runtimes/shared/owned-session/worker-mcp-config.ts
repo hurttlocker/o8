@@ -1,5 +1,6 @@
 import { providerConfigEnvironment } from '@/lib/providers/spawn-environment';
-import { readdir, unlink, writeFile } from 'node:fs/promises';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { writeOwnedMcpArtifact } from '@/lib/providers/mcp-artifacts';
 import path from 'node:path';
 
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -43,10 +44,11 @@ export async function prepareOwnedWorkerMcpConfig({
   mode: OwnedRunMode;
   sandboxEnabled: boolean;
 }): Promise<PreparedOwnedWorkerMcpConfig> {
+  const policy = credentialPolicyFingerprint(adapter.runtimeId);
+  const assertCurrent = () => { if (credentialPolicyFingerprint(adapter.runtimeId) !== policy) throw new Error('Credentials changed during MCP preparation. Retry the launch.'); };
   if (session.executionPolicy !== undefined) {
     if (adapter.workerMcpInjection !== 'config-file') return { sandboxReadPaths: [], servers: [] };
-    const configPath = path.join(session.sessionDir, `o8-worker-mcp-${runId}.json`);
-    await writeFile(configPath, '{"mcpServers":{}}\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    const configPath = writeOwnedMcpArtifact(adapter.runtimeId, runId, '{"mcpServers":{}}\n', assertCurrent);
     return { configPath, sandboxReadPaths: [configPath], servers: [] };
   }
   if (!session.packetId || !adapter.workerMcpInjection) {
@@ -89,11 +91,6 @@ export async function prepareOwnedWorkerMcpConfig({
   }
 
   try {
-    const configPath = path.join(session.sessionDir, `o8-worker-mcp-${runId}.json`);
-    const staleConfigNames = (await readdir(session.sessionDir, { withFileTypes: true }))
-      .filter((entry) => entry.isFile() && /^o8-worker-mcp-.*\.json$/.test(entry.name))
-      .map((entry) => entry.name);
-    await Promise.all(staleConfigNames.map((name) => unlink(path.join(session.sessionDir, name))));
     const mcpServers = Object.fromEntries(injectableServers.map((server) => [
       server.name,
       {
@@ -102,11 +99,7 @@ export async function prepareOwnedWorkerMcpConfig({
         env: server.env ?? {},
       },
     ]));
-    await writeFile(
-      configPath,
-      `${JSON.stringify({ mcpServers }, null, 2)}\n`,
-      { encoding: 'utf8', mode: 0o600 },
-    );
+    const configPath = writeOwnedMcpArtifact(adapter.runtimeId, runId, `${JSON.stringify({ mcpServers }, null, 2)}\n`, assertCurrent);
     recordWorkerMcpEvent(session, 'mcp_injected', {
       servers: injectableServers.map((server) => server.name),
       configPath,

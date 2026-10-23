@@ -1,4 +1,5 @@
 //! Shared encrypted provider store. Wire-compatible with src/lib/providers/key-store.ts.
+mod artifacts;
 use aes_gcm::{
     aead::{rand_core::RngCore, Aead, OsRng},
     Aes256Gcm, KeyInit, Nonce,
@@ -348,6 +349,7 @@ fn mutate_inner(
         }
     }
     let mut nonce = [0u8; 12];
+    artifacts::purge(&dir)?;
     OsRng.fill_bytes(&mut nonce);
     let temporary = dir.join(format!(".provider-keys.{}.tmp", hex::encode(nonce)));
     let result = create_private(&temporary, lines.join("\n").as_bytes()).and_then(|_| {

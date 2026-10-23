@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -64,6 +64,35 @@ it('signed-out API save, check, rotation, disable and remove reach native consum
   expect(native({ action: 'read' }).value).toBeNull();
   expect(native({ action: 'public' }).value.openrouter_api_key_set).toBe(false);
   expect(restartedNode('OPENROUTER_API_KEY')).toBeNull();
+});
+
+it.each(['node-disable', 'node-remove', 'native-disable', 'native-remove'])('%s scrubs dedicated and legacy active/archive MCP copies across processes', async action => {
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-artifact-key' }))).status).toBe(200);
+  const customRoot = join(state.dir, 'custom-sessions'); vi.stubEnv('O8_OWNED_FIXTURE_ROOT', `${customRoot}/`);
+  const directories = [join(state.dir, 'worker-mcp-artifacts'), join(state.dir, 'owned-claude-code', 'fixture'), join(state.dir, 'owned-claude-code-archive', 'fixture'), join(customRoot, 'fixture'), join(`${customRoot}-archive`, 'fixture')];
+  const files = directories.map(dir => { mkdirSync(dir, { recursive: true }); const file = join(dir, 'o8-worker-mcp-fixture.json'); writeFileSync(file, '{"env":{"OPENROUTER_API_KEY":"fixture-artifact-key"}}'); writeFileSync(join(dir, 'state.json'), 'fixture-unrelated'); return file; });
+  if (action.startsWith('native')) expect(native({ action: 'save', pref: action.endsWith('disable') ? 'openrouter_enabled' : 'openrouter_api_key', value: action.endsWith('disable') ? false : '' }).ok).toBe(true);
+  else expect((await (action.endsWith('disable') ? routes.PATCH(request('PATCH', { provider: 'openrouter', enabled: false })) : routes.DELETE(request('DELETE', { provider: 'openrouter' })))).status).toBe(200);
+  for (const file of files) { expect(readFileSync(file, 'utf8'), file).toBe(''); expect(readFileSync(join(file, '..', 'state.json'), 'utf8')).toBe('fixture-unrelated'); }
+});
+it.each(['node', 'native'])('%s refuses revocation when an owned artifact directory redirects to another location', async writer => {
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-artifact-key' }))).status).toBe(200);
+  const target = join(state.dir, 'unrelated'); mkdirSync(target);
+  writeFileSync(join(target, 'o8-worker-mcp-fixture.json'), 'fixture-unrelated');
+  symlinkSync(target, join(state.dir, 'worker-mcp-artifacts'), 'dir');
+  if (writer === 'node') expect((await routes.DELETE(request('DELETE', { provider: 'openrouter' }))).status).toBe(503);
+  else expect(native({ action: 'save', pref: 'openrouter_api_key', value: '' }).ok).toBe(false);
+  expect(resolveProviderKey('OPENROUTER_API_KEY')).toBe('fixture-artifact-key');
+  expect(readFileSync(join(target, 'o8-worker-mcp-fixture.json'), 'utf8')).toBe('fixture-unrelated');
+});
+it.each(['node', 'native'])('%s refuses ambiguous relative legacy roots and preserves the saved credential', async writer => {
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'fixture-artifact-key' }))).status).toBe(200);
+  vi.stubEnv('O8_OWNED_FIXTURE_ROOT', 'relative-sessions');
+  try {
+    if (writer === 'node') expect((await routes.DELETE(request('DELETE', { provider: 'openrouter' }))).status).toBe(503);
+    else expect(native({ action: 'save', pref: 'openrouter_api_key', value: '' }).ok).toBe(false);
+    expect(resolveProviderKey('OPENROUTER_API_KEY')).toBe('fixture-artifact-key');
+  } finally { delete process.env.O8_OWNED_FIXTURE_ROOT; }
 });
 it.each([
   ['openrouter_api_key', 'OPENROUTER_API_KEY'], ['gemini_api_key', 'GEMINI_API_KEY'],

@@ -3822,6 +3822,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "hex",
+ "libc",
  "rusqlite",
  "serde_json",
 ]
