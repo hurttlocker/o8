@@ -1,10 +1,10 @@
-import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { decryptValueSync, encryptValueSync } from '@/lib/db/master-key';
-import { sanitizeRuntimeConfigText } from './runtime-config';
+import { assertCodexAccountAuth, sanitizeRuntimeConfigText } from './runtime-config';
 import { withProviderStoreLock } from './store-lock';
 
 interface Artifact { path: string; runtime: string; owner: 'o8'; replacement: string }
@@ -105,6 +105,32 @@ export function registeredRuntimeHome(home: string, runtime: string): boolean {
   });
 }
 
+/** The auth link is borrowed account state, never an owned scrub destination. */
+export function setCodexAuthSource(home: string, source: string | null): void {
+  withProviderStoreLock(() => {
+    if (!registeredRuntimeHome(home, 'codex')) throw unsafe();
+    const file = canonical(join(home, 'auth.json'));
+    const records = registry();
+    for (const record of records) if (record.path === file) decode(record);
+    let stat;
+    try { stat = lstatSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (stat && !stat.isSymbolicLink()) assertRegular(file);
+    // Drop legacy copy ownership before installing a link: revocation must never
+    // follow that link into the operator's account file.
+    persist(records.filter(record => record.path !== file));
+    if (stat?.isSymbolicLink() && source && resolve(dirname(file), readlinkSync(file)) === resolve(source)) return;
+    if (stat) unlinkSync(file);
+    if (source) symlinkSync(source, file);
+  });
+}
+
+function borrowedCodexAuth(file: string, runtime: string): boolean {
+  if (runtime !== 'codex' || basename(file) !== 'auth.json' || !lstatSync(file).isSymbolicLink()) return false;
+  // Recheck at the launch boundary; a borrowed link may never expose an API key.
+  assertCodexAccountAuth(readFileSync(file, 'utf8'));
+  return true;
+}
+
 /** Bounded migration of ordinary generated destinations, including archived homes. */
 function discovered(): { path: string; runtime: string }[] {
   const found: { path: string; runtime: string }[] = [];
@@ -184,6 +210,7 @@ export function assertOwnedArtifactsForLaunch(runtimeId: string | undefined, env
   for (const candidate of candidates) {
     if (!existsSync(candidate.file)) continue;
     const path = canonical(candidate.file);
+    if (borrowedCodexAuth(path, candidate.runtime)) continue;
     if (records.some(record => record.path === path)) continue;
     assertRegular(path);
     const raw = readFileSync(path, 'utf8');

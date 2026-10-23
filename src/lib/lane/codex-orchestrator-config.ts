@@ -1,4 +1,4 @@
-import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { prepareCodexAuth } from '@/lib/providers/codex-home';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { writeOwnedRuntimeArtifact } from '@/lib/providers/owned-artifacts';
 import { homedir } from 'node:os';
@@ -115,13 +115,14 @@ function pinCodexOrchestratorModel(
 }
 
 function syncCodexAuthFiles(codexHome: string, deferredSolo = false): void {
+  if (!deferredSolo) prepareCodexAuth(codexHome, USER_CODEX_HOME);
   for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
+    if (fileName === 'auth.json' && !deferredSolo) continue;
     const sourcePath = join(USER_CODEX_HOME, fileName);
-    if (!existsSync(sourcePath)) { if (fileName === 'auth.json' && !deferredSolo) reconcileRuntimeConfigFile(join(codexHome, fileName), 'codex'); continue; }
+    if (!existsSync(sourcePath)) continue;
     const destPath = join(codexHome, fileName);
-    if (fileName === 'auth.json' && !deferredSolo) copyRuntimeConfigFile(sourcePath, destPath, 'codex');
-    else copyFileSync(sourcePath, destPath);
-    if (fileName === 'auth.json') { if (!deferredSolo) reconcileRuntimeConfigFile(destPath, 'codex'); chmodSync(destPath, 0o600); }
+    copyFileSync(sourcePath, destPath);
+    if (fileName === 'auth.json') chmodSync(destPath, 0o600);
   }
 }
 

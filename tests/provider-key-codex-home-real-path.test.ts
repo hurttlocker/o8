@@ -10,7 +10,7 @@ state.home = mkdtempSync(join(tmpdir(), 'o8-codex-home-policy-')); state.dir = j
 const source = join(state.home, '.codex'); mkdirSync(source); mkdirSync(state.dir);
 const observed = join(state.home, 'observed.json');
 const binary = join(state.home, 'fixture-codex');
-const inspect = `const fs=require('node:fs'),p=require('node:path');const home=process.env.CODEX_HOME||${JSON.stringify(source)};fs.writeFileSync(${JSON.stringify(observed)},JSON.stringify({home,config:fs.readFileSync(p.join(home,'config.toml'),'utf8'),auth:JSON.parse(fs.readFileSync(p.join(home,'auth.json'),'utf8')),sqlite:process.env.CODEX_SQLITE_HOME,sessions:fs.realpathSync(p.join(home,'sessions'))}));`;
+const inspect = `const fs=require('node:fs'),p=require('node:path');const home=process.env.CODEX_HOME||${JSON.stringify(source)};fs.writeFileSync(${JSON.stringify(observed)},JSON.stringify({home,config:fs.readFileSync(p.join(home,'config.toml'),'utf8'),auth:fs.existsSync(p.join(home,'auth.json'))?JSON.parse(fs.readFileSync(p.join(home,'auth.json'),'utf8')):null,sqlite:process.env.CODEX_SQLITE_HOME,sessions:fs.realpathSync(p.join(home,'sessions'))}));`;
 writeFileSync(binary, `#!/usr/bin/env node\n${inspect}`); chmodSync(binary, 0o755);
 const keys = await import('@/app/api/v2/keys/route');
 const billing = await import('@/app/api/runtime/billing/route');
@@ -24,7 +24,7 @@ beforeEach(async () => {
   vi.stubEnv('CODEX_HOME', '');
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
   writeFileSync(join(source, 'config.toml'), '[model_providers.openai.http_headers]\nAuthorization="Bearer fixture-source-provider"\n');
-  writeFileSync(join(source, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'fixture-source-provider', tokens: { access_token: 'fixture-oauth' } }));
+  writeFileSync(join(source, 'auth.json'), JSON.stringify({ tokens: { access_token: 'fixture-oauth' } }));
   mkdirSync(join(source, 'sessions'), { recursive: true });
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-source-provider' }))).status).toBe(200);
 });
@@ -35,11 +35,12 @@ it.each(['subscription', 'api'] as const)('isolates %s Codex app-server credenti
   const result = JSON.parse(readFileSync(observed, 'utf8'));
   expect(result.home).not.toBe(source);
   expect(result.config).not.toContain('fixture-source-provider');
-  expect(result.auth).toEqual({ tokens: { access_token: 'fixture-oauth' } });
+  expect(result.auth).toEqual(mode === 'subscription' ? { tokens: { access_token: 'fixture-oauth' } } : null);
   expect(result.sqlite).toBe(source); expect(result.sessions).toBe(realpathSync(join(source, 'sessions')));
-  expect(readFileSync(join(source, 'auth.json'), 'utf8')).toContain('fixture-source-provider');
+  expect(JSON.parse(readFileSync(join(source, 'auth.json'), 'utf8'))).toEqual({ tokens: { access_token: 'fixture-oauth' } });
 });
-it('isolates the implicit Codex home at the actual ordinary child boundary', () => {
+it('isolates the implicit Codex home at the actual ordinary child boundary', async () => {
+  await billing.POST(request('runtime/billing', { runtimeId: 'codex', mode: 'subscription' }));
   execFileSync(binary, [], { env: childEnvironment({ runtimeId: 'codex' }) });
   const result = JSON.parse(readFileSync(observed, 'utf8'));
   expect(result.home).not.toBe(source); expect(result.auth.OPENAI_API_KEY).toBeUndefined();

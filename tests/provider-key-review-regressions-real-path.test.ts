@@ -1,20 +1,9 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync as rawExec } from 'node:child_process';
-const s = vi.hoisted(() => ({ home: '', dir: '', authFile: '', swapAuth: '' }));
-vi.mock('node:fs', async original => {
-  const fs = await original<typeof import('node:fs')>();
-  return { ...fs, readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => {
-    const raw = fs.readFileSync(...args);
-    if (s.swapAuth && String(args[0]) === s.authFile) {
-      const replacement = s.swapAuth; s.swapAuth = '';
-      fs.writeFileSync(s.authFile, replacement);
-    }
-    return raw;
-  }) as typeof fs.readFileSync };
-});
+const s = vi.hoisted(() => ({ home: '', dir: '', authFile: '' }));
 vi.mock('node:os', async (original) => ({ ...await original<typeof import('node:os')>(), homedir: () => s.home }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => s.dir, migrateDataDirOnce: () => {} }));
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => ({ entries: [] }) }));
@@ -33,9 +22,8 @@ const { AcpClient } = await import('@/lib/acp/client');
 const { runRuleCheck } = await import('@/lib/supervisor/rule-check');
 const saved = 'fixture-review-provider';
 const observer = join(s.home, 'observe.cjs');
-writeFileSync(observer, `const fs=require('node:fs'),p=require('node:path');const home=process.env.CODEX_HOME;process.stdout.write(JSON.stringify({home,auth:JSON.parse(fs.readFileSync(p.join(home,'auth.json'),'utf8'))}));`);
+writeFileSync(observer, `const fs=require('node:fs'),p=require('node:path');const home=process.env.CODEX_HOME;process.stdout.write(JSON.stringify({home,auth:fs.existsSync(p.join(home,'auth.json'))?JSON.parse(fs.readFileSync(p.join(home,'auth.json'),'utf8')):null}));`);
 beforeEach(() => {
-  s.swapAuth = '';
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 73).toString('base64url'));
   vi.stubEnv('HOME', s.home);
   vi.stubEnv('CODEX_HOME', source);
@@ -58,11 +46,6 @@ it('preserves OAuth refreshed by the previous Codex child', () => {
   expect(JSON.parse(readFileSync(join(first.home, 'auth.json'), 'utf8')).tokens.refresh_token).toBe('fresh-single-use-refresh');
   const second = JSON.parse(cp.execFileSync(process.execPath, [observer], opts()));
   expect(second.auth.tokens.refresh_token).toBe('fresh-single-use-refresh');
-  writeFileSync(s.authFile, JSON.stringify({ OPENAI_API_KEY: saved, tokens: { refresh_token: 'old-single-use-refresh', access_token: 'old-access' } }));
-  expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('fresh-single-use-refresh');
-  writeFileSync(s.authFile, JSON.stringify({ tokens: { refresh_token: 'older-source-refresh' } }));
-  utimesSync(s.authFile, 1, 1);
-  expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('fresh-single-use-refresh');
   writeFileSync(join(source, 'auth.json'), JSON.stringify({ tokens: { refresh_token: 'new-source-login' } }));
   expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('new-source-login');
 });
@@ -157,14 +140,11 @@ it('malformed credential config does not leak a saved provider key in its error'
   expect((error as Error).message.includes(saved)).toBe(false);
 });
 
-it('refuses a source-auth change during capture without overwriting refreshed child auth', () => {
+it('observes account replacement without capturing or acknowledging an OAuth copy', () => {
   const opts = () => ({ env: childEnvironment({ runtimeId: 'codex' }), encoding: 'utf8' as const });
-  const first = JSON.parse(cp.execFileSync(process.execPath, [observer], opts()));
-  const retained = JSON.stringify({ tokens: { refresh_token: 'fixture-child-refreshed' } });
-  writeFileSync(join(first.home, 'auth.json'), retained);
-  s.swapAuth = JSON.stringify({ tokens: { refresh_token: 'fixture-concurrent-source' } });
-  expect(() => cp.execFileSync(process.execPath, [observer], opts())).toThrow(/source authentication changed/);
-  expect(readFileSync(join(first.home, 'auth.json'), 'utf8')).toBe(retained);
+  cp.execFileSync(process.execPath, [observer], opts());
+  writeFileSync(s.authFile, JSON.stringify({ tokens: { refresh_token: 'fixture-new-account' } }));
+  expect(JSON.parse(cp.execFileSync(process.execPath, [observer], opts())).auth.tokens.refresh_token).toBe('fixture-new-account');
 });
 
 it.each(['legacy', 'absent'])('honors source logout when adopting %s overlay state', mode => {
@@ -174,8 +154,8 @@ it.each(['legacy', 'absent'])('honors source logout when adopting %s overlay sta
   const first = launch();
   const sidecar = join(first.home, 'auth-source.sha256');
   if (mode === 'legacy') writeFileSync(sidecar, 'a'.repeat(64));
-  else rmSync(sidecar);
+  else rmSync(sidecar, { force: true });
   rmSync(s.authFile);
-  expect(launch().auth).toEqual({});
-  expect(launch().auth).toEqual({});
+  expect(launch().auth).toBeNull();
+  expect(launch().auth).toBeNull();
 });

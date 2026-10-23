@@ -62,6 +62,19 @@ function parseWithoutSecrets<T>(parse: () => T): T {
   catch { throw new Error('Runtime credential configuration is invalid. Fix its syntax and retry.'); }
 }
 
+/** Empty API-key slots in an OAuth account file carry no credential. */
+export function assertCodexAccountAuth(raw: string): void {
+  const original: unknown = parseWithoutSecrets(() => JSON.parse(raw));
+  const filtered = filterRuntimeConfig(original, 'codex');
+  const removed = (before: unknown, after: unknown): boolean => {
+    if (before === null || before === undefined || before === '') return false;
+    if (typeof before !== 'object') return before !== after;
+    const retained = after && typeof after === 'object' ? after as Record<string, unknown> : {};
+    return Object.entries(before).some(([name, value]) => removed(value, retained[name]));
+  };
+  if (removed(original, filtered)) throw new Error('Codex subscription authentication contains an API credential. Remove it from the account file or select API billing.');
+}
+
 /** Parse before writing a destination, so even interrupted preparation has no plaintext window. */
 export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: string): string {
   if (file.endsWith('.json')) return `${JSON.stringify(filterRuntimeConfig(parseWithoutSecrets(() => JSON.parse(raw)), runtimeId) ?? null, null, 2)}\n`;
@@ -70,7 +83,7 @@ export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: 
     const filtered = filterRuntimeConfig(original, runtimeId) as Record<string, unknown>;
     return JSON.stringify(original) === JSON.stringify(filtered) && !matchesProviderCredential(raw, providerCredentialMaterials()) ? raw : stringifyToml(filtered);
   }
-  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseWithoutSecrets(() => parseYaml(raw)), runtimeId));
+  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseWithoutSecrets(() => parseYaml(raw, { logLevel: 'error' })), runtimeId));
   const materials = providerCredentialMaterials();
   return raw.split('\n').filter(line => {
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);

@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -15,6 +15,10 @@ const script = join(state.dir, 'observe.cjs');
 const output = join(state.dir, 'observed.json');
 writeFileSync(script, `require('node:fs').writeFileSync(${JSON.stringify(output)}, JSON.stringify([process.env.OPENAI_API_KEY ?? null, process.env.LOGIN_COPY ?? null]));`);
 beforeEach(() => {
+  vi.stubEnv('HOME', state.dir);
+  vi.stubEnv('CODEX_HOME', join(state.dir, '.codex'));
+  mkdirSync(join(state.dir, '.codex'), { recursive: true });
+  writeFileSync(join(state.dir, '.codex', 'auth.json'), JSON.stringify({ OPENAI_API_KEY: null, tokens: { refresh_token: 'fixture-oauth' } }));
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 99).toString('base64url'));
   vi.stubEnv('OPENAI_API_KEY', 'fixture-boundary-key'); vi.stubEnv('LOGIN_COPY', 'fixture-boundary-key');
   writeFileSync(join(state.dir, '.env.local'), '');

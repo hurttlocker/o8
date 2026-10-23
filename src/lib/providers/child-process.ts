@@ -5,6 +5,7 @@ import { assertChildArguments, childEnvironmentContext, refreshChildEnvironment,
 import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
 import { isolateCodexHome } from './codex-home';
+import { isolateUnidentifiedHome } from './unidentified-home';
 import { assertOwnedArtifactsForLaunch } from './owned-artifacts';
 export type * from 'node:child_process';
 
@@ -42,7 +43,8 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    if (context?.runtimeId === 'codex' || !context?.runtimeId && env.CODEX_HOME) isolateCodexHome(env);
+    if (!context?.runtimeId) isolateUnidentifiedHome(env);
+    else if (context.runtimeId === 'codex') isolateCodexHome(env);
     assertOwnedArtifactsForLaunch(context?.runtimeId, env, args);
     stampChildPolicy(env);
     return create(env);
