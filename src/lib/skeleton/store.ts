@@ -107,6 +107,27 @@ export function getCached(repoPath: string, filePath: string): FileSkeleton | nu
 }
 
 /**
+ * Read only the indexed paths when dispatch does not need symbol/import JSON.
+ */
+export function getCachedFilePaths(repoPath: string): string[] {
+  const rows = getDb().prepare(
+    'SELECT file_path FROM skeleton_cache WHERE repo_path = ? ORDER BY file_path',
+  ).all(repoPath) as Array<{ file_path: string }>;
+  return rows.map((row) => row.file_path);
+}
+
+/** Importer discovery needs the import lists, without decoding unrelated symbols. */
+export function getCachedImports(repoPath: string): Array<Pick<FileSkeleton, 'relativePath' | 'imports'>> {
+  const rows = getDb().prepare(
+    'SELECT file_path, imports_json FROM skeleton_cache WHERE repo_path = ? ORDER BY file_path',
+  ).all(repoPath) as Array<Pick<SkeletonCacheRow, 'file_path' | 'imports_json'>>;
+  return rows.map((row) => ({
+    relativePath: row.file_path,
+    imports: JSON.parse(row.imports_json) as string[],
+  }));
+}
+
+/**
  * Get all cached skeletons for a repository.
  */
 export function getAllCached(repoPath: string): FileSkeleton[] {

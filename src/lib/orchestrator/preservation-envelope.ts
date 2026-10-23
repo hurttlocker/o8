@@ -5,7 +5,7 @@ import {
   PRESERVATION_DELETE_BUDGET_RATIO,
   PRESERVATION_MIN_DELETE_BUDGET,
 } from '@/lib/lane/merge-gate';
-import { getAllCached, type FileSkeleton } from '@/lib/skeleton';
+import { getAllCached, getCachedFilePaths, type FileSkeleton } from '@/lib/skeleton';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
@@ -134,13 +134,12 @@ export function computePredictedFiles(packet: OrchestratorPacket): string[] {
   const scopeText = buildPacketScopeText(packet);
   if (!scopeText) return [];
 
-  return getAllCached(repoPath)
-    .filter((file) => {
+  return getCachedFilePaths(repoPath)
+    .filter((filePath) => {
       // File-level matches only — skip directory-level to avoid false overlap
-      const normalizedPath = file.relativePath.toLowerCase();
+      const normalizedPath = filePath.toLowerCase();
       return includesPathToken(scopeText, normalizedPath);
-    })
-    .map((file) => file.relativePath);
+    });
 }
 
 /**
