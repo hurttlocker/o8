@@ -40,7 +40,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   }
   const plan = claimSymonWatchPlanBody(id);
   return NextResponse.json({
-    watch: symonWatchRecord(row),
+    watch: symonWatchRecord(getSymonWatch(id) ?? row),
     plan: plan.ok ? { steps: plan.steps, condition: plan.condition } : null,
     planError: plan.ok ? null : plan.error,
   });
