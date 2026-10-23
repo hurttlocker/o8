@@ -34,3 +34,31 @@ Preparation persists a `worktree_preparation_timing` event with stage
 chosen operation starts. A refused directory clone records its reason with the
 native-install or image selection. These events accompany the completion timing
 for `dependency_materialization`.
+
+## Ready directory pool
+
+Worker preparation can consume a ready private dependency directory instead of
+cloning it during dispatch. The pool identity includes the same dependency
+inputs, runtime, install arguments and lifecycle declaration used above, plus
+the donor directory identity and validated installed graph. Unbounded lifecycle
+also retains the source-tree requirement. Recipe and cache keys remain unchanged.
+
+The pool has two fixed slots with a maximum logical size of 3 GiB per tree.
+Refill runs in the background, reserves storage through normal admission, clones
+and validates each tree, probes native bindings and releases its reservation
+before publishing readiness. The first cold dispatch and any unavailable or
+held pool use the existing clone/install path. Consumption claims a slot
+exclusively, then uses a descriptor-pinned, same-volume, no-replace rename.
+Donor rechecks, target graph validation, root lifecycle replay and final native
+checks still run during dispatch. Two workers never consume the same tree.
+
+`dependency_selection` records `dependency-pool` for a hit, together with pool
+limits, ready/occupied/held slot counts and retained logical bytes. The same
+status is available from `dependencyDirectoryPoolStatus`. A background refill
+failure cannot reject dispatch. Ready trees survive process restarts. Interrupted
+slots with durable process receipts are reclaimed only after proving owner death;
+expired storage reservations also require that proof. Unknown ownership, including
+an interruption before the owner receipt is written, stays held. Such a slot
+reduces available pool capacity and remains visible; cleanup never adopts or
+deletes an unreceipted directory. Both slots held means the existing path remains
+in use until that ownership is resolved.

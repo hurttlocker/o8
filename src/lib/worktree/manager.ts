@@ -1340,6 +1340,7 @@ export class WorktreeManager {
         const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
           cloneSourceWorkspace: this.repoRoot,
+          useDependencyPool: true,
           onSelection: (selection) => recordDependencySelection(launch, selection),
           persistReceipt: (receipt) => (
             receipt

@@ -14,21 +14,24 @@ import { purgeExactDirectory } from './exact-directory-purge';
 import { dependencyCloneSnapshotMatches } from './dependency-clone-snapshot';
 import { profileDependencyClone as profile } from './dependency-clone-profile';
 import { dependencyCloneSourceMatcher } from './dependency-clone-source';
+import { dependencyDirectoryPoolKey, dependencyDirectoryPoolStatus, queueDependencyDirectoryPoolRefill, takeDependencyDirectoryPoolTree } from './dependency-directory-pool';
 
 export interface DependencySelection {
-  path: 'directory-clone' | 'native-install' | 'image';
+  path: 'directory-clone' | 'dependency-pool' | 'native-install' | 'image';
   reason: string;
+  pool?: Awaited<ReturnType<typeof dependencyDirectoryPoolStatus>>;
 }
 
 /** Clone a trusted installed npm tree; validate its recipe/metadata, not payload bytes. */
 export async function tryCloneDependencyDirectory(input: {
   sourceWorkspace: string;
+  usePool?: boolean;
   afterClone?: () => Promise<void>;
   workspace: string;
   identity: WorktreeMaterializationIdentity;
   recipe: DependencyInstallRecipe;
   options: DependencyInstallOptions;
-  onDecision?: (decision: { path: 'directory-clone' | 'fallback'; reason: string }) => Promise<void>;
+  onDecision?: (decision: { path: 'directory-clone' | 'dependency-pool' | 'fallback'; reason: string; pool?: DependencySelection['pool'] }) => Promise<void>;
 }): Promise<boolean> {
   const { sourceWorkspace, workspace, identity, recipe, options } = input;
   const fallback = async (reason: string) => { await input.onDecision?.({ path: 'fallback', reason }); return false; };
@@ -54,8 +57,13 @@ export async function tryCloneDependencyDirectory(input: {
   const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace));
   if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return fallback('installed-graph-ineligible');
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
-  await input.onDecision?.({ path: 'directory-clone', reason: 'matching-inputs' });
-  const clone = await profile('directory-clone-publication', () => clonePinnedWorkspaceDirectory(workspace, identity, 'node_modules', sourcePath));
+  const pooled = input.usePool ? await profile('dependency-pool-publication', () => takeDependencyDirectoryPoolTree({
+    key: dependencyDirectoryPoolKey(recipe, sourceIdentity, graph.digest), workspace, identity,
+    onSelected: async () => { await input.onDecision?.({ path: 'dependency-pool', reason: 'matching-inputs', pool: await dependencyDirectoryPoolStatus() }); },
+  })) : null;
+  if (!pooled) await input.onDecision?.({ path: 'directory-clone', reason: 'matching-inputs', ...(input.usePool ? { pool: await dependencyDirectoryPoolStatus() } : {}) });
+  const clone = pooled ? { disposition: 'created' as const, ...pooled }
+    : await profile('directory-clone-publication', () => clonePinnedWorkspaceDirectory(workspace, identity, 'node_modules', sourcePath));
   if (clone.disposition === 'unsupported') return fallback('directory-clone-unsupported');
   if (clone.disposition !== 'created') throw new Error('Dependency clone destination already exists.');
   const discard = async () => {
@@ -78,5 +86,6 @@ export async function tryCloneDependencyDirectory(input: {
   if (!await dependencyCloneSnapshotMatches(workspace, final.snapshot)) throw new Error('Dependency clone changed during native validation.');
   if (!await profile('source-final-recheck', sourceUnchanged)) throw new Error('Dependency clone source changed after lifecycle; refusing to replay setup.');
   await assertWorktreeMaterializationIdentity(workspace, identity);
+  if (input.usePool) queueDependencyDirectoryPoolRefill(sourceWorkspace, recipe, sourceIdentity, graph);
   return true;
 }
