@@ -11,10 +11,13 @@ import { voiceFollowupRemovalReceipt } from './managed-voice-followup';
 
 const EMPTY_QUEUE: QueuedComposerSendRecord[] = [];
 
-export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy: boolean) {
-  const [saved, setSaved] = useState<{ key: string; items: QueuedComposerSendRecord[] } | null>(null);
+export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy: boolean, backend?: string) {
+  const [saved, setSaved] = useState<{ key: string; items: QueuedComposerSendRecord[]; backend?: string; canSteer: boolean; steerableIds?: string[] } | null>(null);
+  const backendRef = useRef(backend); backendRef.current = backend;
   const [removing, setRemoving] = useState<Set<number>>(new Set());
   const removingRef = useRef(new Set<number>());
+  const [promoting, setPromoting] = useState<Set<string>>(new Set());
+  const promotingRef = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const scopeKey = target ? JSON.stringify(target) : '';
   const scopeRef = useRef(scopeKey); scopeRef.current = scopeKey;
@@ -36,13 +39,14 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     const snapshot = targetRef.current;
     if (!snapshot) return;
     const key = JSON.stringify(snapshot);
+    const snapshotBackend = backendRef.current;
     const revision = ++revisionRef.current;
     try {
-      const body = await composerQueueRequest<{ items: QueuedComposerSendRecord[] }>(
-        `/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}`,
+      const body = await composerQueueRequest<{ items: QueuedComposerSendRecord[]; canSteer?: boolean; steerableIds?: string[] }>(
+        `/api/orchestrator/composer-queue?repoPath=${encodeURIComponent(snapshot.repoPath)}&threadId=${encodeURIComponent(snapshot.threadId)}${snapshotBackend ? `&backend=${encodeURIComponent(snapshotBackend)}` : ''}`,
         { cache: 'no-store' }, 'Queued messages could not be loaded. Reopen this chat to retry.');
       if (!Array.isArray(body.items)) throw new Error('Unable to load queued messages.');
-      if (scopeRef.current === key && revision === revisionRef.current) { setSaved({ key, items: body.items }); setError(null); }
+      if (scopeRef.current === key && revision === revisionRef.current) { setSaved({ key, items: body.items, backend: snapshotBackend, canSteer: body.canSteer === true, steerableIds: body.steerableIds }); setError(null); }
     } catch (cause) {
       if (scopeRef.current === key && revision === revisionRef.current) setError(cause instanceof Error ? cause.message : 'Unable to load queued messages.');
     }
@@ -56,8 +60,8 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     void refresh();
     window.addEventListener('o8:lifecycle-reconcile', refresh);
     return () => { window.removeEventListener('o8:lifecycle-reconcile', refresh); };
-  }, [scopeKey, busy, refresh]);
-  const enqueue = useCallback(async (draft: Pick<ComposerQueuePayload, 'text' | 'images'>, capture: () => ComposerQueuePayload) => {
+  }, [scopeKey, busy, backend, refresh]);
+  const enqueue = useCallback(async (draft: Pick<ComposerQueuePayload, 'text' | 'images'>, capture: () => ComposerQueuePayload, intent: QueuedComposerSendRecord['intent'] = 'send-next') => {
     const snapshot = targetRef.current;
     if (!snapshot) throw new Error('Wait for this chat to be saved before using Send next.');
     const owner = ownerRef.current;
@@ -67,7 +71,7 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
     try {
       const body = await composerQueueRequest<{ item: QueuedComposerSendRecord }>('/api/orchestrator/composer-queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...snapshot, id: attempt.id, intent: 'send-next', payload: attempt.payload }),
+        body: JSON.stringify({ ...snapshot, id: attempt.id, intent, payload: attempt.payload }),
       }, 'Send next was not confirmed. Your draft is unchanged. Retry to check the same send with its original routing.');
       item = body.item;
       if (item?.id !== attempt.id || item.threadId !== snapshot.threadId
@@ -105,7 +109,20 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
       return item;
     });
   }, [refresh, serialize]);
-  const items = saved?.key === scopeKey ? saved.items : EMPTY_QUEUE;
+  const transcriptItems = saved?.key === scopeKey ? saved.items : EMPTY_QUEUE;
+  const items = transcriptItems.filter(item => item.status !== 'applied');
+  const steer = useCallback(async (id: string) => {
+    const snapshot = targetRef.current;
+    if (!snapshot || promotingRef.current.has(id)) return;
+    promotingRef.current.add(id); setPromoting(new Set(promotingRef.current));
+    try {
+      await composerQueueRequest('/api/orchestrator/composer-queue', { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...snapshot, id }) }, 'Steering was not confirmed. The saved message is unchanged.');
+      if (scopeRef.current === JSON.stringify(snapshot)) await refresh();
+    } catch (cause) {
+      if (scopeRef.current === JSON.stringify(snapshot)) setError(cause instanceof Error ? cause.message : 'Steering was not confirmed.');
+    } finally { promotingRef.current.delete(id); setPromoting(new Set(promotingRef.current)); }
+  }, [refresh]);
   const cancelRecord = useCallback(async (item: QueuedComposerSendRecord) => {
     const sequence = item.sequence;
     if (removingRef.current.has(sequence)) return false;
@@ -145,5 +162,5 @@ export function useDurableComposerQueue(target: ComposerQueueTarget | null, busy
   }, [cancelRecord, serialize]);
   const hasPending = (text: string, images: ComposerQueuePayload['images']) =>
     Boolean(target && findPendingComposerSend(target, { text, images }));
-  return { items, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
+  return { items, transcriptItems, promoting, steerableIds: saved?.key === scopeKey && saved.steerableIds ? new Set(saved.steerableIds) : undefined, canSteer: saved?.key === scopeKey && saved.backend === backend && saved.canSteer, steer, hasPending, enqueue, enqueueVoice, cancel, cancelVoiceFollowups, error, removing, ready: !target || saved?.key === scopeKey };
 }

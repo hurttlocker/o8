@@ -16,7 +16,7 @@ const { getSqlite, closeDb } = await import('@/lib/db');
 const { ensureV71ComposerQueueSchema } = await import('@/lib/db/v71-composer-queue-migration');
 ensureV71ComposerQueueSchema(getSqlite());
 const queue = await import('@/lib/orchestrator/composer-queue');
-const { GET, POST, DELETE } = await import('@/app/api/orchestrator/composer-queue/route');
+const { GET, POST, PATCH, DELETE } = await import('@/app/api/orchestrator/composer-queue/route');
 const target = { repoPath: repo, threadId: 'thoughts-first' };
 const payload: ComposerQueuePayload = { text: 'First message', wireMessage: 'Original mode directive\n\nFirst message',
   images: [{ name: 'proof.png', dataUri: 'data:image/png;base64,YQ==' }], routing: {
@@ -30,10 +30,79 @@ async function enqueue(id: string, update: Partial<ComposerQueuePayload> = {}) {
   expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
   return (await response.json()).item;
 }
-beforeEach(() => getSqlite().exec('DELETE FROM composer_send_queue'));
+beforeEach(() => {
+  getSqlite().exec('DELETE FROM composer_send_queue');
+  writeFileSync(join(fixture, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'pi', messages: [{ id: 'assistant', role: 'assistant', content: 'Working', timestamp: 1 }] }));
+});
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(fixture, { recursive: true, force: true }); });
 
 describe('durable composer queue API and persisted state', () => {
+  it('converts one queued message into a steer without changing its identity or saved routing', async () => {
+    const first = await enqueue('queue-promote');
+    const response = await PATCH(request('PATCH', { ...target, id: first.id }));
+    expect(response.status).toBe(200);
+    const item = (await response.json()).item;
+    expect(item).toMatchObject({ id: first.id, sequence: first.sequence, intent: 'steer-now', payload: first.payload });
+    closeDb(); ensureV71ComposerQueueSchema(getSqlite());
+    expect(queue.readComposerSend(first.id)?.intent).toBe('steer-now');
+    expect(queue.listQueuedComposerSends(target)).toHaveLength(1);
+  });
+  it('keeps a promoted intent out of the normal claim when promotion races a heartbeat scan', async () => {
+    const item = await enqueue('queue-claim-race');
+    expect(queue.listQueuedComposerSends(target)[0].intent).toBe('send-next');
+    expect((await PATCH(request('PATCH', { ...target, id: item.id }))).status).toBe(200);
+    expect(queue.claimNextComposerSend(target)).toBeNull();
+    expect(queue.claimComposerSteer(item.id)).toMatchObject({ intent: 'steer-now', admittedAt: null });
+  });
+
+  it.each([true, false, 'unknown'] as const)('requires a native acknowledgement before reporting a steer delivered: %s', async outcome => {
+    const { getOrchestratorBackend } = await import('@/lib/lane/orchestrator-backends/registry');
+    const backend = getOrchestratorBackend('pi');
+    const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
+      options.beforeAdmit();
+      if (outcome === 'unknown') throw new Error('Acknowledgement timed out.');
+      return { accepted: outcome };
+    });
+    const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', projectId: undefined };
+    const response = await POST(request('POST', { ...target, id: 'queue-native-steer', intent: 'steer-now', payload: { ...payload, images: [], routing } }));
+    expect(response.status).toBe(200);
+    const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
+    try {
+      heartbeat();
+      await vi.waitFor(() => expect(queue.readComposerSend('queue-native-steer')?.status).toBe(outcome === true ? 'applied' : outcome === false ? 'queued' : 'held'));
+      const item = queue.readComposerSend('queue-native-steer')!;
+      expect(native).toHaveBeenCalledOnce();
+      expect(item.payload.routing).toEqual(routing);
+      expect(item.admittedAt === null).toBe(outcome === false);
+      if (outcome === true) {
+        const history = (await import('@/lib/llm/chat-history-store')).readPersistedLlmChat(target.threadId)!;
+        expect(history.history.messages).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'composer-steer-queue-native-steer', role: 'user', content: payload.text })]));
+      } else expect(item.reason).toContain(outcome === false ? 'Steer declined' : 'Steer unconfirmed');
+      heartbeat(); await Promise.resolve(); expect(native).toHaveBeenCalledOnce();
+    } finally { native.mockRestore(); }
+  });
+
+  it.each([false, true])('fences live preparation when permissions narrow or Stop arrives: %s', async stop => {
+    const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const native = vi.spyOn(backend, 'liveSteer').mockImplementation(async (_repo, _message, options) => {
+      await gate; options.beforeAdmit(); return { accepted: true };
+    });
+    try {
+      const id = stop ? 'queue-stop-steer' : 'queue-narrow-steer';
+      const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', permissionMode: 'full' as const, projectId: undefined };
+      await POST(request('POST', { ...target, id, intent: 'steer-now', payload: { ...payload, images: [], routing } }));
+      const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
+      const running = runQueuedComposerSteer(queue.claimComposerSteer(id)!);
+      if (stop) queue.holdComposerSends(target);
+      else writeFileSync(join(fixture, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'pi', messages: [{ id: 'narrowed', role: 'assistant', content: 'Plan only', timestamp: Date.now() + 1, receipt: { permissionMode: 'plan' } }] }));
+      release(); await expect(running).rejects.toThrow(stop ? 'cancelled or held' : 'more restrictive');
+      expect(queue.readComposerSend(id)?.admittedAt).toBeNull();
+    } finally { native.mockRestore(); }
+  });
+
   it('preserves an explicitly queued outside grant across database reopen and refuses a later downgrade', async () => {
     const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', permissionMode: 'outside-workspace' as const,
       projectId: undefined };
@@ -80,17 +149,22 @@ describe('durable composer queue API and persisted state', () => {
     expect(queue.claimNextComposerSend(target)?.id).toBe(second.id);
   });
 
-  it('rejects mismatched targets and unsupported steer without inserting a FIFO blocker', async () => {
+  it('rejects mismatched targets and retains unsupported steering as the same queued message', async () => {
     const denied = await POST(request('POST', { ...target, id: 'queue-forbidden', intent: 'send-next', payload }, 'remote.invalid'));
     expect(denied.status).toBe(401);
     const otherRepo = join(fixture, 'other-repo'); mkdirSync(otherRepo, { recursive: true });
     expect((await POST(request('POST', { ...target, repoPath: otherRepo, id: 'queue-wrong-repo', intent: 'send-next', payload }))).status).toBe(400);
-    const steer = await POST(request('POST', { ...target, id: 'queue-steer', intent: 'steer-now', payload }));
-    expect(steer.status).toBe(409);
-    expect((await steer.json()).error).toContain('Live steering is unavailable');
-    expect(queue.listQueuedComposerSends(target)).toEqual([]);
-    const legitimate = await enqueue('queue-legitimate');
-    expect(queue.claimNextComposerSend(target)?.id).toBe(legitimate.id);
+    const steerPayload = { ...payload, images: [], routing: { ...payload.routing, backend: 'pi' as const, model: 'pi', projectId: undefined } };
+    const backend = (await import('@/lib/lane/orchestrator-backends/registry')).getOrchestratorBackend('pi');
+    const steer = await POST(request('POST', { ...target, id: 'queue-steer', intent: 'steer-now', payload: steerPayload }));
+    expect(steer.status).toBe(200);
+    const original = backend.liveSteer; Object.defineProperty(backend, 'liveSteer', { value: undefined, configurable: true });
+    try {
+      const { runQueuedComposerSteer } = await import('@/lib/ws-server/composer-queue-heartbeat');
+      await runQueuedComposerSteer(queue.claimComposerSteer('queue-steer')!);
+      expect(queue.readComposerSend('queue-steer')).toMatchObject({ intent: 'send-next', status: 'queued', admittedAt: null, payload: JSON.parse(JSON.stringify(steerPayload)) });
+      expect(queue.claimNextComposerSend(target)?.id).toBe('queue-steer');
+    } finally { Object.defineProperty(backend, 'liveSteer', { value: original, configurable: true }); }
   });
 
   it('deduplicates exact retries and refuses changing an accepted payload or its attachments', async () => {

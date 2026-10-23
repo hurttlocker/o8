@@ -45,13 +45,13 @@ describe('native shutdown registration boundary for detached packet workers', ()
     expect(read('src-tauri/src/restart_job_drain.rs')).toContain('cleanup();');
     const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
     expect(worker).toContain('detached: true,');
-    expect(worker).toContain("stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd]");
+    expect(worker).toContain("stdio: [stdinFd ?? 'ignore', stdoutFd, stderrFd]");
     expect(worker).toContain('child.unref()');
     expect(worker).not.toContain('register_child');
   });
 
   it('requires detached identity only for the detached preparation path, preserving bridge opt-out', () => {
     const worker = read('src/lib/runtimes/shared/owned-session/run-controller.ts');
-    expect(worker).toMatch(/processIdentityRequired: crashSurvivableWorkersEnabled\(\) && runtimeId === 'codex'/);
+    expect(worker).toMatch(/processIdentityRequired: crashSurvivableWorkersEnabled\(\) && Boolean\(session.packetId\)/);
   });
 });

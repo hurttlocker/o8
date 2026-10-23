@@ -15,6 +15,8 @@ import { sendLeadTerminalStatus } from './lead-terminal-status';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
 import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
+import { claimComposerSteer, deferComposerSteer } from '@/lib/orchestrator/composer-queue';
+import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -46,6 +48,22 @@ function checkQueueBinding(item: QueuedComposerSendRecord): void {
     && permissionModeRank(latest.receipt.permissionMode) < permissionModeRank(item.payload.routing.permissionMode)) {
     throw new Error('Chat permissions became more restrictive after this message was queued.');
   }
+}
+
+/** Native input is acknowledged before its transcript label can claim delivery. */
+export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Promise<void> {
+  checkQueueBinding(item);
+  if (item.payload.afterTaskId) { deferComposerSteer(item.id, 'Queued for the original task to finish.'); return; }
+  const backend = getOrchestratorBackend(originFor(item).backend);
+  if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
+    ...item.payload.routing, threadId: item.threadId,
+    beforeAdmit: () => { checkQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.'); },
+  });
+  if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
+    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: item.createdAt });
+  settleComposerSend(item.id, { status: 'applied' });
 }
 
 /** User-requested next turns use saved routing, never whichever composer is currently open. */
@@ -82,10 +100,23 @@ function targetFor(item: QueuedComposerSendRecord) { return { repoPath: item.rep
 export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
   recoverComposerSends();
   const active = new Set<string>();
+  const steering = new Set<string>();
   return () => {
     for (const target of listComposerQueueTargets()) {
       try {
       const key = `${target.repoPath}\0${target.threadId}`;
+      const steer = listQueuedComposerSends(target).find(item => item.intent === 'steer-now' && item.status === 'queued');
+      if (steer && !steering.has(key)) {
+        const claimed = claimComposerSteer(steer.id);
+        if (claimed) {
+          steering.add(key); publishComposerQueueChange(target.threadId);
+          void runQueuedComposerSteer(claimed).catch(error => {
+            settleComposerSend(claimed.id, { status: 'held', reason: `Steer unconfirmed; queued for inspection. ${error instanceof Error ? error.message : ''}` });
+          }).finally(() => { steering.delete(key); publishComposerQueueChange(target.threadId); });
+        }
+        continue;
+      }
+      if (steering.has(key)) continue;
       const next = listQueuedComposerSends(target)[0];
       if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
       const item = claimNextComposerSend(target);
