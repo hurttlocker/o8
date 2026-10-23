@@ -1,0 +1,230 @@
+// @vitest-environment jsdom
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ActivityFeed } from './ActivityFeed';
+
+const streams = ['issues', 'prs', 'ci', 'commits'] as const;
+type Stream = typeof streams[number];
+const repoA = 'example/alpha';
+const repoB = 'example/beta';
+const date = '2026-10-22T12:00:00Z';
+const payload = (stream: Stream, tag: string) => {
+  switch (stream) {
+    case 'issues': return { issues: [{ number: 1, title: `${tag} issue`, state: 'OPEN', createdAt: date, labels: [] }] };
+    case 'prs': return { prs: [{ number: 2, title: `${tag} pull`, state: 'OPEN', createdAt: date, headRefName: 'feature', additions: 7 }] };
+    case 'ci': return { runs: [{ databaseId: 3, displayTitle: `${tag} check`, createdAt: date, conclusion: 'success' }] };
+    case 'commits': return { commits: [{ hash: 'abc123', message: `${tag} commit`, date }] };
+  }
+};
+const empty = (stream: Stream) => ({ [stream === 'ci' ? 'runs' : stream]: [] });
+let host: HTMLDivElement;
+let root: Root;
+let fetchMock: ReturnType<typeof vi.fn>;
+let registered: string[];
+let reply: (stream: Stream, repo: string, init?: RequestInit) => Response | Promise<Response>;
+const render = (activeRepo: string | null = repoA, refreshKey = 0) => act(async () => {
+  root.render(createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo, refreshKey }));
+});
+const refresh = () => act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
+const reads = () => fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/panel/repos');
+const expectRows = (tag: string) => {
+  for (const title of ['issue', 'pull', 'check', 'commit']) expect(host.textContent).toContain(`${tag} ${title}`);
+};
+const selectFilter = (label: string) => act(async () => {
+  host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click();
+});
+function deferred() {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+beforeEach(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-22T12:30:00Z'));
+  registered = [];
+  reply = (stream, repo) => Response.json(payload(stream, repo));
+  fetchMock = vi.fn((input: string, init?: RequestInit) => {
+    if (input === '/api/panel/repos') return Promise.resolve(Response.json({ repos: registered.map((repo) => ({ remoteUrl: `https://github.com/${repo}.git` })) }));
+    const url = new URL(input, 'http://localhost');
+    const stream = url.pathname.split('/').pop() as Stream;
+    if (!streams.includes(stream)) throw new Error(`Unexpected read: ${input}`);
+    return Promise.resolve(reply(stream, url.searchParams.get('repo')!, init));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('ActivityFeed retained stream snapshots', () => {
+  it('renders all four real streams and preserves filtering', async () => {
+    await render(); expectRows(repoA);
+    await selectFilter('Issues 1');
+    expect(host.textContent).toContain(`${repoA} issue`);
+    expect(host.textContent).not.toContain(`${repoA} pull`);
+    await selectFilter('All'); expectRows(repoA);
+  });
+
+  it.each([403, 429])('retains rows through a %i response, lifecycle and fallback backoff, then recovers', async (status) => {
+    await render();
+    reply = () => new Response(null, { status, headers: { 'retry-after': '600' } });
+    await refresh(); expectRows(repoA);
+    expect(host.textContent).toContain('GitHub API paused');
+    const before = reads().length;
+    await refresh();
+    await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+    expectRows(repoA); expect(reads()).toHaveLength(before);
+    reply = (stream) => Response.json(payload(stream, 'recovered'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+    expectRows('recovered');
+    expect(host.textContent).not.toContain('GitHub API paused');
+  });
+
+  it('retains failed streams while publishing successful partial results', async () => {
+    await render();
+    reply = (stream) => stream === 'issues' || stream === 'ci'
+      ? new Response(null, { status: 503 }) : Response.json(payload(stream, 'fresh'));
+    await refresh();
+    expect(host.textContent).toContain(`${repoA} issue`);
+    expect(host.textContent).toContain(`${repoA} check`);
+    expect(host.textContent).toContain('fresh pull');
+    expect(host.textContent).toContain('fresh commit');
+    expect(host.textContent).toContain('GitHub sync delayed');
+  });
+
+  it.each(['network', 'json', 'payload'] as const)('isolates a %s failure to its stream', async (failure) => {
+    await render();
+    reply = (stream) => {
+      if (stream !== 'issues') return Response.json(payload(stream, 'fresh'));
+      if (failure === 'network') return Promise.reject(new Error('offline'));
+      if (failure === 'json') return new Response('not json');
+      return Response.json({ error: 'temporarily unavailable' });
+    };
+    await refresh();
+    expect(host.textContent).toContain(`${repoA} issue`);
+    expect(host.textContent).toContain('fresh pull');
+    expect(host.textContent).toContain('fresh check');
+    expect(host.textContent).toContain('fresh commit');
+    expect(host.textContent).toContain('GitHub sync delayed');
+  });
+
+  it('accepts successful empty streams after failures', async () => {
+    await render();
+    reply = () => new Response(null, { status: 503 });
+    await refresh(); expectRows(repoA);
+    reply = (stream) => Response.json(stream === 'issues' ? empty(stream) : payload(stream, 'fresh'));
+    await refresh();
+    expect(host.textContent).not.toContain(`${repoA} issue`);
+    expect(host.querySelector('[aria-label="Issues"]')).not.toBeNull();
+    expect(host.textContent).toContain('fresh pull');
+  });
+
+  it('publishes successful streams from a rate-limited batch and retains them during the pause', async () => {
+    await render();
+    reply = (stream) => stream === 'issues' ? new Response(null, { status: 429 }) : Response.json(payload(stream, 'fresh'));
+    await refresh();
+    expect(host.textContent).toContain(`${repoA} issue`);
+    for (const title of ['pull', 'check', 'commit']) expect(host.textContent).toContain(`fresh ${title}`);
+    const before = reads().length;
+    await refresh(); expect(reads()).toHaveLength(before);
+    for (const title of ['pull', 'check', 'commit']) expect(host.textContent).toContain(`fresh ${title}`);
+  });
+
+  it('does not manufacture rows for an initially failed stream', async () => {
+    reply = (stream) => stream === 'issues' ? new Response(null, { status: 503 }) : Response.json(payload(stream, 'fresh'));
+    await render();
+    expect(host.querySelector('[aria-label="Issues"]')).not.toBeNull();
+    expect(host.textContent).toContain('fresh pull');
+    expect(host.textContent).toContain('GitHub sync delayed');
+  });
+
+  it('uses the reset header and does not resume before its deadline', async () => {
+    await render();
+    const reset = Math.floor(Date.now() / 1000) + 120;
+    reply = () => new Response(null, { status: 429, headers: { 'x-ratelimit-reset': String(reset) } });
+    await refresh();
+    const before = reads().length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(119_000); });
+    await refresh(); expect(reads()).toHaveLength(before); expectRows(repoA);
+    reply = (stream) => Response.json(payload(stream, 'recovered'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await refresh(); expectRows('recovered');
+  });
+
+  it('hides the old scope while loading and ignores its late rate-limit response', async () => {
+    await render();
+    const late = deferred();
+    reply = (stream, repo) => repo === repoA ? late.promise : Response.json(payload(stream, repo));
+    await refresh();
+    const oldReads = reads().slice(-4);
+    const next = deferred();
+    reply = () => next.promise.then((response) => response.clone());
+    await render(repoB);
+    expect(host.textContent).not.toContain(`${repoA} issue`);
+    await act(async () => { late.resolve(new Response(null, { status: 429, headers: { 'retry-after': '600' } })); });
+    await act(async () => { next.resolve(Response.json({ issues: [], prs: [], runs: [], commits: [] })); });
+    reply = (stream) => Response.json(payload(stream, repoB));
+    await refresh(); expectRows(repoB);
+    expect(host.textContent).not.toContain(`${repoA} issue`);
+    expect(oldReads.every(([, init]) => init?.signal?.aborted)).toBe(true);
+  });
+
+  it('ignores a superseded refresh even if the transport completes after abort', async () => {
+    await render();
+    const late = deferred();
+    reply = () => late.promise.then((response) => response.clone());
+    await refresh();
+    reply = (stream) => Response.json(payload(stream, 'newest'));
+    await refresh(); expectRows('newest');
+    await act(async () => { late.resolve(Response.json({ issues: [], prs: [], runs: [], commits: [] })); });
+    expectRows('newest');
+  });
+
+  it('keeps cached repositories isolated during all-repository partial failures and scope switches', async () => {
+    registered = [repoA, repoB];
+    await render(null); expectRows(repoA); expectRows(repoB);
+    expect(host.textContent).toContain(`[alpha] ${repoA} commit`);
+    reply = (stream, repo) => repo === repoA ? new Response(null, { status: 503 }) : Response.json(payload(stream, 'fresh beta'));
+    await refresh(); expectRows(repoA); expectRows('fresh beta');
+    await act(async () => { host.querySelector<HTMLButtonElement>('button')!.click(); });
+    await act(async () => {
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'alphaalpha')!.click();
+    });
+    expectRows(repoA);
+    expect(host.textContent).not.toContain('[alpha]');
+    expect(host.textContent).not.toContain('fresh beta issue');
+    reply = () => new Response(null, { status: 429 });
+    await refresh();
+    const before = reads().length;
+    await act(async () => { host.querySelector<HTMLButtonElement>('button')!.click(); });
+    await act(async () => {
+      Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'GitHubregistered')!.click();
+    });
+    expect(reads()).toHaveLength(before);
+    expectRows(repoA); expectRows('fresh beta');
+    expect(host.textContent).toContain(`[alpha] ${repoA} commit`);
+    expect(host.textContent).not.toContain('[alpha] [alpha]');
+  });
+
+  it('refreshes on refreshKey and aborts outstanding reads on unmount', async () => {
+    await render();
+    const before = reads().length;
+    await render(repoA, 1); expect(reads()).toHaveLength(before + 4);
+    const pending = deferred(); reply = () => pending.promise;
+    await refresh();
+    const outstanding = reads().slice(-4);
+    await act(async () => root.unmount());
+    expect(outstanding.every(([, init]) => init?.signal?.aborted)).toBe(true);
+    root = createRoot(host);
+    await act(async () => { pending.resolve(Response.json({})); });
+  });
+});
