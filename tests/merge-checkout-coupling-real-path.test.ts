@@ -67,12 +67,13 @@ vi.mock('@/lib/worktree/apfs', async (importOriginal) => ({
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const laneEventsRoute = await import('@/app/api/lanes/[id]/events/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
+const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const reviewStateRoute = await import('@/app/api/orchestrator/review-state/route');
 const { listApprovalsForContext, recordOrchestratorReview } = await import('@/lib/approvals/store');
 const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
 const { assessDurableApprovedReview } = await import('@/lib/lane/durable-review-approval');
 const { recordMission } = await import('@/lib/db/missions-store');
-const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { __resetIdempotencyStoreForTests } = await import('@/lib/orchestrator/idempotency-store');
 const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
@@ -302,6 +303,95 @@ afterAll(() => {
 });
 
 describe('merge checkout coupling through real handlers', () => {
+  const capturedContract = {
+    version: 1 as const,
+    requirements: [{ id: 'R1', source: 'Change file.txt', expectedBehavior: 'Changed content is merged',
+      productionPath: 'file.txt', verification: 'Read the merged file' }],
+    processConstraints: [{ id: 'P1', source: 'Review the commit', expectedBehavior: 'Review is pinned', verification: 'git show HEAD' }],
+    smallestRoute: [{ path: 'file.txt', requirements: ['R1'], reason: 'One file change' }], exclusions: [],
+  };
+  function contractPacket(kind: 'none' | 'default-captured' | 'default-missing' | 'armed') {
+    const state = readOrchestratorControlPlaneState();
+    state.packets[0].taskContractRequired = kind !== 'none';
+    state.packets[0].taskContractSource = kind === 'armed' ? 'explicit' : 'default';
+    state.packets[0].taskContract = kind === 'default-captured' || kind === 'armed' ? capturedContract : null;
+    writeOrchestratorControlPlaneState(state);
+  }
+  function reviewRequest(body: Record<string, unknown>) {
+    return new NextRequest('http://localhost:3001/api/orchestrator/review', {
+      method: 'POST', headers: { host: 'localhost:3001', authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('previews contract IDs, size approval and pending second pass together without creating approval cards', async () => {
+    const fixture = await createFixture('all-prerequisites', false);
+    writeFileSync(join(fixture.lane.worktreePath!, 'oversized.ts'), '// fixture\n'.repeat(1_100));
+    commitAll(fixture.lane.worktreePath!, 'grow fixture file');
+    const head = git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD']);
+    contractPacket('default-captured');
+    recordOrchestratorReview(fixture.packetId, { approved: true, findings: [], reviewedHeadSha: head, requiresSecondPass: true });
+    const before = listApprovalsForContext({ packetId: fixture.packetId, laneId: fixture.lane.id });
+    const response = await mergePreviewRoute.GET(mergePreviewRequest(fixture.packetId));
+    const preview = await response.json();
+    expect(response.status).toBe(200);
+    expect(preview).toMatchObject({ wouldMerge: false,
+      blockers: expect.arrayContaining(['file-size-approval', 'durable-review', 'contract-review']),
+      reviewRequirements: { contractKind: 'default-captured', contractVersion: 1, requirementIds: ['R1'], processConstraintIds: ['P1'],
+        oversizedFiles: [{ path: 'oversized.ts', lineCount: 1_100 }],
+        review: { approved: false, secondPassPending: true, reason: expect.stringContaining('second pass') } },
+    });
+    expect(preview.reviewRequirements.actions.join('\n')).toContain('--coverage');
+    expect(preview.reviewRequirements.actions.join('\n')).toContain('--process-evidence');
+    expect(preview.reviewRequirements.actions.join('\n')).toContain('Override file size limit');
+    expect(listApprovalsForContext({ packetId: fixture.packetId, laneId: fixture.lane.id })).toEqual(before);
+    expect(getLane(fixture.lane.id)?.status).toBe(fixture.lane.status);
+    expect(git(fixture.lane.worktreePath!, ['rev-parse', 'HEAD'])).toBe(head);
+  });
+
+  it.each(['none', 'default-missing', 'armed'] as const)('reports %s contract kind before attempting review', async kind => {
+    const fixture = await createFixture(`contract-${kind}`, false);
+    contractPacket(kind);
+    const preview = await (await mergePreviewRoute.GET(mergePreviewRequest(fixture.packetId))).json();
+    expect(preview.reviewRequirements).toMatchObject({ contractKind: kind,
+      requirementIds: kind === 'armed' ? ['R1'] : [], processConstraintIds: kind === 'armed' ? ['P1'] : [] });
+    if (kind === 'default-missing') expect(preview.reviewRequirements.actions.join('\n')).toContain('--waive-missing-contract');
+  });
+
+  it('returns and replays a typed 422 when a missing-contract waiver targets a captured contract', async () => {
+    const fixture = await createFixture('invalid-captured-waiver', false);
+    contractPacket('default-captured');
+    const input = { packetId: fixture.packetId, approved: true, findings: [], reviewedHeadSha: fixture.reviewedHeadSha,
+      missingContractWaiverReason: 'Explicit fixture request', clientMutationId: randomUUID() };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await reviewRoute.POST(reviewRequest(input));
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ ok: false, error: { code: 'invalid_missing_contract_waiver', message: expect.stringContaining('missing runtime-default contract') } });
+      if (attempt) expect(response.headers.get('x-o8-idempotency-replayed')).toBe('1');
+    }
+    expect(listApprovalsForContext({ packetId: fixture.packetId, laneId: fixture.lane.id })).toEqual([]);
+  });
+
+  it('walks captured-contract preview, review and a local fixture merge without retrying unknown gates', async () => {
+    const fixture = await createFixture('captured-one-pass', false);
+    await updateOperatorDefaults({ requireApproval: 'never' });
+    contractPacket('default-captured');
+    const before = await (await mergePreviewRoute.GET(mergePreviewRequest(fixture.packetId))).json();
+    expect(before.reviewRequirements).toMatchObject({ contractKind: 'default-captured', requirementIds: ['R1'], processConstraintIds: ['P1'] });
+    const response = await reviewRoute.POST(reviewRequest({ packetId: fixture.packetId, approved: true, findings: [],
+      reviewedHeadSha: fixture.reviewedHeadSha, clientMutationId: randomUUID(), contractCoverageEvidence: {
+        contractVersion: 1, headSha: fixture.reviewedHeadSha, entries: [{ requirementId: 'R1', productionPath: 'file.txt' }],
+        processEntries: [{ constraintId: 'P1', source: 'command', reference: `git show ${fixture.reviewedHeadSha}` }],
+      } }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, result: { recorded: true } });
+    const after = await (await mergePreviewRoute.GET(mergePreviewRequest(fixture.packetId))).json();
+    expect(after).toMatchObject({ wouldMerge: true, blockers: [], reviewRequirements: { review: { approved: true } } });
+    const merged = await (await mergeRoute.POST(mergeRequest(fixture.packetId))).json();
+    expect(merged).toMatchObject({ ok: true, result: { merged: true } });
+    expect(readFileSync(join(fixture.repo, 'file.txt'), 'utf8')).toContain('worker');
+  });
+
   it.each(['git-worktree', 'apfs-cow-clone'] as const)(
     'keeps an approved %s packet mergeable after a dirty checkout blocks the late fast-forward',
     async (isolationPreference) => {

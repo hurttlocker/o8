@@ -25,6 +25,7 @@ import type {
 import type { ReviewCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import { currentMissionState, log } from './shared';
 import type { SubmitReviewInput } from './types';
+import { ReviewValidationError } from './review-validation';
 
 function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {
   if (findings.some((finding) => finding.severity === 'high')) {
@@ -361,15 +362,17 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     const { findMissionRegistryEntryByPacketId } = await import('@/lib/orchestrator/mission-registry');
     const waiverPacket = missionPacket ?? findMissionRegistryEntryByPacketId(input.packetId, { includeArchived: true })
       ?.mission.packets.find((candidate) => candidate.id === input.packetId);
-    if (!input.approved || !waiverPacket || waiverPacket.taskContractRequired !== true
-      || waiverPacket.taskContractSource !== 'default' || waiverPacket.taskContract
-      || !input.reviewedHeadSha || !reviewedHeadSha || !reviewCwd
+    if (!waiverPacket || waiverPacket.taskContractRequired !== true
+      || waiverPacket.taskContractSource !== 'default' || waiverPacket.taskContract) {
+      throw new ReviewValidationError('invalid_missing_contract_waiver', 'A missing-contract waiver requires a missing runtime-default contract. This packet is not in that state; use its required coverage evidence instead.');
+    }
+    if (!input.approved || !input.reviewedHeadSha || !reviewedHeadSha || !reviewCwd
       || missingContractWaiverReason.length > 500) {
-      throw new Error('A missing-contract waiver requires a missing runtime-default contract, an approved review, a full reviewed HEAD, and a bounded reason.');
+      throw new ReviewValidationError('invalid_missing_contract_waiver', 'A missing-contract waiver requires a missing runtime-default contract, an approved review, a full reviewed HEAD, and a bounded reason.');
     }
     const currentHeadSha = normalizeHeadSha(await readHeadSha(reviewCwd, verdictLane?.repoPath ?? packet.workspaceTargetPath!));
     if (!currentHeadSha || !headShaMatches(currentHeadSha, reviewedHeadSha)) {
-      throw new Error('The missing-contract waiver does not match the packet current HEAD. Review the current commit before waiving.');
+      throw new ReviewValidationError('waiver_head_mismatch', 'The missing-contract waiver does not match the packet current HEAD. Review the current commit before waiving.');
     }
   }
   if (activeReviewTurn?.surface === 'packet-explainer') {

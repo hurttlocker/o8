@@ -10,6 +10,8 @@ import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
+import { probeLaneSessionAlive } from './owned-session-liveness';
+import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 
 const execFileAsync = promisify(execFile);
 
@@ -359,7 +361,11 @@ export async function reconcileStuckLanes(): Promise<void> {
       continue;
     }
 
-    if (lane.sessionKey && liveSessionKeys.has(lane.sessionKey)) {
+    const owned = Boolean(lane.sessionKey && getOwnedSessionLifecycle(lane.sessionKey)?.detachedPacketIdentity);
+    const ownedAlive = owned ? await probeLaneSessionAlive(lane) : undefined;
+    // An unidentified survivor must neither rebind nor be finalized as lost.
+    if (owned && ownedAlive === undefined) continue;
+    if (owned ? ownedAlive : lane.sessionKey && liveSessionKeys.has(lane.sessionKey)) {
       reboundCount += 1;
       continue;
     }

@@ -170,7 +170,7 @@ export const cursorRuntime: AgentRuntime = {
     if (result.ok && result.surfaceId) {
       scheduleCursorUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, opts.model);
     }
-    return { ok: result.ok, note: result.note, sessionKey: result.surfaceId };
+    return { ok: result.ok, note: result.note, sessionKey: result.surfaceId, sideEffect: result.sideEffect };
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {

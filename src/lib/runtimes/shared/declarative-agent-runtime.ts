@@ -102,7 +102,7 @@ export function createDeclarativeAgentRuntime(
         model: opts.model,
         effort: opts.effort,
       });
-      return { ok: result.ok, note: result.note, sessionKey: result.surfaceId };
+      return { ok: result.ok, note: result.note, sessionKey: result.surfaceId, sideEffect: result.sideEffect };
     },
 
     async resume(sessionKey, message): Promise<RuntimeActionResult> {

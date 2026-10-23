@@ -103,6 +103,7 @@ function getApiBaseLive(): string {
 }
 
 interface CreateMissionInput {
+  idempotencyKey?: string;
   issues: string[];
   repoPath: string;
   projectId?: string | null;
@@ -142,6 +143,7 @@ interface InlineIssue {
 }
 
 interface CreateMissionInlineInput {
+  idempotencyKey?: string;
   issues_inline: InlineIssue[];
   repoPath: string;
   projectId?: string | null;
@@ -383,6 +385,7 @@ export async function createMission(input: CreateMissionInput) {
       '/api/orchestrator/create-mission',
       {
           issues: loadedIssues,
+          ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
           repoPath,
           projectId: input.projectId,
           runtime: input.runtime,
@@ -437,6 +440,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
       '/api/orchestrator/create-mission',
       {
           issues: loadedIssues,
+          ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
           repoPath,
           projectId: input.projectId,
           runtime: input.runtime,

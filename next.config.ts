@@ -13,7 +13,13 @@ const nextConfig: NextConfig = {
     // ELFs and dies on sharp's own libvips-cpp, whose soname no system libvips can
     // match (#1747). Excluding dead weight beats teaching the bundler to carry it.
     '*': [
-      './.cortex-worktrees/**/*',
+      // Dynamic checkout reads must not turn local metadata into runtime files.
+      // Match the directory entry too, since a worktree entry can be a symlink.
+      './.git*{,/**/*}',
+      './.env*',
+      './.mcp.json',
+      './.{agents,claude,codex,cortex-worktrees,o8*}{,/**/*}',
+      './*explainer*.html',
       // Build cache can enter route traces through filesystem reads. Keep it
       // available to the compiler, but never copy it into the runtime bundle.
       './.next/cache/**/*',

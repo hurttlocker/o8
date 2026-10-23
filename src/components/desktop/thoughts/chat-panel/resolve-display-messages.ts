@@ -1,6 +1,7 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { dedupeDisplayMessages } from './dedupe-display-messages';
 import { visibleVoiceTranscript } from '@/lib/transcripts/voice-captions';
+import { mergeCompactionMarkers, withoutCompactionReplay } from '@/lib/transcripts/compaction';
 
 export function resolveVisibleChatMessages(sources: Parameters<typeof resolveDisplayMessages>[0] & {
   isOrchestratorMode: boolean;
@@ -38,10 +39,7 @@ export function resolveDisplayMessages(sources: {
   streamMessages: MobileTranscriptEntry[];
 }): MobileTranscriptEntry[] {
   const { historyEntries, chatMessages, streamMessages } = sources;
-  const base = streamMessages.length > 0
-    ? [...chatMessages, ...streamMessages]
-    : chatMessages;
-  return dedupeDisplayMessages(
-    historyEntries.length > 0 ? [...historyEntries, ...base] : base,
-  );
+  const restored = historyEntries.length ? [...historyEntries, ...chatMessages] : chatMessages;
+  const base = restored.length ? mergeCompactionMarkers(restored, streamMessages) : restored;
+  return withoutCompactionReplay(dedupeDisplayMessages(streamMessages.length ? [...base, ...streamMessages] : base));
 }

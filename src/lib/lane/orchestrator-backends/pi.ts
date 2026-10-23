@@ -18,7 +18,6 @@
  * restart, failure or idle close resumes the same conversation.
  */
 
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { sessionNameForRepo } from '@/lib/lane/orchestrator-session-core';
@@ -35,6 +34,7 @@ import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice'
 import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
+import { piOrchestratorStateDir } from '@/lib/pi/orchestrator/context';
 import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
@@ -179,7 +179,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
   const stateRoot = deps.stateRoot ?? (() => join(getDataDir(), 'pi', 'orchestrator'));
 
   const nameFor = (repoPath: string, threadId?: string | null) => sessionNameForRepo('pi-orchestrator', repoPath, threadId);
-  const stateDirFor = (name: string) => join(stateRoot(), createHash('sha256').update(name).digest('hex').slice(0, 32));
+  const stateDirFor = (name: string) => piOrchestratorStateDir(name, stateRoot());
 
   /** Closes one resident; the map entry goes only if it still names this resident. */
   async function close(pi: ResidentPi) {

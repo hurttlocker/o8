@@ -11,7 +11,7 @@ import { createFailureRetry } from './failure-retry';
 import { assertOwnedSingleAttemptSpawn, assertDurableOwnedSpawn } from './execution-policy';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
-import { closeSync, openSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -33,6 +33,8 @@ import { guardedWorkspaceInvocation } from '@/lib/worktree/materialization-execu
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
+import { assertOwnedSessionProcessIdentity, captureOwnedRunIdentity } from './process-identity';
+import { emitRuntimeFallbackNotification } from './run-notifications';
 import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 import { prepareOwnedLaunchArgs } from './launch-args';
 import { detectSandboxDenial, detectRunSandboxDenial, sandboxDenialOperatorMessage } from './sandbox-denial';
@@ -118,7 +120,7 @@ export function createOwnedRunController({
   const RAW_RETENTION_MAX_BYTES = 2 * 1024 * 1024;
   const recoverModelCompatibility = createModelCompatibilityRecovery({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun });
   const scheduleFailureRetry = createFailureRetry({ adapter, io, withSurfaceLock, readRunArtifacts, spawnOwnedRun,
-    notify: emitRuntimeFallbackNotification, invalidateFleetCache, retryDelayMs });
+    notify: (session, from, to, reason) => emitRuntimeFallbackNotification(runtimeId, session, from, to, reason), invalidateFleetCache, retryDelayMs });
   function recordSandboxDenialEvent(
     laneId: string,
     surfaceId: string,
@@ -343,39 +345,6 @@ export function createOwnedRunController({
     }
   }
 
-  async function emitRuntimeFallbackNotification(
-    session: OwnedSessionRecord,
-    fromModel: string,
-    toModel: string,
-    reason: string,
-  ) {
-    try {
-      const { publishRealtimeMutation } = await import('@/lib/realtime/publisher');
-      publishRealtimeMutation({
-        mutation: {
-          mutationId: `runtime-fallback-${session.surfaceId}-${Date.now()}`,
-          source: 'server',
-          action: 'runtime-fallback',
-          status: 'completed',
-          runtime: runtimeId as OrchestratorRuntime,
-          surfaceId: session.surfaceId,
-          sessionKey: session.surfaceId,
-          note: `${runtimeId} ${fromModel} → ${toModel}: ${reason}`,
-          createdAt: nowIso(),
-          settledAt: nowIso(),
-          fromModel,
-          toModel,
-          reason,
-        } as unknown as Parameters<typeof publishRealtimeMutation>[0]['mutation'],
-        refreshTargets: ['global', 'sessionHistory'],
-        sessionKeys: [session.surfaceId],
-        fresh: true,
-      });
-    } catch (err) {
-      console.error(`[owned-store] emitRuntimeFallbackNotification failed:`, err);
-    }
-  }
-
   async function reconcilePreparedRuns(session: OwnedSessionRecord): Promise<OwnedSessionRecord> {
     let dirty = false;
     for (let index = 0; index < session.recentRuns.length; index += 1) {
@@ -398,6 +367,7 @@ export function createOwnedRunController({
   }
 
   async function refreshSession(session: OwnedSessionRecord, surfaceLockHeld = false, allowRetry = true) {
+    await assertOwnedSessionProcessIdentity(session, runtimeId);
     let dirty = false;
 
     for (const run of session.recentRuns) {
@@ -595,6 +565,7 @@ export function createOwnedRunController({
     }
 
     let pid = 0;
+    let stdinPath: string | undefined;
     let terminalSessionName: string | undefined;
     let detachMode: 'bridge' | 'detached' = 'bridge';
     let detachedChild: ChildProcess | undefined;
@@ -649,6 +620,7 @@ export function createOwnedRunController({
           prompt,
           startedAt: nowIso(),
           pid: 0,
+          processIdentityRequired: crashSurvivableWorkersEnabled() && Boolean(session.packetId) && process.platform !== 'win32',
           commandIdentity: executionCarrierCommandIdentity(carrierLaunch, spawnBinary),
           processMarker: runId,
           spawnState: 'prepared',
@@ -687,7 +659,14 @@ export function createOwnedRunController({
           if (!terminalSessionName) {
             const stdoutFd = openSync(stdoutPath, 'a');
             const stderrFd = openSync(stderrPath, 'a');
+            let stdinFd: number | undefined;
             try {
+              if (stdinPayload) {
+                stdinPath = `${stdoutPath}.stdin`;
+                await writeFile(stdinPath, stdinPayload, { mode: 0o600, flag: 'wx' });
+                stdinFd = openSync(stdinPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | constants.O_NONBLOCK);
+                if (!fstatSync(stdinFd).isFile()) throw new Error('Owned worker input is not a regular file.');
+              }
               // On Windows the resolved CLI is usually a `.cmd` shim (that is what npm
               // installs), and Node refuses to execute one without an interpreter —
               // it fails before a process exists, so the run dies in milliseconds with
@@ -708,14 +687,14 @@ export function createOwnedRunController({
                     windowsHide: true,
                     cwd: session.repoPath,
                     detached: true,
-                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                    stdio: [stdinFd ?? 'ignore', stdoutFd, stderrFd],
                     env: ownedSpawnEnvironment(session, spawnEnv),
                   })
                 : spawn(directLaunch.command, directLaunch.args, {
                     windowsHide: true,
                     cwd: session.repoPath,
                     detached: true,
-                    stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
+                    stdio: [stdinFd ?? 'ignore', stdoutFd, stderrFd],
                     env: ownedSpawnEnvironment(session, spawnEnv),
                   });
               detachedChild = child;
@@ -728,13 +707,11 @@ export function createOwnedRunController({
                   console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
                 });
               });
-              if (stdinPayload && child.stdin) {
-                child.stdin.end(stdinPayload, 'utf8');
-              }
               child.unref();
               pid = child.pid ?? 0;
               detachMode = 'detached';
             } finally {
+              if (stdinFd !== undefined) closeSync(stdinFd);
               closeSync(stdoutFd);
               closeSync(stderrFd);
             }
@@ -756,7 +733,9 @@ export function createOwnedRunController({
           spawnState: 'started',
           tmuxSession: terminalSessionName,
           detachMode,
+          stdinPath,
         };
+        await captureOwnedRunIdentity(session, runtimeId, run);
 
         if (session.packetId && session.executionPolicy === undefined) {
           try {
@@ -781,6 +760,7 @@ export function createOwnedRunController({
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
           });
         }
+        await assertOwnedSessionProcessIdentity(session, runtimeId);
         return run;
       });
     } catch (error) {
