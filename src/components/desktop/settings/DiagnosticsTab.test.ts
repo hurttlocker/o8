@@ -10,7 +10,7 @@ vi.mock('@/lib/entitlement/context', () => ({
 
 vi.mock('./RecallHealthSection', () => ({ RecallHealthSection: () => null }));
 vi.mock('./LoopStatusSection', () => ({ LoopStatusSection: () => null }));
-vi.mock('./DemoRunSection', () => ({ DemoRunSection: () => null }));
+vi.mock('./DemoRunSection', () => ({ DemoRunSection: () => createElement('output', null, 'Demo controls') }));
 vi.mock('./ShippedDarkAuditSection', () => ({ ShippedDarkAuditSection: () => null }));
 
 import { DiagnosticsTab } from './DiagnosticsTab';
@@ -62,6 +62,22 @@ describe('DiagnosticsTab Ollama visibility', () => {
     diagnosticsContainer.remove();
     localModelsContainer.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('requires explicit authorization on each diagnostics visit', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(ollamaPayload)));
+    await act(async () => diagnosticsRoot.render(createElement(DiagnosticsTab)));
+    expect(diagnosticsContainer.textContent).not.toContain('Demo controls');
+    const authorize = [...diagnosticsContainer.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Enable developer diagnostics');
+    expect(authorize).toBeDefined();
+    await act(async () => authorize!.click());
+    expect(diagnosticsContainer.textContent).toContain('Demo controls');
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('run-demo'))).toBe(false);
+    await act(async () => diagnosticsRoot.unmount());
+    diagnosticsRoot = createRoot(diagnosticsContainer);
+    await act(async () => diagnosticsRoot.render(createElement(DiagnosticsTab)));
+    expect(diagnosticsContainer.textContent).not.toContain('Demo controls');
   });
 
   it('shows Ollama as healthy in Diagnostics and Local Models from the same payload', async () => {

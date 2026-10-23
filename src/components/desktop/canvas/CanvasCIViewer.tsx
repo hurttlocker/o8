@@ -5,21 +5,8 @@ import { memo, useEffect, useState } from 'react';
 import { ExternalLink, GitPullRequest } from '../lucide-shims';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
-
-interface CIRun {
-  databaseId: number;
-  displayTitle: string;
-  event: string;
-  headBranch: string;
-  headSha?: string;
-  status: string;
-  conclusion: string;
-  createdAt: string;
-  updatedAt: string;
-  workflowName: string;
-  url: string;
-  pullRequests?: { number: number; url: string }[];
-}
+import { relativeAge } from '@/lib/util/relative-age';
+import { useCanvasCIRuns, type CIRun } from './useCanvasCIRuns';
 
 interface CIAnnotation {
   path: string;
@@ -80,70 +67,63 @@ function ciIcon(conclusion: string, status: string): string {
 }
 
 function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: number }) {
-  const [runs, setRuns] = useState<CIRun[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedRun, setSelectedRun] = useState<number | null>(null);
-  const [runDetail, setRunDetail] = useState<CIRunDetail | null>(null);
-  const [logs, setLogs] = useState('');
-  const [detailLoading, setDetailLoading] = useState(false);
+  const runQuery = useCanvasCIRuns(repo);
+  const { repoScope } = runQuery;
+  const runs = runQuery.data?.runs ?? [];
+  const selectionScope = JSON.stringify([repoScope, initialRunId ?? null]);
+  const [selection, setSelection] = useState<{ scope: string; id: number | null }>(() => ({ scope: selectionScope, id: initialRunId ?? null }));
+  const requestedRun = selection.scope === selectionScope ? selection.id : initialRunId ?? null;
+  const selectedRun = runs.some(run => run.databaseId === requestedRun) ? requestedRun : null;
+  const detailScope = JSON.stringify([repoScope, selectedRun]);
+  const [detail, setDetail] = useState<{
+    scope: string; run: CIRunDetail | null; logs: string; pending: boolean; failed: boolean;
+  } | null>(null);
+  const currentDetail = detail?.scope === detailScope ? detail : null;
+  const runDetail = currentDetail?.run ?? null;
+  const logs = currentDetail?.logs ?? '';
+  const detailLoading = Boolean(selectedRun && (!currentDetail || currentDetail.pending));
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    fetch(`/api/panel/ci${repoParam}`)
-      .then((r) => r.json())
+    if (!selectedRun) return;
+    const controller = new AbortController();
+    setDetail({ scope: detailScope, run: null, logs: '', pending: true, failed: false });
+    const repoParam = repoScope ? `?repo=${encodeURIComponent(repoScope)}` : '';
+    fetch(`/api/panel/ci/${selectedRun}${repoParam}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Unable to load run details');
+        return response.json();
+      })
       .then((data) => {
-        if (!cancelled) {
-          const nextRuns = data.runs ?? [];
-          setRuns(nextRuns);
-          if (typeof initialRunId === 'number') {
-            const matchingRun = nextRuns.find((run: CIRun) => run.databaseId === initialRunId);
-            setSelectedRun(matchingRun ? initialRunId : null);
-          }
-          setLoading(false);
+        if (data.error || !data.run) throw new Error('Unable to load run details');
+        if (!controller.signal.aborted) {
+          setDetail({ scope: detailScope, run: data.run, logs: data.logs ?? '', pending: false, failed: false });
         }
       })
       .catch(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [initialRunId, repo]);
-
-  useEffect(() => {
-    if (!selectedRun) {
-      setRunDetail(null);
-      setLogs('');
-      return;
-    }
-    let cancelled = false;
-    setDetailLoading(true);
-    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    fetch(`/api/panel/ci/${selectedRun}${repoParam}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled) {
-          setRunDetail(data.run ?? null);
-          setLogs(data.logs ?? '');
-          setDetailLoading(false);
+        if (!controller.signal.aborted) {
+          setDetail({ scope: detailScope, run: null, logs: '', pending: false, failed: true });
         }
-      })
-      .catch(() => {
-        if (!cancelled) setDetailLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [repo, selectedRun]);
+    return () => controller.abort();
+  }, [detailScope, repoScope, selectedRun]);
 
-  if (loading) {
+  const listError = runQuery.isError ? (
+    <div role="status" style={{ paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, fontSize: 12, color: 'var(--t-text-muted)' }}>
+      {runQuery.data
+        ? `Showing last successful CI runs · ${relativeAge(runQuery.dataUpdatedAt)}. Refresh failed. `
+        : 'Unable to load CI runs. '}
+      <button type="button" onClick={() => { void runQuery.refetch(); }} style={{ color: 'var(--t-text)', background: 'var(--t-panel)', border: '1px solid var(--t-divider)', borderRadius: 6, cursor: 'pointer' }}>
+        Retry
+      </button>
+    </div>
+  ) : null;
+
+  if (runQuery.isPending) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading CI runs…</div>;
   }
 
   if (runs.length === 0) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>No workflow runs found</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>{listError ?? 'No workflow runs found'}</div>;
   }
 
   return (
@@ -157,6 +137,7 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
           background: 'var(--t-bg-subtle)',
         }}
       >
+        {listError}
         {runs.map((run) => {
           const color = ciColor(run.conclusion, run.status);
           const icon = ciIcon(run.conclusion, run.status);
@@ -165,7 +146,7 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
             <button
               key={run.databaseId}
               type="button"
-              onClick={() => setSelectedRun(run.databaseId)}
+              onClick={() => setSelection({ scope: selectionScope, id: run.databaseId })}
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
@@ -532,6 +513,8 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
               </div>
             ) : null}
           </div>
+        ) : currentDetail?.failed ? (
+          <div role="status" style={{ paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: 'var(--t-text-muted)' }}>Unable to load run details</div>
         ) : null}
       </div>
     </div>

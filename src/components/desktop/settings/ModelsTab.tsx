@@ -107,7 +107,7 @@ export function ModelDefaultsContent({ settings, onNavigateTab }: { settings: Re
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
           header="Engineering Brain"
-          footnote="Auto uses your included managed Brain allowance when your plan has one. It never switches to a CLI, local model, or BYOK key when that allowance is unavailable. Subscription mode is an explicit choice and may use the quota of a connected CLI."
+          footnote="Auto uses o8's managed Brain allowance when your account has one. It never switches to a CLI, local model, or BYOK key when that allowance is unavailable. Subscription mode is an explicit choice and may use the quota of a connected CLI."
         >
           <SettingsRow
             icon={<CpuIcon />}

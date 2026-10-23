@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * SceneCard — a card / modal / pricing surface with an animated sunrise
+ * SceneCard: a card / modal surface with an animated sunrise
  * landscape background (drifting valley fog + glowing sun disc + layered hazy
  * ridges + lit grass). Reuses the procedural scene shader from SunriseFooter,
  * framed as a rounded card with an inset hairline + soft shadow, content

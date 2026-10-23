@@ -90,3 +90,13 @@ it('keeps a resolved signed-out or local profile distinct from failed loading', 
   expect(container.textContent).not.toContain('Account unavailable');
   expect(container.textContent).not.toContain('037');
 });
+
+it('shows a signed-in profile without an edition or founder badge', async () => {
+  mocks.auth = { ...mocks.auth, isLoaded: true, signedIn: true, user: {
+    id: 'current-account', name: 'Current profile', email: 'current@example.test', avatarUrl: null,
+  } };
+  await render();
+  expect(container.textContent).toContain('Manage account');
+  expect(container.textContent).not.toContain('037');
+  expect(container.innerHTML).not.toMatch(/lifetime|free plan|upgrade|pricing/i);
+});

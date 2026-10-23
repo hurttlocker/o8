@@ -8,13 +8,12 @@ import type { Plan } from '@/lib/entitlement/types';
 vi.mock('@/components/auth/O8AuthProvider', () => ({
   useO8Auth: () => ({ clerkEnabled: false, isLoaded: true, signedIn: false, user: null }),
 }));
-vi.mock('@/lib/tauri/bridge', () => ({ storeSet: vi.fn() }));
+vi.mock('@/lib/tauri/bridge', () => ({ storeSet: vi.fn(), isTauri: () => false }));
 vi.mock('./SettingsTomlEditor', () => ({ SettingsTomlEditor: () => null }));
 vi.mock('@/lib/desktop/open-external', () => ({ openExternalUrl: vi.fn() }));
 
-import { EntitlementProvider } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
-import { BillingTab } from './BillingTab';
+import { GeneralTab } from './GeneralTab';
 import { OperatorDefaultsTab } from './OperatorDefaultsTab';
 
 let container: HTMLDivElement;
@@ -55,7 +54,7 @@ async function mountSettings(Component: ComponentType, plan: Plan, actualPlan: P
     throw new Error(`Unexpected request: ${url}`);
   }));
   await act(async () => {
-    root.render(createElement(EntitlementProvider, null, createElement(Component)));
+    root.render(createElement(Component));
   });
   await vi.waitFor(async () => {
     await act(async () => {});
@@ -65,7 +64,7 @@ async function mountSettings(Component: ComponentType, plan: Plan, actualPlan: P
 
 describe('operator defaults early access', () => {
   it.each([
-    ['free', false],
+    ['free', true],
     ['pro', true],
     ['founder', true],
     ['team', true],
@@ -75,43 +74,19 @@ describe('operator defaults early access', () => {
     expect(container.textContent?.includes('Canvas mode')).toBe(enabled);
   });
 
-  it('uses the effective plan when previewing Free with a lifetime plan', async () => {
-    await mountSettings(OperatorDefaultsTab, 'free', 'founder');
-    expect(container.textContent).not.toContain('Native browser-view');
+  it('keeps stability toggles visible without a license', async () => {
+    await mountSettings(OperatorDefaultsTab, 'free');
+    expect(container.textContent).toContain('Native browser-view');
+    // Disabled stability defaults must not be silently turned on.
+    expect(container.querySelectorAll('[role="switch"][aria-checked="false"]').length).toBeGreaterThan(0);
   });
 });
 
-describe('Plan & Billing subscription action', () => {
-  it.each([
-    ['free', 'Free', false],
-    ['pro', 'Pro', true],
-    ['founder', 'Pro · Lifetime', false],
-    ['team', 'Team', false],
-  ] as const)('renders the correct label and action for %s', async (plan, label, manageable) => {
-    await mountSettings(BillingTab, plan);
-    const currentPlan = container.querySelector('section');
-    expect(currentPlan?.textContent).toContain(label);
-    if (plan === 'pro') expect(currentPlan?.textContent).not.toContain('Lifetime');
-    const button = [...container.querySelectorAll('button')]
-      .find((entry) => entry.textContent === 'Manage subscription');
-    expect(Boolean(button)).toBe(manageable);
-    if (button) {
-      await act(async () => button.click());
-      expect(openExternalUrl).toHaveBeenCalledOnce();
-      expect(openExternalUrl).toHaveBeenCalledWith('https://o8.run/account');
-    } else {
-      expect(openExternalUrl).not.toHaveBeenCalled();
-    }
-  });
-
-  it('retains subscription management while previewing Free with a Pro plan', async () => {
-    await mountSettings(BillingTab, 'free', 'pro');
-    expect(container.textContent).toContain('Manage subscription');
-  });
-
-  it('retains lifetime identity while previewing Free with a lifetime plan', async () => {
-    await mountSettings(BillingTab, 'free', 'founder');
-    expect(container.querySelector('section')?.textContent).toContain('Pro · Lifetime');
-    expect(container.textContent).not.toContain('Manage subscription');
+describe('General settings free edition', () => {
+  it.each(['free', 'pro', 'team', 'founder'] as const)('removes commerce from %s', async (plan) => {
+    await mountSettings(GeneralTab, plan);
+    expect(container.textContent).not.toMatch(/plan|upgrade|pricing|lifetime|subscription/i);
+    expect(container.textContent).toContain('Privacy');
+    expect(openExternalUrl).not.toHaveBeenCalled();
   });
 });

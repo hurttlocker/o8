@@ -236,31 +236,23 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
   }
 
   for (const entry of ['http', 'cli'] as const) {
-    it(`${entry} banks dirty orphan source in the retained branch and retirement snapshot`, async () => {
+    it(`${entry} retains dirty orphan source without rewriting its HEAD or index`, async () => {
       const source = await fixture(entry === 'http' ? 'archived' : 'missing');
       writeFileSync(path.join(source.worktree.path, 'source.txt'), 'staged work\n');
       git(source.worktree.path, 'add', 'source.txt');
-      writeFileSync(path.join(source.worktree.path, 'source.txt'), 'uncommitted completed work\n');
-      writeFileSync(path.join(source.worktree.path, 'untracked.txt'), 'untracked completed work\n');
+      writeFileSync(path.join(source.worktree.path, 'source.txt'), 'unfinished work\n');
+      writeFileSync(path.join(source.worktree.path, 'untracked.txt'), 'untracked work\n');
       if (entry === 'http') {
         const response = await httpClose(source.packetId);
-        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+        expect(response.status).toBe(409);
       } else {
-        const result = await cliClose(source.packetId);
-        expect(result, result.stderr).toMatchObject({ exitCode: 0 });
+        expect((await cliClose(source.packetId)).exitCode).not.toBe(0);
       }
-      expect(existsSync(source.worktree.path)).toBe(false);
-      const snapshot = exactSnapshot(source.worktree.path)!;
-      expect(snapshot.state).toBe('retired');
-      expect(snapshot.headCommit).not.toBe(source.head);
-      expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(snapshot.headCommit);
-      expect(git(source.repoPath, 'show', `${snapshot.headCommit}:source.txt`)).toBe('uncommitted completed work');
-      expect(git(source.repoPath, 'show', `${snapshot.headCommit}:untracked.txt`)).toBe('untracked completed work');
-      const { receipt, payload } = await readWorkspacePreservation(preservationIdForSnapshot(snapshot)!);
-      expect(receipt.headCommit).toBe(snapshot.headCommit);
-      expect(payload.gitBundle).toBeDefined();
-      expect(payload.handoff.revision).toBe(snapshot.headCommit);
-      expect(git(source.repoPath, 'rev-parse', payload.handoff.recoveryRef)).toBe(snapshot.headCommit);
+      expect(existsSync(source.worktree.path)).toBe(true);
+      expect(git(source.worktree.path, 'rev-parse', 'HEAD')).toBe(source.head);
+      expect(git(source.worktree.path, 'show', ':source.txt')).toBe('staged work');
+      expect(readFileSync(path.join(source.worktree.path, 'source.txt'), 'utf8')).toBe('unfinished work\n');
+      expect(readFileSync(path.join(source.worktree.path, 'untracked.txt'), 'utf8')).toBe('untracked work\n');
     }, 120_000);
   }
 

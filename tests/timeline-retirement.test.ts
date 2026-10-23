@@ -28,7 +28,7 @@ describe('retired desktop timeline', () => {
     const markup = renderToStaticMarkup(createElement(AppearanceTab));
     expect(markup).toContain('Choose a look for your workspace.');
     expect(markup).not.toMatch(/timeline/i);
-    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'timeline', { founder: true })).toEqual([]);
+    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'timeline')).toEqual([]);
   });
 
   it('renders an old saved timeline tab without loading its component or polling', () => {

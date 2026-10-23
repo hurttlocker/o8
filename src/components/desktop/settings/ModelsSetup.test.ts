@@ -61,7 +61,7 @@ describe('model setup navigation', () => {
     const api = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Manage provider keys'))!;
     act(() => api.click());
     expect(navigate).toHaveBeenCalledWith('api-keys');
-    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'local endpoint', { founder: false })[0]?.tab).toBe('local-models');
+    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'local endpoint')[0]?.tab).toBe('local-models');
   });
 
   it('enables an available worker without changing the preferred runtime or model', async () => {
@@ -83,7 +83,7 @@ describe('model setup navigation', () => {
     input.value = '2.5';
     await act(async () => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
     expect(defaultsFetch).toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', body: JSON.stringify({ meteredPacketCostCapUsd: 2.5 }) }));
-    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'Task spending limits', { founder: false })[0]?.tab).toBe('operator-defaults');
+    expect(searchSettings(SETTINGS_SEARCH_REGISTRY, 'Task spending limits')[0]?.tab).toBe('operator-defaults');
   });
 
   it('saves a local model through the existing defaults endpoint from its new page', async () => {

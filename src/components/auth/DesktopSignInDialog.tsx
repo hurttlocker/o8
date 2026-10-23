@@ -26,6 +26,6 @@ export function DesktopSignInDialog({ onClose }: { onClose: () => void }) {
       void startDesktopSignIn().finally(() => { busyRef.current = false; setBusy(false); });
     }}>{busy ? 'Opening sign-in…' : waiting && !error ? 'Reopen sign-in in browser' : 'Continue in browser'}</RamsButton>
     {error ? <p role="alert" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>{error.message}</p> : waiting ? <p role="status" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>Waiting for sign-in. o8 will connect automatically when you finish in the browser.</p> : null}
-    <p style={{ marginTop: 20, marginBottom: 0, paddingTop: 16, borderTop: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300, lineHeight: 1.5 }}>Secured by Clerk. Your plan is checked after sign-in. You can keep using your local workspace without an account.</p>
+    <p style={{ marginTop: 20, marginBottom: 0, paddingTop: 16, borderTop: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', fontSize: 10.5, fontWeight: 300, lineHeight: 1.5 }}>Secured by Clerk. Signing in is optional. You can keep using your local workspace without an account.</p>
   </FloatingDialog>;
 }

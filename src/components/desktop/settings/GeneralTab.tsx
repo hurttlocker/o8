@@ -16,15 +16,12 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   APP_FONT_STACK,
-  RamsButton,
-  RAMS_CONTROL_BORDER,
   SettingsSelect,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
   type SettingsTab,
 } from './shared';
-import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
-import { RAMS_BUTTON_GEOMETRY } from './control-geometry';
+import { SettingsGroup, SettingsRow } from './grouped';
 import { fetchOperatorDefaults } from './operator-defaults-client';
 import {
   autostartIsEnabled,
@@ -36,17 +33,11 @@ import {
   type DesktopClosePreference,
 } from '@/lib/tauri/bridge';
 import { primeQuietMode, setQuietMode, syncReviewNotificationSetting } from '@/lib/presentation/quiet-mode-client';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
-import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   ENV_LOCKED_REASON,
   type OperatorDefaults,
   type OperatorDefaultsResponse,
 } from './dispatch-shared';
-
-const FOUNDERS_URL = 'https://o8.run/pricing';
-const PLAN_CONTROL_WIDTH = 88;
 
 // ── Minimal raw-SVG glyphs for row icon tiles (React icon libs don't render
 //    inside the Tauri webview — raw <svg> only, per repo rules). ──
@@ -98,41 +89,9 @@ function ShieldIcon() {
   );
 }
 
-function StarIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M12 2l2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 9.5l6.9-.6z" />
-    </svg>
-  );
-}
-
-function ArrowUpIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <line x1="12" y1="19" x2="12" y2="5" />
-      <polyline points="5 12 12 5 19 12" />
-    </svg>
-  );
-}
-
 export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTab) => void }) {
   void onNavigateTab;
   const tauri = isTauri();
-
-  // ── Plan ──
-  // GitHub identity now lives with repo/CLI and automation capabilities in
-  // Git & PRs. This derivation still mirrors AccountBlock so the plan reads
-  // identically wherever it appears.
-  const { plan, founder, actualPlan, actualFounder } = useEntitlement();
-  const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
-  const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  const planLabel = plan === 'team' || actualPlan === 'team'
-    ? PLAN_LABELS.team
-    : isFounder
-      ? PLAN_LABELS.founder
-      : isPaid
-        ? PLAN_LABELS.pro
-        : 'Free Plan';
 
   // ── Launch at login (native autostart via the Tauri bridge) ──
   const [autostart, setAutostart] = useState(false);
@@ -287,32 +246,6 @@ export function GeneralTab({ onNavigateTab }: { onNavigateTab?: (tab: SettingsTa
           {notice}
         </div>
       ) : null}
-
-      <section style={{ marginBottom: 28 }}>
-        <SettingsGroup
-          header="Plan"
-          footnote="The local workspace and connected models are free to use in o8. Your model providers may charge for usage. Manage your license in Plan & Billing."
-        >
-          <SettingsRow
-            icon={<StarIcon />}
-            label="Plan"
-            accessory={<ValuePill tone={isFounder ? 'success' : 'default'} style={{ ...RAMS_BUTTON_GEOMETRY, minWidth: PLAN_CONTROL_WIDTH, borderColor: RAMS_CONTROL_BORDER }}>{planLabel}</ValuePill>}
-            divider={!isFounder && !isPaid}
-          />
-          {!isFounder && !isPaid ? (
-            <SettingsRow
-              icon={<ArrowUpIcon />}
-              label="Upgrade to Pro"
-              subtitle="Pro adds o8 High and Brain assistance on o8 infrastructure, subject to plan limits. Fully hosted mobile and cloud execution are planned."
-              accessory={
-                <RamsButton variant="primary" width={PLAN_CONTROL_WIDTH} onClick={() => openExternalUrl(FOUNDERS_URL)}>
-                  Upgrade
-                </RamsButton>
-              }
-            />
-          ) : null}
-        </SettingsGroup>
-      </section>
 
       {tauri ? (
         <section>

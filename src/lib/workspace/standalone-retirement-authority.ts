@@ -1,3 +1,4 @@
+import { rebuildableCargoTargetPaths } from '@/lib/worktree/cargo-target-cache';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
@@ -36,7 +37,7 @@ async function assertStandaloneOwner(repositoryPath: string, worktreeId: string,
 async function verifyCleanContents(candidatePath: string, identity: WorktreeMaterializationIdentity, headCommit: string, treeSha: string, generatedSettingsSha256: string): Promise<void> {
   const capture = await captureIgnoredArtifacts({
     workspacePath: candidatePath, identity: { ...identity, canonicalPath: candidatePath },
-    headCommit, treeSha, rebuildablePaths: REBUILDABLE_PATHS,
+    headCommit, treeSha, rebuildablePaths: [...REBUILDABLE_PATHS, ...await rebuildableCargoTargetPaths(candidatePath, { ...identity, canonicalPath: candidatePath })],
     copiedEnvironment: { [MANAGED_WORKSPACE_SAFETY_SETTINGS]: generatedSettingsSha256 },
   });
   if (capture.entries.some((entry) => entry.kind === 'file')) throw new Error('Standalone workspace has unique ignored content and must remain retained.');

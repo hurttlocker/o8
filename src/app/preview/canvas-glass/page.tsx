@@ -61,7 +61,6 @@ import type { DiffCard } from './diff-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { CanvasFeedbackButton } from './canvas-feedback';
-import { ViewAsFreeIndicator } from '@/components/desktop/ViewAsFreeIndicator';
 import { ProximityDock } from './proximity-dock';
 import { AnticipationRing } from './anticipation-ring';
 import { ComposerPartialsFill, useAgentPartialsMorph } from './agent-partials-morph';
@@ -2276,7 +2275,6 @@ export default function CanvasGlassPreviewPage() {
           ...glass(true),
         }}
       >
-        <ViewAsFreeIndicator palette="canvas" />
         <CanvasFeedbackButton />
         <button
           type="button"
