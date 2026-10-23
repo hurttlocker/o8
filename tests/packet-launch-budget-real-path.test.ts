@@ -61,6 +61,7 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
   writeFileSync(path.join(repo, 'README.md'), 'committed\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({
     name: 'launch-budget-fixture', version: '1.0.0', packageManager: `npm@${npmVersion}`,
+    o8DependencyClone: { lifecycleInputs: [] },
     scripts: {
       test: 'node -e "process.exit(0)"',
       prebuild: 'node -e "require(\'fs\').writeFileSync(\'generated.pre\',\'ready\')"',
@@ -76,6 +77,11 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
   git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'fixture');
   git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '--allow-empty', '-qm', 'packet base');
   git('remote', 'add', 'origin', repo);
+  // The running checkout advances while the packet remains pinned to main.
+  git('checkout', '-qb', 'donor');
+  writeFileSync(path.join(repo, 'README.md'), 'donor documentation update\n');
+  git('add', 'README.md');
+  git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'docs only');
   // Required ignored assets are provided with a private directory clone.
   mkdirSync(path.join(repo, 'vendor'));
   for (let index = 0; index < 2_000; index += 1) {
@@ -94,6 +100,7 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
     `const npmCli = ${JSON.stringify(npmCli)};`,
     "const args = process.argv.slice(2);",
     "if (args[0] !== 'ci') { const result = cp.spawnSync(process.execPath, [npmCli, ...args], { stdio: 'inherit' }); process.exit(result.status ?? 1); }",
+    "fs.writeFileSync('installer-fallback.txt', 'ci\\n');",
     "fs.mkdirSync('node_modules/fixture', { recursive: true });",
     "fs.writeFileSync('node_modules/fixture/index.js', 'module.exports = 42;\\n');",
     "const result = cp.spawnSync(process.execPath, [npmCli, 'rebuild', '.', '--offline'], { stdio: 'inherit' }); process.exit(result.status ?? 1);",
@@ -159,9 +166,14 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
   expect(sessionMs).toBeLessThan(60_000);
   expect(elapsedMs).toBeLessThan(60_000);
   if (process.platform !== 'darwin') return;
+  expect(existsSync(path.join(workspace, 'installer-fallback.txt'))).toBe(false);
+  expect(events.filter((event) => event.verb === 'worktree_preparation_timing'
+    && event.payload.stage === 'dependency_selection').map((event) => event.payload)).toContainEqual(
+    expect.objectContaining({ path: 'directory-clone', reason: 'matching-inputs' }),
+  );
   expect(lstatSync(path.join(workspace, '.git')).isDirectory()).toBe(true);
   expect(existsSync(path.join(workspace, '.git/objects/info/alternates'))).toBe(false);
-  expect(timings.map((timing) => timing.stage)).toEqual(process.platform === 'darwin' ? ['clone', 'checkout', 'asset_hydration', 'dependency_materialization'] : ['dependency_materialization']);
+  expect(timings.map((timing) => timing.stage)).toEqual(process.platform === 'darwin' ? ['clone', 'checkout', 'asset_hydration', 'dependency_selection', 'dependency_materialization'] : ['dependency_materialization']);
   const workerGit = (...args: string[]) => execFileSync('git', args, {cwd:workspace, encoding:'utf8', stdio:'pipe'}).trim();
   const mainHead = git('rev-parse', 'refs/heads/main');
   workerGit('update-ref', '-d', 'refs/heads/main');
