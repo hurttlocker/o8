@@ -3,7 +3,7 @@
  *
  * POST /api/worktrees/merge — Create PR, merge to main, or discard a worktree
  *
- * @see https://github.com/hurttlocker/o8/issues/70
+ * @see https://github.com/o8-run/o8/issues/70
  */
 
 import path from 'node:path';

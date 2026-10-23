@@ -1,7 +1,7 @@
 /**
  * Worktree Isolation — Barrel Export
  *
- * @see https://github.com/hurttlocker/o8/issues/65
+ * @see https://github.com/o8-run/o8/issues/65
  */
 
 export { WorktreeManager, WorktreeFetchUnreachableError, WorktreeRebaseConflictError } from './manager';

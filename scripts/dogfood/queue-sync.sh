@@ -5,7 +5,7 @@ set -euo pipefail
 STATE_DIR="${O8_DOGFOOD_STATE_DIR:-$HOME/.o8}"
 QUEUE="$STATE_DIR/dogfood-queue.json"
 HANDLED="$STATE_DIR/feedback-handled.json"
-REPO="${O8_DOGFOOD_REPO:-hurttlocker/o8}"
+REPO="${O8_DOGFOOD_REPO:-o8-run/o8}"
 TMP="$QUEUE.tmp.$$"
 
 mkdir -p "$STATE_DIR"

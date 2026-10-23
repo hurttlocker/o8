@@ -12,9 +12,9 @@ vi.mock('@tauri-apps/plugin-shell', () => ({ open: shellOpen }));
 vi.mock('./ReportIssueSection', () => ({ ReportIssueSection: () => null }));
 
 const links = [
-  ['GitHub', 'https://github.com/hurttlocker/o8'],
-  ['Documentation', 'https://github.com/hurttlocker/o8/tree/main/docs'],
-  ['Releases', 'https://github.com/hurttlocker/o8/releases/latest'],
+  ['GitHub', 'https://github.com/o8-run/o8'],
+  ['Documentation', 'https://github.com/o8-run/o8/tree/main/docs'],
+  ['Releases', 'https://github.com/o8-run/o8/releases/latest'],
 ] as const;
 
 let container: HTMLDivElement;

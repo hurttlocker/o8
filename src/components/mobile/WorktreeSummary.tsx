@@ -4,7 +4,7 @@
  * Shows: active count, total disk, conflict status, prune button.
  * Lives above the squad grid when worktrees are active.
  *
- * @see https://github.com/hurttlocker/o8/issues/67
+ * @see https://github.com/o8-run/o8/issues/67
  */
 
 import { memo, useCallback, useState } from 'react';

@@ -50,5 +50,5 @@ the saved task identities, review state, approval, and hold remained intact.
 
 If recovery fails, report the installed version, the exact updater or macOS
 message, and whether work is running or parked in the
-[updater recovery issue](https://github.com/hurttlocker/o8/issues/3807).
+[updater recovery issue](https://github.com/o8-run/o8/issues/3807).
 Do not include private task content, credentials, or database files.

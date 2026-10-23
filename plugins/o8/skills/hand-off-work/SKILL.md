@@ -54,7 +54,7 @@ does not approve cards, merge work, or publish releases. A stop request uses
 
 ## Availability and data
 
-If the CLI is missing, link to [o8 downloads](https://github.com/hurttlocker/o8/releases)
+If the CLI is missing, link to [o8 downloads](https://github.com/o8-run/o8/releases)
 and explain the first-launch requirement. If the app is unreachable, run the
 read-only `o8 doctor --json` and report the blocker. Do not change configuration,
 create credentials, install software, or expose the local API to the internet

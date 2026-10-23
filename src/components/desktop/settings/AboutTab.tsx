@@ -154,8 +154,8 @@ export function AboutTab() {
           <SettingsRow
             icon={<GitHubIcon size={16} />}
             label="GitHub"
-            subtitle="hurttlocker/o8"
-            onPress={() => openExternalUrl('https://github.com/hurttlocker/o8')}
+            subtitle="o8-run/o8"
+            onPress={() => openExternalUrl('https://github.com/o8-run/o8')}
             chevron
             divider
           />
@@ -163,7 +163,7 @@ export function AboutTab() {
             icon={<BookIcon />}
             label="Documentation"
             subtitle="Architecture, workflows, and guides"
-            onPress={() => openExternalUrl('https://github.com/hurttlocker/o8/tree/main/docs')}
+            onPress={() => openExternalUrl('https://github.com/o8-run/o8/tree/main/docs')}
             chevron
             divider
           />
@@ -171,7 +171,7 @@ export function AboutTab() {
             icon={<TagIcon />}
             label="Releases"
             subtitle="Changelog and downloads"
-            onPress={() => openExternalUrl('https://github.com/hurttlocker/o8/releases/latest')}
+            onPress={() => openExternalUrl('https://github.com/o8-run/o8/releases/latest')}
             chevron
           />
         </SettingsGroup>

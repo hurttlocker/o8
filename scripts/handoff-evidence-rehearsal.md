@@ -26,7 +26,7 @@ The normal Git index, original persisted handoff and placeholder narrative inten
 
 ## Relationship to the existing demo
 
-This is a small evidence companion to [the portable demo](https://github.com/kvnloo/o8/pull/32) and its [planned experiment](https://github.com/hurttlocker/o8/blob/748874a5886745f69beac66a21be86025e476bda/scripts/intent-continuity-demo/experiment.md). It does not replace its renderer, checker or store. The demo was inspected at `748874a5886745f69beac66a21be86025e476bda`; the admission draft at `16e2dd430e274eeb344a66eec2bbbe7adb3f40d9`; the state comparator draft at `97bd67372bc16e57fa61240b2e6da455da538a9e`. Those revisions are context, not dependencies invoked by this rehearsal.
+This is a small evidence companion to [the portable demo](https://github.com/kvnloo/o8/pull/32) and its [planned experiment](https://github.com/o8-run/o8/blob/748874a5886745f69beac66a21be86025e476bda/scripts/intent-continuity-demo/experiment.md). It does not replace its renderer, checker or store. The demo was inspected at `748874a5886745f69beac66a21be86025e476bda`; the admission draft at `16e2dd430e274eeb344a66eec2bbbe7adb3f40d9`; the state comparator draft at `97bd67372bc16e57fa61240b2e6da455da538a9e`. Those revisions are context, not dependencies invoked by this rehearsal.
 
 The same semantic request is retained: “Make this respond faster. Keep the layout and existing behavior. Do not deploy.” It is explicitly placeholder narrative. There is no measured interaction, agreed numeric target, AODL validation, admitted R1, or authored-intent identity. The new handoff receives that narrative explicitly from the fixture; this does not prove automatic authored-ref propagation.
 

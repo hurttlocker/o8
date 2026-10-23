@@ -1,7 +1,7 @@
 # Sustained work and workspace retirement
 
-Execution tracking: [#3226](https://github.com/hurttlocker/o8/issues/3226).
-Storage tracking: [#2203](https://github.com/hurttlocker/o8/issues/2203).
+Execution tracking: [#3226](https://github.com/o8-run/o8/issues/3226).
+Storage tracking: [#2203](https://github.com/o8-run/o8/issues/2203).
 The acceptance program started on 2026-10-04.
 
 ## Outcome
@@ -42,19 +42,19 @@ repository artifacts.
 |---|---|
 | A1 | Inventory resource categories and owners on macOS and Linux. Distinguish apparent and allocated bytes, observed free space, and guest storage from host backing storage. |
 | A2 | Register worktrees, clones, temporary output, dependency and cache donors, and owned processes at creation. Persist each resource's identity and retention state. |
-| A3 | Reconcile canonical completion and release state after restart and stale client writes. Preserve newer generations and verify [#2723](https://github.com/hurttlocker/o8/issues/2723) plus the existing Stop and Close fixes. |
+| A3 | Reconcile canonical completion and release state after restart and stale client writes. Preserve newer generations and verify [#2723](https://github.com/o8-run/o8/issues/2723) plus the existing Stop and Close fixes. |
 | B1 | Completion writes a compact private handoff with outcome, source revision, remaining work, evidence and recovery instructions. |
 | B2 | Preserve and verify dirty, unpushed, untracked and unique ignored content. Recovery Git bundles contain the required parents and objects. |
 | B3 | Retain required release, failure and acceptance evidence under explicit holds and bounded policies. Use supported provider interfaces for transcript retention. |
 | B4 | A fresh worker resumes successfully after the original workspace is retired, including unfinished preserved work. |
-| C1 | Resolve [#2948](https://github.com/hurttlocker/o8/issues/2948): remove generated internal links without following their targets; protect external or uncertain links and release assets. |
+| C1 | Resolve [#2948](https://github.com/o8-run/o8/issues/2948): remove generated internal links without following their targets; protect external or uncertain links and release assets. |
 | C2 | One owner-aware, journaled and idempotent retirement path serves app and agent callers. Recheck liveness and identity before removal, then persist measured receipts. |
 | C3 | Completion, supersession and bounded restart or maintenance reconciliation retire eligible work under policy without repeated prompts or model calls. Holds remain visible and affect only their dependent resources. |
 | C4 | Ship attempts reuse bounded compiler caches. Successful and superseded attempts release disposable output while preserving required donors and designated release evidence. |
 | D1 | A small real fix runs through o8 implementation, verification, independent review, integration and recoverable cleanup without the independent helper. |
 | D2 | Prove composer Shared mode's requested and effective shared checkout, branch and scoped ownership through a real worker turn, including persistence, supported and unsupported handling, and honest usage semantics. |
 | D3 | Compare ordinary isolated mode and composer Shared mode on matched useful work: time to verified completion, correctness, retries, available usage evidence and storage growth. Preserve model and effort defaults. |
-| E1 | Verify [#2125](https://github.com/hurttlocker/o8/issues/2125) through real dispatch. Incremental growth and concurrent reservations admit fitting small jobs and hold jobs that cannot fit with actionable receipts. |
+| E1 | Verify [#2125](https://github.com/o8-run/o8/issues/2125) through real dispatch. Incremental growth and concurrent reservations admit fitting small jobs and hold jobs that cannot fit with actionable receipts. |
 | E2 | Appropriate remote builds and tests have one heavy job owner per host. Disconnect and reconnect preserve ownership; an unavailable host does not block independent eligible cleanup elsewhere. |
 | E3 | External worker adoption has explicit ownership and capability boundaries. Unsupported transcript purge and unknown resources remain held without blocking known eligible workspace cleanup. |
 | F1 | Twenty consecutive task, finish and restore cycles independently on macOS and Linux show bounded retained growth. Cover interruption, owner return, PID reuse and missing paths. |
@@ -67,7 +67,7 @@ does not select a faster inference service tier. Its active branch may be an
 issue branch; Shared mode does not require main. The composer, tool help and
 agent instructions use Shared. Older receipts may call it Fast; the stored `fast`
 identifier is retained for saved selections and history
-([#3240](https://github.com/hurttlocker/o8/issues/3240)).
+([#3240](https://github.com/o8-run/o8/issues/3240)).
 
 ## Execution order
 

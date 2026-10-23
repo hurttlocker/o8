@@ -12,7 +12,7 @@ use tauri_plugin_notification::NotificationExt;
 const UPDATE_AVAILABLE_EVENT: &str = "o8://update-available";
 const UPDATE_CLEAR_EVENT: &str = "o8://update-clear";
 const BUNDLE_SIGNATURE_INVALID_EVENT: &str = "o8://bundle-signature-invalid";
-const REINSTALL_URL: &str = "https://github.com/hurttlocker/o8/releases/latest";
+const REINSTALL_URL: &str = "https://github.com/o8-run/o8/releases/latest";
 const REINSTALL_INSTRUCTION: &str = "Quit o8, move /Applications/o8.app to /Applications/o8.app.damaged, then download and reinstall the latest release.";
 
 static LAUNCH_UPDATE_CHECK_STARTED: AtomicBool = AtomicBool::new(false);

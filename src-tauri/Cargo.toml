@@ -4,7 +4,7 @@ version = "0.1.805"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
-repository = "https://github.com/hurttlocker/o8"
+repository = "https://github.com/o8-run/o8"
 edition = "2021"
 rust-version = "1.77.2"
 

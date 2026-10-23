@@ -4,7 +4,7 @@
 // Requires the GitHub CLI (`gh`) to be installed and authenticated.
 import { execFileSync } from 'node:child_process';
 
-const REPO = process.env.ROADMAP_REPO || 'hurttlocker/o8';
+const REPO = process.env.ROADMAP_REPO || 'o8-run/o8';
 const CHECK = process.argv.includes('--check');
 import { readFileSync } from 'node:fs';
 

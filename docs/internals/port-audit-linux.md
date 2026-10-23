@@ -14,13 +14,13 @@ Three surfaces are macOS-native code paths with no Linux implementation. Each ha
 
 ## Executive Top 10 Greenfield Findings
 
-The remaining open Linux blockers are release artifacts ([#1898](https://github.com/hurttlocker/o8/issues/1898)), installed deep-link and bundle registration ([#1899](https://github.com/hurttlocker/o8/issues/1899)), and stale-listener reclaim ([#1926](https://github.com/hurttlocker/o8/issues/1926)).
+The remaining open Linux blockers are release artifacts ([#1898](https://github.com/o8-run/o8/issues/1898)), installed deep-link and bundle registration ([#1899](https://github.com/o8-run/o8/issues/1899)), and stale-listener reclaim ([#1926](https://github.com/o8-run/o8/issues/1926)).
 
 1. **FIXED — Linux Tauri builds could fail before launch because macOS voice sidecars were bundled unconditionally.** Fixed by commit `0436a4845f`: `src-tauri/tauri.macos.conf.json:3-7` now scopes the sidecars to the macOS bundle, and `src-tauri/build.rs:163` gates the recognizer build to macOS. Blocks: none from this finding.
-2. **BLOCKER — The ship/updater pipeline publishes only macOS artifacts and Darwin `latest.json` platforms.** Evidence: `scripts/release.mjs:93`, `scripts/release.mjs:194-203`. Follow-up: [#1898](https://github.com/hurttlocker/o8/issues/1898). Blocks: desktop client.
+2. **BLOCKER — The ship/updater pipeline publishes only macOS artifacts and Darwin `latest.json` platforms.** Evidence: `scripts/release.mjs:93`, `scripts/release.mjs:194-203`. Follow-up: [#1898](https://github.com/o8-run/o8/issues/1898). Blocks: desktop client.
 3. **FIXED — Native Node addons were copied from the build host and then forced through a macOS-only multi-ABI bundle path.** Fixed by commit `739748f267`: `scripts/tauri-export.mjs:527-558` keeps the host-compiled modules for non-Darwin builds and runs the multi-ABI selector only on Darwin. Blocks: none from this finding.
-4. **BLOCKER — Linux runtime deep-link delivery exists, but installed `.desktop`/MIME registration and Linux bundle targets remain unverified.** Evidence: `src-tauri/tauri.linux.conf.json:20-23`, `src-tauri/src/lib.rs:6981-6991`, `src-tauri/src/lib.rs:7262-7324`. Follow-up: [#1899](https://github.com/hurttlocker/o8/issues/1899). Blocks: desktop client.
-5. **BLOCKER (PARTIALLY FIXED) — Tracked-child shutdown now splits Unix and Windows process killing, but stale-listener reclaim remains macOS-only.** Fixed slice: commit `62e7bbb977`, `src-tauri/src/sidecar_lifecycle.rs:241-278`. Open slice: `src-tauri/src/sidecar_lifecycle.rs:746-748` returns `false` off macOS from Linux-reachable callers at `src-tauri/src/lib.rs:925`, `src-tauri/src/lib.rs:7656`, and `src-tauri/src/lib.rs:7675`. Follow-up: [#1926](https://github.com/hurttlocker/o8/issues/1926). Blocks: desktop client.
+4. **BLOCKER — Linux runtime deep-link delivery exists, but installed `.desktop`/MIME registration and Linux bundle targets remain unverified.** Evidence: `src-tauri/tauri.linux.conf.json:20-23`, `src-tauri/src/lib.rs:6981-6991`, `src-tauri/src/lib.rs:7262-7324`. Follow-up: [#1899](https://github.com/o8-run/o8/issues/1899). Blocks: desktop client.
+5. **BLOCKER (PARTIALLY FIXED) — Tracked-child shutdown now splits Unix and Windows process killing, but stale-listener reclaim remains macOS-only.** Fixed slice: commit `62e7bbb977`, `src-tauri/src/sidecar_lifecycle.rs:241-278`. Open slice: `src-tauri/src/sidecar_lifecycle.rs:746-748` returns `false` off macOS from Linux-reachable callers at `src-tauri/src/lib.rs:925`, `src-tauri/src/lib.rs:7656`, and `src-tauri/src/lib.rs:7675`. Follow-up: [#1926](https://github.com/o8-run/o8/issues/1926). Blocks: desktop client.
 6. **STRUCTURAL — Headless live-session/orphan logic depends on optional `lsof`, `pgrep`, and GNU/BSD `ps` shapes.** Evidence: `src-tauri/src/sidecar_lifecycle.rs:219`, `src-tauri/src/sidecar_lifecycle.rs:319`, `src/lib/runtimes/claude-code.ts:721`, `src/lib/runtimes/shared/codex-process-cwd.ts:37`. Blocks: headless node.
 7. **STRUCTURAL — Native Browser Pane / agent-grab is compiled as macOS-only and silently no-ops on Linux.** Evidence: `src-tauri/src/browser_view.rs:60`, `src-tauri/src/browser_view.rs:90`, `src-tauri/src/browser_view.rs:333`, `src-tauri/src/browser_view.rs:353`. Blocks: desktop client.
 8. **STRUCTURAL — Repo/file picker API routes shell out to `osascript`, so Linux desktop chooser flows return null.** Evidence: `src/app/api/panel/browse-folder/route.ts:7`, `src/app/api/panel/browse-folder/route.ts:21`, `src/app/api/panel/file-io/route.ts:133`, `src/app/api/panel/file-io/route.ts:150`. Blocks: desktop client.
@@ -49,7 +49,7 @@ The remaining open Linux blockers are release artifacts ([#1898](https://github.
 - Severity: BLOCKER
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
-- Status: OPEN. Tracked by [#1898](https://github.com/hurttlocker/o8/issues/1898).
+- Status: OPEN. Tracked by [#1898](https://github.com/o8-run/o8/issues/1898).
 - Evidence:
   - `scripts/release.mjs:93` still gates a release preparation step on Darwin.
   - `scripts/release.mjs:194-203` emits only `darwin-x86_64` and `darwin-aarch64` updater platforms.
@@ -89,7 +89,7 @@ The remaining open Linux blockers are release artifacts ([#1898](https://github.
 - Severity: BLOCKER
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
-- Status: OPEN. Runtime delivery and scheme configuration exist, but installed `.desktop`/MIME registration and Linux bundle proof remain in [#1899](https://github.com/hurttlocker/o8/issues/1899).
+- Status: OPEN. Runtime delivery and scheme configuration exist, but installed `.desktop`/MIME registration and Linux bundle proof remain in [#1899](https://github.com/o8-run/o8/issues/1899).
 - Evidence:
   - Original finding: only the macOS plist and `RunEvent::Opened` path handled the URL scheme.
   - `src-tauri/tauri.linux.conf.json:20-23` now configures the `o8` scheme for Linux.
@@ -103,7 +103,7 @@ The remaining open Linux blockers are release artifacts ([#1898](https://github.
 - Severity: BLOCKER (tracked-child shutdown slice fixed)
 - Blocks: desktop client only
 - Known vs greenfield: GREENFIELD.
-- Status: OPEN. Tracked by [#1926](https://github.com/hurttlocker/o8/issues/1926).
+- Status: OPEN. Tracked by [#1926](https://github.com/o8-run/o8/issues/1926).
 - Evidence:
   - Fixed by commit `62e7bbb977`: `src-tauri/src/sidecar_lifecycle.rs:241-278` splits tracked-child shutdown into Unix and Windows implementations.
   - `src-tauri/src/lib.rs:925`, `src-tauri/src/lib.rs:7656`, and `src-tauri/src/lib.rs:7675` still call `kill_orphan_and_wait` on Linux-reachable stale-listener paths.

@@ -349,6 +349,8 @@ describe('release channels through the publication entry point', () => {
     const calls = effects(f);
     const creates = calls.filter(c => c.name === 'gh' && c.args[1] === 'create');
     expect(creates).toHaveLength(2);
+    expect(creates.map(call => call.args[call.args.indexOf('-R') + 1]))
+      .toEqual(['o8-run/o8', 'hurttlocker/o8-releases']);
     expect(calls.filter(call => call.name === 'codex')).toHaveLength(1);
     expect(calls.findIndex(call => call.name === 'codex')).toBeLessThan(calls.findIndex(call => call.name === 'gh' && call.args[1] === 'create'));
     const mirror = creates.find(call => call.args.includes('hurttlocker/o8-releases'))!;

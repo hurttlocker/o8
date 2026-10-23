@@ -5,8 +5,8 @@ does not start an o8 model turn. Asking a worker to continue does start work on
 that worker's configured account and route. These are separate operations.
 
 This document records the research and measurement contract for
-[#3247](https://github.com/hurttlocker/o8/issues/3247) and the comparison in
-[#3251](https://github.com/hurttlocker/o8/issues/3251). Official guidance was
+[#3247](https://github.com/o8-run/o8/issues/3247) and the comparison in
+[#3251](https://github.com/o8-run/o8/issues/3251). Official guidance was
 checked October 5, 2026. No o8-specific subscription savings have been measured.
 
 ## Documented accounting boundaries
@@ -121,8 +121,8 @@ zero cost or automatic payer fallback from a successful connection.
 
 ## Related work
 
-- [Connection, identity and plan-use consent](https://github.com/hurttlocker/o8/issues/3248)
-- [Sign in with ChatGPT implementation](https://github.com/hurttlocker/o8/issues/2951)
-- [Payer and permission visibility](https://github.com/hurttlocker/o8/issues/3250)
-- [Paired usage comparison](https://github.com/hurttlocker/o8/issues/3251)
-- [Connected plugin epic](https://github.com/hurttlocker/o8/issues/2955)
+- [Connection, identity and plan-use consent](https://github.com/o8-run/o8/issues/3248)
+- [Sign in with ChatGPT implementation](https://github.com/o8-run/o8/issues/2951)
+- [Payer and permission visibility](https://github.com/o8-run/o8/issues/3250)
+- [Paired usage comparison](https://github.com/o8-run/o8/issues/3251)
+- [Connected plugin epic](https://github.com/o8-run/o8/issues/2955)

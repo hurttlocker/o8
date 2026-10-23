@@ -2,7 +2,7 @@
  * Web Push send — performs the HTTPS request to the browser-supplied push
  * service (Apple, Google, Mozilla) with a VAPID JWT and an aes128gcm body.
  *
- * Issue: https://github.com/hurttlocker/o8/issues/639
+ * Issue: https://github.com/o8-run/o8/issues/639
  */
 
 import 'server-only';

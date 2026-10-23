@@ -124,9 +124,9 @@ export function slugifyName(name: string): string {
 
 /**
  * Pull "github-org" from a remote URL like:
- *   https://github.com/hurttlocker/o8.git
- *   git@github.com:hurttlocker/o8.git
- *   ssh://git@github.com/hurttlocker/o8
+ *   https://github.com/o8-run/o8.git
+ *   git@github.com:o8-run/o8.git
+ *   ssh://git@github.com/o8-run/o8
  */
 export function parseGithubOrg(remoteUrl: string | null | undefined): string | null {
   if (!remoteUrl) return null;

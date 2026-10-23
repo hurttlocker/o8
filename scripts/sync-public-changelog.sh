@@ -137,7 +137,7 @@ format_entry() {
   elif [ "$lookup_head" = "1" ]; then
     pr_num=$(echo "$msg" | grep -oE '\(#[0-9]+\)\s*$' | grep -oE '[0-9]+' || true)
     if [ -n "$pr_num" ]; then
-      head_ref=$(gh api "repos/hurttlocker/o8/pulls/$pr_num" --jq .head.ref 2>/dev/null || true)
+      head_ref=$(gh api "repos/o8-run/o8/pulls/$pr_num" --jq .head.ref 2>/dev/null || true)
       case "$head_ref" in issue/*|inline/*) via_o8="yes";; esac
     fi
   fi
@@ -213,7 +213,7 @@ echo "[sync] mirror resumes at $LAST_SYNCED_DATE from $SOURCE_REF"
 
 CREDITS="$SYNC_WORK_DIR/credits.tsv"
 git -C "$ROOT" log "$SOURCE_REF" --since="$LAST_SYNCED_DATE 00:00:00" --format='%s' --no-merges \
-  | node "$SCRIPT_DIR/lib/contributor-credits.mjs" --repo hurttlocker/o8 --since "$LAST_SYNCED_DATE" > "$CREDITS" \
+  | node "$SCRIPT_DIR/lib/contributor-credits.mjs" --repo o8-run/o8 --since "$LAST_SYNCED_DATE" > "$CREDITS" \
   || : > "$CREDITS"
 
 : > "$ADDITIONS"

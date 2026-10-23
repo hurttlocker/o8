@@ -199,8 +199,8 @@ The child is a local fixture, not a provider CLI or hosted ChatGPT worker. Tests
 do not prove power-loss durability, live OAuth refresh/revocation, older processes
 that bypass this protocol, installed acceptance or production activation.
 
-Tracked in [#3308](https://github.com/hurttlocker/o8/issues/3308), as a prerequisite
-for controlled worker dispatch in [#3249](https://github.com/hurttlocker/o8/issues/3249).
+Tracked in [#3308](https://github.com/o8-run/o8/issues/3308), as a prerequisite
+for controlled worker dispatch in [#3249](https://github.com/o8-run/o8/issues/3249).
 
 ## Controlled OpenRouter worker
 
