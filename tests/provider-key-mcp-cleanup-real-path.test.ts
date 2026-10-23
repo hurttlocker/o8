@@ -1,14 +1,17 @@
-import { afterAll, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 
-const state = vi.hoisted(() => ({ dir: '', session: '', moved: '', outside: '', checks: 0, swap: false }));
+const state = vi.hoisted(() => ({ dir: '', session: '', moved: '', outside: '', checks: 0, swap: false, emptyDirectory: '' }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 vi.mock('node:fs', async original => {
   const real = await original<typeof import('node:fs')>();
-  return { ...real, lstatSync: (...args: Parameters<typeof real.lstatSync>) => {
+  return { ...real, readdirSync: (...args: Parameters<typeof real.readdirSync>) => {
+    const entries = real.readdirSync(...args);
+    return args[0] === state.emptyDirectory ? Array(100_001).fill(entries[0]) : entries;
+  }, lstatSync: (...args: Parameters<typeof real.lstatSync>) => {
     const stat = real.lstatSync(...args);
     if (args[0] === state.session && state.swap && ++state.checks === 2) {
       state.swap = false;
@@ -22,6 +25,12 @@ state.dir = mkdtempSync(join(tmpdir(), 'o8-mcp-cleanup-race-'));
 const keys = await import('@/app/api/v2/keys/route');
 const request = (body: unknown, method = 'POST') => new NextRequest('http://localhost/api/v2/keys', {
   method, headers: { host: 'localhost' }, body: JSON.stringify(body),
+});
+beforeEach(() => {
+  rmSync(state.dir, { recursive: true, force: true }); mkdirSync(state.dir);
+  state.checks = 0; state.swap = false; state.emptyDirectory = '';
+  vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 86).toString('base64url'));
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(state.dir, { recursive: true, force: true }); });
 
@@ -42,4 +51,13 @@ it('revocation scrubs the opened owned file when its parent is replaced, preserv
   expect(existsSync(join(state.outside, name))).toBe(true);
   expect(readFileSync(join(state.outside, name), 'utf8')).toBe('fixture-unrelated');
   expect(readFileSync(join(state.moved, name), 'utf8')).not.toContain('fixture-owned-mcp-key');
+});
+
+it('scrubbed snapshots do not exhaust credential mutation traversal limits', async () => {
+  state.emptyDirectory = join(state.dir, 'worker-mcp-artifacts');
+  mkdirSync(state.emptyDirectory);
+  writeFileSync(join(state.emptyDirectory, 'o8-worker-mcp-empty.json'), '');
+  // Simulate a large registry listing while keeping the persisted mutation real.
+  expect((await keys.POST(request({ provider: 'openai', key: 'fixture-next-key' }))).status).toBe(200);
+  expect(readFileSync(join(state.dir, '.env.local'), 'utf8')).toContain('O8_KEY_MANAGED_OPENAI_API_KEY=1');
 });

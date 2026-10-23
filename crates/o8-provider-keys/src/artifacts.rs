@@ -68,11 +68,21 @@ fn entries(
         .map_err(|_| ERROR.to_string())?
         .collect::<Result<_, _>>()
         .map_err(|_| ERROR.to_string())?;
-    *visited += values.len();
+    let mut active = Vec::new();
+    for entry in values {
+        if artifact(&entry.file_name().to_string_lossy()) {
+            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| ERROR.to_string())?;
+            if metadata.is_file() && metadata.len() == 0 {
+                continue;
+            }
+        }
+        active.push(entry);
+    }
+    *visited += active.len();
     if *visited > 100_000 {
         return Err(ERROR.into());
     }
-    Ok(values)
+    Ok(active)
 }
 fn collect(
     path: &Path,

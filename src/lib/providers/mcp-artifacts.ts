@@ -24,7 +24,9 @@ export function purgeOwnedMcpArtifacts(): void {
   const entries = (dir: string) => {
     const stat = directory(dir); if (!stat) return [];
     observed.push({ dir, stat });
-    const list = readdirSync(dir, { withFileTypes: true }); visited += list.length;
+    const list = readdirSync(dir, { withFileTypes: true }).filter(entry =>
+      !entry.isFile() || !artifactName.test(entry.name) || optionalStat(join(dir, entry.name))?.size !== 0);
+    visited += list.length;
     if (visited > 100_000) throw unsafe();
     return list;
   };
