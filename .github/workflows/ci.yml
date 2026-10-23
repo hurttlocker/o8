@@ -1,6 +1,6 @@
 name: CI
 
-# Runs on every pull request and on every push to main. The repo is public,
+# Runs on every pull request, merge group and push to main. The repo is public,
 # so Linux and Windows runners are free; the main-branch run keeps the README
 # badge and the default-branch status honest after each merge (Q ruling
 # 2026-09-11, reversing the PR-only rule from the private-repo days).
@@ -10,6 +10,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
     branches: [main]
   schedule:
     - cron: '17 5 * * 0'
@@ -103,14 +106,15 @@ jobs:
   # touches, diffed from the merge-base with the base branch. No touched files
   # means the test steps skip and the check passes. No continue-on-error: a red
   # file fails the check unless it is in the exempted baseline described below. workflow_dispatch with integration_base runs the same
-  # lane against that base.
+  # lane against that base. Merge groups diff their queued head from the queue's
+  # base SHA so selection covers every pull request in the group.
   # Measured 2026-09-17, run 35178958985 (dispatch, integration_base=HEAD~40):
   # 18 touched files in 171.5s of gate time, 3m40s for the whole job including
   # npm ci. Whole-suite files average 6.2s each, so the 20-minute limit covers
   # a PR touching roughly 150 resource-owning files.
   integration-changed:
     name: Integration Tests (changed files)
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.integration_base != '')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -124,8 +128,9 @@ jobs:
       - name: Select touched resource-owning tests
         id: select
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || inputs.integration_base }}
-        run: node scripts/ci/resource-owning-changed.mjs "$BASE_REF"
+          BASE_REF: ${{ github.event.merge_group.base_sha || (github.event_name == 'pull_request' && format('origin/{0}', github.base_ref)) || inputs.integration_base }}
+          HEAD_REF: ${{ github.event.merge_group.head_sha || github.sha }}
+        run: node scripts/ci/resource-owning-changed.mjs "$BASE_REF" "$HEAD_REF"
       - if: steps.select.outputs.count != '0'
         run: npm install -g npm@11
       - if: steps.select.outputs.count != '0'
@@ -248,8 +253,11 @@ jobs:
       # The dependency-review API is Advanced-Security-gated on private repos
       # (live 403, first CI run 2026-07-30). Self-arms at the public flip.
       - name: Review dependency changes
-        if: github.event_name == 'pull_request' && !github.event.repository.private
+        if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !github.event.repository.private
         uses: actions/dependency-review-action@v4
+        with:
+          base-ref: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -334,11 +342,11 @@ jobs:
   #
   # Both targets compile clean as of run 31047139210 (2026-08-05), so the
   # gates are BLOCKING — a PR that breaks non-Darwin compilation goes red.
-  # Public repo → these runners are free; both jobs are PR/dispatch-only like
-  # the rest of event CI.
+  # Both targets also run on merge groups so their required checks cover the
+  # queued commit, alongside pull requests, main pushes and manual runs.
   rust-check-windows:
     name: Rust Compile Gate (Windows)
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -367,7 +375,7 @@ jobs:
 
   rust-check-linux:
     name: Rust Compile Gate (Linux)
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
