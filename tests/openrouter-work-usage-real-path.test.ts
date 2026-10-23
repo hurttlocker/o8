@@ -83,9 +83,12 @@ async function readWork() {
   expect(text).not.toContain('fixture-openrouter-key');
   return JSON.parse(text) as {
     scope: string;
+    firstCallAt: string | null;
+    lastCallAt: string | null;
     duplicateRows: number;
     totals: Record<string, number>;
     bySource: Array<{ key: string } & Record<string, number>>;
+    byModel: Array<{ key: string } & Record<string, number>>;
   };
 }
 
@@ -144,5 +147,69 @@ describe('OpenRouter work run by o8', () => {
     expect(work.duplicateRows).toBe(1);
     expect(work.totals.reportedUsd).toBeCloseTo(0.003, 10);
     expect(work.totals.calls).toBe(5);
+  });
+
+  it.each([
+    { basis: 'unknown', providerFirst: false, reportedUsd: 0.002 },
+    { basis: 'estimate', providerFirst: false, reportedUsd: 0.002 },
+    { basis: 'unknown', providerFirst: true, reportedUsd: 0.002 },
+    { basis: 'estimate', providerFirst: true, reportedUsd: 0.002 },
+    { basis: 'estimate', providerFirst: false, reportedUsd: 0 },
+  ])('prefers provider evidence over $basis (provider first: $providerFirst, reported: $reportedUsd)', async ({ basis, providerFirst, reportedUsd }) => {
+    getSqlite().prepare('DELETE FROM usage_logs').run();
+    const weak = {
+      userId: null, model: 'fixture-requested-model', provider: 'openrouter' as const,
+      inputTokens: 100, outputTokens: 10, costUsd: basis === 'estimate' ? 0.01 : 0,
+      role: 'worker' as const, agentName: 'pi',
+      metadata: { runtime: 'pi', costSource: basis, generationId: 'gen-reconciled', reservedUsd: 0.25 },
+    };
+    const reported = {
+      ...weak, model: 'fixture-actual-model', inputTokens: 200, outputTokens: 20, costUsd: reportedUsd,
+      metadata: { ...weak.metadata, costSource: 'provider_response' },
+    };
+    for (const row of providerFirst ? [reported, weak] : [weak, reported]) logUsage(row);
+    logUsage({ ...reported, model: 'fixture-other-model', agentName: 'fixture-other',
+      inputTokens: 10, outputTokens: 1, costUsd: 0.007,
+      metadata: { costSource: 'provider_response', generationId: 'gen-other' } });
+    // Missing generation ids do not make distinct calls duplicates.
+    for (let index = 0; index < 2; index += 1) logUsage({
+      userId: null, model: 'fixture-unknown-model', provider: 'openrouter',
+      inputTokens: 1, outputTokens: 0, costUsd: 0, agentName: 'fixture-unknown',
+      metadata: { costSource: 'unknown', reservedUsd: 0.5 },
+    });
+    const persisted = getSqlite().prepare('SELECT * FROM usage_logs ORDER BY id').all();
+    const work = await readWork();
+    expect(work.duplicateRows).toBe(1);
+    expect(work.totals).toMatchObject({ calls: 4, failedCalls: 0, inputTokens: 212, outputTokens: 21,
+      estimatedUsd: 0, unlabeledUsd: 0, unknownCostCalls: 2, unknownReservedUsd: 1 });
+    expect(work.totals.reportedUsd).toBeCloseTo(reportedUsd + 0.007, 10);
+    expect(work.bySource.find(group => group.key === 'Pi worker')).toMatchObject({
+      calls: 1, reportedUsd, estimatedUsd: 0, unknownCostCalls: 0, inputTokens: 200, outputTokens: 20,
+    });
+    expect(work.byModel.find(group => group.key === 'fixture-actual-model')).toMatchObject({ calls: 1, reportedUsd });
+    expect(work.byModel.find(group => group.key === 'fixture-requested-model')).toBeUndefined();
+    expect(work.byModel.find(group => group.key === 'fixture-other-model')).toMatchObject({ calls: 1, reportedUsd: 0.007 });
+    expect(getSqlite().prepare('SELECT * FROM usage_logs ORDER BY id').all()).toEqual(persisted);
+  });
+
+  it('keeps first and last timestamps ordered after replacing an early generation row', async () => {
+    getSqlite().prepare('DELETE FROM usage_logs').run();
+    const start = Math.floor(Date.now() / 1_000) * 1_000 - 60_000;
+    const at = (seconds: number) => new Date(start + seconds * 1_000).toISOString().replace('.000Z', 'Z');
+    for (const [model, generationId, costSource, seconds] of [
+      ['fixture-early', 'gen-upgraded', 'unknown', 0],
+      ['fixture-middle', 'gen-middle', 'provider_response', 10],
+      ['fixture-reported', 'gen-upgraded', 'provider_response', 20],
+    ] as const) {
+      logUsage({ userId: null, provider: 'openrouter', model, inputTokens: 1, outputTokens: 1,
+        costUsd: costSource === 'unknown' ? 0 : 0.001, metadata: { generationId, costSource } });
+      getSqlite().prepare('UPDATE usage_logs SET created_at = ? WHERE model = ?')
+        .run(at(seconds).replace('T', ' ').replace('Z', ''), model);
+    }
+    const work = await readWork();
+    expect(work.totals.calls).toBe(2);
+    expect(work.duplicateRows).toBe(1);
+    expect(work.firstCallAt).toBe(at(10));
+    expect(work.lastCallAt).toBe(at(20));
   });
 });
