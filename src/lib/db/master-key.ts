@@ -19,6 +19,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSyn
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { hasEncryptedKeyValues } from '@/lib/providers/env-format';
+import { execKeychainCommand } from '@/lib/providers/child-process';
 
 // ── Constants ──
 
@@ -91,11 +92,7 @@ type KeychainRead =
 function readKeychainKey(): KeychainRead {
   if (process.platform !== 'darwin') return { status: 'absent' };
   try {
-    const { execSync: exec } = require('@/lib/providers/child-process') as typeof import('node:child_process');
-    const out = exec(
-      `security find-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w`,
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    ).trim();
+    const out = execKeychainCommand('find-generic-password', ['-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w']).trim();
     // Malformed existing entries are unavailable, never permission to replace them.
     return Buffer.from(out, 'base64url').length === 32 ? { status: 'found', key: out } : { status: 'error', detail: 'Invalid existing master key' };
   } catch (err) {
@@ -115,11 +112,7 @@ function readKeychainKey(): KeychainRead {
 function writeKeychainKey(key: string): boolean {
   if (process.platform !== 'darwin') return false;
   try {
-    const { execSync: exec } = require('@/lib/providers/child-process') as typeof import('node:child_process');
-    exec(
-      `security add-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w '${key}'`,
-      { stdio: 'ignore' },
-    );
+    execKeychainCommand('add-generic-password', ['-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w', key]);
     return true;
   } catch {
     return false;

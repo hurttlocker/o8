@@ -1,17 +1,15 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 
 const state = vi.hoisted(() => ({ dir: '' }));
+const security = vi.hoisted(() => vi.fn((_file: string, _args: readonly string[], _options?: unknown): string => { throw Object.assign(new Error('fixture Keychain item absent'), { status: 44 }); }));
+vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>(), execFileSync: security }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ invalidateRuntimeAuthCache: vi.fn() }));
 state.dir = mkdtempSync(join(tmpdir(), 'o8-master-route-'));
-// The resolver's direct require uses this same built-in module. No real Keychain access.
-const childProcess = createRequire(import.meta.url)('node:child_process') as typeof import('node:child_process');
-const security = vi.spyOn(childProcess, 'execSync').mockImplementation(() => { throw Object.assign(new Error('fixture Keychain item absent'), { status: 44 }); });
 const { clearMasterKeyCache } = await import('@/lib/db/master-key');
 const { resolveProviderKey } = await import('@/lib/providers/key-store');
 const routes = await import('./route');
@@ -60,6 +58,9 @@ it('refuses a second real-route save when a cached Keychain key becomes denied',
   security.mockReturnValue(originalKey);
   try {
     expect((await post('fixture-keychain-original')).status).toBe(200);
+    expect(security).toHaveBeenCalledWith('/usr/bin/security', ['find-generic-password', '-s', 'ai.o8.master-key', '-a', 'default', '-w'], {
+      env: { NODE_ENV: 'production' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const originalStore = readFileSync(envPath(), 'utf8');
     security.mockImplementation(() => { throw Object.assign(new Error('fixture Keychain denied'), { status: 36 }); });
     const response = await post('fixture-keychain-refused');
@@ -96,7 +97,7 @@ it.each(['linux', 'darwin'].flatMap(platform => ['quoted', 'single-quoted', 'spa
   try {
     expect((await post('fixture-cold-refused')).status).toBe(503);
     expect(existsSync(keyPath())).toBe(false);
-    expect(security.mock.calls.some(([command]) => String(command).includes('add-generic-password'))).toBe(false);
+    expect(security.mock.calls.some(([, args]) => args[0] === 'add-generic-password')).toBe(false);
     expect(readFileSync(envPath(), 'utf8')).toBe(line);
     vi.stubEnv('O8_MASTER_KEY', originalKey); clearMasterKeyCache();
     expect(resolveProviderKey('OPENROUTER_API_KEY')).toBe('fixture-cold-secret');

@@ -7,6 +7,13 @@ import { withProviderStoreLock } from './store-lock';
 import { assertOwnedArtifactsForLaunch } from './owned-artifacts';
 export type * from 'node:child_process';
 
+/** Keychain bootstrap cannot read the provider store it unlocks. Inherit nothing. */
+export function execKeychainCommand(operation: 'find-generic-password' | 'add-generic-password', args: readonly string[]): string {
+  return processApi.execFileSync('/usr/bin/security', [operation, ...args], {
+    env: { NODE_ENV: 'production' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
 type Operation = 'spawn' | 'spawnSync' | 'execFile' | 'execFileSync' | 'exec' | 'execSync' | 'fork';
 function invoke(name: Operation, supplied: unknown[], asPromise = false): unknown {
   const args = [...supplied];
