@@ -7,6 +7,7 @@ import {
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
 import { resolveStorageVolumeId } from './storage-telemetry';
 import { chargeWorktreeMetadataRead, worktreeMetadataReadLimit } from './maintenance-budget';
+import { APFS_DIRECTORY_CLONE_SCRIPT } from './apfs-directory-clone';
 
 export interface PinnedWorkspaceFileIdentity {
   device: number;
@@ -30,6 +31,7 @@ const PINNED_LEAF_IO_SCRIPT = String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+${APFS_DIRECTORY_CLONE_SCRIPT}
 
 function safeRelative(value) {
   const normalized = value.replaceAll('\\', '/').replace(/^\.\//, '');
@@ -202,11 +204,15 @@ async function copyTree(sourcePath, targetPath) {
   }
 }
 
-function fingerprintTree(candidatePath, relative = '.') {
+function fingerprintTree(candidatePath, relative = '.', allowSymlinks = false) {
   const hash = crypto.createHash('sha256');
   const visit = (entryPath, entryRelative) => {
     const entry = fs.lstatSync(entryPath);
-    if (entry.isSymbolicLink()) throw new Error('Pinned hydration refuses source symlinks.');
+    if (entry.isSymbolicLink()) {
+      if (!allowSymlinks) throw new Error('Pinned hydration refuses source symlinks.');
+      hash.update('symlink\0' + entryRelative + '\0' + fs.readlinkSync(entryPath) + '\0');
+      return;
+    }
     if (entry.isFile()) {
       const handle = fs.openSync(entryPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
       try {
@@ -451,7 +457,15 @@ async function main() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
+  if (operation === 'clone-tree') {
+    const input = JSON.parse(process.argv[3]);
+    const fingerprint = fingerprintTree(input.source, '.', true);
+    if (!await cloneDirectory(input.source, prepared.target)) process.exitCode = 46;
+    else if (fingerprintTree(prepared.target, '.', true) !== fingerprint) {
+      throw new Error('Pinned clone contents differ from the authorized source snapshot.');
+    }
+  }
+  else if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
   else if (operation === 'symlink') {
     fs.symlinkSync(process.argv[3], prepared.target);
     const receipt = fs.lstatSync(prepared.target);
@@ -521,7 +535,7 @@ function safeRelativePath(value: string): string {
 async function runPinnedLeaf(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
-  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'ensure-directory' | 'ensure-file',
+  operation: 'read' | 'inspect-entry' | 'atomic-write' | 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree' | 'ensure-directory' | 'ensure-file',
   relativePath: string,
   sourceOrTarget?: string,
   content?: string,
@@ -583,9 +597,9 @@ async function runPinnedLeaf(
   child.stdin.end();
   stdout += pendingStdout;
   if (code === null) throw new Error('Pinned workspace operation ended without an exit receipt.');
-  if (code !== 0 && code !== 44 && code !== 45) {
+  if (code !== 0 && code !== 44 && code !== 45 && !(code === 46 && operation === 'clone-tree')) {
     const message = stderr.trim() || 'Pinned workspace operation failed.';
-    if (operation === 'copy-tree'
+    if (operation === 'copy-tree' || operation === 'clone-tree'
       || (operation === 'copy-file'
         && (message.includes('copied target') || message.includes('target did not match')))
       || (operation === 'symlink' && message.includes('symlink target changed'))
@@ -728,13 +742,14 @@ export async function createPinnedWorkspaceBinding(
   workspacePath: string,
   identity: WorktreeMaterializationIdentity,
   relativePath: string,
-  input: { mode: 'copy-file' | 'symlink' | 'copy-tree'; source: string },
+  input: { mode: 'copy-file' | 'symlink' | 'copy-tree' | 'clone-tree'; source: string },
   afterPinnedStep?: (segment: string) => Promise<void>,
-): Promise<'created' | 'exists'> {
+): Promise<'created' | 'exists' | 'unsupported'> {
   const receipt = await runPinnedLeaf(
-    workspacePath, identity, input.mode, relativePath, input.source, undefined, afterPinnedStep,
+    workspacePath, identity, input.mode, relativePath,
+    input.mode === 'clone-tree' ? JSON.stringify(input) : input.source, undefined, afterPinnedStep,
   );
-  return receipt.code === 45 ? 'exists' : 'created';
+  return receipt.code === 46 ? 'unsupported' : receipt.code === 45 ? 'exists' : 'created';
 }
 
 export async function ensurePinnedWorkspaceDirectory(

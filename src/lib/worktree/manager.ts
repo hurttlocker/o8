@@ -108,6 +108,7 @@ import {
   sameMetadataLockProcessIdentity,
 } from './metadata-lock-process-identity';
 import { writeManagedWorkspaceSafetyHooks } from './safety-hooks';
+import { timeWorktreePreparation } from './preparation-timing';
 
 const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
@@ -510,7 +511,11 @@ export class WorktreeManager {
       base: baseExecutionIdentity,
     }, async () => {
 
-    const isolationKind = await this.resolveIsolationKind(resolveIsolationPreference(opts));
+    // Packet branches are registered Git worktrees: their refs keep shared
+    // objects reachable for the entire lifetime without a private full clone.
+    const isolationKind = opts.packetId
+      ? 'git-worktree'
+      : await this.resolveIsolationKind(resolveIsolationPreference(opts));
     if (isolationKind === 'apfs-cow-clone') {
       return this.createApfsCowClone({
         opts,
@@ -559,7 +564,7 @@ export class WorktreeManager {
     );
     const gitDirectory = gitDirectoryOutput.trim();
     if (!path.isAbsolute(gitDirectory)) throw new Error('Repository Git directory is not absolute.');
-    await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+    await timeWorktreePreparation(opts, 'checkout', () => withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
       execFileAsync('git', [
         ...reviewGitOptions,
         `--git-dir=${gitDirectory}`,
@@ -568,7 +573,7 @@ export class WorktreeManager {
         '-b', branchName,
         creationBaseCommit ?? baseBranch,
       ], { windowsHide: true, cwd: this.worktreeBase, timeout: 30_000 })
-    ));
+    )));
     await assertManagedWorktreeCreatedBoundary(
       this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
     );
@@ -771,13 +776,13 @@ export class WorktreeManager {
 
     let createdExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = preparedExecutionIdentity;
     try {
-      await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+      await timeWorktreePreparation(opts, 'clone', () => withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
         execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, taskId], {
           windowsHide: true,
           cwd: this.worktreeBase,
           timeout: 60_000,
         })
-      ));
+      )));
       await assertManagedWorktreeCreatedBoundary(
         this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
       );
@@ -797,11 +802,11 @@ export class WorktreeManager {
         });
       }
 
-      await execFileAsync('git', ['checkout', '-B', branchName, creationBaseCommit ?? baseBranch], {
+      await timeWorktreePreparation(opts, 'checkout', () => execFileAsync('git', ['checkout', '-B', branchName, creationBaseCommit ?? baseBranch], {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 30_000,
-      });
+      }));
 
       if (opts.packetId && opts.branchName?.trim()) {
         await this.assertCreatedWorktreeBranch(worktreePath, opts.branchName.trim());
@@ -853,7 +858,7 @@ export class WorktreeManager {
         hydrationPaths: [],
       };
 
-      const hydrationPaths = await this.hydrateApfsCowAssets(worktreePath, capturedExecutionIdentity);
+      const hydrationPaths = await timeWorktreePreparation(opts, 'asset_hydration', () => this.hydrateApfsCowAssets(worktreePath, capturedExecutionIdentity));
       info.hydrationPaths = hydrationPaths;
       await this.updateMetaHydrationPaths(taskId, hydrationPaths);
 
@@ -1336,14 +1341,15 @@ export class WorktreeManager {
         await this.assertInstallableLocalNodeModules(worktreePath, identity);
       }
       if (installCommand) {
-        const result = await materializeDependencyInstall(worktreePath, installCommand, {
+        const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
+          cloneSourceWorkspace: this.repoRoot,
           persistReceipt: (receipt) => (
             receipt
               ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)
               : this.clearDependencyMaterialization(path.basename(worktreePath))
           ),
-        });
+        }));
         dependencyMaterialization = result.receipt;
         if (launch?.packetId && launch.laneId) {
           const verification = await verifyDependencyMaterialization(worktreePath);

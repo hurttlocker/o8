@@ -1,0 +1,26 @@
+import type { CreateWorktreeOptions } from './types';
+
+/** Monotonic stage timings on the same lane that records session_launched. */
+export async function timeWorktreePreparation<T>(
+  launch: Pick<CreateWorktreeOptions, 'laneId' | 'packetId'> | undefined,
+  stage: 'clone' | 'checkout' | 'asset_hydration' | 'dependency_materialization',
+  operation: () => Promise<T>,
+): Promise<T> {
+  const started = performance.now();
+  let completed = false;
+  try {
+    const result = await operation();
+    completed = true;
+    return result;
+  } finally {
+    if (launch?.laneId) {
+      const { appendEvent } = await import('@/lib/lane/registry');
+      appendEvent(launch.laneId, 'worktree_preparation_timing', 'system', {
+        packetId: launch.packetId,
+        stage,
+        durationMs: Math.round(performance.now() - started),
+        completed,
+      });
+    }
+  }
+}

@@ -650,6 +650,7 @@ async function auditInstalledEntry(
   workspacePath: string,
   absolutePath: string,
   hardlinks: Map<string, InstalledHardlinkAudit>,
+  onFile?: (filePath: string) => void,
 ): Promise<void> {
   const entry = await lstat(absolutePath);
   if (entry.isSymbolicLink()) {
@@ -660,6 +661,7 @@ async function auditInstalledEntry(
     return;
   }
   if (entry.isFile()) {
+    onFile?.(absolutePath);
     const key = `${entry.dev}:${entry.ino}`;
     const audited = hardlinks.get(key);
     if (audited) {
@@ -673,11 +675,11 @@ async function auditInstalledEntry(
   if (!entry.isDirectory()) return;
   const children = await readdir(absolutePath);
   for (const child of children) {
-    await auditInstalledEntry(workspacePath, path.join(absolutePath, child), hardlinks);
+    await auditInstalledEntry(workspacePath, path.join(absolutePath, child), hardlinks, onFile);
   }
 }
 
-export async function auditPrivateDependencyView(workspacePath: string): Promise<void> {
+export async function auditPrivateDependencyView(workspacePath: string, onFile?: (filePath: string) => void): Promise<void> {
   const nodeModules = path.join(workspacePath, 'node_modules');
   let root;
   try {
@@ -692,7 +694,7 @@ export async function auditPrivateDependencyView(workspacePath: string): Promise
     throw new Error('Installed dependency view is not a private writable directory.');
   }
   const hardlinks = new Map<string, InstalledHardlinkAudit>();
-  await auditInstalledEntry(workspacePath, nodeModules, hardlinks);
+  await auditInstalledEntry(workspacePath, nodeModules, hardlinks, onFile);
   for (const audited of hardlinks.values()) {
     if (audited.nlink > 1 && audited.internal < audited.nlink) {
       throw new Error(
