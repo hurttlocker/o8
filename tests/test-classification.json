@@ -3701,6 +3701,12 @@
       ]
     },
     {
+      "path": "tests/next-render-parity.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
       "path": "tests/o8-model-pi-real-path.test.ts",
       "reasons": [
         "child-process",
