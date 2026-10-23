@@ -66,3 +66,22 @@ it('refuses a linked owned profile root before writing the source config', () =>
   expect(() => prepareOpenclawProfile(34123)).toThrow(/cannot follow links/);
   expect(readFileSync(join(source, 'openclaw.json'), 'utf8')).toBe(before);
 });
+
+it.each(['subscription', 'api', 'disable', 'remove'])('provider headers honor %s while MCP service headers remain intact', async action => {
+  expect((await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: action === 'subscription' ? 'subscription' : 'api' }))).status).toBe(200);
+  expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-header-key' }))).status).toBe(200);
+  const file = join(source, 'openclaw.json');
+  const config = JSON.parse(readFileSync(file, 'utf8'));
+  config.models.providers.openai.headers = { Authorization: 'Bearer fixture-source-key', 'x-api-key': 'fixture-source-key', 'OpenAI-Organization': 'fixture-org' };
+  config.service.headers = { Authorization: 'Bearer fixture-mcp-service', 'x-api-key': 'fixture-mcp-service' };
+  writeFileSync(file, JSON.stringify(config));
+  if (action === 'disable') expect((await keys.PATCH(request('v2/keys', { provider: 'openai', enabled: false }, 'PATCH'))).status).toBe(200);
+  if (action === 'remove') expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
+  prepareOpenclawProfile(34123);
+  const copied = JSON.parse(readFileSync(join(owned, 'openclaw.json'), 'utf8'));
+  expect(copied.models.providers.openai.headers).toEqual(action === 'api'
+    ? { Authorization: 'Bearer fixture-header-key', 'x-api-key': 'fixture-header-key', 'OpenAI-Organization': 'fixture-org' }
+    : { 'OpenAI-Organization': 'fixture-org' });
+  expect(copied.service.headers).toEqual(config.service.headers);
+  expect(readFileSync(file, 'utf8')).toContain('fixture-source-key');
+});
