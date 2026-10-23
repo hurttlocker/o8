@@ -27,6 +27,7 @@ export const codexBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
+    if (options?.permissionMode === 'outside-workspace') return Promise.reject(new Error('Outside workspace commands require the built-in lead.'));
     void prewarmHaiku().catch(() => {});
     void prewarmSonnetCli().catch(() => {});
     return sendToCodexOrchestrator(
@@ -36,7 +37,7 @@ export const codexBackend: OrchestratorBackend = {
         orchestrationMode: options?.orchestrationMode,
       }),
       onEvent,
-      options,
+      { ...options, permissionMode: options?.permissionMode },
     );
   },
 };

@@ -1940,7 +1940,7 @@ export default function CanvasGlassPreviewPage() {
       />
 
       {/* Depth layer — the paper/shader mood from the Canvas tuner. */}
-      <CanvasBackdropLayer kind={settings.backdrop} tone={settings.tone} />
+      <CanvasBackdropLayer kind={settings.backdrop} tone={settings.tone} customBackground={settings.customBackground} />
 
       {/* Center emblem retired (operator call 2026-06-12) — the empty
           canvas stays clean; a logo / Lottie motion piece comes later. */}

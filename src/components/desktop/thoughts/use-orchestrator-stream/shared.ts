@@ -6,7 +6,7 @@ import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
-export type OrchestratorPermissionMode = 'full' | 'plan';
+export type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 export const DEFAULT_ORCHESTRATOR_MODEL: string = MODEL_IDS.orchestratorDefault;
 
 export const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;

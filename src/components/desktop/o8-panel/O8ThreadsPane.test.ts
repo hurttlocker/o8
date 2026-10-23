@@ -10,6 +10,7 @@ import { O8HeaderTabs } from './O8HeaderTabs';
 import { ThreadDetail } from './ThreadDetail';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { TaskPoolTask } from '../repo-focus/tabs/control-room/types';
+import { resetWorkspaceChatDraftStatesForTests } from '../workspace-terminal/workspace-chat-drafts';
 
 const context = vi.hoisted(() => ({
   activeProjectId: 'project', agents: [], missionState: { packets: [] }, onSelectSession: vi.fn(), onOpenO8Panel: vi.fn(),
@@ -50,6 +51,73 @@ describe('contextual thread panel navigation', () => {
     await act(async () => { root.render(createElement(O8ThreadsPane, { active, repoPath, repos: [repo, { ...repo, localPath: '/other' }] })); });
   };
   const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!;
+
+  const openThread = (label: string) => act(() => container.querySelector<HTMLButtonElement>(`[aria-label="View thread ${label}"]`)!.click());
+  const steerField = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Steer this thread"]')!;
+  const typeSteer = (message: string) => act(() => {
+    const field = steerField();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, message);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  it('retains exact unsent steering drafts separately through thread navigation', async () => {
+    resetWorkspaceChatDraftStatesForTests();
+    fetchMock.mockImplementation(async () => json({ tasks: [task('Draft A'), task('Draft B')] }));
+    await show(); openThread('Draft A');
+    typeSteer('  Check the first result\nwithout changing it  ');
+    act(() => button('Threads').click()); openThread('Draft B');
+    expect(steerField().value).toBe('');
+    typeSteer('Keep the second thread separate');
+    act(() => button('Threads').click()); openThread('Draft A');
+    expect(steerField().value).toBe('  Check the first result\nwithout changing it  ');
+    act(() => button('Threads').click()); openThread('Draft B');
+    expect(steerField().value).toBe('Keep the second thread separate');
+    expect(fetchMock.mock.calls.some(call => call[1]?.method === 'POST')).toBe(false);
+  });
+
+  it('restores an unsent steering draft after panel remount and draft cache reload', async () => {
+    resetWorkspaceChatDraftStatesForTests();
+    fetchMock.mockImplementation(async () => json({ tasks: [task('Draft reload')] }));
+    await show(); openThread('Draft reload'); typeSteer('Retain this instruction exactly.');
+    act(() => root.unmount()); root = createRoot(container);
+    resetWorkspaceChatDraftStatesForTests(false);
+    await show();
+    if (!steerField()) openThread('Draft reload');
+    expect(steerField().value).toBe('Retain this instruction exactly.');
+    expect(fetchMock.mock.calls.some(call => call[1]?.method === 'POST')).toBe(false);
+  });
+
+  it('retains a refused draft and clears it only after a confirmed send', async () => {
+    resetWorkspaceChatDraftStatesForTests();
+    const tasks = [task('Draft send')];
+    fetchMock.mockImplementation(async () => json({ tasks }));
+    await show(); openThread('Draft send'); typeSteer('Preserve the intended correction');
+    let accepted = false;
+    fetchMock.mockImplementation(async (url: string) => url === '/api/orchestrator/steer-packet'
+      ? accepted ? json({ ok: true, result: { note: 'Accepted' } }) : json({ ok: false, error: 'Refused' }, 409)
+      : json({ tasks }));
+    await act(async () => button('Send').click());
+    act(() => button('Threads').click()); openThread('Draft send');
+    expect(steerField().value).toBe('Preserve the intended correction');
+    accepted = true;
+    await act(async () => button('Send').click());
+    act(() => button('Threads').click()); openThread('Draft send');
+    expect(steerField().value).toBe('');
+  });
+
+  it('warns when draft storage fails and keeps the unsent text while the panel stays open', async () => {
+    resetWorkspaceChatDraftStatesForTests();
+    fetchMock.mockImplementation(async () => json({ tasks: [task('Draft quota')] }));
+    await show(); openThread('Draft quota');
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage quota'); });
+    try {
+      typeSteer('Keep this correction available');
+      expect(container.textContent).toContain('Browser storage is unavailable.');
+      act(() => button('Threads').click()); openThread('Draft quota');
+      expect(steerField().value).toBe('Keep this correction available');
+      expect(fetchMock.mock.calls.some(call => call[1]?.method === 'POST')).toBe(false);
+    } finally { write.mockRestore(); resetWorkspaceChatDraftStatesForTests(); }
+  });
 
   it('opens the requested cloud session with recorded review state and model', async () => {
     fetchMock.mockResolvedValue(json({ tasks: [{ ...task('Review worker', 'review'),

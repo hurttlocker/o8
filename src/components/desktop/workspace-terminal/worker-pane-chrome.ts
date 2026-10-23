@@ -1,4 +1,12 @@
-import type { TerminalTab } from './types';
+export interface WorkerTabLabelSource {
+  label: string;
+  labelSource?: 'auto' | 'user';
+  orchestrationPacket?: { title?: string | null; branchTarget?: string | null } | null;
+  llmSummary?: string | null;
+  chatMessages?: readonly { role: string; text: string }[];
+  chatDraftInjection?: { text: string } | null;
+  llmDraftInjection?: { text: string } | null;
+}
 
 const TITLE_WORD_CASE = new Map([
   'CI', 'PR', 'API', 'UI', 'UX', 'MCP', 'CLI', 'ID', 'URL', 'JSON', 'SQL', 'CSS', 'HTML',
@@ -25,19 +33,28 @@ export function shortWorkerTitle({ label, branch, fallback = 'Worker' }: {
   return cleanLabel(sentence.replace(/\b[a-z][a-z0-9]*\b/gi, word => TITLE_WORD_CASE.get(word.toLowerCase()) ?? word)) || fallback;
 }
 
-export function workerTabLabels(tabs: readonly TerminalTab[]): string[] {
+export function isGenericWorkerTitle(title: string): boolean {
+  return /^(Orchestrator|Assistant|Agent|Chat|Untitled conversation)$/i.test(title.trim())
+    || /^Orchestrator session · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(title.trim());
+}
+
+/** Broadcast title context without sending transcripts through dashboard state. */
+export function workerTabThreadTitle(tab: WorkerTabLabelSource): string | undefined {
+  return tab.llmSummary?.trim()
+    || [...(tab.chatMessages ?? [])].reverse().find(entry => entry.role === 'user' && entry.text.trim())?.text
+    || tab.chatDraftInjection?.text || tab.llmDraftInjection?.text;
+}
+
+export function workerTabLabels(tabs: readonly WorkerTabLabelSource[]): string[] {
   const base = tabs.map(tab => tab.orchestrationPacket
     ? shortWorkerTitle({ label: tab.orchestrationPacket.title, branch: tab.orchestrationPacket.branchTarget })
     : shortWorkerTitle({ label: tab.label, fallback: 'Chat' }));
   const labels = tabs.map((tab, index) => {
     if (tab.orchestrationPacket || tab.labelSource === 'user') return base[index];
-    const generic = /^(Orchestrator|Assistant|Agent|Chat)$/i.test(base[index]);
+    const generic = isGenericWorkerTitle(base[index]);
     const repeated = base.filter(label => label === base[index]).length > 1;
     if (!generic && !repeated) return base[index];
-    const messages = tab.chatMessages ?? [];
-    const thread = tab.llmSummary?.trim()
-      || [...messages].reverse().find(entry => entry.role === 'user' && entry.text.trim())?.text
-      || tab.chatDraftInjection?.text || tab.llmDraftInjection?.text;
+    const thread = workerTabThreadTitle(tab);
     return thread ? shortWorkerTitle({ label: thread }) : base[index];
   });
   return labels.map((label, index) => labels.filter(other => other === label).length > 1

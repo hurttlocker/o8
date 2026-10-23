@@ -1,3 +1,14 @@
+import type { WorkerTabLabelSource } from '../workspace-terminal/worker-pane-chrome';
+
+export interface WorkspaceHeaderTab extends Pick<WorkerTabLabelSource, 'label' | 'labelSource' | 'llmSummary' | 'orchestrationPacket'> {
+  id: string;
+  kind: string;
+  runtime: string | null;
+  packetStatus: string | null;
+  orchestratorThreadId?: string | null;
+  repoPath?: string | null;
+}
+
 export interface WorkspaceHeaderStripProps {
   /** Render the 78px macOS traffic-light spacer. Set when this strip is leftmost. */
   leadingInset?: boolean;
@@ -24,15 +35,7 @@ export interface WorkspaceHeaderStripProps {
   /** Active workspace tab title rendered in the center slot. */
   headerLabel?: string | null;
   /** Full visible-tab list for the single workspace. */
-  headerTabs?: Array<{
-    id: string;
-    label: string;
-    kind: string;
-    runtime: string | null;
-    packetStatus: string | null;
-    orchestratorThreadId?: string | null;
-    repoPath?: string | null;
-  }>;
+  headerTabs?: WorkspaceHeaderTab[];
   /** Session owner for the tabs, which may differ from the active pane. */
   tabWorkspaceId?: string | null;
   /** Number of visible panes in this workspace page. */

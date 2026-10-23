@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { checkBucket } from '@/components/desktop/pr-panel/check-status';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   Check,
@@ -35,7 +36,7 @@ function PRChecksSectionBase({
   repo,
 }: PRChecksSectionProps) {
   const ciChecks = pr.statusCheckRollup ?? [];
-  const failedChecks = ciChecks.filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success');
+  const failedChecks = ciChecks.filter((check) => checkBucket(check) === 'failing');
 
   if (ciChecks.length === 0) {
     return (
