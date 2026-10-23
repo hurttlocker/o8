@@ -1,3 +1,4 @@
+import { runNext } from './commands/next.js';
 import { runSetup } from './commands/setup.js';
 /**
  * o8 CLI — agent-first wrapper over the local HTTP API.
@@ -324,6 +325,7 @@ commands:
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
 ${OPERATOR_PACKET_COMMAND_LINES}
+  next --enable-next --binary PATH --server URL  opt-in native saved transcript
   session show <key>   provider-native transform capabilities, lineage, and checkpoints
   session import <key> add a discovered provider session without claiming packet ownership
   session checkpoint <key> save a durable provider position for later forks
@@ -400,6 +402,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     return 1;
   }
   switch (primary) {
+    case 'next':
+      return runNext(process.argv.slice(process.argv.indexOf('next') + 1).filter(arg => !['--human', '--verbose', '-v'].includes(arg)));
     case 'chat':
       if (args.jsonExplicit) throw new CliError('invalid_args', 'o8 chat is interactive. Use o8 lead or o8 history for JSON.', EXIT.INVALID_ARGS);
       return runChat(process.argv.slice(2).filter((arg) => !['--human', '--verbose', '-v'].includes(arg)).slice(1));

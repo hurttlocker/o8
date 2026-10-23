@@ -1,0 +1,9 @@
+{
+  "sessionKey": "llm-chat:thoughts-review",
+  "transcript": [
+    {"id":"review-1","role":"user","text":"Review the patch. Keep the `safe_mode` guard.","type":"message","timestamp":1790812801000,"timestampLabel":"12:00 AM"},
+    {"id":"review-2","role":"assistant","text":"## Review\nThe **guard** is intact.\n\n- Preserve order\n- Keep `null` handling\n1. Read the change\n2. Run checks\n\n```rust\nfn ready() -> bool {\n    true\n}\n```\n> Checks passed\n\nA café and a 🚀. Read [the guide](https://example.invalid/guide).","type":"message","timestamp":1790812802000,"timestampLabel":"12:00 AM"},
+    {"id":"review-3","role":"user","text":"Show a JSON example.","type":"message","timestamp":1790812803000,"timestampLabel":"12:00 AM"},
+    {"id":"review-4","role":"assistant","text":"```json\n{\"ready\": true, \"items\": [1, 2]}\n```\nUse *care* and ~~old~~ new behavior.","type":"message","timestamp":1790812804000,"timestampLabel":"12:00 AM"}
+  ]
+}

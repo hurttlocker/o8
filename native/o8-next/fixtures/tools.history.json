@@ -1,0 +1,13 @@
+{
+  "sessionKey": "llm-chat:thoughts-tools",
+  "transcript": [
+    {"id":"tools-1","role":"user","text":"Inspect the files and run the checks.","type":"message","timestamp":1790812801000,"timestampLabel":"12:00 AM"},
+    {"id":"tools-2","role":"assistant","text":"","type":"message","timestamp":1790812802000,"timestampLabel":"12:00 AM","toolCalls":[{"id":"read-preview","name":"exec_command","args":{},"preview":"Running cat src/preview.rs","status":"done"},{"id":"read-a","name":"exec_command","args":{"command":"cat src/a.rs"},"status":"done"},{"id":"read-b","name":"exec_command","args":{"command":"sed -n '1,20p' src/b.rs"},"status":"done"}]},
+    {"id":"tools-3","role":"tool","text":"","type":"message","timestamp":1790812803000,"timestampLabel":"12:00 AM","toolCalls":[{"id":"tests","name":"exec_command","args":{"command":"cargo test"},"status":"running"}]},
+    {"id":"tools-4","role":"tool","text":"A test failed","type":"message","timestamp":1790812804000,"timestampLabel":"12:00 AM","toolCalls":[{"id":"tests","name":"exec_command","status":"error","result":"Expected a stable order"}]},
+    {"id":"tools-5","role":"assistant","text":"The test exposed an ordering problem.","type":"message","timestamp":1790812805000,"timestampLabel":"12:00 AM"},
+    {"id":"tools-6","role":"assistant","text":"","type":"message","timestamp":1790812806000,"timestampLabel":"12:00 AM","toolCalls":[{"id":"retry","name":"exec_command","args":{"command":"cargo test"},"status":"done"},{"id":"stop","name":"exec_command","args":{"command":"npm run lint"},"status":"stopped","result":"Stopped by operator"}]},
+    {"id":"tools-7","role":"assistant","text":"### Result\n- Stable ordering\n- No data migration\n\n```text\nPASS 2 tests\n```","type":"message","timestamp":1790812807000,"timestampLabel":"12:00 AM"},
+    {"id":"tools-8","role":"assistant","text":"<summary>Validation complete</summary><status>ok</status>","type":"message","timestamp":1790812808000,"timestampLabel":"12:00 AM"}
+  ]
+}
