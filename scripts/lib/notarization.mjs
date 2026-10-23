@@ -23,8 +23,19 @@ export function submitForNotarization(artifact, credentials, run = execFileSync)
   try {
     // notarytool output and exec errors can contain authentication arguments.
     run('xcrun', ['notarytool', 'submit', artifact, ...authentication, '--wait'], { stdio: 'pipe' });
-  } catch {
-    throw new Error('notarization submission failed; verify the configured Keychain profile or Apple credentials');
+  } catch (error) {
+    const credentialValues = authentication
+      .filter((value, index) => index % 2 === 1 && value)
+      .sort((left, right) => right.length - left.length);
+    for (const output of [error?.stdout, error?.stderr]) {
+      if (typeof output !== 'string' && !Buffer.isBuffer(output)) continue;
+      let diagnostic = output.toString();
+      for (const value of credentialValues) {
+        diagnostic = diagnostic.replaceAll(value, '[REDACTED]');
+      }
+      if (diagnostic) console.error(`[sign-and-notarize] ${diagnostic}`);
+    }
+    throw new Error('notarization submission failed');
   }
 }
 

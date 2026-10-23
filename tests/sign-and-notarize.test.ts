@@ -35,7 +35,7 @@ describe('release notarization helpers', () => {
     expect(() => resolveNotarizationCredentials({ NODE_ENV: 'test' })).toThrow('APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID');
   });
 
-  it.each(['profile', 'legacy'])('suppresses %s submission output and raw command errors', (mode) => {
+  it.each(['profile', 'legacy'])('suppresses raw %s command errors when no diagnostic streams were captured', (mode) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -51,6 +51,32 @@ describe('release notarization helpers', () => {
     expect(String(failure)).not.toMatch(/synthetic-password|test-profile|test@example.invalid|TESTTEAM/);
     expect([log.mock.calls, warn.mock.calls, error.mock.calls]).toEqual([[], [], []]);
     expect(run.mock.calls[0]?.[2]).toEqual({ stdio: 'pipe' });
+  });
+
+  it.each(['profile', 'legacy'])('prints redacted %s failure diagnostics when a fake command echoes its arguments', (mode) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const credentials = mode === 'profile' ? { keychainProfile: 'profile-$&-[secret].*' } : {
+      appleId: 'release-TEST@example.invalid', teamId: 'TEST', password: 'fake-$&-[secret].*',
+    };
+    const run = vi.fn((command: string, args: string[]) => {
+      const echoed = `${command} ${args.join(' ')}`;
+      throw Object.assign(new Error(`Command failed: ${echoed}`), {
+        stdout: Buffer.from(`Invalid signature: ${echoed}\nRepeated: ${echoed}\n`),
+        stderr: `Bad bundle: ${echoed}\n`,
+      });
+    });
+
+    expect(() => submitForNotarization('/tmp/o8.dmg', credentials, run)).toThrow('notarization submission failed');
+
+    expect(run).toHaveBeenCalledWith('xcrun', expect.any(Array), { stdio: 'pipe' });
+    expect(error).toHaveBeenNthCalledWith(1, expect.stringContaining('Invalid signature:'));
+    expect(error).toHaveBeenNthCalledWith(2, expect.stringContaining('Bad bundle:'));
+    const output = JSON.stringify([error.mock.calls, log.mock.calls, warn.mock.calls]);
+    expect(output).toContain('/tmp/o8.dmg');
+    expect(output).toContain('[REDACTED]');
+    for (const value of Object.values(credentials)) expect(output).not.toContain(value);
   });
 
   it('the signing entry point accepts a profile without reading the password or requiring the trio', async () => {
