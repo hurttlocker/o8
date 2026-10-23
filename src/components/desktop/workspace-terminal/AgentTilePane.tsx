@@ -1,7 +1,5 @@
 'use client';
 
-import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
   memo,
   useCallback,
@@ -12,8 +10,10 @@ import {
   type FormEvent,
   type UIEvent as ReactUIEvent,
 } from 'react';
-import { ComposerArea } from '@/components/desktop/thoughts/chat-panel/ComposerArea';
-import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
+import { shortWorkerTitle, workerAttention } from './worker-pane-chrome';
+import { useWorkerPaneSize } from './useWorkerPaneSize';
+import { WorkerPaneHeader, WORKER_ICON_BUTTON } from './WorkerPaneHeader';
+import { WorkerPaneComposer } from './WorkerPaneComposer';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import {
   TerminalStatusEvidenceDisclosure,
@@ -25,7 +25,7 @@ import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/Wor
 import { useAgentPeerMessages } from '@/components/desktop/workspace-terminal/useAgentPeerMessages';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { agentDisplayLabel, resolveDisplayRuntime, runtimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import { agentDisplayLabel, resolveDisplayRuntime } from '@/lib/orchestrator/display';
 import {
   ORCHESTRATOR_RUNTIME_IDS,
   getRuntimeCapability,
@@ -178,10 +178,6 @@ export function normalizeAgentTileTranscript(
   return mergeAdjacentToolOnlyEntries(normalized);
 }
 
-// Spring curve matches Apple HIG (stiffness 400, damping 30) — used for the
-// composer reveal animation when a lane flips to running/awaiting_input.
-const noop = () => undefined;
-const COMPOSER_SPRING = { type: 'spring', stiffness: 400, damping: 30 } as const;
 const TRANSCRIPT_STEER_LOADING_TIMEOUT_MS = 10_000;
 const STICK_TO_BOTTOM_THRESHOLD_PX = 120;
 
@@ -257,11 +253,12 @@ export function canSteerAgentState(
   // between escalation layers, and is steerable for the same reason.
   if (packetStatus === 'idle' || packetStatus === 'recovering') return true;
   if (/^(codex-owned|claude-code-owned):.+/.test(sessionKey ?? '') && !packet
-    && ['completed', 'finished', 'idle'].includes(agentStatus)) return true;
+    && ['completed', 'finished', 'idle', 'paused', 'waiting'].includes(agentStatus)) return true;
   return packetStatus === 'blocked' && (blockedReason === 'huddle_ready' || blockedReason === 'worker_question');
 }
 
 function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocus, onOpenReview }: AgentTilePaneProps) {
+  const { paneRef, compact } = useWorkerPaneSize();
   const peerExchange = useAgentPeerMessages(sessionKey);
   const slice = useTranscript(sessionKey);
   const transcriptUnsupportedReason = agent?.transcriptUnsupportedReason?.trim() || null;
@@ -293,12 +290,12 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   const [sending, setSending] = useState(false);
   // Fix #4: synchronous guard so held-Enter can't double-fire before setState flushes
   const sendingRef = useRef(false);
-  const pendingSteerRef = useRef<{ body: string; message: string } | null>(null);
+  const pendingSteerRef = useRef<{ body: string; message: string; interrupt?: boolean } | null>(null);
   const [steerReceipt, setSteerReceipt] = useState<'sending' | 'accepted' | 'unknown' | 'failed' | null>(null);
   const loadingFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const name = useMemo(() => displayName(agent, packet, sessionKey), [agent, packet, sessionKey]);
-  const displayTitle = peerExchange.self ? `@${peerExchange.self.name} · ${name}` : name;
+  const displayTitle = shortWorkerTitle({ label: packet ? packet.title : agent?.currentTask || agent?.name, branch: packet?.branchTarget, fallback: name });
   const displayEntries = useMemo(() => normalizeAgentTileTranscript(
     entries,
     name,
@@ -308,11 +305,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     ? resolveDisplayRuntime(packet)
     : inferRuntime(sessionKey, agent?.runtime);
   const resolvedModel = packet?.lane?.model ?? agent?.model ?? packet?.model ?? packet?.workerRouting?.selectedModel ?? packet?.assignedModel;
-  const runtimeModelLabel = runtimeModelDisplayLabel(runtime, resolvedModel);
   const modelLabel = resolvedModel?.trim() || null;
   const taskLabel = agent?.currentTask?.trim() || packet?.title?.trim() || packet?.summary?.trim() || null;
-  const recipientName = peerExchange.self?.name?.trim() || agent?.name?.trim();
-  const recipientLabel = recipientName ? `@${recipientName.replace(/^@/, '')}` : name;
+  const attention = workerAttention(packet?.status ?? agent?.status, packet?.blockedReason);
   const statusEvidence = packet?.statusEvidence ?? agent?.statusEvidence;
   const status = useMemo(
     () => statusEvidence
@@ -346,7 +341,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     loadingFallbackRef.current = null;
   }, []);
 
-  const resolveSteer = useCallback(async (request: { body: string; message: string }) => {
+  const resolveSteer = useCallback(async (request: { body: string; message: string; interrupt?: boolean }) => {
     setSending(true);
     setSteerReceipt('sending');
     setSendError(null);
@@ -366,12 +361,13 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         const note = payload?.error ?? payload?.note ?? response.statusText ?? 'Unable to send steer.';
         setSendError(note);
         setSteerReceipt('failed');
-        setDraft(request.message);
+        if (!request.interrupt) setDraft(request.message);
         pendingSteerRef.current = null;
         return;
       }
       setSteerReceipt('accepted');
       pendingSteerRef.current = null;
+      if (request.interrupt) return;
       // Fix #5: set transcript to loading but fall back to idle after 10s if WS push never arrives
       clearTranscriptLoadingFallback();
       transcriptStore.setStatus(sessionKey, 'loading');
@@ -386,7 +382,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         setSendError('Final receipt unavailable. Check the same action before sending again.');
       } else {
         setSteerReceipt('failed');
-        setDraft(request.message);
+        if (!request.interrupt) setDraft(request.message);
         pendingSteerRef.current = null;
         setSendError(err instanceof Error ? err.message : 'Unable to send steer.');
       }
@@ -397,8 +393,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     }
   }, [clearTranscriptLoadingFallback, sessionKey]);
 
-  const submitSteer = useCallback(() => {
-    const message = trimmedDraft;
+  const submitSteer = useCallback((resumeMessage?: string) => {
+    const message = resumeMessage ?? trimmedDraft;
     // Re-derive the latest lane state and synchronously guard duplicate submits.
     if (!message || !canSteerAgentState(agentRef.current, packetRef.current, sessionKey)
       || sendingRef.current || pendingSteerRef.current) return;
@@ -410,6 +406,14 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
     setDraft('');
     void resolveSteer(request);
   }, [resolveSteer, sessionKey, trimmedDraft]);
+
+  const stopWorker = useCallback(() => {
+    if (sendingRef.current || pendingSteerRef.current) return;
+    sendingRef.current = true;
+    const request = { body: JSON.stringify({ action: 'interrupt', surfaceId: sessionKey, clientMutationId: crypto.randomUUID() }), message: '', interrupt: true };
+    pendingSteerRef.current = request;
+    void resolveSteer(request);
+  }, [resolveSteer, sessionKey]);
 
   const checkSteerReceipt = useCallback(() => {
     const request = pendingSteerRef.current;
@@ -429,7 +433,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
   // When the lane stops accepting input, drop any error so the composer
   // doesn't carry stale state into the next live run.
   useEffect(() => {
-    if (!canSteer && steerReceipt !== 'unknown') setSendError(null);
+    if (!canSteer && steerReceipt !== 'unknown' && steerReceipt !== 'failed') setSendError(null);
   }, [canSteer, steerReceipt]);
 
   useEffect(() => {
@@ -451,6 +455,9 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
 
   return (
     <div
+      ref={paneRef}
+      data-worker-pane
+      data-compact={compact}
       onMouseDown={() => onFocus(sessionKey)}
       style={{
         flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
@@ -462,86 +469,17 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         overflow: 'hidden',
       }}
     >
-      <div
-        data-worker-pane-header
-        style={{
-          height: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-          paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 10,
-          borderBottomWidth: 1, borderBottomStyle: 'solid',
-          borderBottomColor: 'var(--t-divider-subtle, var(--t-border))',
-          background: 'transparent',
-        }}
-      >
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            title={runtimeModelLabel}
-            style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}
-          >
-            {/* Long identities yield before the metadata group's status-dot floor,
-                so the title stays bounded and the status indicator survives. */}
-            <div
-              title={peerExchange.self ? `${displayTitle} · ${peerExchange.self.runtime} · ${peerExchange.self.sessionKey}` : name}
-              style={{
-                flexShrink: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontSize: 12, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.1px',
-              }}
-            >
-              {displayTitle}
-            </div>
-            <div style={{ minWidth: 10, flex: 1, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-              {modelLabel ? <span data-worker-model title={runtimeModelLabel} style={{ minWidth: 0, maxWidth: '45%', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-faint)', fontSize: 10.5, fontWeight: 400 }}>· {modelLabel}</span> : null}
-              <span
-                title={statusEvidence?.summary ?? STATUS_META[status].label}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, marginLeft: 'auto',
-                  maxWidth: '100%', overflow: 'hidden',
-                  color: 'var(--t-text-secondary)', fontSize: 10, fontWeight: 300,
-                }}
-              >
-                <AgentStatusDot state={agentStatusToDotState(status)} label={STATUS_META[status].label} />
-                <span
-                  style={{
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}
-                >
-                  {statusEvidence
-                    ? terminalStatusCaption(statusEvidence)
-                    : STATUS_META[status].label}
-                </span>
-              </span>
-            </div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} />
-          <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} />
-          <button
-            type="button"
-            aria-label={`Hide ${name} pane`}
-            title="Hide pane · worker stays available in Agents"
-            onClick={(event) => { event.stopPropagation(); onClose(sessionKey); }}
-            style={{
-              width: 44, height: 44, marginTop: -4, marginRight: -4, marginBottom: -4, marginLeft: 0,
-              borderRadius: 12, borderWidth: 0, background: 'transparent', color: 'var(--t-text-secondary)',
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
-            }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.background = 'var(--t-hover)';
-              event.currentTarget.style.color = 'var(--t-text)';
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = 'transparent';
-              event.currentTarget.style.color = 'var(--t-text-secondary)';
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round">
-              <path d="M6 6l12 12" />
-              <path d="M18 6L6 18" />
-            </svg>
+      <WorkerPaneHeader title={displayTitle} branch={packet?.branchTarget} issueNumber={packet?.issue?.number}
+        runtime={getRuntimeCapability(runtime).label} model={modelLabel} compact={compact} status={status}
+        statusLabel={statusEvidence ? terminalStatusCaption(statusEvidence) : STATUS_META[status].label}
+        actions={<>
+          <WorkerReviewAction packet={packet} onOpenReview={onOpenReview} size={24} />
+          <SessionTransformMenu runtimeId={runtime} sessionKey={sessionKey} size={24} />
+          <button type="button" aria-label={`Hide ${displayTitle} pane`} title="Hide pane · worker stays available in Agents"
+            onClick={event => { event.stopPropagation(); onClose(sessionKey); }} style={WORKER_ICON_BUTTON}>
+            <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
           </button>
-        </div>
-      </div>
+        </>} />
 
       {statusEvidence ? (
         <TerminalStatusEvidenceDisclosure evidence={statusEvidence} />
@@ -595,66 +533,29 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
         )}
       </div>
 
-      <AnimatePresence initial={false}>
-        {canSteer || steerReceipt === 'unknown' ? (
-          <motion.form
-            key="steer-composer"
-            onSubmit={handleFormSubmit}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={COMPOSER_SPRING}
-            style={{ flexShrink: 0, background: 'transparent' }}
-          >
-            <div inert={!canSteer || sending || steerReceipt === 'unknown'}>
-              <ComposerArea key={sessionKey}
-                ref={textareaRef}
-                activeComposer={focused && canSteer && !sending && steerReceipt !== 'unknown'}
-                showBrain={false}
-                inputLabel={`Message ${name}`}
-                placeholder={`Message ${recipientLabel}…`}
-                literalInput
-                input={draft}
-                onInputChange={next => {
-                  setDraft(next);
-                  if (steerReceipt === 'accepted' || steerReceipt === 'failed') {
-                    setSteerReceipt(null);
-                    setSendError(null);
-                  }
-                }}
-                isOrchestratorMode={false}
-                displayWaiting={false}
-                chatMessages={displayEntries}
-                activeTargetLabel={name}
-                targetAgentExists={canSteer && !sending && steerReceipt !== 'unknown'}
-                thoughtsBodyBackground="transparent"
-                enhancing={false}
-                preEnhanceInput={null}
-                onEnhance={noop}
-                onUndoEnhance={noop}
-                onSubmit={submitSteer}
-                onSteer={submitSteer}
-                onSlashCommand={noop}
-                modelLabel={runtimeModelLabel}
-                effort="adaptive"
-                onEffortChange={noop}
-                adaptiveEnabled={false}
-                displayMessagesCount={displayEntries.length}
-                hasAssistantActivity={false}
-                footerOverride={<InputButtons input={canSend ? draft : ''} onSubmit={submitSteer}
-                  modelLabel={runtimeModelLabel} enhancing={false} preEnhanceInput={null}
-                  onEnhance={noop} onUndoEnhance={noop} adaptiveEnabled={false} />}
-              />
+      {canSteer || attention || steerReceipt === 'unknown' ? (
+        <form onSubmit={handleFormSubmit} style={{ flexShrink: 0, background: 'transparent' }}>
+          <WorkerPaneComposer key={sessionKey} textareaRef={textareaRef} scopeKey={sessionKey}
+            active={focused} compact={compact} input={draft} onInputChange={next => {
+              setDraft(next);
+              if (steerReceipt === 'accepted' || steerReceipt === 'failed') {
+                setSteerReceipt(null);
+                setSendError(null);
+              }
+            }} onSend={() => submitSteer()} canSend={canSend}
+            disabled={!canSteer || sending || steerReceipt === 'unknown'} attention={attention}
+            busy={sending || steerReceipt === 'unknown'}
+            onResume={canSteer ? () => submitSteer(trimmedDraft || 'Continue the assigned task.') : undefined}
+            onStop={stopWorker} onOpenReview={onOpenReview} repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace}
+          />
+          {steerReceipt === 'failed' || steerReceipt === 'unknown' ? (
+            <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)', fontSize: 11, paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
+              <span>{steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
+              {steerReceipt === 'unknown' ? <button type="button" onClick={checkSteerReceipt} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', fontSize: 11, fontWeight: 300 }}>Check receipt</button> : null}
             </div>
-            {steerReceipt === 'failed' || steerReceipt === 'unknown' ? (
-              <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? '#ef4444' : 'var(--t-text-secondary)', fontSize: 10.5, paddingLeft: 4, paddingRight: 4 }}>
-                <span>{steerReceipt === 'unknown' ? 'Receipt unavailable' : 'Not sent'}{sendError ? ` · ${sendError}` : ''}</span>
-                {steerReceipt === 'unknown' ? <button type="button" onClick={checkSteerReceipt} style={{ border: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 500 }}>Check receipt</button> : null}
-              </div>
-            ) : null}
-          </motion.form>
-        ) : null}
-      </AnimatePresence>
+          ) : null}
+        </form>
+      ) : null}
     </div>
   );
 }
