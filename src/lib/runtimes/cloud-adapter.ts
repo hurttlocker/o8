@@ -17,6 +17,7 @@
  * pool can share a queue and each tracks its own cursor. This matches the
  * Cursor self-hosted shape (10 workers/user, 50 workers/team).
  */
+import { assertOwnedActionGuard } from './shared/owned-session/action-admission';
 import type {
   AgentRuntime,
   LaunchOptions,
@@ -203,6 +204,7 @@ export const cloudRuntime: AgentRuntime = {
     }
     try {
       const jobId = randomUUID();
+      assertOwnedActionGuard();
       const job = enqueueCloudJob(DEFAULT_TEAM_ID, jobId, { ...opts, remoteSource });
       return {
         ok: true,

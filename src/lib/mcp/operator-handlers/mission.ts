@@ -248,7 +248,7 @@ export const MISSION_TOOLS: McpTool[] = [
   {
     name: 'o8_task_dispatch',
     description:
-      'Dispatch a task from the o8 task pool through Codex-only production routing. This launches the lane and injects the project-backed task brief.',
+      'Dispatch a task from the o8 task pool. Returns a durable launching receipt before provisioning finishes. Follow progress with mission_tail. Repeating the same dispatch returns its existing receipt; reset the packet before changing an active launch intent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -684,46 +684,7 @@ export async function handleGetMissionStatus(args: Record<string, unknown>): Pro
   }
 }
 
-export async function handleMissionTail(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const packetId = requiredString(args, 'packetId');
-    const sinceRaw = args.since;
-    const since = typeof sinceRaw === 'number' && Number.isFinite(sinceRaw) && sinceRaw >= 0
-      ? Math.floor(sinceRaw)
-      : 0;
-    const timeoutRaw = args.timeoutMs;
-    const timeoutMs = typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw) && timeoutRaw > 0
-      ? Math.floor(timeoutRaw)
-      : 0;
-
-    const qs = new URLSearchParams();
-    qs.set('since', String(since));
-    if (timeoutMs > 0) {
-      qs.set('follow', 'true');
-      qs.set('timeoutMs', String(timeoutMs));
-    }
-
-    const data = await apiFetch(`/api/lanes/${encodeURIComponent(packetId)}/events?${qs.toString()}`) as Record<string, unknown>;
-    const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
-    const nextSinceRaw = data.nextSince;
-    const nextSince = typeof nextSinceRaw === 'number' && Number.isFinite(nextSinceRaw)
-      ? nextSinceRaw
-      : since;
-    return jsonResult({
-      summary: events.length === 0
-        ? `No packet events (nextSince: ${nextSince})`
-        : `${events.length} packet events (nextSince: ${nextSince})`,
-      data: {
-        packetId,
-        events,
-        nextSince,
-      },
-    });
-  } catch (error) {
-    console.error(`${'[mcp-operator]'} mission_tail failed: ${errorText(error)}`);
-    return textResult(`Failed to read mission tail: ${errorText(error)}`, true);
-  }
-}
+export { handleMissionTail } from './mission-tail';
 
 export async function handleGetPacketScope(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
@@ -825,6 +786,7 @@ export async function handleTaskClaim(args: Record<string, unknown>): Promise<Mc
 export async function handleTaskDispatch(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const result = await dispatchTask(requiredString(args, 'taskId'), {
+      waitForLaunch: false,
       actor: 'orchestrator',
       message: optionalString(args, 'message') || null,
       model: optionalString(args, 'model') || null,
