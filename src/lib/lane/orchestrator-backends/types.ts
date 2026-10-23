@@ -51,8 +51,8 @@ export function isOrchestratorBackendId(value: unknown): value is OrchestratorBa
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 
 export interface OrchestratorTurnOptions {
-  /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
-  permissionMode?: 'full' | 'plan';
+  /** Full access keeps the built-in command workspace boundary; outside-workspace explicitly lifts it. Plan is read-only. */
+  permissionMode?: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
   /** Set on a review turn: its metered calls are recorded as reviewer usage on this lane and packet (#3742). */
   reviewUsage?: { reviewTurnId: string; laneId: string; packetId: string | null; surface: string };
   /** Start a new conversation instead of resuming the thread's; each review turn reads its diff fresh (#3742). */

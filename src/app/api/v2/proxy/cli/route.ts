@@ -8,6 +8,8 @@ import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver
 import { spawnsViaInterpreter } from '@/lib/runtimes/shared/cli-spawn';
 import { CODEX_MODEL_IDS, MODEL_IDS } from '@/lib/models';
 import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupported } from '@/lib/codex/model-compatibility';
+import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
+import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 /**
  * POST /api/v2/proxy/cli
@@ -19,13 +21,11 @@ import { CODEX_SOL_FALLBACK_MODEL, CODEX_SOL_UPDATE_NOTICE, isCodexSolUnsupporte
 
 type CliRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode';
 
-type CliEffort = 'low' | 'medium' | 'high' | 'max';
-
 interface CliRequestBody {
   runtime: CliRuntime;
   model: string;       // e.g. 'cli:claude-code:opus' → extract 'opus' or 'haiku'
   messages: { role: string; content: string }[];
-  effort?: CliEffort;
+  effort?: unknown;
   repoPath?: string;
 }
 
@@ -107,6 +107,11 @@ export async function POST(request: Request) {
     if (!prompt) {
       return NextResponse.json({ error: 'No user message found' }, { status: 400 });
     }
+    if (body.effort !== undefined && !isThinkingEffort(body.effort)) {
+      return NextResponse.json({
+        error: `effort must be one of: ${EFFORT_CHOICE_LIST}.`, code: 'invalid_effort',
+      }, { status: 400 });
+    }
 
     // An explicit repoPath is untrusted input: validate it against the registry before
     // anything else runs (traversal guard, asserted by the cold-start route contract).
@@ -184,6 +189,19 @@ export async function POST(request: Request) {
       }
       default:
         return NextResponse.json({ error: `Unsupported runtime: ${runtime}` }, { status: 400 });
+    }
+
+    const effortPin = resolveEffortPin({
+      requestedEffort: body.effort,
+      runtime,
+      model: codexModel ?? modelKey,
+      explicitModel: runtime === 'codex' ? modelKey : undefined,
+    });
+    if (!effortPin.ok) {
+      return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
+    }
+    if (runtime === 'codex' && effortPin.selectedEffort) {
+      args.splice(args.indexOf('--'), 0, '-c', `model_reasoning_effort=${effortPin.selectedEffort}`);
     }
 
     // Every runtime above puts the user's prompt on argv. On Windows an

@@ -9,7 +9,8 @@
  * Full access its own file writes and commands in the repo run without asking,
  * as the Claude orchestrator's do (#3555); policy-blocked commands, workspace
  * path checks and command limits still apply, and commands write only in the
- * workspace and a private temp dir (#3658). A plan-mode turn gets the
+ * workspace and a private temp dir (#3658). Outside workspace explicitly lifts
+ * that command boundary for the selected turn. A plan-mode turn gets the
  * proposer projection and only `read_file`.
  *
  * One turn at a time per repo and thread, and one resident Pi process for it.
@@ -33,6 +34,7 @@ import { isOpenRouterPiModelChoice } from '@/lib/pi/sdk/openrouter-model-choice'
 import type { OpenRouterPiReceipt, OpenRouterSpendCeiling } from '@/lib/pi/sdk/openrouter-transport';
 import type { createPiSdkSession, PiSdkSessionOptions } from '@/lib/pi/sdk/session';
 import { newestPiSessionFile, prunePiSessionFiles } from '@/lib/pi/sdk/session-files';
+import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import type { OrchestratorBackend, OrchestratorSessionInfo, OrchestratorTurnOptions } from './types';
 
 /** Per-turn limits. A turn that dispatches and waits on a mission needs more than the prototype's defaults. */
@@ -48,6 +50,7 @@ type PiSession = Awaited<ReturnType<typeof createPiSdkSession>>;
 interface PiSurface {
   profile: ToolProfile;
   readOnly: boolean;
+  outsideWorkspace: boolean;
 }
 
 interface ResidentPi extends PiSurface {
@@ -76,7 +79,7 @@ function piUsageAttribution(name: string, repoPath: string, options: Orchestrato
 export function piSurfaceForTurn(options: OrchestratorTurnOptions): PiSurface {
   const plan = options.permissionMode === 'plan';
   const profile: ToolProfile = plan ? 'propose' : options.toolProfile ?? 'full';
-  return { profile, readOnly: plan || profile === 'propose' };
+  return { profile, readOnly: plan || profile === 'propose', outsideWorkspace: options.permissionMode === 'outside-workspace' };
 }
 
 /**
@@ -226,8 +229,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
         sessionFile: options.freshSession ? undefined : await newestPiSessionFile(join(stateDir, 'sessions')),
         transport,
         approve: deps.approve ?? (surface.readOnly ? undefined : fullAccess),
-        // Writes outside the workspace need a setting beyond Full access (#3677).
-        confineCommands: 'workspace',
+        // Only the explicit per-turn grant lifts command confinement. File-tool checks remain in place.
+        confineCommands: surface.outsideWorkspace ? false : 'workspace',
         hostTools: commands.length ? createO8CommandTools(commands) : [],
         systemPrompt,
         readOnly: surface.readOnly,
@@ -263,7 +266,7 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     let pi = resident.get(name);
     // A different tool surface or model route needs a different process; the session file keeps the conversation.
     if (pi && (options.freshSession || pi.profile !== surface.profile || pi.readOnly !== surface.readOnly
-      || pi.routeId !== routeId || !pi.session.running)) {
+      || pi.outsideWorkspace !== surface.outsideWorkspace || pi.routeId !== routeId || !pi.session.running)) {
       await close(pi);
       pi = undefined;
     }
@@ -295,7 +298,8 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
     for (const key of Object.keys(current.attribution)) delete current.attribution[key as keyof PiUsageAttribution];
     Object.assign(current.attribution, piUsageAttribution(name, repoPath, options));
     current.ceiling?.reset();
-    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium' });
+    onEvent({ type: 'turn_receipt', leadModel: route.carrier === 'openrouter' ? route.choice : 'pi', effort: options.thinkingEffort ?? 'medium',
+      permissionMode: options.permissionMode ?? 'full' });
     const stop = () => { void current.session.abort(); };
     options.signal?.addEventListener('abort', stop, { once: true });
     try {
@@ -323,6 +327,13 @@ export function createPiOrchestratorBackend(deps: PiOrchestratorDeps = {}): Orch
 
   function sendTurn(repoPath: string, message: string, onEvent: (event: OrchestratorEvent) => void,
     options: OrchestratorTurnOptions = {}): Promise<void> {
+    try {
+      assertOrchestratorPermissionMode('pi', options.permissionMode, options.toolProfile);
+    } catch (error) {
+      onEvent({ type: 'error', error: error instanceof Error ? error.message : 'Invalid permission mode.' });
+      onEvent({ type: 'done', sessionId: null, cost: null });
+      return Promise.resolve();
+    }
     const name = nameFor(repoPath, options.threadId);
     ensured.add(name);
     if (closing || active.has(name)) {
