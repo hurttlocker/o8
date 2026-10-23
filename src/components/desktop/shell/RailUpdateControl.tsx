@@ -10,6 +10,7 @@ import { checkAppUpdates, loadCachedReleaseNotes, refreshCliUpdateView, synchron
 import { toast } from '@/components/shared/ConfirmToastHost';
 import type { ReleaseNotes } from '@/lib/app-update/release-notes';
 import type { UpdateProgress } from '@/lib/app-update/client-restart';
+import { updateRestartLabel } from '@/lib/app-update/update-card-view';
 import { RailActionButton } from './RailActionButton';
 import { ConnectedCliUpdateRows } from './ConnectedCliUpdateRows';
 
@@ -171,7 +172,7 @@ export function RailUpdateControl({ buttonStyle }: { buttonStyle: CSSProperties 
           <button type="button" disabled={pending}
             onClick={() => { setPinned(true); window.dispatchEvent(new Event('o8:restart-app-update')); }}
             style={{ ...button, justifySelf: 'start', minHeight: 30, color: 'var(--t-accent-contrast, #fff)', background: 'var(--t-accent)' }}>
-            Restart now
+            {updateRestartLabel(hub.app.blockers)}
           </button>
         </div> : null}
         {hub.app.version && !hub.app.blockers ? <div style={{ display: 'grid', justifyItems: 'start', gap: 6 }}>

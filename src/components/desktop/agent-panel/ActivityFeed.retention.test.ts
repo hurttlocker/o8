@@ -2,6 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ActivityFeed } from './ActivityFeed';
 
 const streams = ['issues', 'prs', 'ci', 'commits'] as const;
@@ -20,11 +21,13 @@ const payload = (stream: Stream, tag: string) => {
 const empty = (stream: Stream) => ({ [stream === 'ci' ? 'runs' : stream]: [] });
 let host: HTMLDivElement;
 let root: Root;
+let client: QueryClient;
 let fetchMock: ReturnType<typeof vi.fn>;
 let registered: string[];
 let reply: (stream: Stream, repo: string, init?: RequestInit) => Response | Promise<Response>;
 const render = (activeRepo: string | null = repoA, refreshKey = 0) => act(async () => {
-  root.render(createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo, refreshKey }));
+  root.render(createElement(QueryClientProvider, { client },
+    createElement(ActivityFeed, { events: [], commits: [], agents: [], activeRepo, refreshKey })));
 });
 const refresh = () => act(async () => { window.dispatchEvent(new Event('o8:lifecycle-reconcile')); });
 const reads = () => fetchMock.mock.calls.filter(([url]) => String(url) !== '/api/panel/repos');
@@ -45,6 +48,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-22T12:30:00Z'));
   registered = [];
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   reply = (stream, repo) => Response.json(payload(stream, repo));
   fetchMock = vi.fn((input: string, init?: RequestInit) => {
     if (input === '/api/panel/repos') return Promise.resolve(Response.json({ repos: registered.map((repo) => ({ remoteUrl: `https://github.com/${repo}.git` })) }));
@@ -60,6 +64,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  client.clear();
   host.remove();
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -139,7 +139,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       return next;
     });
   }, []);
-  const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
+  const { prDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
   const [retryNonce, setRetryNonce] = useState(0);
   const orchestratorData = useOrchestratorData();
@@ -676,7 +676,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         paddingTop: 6, paddingRight: 14, paddingBottom: 10, paddingLeft: 52,
                         borderBottom: '1px solid var(--t-panel-border, rgba(0,0,0,0.06))',
                       }}>
-                        {renderExpandedDetail(item, prDetails, ciDetails, key, {
+                        {renderExpandedDetail(item, prDetails, key, {
+                          active,
                           onOpenPr: (pr) => handleItemClick(pr),
                         })}
                       </div>

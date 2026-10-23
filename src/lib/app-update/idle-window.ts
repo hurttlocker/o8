@@ -1,12 +1,14 @@
 import { inspectCliOperationAdmission, type CliInstallerActivity } from '@/lib/setup/cli-operation-admission';
 import 'server-only';
+import { listWorkLaunches } from './work-launch-admission';
 
+import { isOwnedSessionKey, probeLaneSessionAlive } from '@/lib/lane/owned-session-liveness';
 import { listLanes } from '@/lib/lane/registry';
 import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import type { LaneStatus } from '@/lib/lane/types';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { listManagedRuns } from '@/lib/runtimes/managed-runs/registry';
-import { listOwnedActiveRuns } from '@/lib/runtimes/shared/owned-session-index';
+import { listOwnedActiveRuns, lookupOwnedActiveRunFresh } from '@/lib/runtimes/shared/owned-session-index';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { listJobs } from '@/lib/cloud/job-queue';
 
@@ -16,6 +18,7 @@ export interface UpdateIdleLane {
   status: LaneStatus;
   runtime: string;
   sessionKey: string | null;
+  processLive?: boolean;
 }
 
 export interface UpdateIdleTerminalSession {
@@ -49,8 +52,8 @@ export interface UpdateIdleCloudJob {
 
 /**
  * Lane states with no worker process: the task is waiting for review, input or
- * a retry. A restart keeps their persisted state, so an operator may restart
- * past them after confirming. Every other non-terminal lane is live work.
+ * a retry. A restart keeps their persisted state. Process liveness is checked
+ * separately because a parked status alone does not prove the worker exited.
  */
 const PARKED_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStatus>([
   'idle', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human', 'recovering', 'reviewing',
@@ -63,11 +66,11 @@ export function isParkedLaneStatus(status: LaneStatus): boolean {
 export interface UpdateIdleWindow {
   idle: boolean;
   /**
-   * True when the only blockers are parked lanes. An operator-confirmed restart
-   * may proceed; automatic and remote applies still wait for `idle`.
+   * True when only persisted parked lanes remain, with no live worker or other
+   * runtime blocker. Manual, automatic and remote apply may preserve these lanes.
    */
   idleExceptParked: boolean;
-  /** Parked lanes among `active.lanes`, named so the operator can confirm past them. */
+  /** Persisted parked lanes, listed separately from running work. */
   parkedLanes: UpdateIdleLane[];
   active: {
     lanes: UpdateIdleLane[];
@@ -76,6 +79,7 @@ export interface UpdateIdleWindow {
     ownedSessions: UpdateIdleOwnedSession[];
     cloudJobs: UpdateIdleCloudJob[];
     cliInstallers?: CliInstallerActivity[];
+    workLaunches?: Array<{ label: string }>;
     restartPending?: boolean;
   };
   unavailable: string[];
@@ -92,6 +96,7 @@ interface IdleWindowInput {
   cliAdmissionUnavailable?: boolean;
   restartPending?: boolean;
   terminalInventoryAvailable: boolean;
+  workLaunches?: Array<{ label: string }>;
   checkedAt?: string;
 }
 
@@ -102,20 +107,23 @@ export function evaluateUpdateIdleWindow(input: IdleWindowInput): UpdateIdleWind
   ));
   const unavailable = input.terminalInventoryAvailable ? [] : ['terminal-sessions'];
   if (input.cliAdmissionUnavailable) unavailable.push('cli-update-ownership');
-  const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status));
+  const parkedLanes = activeLanes.filter((lane) => isParkedLaneStatus(lane.status) && !lane.processLive);
+  const runningLanes = activeLanes.filter(lane => !parkedLanes.includes(lane));
   const otherWorkIdle = terminalSessions.length === 0
     && input.managedRuns.length === 0
     && input.ownedSessions.length === 0
     && (input.cloudJobs?.length ?? 0) === 0
     && (input.cliInstallers?.length ?? 0) === 0
+    && (input.workLaunches?.length ?? 0) === 0
     && !input.restartPending
     && unavailable.length === 0;
   return {
-    idle: activeLanes.length === 0 && otherWorkIdle,
+    idle: activeLanes.length === parkedLanes.length && otherWorkIdle,
     idleExceptParked: activeLanes.length === parkedLanes.length && otherWorkIdle,
     parkedLanes,
     active: {
-      lanes: activeLanes,
+      lanes: runningLanes,
+      workLaunches: input.workLaunches ?? [],
       terminalSessions,
       managedRuns: input.managedRuns,
       ownedSessions: input.ownedSessions,
@@ -167,19 +175,27 @@ async function readTerminalInventory(): Promise<{
   }
 }
 
-export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
+async function parkedLaneProcessLive(lane: ReturnType<typeof listLanes>[number]): Promise<boolean> {
+  if (!isParkedLaneStatus(lane.status) || !lane.sessionKey) return false;
+  // A restart decision must not reuse the fleet's short-lived session cache.
+  if (isOwnedSessionKey(lane.sessionKey)) await lookupOwnedActiveRunFresh(lane.sessionKey);
+  return await probeLaneSessionAlive(lane) !== false;
+}
+
+export async function getUpdateIdleWindow(reservationId?: string): Promise<UpdateIdleWindow> {
   const [terminalInventory, managedRuns, ownedSessions] = await Promise.all([
     readTerminalInventory(),
     listManagedRuns(),
-    listOwnedActiveRuns(),
+    listOwnedActiveRuns(Date.now(), Boolean(reservationId)),
   ]);
-  const lanes = listLanes().map((lane) => ({
+  const lanes = await Promise.all(listLanes().map(async (lane) => ({
     id: lane.id,
     label: lane.label,
     status: lane.status,
     runtime: lane.runtime,
     sessionKey: lane.sessionKey,
-  }));
+    processLive: await parkedLaneProcessLive(lane),
+  })));
   const cloudJobs = listJobs('team_default')
     .filter((job) => job.status === 'leased')
     .map((job) => ({
@@ -189,9 +205,10 @@ export async function getUpdateIdleWindow(): Promise<UpdateIdleWindow> {
       workerId: job.claimedBy ?? null,
       leaseExpiresAt: job.leaseExpiresAt ?? null,
     }));
-  const cliAdmission = inspectCliOperationAdmission();
+  const cliAdmission = inspectCliOperationAdmission(reservationId);
   return evaluateUpdateIdleWindow({
     lanes,
+    workLaunches: listWorkLaunches(),
     cliInstallers: cliAdmission.installers,
     cliAdmissionUnavailable: cliAdmission.blocked && cliAdmission.installers.length === 0 && cliAdmission.code !== 'app_restart_pending',
     restartPending: cliAdmission.code === 'app_restart_pending',
