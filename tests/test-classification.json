@@ -1831,6 +1831,13 @@
       ]
     },
     {
+      "path": "tests/cli-chat-effort-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cli-chat-terminal-real-path.test.ts",
       "reasons": [
         "child-process",
