@@ -103,7 +103,7 @@ export const primeAgentRuntime: AgentRuntime = {
       laneId: opts.laneId,
       packetId: opts.packetId,
     });
-    return { ok: result.ok, note: result.note, sessionKey: result.surfaceId };
+    return { ok: result.ok, note: result.note, sessionKey: result.surfaceId, sideEffect: result.sideEffect };
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {

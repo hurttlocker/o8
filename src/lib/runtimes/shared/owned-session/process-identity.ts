@@ -85,14 +85,15 @@ export async function probeOwnedSignalIdentity(run: OwnedProcessEvidence): Promi
 export async function assertOwnedSessionProcessIdentity(session: OwnedSessionRecord, runtimeId: string): Promise<void> {
   const run = session.activeRun;
   if (!run || run.spawnState === 'prepared' || run.finishedAt || run.tmuxSession
-    || process.platform === 'win32' || runtimeId !== 'codex' || !session.packetId
+    || process.platform === 'win32' || !session.packetId
+    || (runtimeId !== 'codex' && run.detachMode !== 'detached' && !run.processIdentityRequired && !run.processIdentity)
     || (run.processIdentityRequired === false && !run.processIdentity)) return;
   const proof = await probeOwnedRunIdentity(run);
   if (proof.state === 'mismatch' || proof.state === 'unknown') throw new OwnedProcessIdentityError(proof.state);
 }
 
 export async function captureOwnedRunIdentity(session: OwnedSessionRecord, runtimeId: string, run: OwnedRunRecord): Promise<void> {
-  if (runtimeId !== 'codex' || !session.packetId || process.platform === 'win32' || run.detachMode !== 'detached') return;
+  if (!session.packetId || process.platform === 'win32' || run.detachMode !== 'detached') return;
   run.processIdentityRequired = true;
   let unavailable: Exclude<OwnedProcessProbe, { state: 'live' }> = { state: 'unknown', detail: 'Process identity capture did not complete.' };
   const sources: Array<OwnedIdentitySource | undefined> = process.platform === 'darwin' ? [undefined, 'ps'] : [undefined];
@@ -113,5 +114,5 @@ export async function captureOwnedRunIdentity(session: OwnedSessionRecord, runti
   delete run.processIdentity;
   delete run.processIdentitySource;
   const reason = unavailable.state === 'unknown' ? unavailable.detail : 'Worker exited before identity capture completed.';
-  console.warn(`[owned-store] Codex packet start identity unavailable; retaining legacy process controls for run ${run.id}: ${reason}`);
+  console.warn(`[owned-store] ${runtimeId} packet start identity unavailable; retaining legacy process controls for run ${run.id}: ${reason}`);
 }

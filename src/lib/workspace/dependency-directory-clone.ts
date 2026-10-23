@@ -7,37 +7,18 @@ import {
   type WorktreeMaterializationIdentity,
 } from '@/lib/worktree/materialization-identity';
 import { clonePinnedWorkspaceDirectory, readPinnedWorkspaceFile } from '@/lib/worktree/materialization-leaf-io';
-import { guardedWorkspaceInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { DependencyInstallOptions, DependencyInstallRecipe } from './dependency-install';
 import { validateDependencyCloneGraph } from './dependency-clone-validation';
 import { finishDependencyClone, probeDependencyCloneNativeFiles } from './dependency-clone-lifecycle';
 import { purgeExactDirectory } from './exact-directory-purge';
 import { dependencyCloneSnapshotMatches } from './dependency-clone-snapshot';
 import { profileDependencyClone as profile } from './dependency-clone-profile';
+import { dependencyCloneSourceMatcher } from './dependency-clone-source';
 
-const CHECK_SOURCE_RECIPE = String.raw`
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-const recipe = JSON.parse(process.argv[1]);
-const tree = require('node:child_process').spawnSync('git', ['rev-parse', 'HEAD^{tree}'], {encoding:'utf8'});
-let matches = tree.status === 0 && tree.stdout.trim() === recipe.gitTreeSha;
-for (const input of [...recipe.inputDigests, recipe.lockfile]) {
-  if (path.isAbsolute(input.path) || input.path.split('/').includes('..')) throw new Error('Unsafe dependency recipe input.');
-  const parts = input.path.split('/');
-  parts.pop();
-  let ancestor = '.';
-  for (const part of parts) {
-    ancestor = path.join(ancestor, part);
-    const entry = fs.lstatSync(ancestor);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Unsafe dependency recipe ancestor.');
-  }
-  const fd = fs.openSync(input.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  try { matches = matches && crypto.createHash('sha256').update(fs.readFileSync(fd)).digest('hex') === input.digest; }
-  finally { fs.closeSync(fd); }
+export interface DependencySelection {
+  path: 'directory-clone' | 'native-install' | 'image';
+  reason: string;
 }
-console.log(JSON.stringify(matches));
-`;
 
 /** Clone a trusted installed npm tree; validate its recipe/metadata, not payload bytes. */
 export async function tryCloneDependencyDirectory(input: {
@@ -47,41 +28,41 @@ export async function tryCloneDependencyDirectory(input: {
   identity: WorktreeMaterializationIdentity;
   recipe: DependencyInstallRecipe;
   options: DependencyInstallOptions;
+  onDecision?: (decision: { path: 'directory-clone' | 'fallback'; reason: string }) => Promise<void>;
 }): Promise<boolean> {
   const { sourceWorkspace, workspace, identity, recipe, options } = input;
-  if (path.resolve(sourceWorkspace) === path.resolve(workspace)) return false;
-  try { await lstat(path.join(workspace, 'node_modules')); return false; }
+  const fallback = async (reason: string) => { await input.onDecision?.({ path: 'fallback', reason }); return false; };
+  if (path.resolve(sourceWorkspace) === path.resolve(workspace)) return fallback('same-workspace');
+  try { await lstat(path.join(workspace, 'node_modules')); return fallback('destination-exists'); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (process.platform !== 'darwin' || recipe.packageManager !== 'npm'
     || recipe.platform !== process.platform || recipe.architecture !== process.arch
     || recipe.runtimeAbi !== process.versions.modules || recipe.installArgs[0] !== 'ci'
     || recipe.installArgs.some((arg) => arg.startsWith('--omit') || arg === '--production')
-    || recipe.localDependencyDigests.length > 0) return false;
+    || recipe.localDependencyDigests.length > 0) return fallback('ineligible-recipe');
   const sourceIdentity = await captureWorktreeMaterializationIdentity(sourceWorkspace);
   const sourcePath = path.join(sourceWorkspace, 'node_modules');
   try { await lstat(sourcePath); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
-  const sourceMatches = async () => {
-    const invocation = guardedWorkspaceInvocation(process.execPath, ['-e', CHECK_SOURCE_RECIPE, JSON.stringify(recipe)], sourceIdentity);
-    const result = await materializationAwareExecFile(invocation.command, invocation.args, { cwd: sourceWorkspace, timeout: 10_000 });
-    return JSON.parse(result.stdout) === true;
-  };
-  if (!await profile('source-recipe', sourceMatches)) return false;
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback('source-install-missing'); throw error; }
   const manifest = JSON.parse((await readPinnedWorkspaceFile(workspace, identity, 'package.json'))!) as { workspaces?: unknown; scripts?: Record<string, unknown> };
-  if (manifest.workspaces) return false;
+  if (manifest.workspaces) return fallback('workspace-topology');
   if (recipe.lifecycleScripts === 'enabled'
-    && ['preinstall', 'install', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'dependencies'].some((stage) => manifest.scripts?.[stage])) return false;
+    && ['preinstall', 'install', 'prepublish', 'preprepare', 'prepare', 'postprepare', 'dependencies'].some((stage) => manifest.scripts?.[stage])) return fallback('unsupported-root-lifecycle');
+  const requireSameTree = recipe.lifecycleScripts === 'enabled' && recipe.cloneLifecycleInputs === undefined;
+  const sourceMatches = dependencyCloneSourceMatcher(sourceWorkspace, sourceIdentity, recipe, requireSameTree);
+  if (!await profile('source-recipe', sourceMatches)) return fallback(requireSameTree ? 'source-inputs-or-unbounded-lifecycle' : 'source-inputs-mismatch');
   const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace));
-  if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return false;
+  if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return fallback('installed-graph-ineligible');
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
+  await input.onDecision?.({ path: 'directory-clone', reason: 'matching-inputs' });
   const clone = await profile('directory-clone-publication', () => clonePinnedWorkspaceDirectory(workspace, identity, 'node_modules', sourcePath));
-  if (clone.disposition === 'unsupported') return false;
+  if (clone.disposition === 'unsupported') return fallback('directory-clone-unsupported');
   if (clone.disposition !== 'created') throw new Error('Dependency clone destination already exists.');
   const discard = async () => {
     await assertWorktreeMaterializationIdentity(workspace, identity);
     await purgeExactDirectory(path.join(workspace, 'node_modules'), clone);
     await assertWorktreeMaterializationIdentity(workspace, identity);
-    return false;
+    return fallback('source-changed');
   };
   await input.afterClone?.();
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);

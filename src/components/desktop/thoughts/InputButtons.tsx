@@ -418,6 +418,7 @@ export function InputButtons({
   input,
   hasAttachments = false,
   onSubmit,
+  sendDisabled = false,
   modelLabel,
   modelId,
   onModelChange,
@@ -457,6 +458,7 @@ export function InputButtons({
   onUndoEnhance: () => void;
   onSendAsTask?: () => void;
   onSubmit: () => void;
+  sendDisabled?: boolean;
   small?: boolean;
   modelLabel?: string;
   /** Raw orchestrator model id — drives the active row in the chip's model section. */
@@ -590,7 +592,7 @@ export function InputButtons({
           voiceControl={managedVoiceControl}
           sendControl={(
             <SendPill
-              canSubmit={canSubmit}
+              canSubmit={canSubmit && !sendDisabled}
               working={working}
               onSubmit={onSubmit}
               onStop={onStop}
@@ -711,7 +713,7 @@ export function InputButtons({
       {/* Send — ↵ enter key when idle, square stop while working
           (Claude Code reference, Q ruling 2026-07-11). */}
       <SendPill
-        canSubmit={canSubmit}
+        canSubmit={canSubmit && !sendDisabled}
         working={working}
         onSubmit={onSubmit}
         onStop={onStop}

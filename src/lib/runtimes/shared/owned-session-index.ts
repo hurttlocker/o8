@@ -34,6 +34,7 @@ export interface OwnedActiveRun {
   processIdentity?: MetadataLockProcessIdentity;
   processIdentitySource?: OwnedIdentitySource;
   processIdentityRequired?: boolean;
+  detachMode?: 'detached' | 'bridge';
   processGroupId?: number;
   tmuxSession?: string;
   commandIdentity?: string;
@@ -188,7 +189,8 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
           processIdentity: parsed.activeRun.processIdentity,
           processIdentitySource: parsed.activeRun.processIdentitySource,
           ...((parsed.activeRun.processIdentityRequired || (parsed.activeRun.processIdentityRequired !== false && process.platform !== 'win32'
-            && parsed.surfaceId.startsWith('codex-owned:') && Boolean(parsed.packetId) && !parsed.activeRun.tmuxSession))
+            && (parsed.surfaceId.startsWith('codex-owned:') || parsed.activeRun.detachMode === 'detached')
+            && Boolean(parsed.packetId) && !parsed.activeRun.tmuxSession))
             ? { processIdentityRequired: true } : {}),
           processGroupId: typeof parsed.activeRun.processGroupId === 'number'
             ? parsed.activeRun.processGroupId

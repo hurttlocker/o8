@@ -30,7 +30,7 @@ import {
   type DependencyInstallReceipt,
 } from './dependency-install';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
-import { tryCloneDependencyDirectory } from './dependency-directory-clone';
+import { tryCloneDependencyDirectory, type DependencySelection } from './dependency-directory-clone';
 import { profileDependencyClone } from './dependency-clone-profile';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
@@ -115,6 +115,7 @@ export interface DependencyMaterializerOptions extends Pick<DependencyInstallOpt
   'run' | 'resolveVersion' | 'cacheRoot' | 'now' | 'materializationIdentity'> {
   preparedRecipe?: DependencyInstallRecipe;
   cloneSourceWorkspace?: string;
+  onSelection?: (selection: DependencySelection) => Promise<void>;
   /** Deterministic race seam after native publication, before source revalidation. */
   afterDependencyDirectoryClone?: () => Promise<void>;
   imageRegistryRoot?: string;
@@ -270,6 +271,7 @@ async function runNativeMaterialization(
   options: DependencyMaterializerOptions,
   queuePublication: boolean,
 ): Promise<DependencyMaterializationResult> {
+  await options.onSelection?.({ path: 'native-install', reason: 'directory-clone-not-requested' });
   const installReceipt = await runDependencyInstall(workspacePath, installCommand, {
     run: options.run,
     resolveVersion: options.resolveVersion,
@@ -349,8 +351,13 @@ export async function materializeDependencyInstall(
     );
   }
   const imageRequired = Boolean(options.expectedLease || options.exactGenerationRemount);
+  let fallbackReason = imageRequired ? 'image-required' : 'directory-clone-not-requested';
   if (!imageRequired && options.cloneSourceWorkspace && await tryCloneDependencyDirectory({
     sourceWorkspace: options.cloneSourceWorkspace,
+    onDecision: async (decision) => {
+      if (decision.path === 'fallback') fallbackReason = decision.reason;
+      else await options.onSelection?.({ path: 'directory-clone', reason: decision.reason });
+    },
     afterClone: options.afterDependencyDirectoryClone,
     workspace,
     identity,
@@ -365,6 +372,8 @@ export async function materializeDependencyInstall(
     await options.persistReceipt?.(receipt);
     return { receipt, installReceipt: null };
   }
+  const onSelection = options.onSelection;
+  options = { ...options, onSelection: (selection) => onSelection?.({ ...selection, reason: fallbackReason }) ?? Promise.resolve() };
   if ((!enabled && !imageRequired) || platform !== 'darwin'
     || !await isDependencyImageRecipeEligible(workspace, recipe)) {
     if (imageRequired) {
@@ -447,6 +456,7 @@ export async function materializeDependencyInstall(
   let mount: Awaited<ReturnType<DependencyImageProvider['mount']>> | null = null;
   const prepared = { receipt: null as DependencyMaterializationReceipt | null };
   try {
+    await options.onSelection?.({ path: 'image', reason: fallbackReason });
     mount = await provider.mount({
       workspacePath: workspace,
       installCommand,
