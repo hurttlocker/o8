@@ -1,87 +1,53 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect -- extracted from Canvas.tsx */
 
 import { memo, useEffect, useState } from 'react';
 import { ExternalLink, Play } from './lucide-shims';
 import { MarkdownBody } from './MarkdownBody';
-import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { repoSlugFromRemote, readinessTone, formatAge, LIGHT_CANVAS_VARS, type CanvasRepoTaskLaunchRequest } from './canvas-utils';
+import { relativeAge } from '@/lib/util/relative-age';
+import { useIssueDetail } from './useIssueDetail';
 
-interface IssueDetail {
-  number: number;
-  title: string;
-  body: string;
-  state: string;
-  labels: { name: string; color: string }[];
-  author: string;
-  createdAt: string;
-  comments: number;
-  url: string;
-}
-
-export const IssueViewer = memo(function IssueViewer({
-  issueNumber,
-  repo,
-  onLaunchWorkspaceTask,
-}: {
+interface IssueViewerProps {
   issueNumber: number;
   repo?: string;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
-}) {
-  const [detail, setDetail] = useState<IssueDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+}
+
+function IssueViewerBase({
+  issueNumber,
+  repo,
+  onLaunchWorkspaceTask,
+}: IssueViewerProps) {
+  const detailQuery = useIssueDetail(repo, issueNumber);
+  const detail = detailQuery.data;
   const [launching, setLaunching] = useState(false);
   const [localRepo, setLocalRepo] = useState<Pick<RepoRegistryEntry, 'name' | 'localPath' | 'readiness'> | null>(null);
   const repoMissing = localRepo?.readiness?.state === 'missing';
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
-    fetch(`/api/panel/issues/${issueNumber}${repoParam}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setDetail(data.issue ?? data);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err.message);
-          setLoading(false);
-        }
-      });
-
-    return () => { cancelled = true; };
-  }, [issueNumber]);
-
-  useEffect(() => {
-    if (!repo) {
-      setLocalRepo(null);
-      return;
-    }
-    let cancelled = false;
-    fetch('/api/panel/repos')
+    if (!repo) return;
+    const controller = new AbortController();
+    fetch('/api/panel/repos', { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         const match = (data.repos ?? []).find((entry: RepoRegistryEntry) => repoSlugFromRemote(entry.remoteUrl) === repo);
         setLocalRepo(match ? { name: match.name, localPath: match.localPath, readiness: match.readiness } : null);
       })
       .catch(() => {
-        if (!cancelled) setLocalRepo(null);
+        if (!controller.signal.aborted) setLocalRepo(null);
       });
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [repo]);
 
-  if (loading) {
+  const retry = (
+    <button type="button" onClick={() => { void detailQuery.refetch(); }} style={{ background: 'var(--t-panel)', color: 'var(--t-text)', border: '1px solid var(--t-divider)', borderRadius: 6, cursor: 'pointer' }}>
+      Retry
+    </button>
+  );
+
+  if (detailQuery.isPending) {
     return (
       <div style={{ padding: 32, color: 'var(--t-text-muted)', fontSize: 13 }}>
         Loading issue #{issueNumber}...
@@ -89,10 +55,10 @@ export const IssueViewer = memo(function IssueViewer({
     );
   }
 
-  if (error || !detail) {
+  if (!detail) {
     return (
       <div style={{ padding: 32, color: '#ef4444', fontSize: 13 }}>
-        Failed to load issue #{issueNumber}: {error || 'Unknown error'}
+        Failed to load issue #{issueNumber}: {detailQuery.error?.message || 'Unknown error'} {retry}
       </div>
     );
   }
@@ -102,6 +68,11 @@ export const IssueViewer = memo(function IssueViewer({
 
   return (
     <div style={{ padding: '24px 32px' }}>
+      {detailQuery.isError ? (
+        <div role="status" style={{ marginBottom: 12, fontSize: 12, color: 'var(--t-text-muted)' }}>
+          Showing last successful issue · {relativeAge(detailQuery.dataUpdatedAt)}. Refresh failed. {retry}
+        </div>
+      ) : null}
       {/* Header */}
       <div style={{
         display: 'flex',
@@ -272,4 +243,10 @@ export const IssueViewer = memo(function IssueViewer({
       </div>
     </div>
   );
+}
+
+export const IssueViewer = memo(function IssueViewer(props: IssueViewerProps) {
+  const repo = props.repo?.trim() || undefined;
+  // Readiness and launch UI state belong to the displayed issue identity too.
+  return <IssueViewerBase key={JSON.stringify([repo?.toLowerCase() ?? null, props.issueNumber])} {...props} repo={repo} />;
 });
