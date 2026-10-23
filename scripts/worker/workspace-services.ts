@@ -57,7 +57,7 @@ async function stopAndWait(child: ChildProcess): Promise<void> {
 }
 
 async function runCommand(command: string, cwd: string, signal: AbortSignal, timeoutMs: number): Promise<void> {
-  if (signal.aborted) throw new Error('Workspace command was cancelled.');
+  if (signal.aborted) throw new DOMException('Workspace command was cancelled.', 'AbortError');
   const [program, args] = shell(command);
   await new Promise<void>((resolve, reject) => {
     const child = spawn(program, args, {
@@ -85,7 +85,7 @@ async function runCommand(command: string, cwd: string, signal: AbortSignal, tim
       // Setup commands may background children. They are never allowed to
       // outlive this command; long-lived processes belong in services.
       signalTree(child, 'SIGKILL');
-      if (signal.aborted) reject(new Error('Workspace command was cancelled.'));
+      if (signal.aborted) reject(new DOMException('Workspace command was cancelled.', 'AbortError'));
       else if (timedOut) reject(new Error('Workspace command timed out.'));
       else if (code !== 0) reject(new Error(`Workspace command exited with code ${code}.`));
       else resolve();
@@ -129,8 +129,11 @@ async function waitForHealth(service: WorkspaceManifestService, child: ChildProc
   const url = healthUrl(service);
   const timeoutMs = Math.min(MAX_HEALTH_TIMEOUT_MS, Math.max(1_000, service.health?.timeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS));
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (signal.aborted || child.exitCode !== null) throw new Error('Workspace service stopped before it became healthy.');
+  while (true) {
+    // The job monitor distinguishes cancellation from an independent service failure.
+    if (signal.aborted) throw new DOMException('Workspace service startup was cancelled.', 'AbortError');
+    if (Date.now() >= deadline) throw new Error('Workspace service health timed out.');
+    if (child.exitCode !== null) throw new Error('Workspace service stopped before it became healthy.');
     try {
       if (url) {
         const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(1_500) });
@@ -146,7 +149,6 @@ async function waitForHealth(service: WorkspaceManifestService, child: ChildProc
     } catch { /* The service may still be starting. */ }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error('Workspace service health timed out.');
 }
 
 export interface RunningWorkspaceServices {
