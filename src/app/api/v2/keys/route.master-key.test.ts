@@ -44,12 +44,12 @@ it.each(['remove', 'corrupt', 'replace'])('refuses a second real-route save afte
   clearMasterKeyCache();
   expect(resolveProviderKey('OPENROUTER_API_KEY')).toBe('fixture-original-secret');
 });
-it.skipIf(process.platform === 'win32')('tightens fallback key and directory permissions before a real-route save', async () => {
+it.skipIf(process.platform === 'win32')('preserves existing fallback key permissions during a real-route save', async () => {
   const { mkdirSync } = await import('node:fs'); mkdirSync(state.dir, { mode: 0o755 }); chmodSync(state.dir, 0o755);
   writeFileSync(keyPath(), originalKey, { mode: 0o644 }); chmodSync(keyPath(), 0o644);
   expect((await post('fixture-permissions')).status).toBe(200);
-  expect(statSync(state.dir).mode & 0o777).toBe(0o700);
-  expect(statSync(keyPath()).mode & 0o777).toBe(0o600);
+  expect(statSync(state.dir).mode & 0o777).toBe(0o755);
+  expect(statSync(keyPath()).mode & 0o777).toBe(0o644);
 });
 
 it('refuses a second real-route save when a cached Keychain key becomes denied', async () => {

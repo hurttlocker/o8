@@ -62,7 +62,7 @@ const PROVIDERS: ProviderKeyConfig[] = [
     envVar: 'ANTHROPIC_API_KEY',
     placeholder: 'sk-ant-...',
     docsUrl: 'https://console.anthropic.com/keys',
-    validateUrl: 'https://api.anthropic.com/v1/models',
+    validateUrl: 'https://api.anthropic.com/v1/messages',
   },
   {
     // BYOK for Symon Realtime mode (gpt-realtime). Free path — the user's key
@@ -75,30 +75,57 @@ const PROVIDERS: ProviderKeyConfig[] = [
     docsUrl: 'https://platform.openai.com/api-keys',
     validateUrl: 'https://api.openai.com/v1/models',
   },
-  { id: 'gemini', label: 'Gemini', envVar: 'GEMINI_API_KEY', placeholder: 'AIza...', docsUrl: 'https://aistudio.google.com/app/apikey', validateUrl: 'https://generativelanguage.googleapis.com/v1beta/models' },
-  { id: 'groq', label: 'Groq', envVar: 'GROQ_API_KEY', placeholder: 'gsk_...', docsUrl: 'https://console.groq.com/keys', validateUrl: 'https://api.groq.com/openai/v1/models' },
-  { id: 'elevenlabs', label: 'ElevenLabs', envVar: 'ELEVENLABS_API_KEY', placeholder: 'API key', docsUrl: 'https://elevenlabs.io/app/settings/api-keys', validateUrl: 'https://api.elevenlabs.io/v1/user' },
-  { id: 'google_tts', label: 'Google Cloud TTS', envVar: 'GOOGLE_TTS_API_KEY', placeholder: 'API key', docsUrl: 'https://console.cloud.google.com/apis/credentials' },
 ];
 
 async function validateKey(config: ProviderKeyConfig, key: string): Promise<{ valid: boolean; error?: string }> {
-  if (!config.validateUrl) return { valid: true, error: 'Provider does not support a key-only check. Saved without verification.' };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  if (!config.validateUrl) return { valid: true };
   try {
-    const headers: Record<string, string> = config.id === 'anthropic'
-      ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
-      : config.id === 'gemini' ? { 'x-goog-api-key': key }
-        : config.id === 'elevenlabs' ? { 'xi-api-key': key }
-          : { Authorization: `Bearer ${key}` };
-    const res = await fetch(config.validateUrl, { headers, redirect: 'error', signal: controller.signal });
-    await res.body?.cancel().catch(() => {});
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const headers: Record<string, string> = {};
+
+    if (config.id === 'anthropic') {
+      headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+      headers['content-type'] = 'application/json';
+      // Anthropic requires a POST to /messages — use a minimal request that will 400 but proves auth works
+      const res = await fetch(config.validateUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      // 200 or 400 (bad request) means the key authenticated — only 401/403 means invalid
+      if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+      return { valid: true };
+    }
+
+    if (config.id === 'google') {
+      const res = await fetch(config.validateUrl, {
+        headers: { 'x-goog-api-key': key },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (res.status === 400 || res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
+      return { valid: true };
+    }
+
+    if (config.id === 'github') {
+      headers['Authorization'] = `token ${key}`;
+    } else {
+      headers['Authorization'] = `Bearer ${key}`;
+    }
+
+    const res = await fetch(config.validateUrl, { headers, signal: controller.signal });
+    clearTimeout(timeout);
     if (res.status === 401 || res.status === 403) return { valid: false, error: 'Invalid API key' };
-    if (!res.ok) return { valid: true, error: `Provider validation unavailable (${res.status}). Saved without verification.` };
+    if (!res.ok) return { valid: true, error: `Provider validation unavailable (${res.status}) — key saved without verification` };
     return { valid: true };
   } catch {
-    return { valid: true, error: 'Could not validate (network error). Saved without verification.' };
-  } finally { clearTimeout(timeout); }
+    // Network error — don't block saving, just warn
+    return { valid: true, error: 'Could not validate (network error) — key saved anyway' };
+  }
 }
 
 function maskKey(key: string): string {
@@ -227,7 +254,7 @@ async function handlePATCH(request: NextRequest) {
   const config = PROVIDERS.find((provider) => provider.id === body?.provider);
   if (!config) return NextResponse.json({ error: 'Unknown provider' }, { status: 400 });
   const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
-  if (enabled === undefined && body.check !== true) {
+  if (enabled === undefined && (config.id !== 'openrouter' || body.check !== true)) {
     return NextResponse.json({ error: 'enabled (boolean) or check (true) is required' }, { status: 400 });
   }
 
@@ -238,12 +265,6 @@ async function handlePATCH(request: NextRequest) {
       mutateProviderKey(config.envVar, { enabled });
       resolveProviderKey(config.envVar);
       invalidateRuntimeAuthCache();
-    }
-    const key = resolveProviderKey(config.envVar);
-    if (body.check === true) {
-      if (!providerKeyEnabled(config.envVar) || !key) return NextResponse.json({ error: 'No enabled key is connected' }, { status: 409 });
-      const check = await validateKey(config, key);
-      return NextResponse.json({ success: check.valid, provider: config.id, warning: check.error, enabled: true });
     }
     return NextResponse.json({ success: true, provider: config.id, enabled: providerKeyEnabled(config.envVar) });
   }

@@ -142,12 +142,13 @@ export function purgeOwnedRuntimeArtifacts(): void {
   for (const record of records) decode(record);
   const entries = new Map(records.map(record => [record.path, { path: record.path, runtime: record.runtime }]));
   for (const record of discovered()) { const path = canonical(record.path); entries.set(path, { ...record, path }); }
-  const prepared: { path: string; safe: string }[] = [];
+  const prepared: { path: string; safe: string; changed: boolean }[] = [];
   for (const record of entries.values()) {
     assertRegular(record.path);
     if (!existsSync(record.path)) continue;
-    const safe = sanitizeRuntimeConfigText(record.path, readFileSync(record.path, 'utf8'), record.runtime);
-    prepared.push({ path: record.path, safe });
+    const raw = readFileSync(record.path, 'utf8');
+    const safe = sanitizeRuntimeConfigText(record.path, raw, record.runtime);
+    prepared.push({ path: record.path, safe, changed: raw !== safe });
   }
   // Refresh encrypted cleanup payloads before changing existing files. This also
   // preserves OAuth tokens refreshed by a CLI since its initial registration.
@@ -155,7 +156,7 @@ export function purgeOwnedRuntimeArtifacts(): void {
     const runtime = entries.get(record.path)!.runtime;
     return { path: record.path, runtime, owner: 'o8', replacement: encode(record.path, runtime, record.safe) };
   }));
-  for (const record of prepared) replaceOpened(record.path, record.safe);
+  for (const record of prepared) if (record.changed) replaceOpened(record.path, record.safe);
 }
 function knownOwnedPath(file: string): boolean {
   const roots = [getDataDir(), join(homedir(), '.openclaw-o8')];

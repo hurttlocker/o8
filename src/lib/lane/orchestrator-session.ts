@@ -1,5 +1,5 @@
 import { ensureMcpConfig } from './claude-orchestrator-mcp-config';
-import { sessions, getWarmState, clearIdleTimer, killOrchestratorProc, reapIdleForCapacity, settleOrchestratorTurn, handleClaudeJsonLine, spawnOrchestratorProc } from './orchestrator-resident-process';
+import { orchestratorProcessPolicyCurrent, withOrchestratorPromptPolicy, sessions, getWarmState, clearIdleTimer, killOrchestratorProc, reapIdleForCapacity, settleOrchestratorTurn, handleClaudeJsonLine, spawnOrchestratorProc } from './orchestrator-resident-process';
 export { getWarmState, attachOrchestratorProcHandlers } from './orchestrator-resident-process';
 /**
  * Resident Claude Code stream-json orchestrator. Each o8 chat owns one process,
@@ -613,6 +613,8 @@ export async function sendToOrchestrator(
   const systemPrompt = buildOrchestratorSystemPrompt(session.repoPath, { backend: 'claude', toolProfile });
   const promptFingerprint = orchestratorPromptFingerprint(systemPrompt);
 
+  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort });
+  if (session.proc && !orchestratorProcessPolicyCurrent(session.proc)) killOrchestratorProc(session, w, true);
   // Spawn a fresh proc when there's no warm one (first turn / after recycle).
   if (!session.proc) {
     reapIdleForCapacity(session.sessionName);
@@ -625,7 +627,6 @@ export async function sendToOrchestrator(
       throw e;
     }
   }
-  onEvent({ type: 'turn_receipt', leadModel: model, effort: thinkingEffort });
   // Attachments → image blocks. Same CLI contract as interactive-session.ts;
   // the message is written to the RESIDENT proc's still-open stdin (no
   // stdin.end() — the proc lives on for the next turn).
@@ -755,13 +756,13 @@ export async function sendToOrchestrator(
       }
 
       try {
-        proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
+        withOrchestratorPromptPolicy(proc, () => proc.stdin!.write(payload, 'utf8', (error?: Error | null) => {
           if (error) {
             console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
             session.status = 'dead';
             settleOrchestratorTurn(session, w, error);
           }
-        });
+        }));
       } catch (error) {
         session.status = 'dead';
         settleOrchestratorTurn(session, w, error instanceof Error ? error : new Error(String(error)));

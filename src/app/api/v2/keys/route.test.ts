@@ -15,7 +15,7 @@ const { clearMasterKeyCache } = await import('@/lib/db/master-key');
 const request = (method: string, body?: unknown) => new NextRequest('http://localhost/api/v2/keys', { method, ...(body ? { body: JSON.stringify(body) } : {}) });
 beforeEach(() => {
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 19).toString('base64url')); clearMasterKeyCache();
-  vi.stubEnv('OPENROUTER_API_KEY', ''); state.denied = false;
+  vi.stubEnv('OPENROUTER_API_KEY', ''); vi.stubEnv('OPENAI_API_KEY', ''); state.denied = false;
   rmSync(join(state.dir, 'providers'), { recursive: true, force: true });
   writeFileSync(join(state.dir, '.env.local'), '# preserve\nUNRELATED=value\n');
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
@@ -125,26 +125,33 @@ it('preserves encrypted credentials and connection state when the store cannot d
   }
 });
 
-it.each(['openai', 'anthropic', 'deepseek', 'gemini', 'groq', 'elevenlabs', 'google_tts'])('saves, checks, disables and removes the %s provider without an account', async (provider) => {
+it.each(['openai', 'anthropic', 'deepseek'])('keeps the existing %s save/remove surface and required revocation writes', async provider => {
   expect((await routes.POST(request('POST', { provider, key: 'synthetic-provider-key' }))).status).toBe(200);
-  expect((await routes.PATCH(request('PATCH', { provider, check: true }))).status).toBe(200);
   expect((await routes.PATCH(request('PATCH', { provider, enabled: false }))).status).toBe(200);
-  expect((await routes.PATCH(request('PATCH', { provider, check: true }))).status).toBe(409);
+  expect((await routes.PATCH(request('PATCH', { provider, check: true }))).status).toBe(400);
   expect((await routes.DELETE(request('DELETE', { provider }))).status).toBe(200);
 });
-it('never checks a provider key with a model completion', async () => {
-  await routes.POST(request('POST', { provider: 'anthropic', key: 'synthetic-provider-key' }));
-  expect(fetch).toHaveBeenCalledWith('https://api.anthropic.com/v1/models', expect.objectContaining({ headers: expect.objectContaining({ 'x-api-key': 'synthetic-provider-key' }) }));
-  expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true);
+it('keeps additional provider CRUD out of this policy change', async () => {
+  const inventory = await (await routes.GET(request('GET'))).json();
+  expect(inventory.providers.map((provider: { id: string }) => provider.id)).toEqual(['openrouter', 'deepseek', 'anthropic', 'openai']);
+  for (const provider of ['gemini', 'groq', 'elevenlabs', 'google_tts']) {
+    expect((await routes.POST(request('POST', { provider, key: 'fixture-deferred-key' }))).status).toBe(400);
+  }
 });
-
-it('encrypts supported legacy plaintext without copying project configuration', async () => {
-  writeFileSync(join(state.dir, '.env.local'), '# preserve\nGROQ_API_KEY=fixture-legacy-groq\nUNRELATED=value\n');
-  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'synthetic-migrating-key' }))).status).toBe(200);
+it('preserves unrelated existing plaintext and ciphertext during a save', async () => {
+  const { createCipheriv } = await import('node:crypto');
+  // Independent writer using the pre-upgrade AES-256-GCM format.
+  const iv = Buffer.alloc(12, 7);
+  const cipher = createCipheriv('aes-256-gcm', Buffer.alloc(32, 19), iv);
+  const encrypted = Buffer.concat([cipher.update('fixture-upgrade-key', 'utf8'), cipher.final(), cipher.getAuthTag()]);
+  const line = `OPENAI_API_KEY=enc:${iv.toString('hex')}:${encrypted.toString('hex')}`;
+  writeFileSync(join(state.dir, '.env.local'), `${line}\nGROQ_API_KEY=fixture-existing-groq\nUNRELATED=value\n`);
+  expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'synthetic-upgrade-key' }))).status).toBe(200);
   const raw = readFileSync(join(state.dir, '.env.local'), 'utf8');
-  expect(raw).toMatch(/^GROQ_API_KEY=enc:/m);
-  expect(raw).not.toContain('fixture-legacy-groq');
-  expect(raw).toContain('UNRELATED=value');
+  expect(raw).toContain(line);
+  expect(raw).toContain('GROQ_API_KEY=fixture-existing-groq');
+  const { resolveProviderKey } = await import('@/lib/providers/key-store');
+  expect(resolveProviderKey('OPENAI_API_KEY')).toBe('fixture-upgrade-key');
 });
 
 it('disabling an ambient provider preserves its environment credential for re-enable', async () => {
@@ -152,5 +159,6 @@ it('disabling an ambient provider preserves its environment credential for re-en
   expect((await routes.PATCH(request('PATCH', { provider: 'openai', enabled: false }))).status).toBe(200);
   expect(process.env.OPENAI_API_KEY).toBe('fixture-ambient-openai');
   await routes.PATCH(request('PATCH', { provider: 'openai', enabled: true }));
-  expect((await routes.PATCH(request('PATCH', { provider: 'openai', check: true }))).status).toBe(200);
+  const { resolveProviderKey } = await import('@/lib/providers/key-store');
+  expect(resolveProviderKey('OPENAI_API_KEY')).toBe('fixture-ambient-openai');
 });

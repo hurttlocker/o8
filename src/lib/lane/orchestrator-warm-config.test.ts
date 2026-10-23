@@ -48,6 +48,7 @@ vi.mock('./claude-harness-carrier', () => ({
 }));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-orchestrator-warm-config-'));
+process.env.O8_MASTER_KEY = Buffer.alloc(32, 59).toString('base64url');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_CLAUDE_CODE_BIN = process.execPath;
@@ -447,6 +448,10 @@ describe('warm orchestrator MCP config reuse', () => {
   });
 
   it('carries an explicitly selected API model through the real orchestrator launch path', async () => {
+    const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+    const { mutateProviderKey } = await import('@/lib/providers/key-store');
+    saveRuntimeBillingMode('claude-code', 'api');
+    mutateProviderKey('OPENROUTER_API_KEY', { key: 'api-carrier-token', enabled: true });
     carrierState.source = 'openrouter';
     carrierState.model = 'provider/frontier-model';
     carrierState.baseUrl = 'https://gateway.example/api';

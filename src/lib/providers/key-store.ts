@@ -108,13 +108,6 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     assertMasterKeyAvailableForMutation();
     assertProviderStoreAvailable();
     const updates = new Map<string, string | null>();
-    for (const provider of PROVIDER_ENV_KEYS) {
-      const legacy = values.get(provider);
-      if (legacy && !legacy.startsWith('enc:')) {
-        const { iv, ciphertext } = encryptValueSync(legacy);
-        updates.set(provider, `enc:${iv}:${ciphertext}`);
-      }
-    }
     const hashes = new Set<string>(JSON.parse(values.get(`O8_KEY_HASHES_${name}`) || '[]') as string[]);
     const lengths = new Set<number>(JSON.parse(values.get(`O8_KEY_LENGTHS_${name}`) || '[]') as number[]);
     const previous = values.get(name);

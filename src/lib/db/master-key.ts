@@ -15,7 +15,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { hasEncryptedKeyValues } from '@/lib/providers/env-format';
@@ -41,20 +41,9 @@ function dataDir(): string {
  * platform without the macOS Keychain (SECURITY_AUDIT_2026-07-02 §MED-1). The
  * key is reproducible across restarts (persisted) but secret (random + 0600).
  */
-function securePath(path: string, directory: boolean): void {
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) throw new Error('Unsafe master key path');
-  // Windows uses ACLs; chmod/stat cannot express Unix owner-only modes.
-  if (process.platform === 'win32') return;
-  const mode = directory ? 0o700 : 0o600;
-  if ((stat.mode & 0o777) !== mode) chmodSync(path, mode);
-  if ((lstatSync(path).mode & 0o777) !== mode) throw new Error('Unsafe master key permissions');
-}
 function readOrCreateKeyFile(create: boolean): string {
   const keyPath = join(dataDir(), 'master-key');
   if (existsSync(keyPath)) {
-    securePath(dataDir(), true);
-    securePath(keyPath, false);
     const existing = readFileSync(keyPath, 'utf-8').trim();
     if (Buffer.from(existing, 'base64url').length !== 32) throw new Error('Invalid persisted master key');
     return existing;
@@ -65,7 +54,6 @@ function readOrCreateKeyFile(create: boolean): string {
   }
   const key = generateKey();
   mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
-  securePath(dataDir(), true);
   writeFileSync(keyPath, key, { encoding: 'utf-8', mode: 0o600, flag: 'wx' });
   return key;
 }

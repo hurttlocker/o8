@@ -143,7 +143,7 @@ export function isOpenRouterEnabled(): boolean {
 export function setOpenRouterEnabled(enabled: boolean): OpenRouterConnectionRecord {
   const previous = readOpenRouterConnection();
   mutateProviderKey('OPENROUTER_API_KEY', { enabled });
-  return { ...previous, enabled };
+  return writeOpenRouterConnection({ ...previous, enabled });
 }
 
 export function recordOpenRouterCheck(key: string, result: OpenRouterCheckResult, now = new Date()): OpenRouterConnectionRecord {

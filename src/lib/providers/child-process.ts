@@ -42,12 +42,12 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    if (context?.runtimeId === 'codex') isolateCodexHome(env);
-    if (context?.runtimeId) assertOwnedArtifactsForLaunch(context.runtimeId, env, args);
+    if (context?.runtimeId === 'codex' || !context?.runtimeId && env.CODEX_HOME) isolateCodexHome(env);
+    assertOwnedArtifactsForLaunch(context?.runtimeId, env, args);
     stampChildPolicy(env);
     return create(env);
   };
-  return context?.runtimeId ? withProviderStoreLock(launch) : launch();
+  return withProviderStoreLock(launch);
 }
 
 export const spawn = ((...args: unknown[]) => invoke('spawn', args)) as typeof processApi.spawn;

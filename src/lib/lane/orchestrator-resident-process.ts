@@ -1,4 +1,6 @@
-import { childEnvironment, retainChildTransportCredentials } from '@/lib/providers/spawn-environment';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { withProviderStoreLock } from '@/lib/providers/store-lock';
+import { childEnvironment, childEnvironmentContext, retainChildTransportCredentials } from '@/lib/providers/spawn-environment';
 import { resolveProviderKey } from '@/lib/providers/key-store';
 import { spawn } from '@/lib/providers/child-process';
 import { closeSync } from 'node:fs';
@@ -15,6 +17,7 @@ import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
 import { crashSurvivableOrchestratorEnabled, createOrchestratorTurnRecord, openAppendFile, updateOrchestratorTurnPid, discardOrchestratorTurnRecord, finishOrchestratorTurn, type OrchestratorTurnRecord } from './orchestrator-crash-survival';
+import type { ChildProcess } from 'node:child_process';
 import type { WarmState, OrchestratorProcConfig } from './orchestrator-session-state';
 import type { OrchestratorSession } from './orchestrator-session';
 export const sessions = new Map<string, OrchestratorSession>();
@@ -22,6 +25,21 @@ export const sessions = new Map<string, OrchestratorSession>();
 const IDLE_REAP_MS = 30 * 60_000;
 const MAX_LIVE_PROCS = 4; // mirror the Brain warm-pool cap
 const warmStates = new Map<string, WarmState>();
+const processPolicies = new WeakMap<ChildProcess, string>();
+
+export function orchestratorProcessPolicyCurrent(proc: ChildProcess | null): boolean {
+  return !!proc && processPolicies.get(proc) === credentialPolicyFingerprint('claude-code');
+}
+
+export function withOrchestratorPromptPolicy(proc: ChildProcess, write: () => void): void {
+  withProviderStoreLock(() => {
+    if (!orchestratorProcessPolicyCurrent(proc)) {
+      proc.kill('SIGTERM');
+      throw new Error('Credentials or billing changed before prompt delivery. Retry the turn.');
+    }
+    write();
+  });
+}
 
 export function getWarmState(sessionName: string): WarmState {
   let w = warmStates.get(sessionName);
@@ -319,6 +337,7 @@ export function spawnOrchestratorProc(
     for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) if (carrierEnv[name] !== undefined) launchEnv[name] = carrierEnv[name];
     retainChildTransportCredentials(launchEnv, ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
   }
+  const policy = childEnvironmentContext(launchEnv)!.policy!;
   const proc = spawn(launch.command, launch.args, { windowsHide: true,
     cwd: session.repoPath,
     // Fable key injection stays scoped; the selected harness carrier contributes
@@ -329,6 +348,7 @@ export function spawnOrchestratorProc(
       ? ['pipe', stdoutFd, stderrFd]
       : ['pipe', 'pipe', 'pipe'],
   });
+  processPolicies.set(proc, policy);
   if (stdoutFd !== null) closeSync(stdoutFd);
   if (stderrFd !== null) closeSync(stderrFd);
   if (crashEnabled) proc.unref();

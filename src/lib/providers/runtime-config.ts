@@ -57,15 +57,20 @@ export function filterRuntimeConfig(value: unknown, runtimeId: string, provider 
   return out;
 }
 
+function parseWithoutSecrets<T>(parse: () => T): T {
+  try { return parse(); }
+  catch { throw new Error('Runtime credential configuration is invalid. Fix its syntax and retry.'); }
+}
+
 /** Parse before writing a destination, so even interrupted preparation has no plaintext window. */
 export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: string): string {
-  if (file.endsWith('.json')) return `${JSON.stringify(filterRuntimeConfig(JSON.parse(raw), runtimeId) ?? null, null, 2)}\n`;
+  if (file.endsWith('.json')) return `${JSON.stringify(filterRuntimeConfig(parseWithoutSecrets(() => JSON.parse(raw)), runtimeId) ?? null, null, 2)}\n`;
   if (file.endsWith('.toml')) {
-    const original = parseToml(raw);
+    const original = parseWithoutSecrets(() => parseToml(raw));
     const filtered = filterRuntimeConfig(original, runtimeId) as Record<string, unknown>;
     return JSON.stringify(original) === JSON.stringify(filtered) && !matchesProviderCredential(raw, providerCredentialMaterials()) ? raw : stringifyToml(filtered);
   }
-  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseYaml(raw), runtimeId));
+  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseWithoutSecrets(() => parseYaml(raw)), runtimeId));
   const materials = providerCredentialMaterials();
   return raw.split('\n').filter(line => {
     const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);

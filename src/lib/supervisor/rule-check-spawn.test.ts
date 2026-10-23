@@ -26,6 +26,8 @@ describe('child-process rule through the real git-backed entry point', () => {
   it.each([
     ["require alias", "const load = require; const cp = load('node:child_process'); cp.spawn('tool');"],
     ["require destructuring", "const { spawn: launch } = require('node:child_process'); launch('tool');"],
+    ["createRequire alias", "import { createRequire as make } from 'node:module'; const load = make(import.meta.url); const { spawn: launch } = load('node:child_process'); launch('tool');"],
+    ["createRequire namespace", "import * as mod from 'module'; const load = mod.createRequire(import.meta.url); load('child_process').execSync('tool');"],
     ["execa", "import { execa as launch } from 'execa'; launch('tool');"],
     ["worker threads", "const { Worker: Launch } = require('node:worker_threads'); new Launch('tool');"],
     ["shell string", "import { execSync } from 'node:child_process'; execSync('tool --header=secret');"],
@@ -112,6 +114,13 @@ describe('child-process rule through the real git-backed entry point', () => {
       'src/lib/providers/launch.ts': "import { spawn } from './child-process'; spawn('tool', [], { env: process.env });",
     }), 'HEAD');
     expect(result.violations.some(v => v.rule === 'spawn-environment')).toBe(true);
+  });
+
+  it('terminates alias analysis on circular assignments', async () => {
+    const result = await runRuleCheck(fixture({
+      'src/lib/example/launch.ts': "let load; load = load.bind('fixture'); load('node:child_process');",
+    }), 'HEAD');
+    expect(result.violations).toEqual([]);
   });
 
   it('checks the structural inline PTY module at its known raw boundary', async () => {

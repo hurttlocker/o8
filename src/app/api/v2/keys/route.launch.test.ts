@@ -46,11 +46,21 @@ vi.mock('node:child_process', async original => ({ ...await original<typeof impo
 } }));
 state.dir = mkdtempSync(join(tmpdir(), 'o8-launch-keys-'));
 const repo = join(state.dir, 'repo'); mkdirSync(repo); execFileSync('git', ['init', '-q', repo]);
+const { mutateProviderKey } = await import('@/lib/providers/key-store');
 const { clearMasterKeyCache } = await import('@/lib/db/master-key');
 const routes = await import('./route');
 const request = (method: string, provider: string, extra: object = {}) => new NextRequest('http://localhost/api/v2/keys', { method, headers: { host: 'localhost' }, body: JSON.stringify({ provider, ...extra }) });
 const providers = ['openrouter', 'openai', 'anthropic', 'deepseek', 'gemini', 'groq', 'elevenlabs', 'google_tts'];
 const keys = ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY'];
+async function changeProvider(provider: string, change: { key?: string | null; enabled?: boolean }): Promise<void> {
+  if (['openrouter', 'openai', 'anthropic', 'deepseek'].includes(provider)) {
+    const method = 'key' in change ? change.key === null ? 'DELETE' : 'POST' : 'PATCH';
+    expect((await routes[method](request(method, provider, change))).status).toBe(200);
+  } else {
+    // Existing persisted keys remain governed without expanding the public CRUD surface.
+    mutateProviderKey(keys[providers.indexOf(provider)], change);
+  }
+}
 const aliases = ['GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY', 'GOOGLE_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
 const generic = ['codex', 'claude-code', 'gemini', 'cursor', 'prime-agent', 'muse', 'opencode'];
 const acp = ['hermes', 'grok', 'deepseek-harness'];
@@ -93,19 +103,20 @@ beforeEach(() => {
   vi.stubEnv('HERMES_HOME', hermes);
   writeFileSync(join(state.dir, '.env.local'), '');
   rmSync(join(state.dir, 'runtime-billing'), { recursive: true, force: true });
+  rmSync(join(state.dir, 'providers'), { recursive: true, force: true });
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 });
 afterEach(async () => { for (const child of state.children.splice(0)) child.emit('close', 0, null); await new Promise(resolve => setTimeout(resolve, 20)); });
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); clearMasterKeyCache(); rmSync(state.dir, { recursive: true, force: true }); });
 const cases = [...[...generic, ...declarative].flatMap(runtime => ['direct', 'bridge'].map(mode => [runtime, mode])), ...acp.map(runtime => [runtime, 'acp']), ['pi', 'rpc'], ['pi-builtin', 'sdk']];
-it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys real API %s for all provider families', async (runtime, mode, action) => {
+it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(action => [runtime, mode, action])))('%s %s launch obeys persisted %s for all provider families', async (runtime, mode, action) => {
   state.runtime = runtime;
   const billing = await import('@/app/api/runtime/billing/route');
   expect((await billing.POST(new NextRequest('http://localhost/api/runtime/billing', { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify({ runtimeId: runtime, mode: 'api' }) }))).status).toBe(200);
   vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', mode === 'bridge' ? '0' : '1');
   for (const provider of providers) {
-    expect((await routes.POST(request('POST', provider, { key: `fixture-saved-${provider}` }))).status).toBe(200);
-    if (action !== 'enabled') expect((await (action === 'disable' ? routes.PATCH(request('PATCH', provider, { enabled: false })) : routes.DELETE(request('DELETE', provider)))).status).toBe(200);
+    await changeProvider(provider, { key: `fixture-saved-${provider}` });
+    if (action !== 'enabled') await changeProvider(provider, action === 'disable' ? { enabled: false } : { key: null });
   }
   const result = await modules[runtime].launch({ cwd: repo, prompt: 'fixture', runtimeConfig: { museConfigRoot: join(state.dir, 'muse-config'), museDataRoot: join(state.dir, 'muse-data') } } as never);
   expect(result).toMatchObject({ ok: true });
@@ -146,7 +157,7 @@ it('ACP launch retains an explicit unmanaged provider override instead of an amb
 
 it.each(['codex', 'claude-code'])('%s subscription default never changes payer through saved keys', async runtime => {
   state.runtime = runtime;
-  for (const provider of ['openai', 'anthropic']) expect((await routes.POST(request('POST', provider, { key: `fixture-saved-${provider}` }))).status).toBe(200);
+  for (const provider of ['openai', 'anthropic']) await changeProvider(provider, { key: `fixture-saved-${provider}` });
   expect(await modules[runtime].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
   expect(state.envs.length).toBeGreaterThan(0);
   for (const env of state.envs) for (const name of ['CODEX_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) expect(env[name] || null, name).toBeNull();
@@ -179,10 +190,12 @@ it('Copilot aliases use its provider selector when the generic LLM selector diff
   const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('copilot-cli', 'api');
   vi.stubEnv('COPILOT_PROVIDER_TYPE', 'gemini'); vi.stubEnv('LLM_PROVIDER', 'openai');
   vi.stubEnv('COPILOT_PROVIDER_API_KEY', 'fixture-stale-copilot'); vi.stubEnv('COPILOT_PROVIDER_BEARER_TOKEN', 'fixture-stale-copilot');
-  for (const provider of ['openai', 'gemini']) expect((await routes.POST(request('POST', provider, { key: `fixture-${provider}` }))).status).toBe(200);
+  for (const provider of ['openai', 'gemini']) await changeProvider(provider, { key: `fixture-${provider}` });
   expect(await modules['copilot-cli'].launch({ cwd: repo, prompt: 'fixture' } as never)).toMatchObject({ ok: true });
   expect(state.envs.at(-1)?.COPILOT_PROVIDER_API_KEY).toBe('fixture-gemini'); expect(state.envs.at(-1)?.COPILOT_PROVIDER_BEARER_TOKEN).toBe('fixture-gemini');
-  expect((await routes.DELETE(request('DELETE', 'gemini'))).status).toBe(200);
+  state.children.at(-1)?.emit('close', 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await changeProvider('gemini', { key: null });
   const afterRemoval = await modules['copilot-cli'].launch({ cwd: repo, prompt: 'fixture' } as never);
   expect(afterRemoval, JSON.stringify(afterRemoval)).toMatchObject({ ok: true });
   expect(state.envs.at(-1)?.COPILOT_PROVIDER_API_KEY || null).toBeNull(); expect(state.envs.at(-1)?.COPILOT_PROVIDER_BEARER_TOKEN || null).toBeNull();

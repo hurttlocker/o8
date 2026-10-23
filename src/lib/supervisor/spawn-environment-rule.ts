@@ -5,10 +5,11 @@ import type { RuleViolation } from './rule-check';
 const RAW_BOUNDARY = 'src/lib/providers/child-process.ts';
 const ENVIRONMENT_BUILDER = 'src/lib/providers/spawn-environment.ts';
 const METHODS = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']);
-type Origin = 'loader' | 'execa' | 'thread' | 'node' | 'wrapper' | 'pty' | 'process' | 'environment' | `call:${string}:${string}`;
+type Origin = 'module' | 'createRequire' | 'loader' | 'execa' | 'thread' | 'node' | 'wrapper' | 'pty' | 'process' | 'environment' | `call:${string}:${string}`;
 
 function moduleOrigin(name: string): Origin | undefined {
   if (name === 'child_process' || name === 'node:child_process') return 'node';
+  if (name === 'node:module' || name === 'module') return 'module';
   if (name === 'execa') return 'execa';
   if (name === 'worker_threads' || name === 'node:worker_threads') return 'thread';
   if (name === 'node-pty') return 'pty';
@@ -90,7 +91,7 @@ export function scanSpawnEnvironment(relPath: string, content: string): RuleViol
     violations.push({ file: relPath, line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1, rule, detail });
   };
 
-  function moduleName(node: ts.Node): string | undefined {
+  function moduleName(node: ts.Node, seen = new Set<ts.Node>()): string | undefined {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
       && ts.isStringLiteralLike(node.moduleSpecifier)) return node.moduleSpecifier.text;
     if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)
@@ -99,11 +100,12 @@ export function scanSpawnEnvironment(relPath: string, content: string): RuleViol
     }
     if (ts.isCallExpression(node) && node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])
       && (node.expression.kind === ts.SyntaxKind.ImportKeyword
-        || originOf(node.expression) === 'loader')) return node.arguments[0].text;
+        || originOf(node.expression, seen) === 'loader')) return node.arguments[0].text;
     return undefined;
   }
 
   function member(origin: Origin | undefined, key: string | undefined): Origin | undefined {
+    if (origin === 'module' && key === 'createRequire') return 'createRequire';
     if (origin === 'thread' && key === 'Worker') return 'call:thread:Worker';
     if (origin === 'execa' && key && ['execa', 'execaSync', 'execaCommand', 'execaCommandSync', '$'].includes(key)) return `call:execa:${key}`;
     if (origin === 'process' && key === 'env') return 'environment';
@@ -137,8 +139,9 @@ export function scanSpawnEnvironment(relPath: string, content: string): RuleViol
     const node = unwrap(expression);
     if (seen.has(node)) return undefined;
     const next = new Set(seen).add(node);
-    const importedModule = moduleName(node);
+    const importedModule = moduleName(node, next);
     if (importedModule) return originForModule(importedModule);
+    if (ts.isCallExpression(node) && originOf(node.expression, next) === 'createRequire') return 'loader';
     if (ts.isIdentifier(node)) {
       const symbol = ts.isShorthandPropertyAssignment(node.parent)
         ? checker.getShorthandAssignmentValueSymbol(node.parent) : checker.getSymbolAtLocation(node);
