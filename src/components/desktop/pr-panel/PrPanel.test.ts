@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invalidateSWR } from '@/lib/panel/fetch-cache';
@@ -16,21 +17,25 @@ function deferred() {
   const promise = new Promise<Response>((finish) => { resolve = finish; });
   return { promise, resolve };
 }
+let client: QueryClient;
+const provide = (child: ReactNode) => createElement(QueryClientProvider, { client }, child);
 let host: HTMLDivElement;
 let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn<() => void>>;
-const render = (prNumber: number, repoSlug = 'example/repo', active = true) => act(async () => root.render(createElement(PrPanel, { prNumber, repoSlug, onClose, active })));
+const settleTimeline = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+const render = (prNumber: number, repoSlug = 'example/repo', active = true) => act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, onClose, active }))));
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   invalidateSWR('pr-detail');
   invalidateSWR('pr-timeline');
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
 
 describe('pull request selection', () => {
   it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
@@ -141,7 +146,7 @@ describe('pull request selection', () => {
     fetchMock.mockResolvedValue(Response.json({ pr: detail(9501) }));
     const receive = vi.fn(); window.addEventListener('o8:open-composer-brain', receive);
     try {
-      await act(async () => root.render(createElement(PrPanel, { prNumber: 9501, repoSlug: 'example/repo', repoPath: '/workspace/repo', onClose })));
+      await act(async () => root.render(provide(createElement(PrPanel, { prNumber: 9501, repoSlug: 'example/repo', repoPath: '/workspace/repo', onClose }))));
       expect(host.querySelector('[data-pr-brain-chat]')).toBeNull();
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
       await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === 'Ask Brain')!.click());
@@ -153,7 +158,7 @@ describe('pull request selection', () => {
   });
   it('retains a separate comment draft and mode through PR switching without posting', async () => {
     fetchMock.mockImplementation(async (url: string) => Response.json({ pr: detail(Number(url.match(/prs\/(\d+)/)?.[1])) }));
-    const show = (prNumber: number, repoSlug = 'example/repo') => act(async () => root.render(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose })));
+    const show = (prNumber: number, repoSlug = 'example/repo') => act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose }))));
     const type = async (selector: string, text: string) => act(async () => { const input = host.querySelector<HTMLTextAreaElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
     await show(9601);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
@@ -180,7 +185,7 @@ describe('pull request selection', () => {
     });
     await render(9101);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/timeline'))).toBe(false);
-    const clickTimeline = async () => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((tab) => tab.textContent === 'Timeline')!.click());
+    const clickTimeline = async () => { await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((tab) => tab.textContent === 'Timeline')!.click()); await settleTimeline(); };
     await clickTimeline();
     expect(host.querySelector('[role="status"]')?.textContent).toContain('Loading activity for PR #9101');
     await render(9102);
@@ -189,6 +194,7 @@ describe('pull request selection', () => {
     await clickTimeline();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Activity interrupted');
     await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === 'Retry activity')!.click());
+    await settleTimeline();
     expect(host.querySelector('[aria-label="Pull request timeline"]')?.textContent).toContain('Selected discussion');
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('repo=example%2Frepo');
@@ -199,7 +205,9 @@ describe('pull request selection', () => {
     fetchMock.mockImplementation(async (url: string) => !url.includes('/timeline') ? Response.json({ pr: detail(9201) }) : url.includes('page=2') ? Response.json({ events: [event, { ...event, id: 'comment:2', body: 'Second comment' }], nextPage: null }) : Response.json({ events: [event], nextPage: 2 }));
     await render(9201);
     await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((tab) => tab.textContent === 'Timeline')!.click());
+    await settleTimeline();
     await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent === 'Load more activity')!.click());
+    await settleTimeline();
     expect(host.querySelectorAll('[aria-label="Pull request timeline"] li')).toHaveLength(3);
     expect((host.textContent || '').match(/First comment/g)).toHaveLength(1);
     expect(host.textContent).toContain('Second comment');

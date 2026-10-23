@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { getSWR, invalidateSWR, setSWR } from '@/lib/panel/fetch-cache';
+import { getSWR, setSWR } from '@/lib/panel/fetch-cache';
+import { invalidatePrTimeline } from './timeline-query-key';
 import type { PrMergeMethod, PrReviewAction } from './types';
 
 export type PrWriteAction = 'comment' | 'close-with-comment' | 'close' | 'merge' | 'draft' | 'ready' | 'enable-auto-merge' | 'disable-auto-merge' | PrReviewAction;
@@ -44,7 +45,7 @@ export function usePrComment(repo: string | null | undefined, number: number) {
       const detailKey = 'pr-detail:' + repo + ':' + number;
       const cached = getSWR<Record<string, unknown>>(detailKey).data;
       if (cached) setSWR(detailKey, { ...cached, loadedAt: 0 });
-      invalidateSWR('pr-timeline:' + repo + ':' + number);
+      invalidatePrTimeline(repo, number);
       window.dispatchEvent(new CustomEvent('o8:pr-updated', { detail: { repo, number, action } }));
       return true;
     } catch {
