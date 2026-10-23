@@ -108,6 +108,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   onClosePR,
 }: O8ActivityPaneProps) {
   const { workspaceGlass } = useTheme();
+  const [packetFallbackTimestamp] = useState(() => Date.now());
   const [filter, setFilter] = useState<O8FeedFilter>('all');
   const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -296,11 +297,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       // Comparison-group siblings — render only the leader, like the
       // Mission rail used to do via ComparisonCard.
       if (packet.comparisonGroupId && packet.comparisonIndex && packet.comparisonIndex > 0) continue;
-      const ts = parseTs(packet.lane?.lastEventAt) ?? parseTs(packet.lastEventAt) ?? Date.now();
+      const ts = parseTs(packet.lane?.lastEventAt) ?? parseTs(packet.lastEventAt) ?? packetFallbackTimestamp;
       items.push({ kind: 'packet', packet, ts, repo: packet.workspaceTargetPath ?? undefined });
     }
     return items;
-  }, [missionPackets]);
+  }, [missionPackets, packetFallbackTimestamp]);
 
   // Build sorted timeline
   const allItems = useMemo<ActivityItem[]>(() => {
