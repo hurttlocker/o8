@@ -318,6 +318,9 @@ async function applyLoadedManifest(input: {
       ...receipt,
       services: [...receipt.services, serviceReceipt],
     }));
+    if (health && !health.ok) {
+      throw new Error(`Service ${service.name} failed its ${health.kind.toUpperCase()} health check: ${health.error ?? 'Probe did not report ready.'}`);
+    }
   }
   await input.setStep('preview');
   const firstPort = services.map((service) => ports[service.name]).find((port) => port !== undefined);

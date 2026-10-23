@@ -7,6 +7,7 @@ import { validateComposerImageAttachments, composerBackendSupportsImages } from 
 import { isOrchestratorServiceTier } from './service-tier';
 import { isThinkingEffort } from './thinking-effort';
 import { isComposerWireMode } from './composer-wire';
+import { assertOrchestratorPermissionMode, isOrchestratorPermissionMode } from './permission-mode';
 import { COMPOSER_STEER_UNAVAILABLE_REASON, type ComposerQueuePayload, type ComposerQueueTarget, type QueuedComposerSendRecord } from './composer-queue-types';
 
 interface Row {
@@ -40,9 +41,10 @@ export function validateComposerQueuePayload(input: unknown): ComposerQueuePaylo
   if (!payload || typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 200_000
     || typeof payload.wireMessage !== 'string' || !payload.wireMessage.trim() || payload.wireMessage.length > 250_000
     || !routing || !isOrchestratorBackendId(routing.backend) || typeof routing.model !== 'string' || !routing.model.trim() || routing.model.length > 500
-    || !isThinkingEffort(routing.effort) || (routing.serviceTier !== undefined && !isOrchestratorServiceTier(routing.serviceTier)) || !['full', 'plan'].includes(routing.permissionMode)
+    || !isThinkingEffort(routing.effort) || (routing.serviceTier !== undefined && !isOrchestratorServiceTier(routing.serviceTier)) || !isOrchestratorPermissionMode(routing.permissionMode)
     || !['single', 'fleet', 'fusion'].includes(routing.mode) || !isComposerWireMode(routing.pickedMode)
     || typeof routing.collide !== 'boolean' || (routing.projectId !== undefined && (typeof routing.projectId !== 'string' || routing.projectId.length > 256))) throw new Error('The queued message needs a complete routing snapshot.');
+  assertOrchestratorPermissionMode(routing.collide && routing.mode !== 'single' ? 'collide' : routing.backend, routing.permissionMode);
   const images = validateComposerImageAttachments(payload.images);
   if ((payload.afterTaskId !== undefined && (typeof payload.afterTaskId !== 'string'
     || !/^[A-Za-z0-9_-]{1,160}$/.test(payload.afterTaskId) || routing.pinBackend !== true))
