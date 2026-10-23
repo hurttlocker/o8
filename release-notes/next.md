@@ -1,5 +1,4 @@
-- o8 is free. The plan, upgrade, billing and pricing screens are gone, and features that needed a plan now work for everyone.
-- Finished packets no longer keep a full copy of the repository on disk. Closing or archiving a clean, finished packet frees its checkout, and Rust workers share one build cache.
-- A message sent to a busy worker waits in a queue and is delivered when the worker is ready, instead of being refused.
-- A worker launch no longer fails when preparing its checkout outlasts the launch watchdog. Mission status shows a stuck packet as blocked, with the real reason.
-- Pull request, issue, CI run and activity views share cached GitHub reads. The app makes fewer GitHub requests and keeps showing the last data when a refresh fails.
+- The updater checks for updates on its own, even when no window is open, and never installs from an old check. Parked or finished lanes no longer block an update.
+- An update waits for live work to finish, and a crashed merge or terminal can no longer block updates forever. A forced update always goes through and records what was running.
+- Workers start much faster. Build caches and dependencies are cloned in one step instead of copied file by file.
+- More panels share cached GitHub reads and keep their last data when a refresh fails: pull request details, CI details, activity hovers and Diagnostics counts.

@@ -76,6 +76,9 @@ beforeEach(async () => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+  // Native check state exists before the display mounts.
+  await stateRoute.POST(new Request('http://localhost/api/panel/app/update-state', { method: 'POST',
+    body: JSON.stringify({ updatePending: true, version: '0.1.999', checkOutcome: 'available', checkedAt: new Date().toISOString() }) }));
   // The navigation rail renders the quiet card.
   await act(async () => root.render(createElement(UpdateCard, { quiet: true })));
   await waitFor(async () => ((await (await stateRoute.GET()).json()).state.updatePending ? true : undefined), 'the check to reach the server');

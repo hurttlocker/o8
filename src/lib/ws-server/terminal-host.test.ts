@@ -1,4 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { reserveWorkLaunch, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
+const data = mkdtempSync(join(tmpdir(), 'o8-terminal-host-'));
+vi.stubEnv('O8_DATA_DIR', data);
+vi.stubEnv('CORTEX_IDE_DATA_DIR', data);
+const leases: WorkLaunchLease[] = [];
+function admissionId(): string {
+  const lease = reserveWorkLaunch('Terminal host fixture'); leases.push(lease); return lease.id;
+}
+afterEach(() => { for (const lease of leases.splice(0)) lease.release(); });
+afterAll(() => { vi.unstubAllEnvs(); rmSync(data, { recursive: true, force: true }); });
 import { createTerminalHostChild, type ChildPty } from './terminal-host-child';
 import { createChildTerminalHost } from './terminal-host-client';
 import type { TerminalHostEvent, TerminalHostRequest } from './terminal-host-protocol';
@@ -38,6 +51,7 @@ describe('createTerminalHostChild (unit, fake pty)', () => {
 
     const spawnReq: TerminalHostRequest = {
       type: 'spawn',
+      admissionId: admissionId(),
       id: 'a',
       spec: { file: '/bin/sh', args: [], cols: 80, rows: 24, cwd: '/tmp', env: {} },
     };
@@ -65,7 +79,7 @@ describe('createTerminalHostChild (unit, fake pty)', () => {
       spawn: () => { throw new Error('node-pty not available'); },
       send: (e) => sent.push(e),
     });
-    child.handle({ type: 'spawn', id: 'z', spec: { file: 'x', args: [], cols: 1, rows: 1, cwd: '/', env: {} } });
+    child.handle({ type: 'spawn', admissionId: admissionId(), id: 'z', spec: { file: 'x', args: [], cols: 1, rows: 1, cwd: '/', env: {} } });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ type: 'spawn-error', id: 'z' });
     expect(child.size()).toBe(0);

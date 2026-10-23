@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ home: '', selected: '', publish: vi.fn(async () => true), drain: vi.fn(() => ({ draining: true })) }));
-const root = mkdtempSync(join(tmpdir(), 'o8-installer-restart-'));
+const fixture = vi.hoisted(() => ({ home: '', selected: '', publish: vi.fn(async () => true), drain: vi.fn(() => ({ draining: true })),
+  downloadStarted: vi.fn(), guardedInstall: vi.fn(), unsafeExit: vi.fn(), finishDownload: undefined as (() => void) | undefined }));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-installer-restart-')));
 const dataDir = join(root, 'data');
 fixture.home = join(root, 'home');
 fixture.selected = join(fixture.home, '.o8/bin/claude');
@@ -16,8 +17,33 @@ vi.stubEnv('CLAUDE_CONFIG_DIR', join(fixture.home, '.claude'));
 mkdirSync(dataDir, { recursive: true });
 writeFileSync(join(dataDir, 'ws-token'), 'installer-fixture-operator');
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.home }));
+vi.mock('node:child_process', async original => {
+  const child = await original<typeof import('node:child_process')>();
+  const { promisify } = await import('node:util');
+  const run = promisify(child.execFile);
+  // Host provider processes are outside this fixture. The selected executable,
+  // installer process, ownership files and update route remain real.
+  const execFile = Object.assign((...args: Parameters<typeof child.execFile>) => Reflect.apply(child.execFile, undefined, args), {
+    [promisify.custom]: async (file: string, args: string[], options: object) => file === '/bin/ps'
+      ? { stdout: '', stderr: '' } : run(file, args, options),
+  });
+  return { ...child, execFile };
+});
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: fixture.publish }));
 vi.mock('@/lib/cloud/job-queue', () => ({ beginJobDrain: fixture.drain }));
+vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => true }));
+vi.mock('@/lib/app-update/check', () => ({ check: async () => ({ rid: 7, version: '0.2.0', installExits: true,
+  downloadAndInstall: async () => { fixture.downloadStarted(); await new Promise<void>(resolve => { fixture.finishDownload = resolve; }); fixture.unsafeExit(); throw new Error('unguarded installer exit'); } }) }));
+vi.mock('@tauri-apps/api/core', () => ({ Channel: class { onmessage?: unknown }, invoke: async (command: string) => {
+  if (command === 'download_app_update') { fixture.downloadStarted(); await new Promise<void>(resolve => { fixture.finishDownload = resolve; }); return 23; }
+  if (command === 'discard_app_update_download') return;
+  if (command === 'install_app_update') {
+    fixture.guardedInstall();
+    const { inspectCliOperationAdmission: inspect } = await import('@/lib/setup/cli-operation-admission');
+    if (inspect().blocked) throw new Error('cli_operation_blocked: executable CLI installer is active');
+  }
+  throw new Error(`Unexpected native command ${command}`);
+} }));
 vi.mock('@/lib/app-update/idle-window', () => ({ getUpdateIdleWindow: async () => ({ idle: true, idleExceptParked: true, parkedLanes: [], unavailable: [],
   active: { lanes: [], ownedSessions: [], managedRuns: [], terminalSessions: [], cloudJobs: [] } }) }));
 vi.mock('@/lib/runtimes/shared/cli-resolver', async original => ({
@@ -37,11 +63,21 @@ const receipt = () => JSON.parse(readFileSync(join(dataDir, 'claude-code-cli-upd
 const request = (path: string, body: unknown = {}) => new Request(`http://localhost${path}`, { method: 'POST',
   headers: { Authorization: 'Bearer installer-fixture-operator', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
+async function installerStarted(pending: Promise<Response>) {
+  let early: Response | undefined;
+  void pending.then(response => { early = response; });
+  await vi.waitFor(async () => {
+    if (early) throw new Error(`Installer returned before launch: ${await early.clone().text()}`);
+    expect(existsSync(join(root, 'started'))).toBe(true);
+  }, { timeout: 5_000 });
+}
+
 beforeEach(() => {
   rmSync(fixture.home, { recursive: true, force: true });
   for (const name of readdirSync(dataDir)) if (name !== 'ws-token') rmSync(join(dataDir, name), { recursive: true, force: true });
   for (const name of ['started', 'release']) rmSync(join(root, name), { force: true });
   fixture.publish.mockClear(); fixture.drain.mockClear();
+  fixture.downloadStarted.mockClear(); fixture.guardedInstall.mockClear(); fixture.unsafeExit.mockClear(); fixture.finishDownload = undefined;
   setAppUpdateState({ updatePending: true, version: '0.1.999' });
   const versions = join(fixture.home, '.local/share/claude/versions');
   const launcher = join(fixture.home, '.local/bin/claude');
@@ -68,11 +104,11 @@ const timer = setInterval(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true }); });
 
-it('defers another client restart and forced apply while an executable installer owns admission, then releases after verification', async () => {
+it('defers normal restart but records and accepts forced apply while a real installer owns admission', async () => {
   const pending = updates.POST(request('/api/setup/cli-updates', { runtime: 'claude-code' }));
   let installation: Response;
   try {
-    await vi.waitFor(() => expect(existsSync(join(root, 'started'))).toBe(true));
+    await installerStarted(pending);
     expect(receipt()).toMatchObject({ status: 'installing', selectedPath: fixture.selected });
     const restart = await relaunch.POST(request('/api/panel/app/relaunch'));
     const restartPayload = await restart.json();
@@ -80,15 +116,25 @@ it('defers another client restart and forced apply while an executable installer
     expect(restartPayload).toMatchObject({ relaunched: false, error: { code: 'cli_update_in_progress' } });
     expect(inspectCliOperationAdmission()).toMatchObject({ blocked: true, installers: [{ runtime: 'claude-code', state: 'active' }] });
     const forced = await apply.POST(request('/api/panel/update/apply', { force: true }));
-    expect(forced.status).toBe(409);
-    expect(fixture.publish).not.toHaveBeenCalled(); expect(fixture.drain).not.toHaveBeenCalled();
+    expect(forced.status).toBe(202);
+    const receipts = readdirSync(join(dataDir, 'forced-restarts'));
+    expect(receipts).toHaveLength(1);
+    expect(readFileSync(join(dataDir, 'forced-restarts', receipts[0]), 'utf8')).toContain('claude-code');
+    expect(fixture.publish).toHaveBeenCalledOnce(); expect(fixture.drain).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/api/panel/update/apply') ? apply.POST(new Request(String(input), init)) : new Response('2.0.2')));
+    const { handleUpdateApply } = await import('@/lib/mcp/operator-handlers/update');
+    expect((await handleUpdateApply({ force: true })).isError).toBe(false);
+    expect((await relaunch.POST(request('/api/panel/app/relaunch', { force: true }))).status).toBe(200);
+    expect(readdirSync(join(dataDir, 'forced-restarts'))).toHaveLength(3);
+    expect(fixture.publish).toHaveBeenCalledTimes(3);
     process.kill(Number(readFileSync(join(root, 'started'), 'utf8')), 0);
   } finally { writeFileSync(join(root, 'release'), 'finish'); installation = await pending; }
   expect(installation.status).toBe(200);
   expect(receipt()).toMatchObject({ status: 'succeeded', targetVersion: '2.0.2' });
   expect(existsSync(lockPath)).toBe(false); expect(existsSync(reservationPath)).toBe(false);
   expect((await relaunch.POST(request('/api/panel/app/relaunch'))).status).toBe(200);
-  expect(fixture.drain).not.toHaveBeenCalled(); expect(fixture.publish).toHaveBeenCalledOnce();
+  expect(fixture.drain).not.toHaveBeenCalled(); expect(fixture.publish).toHaveBeenCalledTimes(4);
   expect(readFileSync(join(fixture.home, '.claude/settings.json'), 'utf8')).toBe('{"autoUpdatesChannel":"stable"}');
 }, 15_000);
 
@@ -102,6 +148,25 @@ it('refuses a new installer after native restart reserves the same persisted slo
   expect(existsSync(join(reservationPath, `${id}.json`))).toBe(true);
 });
 
+it('holds Windows installation when a real CLI installer starts during artifact download', async () => {
+  const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
+  const app = installUpdateAndRestart();
+  const outcome = app.then(value => ({ value, error: null }), error => ({ value: null, error: String(error) }));
+  await vi.waitFor(() => expect(fixture.downloadStarted).toHaveBeenCalledOnce());
+  const cli = updates.POST(request('/api/setup/cli-updates', { runtime: 'claude-code' }));
+  try {
+    await installerStarted(cli);
+    expect(receipt().status).toBe('installing');
+    fixture.finishDownload!();
+    expect((await outcome).error).toMatch(/cli_operation_blocked/);
+    expect(fixture.guardedInstall).toHaveBeenCalledOnce();
+    expect(fixture.unsafeExit).not.toHaveBeenCalled();
+    process.kill(Number(readFileSync(join(root, 'started'), 'utf8')), 0);
+  } finally { writeFileSync(join(root, 'release'), 'finish'); fixture.finishDownload?.(); await cli; }
+  expect(receipt().status).toBe('succeeded');
+  expect(existsSync(reservationPath)).toBe(false);
+}, 15_000);
+
 it('keeps interrupted and legacy installer owners held with a recovery reason', async () => {
   const deadPid = Number(execFileSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).trim());
   const id = randomUUID(); mkdirSync(reservationPath);
@@ -110,10 +175,10 @@ it('keeps interrupted and legacy installer owners held with a recovery reason', 
   const response = await relaunch.POST(request('/api/panel/app/relaunch'));
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ error: { code: 'cli_update_recovery_required', message: expect.stringContaining('no lock was removed') } });
-  expect(inspectCliOperationAdmission().installers[0]).toMatchObject({ state: 'interrupted' });
+  expect(inspectCliOperationAdmission().installers[0]).toMatchObject({ state: 'unconfirmed' });
   expect(fixture.publish).not.toHaveBeenCalled(); expect(fixture.drain).not.toHaveBeenCalled();
   expect(readFileSync(join(dataDir, 'codex-cli-update.lock'), 'utf8')).toBe('legacy-owner');
-  expect(existsSync(join(reservationPath, `${id}.json`))).toBe(true);
+  expect(existsSync(join(reservationPath, `${id}.json`))).toBe(false);
 });
 
 it('an old installer cleanup cannot remove a replacement operation or legacy lock', () => {

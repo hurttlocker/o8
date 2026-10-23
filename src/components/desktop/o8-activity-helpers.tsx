@@ -9,6 +9,7 @@ import type React from 'react';
 import { useCallback, useState } from 'react';
 import type { ActivityItem, FeedFilter } from './agent-panel/types';
 import { relativeAge } from './agent-panel/shared';
+import { O8ActivityCIDetail } from './O8ActivityCIDetail';
 
 // ── Phosphor-style SVG icons (raw, per CLAUDE.md) ──
 
@@ -449,19 +450,12 @@ interface PRExpandDetail {
   files: { path: string; additions: number; deletions: number }[];
 }
 
-interface CIExpandDetail {
-  failingJobs: { name: string; failingStep: string | null }[];
-  summaryLine: string | null;
-}
-
 export type ExpandDetails = {
   pr: Record<string, PRExpandDetail>;
-  ci: Record<string, CIExpandDetail>;
 };
 
 export function useExpandDetails() {
   const [prDetails, setPrDetails] = useState<Record<string, PRExpandDetail>>({});
-  const [ciDetails, setCiDetails] = useState<Record<string, CIExpandDetail>>({});
 
   const fetchForItem = useCallback((item: ActivityItem, key: string) => {
     if (item.kind === 'pr' && !prDetails[key]) {
@@ -478,28 +472,9 @@ export function useExpandDetails() {
         })
         .catch(() => {});
     }
-    if (item.kind === 'ci' && !ciDetails[key]) {
-      fetch(`/api/panel/ci/${item.id}?repo=${encodeURIComponent(item.repo)}`)
-        .then((r) => r.json())
-        .then((d) => {
-          if (d?.error) return;
-          const jobs = (d.run?.jobs ?? []) as { name: string; conclusion: string; steps?: { name: string; conclusion: string }[] }[];
-          const failingJobs = jobs
-            .filter((j) => j.conclusion?.toLowerCase() === 'failure')
-            .map((j) => ({ name: j.name, failingStep: j.steps?.find((s) => s.conclusion?.toLowerCase() === 'failure')?.name ?? null }))
-            .slice(0, 3);
-          const summaryLine = String(d.logs ?? '')
-            .split('\n')
-            .find((l: string) => l.includes('##[error]') || l.toLowerCase().includes('error ts') || l.toLowerCase().includes('failed'))
-            ?.replace(/^.*##\[error\]/, '')
-            .trim() ?? null;
-          setCiDetails((prev) => ({ ...prev, [key]: { failingJobs, summaryLine } }));
-        })
-        .catch(() => {});
-    }
-  }, [prDetails, ciDetails]);
+  }, [prDetails]);
 
-  return { prDetails, ciDetails, fetchForItem };
+  return { prDetails, fetchForItem };
 }
 
 // ── Expanded row detail content ──
@@ -569,9 +544,8 @@ function DetailActionButton({ label, onClick }: { label: string; onClick: () => 
 export function renderExpandedDetail(
   item: ActivityItem,
   prDetails: Record<string, PRExpandDetail>,
-  ciDetails: Record<string, CIExpandDetail>,
   key: string,
-  actions?: { onOpenPr?: (item: Extract<ActivityItem, { kind: 'pr' }>) => void },
+  actions?: { active?: boolean; onOpenPr?: (item: Extract<ActivityItem, { kind: 'pr' }>) => void },
 ): React.ReactNode {
   if (item.kind === 'commit') {
     return (
@@ -632,7 +606,6 @@ export function renderExpandedDetail(
   }
 
   if (item.kind === 'ci') {
-    const detail = ciDetails[key];
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -641,24 +614,28 @@ export function renderExpandedDetail(
             {item.workflow} on {item.branch}
           </span>
         </div>
-        {detail?.failingJobs && detail.failingJobs.length > 0 ? (
-          <div>
-            <div style={DETAIL_LABEL_STYLE}>Failing jobs</div>
-            {detail.failingJobs.map((j) => (
-              <div key={j.name} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 6, alignItems: 'center' }}>
-                <IconXCircle size={10} color={ACTIVITY_COLORS.danger} />
-                <span>{j.name}</span>
-                {j.failingStep ? <span style={{ color: 'var(--t-text-faint)' }}>{j.failingStep}</span> : null}
-              </div>
-            ))}
-          </div>
-        ) : detail === undefined && item.conclusion === 'failure' ? (
-          <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
-        ) : null}
-        {detail?.summaryLine ? (
-          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 350 }}>
-            {detail.summaryLine.slice(0, 200)}
-          </div>
+        {actions?.active !== false ? (
+          <O8ActivityCIDetail repo={item.repo} runId={item.id}>
+            {(detail) => <>
+              {detail?.failingJobs && detail.failingJobs.length > 0 ? (
+                <div>
+                  <div style={DETAIL_LABEL_STYLE}>Failing jobs</div>
+                  {detail.failingJobs.map((j) => (
+                    <div key={j.name} style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <IconXCircle size={10} color={ACTIVITY_COLORS.danger} />
+                      <span>{j.name}</span>
+                      {j.failingStep ? <span style={{ color: 'var(--t-text-faint)' }}>{j.failingStep}</span> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {detail?.summaryLine ? (
+                <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 350 }}>
+                  {detail.summaryLine.slice(0, 200)}
+                </div>
+              ) : null}
+            </>}
+          </O8ActivityCIDetail>
         ) : null}
       </div>
     );
