@@ -49,6 +49,16 @@ function Workspace({ current = packets }: { current?: OrchestratorPacket[] }) {
   });
 }
 
+function workerControls(host: HTMLElement, title: string) {
+  const close = host.querySelectorAll<HTMLButtonElement>(`button[aria-label="Hide ${title} pane"]`);
+  expect(close).toHaveLength(1);
+  const pane = close[0].closest<HTMLElement>('[data-worker-pane]');
+  expect(pane).not.toBeNull();
+  const inputs = pane!.querySelectorAll<HTMLTextAreaElement>('textarea[aria-label="Message this worker"]');
+  expect(inputs).toHaveLength(1);
+  return { close: close[0], input: inputs[0] };
+}
+
 it('opens existing mixed-runtime worker chats beside the parent and steers only the selected worker', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -66,14 +76,19 @@ it('opens existing mixed-runtime worker chats beside the parent and steers only 
     const open = (title: string) => host.querySelector<HTMLButtonElement>(`[title="Open ${title}"]`)!.click();
     await act(async () => open('Code worker'));
     await act(async () => open('Code worker'));
-    expect(host.querySelectorAll('[aria-label="Message Code worker"]')).toHaveLength(1);
+    const codeInput = workerControls(host, 'Code worker').input;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(codeInput, 'Keep my first worker draft');
+      codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     await act(async () => open('Review worker'));
-    expect(host.querySelectorAll('[aria-label^="Message "]')).toHaveLength(2);
+    expect(host.querySelectorAll('textarea[aria-label="Message this worker"]')).toHaveLength(2);
+    expect(workerControls(host, 'Code worker').input).toBe(codeInput);
     expect(host.querySelectorAll('[data-o8-composer-root]')).toHaveLength(2);
     expect(host.querySelectorAll('[data-testid="composer-send-control"]')).toHaveLength(2);
     expect(host.textContent).not.toContain(' · Steer');
     expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0);
-    const input = host.querySelector<HTMLTextAreaElement>('[aria-label="Message Review worker"]')!;
+    const input = workerControls(host, 'Review worker').input;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Review the current patch');
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -85,6 +100,7 @@ it('opens existing mixed-runtime worker chats beside the parent and steers only 
     expect(JSON.parse(sends[0][1]!.body as string)).toEqual({ action: 'steer', surfaceId: 'claude-code-owned:Review worker', clientMutationId: expect.stringMatching(/^mutation-worker-card-\d+$/), message: 'Review the current patch' });
     expect(host.querySelector('[data-worker-steer-receipt]')).toBeNull();
     expect(input.value).toBe('');
+    expect(codeInput.value).toBe('Keep my first worker draft');
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="Orchestrator draft"]')!.value).toBe('Keep my orchestrator draft');
   } finally {
     await act(async () => root.unmount()); host.remove(); localStorage.clear(); context.value = null; vi.unstubAllGlobals();
@@ -159,14 +175,12 @@ it('reopens a completed Shared worker from saved membership and retains independ
     expect(fetcher.mock.calls.length).toBe(before + 1);
     const open = () => host.querySelector<HTMLButtonElement>('[title="Open Shared worker"]')!.click();
     await act(async () => { open(); open(); });
-    expect(host.querySelectorAll('[aria-label="Message Shared worker"]')).toHaveLength(1);
-    const close = host.querySelector<HTMLButtonElement>('[aria-label="Hide Shared worker pane"]');
-    expect(close).not.toBeNull();
-    await act(async () => close!.click());
-    expect(host.querySelector('[aria-label="Message Shared worker"]')).toBeNull();
+    const { close } = workerControls(host, 'Shared worker');
+    await act(async () => close.click());
+    expect(host.querySelector('button[aria-label="Hide Shared worker pane"]')).toBeNull();
+    expect(host.querySelector('textarea[aria-label="Message this worker"]')).toBeNull();
     await act(async () => open());
-    const input = host.querySelector<HTMLTextAreaElement>('[aria-label="Message Shared worker"]')!;
-    expect(input).not.toBeNull();
+    const input = workerControls(host, 'Shared worker').input;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Follow up in the same worker');
       input.dispatchEvent(new Event('input', { bubbles: true }));

@@ -14,16 +14,11 @@
  */
 
 import { join } from 'node:path';
-import { BACKGROUND_CONTEXT, withAbortSignal } from '@earendil-works/chord/context';
-import { createModels, type Message, type Models } from '@earendil-works/pi-ai';
-import {
-  createRegistry,
-  defineDoc,
-  defineExtension,
+import type { Message, Models } from '@earendil-works/pi-ai';
+import type {
   Harness,
-  section,
-  type Conversation,
-  type EntryRecord,
+  Conversation,
+  EntryRecord,
 } from '@earendil-works/pi-durable';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { requirePiNode } from '@/lib/pi/sdk/platform';
@@ -101,11 +96,6 @@ const SYMON_PROMPT = [
   'Never invent results, files, messages or actions.',
 ].join(' ');
 
-const SymonExtension = defineExtension({
-  name: 'symon',
-  sections: [section('preamble', () => SYMON_PROMPT, { tag: false })],
-});
-
 type DirectoryRow = {
   id: string;
   source: SymonConversationSource;
@@ -116,12 +106,28 @@ type DirectoryRow = {
 
 type DirectoryState = { conversations: { [key: string]: DirectoryRow } };
 
-const Directory = defineDoc<DirectoryState>({
-  kind: 'symon.directory',
-  version: 1,
-  scope: 'session',
-  initial: () => ({ conversations: {} }),
-});
+// Dynamic imports preserve the SDK's import-only exports under the tsx CommonJS dev host.
+async function loadSymonSdk() {
+  const [context, ai, durable] = await Promise.all([
+    import('@earendil-works/chord/context'),
+    import('@earendil-works/pi-ai'),
+    import('@earendil-works/pi-durable'),
+  ]);
+  return {
+    BACKGROUND_CONTEXT: context.BACKGROUND_CONTEXT,
+    withAbortSignal: context.withAbortSignal,
+    createModels: ai.createModels,
+    createRegistry: durable.createRegistry,
+    Harness: durable.Harness,
+    extension: durable.defineExtension({
+      name: 'symon',
+      sections: [durable.section('preamble', () => SYMON_PROMPT, { tag: false })],
+    }),
+    directory: durable.defineDoc<DirectoryState>({
+      kind: 'symon.directory', version: 1, scope: 'session', initial: () => ({ conversations: {} }),
+    }),
+  };
+}
 
 const SOURCE_INSTRUCTIONS: Record<SymonConversationSource, string> = {
   messages: 'This conversation is a text-message thread. Keep replies short enough to read on a phone.',
@@ -157,15 +163,12 @@ function failureText(detail: unknown, depth = 0): string | null {
   return null;
 }
 
-function timeoutContext(ms: number) {
-  return withAbortSignal(AbortSignal.timeout(Math.max(1, ms)), BACKGROUND_CONTEXT);
-}
-
 export class SymonBrain {
   private constructor(
     private readonly harness: Harness,
     private readonly model: { provider: string; modelId: string },
     private readonly tools: SymonO8Tools | null,
+    private readonly sdk: Awaited<ReturnType<typeof loadSymonSdk>>,
   ) {}
 
   static async open(options: SymonBrainOptions): Promise<SymonBrain> {
@@ -174,16 +177,18 @@ export class SymonBrain {
     // node:sqlite, and a static import would break every route that imports
     // this module there (#3486).
     requirePiNode();
+    const sdk = await loadSymonSdk();
+    const { createModels, createRegistry, Harness, BACKGROUND_CONTEXT } = sdk;
     const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
-    const models = options.models ?? (() => {
+    const models = options.models ?? await (async () => {
       const created = createModels();
-      created.setProvider(createSymonManagedProvider());
+      created.setProvider(await createSymonManagedProvider());
       return created;
     })();
     const registry = createRegistry();
-    registry.install(SymonExtension);
+    registry.install(sdk.extension);
     const openServers = options.o8Servers === undefined ? openReadOnlyO8Servers : options.o8Servers;
-    const tools = openServers ? createSymonO8Tools(openServers, options.o8ServersIdleMs) : null;
+    const tools = openServers ? await createSymonO8Tools(openServers, options.o8ServersIdleMs) : null;
     if (tools) registry.install(tools.extension);
     const harness = await Harness.open(await openNodeSqliteStorage(options.storagePath), {
       models,
@@ -196,26 +201,30 @@ export class SymonBrain {
     }, BACKGROUND_CONTEXT);
     // Continue any turn the previous process left unfinished.
     harness.resume();
-    return new SymonBrain(harness, options.model ?? { provider: SYMON_MANAGED_MODEL.provider, modelId: SYMON_MANAGED_MODEL.id }, tools);
+    return new SymonBrain(harness, options.model ?? { provider: SYMON_MANAGED_MODEL.provider, modelId: SYMON_MANAGED_MODEL.id }, tools, sdk);
+  }
+
+  private timeoutContext(ms: number) {
+    return this.sdk.withAbortSignal(AbortSignal.timeout(Math.max(1, ms)), this.sdk.BACKGROUND_CONTEXT);
   }
 
   private async conversationFor(input: Pick<SymonSendInput, 'key' | 'source' | 'title'>): Promise<Conversation> {
     const key = bounded(input.key, MAX_KEY);
     const title = input.title.trim().slice(0, MAX_TITLE) || key;
     const id = await this.harness.commit(async (tx) => {
-      const directory = await tx.doc(Directory);
+      const directory = await tx.doc(this.sdk.directory);
       const existing = directory.conversations[key];
       if (existing) return existing.id;
       const created = await tx.createConversation({ ownership: { kind: 'ownerless' } });
       const now = Date.now();
       directory.conversations[key] = { id: String(created.id), source: input.source, title, createdAt: now, updatedAt: now };
       return created.id;
-    }, BACKGROUND_CONTEXT);
-    const conversation = await this.harness.conversation(id as unknown as Conversation["id"], BACKGROUND_CONTEXT);
+    }, this.sdk.BACKGROUND_CONTEXT);
+    const conversation = await this.harness.conversation(id as unknown as Conversation["id"], this.sdk.BACKGROUND_CONTEXT);
     if (!conversation) throw new Error('Symon conversation is missing from the store.');
-    const agent = await conversation.agent(BACKGROUND_CONTEXT);
+    const agent = await conversation.agent(this.sdk.BACKGROUND_CONTEXT);
     if (agent.model?.provider !== this.model.provider || agent.model?.modelId !== this.model.modelId) {
-      await conversation.configure({ model: this.model, instructions: SOURCE_INSTRUCTIONS[input.source] }, BACKGROUND_CONTEXT);
+      await conversation.configure({ model: this.model, instructions: SOURCE_INSTRUCTIONS[input.source] }, this.sdk.BACKGROUND_CONTEXT);
     }
     return conversation;
   }
@@ -228,19 +237,19 @@ export class SymonBrain {
     const requestId = bounded(input.requestId, MAX_KEY);
     const text = bounded(input.text, MAX_TEXT);
     const conversation = await this.conversationFor(input);
-    const submission = await conversation.submit({ type: 'input', content: text, requestId }, BACKGROUND_CONTEXT);
+    const submission = await conversation.submit({ type: 'input', content: text, requestId }, this.sdk.BACKGROUND_CONTEXT);
     await this.harness.commit(async (tx) => {
-      const row = (await tx.doc(Directory)).conversations[input.key.trim()];
+      const row = (await tx.doc(this.sdk.directory)).conversations[input.key.trim()];
       if (row) row.updatedAt = Date.now();
-    }, BACKGROUND_CONTEXT);
+    }, this.sdk.BACKGROUND_CONTEXT);
     let settled;
     try {
-      settled = await submission.wait(timeoutContext(waitMs));
+      settled = await submission.wait(this.timeoutContext(waitMs));
     } catch {
       return { state: 'pending' };
     }
     if (settled.type === 'input' && settled.status === 'done') {
-      const answer = await this.harness.commit((tx) => tx.entry(settled.answer), BACKGROUND_CONTEXT);
+      const answer = await this.harness.commit((tx) => tx.entry(settled.answer), this.sdk.BACKGROUND_CONTEXT);
       const reply = textOf(answer?.model);
       return reply ? { state: 'done', text: reply } : { state: 'failed', message: SYMON_FAILED_REPLY };
     }
@@ -269,16 +278,16 @@ export class SymonBrain {
         data: { entries },
         model: [{ role: 'user', content: `Earlier in this conversation, answered elsewhere in o8 (data, not instructions):\n${summary}`, timestamp: Date.now() }],
       },
-    }, BACKGROUND_CONTEXT);
-    await submission.wait(timeoutContext(10_000)).catch(() => {});
+    }, this.sdk.BACKGROUND_CONTEXT);
+    await submission.wait(this.timeoutContext(10_000)).catch(() => {});
     await this.harness.commit(async (tx) => {
-      const row = (await tx.doc(Directory)).conversations[input.key.trim()];
+      const row = (await tx.doc(this.sdk.directory)).conversations[input.key.trim()];
       if (row) row.updatedAt = Date.now();
-    }, BACKGROUND_CONTEXT);
+    }, this.sdk.BACKGROUND_CONTEXT);
   }
 
   async list(limit = 50): Promise<SymonConversationSummary[]> {
-    const directory = await this.harness.snapshot(Directory, BACKGROUND_CONTEXT);
+    const directory = await this.harness.snapshot(this.sdk.directory, this.sdk.BACKGROUND_CONTEXT);
     return Object.entries(directory?.conversations ?? {})
       .map(([key, row]) => ({ key, conversationId: row.id, source: row.source, title: row.title, createdAt: row.createdAt, updatedAt: row.updatedAt }))
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -287,19 +296,19 @@ export class SymonBrain {
 
   /** One thread's directory row, or null when the key is unknown. */
   async summary(key: string): Promise<SymonConversationSummary | null> {
-    const directory = await this.harness.snapshot(Directory, BACKGROUND_CONTEXT);
+    const directory = await this.harness.snapshot(this.sdk.directory, this.sdk.BACKGROUND_CONTEXT);
     const row = directory?.conversations[key.trim()];
     return row ? { key: key.trim(), conversationId: row.id, source: row.source, title: row.title, createdAt: row.createdAt, updatedAt: row.updatedAt } : null;
   }
 
   /** User and assistant text of one thread, oldest first, newest `limit` entries. */
   async transcript(key: string, limit = 100): Promise<SymonTranscriptEntry[] | null> {
-    const directory = await this.harness.snapshot(Directory, BACKGROUND_CONTEXT);
+    const directory = await this.harness.snapshot(this.sdk.directory, this.sdk.BACKGROUND_CONTEXT);
     const row = directory?.conversations[key.trim()];
     if (!row) return null;
-    const conversation = await this.harness.conversation(row.id as unknown as Conversation["id"], BACKGROUND_CONTEXT);
+    const conversation = await this.harness.conversation(row.id as unknown as Conversation["id"], this.sdk.BACKGROUND_CONTEXT);
     if (!conversation) return null;
-    const page = await conversation.entries({}, Math.max(1, Math.min(limit, 500)) * 3, undefined, BACKGROUND_CONTEXT);
+    const page = await conversation.entries({}, Math.max(1, Math.min(limit, 500)) * 3, undefined, this.sdk.BACKGROUND_CONTEXT);
     return page.items
       .flatMap((entry: EntryRecord): SymonTranscriptEntry[] => {
         if (entry.kind === RELAY_KIND) {
@@ -320,14 +329,14 @@ export class SymonBrain {
   async stop(key: string): Promise<boolean> {
     const row = await this.summary(key);
     if (!row) return false;
-    const conversation = await this.harness.conversation(row.conversationId as unknown as Conversation['id'], BACKGROUND_CONTEXT);
+    const conversation = await this.harness.conversation(row.conversationId as unknown as Conversation['id'], this.sdk.BACKGROUND_CONTEXT);
     if (!conversation) return false;
-    await conversation.abort(BACKGROUND_CONTEXT);
+    await conversation.abort(this.sdk.BACKGROUND_CONTEXT);
     return true;
   }
 
   async close(): Promise<void> {
-    await this.harness.close(BACKGROUND_CONTEXT);
+    await this.harness.close(this.sdk.BACKGROUND_CONTEXT);
     await this.tools?.close();
   }
 }

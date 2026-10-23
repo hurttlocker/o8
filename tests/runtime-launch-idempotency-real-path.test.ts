@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
 import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
+import { THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 
 const h = vi.hoisted(() => ({
   launch: vi.fn<(request: RuntimeLaunchRequest) => Promise<RuntimeLaunchResult>>(async (request) => ({
@@ -84,6 +85,41 @@ describe('runtime launch persisted idempotency through the real route', () => {
     await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('clientMutationId') });
     expect(h.launch).not.toHaveBeenCalled();
     expect(h.publish).not.toHaveBeenCalled();
+  });
+
+  it.each(['turbo', '', 'HIGH', 1, false, null, {}, ['high']].map((effort) => [effort]))(
+    'rejects malformed effort %j before binding the mutation identity', async (effort) => {
+      const body = {
+        runtime: 'codex', prompt: 'Inspect the fixture.', cwd: dataDir,
+        clientMutationId: 'invalid-effort-correction', effort,
+      };
+      const response = await route.POST(post(body));
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining('effort'), code: 'invalid_effort',
+      });
+      expect(h.launch).not.toHaveBeenCalled();
+      expect(h.publish).not.toHaveBeenCalled();
+
+      const corrected = { ...body, effort: 'high' };
+      expect((await route.POST(post(corrected))).status).toBe(200);
+      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'high' }));
+      closeDb();
+      const replay = await route.POST(post(corrected));
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get('x-o8-idempotency-replayed')).toBe('1');
+      expect(h.launch).toHaveBeenCalledTimes(1);
+      expect(h.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([undefined, ...THINKING_EFFORTS])('preserves supported effort %s', async (effort) => {
+    const response = await route.POST(post({
+      runtime: 'codex', prompt: 'Inspect the fixture.', cwd: dataDir,
+      clientMutationId: 'valid-effort', effort,
+    }));
+    expect(response.status).toBe(200);
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort }));
   });
 
   it('retains the single-attempt limit in the real route and its persisted request binding', async () => {

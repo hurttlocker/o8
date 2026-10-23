@@ -312,6 +312,20 @@
       ]
     },
     {
+      "path": "src/components/desktop/workspace-terminal/worker-activity.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
+      "path": "src/components/desktop/workspace-terminal/worker-handback-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/acp/local-connection-integration.test.ts",
       "reasons": [
         "integration"
@@ -412,6 +426,13 @@
       "reasons": [
         "child-process",
         "git-cli"
+      ]
+    },
+    {
+      "path": "src/lib/cortex/indexer/root-docs-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
       ]
     },
     {
@@ -2365,6 +2386,12 @@
       ]
     },
     {
+      "path": "tests/delegate-effort-correction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-directory-clone-real-path.test.ts",
       "reasons": [
         "apfs-tool",
@@ -3680,6 +3707,12 @@
       ]
     },
     {
+      "path": "tests/operator-defaults-values-invalidation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-mcp-review-merge-freshness-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3951,6 +3984,13 @@
       "reasons": [
         "executable-fixture",
         "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-dev-imports-real-path.test.ts",
+      "reasons": [
+        "child-process",
         "real-path"
       ]
     },
@@ -4915,6 +4955,14 @@
       ]
     },
     {
+      "path": "tests/speed-render-samples-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/stable-cli-update-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5662,6 +5710,15 @@
         "git-cli",
         "worktree",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-pinned-read-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
       ]
     },
     {

@@ -11,6 +11,7 @@ export interface WorkspaceStreamEvent {
   args?: Record<string, unknown>;
   preview?: string;
   output?: string;
+  isError?: boolean;
   text?: string;
   sessionId?: string;
   threadId?: string;
@@ -101,6 +102,7 @@ export function coerceClaudeCodeChatEvent(event: WorkspaceStreamEvent): ClaudeCo
   if (event.type === 'tool_result') {
     return {
       type: 'tool_result',
+      ...(event.isError ? { isError: true } : {}),
       id: event.id ?? null,
       name: event.name,
       ...(event.args ? { args: event.args } : {}),

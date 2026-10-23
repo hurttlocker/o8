@@ -8,12 +8,7 @@ import type { WorktreeMaterializationIdentity } from './materialization-identity
 
 const materializationContext = new AsyncLocalStorage<ReadonlyMap<string, WorktreeMaterializationIdentity>>();
 
-const WORKSPACE_EXEC_GUARD = String.raw`
-const fs = require('node:fs');
-const path = require('node:path');
-const expected = JSON.parse(process.argv[1]);
-let command = process.argv[2];
-const args = process.argv.slice(3);
+const WORKSPACE_IDENTITY_CHECK = String.raw`
 const actual = fs.lstatSync('.');
 const canonicalPath = fs.realpathSync('.');
 if (!actual.isDirectory() || actual.isSymbolicLink()
@@ -22,6 +17,15 @@ if (!actual.isDirectory() || actual.isSymbolicLink()
   process.stderr.write('Managed workspace ownership changed before process execution.\n');
   process.exit(78);
 }
+`;
+
+const WORKSPACE_EXEC_GUARD = String.raw`
+const fs = require('node:fs');
+const path = require('node:path');
+const expected = JSON.parse(process.argv[1]);
+let command = process.argv[2];
+const args = process.argv.slice(3);
+${WORKSPACE_IDENTITY_CHECK}
 if (!command.includes(path.sep)) {
   const match = (process.env.PATH || '').split(path.delimiter)
     .map((entry) => path.join(entry, command))
@@ -50,6 +54,28 @@ export function guardedWorkspaceInvocation(
   return {
     command: process.execPath,
     args: ['-e', WORKSPACE_EXEC_GUARD, JSON.stringify(identity), command, ...args],
+  };
+}
+
+/** Run a controlled read script after the same captured-cwd guard, without another Node startup. */
+export function guardedWorkspaceReadScriptInvocation(
+  script: string,
+  args: string[],
+  identity: WorktreeMaterializationIdentity,
+): { command: string; args: string[] } {
+  const guardedScript = String.raw`
+{
+  const fs = require('node:fs');
+  const expected = JSON.parse(process.argv[1]);
+  ${WORKSPACE_IDENTITY_CHECK}
+  process.env.PWD = canonicalPath;
+  process.argv.splice(1, 1);
+}
+${script}
+`;
+  return {
+    command: process.execPath,
+    args: ['-e', guardedScript, JSON.stringify(identity), ...args],
   };
 }
 
