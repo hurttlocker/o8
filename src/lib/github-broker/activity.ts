@@ -129,6 +129,12 @@ export async function fetchGitHubWorkflowRunDetail(repoFullName: string, runId: 
         startedAt: job.started_at ?? '',
         completedAt: job.completed_at ?? '',
         url: job.html_url ?? '',
+        steps: (job.steps ?? []).map((step) => ({
+          name: step.name ?? '',
+          status: step.status ?? '',
+          conclusion: step.conclusion ?? '',
+          number: step.number ?? 0,
+        })),
         checkRunId,
         annotations,
       };
