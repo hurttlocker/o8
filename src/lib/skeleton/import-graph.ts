@@ -17,7 +17,7 @@
  */
 
 import { dirname, normalize, posix } from 'node:path';
-import { getAllCached, getCached } from './store';
+import { getAllCached, getCached, getCachedImports } from './store';
 import type { FileSkeleton } from './types';
 
 const TS_CANDIDATE_SUFFIXES = ['.ts', '.tsx', '/index.ts', '/index.tsx'];
@@ -44,6 +44,7 @@ function resolveImportSpecifier(
   repoPath: string,
   sourceFileRelative: string,
   specifier: string,
+  cachedPaths?: ReadonlySet<string>,
 ): string | null {
   const trimmed = specifier.trim();
   if (!trimmed) return null;
@@ -68,18 +69,19 @@ function resolveImportSpecifier(
   }
 
   const candidate = normalizeRelativePath(basePath);
+  const exists = (filePath: string) => cachedPaths
+    ? cachedPaths.has(filePath)
+    : getCached(repoPath, filePath) !== null;
 
   // Already pointing at a .ts/.tsx?
   if (/\.(ts|tsx|json|md)$/.test(candidate)) {
-    const existing = getCached(repoPath, candidate);
-    return existing ? existing.relativePath : null;
+    return exists(candidate) ? candidate : null;
   }
 
   // Try each .ts/.tsx/index.ts suffix
   for (const suffix of TS_CANDIDATE_SUFFIXES) {
     const attempt = `${candidate}${suffix}`;
-    const existing = getCached(repoPath, attempt);
-    if (existing) return existing.relativePath;
+    if (exists(attempt)) return attempt;
   }
 
   return null;
@@ -192,13 +194,14 @@ export function getInboundImporters(
   filePath: string,
 ): string[] {
   const stripped = stripExtension(filePath);
-  const all = getAllCached(repoPath);
+  const all = getCachedImports(repoPath);
+  const cachedPaths = new Set(all.map((file) => file.relativePath));
   const importers: string[] = [];
 
   for (const file of all) {
     if (file.relativePath === filePath) continue;
     for (const specifier of file.imports) {
-      const resolved = resolveImportSpecifier(repoPath, file.relativePath, specifier);
+      const resolved = resolveImportSpecifier(repoPath, file.relativePath, specifier, cachedPaths);
       if (resolved === filePath || (resolved && stripExtension(resolved) === stripped)) {
         importers.push(file.relativePath);
         break;
