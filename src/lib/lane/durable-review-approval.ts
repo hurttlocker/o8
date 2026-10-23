@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import type { ApprovalRecord, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { allFindingsResolved } from '@/lib/approvals/orchestrator-review';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
@@ -191,7 +192,7 @@ async function listChangedPathsForCoverage(
 
   const collect = async (args: string[]): Promise<string[] | null> => {
     try {
-      const { stdout } = await run('git', args, { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 });
+      const { stdout } = await run(resolveGitBinary(), args, { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 });
       return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
     } catch {
       return null;
@@ -227,7 +228,7 @@ async function listUncommittedPaths(cwd: string): Promise<string[] | null> {
   const { promisify } = await import('node:util');
   try {
     const { stdout } = await promisify(execFile)(
-      'git',
+      resolveGitBinary(),
       ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
       { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 },
     );

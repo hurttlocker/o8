@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 /**
  * Shared helpers for the owned-session primitive.
  *
@@ -208,7 +209,7 @@ export async function validateWorkspace(targetCwd: string) {
   // spawn). Fall back to the resolved folder itself — the CLIs run fine in a
   // non-git directory; isolation/worktrees are separately gated on git.
   try {
-    const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['-C', real, 'rev-parse', '--show-toplevel'], {
       windowsHide: true,
       maxBuffer: 256 * 1024,
     });
@@ -221,7 +222,7 @@ export async function validateWorkspace(targetCwd: string) {
 
 export async function gitValue(repoPath: string, args: string[]) {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['-C', repoPath, ...args], {
       windowsHide: true,
       maxBuffer: 256 * 1024,
     });

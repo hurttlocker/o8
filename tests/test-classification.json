@@ -2120,6 +2120,15 @@
       ]
     },
     {
+      "path": "tests/codex-live-steer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-config-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2454,6 +2463,23 @@
       "reasons": [
         "apfs-tool",
         "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/dependency-directory-pool-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/dependency-pool-dispatch-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
         "git-cli",
         "real-path"
       ]
@@ -3831,6 +3857,7 @@
         "child-process",
         "git-cli",
         "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },

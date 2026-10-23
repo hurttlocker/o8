@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -143,7 +144,7 @@ async function git(
   if (options.input !== undefined) {
     return gitWithInput(cwd, args, options.input, options.timeout ?? 8_000);
   }
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     encoding: 'utf8',
@@ -160,7 +161,7 @@ function gitWithInput(
   timeout: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, {
+    const child = spawn(resolveGitBinary(), args, {
       windowsHide: true,
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -1,20 +1,9 @@
 /**
- * Codex orchestrator session — sibling to orchestrator-session.ts that spawns
- * `codex exec --json` instead of `claude -p`. Used as the default after the
- * Anthropic SDK pricing change (June 15 2026) so the default install doesn't
- * burn the operator's Agent SDK credit pool.
+ * Codex orchestrator session. Exec uses a per-repo CODEX_HOME with merged MCP
+ * config; the app-server bridge uses a thread config in the user's Codex home.
  *
- * Uses a per-repo sandbox CODEX_HOME with a merged config.toml so Codex can
- * call the same operator + cortex MCP tools as the Claude orchestrator path.
- *
- * COLD by design (unlike the WARMED Claude orchestrator-session.ts, which keeps
- * a resident `claude` process across turns). `codex exec` is a BATCH command —
- * it reads its prompt from argv, ignores stdin, and exits when the turn ends, so
- * there is no resident-process path to warm short of Codex's server/proto mode.
- * Conversation continuity is `codex exec resume <threadId>` — the exec-resume
- * floor. Warming the Codex path is a separate, larger follow-up (wire the Codex
- * app-server / proto interface); NOT built here. In Collide this means the Codex
- * PROPOSER stays cold while the Claude proposer + aggregator warm.
+ * Each turn owns a process. App threads use the app-server bridge, which can
+ * accept native input during that turn; exec continues through exec resume.
  */
 
 import { spawn } from 'node:child_process';
@@ -30,6 +19,7 @@ import {
 import { codexAppThreadConfig, prepareCodexHome, userCodexHome } from './codex-orchestrator-config';
 import { CODEX_USER_MESSAGE_MARKER, splitCodexOrchestratorPrompt, writeCodexAppBridgeSpec } from '@/lib/codex/app-bridge-spec';
 import { codexAppBridgeLaunch } from '@/lib/codex/app-bridge-launch';
+import { registerCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
 import { noteCodexAppTurnLine } from '@/lib/codex/app-thread-sync';
 export { ensureCodexHome, mergeCodexMcpConfig, prepareCodexHome, stripPluginSections } from './codex-orchestrator-config';
 import { parseLocalModel } from '@/lib/codex/local-model';
@@ -373,17 +363,14 @@ async function sendToCodexOrchestratorAttempt(
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
   let model = resolveOrchestratorModelSync(options.model);
 
-  // Steer-Now / queue preempt: the ws-server aborts the prior turn's
-  // controller before calling sendTurn, so a still-'busy' session here is a
-  // just-interrupted subprocess mid-teardown. Wait for it to close rather than
-  // dropping the steered message. See orchestrator-session.ts for the full why.
+  // A preempted subprocess may still be tearing down. Native steering uses
+  // the bridge's liveSteer path instead of entering sendTurn again.
   if (session.status === 'busy') {
     await waitForSessionIdle(session, PREEMPT_SETTLE_MS);
   }
   if (settleBeforeSpawnIfAborted()) return;
 
-  // A SIGTERM'd turn exits non-zero → 'dead', so the settle wait above commonly
-  // lands here; auto-recover into a fresh turn.
+  // Recover an interrupted process before starting the next turn.
   if (session.status === 'dead') {
     console.log(`[codex-orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
     session.status = 'ready';
@@ -398,10 +385,7 @@ async function sendToCodexOrchestratorAttempt(
   }
 
   session.status = 'busy';
-  // #1551 — preflight the repo path before ANY spawn work. The default
-  // backend had no preflight at all: a missing folder surfaced as
-  // "spawn codex ENOENT" (naming the healthy binary), and a non-git folder
-  // let codex boot and fail into a confusing tool-side error mid-turn.
+  // Preflight the repo before resolving or spawning the CLI (#1551).
   try {
     assertOrchestratorRepoPath(session.repoPath);
   } catch (err) {
@@ -612,8 +596,8 @@ async function sendToCodexOrchestratorAttempt(
         env: spawnEnv,
         detached: crashEnabled || singleProcessGroup,
         stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
-          ? ['ignore', stdoutFd, stderrFd]
-          : ['ignore', 'pipe', 'pipe'],
+          ? ['ignore', stdoutFd, stderrFd, ...(codexApp ? ['ipc' as const] : [])]
+          : ['ignore', 'pipe', 'pipe', ...(codexApp ? ['ipc' as const] : [])],
       });
     } catch (err) {
       if (stdoutFd !== null) closeSync(stdoutFd);
@@ -634,7 +618,7 @@ async function sendToCodexOrchestratorAttempt(
       crashRecord = updateOrchestratorTurnPid(crashRecord, proc.pid ?? 0);
     }
     session.proc = proc;
-
+    const stopSteer = codexApp ? registerCodexAppBridgeSteer(session, proc, { model, permissionMode, toolProfile: options.toolProfile ?? 'full', orchestrationMode: options.orchestrationMode }) : () => {};
     const userAbortSignal = options.signal;
     let userAbortListener: (() => void) | null = null;
     const detachUserAbortListener = () => {
@@ -676,6 +660,7 @@ async function sendToCodexOrchestratorAttempt(
     const settle = (status: 'ready' | 'dead', error?: string, drain = false) => {
       if (settled) return;
       settled = true;
+      stopSteer();
       if (processTimeout) clearTimeout(processTimeout);
       if (firstEventTimeout) clearTimeout(firstEventTimeout);
       if (drain) drainCrashOutput();

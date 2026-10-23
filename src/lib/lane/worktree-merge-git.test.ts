@@ -76,7 +76,7 @@ describe('resolveCurrentBranch', () => {
       execFileSync('git', ['checkout', '-q', '--detach'], { cwd: repoPath });
       const identity = await captureWorktreeMaterializationIdentity(repoPath);
 
-      await expect(withWorktreeMaterializationExecution(repoPath, identity, () => (
+      await expect(withWorktreeMaterializationExecution(repoPath, { ...identity, inode: identity.inode + 1 }, () => (
         resolveCurrentBranch(repoPath, (cwd, args, opts) => materializationAwareExecFile(
           'git',
           args,
@@ -84,7 +84,7 @@ describe('resolveCurrentBranch', () => {
         ))
       ))).resolves.toMatchObject({
         state: 'unknown',
-        evidence: expect.stringContaining('Managed workspace command could not be resolved'),
+        evidence: expect.stringContaining('Managed workspace ownership changed before process execution'),
       });
 
       await expect(withWorktreeMaterializationExecution(

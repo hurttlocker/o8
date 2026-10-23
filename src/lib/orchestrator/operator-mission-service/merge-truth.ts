@@ -1,10 +1,11 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
 async function git(cwd: string, args: string[], opts: { timeout?: number; maxBuffer?: number } = {}) {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout: opts.timeout ?? 10_000,
@@ -28,7 +29,7 @@ export async function isAncestorCommit(cwd: string, ancestorSha: string, descend
 
 function patchIdOfDiff(cwd: string, diff: string): string | null {
   if (!diff.trim()) return null;
-  const result = spawnSync('git', ['patch-id', '--stable'], {
+  const result = spawnSync(resolveGitBinary(), ['patch-id', '--stable'], {
     windowsHide: true,
     cwd,
     input: diff,
