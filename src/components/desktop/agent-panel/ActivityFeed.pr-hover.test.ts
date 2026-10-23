@@ -38,6 +38,7 @@ async function hover(index = 0, number = 7, open = true) {
     bubbles: true, relatedTarget: document.body,
   })));
   await settle(open ? 1 : 150);
+  await settle();
 }
 function retry() {
   return [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Retry PR details')!;
@@ -211,4 +212,58 @@ it('preserves hover review, full-PR and launch actions', async () => {
   }
   expect(review).toHaveBeenCalledWith(7, repoA); expect(select).toHaveBeenCalledWith(7, repoA);
   expect(launch).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr', repo: repoA, number: 7 }));
+});
+
+const deadlineCases: Array<{ label: string; headers: HeadersInit }> = [
+  { label: 'numeric', headers: { 'retry-after': '30' } },
+  { label: 'HTTP-date', headers: { 'retry-after': 'Thu, 22 Oct 2026 12:30:30 GMT' } },
+  { label: 'reset', headers: { 'x-ratelimit-reset': String(Date.parse('2026-10-22T12:30:30Z') / 1000) } },
+];
+it.each(deadlineCases)('recovers an already-open hover at its $label deadline without reopening or Retry', async ({ headers }) => {
+  reply = () => new Response(null, { status: 429, headers });
+  await render(); await hover(); expect(reads()).toHaveLength(1); expect(document.body.textContent).toContain('PR details delayed');
+  reply = () => Response.json(body(7, 'recovered.ts'));
+  await settle(28_000); expect(reads()).toHaveLength(1);
+  await settle(3100); await settle();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent).toContain('recovered.ts');
+  expect(document.body.textContent).not.toContain('PR details delayed');
+});
+
+it('shares one automatic recovery read across already-open hovers', async () => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(Array(3).fill(repoA)); for (let i = 0; i < 3; i++) await hover(i);
+  expect(reads()).toHaveLength(1); reply = () => Response.json(body(7, 'recovered.ts'));
+  await settle(31_100); await settle();
+  expect(reads()).toHaveLength(2); expect(document.body.textContent?.match(/recovered.ts/g)).toHaveLength(3);
+});
+
+it.each([false, true])('keeps files and age until deadline recovery after refused refresh (stale=%s)', async stale => {
+  await render(); await hover(); if (stale) await settle(120_000);
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  expect(document.body.textContent).toContain('known.ts'); expect(document.body.textContent).toContain('Showing last known details');
+  reply = () => Response.json(body(7, 'recovered.ts')); await settle(28_000); expect(reads()).toHaveLength(2);
+  await settle(3100); await settle(); expect(reads()).toHaveLength(3);
+  expect(document.body.textContent).toContain('recovered.ts'); expect(document.body.textContent).not.toContain('known.ts');
+  expect(document.body.textContent).not.toContain('PR details delayed');
+});
+
+it('honors another refusal from the automatic recovery read before trying again', async () => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(); await hover(); await settle(31_100); await settle(); expect(reads()).toHaveLength(2);
+  await settle(28_000); expect(reads()).toHaveLength(2);
+  reply = () => Response.json(body(7, 'recovered.ts')); await settle(3100); await settle();
+  expect(reads()).toHaveLength(3); expect(document.body.textContent).toContain('recovered.ts');
+});
+
+it.each(['close', 'filter', 'unmount'])('does no deadline read after the hover becomes %s', async mode => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(); await hover(); expect(reads()).toHaveLength(1);
+  if (mode === 'close') await hover(0, 7, false);
+  else if (mode === 'unmount') await render([]);
+  else {
+    const filter = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith('Commits'))!;
+    await act(async () => filter.click()); await settle();
+  }
+  reply = () => Response.json(body()); await settle(31_100); await settle(); expect(reads()).toHaveLength(1);
 });
