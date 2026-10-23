@@ -27,6 +27,7 @@ import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 import { withOperatingAgreement } from '@/lib/operator/operating-agreement';
 import { applyOrchestrationMode } from './orchestration-mode';
 import { withVisualizationInstructions } from '@/lib/visualizations/orchestrator-prompt';
+import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,11 @@ export function withOrchestrationMode(
   return {
     ...backend,
     sendTurn(repoPath, message, onEvent, options) {
+      try {
+        assertOrchestratorPermissionMode(backend.id, options?.permissionMode, options?.toolProfile);
+      } catch (error) {
+        return Promise.reject(error);
+      }
       const resolved = applyOrchestrationMode(message, options);
       const prompt = ['openclaw', 'hermes', 'acp', 'opencode', 'muse'].includes(backend.id)
         ? withVisualizationInstructions(resolved.message, repoPath, options?.threadId) : resolved.message;

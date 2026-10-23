@@ -37,6 +37,7 @@ export const fableBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
+    if (options?.permissionMode === 'outside-workspace') return Promise.reject(new Error('Outside workspace commands require the built-in lead.'));
     // Slice 2 — warm-as-hell Brain. With native reads stripped, `cortex_ask` is
     // Fable's only repo-context path, so the Brain fires on effectively every
     // turn. Heat the warm pool at turn START (classifier Haiku + Sonnet-5
@@ -59,6 +60,7 @@ export const fableBackend: OrchestratorBackend = {
       // (orchestrator-session.ts:505) and any caller-supplied profile.
       {
         ...options,
+        permissionMode: options?.permissionMode,
         model,
         toolProfile: options?.orchestrationMode === 'single' ? 'fable-solo' : 'fable',
       },

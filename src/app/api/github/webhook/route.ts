@@ -222,6 +222,7 @@ export async function POST(request: NextRequest) {
       if (pr) {
         upsertGitHubPullRequest({
           pullRequestId: pr.id,
+          repositoryId: payload.repository?.id ?? null,
           repoFullName,
           number: pr.number,
           title: pr.title,

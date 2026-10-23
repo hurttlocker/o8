@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, readlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -109,6 +109,23 @@ export async function probeLiveClaudeProcesses(options: {
       }
     } catch {
       cwdProbed = false;
+      if (process.platform === 'linux') {
+        // lsof is optional on Linux. Observe the same candidate PIDs through
+        // procfs, keeping the probe inconclusive if any cwd cannot be read.
+        const observed = await Promise.all(processes.map(async (process) => {
+          try {
+            const cwd = await readlink(`/proc/${process.pid}/cwd`);
+            if (!path.isAbsolute(cwd) || cwd.endsWith(' (deleted)')) return false;
+            process.cwd = cwd;
+            const stdin = await readlink(`/proc/${process.pid}/fd/0`).catch(() => null);
+            if (stdin && /^\/dev\/(?:pts\/\d+|tty\w*)$/.test(stdin)) process.tty = stdin;
+            return true;
+          } catch {
+            return false;
+          }
+        }));
+        cwdProbed = observed.every(Boolean);
+      }
     }
     await Promise.all(processes.map(async (process) => {
       const state = await readSessionState(process.pid).catch(() => null);

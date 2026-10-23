@@ -10,7 +10,7 @@
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { WorkspaceHistoryControls } from './WorkspaceHistoryControls';
@@ -26,7 +26,8 @@ import { WorkspaceAddTabButton } from './WorkspaceAddTabButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
-import type { WorkspaceHeaderStripProps } from './workspace-header-strip-types';
+import type { WorkspaceHeaderStripProps, WorkspaceHeaderTab } from './workspace-header-strip-types';
+import { useWorkspaceHeaderTabLabels } from './useWorkspaceHeaderTabLabels';
 import { useHeaderTabDrag } from './useHeaderTabDrag';
 import { revealHeaderTab, scrollTabStripFromWheel } from './tab-scroll';
 
@@ -142,15 +143,7 @@ export function HeaderPillStrip({
   finishedTabCount = 0,
   ariaLabel = 'Open sessions',
 }: {
-  tabs: Array<{
-    id: string;
-    label: string;
-    kind: string;
-    runtime: string | null;
-    packetStatus: string | null;
-    orchestratorThreadId?: string | null;
-    repoPath?: string | null;
-  }>;
+  tabs: WorkspaceHeaderTab[];
   activeTabId: string | null;
   /** When set, pill events include this id so the matching
    *  WorkspaceTerminalRoot can claim them. Lets two strips coexist
@@ -162,23 +155,8 @@ export function HeaderPillStrip({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const drag = useHeaderTabDrag(scrollRef, tabs, workspaceId);
-  // Truncate to one word when the strip is crowded — Codex feel: at 5+
-  // tabs each pill compacts to just its first significant word. Sibling
-  // packets often share a verb ("Add …" × 3), so when the one-word form
-  // collides we extend those pills to two words — three identical "Add"
-  // pills carry zero information.
-  const crowded = tabs.length >= 5;
-  const crowdedLabels = useMemo(() => {
-    const firsts = tabs.map((tab) => significantWords(tab.label, 1));
-    const counts = new Map<string, number>();
-    for (const word of firsts) counts.set(word, (counts.get(word) ?? 0) + 1);
-    const out = new Map<string, string>();
-    tabs.forEach((tab, index) => {
-      const first = firsts[index];
-      out.set(tab.id, (counts.get(first) ?? 0) > 1 ? significantWords(tab.label, 2) : first);
-    });
-    return out;
-  }, [tabs]);
+  const labels = useWorkspaceHeaderTabLabels(tabs);
+  const labelsKey = JSON.stringify(labels);
 
   // Hidden scrollbars keep the chrome quiet; arrows and edge fades reveal overflow.
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -282,7 +260,7 @@ export function HeaderPillStrip({
 
   // Selecting a tab that's scrolled off-screen should bring it into view —
   // otherwise clicking a pill in the (separate) AgentPanel can activate a tab
-  // you can't see in the strip.
+  // you can't see in the strip. Saved titles can also widen existing pills.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -290,7 +268,7 @@ export function HeaderPillStrip({
     if (active) revealHeaderTab(el, active);
     const frame = window.requestAnimationFrame(recomputeEdges);
     return () => window.cancelAnimationFrame(frame);
-  }, [activeTabId, tabs.length, recomputeEdges]);
+  }, [activeTabId, labelsKey, tabs.length, recomputeEdges]);
 
   // Fade only the edge(s) that have more content behind them. Transparent-safe
   // (masks the pills themselves) so it works over the vibrancy chrome where a
@@ -342,7 +320,7 @@ export function HeaderPillStrip({
           into place without leaving a gap. The full row→pill morph (V2)
           will reuse this wrapper as the target host. */}
       <AnimatePresence initial={false} mode="popLayout">
-        {tabs.map((tab) => (
+        {tabs.map((tab, index) => (
           <motion.div
             key={tab.id}
             layout
@@ -363,8 +341,7 @@ export function HeaderPillStrip({
               tab={tab}
               active={tab.id === activeTabId}
               tabStop={tab.id === rovingTabId}
-              crowded={crowded}
-              crowdedLabel={crowdedLabels.get(tab.id) ?? null}
+              displayLabel={labels[index]}
               onSelect={handleSelect}
               onClose={handleClose}
               onRename={handleRename}
@@ -401,27 +378,17 @@ function HeaderPill({
   tab,
   active,
   tabStop,
-  crowded,
-  crowdedLabel,
+  displayLabel,
   onSelect,
   onClose,
   onRename,
   onFocusTab,
 }: {
-  tab: {
-    id: string;
-    label: string;
-    kind: string;
-    runtime: string | null;
-    packetStatus: string | null;
-    orchestratorThreadId?: string | null;
-    repoPath?: string | null;
-  };
+  tab: WorkspaceHeaderTab;
   active: boolean;
   /** This pill owns the tablist's single Tab stop (roving tabindex). */
   tabStop: boolean;
-  crowded: boolean;
-  crowdedLabel: string | null;
+  displayLabel: string;
   onSelect: (tabId: string) => void;
   onClose: (tabId: string) => void;
   onRename: (tabId: string, label: string) => void;
@@ -446,12 +413,12 @@ function HeaderPill({
   // as it does on hover so a keyboard user can see what they are about to hit.
   const [closeFocused, setCloseFocused] = useState(false);
   const closeRevealed = hovered || closeFocused;
-  const display = crowded ? (crowdedLabel ?? significantWords(tab.label, 1)) : tab.label;
   return (
     <div
       data-no-drag
       data-o8-workspace-tab={tab.id}
       role="tab"
+      aria-label={displayLabel}
       aria-selected={active}
       tabIndex={tabStop ? 0 : -1}
       onFocus={() => onFocusTab(tab.id)}
@@ -478,7 +445,7 @@ function HeaderPill({
         setDraft(tab.label);
         setEditing(true);
       }}
-      title="Double-click, right-click, or press F2 to rename workspace tab"
+      title={`${tab.orchestrationPacket?.branchTarget || displayLabel}\nDouble-click, right-click, or press F2 to rename workspace tab`}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -530,7 +497,7 @@ function HeaderPill({
         }}
         onFocus={() => setCloseFocused(true)}
         onBlur={() => setCloseFocused(false)}
-        aria-label={`Close ${tab.label || 'tab'}`}
+        aria-label={`Close ${displayLabel || 'tab'}`}
         title={closeRevealed ? 'Close tab (⌘W)' : undefined}
         tabIndex={tabStop ? 0 : -1}
         style={{
@@ -576,7 +543,7 @@ function HeaderPill({
           style={{ width: Math.min(220, Math.max(100, draft.length * 7)), minWidth: 0, border: 0, outline: 'none', background: 'transparent', color: 'var(--t-text)', font: 'inherit' }}
         />
       ) : (
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: crowded ? 80 : 140 }}>{display}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{displayLabel}</span>
       )}
     </div>
   );
@@ -629,15 +596,6 @@ function PillRuntimeGlyph({ kind }: { kind: string; runtime: string | null }) {
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
-}
-
-function significantWords(label: string, count: number): string {
-  if (!label) return '';
-  // Split on " / " first (repo / title pattern) — keep the title side.
-  const slash = label.indexOf(' / ');
-  const tail = slash >= 0 ? label.slice(slash + 3) : label;
-  const words = tail.trim().split(/\s+/);
-  return words.slice(0, count).join(' ');
 }
 
 // The "<repo> / <chat title>" split: repo gets emphasis, the
