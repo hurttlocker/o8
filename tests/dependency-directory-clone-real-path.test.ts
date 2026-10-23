@@ -77,13 +77,98 @@ it('materializes the matching recipe privately without an install on APFS, with 
   expect(readFileSync(path.join(source, 'node_modules', 'tool.js'), 'utf8')).toBe('private\n');
 });
 
+it.skipIf(process.platform !== 'darwin')('clones identical dependency inputs across different committed source trees', async () => {
+  const { source, workspace } = fixture();
+  writeFileSync(path.join(source, 'README.md'), 'new donor commit\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: source });
+  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'docs only'], { cwd: source });
+  const run = vi.fn(async () => { throw new Error('Unexpected installer fallback'); });
+  const result = await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+    cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+    env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run,
+  });
+  expect(result.receipt.source).toBe('directory-clone');
+  expect(run).not.toHaveBeenCalled();
+});
+
+it.skipIf(process.platform !== 'darwin').each(['config', 'patch', 'lifecycle', 'undeclared-lifecycle'])(
+  'refuses cross-tree cloning for a changed or unbounded %s input', async (kind) => {
+    const { source, workspace } = fixture();
+    const manifest = { name: 'fixture', version: '1.0.0', scripts: { postinstall: 'node setup.js' },
+      ...(kind === 'undeclared-lifecycle' ? {} : { o8DependencyClone: { lifecycleInputs: ['setup.js'] } }) };
+    for (const dir of [source, workspace]) {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
+      writeFileSync(path.join(dir, 'setup.js'), '// original setup\n');
+      execFileSync('git', ['add', 'package.json', 'setup.js'], { cwd: dir });
+      execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'setup'], { cwd: dir });
+    }
+    const changed = kind === 'config' ? '.npmrc' : kind === 'patch' ? 'extra.patch' : kind === 'lifecycle' ? 'setup.js' : 'README.md';
+    writeFileSync(path.join(source, changed), kind === 'config' ? 'legacy-peer-deps=true\n' : '// changed\n');
+    execFileSync('git', ['add', changed], { cwd: source });
+    execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'donor change'], { cwd: source });
+    const run = vi.fn(async () => { mkdirSync(path.join(workspace, 'node_modules')); });
+    const result = await materializeDependencyInstall(workspace, 'npm ci', {
+      cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+      env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run,
+    });
+    expect(run).toHaveBeenCalledOnce();
+    expect(result.receipt.source).toBeUndefined();
+  },
+);
+
+it.skipIf(process.platform !== 'darwin')('requires a complete lifecycle declaration for dependency-generated workspace output', async () => {
+  const { source, workspace } = fixture();
+  writeFileSync(path.join(source, 'node_modules/fixture/package.json'), JSON.stringify({
+    name: 'fixture', version: '1.0.0', bin: '../tool.js', scripts: { postinstall: 'generate-from-workspace-schema' },
+  }));
+  for (const dir of [source, workspace]) {
+    const lock = JSON.parse(readFileSync(path.join(dir, 'package-lock.json'), 'utf8'));
+    lock.packages['node_modules/fixture'].hasInstallScript = true;
+    writeFileSync(path.join(dir, 'package-lock.json'), JSON.stringify(lock));
+    execFileSync('git', ['add', 'package-lock.json'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'dependency lifecycle'], { cwd: dir });
+    if (dir === source) writeFileSync(path.join(dir, 'node_modules/.package-lock.json'), JSON.stringify(lock));
+  }
+  writeFileSync(path.join(source, 'node_modules/fixture/generated.js'), 'donor schema output');
+  writeFileSync(path.join(source, 'schema.txt'), 'changed donor schema');
+  execFileSync('git', ['add', 'schema.txt'], { cwd: source });
+  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'schema'], { cwd: source });
+  const run = vi.fn(async () => { mkdirSync(path.join(workspace, 'node_modules')); });
+  const result = await materializeDependencyInstall(workspace, 'npm ci', {
+    cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+    env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run,
+  });
+  expect(run).toHaveBeenCalledOnce();
+  expect(result.receipt.source).toBeUndefined();
+});
+
+it.each(['../outside', '/absolute', 'missing.js', 'tools', 'setup-link.js'])(
+  'refuses unsafe lifecycle input %s through materialization', async (input) => {
+    const { source, workspace } = fixture();
+    const manifest = { name: 'fixture', version: '1.0.0', o8DependencyClone: { lifecycleInputs: [input] } };
+    writeFileSync(path.join(workspace, 'package.json'), JSON.stringify(manifest));
+    symlinkSync('package.json', path.join(workspace, 'setup-link.js'));
+    execFileSync('git', ['add', 'package.json', 'setup-link.js'], { cwd: workspace });
+    execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'declared inputs'], { cwd: workspace });
+    const run = vi.fn();
+    await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0', run,
+    })).rejects.toThrow(/Dependency (clone lifecycle inputs|recipe input)/);
+    expect(run).not.toHaveBeenCalled();
+  },
+);
+
 it('falls back for a changed source recipe instead of cloning stale dependencies', async () => {
   const { source, workspace } = fixture();
   writeFileSync(path.join(source, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
-  const run = vi.fn(async () => { mkdirSync(path.join(workspace, 'node_modules')); });
+  const selected = vi.fn();
+  const run = vi.fn(async () => {
+    expect(selected).toHaveBeenCalledWith({ path: 'native-install', reason: process.platform === 'darwin' ? 'source-inputs-mismatch' : 'ineligible-recipe' });
+    mkdirSync(path.join(workspace, 'node_modules'));
+  });
   await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
     cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
-    env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run,
+    env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, run, onSelection: selected,
   });
   expect(run).toHaveBeenCalledOnce();
 });
@@ -273,7 +358,7 @@ it.skipIf(process.platform !== 'darwin')('checks native output after the root li
   expect(persistReceipt).not.toHaveBeenCalled();
 });
 
-it.skipIf(process.platform !== 'darwin').each(['lockfile', 'package-directory', 'deep-native'])(
+it.skipIf(process.platform !== 'darwin').each(['lockfile', 'package-directory', 'deep-native', 'committed-tree'])(
   'discards the exact clone and falls back when the source %s changes', async (mutation) => {
     const { source, workspace } = fixture();
     if (mutation === 'deep-native') {
@@ -296,6 +381,10 @@ it.skipIf(process.platform !== 'darwin').each(['lockfile', 'package-directory', 
           renameSync(pkg, `${pkg}-old`);
           mkdirSync(pkg);
           writeFileSync(path.join(pkg, 'package.json'), '{"version":"1.0.0"}');
+        } else if (mutation === 'committed-tree') {
+          writeFileSync(path.join(source, 'README.md'), 'donor advanced during clone');
+          execFileSync('git', ['add', 'README.md'], { cwd: source });
+          execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'race'], { cwd: source });
         } else writeFileSync(path.join(source, 'node_modules/fixture/custom/deep/addon.node'), 'after');
       },
     });
