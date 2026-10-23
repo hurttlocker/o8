@@ -224,7 +224,7 @@ describe('AgentTilePane live transcript scrolling', () => {
 });
 
 describe('AgentTilePane worker identity', () => {
-  it('shows the actual model, current task, and steer recipient in the pane', () => {
+  it('shows the task title and model with a short composer placeholder', () => {
     act(() => {
       root?.render(createElement(AgentTilePane, {
         sessionKey: 'codex-owned:worker',
@@ -236,13 +236,13 @@ describe('AgentTilePane worker identity', () => {
     });
 
     expect(host?.querySelector('[data-worker-model]')?.textContent).toBe('· gpt-6-sol');
-    expect(host?.querySelector('[data-worker-model]')?.parentElement?.parentElement?.textContent).toContain('Worker');
+    expect(host?.querySelector('[data-worker-title]')?.textContent).toBe('Trace the handoff');
     expect(host?.querySelector('[data-worker-task]')?.textContent).toContain('Trace the handoff');
     expect(host?.querySelector('[data-o8-composer-root]')).not.toBeNull();
     expect(host?.querySelector('[data-brain-dock-tab]')).toBeNull();
     expect(host?.querySelector('[data-testid="composer-send-control"]')).not.toBeNull();
     expect(host?.textContent).not.toContain('To @Worker · Steer');
-    expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message @Worker…');
+    expect(host?.querySelector('textarea')?.getAttribute('placeholder')).toBe('Message this worker');
   });
 
   it('names the actual operator decision and opens the bound review', () => {
@@ -343,6 +343,61 @@ describe('AgentTilePane worker identity', () => {
     expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
     expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body)).clientMutationId).toBe('one-steer-id');
     expect(randomUUID).toHaveBeenCalledOnce();
+  });
+
+  it('resumes a paused owned worker through the existing correlated steer route', async () => {
+    const receipt = vi.spyOn(actionReceipt, 'fetchCorrelatedActionReceipt').mockResolvedValue({
+      response: new Response('{}', { status: 200 }), payload: { ok: true },
+    });
+    act(() => root?.render(createElement(AgentTilePane, {
+      sessionKey: 'codex-owned:paused-worker', agent: { name: 'Worker', status: 'paused', runtime: 'codex' },
+      focused: true, onClose: () => {}, onFocus: () => {},
+    })));
+    const resume = [...(host?.querySelectorAll('button') ?? [])].find(button => button.textContent === 'Resume')!;
+    await act(async () => { resume.click(); resume.click(); });
+    expect(receipt).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body))).toMatchObject({
+      action: 'steer', surfaceId: 'codex-owned:paused-worker', message: 'Continue the assigned task.',
+    });
+  });
+
+  it('checks an uncertain Stop with the same mutation and preserves the draft', async () => {
+    const receipt = vi.spyOn(actionReceipt, 'fetchCorrelatedActionReceipt')
+      .mockRejectedValueOnce(new actionReceipt.CorrelatedActionUnsettledError())
+      .mockResolvedValueOnce({ response: new Response('{}', { status: 200 }), payload: { ok: true } });
+    act(() => root?.render(createElement(AgentTilePane, {
+      sessionKey: 'codex-owned:paused-worker', agent: { name: 'Worker', status: 'paused', runtime: 'codex' },
+      focused: true, onClose: () => {}, onFocus: () => {},
+    })));
+    const textarea = host!.querySelector('textarea')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, 'Keep this draft.');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const stop = [...host!.querySelectorAll('button')].find(button => button.textContent === 'Stop')!;
+    await act(async () => { stop.click(); stop.click(); });
+    expect(receipt).toHaveBeenCalledOnce();
+    expect(textarea.disabled).toBe(true);
+    await act(async () => [...host!.querySelectorAll('button')].find(button => button.textContent === 'Check receipt')!.click());
+    expect(receipt).toHaveBeenCalledTimes(2);
+    expect(receipt.mock.calls[0]?.[1]?.body).toBe(receipt.mock.calls[1]?.[1]?.body);
+    expect(JSON.parse(String(receipt.mock.calls[0]?.[1]?.body))).toMatchObject({ action: 'interrupt', surfaceId: 'codex-owned:paused-worker' });
+    expect(textarea.value).toBe('Keep this draft.');
+  });
+
+  it('humanizes a branch-only packet and keeps a refused Stop visible when message entry is disabled', async () => {
+    vi.spyOn(actionReceipt, 'fetchCorrelatedActionReceipt').mockResolvedValue({
+      response: new Response('{}', { status: 409, statusText: 'Interrupt could not be confirmed.' }), payload: { ok: false },
+    });
+    act(() => root?.render(createElement(AgentTilePane, {
+      sessionKey: 'codex-owned:blocked-worker', agent: { name: 'Worker', status: 'idle', runtime: 'codex' },
+      packet: { id: 'blocked', title: '', branchTarget: 'issue/4080-check-ci', status: 'blocked', blockedReason: 'CI' } as OrchestratorPacket,
+      focused: true, onClose: () => {}, onFocus: () => {},
+    })));
+    expect(host?.querySelector('[data-worker-title]')?.textContent).toBe('Check ci');
+    expect(host?.querySelector('textarea')?.disabled).toBe(true);
+    await act(async () => [...host!.querySelectorAll('button')].find(button => button.textContent === 'Stop')!.click());
+    expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Interrupt could not be confirmed.');
   });
 });
 
