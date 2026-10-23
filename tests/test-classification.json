@@ -2232,6 +2232,12 @@
       ]
     },
     {
+      "path": "tests/conversation-pr-context-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-launch-agent-readonly-real-path.test.ts",
       "reasons": [
         "child-process",
