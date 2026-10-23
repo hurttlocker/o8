@@ -5698,6 +5698,15 @@
       ]
     },
     {
+      "path": "tests/worktree-pinned-read-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/worktree-reaper-non-git-dirs-real-path.test.ts",
       "reasons": [
         "child-process",
