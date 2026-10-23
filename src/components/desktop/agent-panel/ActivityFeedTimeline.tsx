@@ -36,6 +36,7 @@ import type {
   RepoTaskLaunchRequest,
 } from './types';
 import { packetRuntimeModelDisplayLabel } from '@/lib/orchestrator/display';
+import type { ActivityPrHoverStatus } from './useActivityPrHoverDetail';
 
 const FEED_ICON: Record<string, { icon: ReactNode; bg: string; color: string }> = {
   commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
@@ -98,6 +99,7 @@ interface ActivityFeedTimelineProps {
   hoveredItemKey: string | null;
   hoveredItemRect: DOMRect | null;
   prHoverDetails: Record<string, PRHoverDetail>;
+  prHoverStatus: ActivityPrHoverStatus;
   ciHoverDetails: Record<string, CIHoverDetail>;
   commitStack: Array<Extract<ActivityItem, { kind: 'commit' }>>;
   onOpenHoverCard: (key: string, rect: DOMRect) => void;
@@ -122,6 +124,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
   hoveredItemKey,
   hoveredItemRect,
   prHoverDetails,
+  prHoverStatus,
   ciHoverDetails,
   commitStack,
   onOpenHoverCard,
@@ -429,6 +432,15 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           <BlueGlassMetricPill label="State" value={mergeRisk?.label ?? 'reviewing'} color={mergeRisk?.color ?? '#64748b'} />
                           <BlueGlassMetricPill label="Checks" value={`${item.checkSummary?.failed ?? 0} fail · ${item.checkSummary?.pending ?? 0} pending`} color={item.checkSummary?.failed ? '#dc2626' : item.checkSummary?.pending ? '#d97706' : '#1d4ed8'} />
                           <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="var(--t-text)" />
+                        </div>
+                        <div role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                          {prHoverStatus.isFetching ? (prDetail ? 'Refreshing PR details…' : 'Loading PR details…') : null}
+                          {prHoverStatus.error ? `PR details delayed: ${prHoverStatus.error}. ` : null}
+                          {prHoverStatus.error && prDetail && prHoverStatus.ageSeconds !== null
+                            ? `Showing last known details (${prHoverStatus.ageSeconds}s old). ` : null}
+                          <button type="button" onClick={() => { void prHoverStatus.retry(); }} style={{
+                            border: 0, padding: 0, background: 'transparent', color: 'var(--t-accent)', cursor: 'pointer', font: 'inherit',
+                          }}>Retry PR details</button>
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           {onLaunchTask ? (

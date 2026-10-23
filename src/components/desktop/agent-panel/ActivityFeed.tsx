@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActivityExtras } from './useActivityExtras';
 import { ActivityFeedControls } from './ActivityFeedControls';
 import { ActivityFeedTimeline } from './ActivityFeedTimeline';
+import { useActivityPrHoverDetail } from './useActivityPrHoverDetail';
 import {
   ActivityFeedEmptyState,
   activityItemKey,
@@ -20,7 +21,6 @@ import type {
   CommitSummary,
   EventEntry,
   FeedFilter,
-  PRHoverDetail,
   RepoTaskLaunchRequest,
 } from './types';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
@@ -72,7 +72,6 @@ export const ActivityFeed = memo(function ActivityFeed({
   const [hoveredItemKey, setHoveredItemKey] = useState<string | null>(null);
   const [hoveredItemRect, setHoveredItemRect] = useState<DOMRect | null>(null);
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [prHoverDetails, setPrHoverDetails] = useState<Record<string, PRHoverDetail>>({});
   const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
 
   useEffect(() => {
@@ -216,6 +215,11 @@ export const ActivityFeed = memo(function ActivityFeed({
     [extras.repoCommits],
   );
 
+  const hoveredPr = filtered.find((item) => item.kind === 'pr' && activityItemKey(item) === hoveredItemKey);
+  const prHover = useActivityPrHoverDetail(hoveredPr?.kind === 'pr' ? hoveredPr.repo : null,
+    hoveredPr?.kind === 'pr' ? hoveredPr.number : null);
+  const prHoverDetails = prHover.detail && hoveredItemKey && hoveredPr ? { [hoveredItemKey]: prHover.detail } : {};
+
   const openHoverCard = useCallback((key: string, rect: DOMRect) => {
     if (hoverCloseTimerRef.current) {
       clearTimeout(hoverCloseTimerRef.current);
@@ -245,24 +249,6 @@ export const ActivityFeed = memo(function ActivityFeed({
     const hoveredItem = items.find((item) => activityItemKey(item) === hoveredItemKey);
     if (!hoveredItem) return;
 
-    if (hoveredItem.kind === 'pr' && !prHoverDetails[hoveredItemKey]) {
-      fetch(`/api/panel/pr?repo=${encodeURIComponent(hoveredItem.repo)}&number=${hoveredItem.number}`)
-        .then((response) => response.json())
-        .then((detail) => {
-          if (detail?.error) return;
-          setPrHoverDetails((current) => ({
-            ...current,
-            [hoveredItemKey]: {
-              mergeable: Boolean(detail.mergeable),
-              checksStatus: detail.checksStatus ?? 'unknown',
-              reviewDecision: detail.reviewDecision ?? null,
-              files: detail.files ?? [],
-            },
-          }));
-        })
-        .catch(() => {});
-    }
-
     if (hoveredItem.kind === 'ci' && !ciHoverDetails[hoveredItemKey]) {
       fetch(`/api/panel/ci/${hoveredItem.id}?repo=${encodeURIComponent(hoveredItem.repo)}`)
         .then((response) => response.json())
@@ -288,7 +274,7 @@ export const ActivityFeed = memo(function ActivityFeed({
         })
         .catch(() => {});
     }
-  }, [ciHoverDetails, hoveredItemKey, items, prHoverDetails]);
+  }, [ciHoverDetails, hoveredItemKey, items]);
 
   const grouped = useMemo(() => {
     const groups: Array<{ label: string; items: ActivityItem[] }> = [];
@@ -356,6 +342,7 @@ export const ActivityFeed = memo(function ActivityFeed({
         hoveredItemKey={hoveredItemKey}
         hoveredItemRect={hoveredItemRect}
         prHoverDetails={prHoverDetails}
+        prHoverStatus={prHover.status}
         ciHoverDetails={ciHoverDetails}
         commitStack={commitStack}
         onOpenHoverCard={openHoverCard}
