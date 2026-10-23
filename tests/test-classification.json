@@ -4037,6 +4037,24 @@
       ]
     },
     {
+      "path": "tests/pi-outside-workspace-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/pi-outside-workspace-ws-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/pi-sdk-approved-write-races-real-path.test.ts",
       "reasons": [
         "executable-fixture",

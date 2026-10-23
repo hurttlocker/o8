@@ -14,6 +14,7 @@ import { immediateComposerSendPending } from './composer-send-admission';
 import { sendLeadTerminalStatus } from './lead-terminal-status';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
+import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -41,8 +42,10 @@ function checkQueueBinding(item: QueuedComposerSendRecord): void {
     throw new Error('The chat runtime changed. Choose an explicit handoff before sending this message.');
   }
   const latest = history?.messages?.filter(row => row.role === 'assistant').at(-1);
-  if (latest && latest.timestamp > item.createdAt && latest.receipt?.permissionMode === 'plan'
-    && item.payload.routing.permissionMode === 'full') throw new Error('Chat permissions became more restrictive after this message was queued.');
+  if (latest && latest.timestamp > item.createdAt && latest.receipt?.permissionMode !== undefined
+    && permissionModeRank(latest.receipt.permissionMode) < permissionModeRank(item.payload.routing.permissionMode)) {
+    throw new Error('Chat permissions became more restrictive after this message was queued.');
+  }
 }
 
 /** User-requested next turns use saved routing, never whichever composer is currently open. */
@@ -51,6 +54,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
   const repoPath = readPersistedLlmChat(item.threadId)!.history.repoPath!;
   if (findLeadThreadBinding(item.threadId)) {
     const origin = originFor(item);
+    if (origin.permissionMode === 'outside-workspace') throw new Error('Outside workspace commands require the built-in lead.');
     const result = await sendLeadThreadMessage({ threadId: item.threadId, repoPath,
       message: item.payload.wireMessage, displayMessage: item.payload.text, projectId: origin.projectId,
       backend: origin.backend, model: origin.model, effort: origin.effort, permissionMode: origin.permissionMode,

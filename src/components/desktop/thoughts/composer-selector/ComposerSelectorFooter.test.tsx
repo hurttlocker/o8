@@ -68,14 +68,14 @@ function Harness({
   messages?: number;
   waiting?: boolean;
   permissions?: boolean;
-  onSend?: (permission: 'full' | 'plan') => void;
+  onSend?: (permission: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode) => void;
   initialInput?: string;
   onDraftSend?: (input: string) => void;
   repoPath?: string;
   effortTestId?: string;
 }) {
   const [input, setInput] = useState(initialInput);
-  const [permission, setPermission] = useState<'full' | 'plan'>('full');
+  const [permission, setPermission] = useState<import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode>('full');
   const [mode, setMode] = useState<ComposerSelectorMode>(initialMode);
   const [effort, setEffort] = useState<ThinkingEffort>(initialEffort);
   const [model, setModel] = useState(initialModel);
@@ -338,6 +338,30 @@ describe('ComposerSelectorFooter', () => {
     await act(async () => root.render(createElement(Harness, { permissions: true, messages: 0, waiting: true })));
     expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
   });
+
+  it('requires an explicit outside-workspace choice for the built-in lead', async () => {
+    const onSend = vi.fn();
+    await act(async () => root.render(createElement(Harness, { permissions: true, initialBackend: 'pi', initialModel: 'pi', onSend })));
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Permissions: Full access"]')!;
+    expect(trigger).not.toBeNull();
+    act(() => trigger.click());
+    const outside = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+      .find(button => button.textContent?.includes('Outside workspace'));
+    expect(outside).toBeDefined();
+    expect(outside!.getAttribute('aria-checked')).toBe('false');
+    expect(outside!.textContent).toContain('Commands can edit files outside this workspace');
+    act(() => outside!.click());
+    expect(container.querySelector('[aria-label="Permissions: Outside workspace"]')).not.toBeNull();
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="composer-selector-send"] button')!.click());
+    expect(onSend).toHaveBeenCalledWith('outside-workspace');
+  });
+
+  it.each([{ backend: 'codex' as const, mode: 'solo' as const }, { backend: 'pi' as const, mode: 'moa' as const }])(
+    'hides outside-workspace permission for $backend in $mode', async ({ backend, mode }) => {
+      await act(async () => root.render(createElement(Harness, { permissions: true, initialBackend: backend, initialMode: mode })));
+      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Permissions: Full access"]')!.click());
+      expect(container.textContent).not.toContain('Outside workspace');
+    });
 
   it('orders mode, attach, lead, mic, and send with mic immediately before send', async () => {
     await act(async () => { root.render(createElement(Harness)); });
