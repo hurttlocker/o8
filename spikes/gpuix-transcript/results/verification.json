@@ -1,0 +1,22 @@
+{
+  "harness": {"acceptedRuns": 9, "runsPerArm": 3, "keysPerArm": 60, "streamSamplesPerArm": 240, "scrollSamplesPerArm": 300, "fixtureAndInputAcknowledgements": "pass", "terminalDecodedComposerMarkers": "pass"},
+  "typecheck": {"root": "npx tsc --noEmit: exit 0", "isolated": "npx tsc --noEmit -p spikes/gpuix-transcript/tsconfig.json: exit 0"},
+  "lint": "ESLint on all touched TS/TSX/MJS files: exit 0, zero warnings",
+  "rules": "npm run rule-check -- --base=HEAD: exit 0, four TS/TSX files scanned",
+  "build": "npm run build: exit 0",
+  "syntax": "Python py_compile and MJS node --check: pass",
+  "unattendedSampler": "swiftc -parse-as-library -typecheck: exit 0; not executed",
+  "unitGate": {
+    "scope": "isolated unchanged product-source snapshot",
+    "initialCommand": "npm test",
+    "initial": {"filesPassed": 1182, "filesFailed": 8, "filesSkipped": 3, "testsPassed": 8336, "testsFailed": 12, "testsSkipped": 4},
+    "initialCauses": ["missing ink, @pierre/diffs and @muse-code/sdk dependencies", "missing Git metadata in archive snapshot"],
+    "setupCorrection": "Installed locked dependencies and initialized Git metadata only in the disposable verification snapshot; no product source change",
+    "affectedFileRerun": {"filesPassed": 8, "testsPassed": 53, "failures": 0},
+    "affectedFiles": ["cli/src/chat/viewport.test.ts", "src/components/desktop/pr-panel/PierrePrDiff.test.ts", "src/components/desktop/pr-panel/pr-patch.test.ts", "src/components/desktop/o8-panel/workspace-rail/PierreFileView.test.ts", "src/components/desktop/thoughts/use-orchestrator-stream/fresh-turn-options.test.ts", "tests/release-artifacts.test.ts", "src/components/desktop/o8-panel/workspace-rail/AllFilesTree.test.ts", "src/components/desktop/o8-panel/workspace-rail/WorkspaceFilesPane.test.ts"],
+    "limitation": "Full suite was not repeated after setup repair; every originally failing file passed the focused rerun"
+  },
+  "roadmap": "Existing drift: Now links closed issue #4082; no roadmap changes",
+  "privacy": "Committed result/source scan contains no home paths, credentials, process IDs, or desktop captures",
+  "decision": "Draft only; no merge or release"
+}

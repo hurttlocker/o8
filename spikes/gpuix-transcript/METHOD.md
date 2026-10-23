@@ -1,85 +1,90 @@
-# Pending measurement method
+# Isolated measurement method
 
-Not executed. No measurement script exists. All three sample counts are zero.
-The source audit stop rule takes precedence over building this harness.
+Run from this directory with `npm run build && npm run bench`. The root app and
+root dependency graph are unchanged. The native addon must first be built from
+the source pins with `test-support`, `--release`, and the explicit target.
+Install the isolated browser with `npx playwright-core install webkit`.
 
-1. Finish the build/download audit after the toolchain boundary is resolved.
-   Use the source pins and lock hashes in `source-pins.json`; explicitly target
-   `x86_64-apple-darwin`. Pin every direct dependency exactly and commit the local
-   lockfile. Never install into the root or change product components.
-2. Generate one deterministic invented fixture: 2,000 turns containing user and
-   assistant prose, markdown, code, tool rows, and a fixed count of diffs. Define
-   whether each turn is a message or exchange and record counts/bytes/hash.
-   Append identical token strings on a 20 ms schedule; record achieved rate.
-3. Render GPUIX with windowed `virtual-list`, native markdown/code/diff and a
-   composer. Use system sans and monospace fonts, the existing transcript's
-   font size, theme, spacing and activity grouping. Record any visual compromises.
-   Do not give a diff its own vertical scroller inside the scrolling transcript.
-4. Use the real `WorkspaceTranscript` and worker composer in a development-only
-   preview following `src/app/preview/worker-transcript/`. Keep the preview app
-   and its route inside this spike, importing the existing components unchanged.
-   Preserve production rendering/virtualization behavior and record the exact
-   source commit. A mocked HTML transcript is not the baseline.
-5. Use actual Safari, not a Playwright WebKit substitute. Run one side at a time
-   in the foreground with an equal 1200x800 content viewport, display scale,
-   refresh rate and font settings. Verify the viewport; do not equate outer window
-   bounds with the page viewport. Preserve unrelated browser windows and tabs.
-6. Script at least three runs per surface, rotating native, Safari and Ghostty
-   order. Define cold launch
-   as launch/navigation to the first displayed transcript frame. Keep the dev
-   server ready and report compilation/cache state separately. Do not claim a
-   cold filesystem cache unless it was actually controlled.
-7. Establish a common displayed-frame timestamp method for both surfaces before
-   collecting numbers. Native CPU render duration, React commit duration,
-   requestAnimationFrame cadence and actual presentation latency are different
-   quantities. Keep raw presentation timestamps and instrumentation overhead.
-   Use streaming frame intervals for each run's p50/p95/p99; count missed display
-   intervals during a scripted fast traversal that proves all 2,000 turns were
-   traversed. Preserve scroll path, speed, duration and coverage evidence.
-8. During streaming, inject timestamped real keyboard input into the focused
-   composer and detect the corresponding displayed glyph. Retain each input and
-   presentation pair. Event-to-next-rAF alone does not establish key-to-paint.
-9. Resolve each page's actual Safari WebContent process, not Safari's browser
-   process, networking process or an arbitrary matching PID. Preserve process
-   attribution evidence. Sample that PID's RSS and the native app's RSS at idle
-   and after 300 seconds of streaming, with equal sampling semantics. Record
-   helper processes separately rather than silently folding them into one side.
-10. Report the median of per-run values, including the per-run percentile values,
-    with raw sample counts. Reject invalid runs with reasons; retain them rather
-    than retrying invisibly. Do not infer a Rust backend speedup from renderer data.
+## Boundaries
 
-## Ghostty terminal comparison
+- Never post operating-system input, automate an installed application, activate
+  a window, or launch a terminal host. The old desktop drivers are retired and
+  retained only in ignored local evidence, outside executable entry points.
+- Web: Playwright launches its own headless WebKit. In-page KeyboardEvent and
+  InputEvent dispatch use the real WorkerPaneComposer handler. Performance marks,
+  two requestAnimationFrame callbacks, and PerformanceObserver provide raw
+  samples. `costMs` measures the synchronous React update and forced layout;
+  `elapsedMs` ends at the second rAF. Neither establishes displayed key-to-paint,
+  GPU completion, OS input queue cost, compositor drops, or refresh-rate cadence.
+- Native: GPUIX's GPU-backed TestGpuixRenderer opens an offscreen window at
+  (-10000,-10000), with `focus:false`. Test-only active status changes no OS
+  focus. Keystrokes go through GPUI event dispatch; exact input and painted text
+  must match. Flush runs GPUI until parked; the in-process completion callback
+  reads the GPUI profiler's draw duration. An update includes two flushes and
+  event drains. `drawMs` is the last draw's CPU build/layout/paint cost, excluding
+  physical display presentation. The parent kills a run at nine seconds, and the
+  process exits after recording its samples. No activation method is called.
+- Terminal: a Python-owned PTY supplies a 1200x816 winsize to GPUIX terminal mode.
+  A minimal Kitty protocol emulator refuses shared memory and decodes actual
+  inline zlib/base64 RGBA images before acknowledging fences. Typed bytes enter
+  only that owned PTY. Input must match the GPUI state, painted text and the decoded composer marker. Frame
+  timestamps end at decode completion; they include transport, compression,
+  readback, decoder, HTTP control, and scheduling costs, excluding any terminal
+  GPU/compositor. This is an inline transport test, not a Ghostty benchmark.
 
-Ghostty `1.3.1` is installed. This leg is required and shares the native build
-blocker. Use the same built transcript command and fixture, changing only
-`GPUIX_TERMINAL=1`. After the audit/build gates clear, launch a dedicated instance:
+No arm measures physical keyboard latency. Values with different completion
+boundaries must not be divided to claim a renderer speedup.
 
-```text
-open -na /Applications/Ghostty.app --args -e /usr/bin/env GPUIX_TERMINAL=1 <absolute transcript command> <arguments>
+## Fixture and schedule
+
+One turn is one invented transcript entry. All arms verify the identical SHA-256
+of the same 2,000-entry fixture. It contains prose, markdown, code, tools, and
+20 diffs. The web arm imports production WorkspaceTranscript and
+WorkerPaneComposer unchanged. Native and terminal share the same React GPUIX
+component with 50 windowed rows, native markdown/diffs, simplified tool rows,
+system sans and monospace fonts. Web diffs remain fenced markdown. These visual
+and virtualization differences prevent a production-parity speed claim.
+
+Each run requests the same 80 token additions, 20 keys during streaming, and
+100 scroll anchors (19,39,...,1999). These are sampled jumps over the whole index
+range, not proof that every turn was visibly traversed. Native records observed
+visible ranges. A 20 ms target schedule is backpressured by measurement; achieved
+rate is reported, never assumed to equal 50 tokens/s. The second-rAF wait also
+limits the web driver. This short test is not a 300-second memory soak.
+
+Three fresh processes/browser instances per arm, with production React in all arms. The initial accepted batch
+rotated native/web/terminal, web/terminal/native, terminal/native/web. The final
+native and terminal passes were recollected separately to fix production React
+mode and enforce decoded composer-marker acknowledgement. Web samples did not
+change. Order and active-desktop background load were not fully controlled. Results contain every sample, counts,
+fixture hash, acknowledgements, and per-run p50/p95/p99. The report takes the
+median of those per-run percentiles. Headless WebKit uses millisecond timer
+precision. There is no controlled cold filesystem cache or refresh-rate claim.
+Rejected probes remain in ignored raw evidence with reasons summarized in
+results/rejected.json. Only the final accepted nine runs enter the summary.
+
+## Needs an unattended on-screen run
+
+`unattended-on-screen.swift` is the single read-only compositor sampler. It was
+typechecked, never executed. It requires an explicit, manually prepared,
+experiment-owned window ID with a `GPUIX benchmark` title. It captures only that
+window for at most eight seconds; it does not create, activate, resize, close,
+or send input to an app. Prepare native windows without activation and under
+ten seconds lifetime; prepare a separate Playwright WebKit instance with in-page
+input. A terminal-host window requires manual preparation by the operator.
+
+Compile/run at the empty desk:
+
+```sh
+swiftc -parse-as-library unattended-on-screen.swift -o /tmp/gpuix-unattended-capture
+/tmp/gpuix-unattended-capture <owned-window-id> <output.jsonl> 8
 ```
 
-This is a launch template, not a command that has been executed. Record existing
-Ghostty process/window IDs before launch. Associate the newly opened window with
-the run ID and child PID; never identify ownership by the app name alone.
-
-GPUIX terminal mode ignores `render()` width/height and follows terminal size.
-Verify the actual graphic content area is 1200x800, adjusting only the experiment's
-window. Use the same foreground status, display, refresh rate, streaming schedule,
-scroll traversal, typing and three-run aggregation as the native leg.
-
-Measure frames after Ghostty presents the graphics. GPUIX's offscreen rendering
-stats alone omit terminal presentation and cannot establish that frame time.
-Record the GPUIX child RSS at idle/300 seconds with the same sampling as native,
-and Ghostty's owned host/helper RSS separately. Report their combined total with
-the components, so terminal host overhead is visible rather than hidden.
-
-Capture the actual transcript in the owned Ghostty window. Inspect that screenshot
-before uploading to the PR proof branch. A blank terminal or failed launch is not
-proof that terminal rendering works. Do not publish unrelated windows or content.
-
-On completion or failure, interrupt only the experiment's child/session, then close
-only the recorded experiment window IDs. Preserve every pre-existing Ghostty
-window and process; do not issue a blanket app quit or process-name kill.
-
-Put any future screenshots only on `pr-proof-assets` under the PR number, never
-in this branch's commits or release assets. This blocked run has no screenshots.
+Repeat for each arm and each run while the app-owned/page-owned input driver
+runs. Preserve that driver's monotonic event log. Correlate the resulting
+ScreenCaptureKit complete-frame timestamps with each input's content marker;
+raw capture cadence alone is not key-to-paint or dropped-frame proof. This
+script supplies capture evidence, not an automatic nine-run compositor verdict.
+Outstanding: displayed key-to-frame, actual terminal-host presentation, launch
+to first displayed content, compositor scroll/stream drops and display scale/
+refresh parity. A separate 300-second offscreen soak is also unmeasured.

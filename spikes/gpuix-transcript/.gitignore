@@ -4,3 +4,4 @@ dist/
 raw/
 screenshots/
 *.log
+__pycache__/

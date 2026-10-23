@@ -1,0 +1,37 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "types": [
+      "node",
+      "react",
+      "react-dom"
+    ],
+    "paths": {
+      "@/*": [
+        "../../src/*"
+      ],
+      "react": [
+        "./node_modules/@types/react/index.d.ts"
+      ],
+      "react/*": [
+        "./node_modules/@types/react/*"
+      ]
+    }
+  },
+  "include": [
+    "fixture.ts",
+    "native.tsx",
+    "native-bench.tsx",
+    "preview.tsx",
+    "../../src/types/*.d.ts"
+  ],
+  "exclude": [
+    "vendor",
+    "node_modules",
+    "dist",
+    "raw"
+  ]
+}

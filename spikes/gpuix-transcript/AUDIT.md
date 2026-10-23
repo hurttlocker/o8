@@ -1,4 +1,25 @@
-# Source audit receipt
+# Current execution status
+
+The blocked receipt below is historical. The preceding work completed a release
+addon build from the unchanged source pins, using Rust 1.97.1 and the available
+Metal toolchain. The source checkout has no diff. This continuation installed
+only the spike-local Playwright dependency and its isolated WebKit runtime; it
+did not acquire native toolchains or change saved defaults. The cached addon
+SHA-256 is recorded in source-pins.json. It is a local x86_64 build, not a
+published package for that target. Rebuild from the pinned sources with:
+
+```sh
+cargo +1.97.1 build --locked --offline --release --features test-support --target x86_64-apple-darwin
+```
+
+Run from the source checkout's packages/native directory after source/dependency
+audit and prerequisites. Copy the resulting dynamic library to the isolated
+@gpuix/native package using its expected napi filename. The previous build log
+reported release completion in 8m15s. Fresh measurements now use the isolated
+method in [METHOD.md](METHOD.md). Prior desktop probes are excluded. Product
+components and root dependencies remain unchanged. No merge or release occurred.
+
+# Source audit receipt (historical pre-build state)
 
 Status: stopped before dependency installation or compilation, 2026-10-23.
 This is a blocked research handoff, not a completed benchmark. No fixture,

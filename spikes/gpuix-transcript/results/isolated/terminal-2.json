@@ -1,0 +1,2820 @@
+{
+  "surface": "terminal",
+  "fixtureHash": "46471f2c5a78d461e9e11b4f30129a23f18aee84644b856cd2440373e85ae238",
+  "rows": 2000,
+  "width": 1200,
+  "height": 816,
+  "stream": [
+    {
+      "elapsedMs": 18.510715007781982,
+      "costMs": 18.510715007781982,
+      "appFrameMs": 11.548223000000007,
+      "drawMs": 2.754081964492798,
+      "decodeMs": 6.135197997093201,
+      "receiveMs": 8.50127100944519,
+      "hash": "f3d905491e7d21d858f1c95ba716b922066b71cc0a32fc8b6cd85162dc6012a9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 31.955873012542725,
+      "costMs": 31.955873012542725,
+      "appFrameMs": 4.497567000000004,
+      "drawMs": 3.4712700843811035,
+      "decodeMs": 6.397516965866089,
+      "receiveMs": 9.391709923744202,
+      "hash": "f18e174067f80197bb798e078283a1a9f5e86e361f55ae6190a37ba3bc41d739",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 26.113273978233337,
+      "costMs": 26.113273978233337,
+      "appFrameMs": 3.5515589999999975,
+      "drawMs": 2.780503988265991,
+      "decodeMs": 5.3048399686813354,
+      "receiveMs": 7.130107045173645,
+      "hash": "e984cfcae538de28ee807422ff5a493f7262a92deb7682e4bf2ad44b69e13016",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 32.13302505016327,
+      "costMs": 32.13302505016327,
+      "appFrameMs": 4.407181000000037,
+      "drawMs": 3.6743030548095703,
+      "decodeMs": 5.723049998283386,
+      "receiveMs": 9.844519972801208,
+      "hash": "b4e79ead7704a1775f9590e3f96646b72d6fff32248c2bde4f41c5acc834e6a7",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 32.392395973205566,
+      "costMs": 32.392395973205566,
+      "appFrameMs": 3.7958430000001044,
+      "drawMs": 2.732412815093994,
+      "decodeMs": 4.810522079467773,
+      "receiveMs": 6.81290602684021,
+      "hash": "010305299a0d4250e7e93627d1fd629b64435b28db5f4f811a91b91a0fec4a72",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 31.458328008651733,
+      "costMs": 31.458328008651733,
+      "appFrameMs": 3.793559999999843,
+      "drawMs": 3.0815799236297607,
+      "decodeMs": 4.821318030357361,
+      "receiveMs": 6.8885239362716675,
+      "hash": "025079c8a75343e0596c7ccf6cb600f871f22716599658101df8ffebd51c1a8a",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 31.33050799369812,
+      "costMs": 31.33050799369812,
+      "appFrameMs": 3.673304000000144,
+      "drawMs": 3.0258948802948,
+      "decodeMs": 4.404510021209717,
+      "receiveMs": 6.529518961906433,
+      "hash": "24d49af8f8744f3da875d0f5ca9eaa1c78730781453633c7cae35148d2db06ba",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 21.994400024414062,
+      "costMs": 21.994400024414062,
+      "appFrameMs": 3.931636000000026,
+      "drawMs": 3.2501888275146484,
+      "decodeMs": 5.006488919258118,
+      "receiveMs": 7.361021995544434,
+      "hash": "ecbfd499e445f68ce7211bc95f9ed0675dd1e305199a70c7d85ac17b049bb4ed",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.447459936141968,
+      "costMs": 24.447459936141968,
+      "appFrameMs": 3.635953999999856,
+      "drawMs": 3.0141119956970215,
+      "decodeMs": 6.742565035820007,
+      "receiveMs": 8.98117709159851,
+      "hash": "1f8a9c1ee798ca1882e4d2f69c13ea68342ba774b0b7541c5720cd2ffa3759ad",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.132763981819153,
+      "costMs": 5.132763981819153,
+      "appFrameMs": 3.5223940000000766,
+      "drawMs": 2.9621798992156982,
+      "decodeMs": 3.3106720447540283,
+      "receiveMs": 6.185655951499939,
+      "hash": "1f8a9c1ee798ca1882e4d2f69c13ea68342ba774b0b7541c5720cd2ffa3759ad",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.396229028701782,
+      "costMs": 5.396229028701782,
+      "appFrameMs": 4.111043000000109,
+      "drawMs": 3.1516149044036865,
+      "decodeMs": 3.7429699897766113,
+      "receiveMs": 5.869204044342041,
+      "hash": "0e651750192700b01e9f090b4d1b83b1103ff416b4c20369df170edddb3b7fc3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.227352023124695,
+      "costMs": 5.227352023124695,
+      "appFrameMs": 3.9464929999999185,
+      "drawMs": 3.3353359699249268,
+      "decodeMs": 3.087453007698059,
+      "receiveMs": 5.281962990760803,
+      "hash": "e2177a63415093e099efeb87bc79af8b297b65d288fae258ee27b12ecfdfc936",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 24.499911069869995,
+      "costMs": 24.499911069869995,
+      "appFrameMs": 3.21330799999987,
+      "drawMs": 2.6665029525756836,
+      "decodeMs": 4.237006068229675,
+      "receiveMs": 6.074169993400574,
+      "hash": "639d097cfd7329f5e88df52289a34693cfc340e3a5ecb7ff1d9829a5b63e0af1",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 29.28476905822754,
+      "costMs": 29.28476905822754,
+      "appFrameMs": 3.3424270000000433,
+      "drawMs": 2.8501691818237305,
+      "decodeMs": 5.102558016777039,
+      "receiveMs": 7.551470994949341,
+      "hash": "996529138aedc9e9ef8a4b89b5af8044d869f02d3a8c28162fe936ce25bb36d0",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 25.0782470703125,
+      "costMs": 25.0782470703125,
+      "appFrameMs": 5.63718700000004,
+      "drawMs": 4.724311351776123,
+      "decodeMs": 2.897415041923523,
+      "receiveMs": 5.125360012054443,
+      "hash": "885db671c84b0147f40d516549813401cd28e35662dcc3066402801bbe38afa8",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 28.832723021507263,
+      "costMs": 28.832723021507263,
+      "appFrameMs": 4.3743319999998675,
+      "drawMs": 3.8524460792541504,
+      "decodeMs": 3.808526039123535,
+      "receiveMs": 6.0324660539627075,
+      "hash": "d8877ea0a07ece8354984e5c3ebb86ebd94393e3b035f892ba23b5cbd29fe5af",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 20.936076998710632,
+      "costMs": 20.936076998710632,
+      "appFrameMs": 15.079989999999952,
+      "drawMs": 4.158814907073975,
+      "decodeMs": 4.930711984634399,
+      "receiveMs": 8.565868020057678,
+      "hash": "8e05ac1ad7a985764b6bf611ca9bc4e7fccfb29f05326770b04da8ec6e1aa641",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 19.558748960494995,
+      "costMs": 19.558748960494995,
+      "appFrameMs": 3.5818269999999757,
+      "drawMs": 2.9820079803466797,
+      "decodeMs": 3.8443679809570312,
+      "receiveMs": 6.42093300819397,
+      "hash": "9861f82e90b20fcf201604a0fd2b8412afddeb1ac85692ac5ae4e828fa92b94c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 30.745787024497986,
+      "costMs": 30.745787024497986,
+      "appFrameMs": 3.657444999999825,
+      "drawMs": 2.9627890586853027,
+      "decodeMs": 4.596314072608948,
+      "receiveMs": 9.261553049087524,
+      "hash": "dc9d3ceb03d39bf1474d33d39a31a3e05b4ead98f076f6dd6b2c59e4d3a050ce",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 20.668918013572693,
+      "costMs": 20.668918013572693,
+      "appFrameMs": 5.716357000000016,
+      "drawMs": 4.756807804107666,
+      "decodeMs": 3.2040590047836304,
+      "receiveMs": 6.692405939102173,
+      "hash": "3f3c63258cf78a8e36a05e79e5f86f4f62cd6fb0316e8d56cd2f292e8647a729",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 29.08575999736786,
+      "costMs": 29.08575999736786,
+      "appFrameMs": 3.50965199999996,
+      "drawMs": 2.9935481548309326,
+      "decodeMs": 5.631538033485413,
+      "receiveMs": 8.458611965179443,
+      "hash": "38612bebd00ca2b814f60b6979996bac130e4b4ed1bd2d932a6aa15f225407cb",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 11.74584698677063,
+      "costMs": 11.74584698677063,
+      "appFrameMs": 19.920683000000054,
+      "drawMs": 4.223199844360352,
+      "decodeMs": 5.751607060432434,
+      "receiveMs": 11.849533915519714,
+      "hash": "38612bebd00ca2b814f60b6979996bac130e4b4ed1bd2d932a6aa15f225407cb",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 3.7716130018234253,
+      "costMs": 3.7716130018234253,
+      "appFrameMs": 17.23218399999996,
+      "drawMs": 2.9542407989501953,
+      "decodeMs": 4.341317057609558,
+      "receiveMs": 7.690697908401489,
+      "hash": "f17a50038b7140b0776347ef540e78973fc5b490c66d5c3f699e02bb5a90c9a2",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 8.17413592338562,
+      "costMs": 8.17413592338562,
+      "appFrameMs": 24.35853300000008,
+      "drawMs": 4.1808319091796875,
+      "decodeMs": 8.80834698677063,
+      "receiveMs": 12.501610040664673,
+      "hash": "d72e4c08768b96a0cede4d875f7e1bc23d2eff7b3d6f6b7e7227c56f5189b39e",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 20.86786699295044,
+      "costMs": 20.86786699295044,
+      "appFrameMs": 16.712102999999843,
+      "drawMs": 4.494932174682617,
+      "decodeMs": 3.1942800283432007,
+      "receiveMs": 8.47488009929657,
+      "hash": "68de850f76d0ca0f3db8f9335e80a5cb1f7d3e3008836ab60034e4bf0a66b1e5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 23.387457013130188,
+      "costMs": 23.387457013130188,
+      "appFrameMs": 3.191714999999931,
+      "drawMs": 2.68618106842041,
+      "decodeMs": 3.37506103515625,
+      "receiveMs": 5.265619993209839,
+      "hash": "e5116c727544253e43340ad4a8a886c1b232e7766992e4054a7f7c1020a2f2e8",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 34.14522397518158,
+      "costMs": 34.14522397518158,
+      "appFrameMs": 3.070937999999842,
+      "drawMs": 2.6776180267333984,
+      "decodeMs": 4.720535039901733,
+      "receiveMs": 6.877136945724487,
+      "hash": "97f66d8be2043ea52c2b400172576d029844ac8bd01fca6b3401799ebab9488b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 19.185456037521362,
+      "costMs": 19.185456037521362,
+      "appFrameMs": 4.5015840000000935,
+      "drawMs": 3.895120859146118,
+      "decodeMs": 3.7296119928359985,
+      "receiveMs": 6.277726054191589,
+      "hash": "453b70a88974c73ee5ebc8cb2c6f74223de52ed7cdd3bcb066d958db61d6aa9c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 50.25960099697113,
+      "costMs": 50.25960099697113,
+      "appFrameMs": 3.516726999999719,
+      "drawMs": 2.956068992614746,
+      "decodeMs": 31.900123953819275,
+      "receiveMs": 35.66874098777771,
+      "hash": "2e55c00a9e274fefe72518fa5299bc98c5b876ca6449e7e6897975bb64ceb2f0",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 22.023132920265198,
+      "costMs": 22.023132920265198,
+      "appFrameMs": 17.45325099999991,
+      "drawMs": 4.864235877990723,
+      "decodeMs": 3.708370089530945,
+      "receiveMs": 7.400044918060303,
+      "hash": "e9c8f2aa8b94c70c4a0ab7912b01932388caea2f349f0a49b493becb415a61cb",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 23.047538995742798,
+      "costMs": 23.047538995742798,
+      "appFrameMs": 3.4855940000002192,
+      "drawMs": 3.0289499759674072,
+      "decodeMs": 4.1359699964523315,
+      "receiveMs": 7.316902995109558,
+      "hash": "7eb3a767d9bd15ab929affd6774e8107dfc97dd63c293e22b4f5b87185848145",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 23.90089201927185,
+      "costMs": 23.90089201927185,
+      "appFrameMs": 4.389913999999862,
+      "drawMs": 3.8139450550079346,
+      "decodeMs": 3.151029109954834,
+      "receiveMs": 6.081971049308777,
+      "hash": "8944a05b483772de8012d3615f60d3710b43642a2c6b97e0f8dfaf2417148678",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 26.1491619348526,
+      "costMs": 26.1491619348526,
+      "appFrameMs": 4.494419000000107,
+      "drawMs": 4.037333011627197,
+      "decodeMs": 4.410171031951904,
+      "receiveMs": 7.782701015472412,
+      "hash": "8d5bb2bae65e3080217fa897967c24249c4db20b1d77427b3c00da11c1b755a7",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 27.704657077789307,
+      "costMs": 27.704657077789307,
+      "appFrameMs": 4.234129999999823,
+      "drawMs": 3.6006791591644287,
+      "decodeMs": 4.340274095535278,
+      "receiveMs": 7.762152910232544,
+      "hash": "69528831d388dd19bfb731cf1e7041a0219c0a300cbbe10d8946d2a32acb8c1a",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 21.390079975128174,
+      "costMs": 21.390079975128174,
+      "appFrameMs": 5.104894000000058,
+      "drawMs": 4.46226692199707,
+      "decodeMs": 2.7560240030288696,
+      "receiveMs": 5.253742933273315,
+      "hash": "a335fdb5131e007c6643adf342eaa4d529fdb7c366e0f535cf4e67ed0a8b65c4",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 30.883689999580383,
+      "costMs": 30.883689999580383,
+      "appFrameMs": 3.232036999999764,
+      "drawMs": 2.8099961280822754,
+      "decodeMs": 3.9682130813598633,
+      "receiveMs": 7.8511329889297485,
+      "hash": "ba511f76c476890dd3a0e68fa6a49e195ee0ff1b8f905909dd6687a8e7320103",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 30.22677707672119,
+      "costMs": 30.22677707672119,
+      "appFrameMs": 3.210529999999835,
+      "drawMs": 2.8289849758148193,
+      "decodeMs": 4.548647999763489,
+      "receiveMs": 7.341791987419128,
+      "hash": "d965335d3fa35d0862123995fad328c33e24b72f7eef204e4efa445f29302d81",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 22.449974060058594,
+      "costMs": 22.449974060058594,
+      "appFrameMs": 3.593814999999722,
+      "drawMs": 3.1797990798950195,
+      "decodeMs": 3.045395016670227,
+      "receiveMs": 5.842422962188721,
+      "hash": "f2fb34db1dfc4aec75c7d6585aeb1379ceaf56d1bdbb01361e7f19c37189f5b9",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.719529032707214,
+      "costMs": 24.719529032707214,
+      "appFrameMs": 3.2211999999999534,
+      "drawMs": 2.7667078971862793,
+      "decodeMs": 3.104836940765381,
+      "receiveMs": 5.863273024559021,
+      "hash": "b8aa5327de5d741a948ce25cab4505e1b0b4333685c617315aff15b275eb6d84",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 33.81552004814148,
+      "costMs": 33.81552004814148,
+      "appFrameMs": 4.4212399999996705,
+      "drawMs": 3.9520020484924316,
+      "decodeMs": 2.993407964706421,
+      "receiveMs": 7.200731039047241,
+      "hash": "8e3648b71729032f4f53e05d441097ff1132d0eedd90726c28bf62783c7452ee",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 23.288415908813477,
+      "costMs": 23.288415908813477,
+      "appFrameMs": 3.6231579999998758,
+      "drawMs": 3.192348003387451,
+      "decodeMs": 3.392043948173523,
+      "receiveMs": 6.3766080141067505,
+      "hash": "dbff244db53a6e84cb939e411c373a1c1a32b81be2caa452bc349b1044eaa989",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 29.893507957458496,
+      "costMs": 29.893507957458496,
+      "appFrameMs": 4.423717000000124,
+      "drawMs": 3.858069896697998,
+      "decodeMs": 3.8378520011901855,
+      "receiveMs": 7.006083011627197,
+      "hash": "4722a758d993968fa0a14909bb5a6e61b7a647c7dc5a3b40ff5ec1deb0378052",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 26.36547303199768,
+      "costMs": 26.36547303199768,
+      "appFrameMs": 3.7596770000000106,
+      "drawMs": 3.1664700508117676,
+      "decodeMs": 3.058314085006714,
+      "receiveMs": 6.7120290994644165,
+      "hash": "653f46c9bcbc598192e7c58e004510a51bad6181dc9df0975f71b2e590e26e03",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 7.110365033149719,
+      "costMs": 7.110365033149719,
+      "appFrameMs": 3.637011999999686,
+      "drawMs": 3.174827814102173,
+      "decodeMs": 3.588621973991394,
+      "receiveMs": 7.584214925765991,
+      "hash": "653f46c9bcbc598192e7c58e004510a51bad6181dc9df0975f71b2e590e26e03",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 22.713881969451904,
+      "costMs": 22.713881969451904,
+      "appFrameMs": 3.222013000000061,
+      "drawMs": 2.821866989135742,
+      "decodeMs": 3.1559330224990845,
+      "receiveMs": 4.976127982139587,
+      "hash": "f6f29eed28e84e48a99b6c0fa2fd0b462e97368417784f3b8f5e8494a523d6b7",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 33.29996991157532,
+      "costMs": 33.29996991157532,
+      "appFrameMs": 4.710055000000011,
+      "drawMs": 4.078540802001953,
+      "decodeMs": 2.947421908378601,
+      "receiveMs": 5.82188093662262,
+      "hash": "cf79d7ace70f91e9f7df9e0b8ffc4cd2931c011416a581aa709ad20ec60894ff",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.98980402946472,
+      "costMs": 24.98980402946472,
+      "appFrameMs": 3.1435419999997976,
+      "drawMs": 2.7540388107299805,
+      "decodeMs": 3.298013925552368,
+      "receiveMs": 5.192709922790527,
+      "hash": "4ae40d5265f50de6bf6c2dc8e3de5807c967135682ee5aad8122c18e18b6e354",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 26.66789197921753,
+      "costMs": 26.66789197921753,
+      "appFrameMs": 3.1618759999996655,
+      "drawMs": 2.748051881790161,
+      "decodeMs": 4.084637999534607,
+      "receiveMs": 6.3619771003723145,
+      "hash": "654bfb5cc2b2906da32e32f5e5483a53fbf5bb950cbe7329757b656f37be1909",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 21.95912504196167,
+      "costMs": 21.95912504196167,
+      "appFrameMs": 5.318501000000197,
+      "drawMs": 4.7708001136779785,
+      "decodeMs": 3.849023938179016,
+      "receiveMs": 6.6622090339660645,
+      "hash": "4ff256a88d4e1b361c5df2ddad17bb807f6be6cc8b8a67d1f2e9b6ae2f4e567f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 26.589145064353943,
+      "costMs": 26.589145064353943,
+      "appFrameMs": 3.640632000000096,
+      "drawMs": 3.1392669677734375,
+      "decodeMs": 3.011819005012512,
+      "receiveMs": 5.8687520027160645,
+      "hash": "20cf34aeb1ef465a4638f085b79f4bbb702860a784a37110df8f5403f382f3eb",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 23.487239956855774,
+      "costMs": 23.487239956855774,
+      "appFrameMs": 3.668314999999893,
+      "drawMs": 3.198012113571167,
+      "decodeMs": 3.297961115837097,
+      "receiveMs": 7.278607964515686,
+      "hash": "8ca5896c6bc8b1548525afa2a828057bab100cdd1ccec15094ff24cb7b371f96",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 30.020628929138184,
+      "costMs": 30.020628929138184,
+      "appFrameMs": 3.9071509999998852,
+      "drawMs": 3.34637713432312,
+      "decodeMs": 2.9158499240875244,
+      "receiveMs": 5.611187934875488,
+      "hash": "58441137f75380ec9373379ef2d80f1a2d9486a877c4ee89116ff39017b39097",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 25.112632989883423,
+      "costMs": 25.112632989883423,
+      "appFrameMs": 5.095307999999932,
+      "drawMs": 4.5351243019104,
+      "decodeMs": 3.531772017478943,
+      "receiveMs": 6.5973920822143555,
+      "hash": "086ba6c8702953e7fe4c180edb74a3a1e1c8e0e8240a2b288e1de6dffa3e312d",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 32.7291419506073,
+      "costMs": 32.7291419506073,
+      "appFrameMs": 3.882897999999841,
+      "drawMs": 3.409641981124878,
+      "decodeMs": 4.0391199588775635,
+      "receiveMs": 7.785482048988342,
+      "hash": "ca00c111492a69a10ee78692093abdffea8e840db841b42400be52e0f3107068",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 10.322458028793335,
+      "costMs": 10.322458028793335,
+      "appFrameMs": 18.73334900000009,
+      "drawMs": 4.025296688079834,
+      "decodeMs": 5.861676931381226,
+      "receiveMs": 9.80333697795868,
+      "hash": "ca00c111492a69a10ee78692093abdffea8e840db841b42400be52e0f3107068",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 4.152480959892273,
+      "costMs": 4.152480959892273,
+      "appFrameMs": 16.74879400000009,
+      "drawMs": 4.109663009643555,
+      "decodeMs": 4.840914011001587,
+      "receiveMs": 7.999356031417847,
+      "hash": "1008e71b984367cb0bdf7f8300aa7114bc63f079fcd3b1a127bff3505cadeeb6",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 20.539448022842407,
+      "costMs": 20.539448022842407,
+      "appFrameMs": 14.51498300000003,
+      "drawMs": 3.2918381690979004,
+      "decodeMs": 5.368511080741882,
+      "receiveMs": 9.743629932403564,
+      "hash": "9176c5cc9de3715da979cf1aa1dfbefa077a5b7906bcd4805f1804729eb8ed67",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 19.819414019584656,
+      "costMs": 19.819414019584656,
+      "appFrameMs": 4.6702879999998,
+      "drawMs": 4.091646194458008,
+      "decodeMs": 4.013882040977478,
+      "receiveMs": 7.828473925590515,
+      "hash": "83116e73f4a32edf0f01e8e54ef4f9ec722a97a54f3889986f7c2362a49c517b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 29.37423300743103,
+      "costMs": 29.37423300743103,
+      "appFrameMs": 4.420067000000017,
+      "drawMs": 3.978334903717041,
+      "decodeMs": 4.8680260181427,
+      "receiveMs": 8.602299094200134,
+      "hash": "33ea3507439324f3438030570a8aa43bc1a1258a906cd53c0b5e1abd6fc83b25",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 22.88718593120575,
+      "costMs": 22.88718593120575,
+      "appFrameMs": 5.468742999999904,
+      "drawMs": 4.788557052612305,
+      "decodeMs": 3.9415459632873535,
+      "receiveMs": 8.379605054855347,
+      "hash": "370a71a1524f0dc737fd86ad3c090ae0f3ff636c8192056365327eb681f5f141",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 32.617753982543945,
+      "costMs": 32.617753982543945,
+      "appFrameMs": 3.874072999999953,
+      "drawMs": 3.2538070678710938,
+      "decodeMs": 4.552170991897583,
+      "receiveMs": 8.872775077819824,
+      "hash": "41b6f9be6c8b38daca5c2ca4938c9210ed1e1f74645bcc09a2b9d11d429a4dc3",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 28.32171404361725,
+      "costMs": 28.32171404361725,
+      "appFrameMs": 21.685201000000234,
+      "drawMs": 4.8792266845703125,
+      "decodeMs": 5.763971924781799,
+      "receiveMs": 11.089294910430908,
+      "hash": "1ea6bbb919efa3e28b70f1b0f6c36479b83053db0a99e135a3a007a811eb9504",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 19.636354088783264,
+      "costMs": 19.636354088783264,
+      "appFrameMs": 15.118681000000379,
+      "drawMs": 4.393718242645264,
+      "decodeMs": 3.5994969606399536,
+      "receiveMs": 6.70644998550415,
+      "hash": "8a04c84bf2f7b72ea84eb2cab3046c730a6311dfaa07d5fc4a2eeb2e948343f5",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.12040901184082,
+      "costMs": 24.12040901184082,
+      "appFrameMs": 3.753777999999784,
+      "drawMs": 3.3204338550567627,
+      "decodeMs": 3.9506460428237915,
+      "receiveMs": 8.194819927215576,
+      "hash": "629e662bafea1eb46c7f35dfd535fb0f153b70640468ad73ce57939b3629f883",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.960512042045593,
+      "costMs": 24.960512042045593,
+      "appFrameMs": 18.291331000000355,
+      "drawMs": 5.313381195068359,
+      "decodeMs": 5.880022048950195,
+      "receiveMs": 9.761559009552002,
+      "hash": "180e27a8667a1d5ee6883cf03a9769630cc5dd91a1fba0ffc2861198a4d941b1",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 9.050288081169128,
+      "costMs": 9.050288081169128,
+      "appFrameMs": 4.718984000000091,
+      "drawMs": 4.308408260345459,
+      "decodeMs": 4.658906936645508,
+      "receiveMs": 9.098717093467712,
+      "hash": "180e27a8667a1d5ee6883cf03a9769630cc5dd91a1fba0ffc2861198a4d941b1",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 24.04565393924713,
+      "costMs": 24.04565393924713,
+      "appFrameMs": 18.56214,
+      "drawMs": 4.936367034912109,
+      "decodeMs": 4.583261966705322,
+      "receiveMs": 8.930346012115479,
+      "hash": "045b3eec81094bb6143f38697d78e2fe878214cf003b1ea0d554579e79b19f36",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 23.97698199748993,
+      "costMs": 23.97698199748993,
+      "appFrameMs": 17.72414800000024,
+      "drawMs": 4.607872009277344,
+      "decodeMs": 5.592077016830444,
+      "receiveMs": 9.793316006660461,
+      "hash": "a76db94b29513d6cc67c8c56aeeba7a90b8ff11dc677ca49ce995e21456dd29e",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 21.31680190563202,
+      "costMs": 21.31680190563202,
+      "appFrameMs": 15.807008000000224,
+      "drawMs": 3.519789934158325,
+      "decodeMs": 4.886077046394348,
+      "receiveMs": 9.800366044044495,
+      "hash": "b725718a400de14a3ff2203a161d45ba1de259ba4d5ecf77fd96e6f609e3f14f",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 23.795801043510437,
+      "costMs": 23.795801043510437,
+      "appFrameMs": 17.995253000000048,
+      "drawMs": 4.994338035583496,
+      "decodeMs": 4.599184989929199,
+      "receiveMs": 8.278465032577515,
+      "hash": "067dc76b5df34dd09d76434117f5db0fbe6e04c778c8ad773582bc4a1cc09714",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 28.813880920410156,
+      "costMs": 28.813880920410156,
+      "appFrameMs": 21.498419000000467,
+      "drawMs": 3.9838039875030518,
+      "decodeMs": 6.363469958305359,
+      "receiveMs": 13.402435064315796,
+      "hash": "5ab0f20d546b92915e5141cc37ed96348ead387c0e060411653cfd09a6432fd8",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 17.69666302204132,
+      "costMs": 17.69666302204132,
+      "appFrameMs": 13.609894000000168,
+      "drawMs": 3.8170690536499023,
+      "decodeMs": 3.3975199460983276,
+      "receiveMs": 6.005107045173645,
+      "hash": "f526740b6ab1e6b18917ec27fbb00b5667259598163386e3f18f22c8b6cc46d2",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.926946997642517,
+      "costMs": 24.926946997642517,
+      "appFrameMs": 18.71650099999988,
+      "drawMs": 6.427913665771484,
+      "decodeMs": 5.08357298374176,
+      "receiveMs": 8.891865015029907,
+      "hash": "100255d404ac5d9bce21afef41980c3118d544dc1953bf1865a4d6cf44188ae0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 22.633595943450928,
+      "costMs": 22.633595943450928,
+      "appFrameMs": 16.826845000000503,
+      "drawMs": 5.259584903717041,
+      "decodeMs": 4.989089012145996,
+      "receiveMs": 8.478263020515442,
+      "hash": "58b8f0c275b75e52c58a1228e02beb0398f45f33212778c42c246d4b51aac702",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 24.24353301525116,
+      "costMs": 24.24353301525116,
+      "appFrameMs": 4.038430999999946,
+      "drawMs": 3.548746109008789,
+      "decodeMs": 4.546610951423645,
+      "receiveMs": 8.090230941772461,
+      "hash": "b23381261b35fe379a059816beae8dfa19433ef3fbe9133b4279cd9acc882b4f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 24.243733048439026,
+      "costMs": 24.243733048439026,
+      "appFrameMs": 19.03393700000015,
+      "drawMs": 4.1438446044921875,
+      "decodeMs": 4.284306049346924,
+      "receiveMs": 11.568395972251892,
+      "hash": "6cd32cb1fce31dc3d842d802de613630b467ae574319120e416ecee972151bb1",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 39.487943053245544,
+      "costMs": 39.487943053245544,
+      "appFrameMs": 3.534850000000006,
+      "drawMs": 3.1387858390808105,
+      "decodeMs": 5.434651017189026,
+      "receiveMs": 13.28477394580841,
+      "hash": "2b1f7e291dc2fee86026c7292427838da1331c541a96c8a47c273a9eabd64ca5",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 26.80409801006317,
+      "costMs": 26.80409801006317,
+      "appFrameMs": 18.1298110000007,
+      "drawMs": 5.304207801818848,
+      "decodeMs": 7.7217570543289185,
+      "receiveMs": 11.6332288980484,
+      "hash": "6e78c5bb96e004427c5c862b2c5889274d4a6332ea4d7b1992b79fa4281378bd",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.941006898880005,
+      "costMs": 24.941006898880005,
+      "appFrameMs": 18.51118200000019,
+      "drawMs": 4.94264554977417,
+      "decodeMs": 5.602472901344299,
+      "receiveMs": 10.164611101150513,
+      "hash": "2d6920def1a1a7cf933b6a624fc16a650545c5c05efc3a8fd74d0afc619d7a32",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 23.39095401763916,
+      "costMs": 23.39095401763916,
+      "appFrameMs": 17.3171769999999,
+      "drawMs": 3.6579248905181885,
+      "decodeMs": 5.255903005599976,
+      "receiveMs": 11.002828001976013,
+      "hash": "85cbe0b6917f02362b5f25b8aeccc4bdc8831ceb028173b0bcbd2e44f37bfea6",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "elapsedMs": 40.92295491695404,
+      "costMs": 40.92295491695404,
+      "appFrameMs": 50.073585987091064,
+      "drawMs": null,
+      "decodeMs": 3.351001024246216,
+      "receiveMs": 5.815100908279419,
+      "hash": "80b36795c917a2e16b6c48c43b3fb3e00281aa399c207e4adb4360710af3682f",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 24.028531908988953,
+      "costMs": 24.028531908988953,
+      "appFrameMs": 34.00406301021576,
+      "drawMs": null,
+      "decodeMs": 3.704087018966675,
+      "receiveMs": 6.4242188930511475,
+      "hash": "6f4a834e22d391f8271d29517d6a892da529042cb5dfb9da2552e2c9208a6a27",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 32.88693404197693,
+      "costMs": 32.88693404197693,
+      "appFrameMs": 42.874971985816956,
+      "drawMs": null,
+      "decodeMs": 3.083575963973999,
+      "receiveMs": 7.820517063140869,
+      "hash": "0b8642fe01b97d8cc85f13f5f1489bdf053425ef9f29e4808d114d834944714c",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 33.67878198623657,
+      "costMs": 33.67878198623657,
+      "appFrameMs": 45.84172201156616,
+      "drawMs": null,
+      "decodeMs": 6.4301300048828125,
+      "receiveMs": 9.120796084403992,
+      "hash": "a1ac5e97b3857b8acb67fc202df995626180fdb85d9fa3abc5403647415189e3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 29.437915921211243,
+      "costMs": 29.437915921211243,
+      "appFrameMs": 40.48860692977905,
+      "drawMs": null,
+      "decodeMs": 2.837298035621643,
+      "receiveMs": 6.468617081642151,
+      "hash": "662f447aeaf0c45007cfc2857052bd78b2265280e72d05f935f5427b53bc7745",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 38.31661593914032,
+      "costMs": 38.31661593914032,
+      "appFrameMs": 52.430781960487366,
+      "drawMs": null,
+      "decodeMs": 4.841117978096008,
+      "receiveMs": 8.636311888694763,
+      "hash": "7f69d6c30950a4e2d1ba11ae8ab81b07ee1c9ace0b99819fc944b0741b2221c3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 31.189778923988342,
+      "costMs": 31.189778923988342,
+      "appFrameMs": 41.59997797012329,
+      "drawMs": null,
+      "decodeMs": 6.8810049295425415,
+      "receiveMs": 11.197500944137573,
+      "hash": "c60470593a39e140bf064cabda624e07524560ee5e53a8d2fe04b6bebfed4324",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 31.080157041549683,
+      "costMs": 31.080157041549683,
+      "appFrameMs": 41.0458300113678,
+      "drawMs": null,
+      "decodeMs": 6.076774001121521,
+      "receiveMs": 9.354212999343872,
+      "hash": "77bdbff4100d5de50a22488bf5c3f6908ec2a14535984efabe001aaee1a59fed",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 28.288164973258972,
+      "costMs": 28.288164973258972,
+      "appFrameMs": 38.52830195426941,
+      "drawMs": null,
+      "decodeMs": 4.802207946777344,
+      "receiveMs": 7.91612708568573,
+      "hash": "6cb0bffa49cc522641c9aa1f2b3afd2e5c910d90d9fb0645c987708e75459cc2",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 30.657616019248962,
+      "costMs": 30.657616019248962,
+      "appFrameMs": 40.964682936668396,
+      "drawMs": null,
+      "decodeMs": 3.946732997894287,
+      "receiveMs": 6.740386009216309,
+      "hash": "6fec52ee70affb9aac6282a24ee64256fc50ad4c021aea1aba509003d8e605a7",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 34.36266803741455,
+      "costMs": 34.36266803741455,
+      "appFrameMs": 43.241082072257996,
+      "drawMs": null,
+      "decodeMs": 4.244539976119995,
+      "receiveMs": 8.079779982566833,
+      "hash": "15e1ca7ec87b268c223b200745f0cb1e317cd51ed2a263f9f7933b6009df0afa",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 28.372856974601746,
+      "costMs": 28.372856974601746,
+      "appFrameMs": 39.72766101360321,
+      "drawMs": null,
+      "decodeMs": 4.728422045707703,
+      "receiveMs": 9.996076941490173,
+      "hash": "5bdb3285fc4a462d8d93495ae25d1ff6d3c6eda12a21c4355248017399eb1e81",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 20.513414978981018,
+      "costMs": 20.513414978981018,
+      "appFrameMs": 31.956449031829834,
+      "drawMs": null,
+      "decodeMs": 3.4517910480499268,
+      "receiveMs": 5.976184010505676,
+      "hash": "a24f3324b0be23a8725e9531e94be9dbd555e236293fb9c29de7cbebcff228f3",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 41.52980899810791,
+      "costMs": 41.52980899810791,
+      "appFrameMs": 53.5414000749588,
+      "drawMs": null,
+      "decodeMs": 6.423907041549683,
+      "receiveMs": 9.800778031349182,
+      "hash": "b9d89c36034835bc7feec7d1e0b644251d28ad56560c723964b6127f1ae3d91b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 21.32232892513275,
+      "costMs": 21.32232892513275,
+      "appFrameMs": 32.17260992527008,
+      "drawMs": null,
+      "decodeMs": 3.626085042953491,
+      "receiveMs": 6.920665979385376,
+      "hash": "9139d55447ea5661edad90805ee65e66b5d38320cdb744023f29b6a9ba0fef9d",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 51.67608296871185,
+      "costMs": 51.67608296871185,
+      "appFrameMs": 66.98309993743896,
+      "drawMs": null,
+      "decodeMs": 6.6297420263290405,
+      "receiveMs": 13.235894083976746,
+      "hash": "19623ed44beeb134c7e2ede9a06b1cd021490cd7f3aac1928dea0b065c9fc941",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 50.89429998397827,
+      "costMs": 50.89429998397827,
+      "appFrameMs": 62.860573053359985,
+      "drawMs": null,
+      "decodeMs": 4.613882064819336,
+      "receiveMs": 8.766157984733582,
+      "hash": "c2c8ddf15427cdecd0f2568eee560a4cef6e361ff16d265c96d1bc67a662fa35",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 37.1659369468689,
+      "costMs": 37.1659369468689,
+      "appFrameMs": 52.92295801639557,
+      "drawMs": null,
+      "decodeMs": 7.992813944816589,
+      "receiveMs": 13.78325605392456,
+      "hash": "3398e3ed2e696e6c9c5f903e9046614e14707aac4faf070023886247cb67164e",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 37.725404024124146,
+      "costMs": 37.725404024124146,
+      "appFrameMs": 48.0130580663681,
+      "drawMs": null,
+      "decodeMs": 3.670446991920471,
+      "receiveMs": 6.343196988105774,
+      "hash": "7b993a97de059fa6b08827ac1fac63de40e731bc064f3892bbdeea230d6072a6",
+      "markerRGB": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "elapsedMs": 42.513723969459534,
+      "costMs": 42.513723969459534,
+      "appFrameMs": 54.933103919029236,
+      "drawMs": null,
+      "decodeMs": 5.740198969841003,
+      "receiveMs": 10.060836911201477,
+      "hash": "93b75492f1261a0fbce93b137a49afc84995ace8aca9a6960cf53da08ffc752c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    }
+  ],
+  "scroll": [
+    {
+      "elapsedMs": 60.6686669588089,
+      "costMs": 60.6686669588089,
+      "appFrameMs": 54.21053800000027,
+      "drawMs": 39.346988677978516,
+      "decodeMs": 5.562777996063232,
+      "receiveMs": 8.618064999580383,
+      "hash": "af38a2809805071f9aa495efe0ec6bbe5dd3d4565bd392af7e7a2496deb7a8ba",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 49.91634798049927,
+      "costMs": 49.91634798049927,
+      "appFrameMs": 42.924238000000514,
+      "drawMs": 5.655123710632324,
+      "decodeMs": 6.20400607585907,
+      "receiveMs": 8.773432970046997,
+      "hash": "76d8c0f1d3df03191e2d0b7b767a7c5572840563de49f92c15f6318f5a5fdef8",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 51.63559901714325,
+      "costMs": 51.63559901714325,
+      "appFrameMs": 44.044543999999405,
+      "drawMs": 4.2834248542785645,
+      "decodeMs": 6.3586119413375854,
+      "receiveMs": 9.775722980499268,
+      "hash": "4138d9cd4b113a5d3c15865f06216c0bfc8446242a43ee8c997f7abd25704eb0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 52.89816999435425,
+      "costMs": 52.89816999435425,
+      "appFrameMs": 46.60945100000026,
+      "drawMs": 3.129133939743042,
+      "decodeMs": 5.5785380601882935,
+      "receiveMs": 8.137803077697754,
+      "hash": "e5d0c415a022834ce85cab9f598b2f4b8c638a51b5dd10e9239c32eba01e2bbc",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 46.17943298816681,
+      "costMs": 46.17943298816681,
+      "appFrameMs": 39.4531820000002,
+      "drawMs": 3.0680880546569824,
+      "decodeMs": 5.772970080375671,
+      "receiveMs": 11.398334980010986,
+      "hash": "0ee797897070eb628dbc0e8778e3e4c92286a8d4ad656373bf3218967934c89c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 40.9652099609375,
+      "costMs": 40.9652099609375,
+      "appFrameMs": 34.84961299999941,
+      "drawMs": 6.0594987869262695,
+      "decodeMs": 5.445133924484253,
+      "receiveMs": 8.588627099990845,
+      "hash": "ecede0558e9e4573e88f7c9732373e9205bdde924ee0ad03a8abf45b762b8bbb",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 50.4051079750061,
+      "costMs": 50.4051079750061,
+      "appFrameMs": 40.97104300000046,
+      "drawMs": 5.025012016296387,
+      "decodeMs": 8.374606013298035,
+      "receiveMs": 15.734470009803772,
+      "hash": "9d82f5670ff285ceb651657d8fab3328be89b7dcc4b8ddacbe8eff556883b813",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 49.614723920822144,
+      "costMs": 49.614723920822144,
+      "appFrameMs": 43.166190999999344,
+      "drawMs": 4.181971549987793,
+      "decodeMs": 5.615960001945496,
+      "receiveMs": 10.5748850107193,
+      "hash": "b0b6b4f6644c53e2937722d82b4852cce8eaceae9195a8f13776f68653259295",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 40.85566699504852,
+      "costMs": 40.85566699504852,
+      "appFrameMs": 35.0747539999993,
+      "drawMs": 3.1780941486358643,
+      "decodeMs": 4.892604947090149,
+      "receiveMs": 8.610201001167297,
+      "hash": "bb029840e321e9647ce4f0056d601f3376cfd38e8c216bf29380e414d1302c0f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 51.480746030807495,
+      "costMs": 51.480746030807495,
+      "appFrameMs": 46.31691300000057,
+      "drawMs": 5.469096660614014,
+      "decodeMs": 4.223701000213623,
+      "receiveMs": 9.938832998275757,
+      "hash": "b46457a0ce6a3ac42839c86610739b25a3f9581b9b6e37ec7e77d9c140ec973b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 192.9429910182953,
+      "costMs": 192.9429910182953,
+      "appFrameMs": 186.0415009999997,
+      "drawMs": 6.637399196624756,
+      "decodeMs": 6.153118968009949,
+      "receiveMs": 28.958295106887817,
+      "hash": "e4738f9a9b755fe44a3e4fe69b81d9bb47a10b791883d63def143fea2315648c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 59.744621992111206,
+      "costMs": 59.744621992111206,
+      "appFrameMs": 53.84893700000066,
+      "drawMs": 4.538931846618652,
+      "decodeMs": 4.989944934844971,
+      "receiveMs": 9.428287982940674,
+      "hash": "e548f94b33198d43fb14e9d0e4993f1795eb80d47f8e26f2ef6c334b2f43d23b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 55.09680497646332,
+      "costMs": 55.09680497646332,
+      "appFrameMs": 48.68199800000002,
+      "drawMs": 4.696048736572266,
+      "decodeMs": 5.346262097358704,
+      "receiveMs": 10.768216967582703,
+      "hash": "b8f6d63c5bf72ed362ed76fbe0cda8437023a3b434604ceb8a4e3d8f9cef73fe",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 49.96381199359894,
+      "costMs": 49.96381199359894,
+      "appFrameMs": 43.438263999999435,
+      "drawMs": 3.1305770874023438,
+      "decodeMs": 5.569546937942505,
+      "receiveMs": 14.973330020904541,
+      "hash": "1345445f9fa38b6f5add7ae273d9ba8cc2c587ea70a3ec23d3d75ed036c0203a",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 32.36043608188629,
+      "costMs": 32.36043608188629,
+      "appFrameMs": 28.17841700000008,
+      "drawMs": 3.016097068786621,
+      "decodeMs": 3.5533889532089233,
+      "receiveMs": 6.450067043304443,
+      "hash": "b8a69d797790cce542d1e23f72a5a7ba732d537db32dba8993457f23e95957a7",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 35.31024706363678,
+      "costMs": 35.31024706363678,
+      "appFrameMs": 30.475252000000182,
+      "drawMs": 2.5020291805267334,
+      "decodeMs": 4.252817988395691,
+      "receiveMs": 6.362551927566528,
+      "hash": "e6b86445a61af51a43314aa9e782612cd0e9fc1cff627b5b0d5012d6d84cc402",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 34.15180003643036,
+      "costMs": 34.15180003643036,
+      "appFrameMs": 28.49880800000028,
+      "drawMs": 2.7835581302642822,
+      "decodeMs": 4.967289924621582,
+      "receiveMs": 7.335631012916565,
+      "hash": "99f98650668802b103580c3670d598232913269bcc261df41146ccd7a7d43dfb",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 34.46464002132416,
+      "costMs": 34.46464002132416,
+      "appFrameMs": 30.390064999999595,
+      "drawMs": 3.1405131816864014,
+      "decodeMs": 3.4143110513687134,
+      "receiveMs": 6.060558080673218,
+      "hash": "d2b3be94c3d380e7cc0410e29963121f7b611c1ae43f8c631bce497fd33a2837",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 39.73845398426056,
+      "costMs": 39.73845398426056,
+      "appFrameMs": 35.6399220000003,
+      "drawMs": 5.485755920410156,
+      "decodeMs": 3.5702250003814697,
+      "receiveMs": 6.4604679346084595,
+      "hash": "7d870d3f9cc15a0dec2e94a3da4a2b4a6162d38ecb1bd08a82ac27d04f9b25fd",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 6.435840964317322,
+      "costMs": 6.435840964317322,
+      "appFrameMs": 26.68725799999993,
+      "drawMs": 2.398414134979248,
+      "decodeMs": 3.9266210794448853,
+      "receiveMs": 6.617649078369141,
+      "hash": "7d870d3f9cc15a0dec2e94a3da4a2b4a6162d38ecb1bd08a82ac27d04f9b25fd",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.1926239728927612,
+      "costMs": 3.1926239728927612,
+      "appFrameMs": 29.214434999999867,
+      "drawMs": 3.683234214782715,
+      "decodeMs": 4.414644002914429,
+      "receiveMs": 6.183000922203064,
+      "hash": "193159c04154ab093dad2c8ad3f48ce4b70b47c1c7837b772f6c1d419e8c813b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.7509360313415527,
+      "costMs": 3.7509360313415527,
+      "appFrameMs": 28.08085899999969,
+      "drawMs": 3.2385311126708984,
+      "decodeMs": 4.418122053146362,
+      "receiveMs": 6.817197918891907,
+      "hash": "1d653b64be7d7ea9c92307eb208bd4ad1f55f93cb046f2871a92f52a84f0613d",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.531914949417114,
+      "costMs": 5.531914949417114,
+      "appFrameMs": 32.335353999999825,
+      "drawMs": 3.643813133239746,
+      "decodeMs": 6.205839037895203,
+      "receiveMs": 8.737167954444885,
+      "hash": "c299a560e0b984ee08fc62ea0630c381026a55ce561495e445135f4446276d86",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.312996983528137,
+      "costMs": 4.312996983528137,
+      "appFrameMs": 42.15123700000004,
+      "drawMs": 3.0323450565338135,
+      "decodeMs": 5.16117799282074,
+      "receiveMs": 9.564632058143616,
+      "hash": "7d1f1c50b6b235ee63bdcbe1728437db29a5f996a3b16c1abb09fa24cbf7b821",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.1345601081848145,
+      "costMs": 3.1345601081848145,
+      "appFrameMs": 69.43401100000028,
+      "drawMs": 7.998599529266357,
+      "decodeMs": 3.8491140604019165,
+      "receiveMs": 12.821438908576965,
+      "hash": "fc92e33b8cdbd5bcf9a00908d4f4f4d6dae469f1c418ded2ab42559d5f7f35eb",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.12200403213501,
+      "costMs": 4.12200403213501,
+      "appFrameMs": 49.65841400000045,
+      "drawMs": 5.1140031814575195,
+      "decodeMs": 5.2060089111328125,
+      "receiveMs": 17.563067078590393,
+      "hash": "e3e83b44d843550e9f2a2bee419949e795ffde9d273a99f10b181792f8b50a5c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.001128911972046,
+      "costMs": 4.001128911972046,
+      "appFrameMs": 45.344506000000365,
+      "drawMs": 5.55350399017334,
+      "decodeMs": 4.899565935134888,
+      "receiveMs": 10.869737982749939,
+      "hash": "36b7e03502124a0160bd6995c3bf6501fba74b10a41a421c66d2826a8bb81314",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.575218081474304,
+      "costMs": 4.575218081474304,
+      "appFrameMs": 44.41936799999985,
+      "drawMs": 3.7536962032318115,
+      "decodeMs": 5.429046034812927,
+      "receiveMs": 10.312108039855957,
+      "hash": "10216a52e0e667aad3a195de96ec3e1ec2e49796d63a82fa33c10bebc927d64c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.4363439083099365,
+      "costMs": 4.4363439083099365,
+      "appFrameMs": 37.79782900000009,
+      "drawMs": 4.027359962463379,
+      "decodeMs": 5.097941040992737,
+      "receiveMs": 9.6896390914917,
+      "hash": "aa3ae2ff42e3b9d045e94ec85fd63f1f9745be5c698433930a11945d6af08217",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 6.008702039718628,
+      "costMs": 6.008702039718628,
+      "appFrameMs": 40.61363699999947,
+      "drawMs": 4.978522300720215,
+      "decodeMs": 6.584477066993713,
+      "receiveMs": 9.413957953453064,
+      "hash": "265c8d65eb309683632626379fb95de1dd1ae4ff25fcb094714669f0553be2b9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.353951096534729,
+      "costMs": 4.353951096534729,
+      "appFrameMs": 32.44710100000066,
+      "drawMs": 3.3256161212921143,
+      "decodeMs": 5.186926960945129,
+      "receiveMs": 12.115108966827393,
+      "hash": "78867c814fb620f5eebd4415744e7eab8cbba0b5086d6374762f49a3f94135c5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.4761719703674316,
+      "costMs": 3.4761719703674316,
+      "appFrameMs": 28.34540299999935,
+      "drawMs": 2.4249229431152344,
+      "decodeMs": 4.807543039321899,
+      "receiveMs": 10.858283996582031,
+      "hash": "e6b1c33599b12ce61b1430c9eafbbcebf891c7b4a20c60b5e381fb8c72d0a07b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.307317018508911,
+      "costMs": 3.307317018508911,
+      "appFrameMs": 28.702358999999888,
+      "drawMs": 2.6518850326538086,
+      "decodeMs": 3.8962219953536987,
+      "receiveMs": 6.8313820362091064,
+      "hash": "31c270718ab23f35cb4dcf5a2c6aa942ed527ed99079580a58e05fc87161f545",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.1505420207977295,
+      "costMs": 3.1505420207977295,
+      "appFrameMs": 35.291111999999885,
+      "drawMs": 3.1783530712127686,
+      "decodeMs": 4.5115519762039185,
+      "receiveMs": 8.254317998886108,
+      "hash": "7d5f280e8ddc05b76fc4dbdaa6ba1f8a8d62285bdb8a638e58eda3fa60d36905",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.789984941482544,
+      "costMs": 3.789984941482544,
+      "appFrameMs": 27.674927000000025,
+      "drawMs": 3.065988063812256,
+      "decodeMs": 5.431291937828064,
+      "receiveMs": 9.399973034858704,
+      "hash": "d01e4feaccfec5124668234c85a97adcf6b94e0453b0262e913e54bff90af2d4",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.372089982032776,
+      "costMs": 3.372089982032776,
+      "appFrameMs": 27.522244000000683,
+      "drawMs": 2.2385380268096924,
+      "decodeMs": 3.9454150199890137,
+      "receiveMs": 6.826918005943298,
+      "hash": "abfa942bce2a5af35657d7dee318d03e1c3a5e6deb5ef51d0d5e41d0d391df0e",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.0038599967956543,
+      "costMs": 3.0038599967956543,
+      "appFrameMs": 45.03990299999987,
+      "drawMs": 6.07105827331543,
+      "decodeMs": 3.8327510356903076,
+      "receiveMs": 6.0173749923706055,
+      "hash": "693b4ab4c0024fa20570a48b6e14d07eaf46eed021276f58ea50bd676128ca1c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.1702109575271606,
+      "costMs": 3.1702109575271606,
+      "appFrameMs": 33.43189999999959,
+      "drawMs": 3.3011159896850586,
+      "decodeMs": 4.294410943984985,
+      "receiveMs": 10.902972936630249,
+      "hash": "cb2357304a791f4009a9224914dfd839b4f1a7816add73f43b1c6e3887f52f97",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.414276957511902,
+      "costMs": 3.414276957511902,
+      "appFrameMs": 69.47618299999976,
+      "drawMs": 6.992321014404297,
+      "decodeMs": 3.9864948987960815,
+      "receiveMs": 6.15425705909729,
+      "hash": "9e31d65e59b499c4402b2e79fd44f2dbca14a6d51f22cdc93f1b470aa227def3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 6.605333089828491,
+      "costMs": 6.605333089828491,
+      "appFrameMs": 210.72380200000043,
+      "drawMs": 5.986439228057861,
+      "decodeMs": 9.083338975906372,
+      "receiveMs": 31.819342970848083,
+      "hash": "627ffb1aeafb4963844b972bfbb1137fedc3e66a5526f19a9bd6208b719ff901",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 35.66193389892578,
+      "costMs": 35.66193389892578,
+      "appFrameMs": 47.79773699999987,
+      "drawMs": 4.951236724853516,
+      "decodeMs": 5.700483083724976,
+      "receiveMs": 14.16047191619873,
+      "hash": "3d313f3633cea1c5dc9b2aff4e386b7c5c65b6774c74b4808f9ca3b4f8cf096a",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.347805976867676,
+      "costMs": 4.347805976867676,
+      "appFrameMs": 44.083073000000695,
+      "drawMs": 6.347793102264404,
+      "decodeMs": 5.026156067848206,
+      "receiveMs": 11.455726981163025,
+      "hash": "65bbb76cadbd2fe5e3eedd24b00f90903193a44ab4e8e32cf9b65c7ff135eef9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.7774800062179565,
+      "costMs": 5.7774800062179565,
+      "appFrameMs": 36.80601200000001,
+      "drawMs": 3.3642170429229736,
+      "decodeMs": 6.754837989807129,
+      "receiveMs": 10.78256893157959,
+      "hash": "00c693dcd84e95509e5405b0153d740c756992de452ca2a3a24b104f4441e832",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.711356043815613,
+      "costMs": 4.711356043815613,
+      "appFrameMs": 61.764478000000054,
+      "drawMs": 3.8411850929260254,
+      "decodeMs": 5.664865016937256,
+      "receiveMs": 10.375624060630798,
+      "hash": "51e1dacd487c480c93ef84b1145d41827127dac7f125eb8ba2420a768920c7b0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 7.164713978767395,
+      "costMs": 7.164713978767395,
+      "appFrameMs": 37.737466000000495,
+      "drawMs": 4.440377235412598,
+      "decodeMs": 9.38955807685852,
+      "receiveMs": 32.78704798221588,
+      "hash": "c7582ef9f146e98ebd04574f19dcdf7383384d3800f6dc9e4f53d79c6e196ba4",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.6708130836486816,
+      "costMs": 3.6708130836486816,
+      "appFrameMs": 45.3945020000001,
+      "drawMs": 5.28230619430542,
+      "decodeMs": 4.543269038200378,
+      "receiveMs": 8.444381952285767,
+      "hash": "bc5a5bafdf963caef50a0a4299e36fdd733dbe602a4a7cfdda32238dfd825ad0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.572202920913696,
+      "costMs": 4.572202920913696,
+      "appFrameMs": 40.00661400000081,
+      "drawMs": 4.642461776733398,
+      "decodeMs": 5.349001049995422,
+      "receiveMs": 10.72701096534729,
+      "hash": "0294684be274d16df1f05435b422cb01cabfbd849402df306760b8b981a7b872",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.164310932159424,
+      "costMs": 4.164310932159424,
+      "appFrameMs": 31.94004000000041,
+      "drawMs": 2.2497079372406006,
+      "decodeMs": 4.929888010025024,
+      "receiveMs": 9.143728017807007,
+      "hash": "20d1099613e73bb1f82ff2bd0804f343596a5831970c88ddd673c506c24ded42",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.348436951637268,
+      "costMs": 3.348436951637268,
+      "appFrameMs": 34.390816000000086,
+      "drawMs": 2.958498954772949,
+      "decodeMs": 4.037727952003479,
+      "receiveMs": 7.636696934700012,
+      "hash": "d7329fe3bd2e59ae6f3e87e2f1f7ae987f61d7154a7465b0485f2c1c3f938503",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.6598639488220215,
+      "costMs": 3.6598639488220215,
+      "appFrameMs": 36.45530299999973,
+      "drawMs": 4.771015167236328,
+      "decodeMs": 4.456281900405884,
+      "receiveMs": 10.591349005699158,
+      "hash": "afa160689d0457f88751f0ab52bb314afaf12685a2be562bf90f553cd2a74efb",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.296657919883728,
+      "costMs": 3.296657919883728,
+      "appFrameMs": 29.934001999999964,
+      "drawMs": 3.089715003967285,
+      "decodeMs": 4.03351092338562,
+      "receiveMs": 6.24063503742218,
+      "hash": "e97eda1f4a30733462e0411b54bca70c500ad25dac835afed7979c869f92ff46",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.857553958892822,
+      "costMs": 4.857553958892822,
+      "appFrameMs": 35.04170299999987,
+      "drawMs": 2.2852530479431152,
+      "decodeMs": 5.396836042404175,
+      "receiveMs": 7.905658960342407,
+      "hash": "56ca2df9aac50836ab3cb7d08f37c9015f52a8c5efce4ff622c88c44cc912866",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.899845004081726,
+      "costMs": 3.899845004081726,
+      "appFrameMs": 30.211429999999382,
+      "drawMs": 2.8443260192871094,
+      "decodeMs": 4.5768150091171265,
+      "receiveMs": 6.693190932273865,
+      "hash": "1d42cc63cb519e226754ad09e102acc54419ae8dab9db0bbbe55d0ba3edf231c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.371151924133301,
+      "costMs": 3.371151924133301,
+      "appFrameMs": 35.9081699999997,
+      "drawMs": 4.864530086517334,
+      "decodeMs": 3.9059609174728394,
+      "receiveMs": 5.585091948509216,
+      "hash": "d6f766ac35b3ac2d059b672b1041d9da10bdf16c67c934df8e7847ab25f76d0f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.1273539066314697,
+      "costMs": 3.1273539066314697,
+      "appFrameMs": 32.18468699999994,
+      "drawMs": 4.3050312995910645,
+      "decodeMs": 3.7643489837646484,
+      "receiveMs": 7.423181056976318,
+      "hash": "32c29a873ecaa05b5ee583431a076a416d9567b640822007325d193a0477be3b",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 6.372457027435303,
+      "costMs": 6.372457027435303,
+      "appFrameMs": 42.74889699999949,
+      "drawMs": 3.3124358654022217,
+      "decodeMs": 7.2628090381622314,
+      "receiveMs": 10.629087924957275,
+      "hash": "b59538f6cb1e4868a5a254fa20e9aacab53d6fb0f789e7f136b04515054b936c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.752835035324097,
+      "costMs": 5.752835035324097,
+      "appFrameMs": 30.780848000000333,
+      "drawMs": 3.0398049354553223,
+      "decodeMs": 6.461467027664185,
+      "receiveMs": 15.964108943939209,
+      "hash": "d3280f4240e1bdf07f18a817524ed107a42714e7268ee623a83f7262fc982ced",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.543666958808899,
+      "costMs": 4.543666958808899,
+      "appFrameMs": 27.795022000000245,
+      "drawMs": 2.9124810695648193,
+      "decodeMs": 5.22337794303894,
+      "receiveMs": 8.273903012275696,
+      "hash": "a1507153c9d6a7e43a3f08bb60eec6d8f690dc117f086601bc5b69d09dc69e94",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 2.8852670192718506,
+      "costMs": 2.8852670192718506,
+      "appFrameMs": 30.020110999999815,
+      "drawMs": 2.809148073196411,
+      "decodeMs": 3.436876058578491,
+      "receiveMs": 6.13967502117157,
+      "hash": "b0a4ce073292c21838a22d11b534a80cb5f74c3897eeac4856ebbaf56726b21c",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.015851020812988,
+      "costMs": 4.015851020812988,
+      "appFrameMs": 33.275760999999875,
+      "drawMs": 2.116381883621216,
+      "decodeMs": 4.882529973983765,
+      "receiveMs": 8.474828004837036,
+      "hash": "151918c085cdbef292ae3f9bdf57cff1b8c46c2f45b6e37b0cb6a862f4f5064e",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 2.890380024909973,
+      "costMs": 2.890380024909973,
+      "appFrameMs": 50.034953000000314,
+      "drawMs": 5.193819046020508,
+      "decodeMs": 3.5194919109344482,
+      "receiveMs": 7.862591028213501,
+      "hash": "4f392dfb2ea6a18a534f8549aea7ec76fda939c20c8249d39f2bc299c5aa77b2",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.527367949485779,
+      "costMs": 3.527367949485779,
+      "appFrameMs": 45.83624499999951,
+      "drawMs": 3.457597017288208,
+      "decodeMs": 4.278091907501221,
+      "receiveMs": 7.820463061332703,
+      "hash": "4fbe14e17de4a3216f6842b865ecf42f6833614af4a9ae6a1708ee90fef76ce1",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.234049916267395,
+      "costMs": 4.234049916267395,
+      "appFrameMs": 30.33596099999977,
+      "drawMs": 3.072451114654541,
+      "decodeMs": 4.888499975204468,
+      "receiveMs": 11.241405010223389,
+      "hash": "5156a5db452a671a3f3db1f5818c465360553815f696bc7fe6ff87c360fe2bc5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.3393889665603638,
+      "costMs": 3.3393889665603638,
+      "appFrameMs": 28.98829300000034,
+      "drawMs": 2.343172073364258,
+      "decodeMs": 3.9216439723968506,
+      "receiveMs": 6.596967101097107,
+      "hash": "f18c4997956d5c92bc61470c0de43c1ae79221830c8d107333ea0fcf9ad2420a",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 2.621738910675049,
+      "costMs": 2.621738910675049,
+      "appFrameMs": 29.851629999999204,
+      "drawMs": 3.9715380668640137,
+      "decodeMs": 3.1804620027542114,
+      "receiveMs": 5.252002954483032,
+      "hash": "6feac091522b1832262b0844cec9d892f36dceb56456592814ba678a8c7c930a",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.01810097694397,
+      "costMs": 4.01810097694397,
+      "appFrameMs": 30.771334000000024,
+      "drawMs": 3.1309561729431152,
+      "decodeMs": 4.626124024391174,
+      "receiveMs": 7.570789933204651,
+      "hash": "842ec605d2b0f79dfe8c51df102055ce5397ecfda0c86f5991d2d8087f7f6fe0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.357692003250122,
+      "costMs": 3.357692003250122,
+      "appFrameMs": 29.31616800000029,
+      "drawMs": 3.5374720096588135,
+      "decodeMs": 4.01323401927948,
+      "receiveMs": 5.802831053733826,
+      "hash": "785473435bbb36a74f4cea0d30eafe9d08ceac2544618ccca015ddc690ba1e58",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.36354398727417,
+      "costMs": 3.36354398727417,
+      "appFrameMs": 29.476206000000275,
+      "drawMs": 2.3366611003875732,
+      "decodeMs": 3.9016250371932983,
+      "receiveMs": 6.89009702205658,
+      "hash": "05d185eb4e875efb1d07c6217389e4c4aed584eeed08127eb4fa201270a0ace3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.8435550928115845,
+      "costMs": 3.8435550928115845,
+      "appFrameMs": 39.355155000000195,
+      "drawMs": 4.8164591789245605,
+      "decodeMs": 4.726659059524536,
+      "receiveMs": 8.555617928504944,
+      "hash": "c0236e6f0873e81e2eec451cbb94dcd4b53dd6a2593309bb64acd4531e6c2c35",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.0824040174484253,
+      "costMs": 3.0824040174484253,
+      "appFrameMs": 42.13135500000044,
+      "drawMs": 3.5201940536499023,
+      "decodeMs": 3.6812139749526978,
+      "receiveMs": 9.241286993026733,
+      "hash": "b24723909d8a5db1071c6e7162f5fe34529bd0dfe9b4aadeaa929dca26c973ff",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.5377490520477295,
+      "costMs": 5.5377490520477295,
+      "appFrameMs": 44.05784700000004,
+      "drawMs": 4.460966110229492,
+      "decodeMs": 6.385301947593689,
+      "receiveMs": 17.0811949968338,
+      "hash": "f72722dea6972d738bdea6571785c63141746d8139253695871968f3e699f96f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.312222957611084,
+      "costMs": 3.312222957611084,
+      "appFrameMs": 56.66302700000051,
+      "drawMs": 5.686598777770996,
+      "decodeMs": 3.9395960569381714,
+      "receiveMs": 8.83603310585022,
+      "hash": "3dd79be6e99f220a2175a210ee6d046ea5f9a7103472a3525cfa99408cd6d344",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.811701059341431,
+      "costMs": 5.811701059341431,
+      "appFrameMs": 51.265386000000944,
+      "drawMs": 5.44901180267334,
+      "decodeMs": 9.233778953552246,
+      "receiveMs": 17.251749992370605,
+      "hash": "fa97b102ace34abd368c79bbe154cf1af5fb9cf272b9dfb06985307011c25662",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.938145995140076,
+      "costMs": 5.938145995140076,
+      "appFrameMs": 49.14885099999992,
+      "drawMs": 4.602273941040039,
+      "decodeMs": 6.796779990196228,
+      "receiveMs": 9.443418025970459,
+      "hash": "78b4eb0a725be3304f85ffaff2ad1d1e3a3a0dd180805922c959438a108d1525",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.2189589738845825,
+      "costMs": 4.2189589738845825,
+      "appFrameMs": 46.571256000001085,
+      "drawMs": 5.340270042419434,
+      "decodeMs": 5.124505043029785,
+      "receiveMs": 10.00363302230835,
+      "hash": "8a96382ce7ebf270dc47a74b0250902847d2741775061f1c197004cc879a8bd9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.242185950279236,
+      "costMs": 3.242185950279236,
+      "appFrameMs": 40.07776399999966,
+      "drawMs": 3.3647968769073486,
+      "decodeMs": 5.522534012794495,
+      "receiveMs": 9.787994027137756,
+      "hash": "1d90807c0f48e717c370f5184f101158fb64bde5ea20834e4f3d408e9949e0c6",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.861966013908386,
+      "costMs": 4.861966013908386,
+      "appFrameMs": 34.59479199999987,
+      "drawMs": 2.741925001144409,
+      "decodeMs": 6.7007869482040405,
+      "receiveMs": 11.929450988769531,
+      "hash": "39edb1744c79846b283de7f6f38f2e1ab264cc03185d736046ffa0d3603632ea",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.9241130352020264,
+      "costMs": 3.9241130352020264,
+      "appFrameMs": 47.56368099999963,
+      "drawMs": 5.898221015930176,
+      "decodeMs": 4.786844968795776,
+      "receiveMs": 10.878400921821594,
+      "hash": "0491db355b6cf1c45d3c8720a366024a3175b2b0ec0c038de95085c7486bcbe5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.565790057182312,
+      "costMs": 5.565790057182312,
+      "appFrameMs": 38.59418000000005,
+      "drawMs": 3.575650930404663,
+      "decodeMs": 7.421538949012756,
+      "receiveMs": 17.222511053085327,
+      "hash": "3715987529aca09273a7d7e2ecfe5cb807c0b63368d287ca2a1d45cd5bb18784",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 2.970555067062378,
+      "costMs": 2.970555067062378,
+      "appFrameMs": 26.741543000000092,
+      "drawMs": 2.3748180866241455,
+      "decodeMs": 3.5845760107040405,
+      "receiveMs": 6.128044009208679,
+      "hash": "2dc0d82ce63a98eaca3944d632ecd43995bc10dec02a50601bece5e5f0470f49",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.087664008140564,
+      "costMs": 3.087664008140564,
+      "appFrameMs": 29.295501000000513,
+      "drawMs": 3.3507418632507324,
+      "decodeMs": 3.5982179641723633,
+      "receiveMs": 6.1978440284729,
+      "hash": "7330cad96489e7b84a04558c705e4e06c8767023d1d96ac5b5b3ab24ad72086d",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.656308054924011,
+      "costMs": 4.656308054924011,
+      "appFrameMs": 31.892135000000053,
+      "drawMs": 3.173769950866699,
+      "decodeMs": 5.343235015869141,
+      "receiveMs": 9.0729079246521,
+      "hash": "db803ae0d0200db84af9e10130e11240a6059815ea6f53e00181c64ee5a6da17",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.103875994682312,
+      "costMs": 3.103875994682312,
+      "appFrameMs": 29.84067099999993,
+      "drawMs": 3.226102113723755,
+      "decodeMs": 3.7186800241470337,
+      "receiveMs": 6.4373539686203,
+      "hash": "b237911ee159b209e5a603254658f8b8f31d959918b8f002fd78027962416ab8",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.2569730281829834,
+      "costMs": 3.2569730281829834,
+      "appFrameMs": 33.18852500000139,
+      "drawMs": 2.9981789588928223,
+      "decodeMs": 3.9374449253082275,
+      "receiveMs": 6.1939860582351685,
+      "hash": "26cfafb9261dcaefed428f2c401e35f2d1464db0e192c5f2986320d0fdb6ead4",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.016988039016724,
+      "costMs": 4.016988039016724,
+      "appFrameMs": 54.66961099999935,
+      "drawMs": 6.401861190795898,
+      "decodeMs": 5.519882917404175,
+      "receiveMs": 10.049278974533081,
+      "hash": "5303a5a919a58d804dc5c87b3d7c4dd63ed95b50ab54f0cd059f23fa1e7f03ea",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 14.961519002914429,
+      "costMs": 14.961519002914429,
+      "appFrameMs": 63.647978000000876,
+      "drawMs": 5.878164768218994,
+      "decodeMs": 15.697216987609863,
+      "receiveMs": 21.46357297897339,
+      "hash": "f69c86d7a9c23a3a784a9bf0a2e4a58518d59846686d76b8eaf276c890006eda",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.92703902721405,
+      "costMs": 5.92703902721405,
+      "appFrameMs": 41.05314999999973,
+      "drawMs": 3.911076068878174,
+      "decodeMs": 6.751085042953491,
+      "receiveMs": 11.481589913368225,
+      "hash": "8808cfbb9e7b73147a4ca3cd95e761fe587def194fbb5d5472f9c6e3d2342aed",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.644362926483154,
+      "costMs": 5.644362926483154,
+      "appFrameMs": 33.66087899999911,
+      "drawMs": 2.3418328762054443,
+      "decodeMs": 6.233759045600891,
+      "receiveMs": 11.537382960319519,
+      "hash": "0659c5aacfc20f17c9e244ad593ec605156e562964890bb3123eca2bd737b596",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.353638052940369,
+      "costMs": 4.353638052940369,
+      "appFrameMs": 39.62528200000088,
+      "drawMs": 3.368471145629883,
+      "decodeMs": 5.328691005706787,
+      "receiveMs": 8.229506969451904,
+      "hash": "1eb669d2132ff4021cadfb3defc4d46cf17d03d1af63bc8669237acdeb7ee25f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.091088891029358,
+      "costMs": 5.091088891029358,
+      "appFrameMs": 39.505799999999,
+      "drawMs": 4.443001747131348,
+      "decodeMs": 6.156538963317871,
+      "receiveMs": 10.340200066566467,
+      "hash": "da9b3ad5317a784d4489f2bd5c656d843cbd1471536e4a5c91e38d75d7c029e3",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 24.792283058166504,
+      "costMs": 24.792283058166504,
+      "appFrameMs": 36.7704219999996,
+      "drawMs": 4.227029323577881,
+      "decodeMs": 4.381475925445557,
+      "receiveMs": 10.133437037467957,
+      "hash": "2bc81dc57ec9fbecf538ab1fd5899b19454bb4abf5d54d500fb63489583c5ba0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.087875962257385,
+      "costMs": 4.087875962257385,
+      "appFrameMs": 31.541355999999723,
+      "drawMs": 2.20253586769104,
+      "decodeMs": 4.686403036117554,
+      "receiveMs": 9.284719944000244,
+      "hash": "8daa90a211b44c238ff271b093d8c984462d781bf45ba6b6473aa74acd181ec9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.338124990463257,
+      "costMs": 3.338124990463257,
+      "appFrameMs": 30.67578400000093,
+      "drawMs": 3.6697089672088623,
+      "decodeMs": 3.9443520307540894,
+      "receiveMs": 5.709748029708862,
+      "hash": "d246629aa1aa5f3a23a5da45ff56ac464ac76f900b12b68835a5cbbf239788d0",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.037961006164551,
+      "costMs": 4.037961006164551,
+      "appFrameMs": 34.65452000000005,
+      "drawMs": 4.8631062507629395,
+      "decodeMs": 4.697502970695496,
+      "receiveMs": 7.5225750207901,
+      "hash": "7b78657696994d669daf43aadfa30d937478f55f8d39115fbfc77d4e9fc4bdc9",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.960275888442993,
+      "costMs": 3.960275888442993,
+      "appFrameMs": 34.16008200000033,
+      "drawMs": 2.7656850814819336,
+      "decodeMs": 4.817378044128418,
+      "receiveMs": 8.923110961914062,
+      "hash": "67209da69202385a0947d9e9f77f52174aab4122b800c5ac211c28f2c1fa851f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 3.6687350273132324,
+      "costMs": 3.6687350273132324,
+      "appFrameMs": 59.80843599999935,
+      "drawMs": 12.34103775024414,
+      "decodeMs": 4.2492899894714355,
+      "receiveMs": 7.802564978599548,
+      "hash": "94522e5ecfa7bbc2f4fb40b25d4b85a4f7cc8bbc40f01d4520621cafed03abc5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 4.858076095581055,
+      "costMs": 4.858076095581055,
+      "appFrameMs": 49.43850199999906,
+      "drawMs": 5.219281196594238,
+      "decodeMs": 5.64541494846344,
+      "receiveMs": 13.567077040672302,
+      "hash": "a4c238df2ba99dd1ed24d33dc0de922acb8357fbb9a85f2f96c032f39de2b5a5",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 8.08231794834137,
+      "costMs": 8.08231794834137,
+      "appFrameMs": 51.08269100000143,
+      "drawMs": 3.4620048999786377,
+      "decodeMs": 9.038188934326172,
+      "receiveMs": 16.299498081207275,
+      "hash": "5b62e053a6b0a0b3fca47073a521b202db2f1a3b815bf910aa22d3c19851292f",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 5.07840895652771,
+      "costMs": 5.07840895652771,
+      "appFrameMs": 162.32762099999854,
+      "drawMs": 58.09172058105469,
+      "decodeMs": 6.162238001823425,
+      "receiveMs": 9.340455055236816,
+      "hash": "53b84c40985f956d5349fbd39041a14c6ff86cd7daa7e61a105ef6885c6da89d",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "elapsedMs": 26.19245195388794,
+      "costMs": 26.19245195388794,
+      "appFrameMs": 27.363844000001336,
+      "drawMs": 8.587373733520508,
+      "decodeMs": 4.564136981964111,
+      "receiveMs": 7.36518406867981,
+      "hash": "1500ef63f2c3020ea2a82b5f5883e6fd7351e4bc04a0c6b420757e26c89aeea2",
+      "markerRGB": [
+        0,
+        255,
+        0
+      ]
+    }
+  ],
+  "tokens": 80,
+  "inputAcknowledged": 20,
+  "streamMs": 3774.9293019771576,
+  "tokensPerSecond": 21.192449871339097,
+  "decodedFrames": 216,
+  "measurement": "Owned PTY inline Kitty RGBA decode completion; HTTP command overhead included; no terminal compositor",
+  "run": 2
+}

@@ -1,38 +1,29 @@
-# GPUIX transcript spike: blocked before build
+# Isolated transcript comparison
 
-The source audit triggered the requested stop rule. The default macOS build
-needs an absent Apple Metal toolchain; installing it downloads outside the
-allowed sources. Rust 1.97.1 is also absent. No install, build or benchmark ran.
+Three accepted runs each: GPUIX offscreen test window, Playwright headless WebKit,
+and GPUIX through an owned PTY with inline Kitty RGBA decoding. All acknowledge
+20 keys, 80 tokens, and the same 2,000-entry fixture hash. Each samples 100 scroll
+anchors. See [raw results](results/summary.json), [per-run numbers](results/TABLE.md),
+[draw costs](results/DRAW-TABLE.md), and [method and limitations](METHOD.md).
 
-| Median of >=3 runs | Native | Safari | Ghostty |
-| --- | --- | --- | --- |
-| Cold launch to first frame | NM | NM | NM |
-| Streaming frame p50/p95/p99 | NM | NM | NM |
-| Fast-scroll dropped frames | NM | NM | NM |
-| Composer key-to-paint | NM | NM | NM |
-| Idle RSS | NM | NM | NM |
-| RSS after 5 min streaming | NM | NM | NM |
+These are internal completion boundaries, not displayed key-to-paint. WebKit
+reports JS/React/layout and second-rAF timing. Native reports in-process GPUI
+flush completion and CPU draw costs. Terminal reports PTY decode completion and
+CPU draw costs, with no terminal-host compositor. The short backpressured driver
+does not sustain the requested token rate on every arm. No OS input was posted;
+no installed browser or terminal app was driven. Native accepted lifetimes stay
+below nine seconds without activation. Legacy desktop probes are rejected.
 
-NM = not measured; n=0. Ghostty 1.3.1 is installed. Terminal mode is required
-but blocked by the same native build. No Ghostty windows opened.
+**Recommendation:** retain the production renderer. If a native rewrite is
+pursued, choose pure GPUI for the core; use GPUIX for bounded prototypes.
+GPUIX's documented nested-scroll, font, inheritance and motion gaps require
+parity work, and its React windowing and tool-group behavior need app code.
+Pure GPUI was not benchmarked, so this is a capability and control recommendation,
+not evidence of a pure-GPUI speed advantage or a Rust backend speedup.
 
-**Method, pending:** three scripted runs per surface, equal 1200x800 content areas,
-one invented 2,000-turn fixture, 50 tokens/s, complete fast-scroll traversal,
-and typing during streaming. Measure displayed frames, not React commits.
-Use the page's WebContent PID; report terminal renderer and Ghostty RSS separately.
-Capture the terminal's displayed frame and close only owned windows. See
-[METHOD.md](METHOD.md); no measurement script exists yet.
-
-**Documented gaps, not runtime findings:** nested vertical scrollers
-(including an inner diff), inherited text colour, WOFF/WOFF2, springs,
-keyframes, variants and shared-layout animations. Horizontal child scrolling,
-TTF/OTF and numeric tween animations are supported.
-
-**Rough effort:** list/tail/virtualization 2-4 person-days; markdown/code
-3-6; diffs 3-5; tool groups 1-3; composer 4-8; layout/theme/fonts 2-4;
-motion 2-5. Provisional estimates; exclude backend,
-accessibility parity and production hardening.
-
-**Recommendation:** make no migration performance claim. Resolve the toolchain
-source exception, finish the audit, then benchmark. A Rust backend rewrite needs
-separate evidence. [AUDIT.md](AUDIT.md) records the blocker and exact source pins.
+**Needs an unattended on-screen run:** displayed input-to-frame, terminal-host
+presentation, cold first displayed content, and compositor scroll/stream drops.
+The one read-only [capture script](unattended-on-screen.swift) is typechecked and
+unexecuted. It requires explicitly owned, manually prepared windows and records
+at most eight seconds. Display refresh/scale parity and a 300-second memory
+soak remain unmeasured. No merge or release.

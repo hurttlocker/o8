@@ -17,13 +17,34 @@
   },
   "target": "x86_64-apple-darwin",
   "terminal": {
-    "application": "Ghostty",
-    "version": "1.3.1",
-    "environment": { "GPUIX_TERMINAL": "1" },
-    "status": "blocked-before-build",
-    "benchmarkRuns": 0
+    "application": "owned PTY with inline Kitty decoder",
+    "environment": {
+      "GPUIX_TERMINAL": "1"
+    },
+    "status": "owned-pty-inline-decode",
+    "benchmarkRuns": 3
   },
-  "status": "stopped-before-install",
-  "dependencyGraphInstalled": false,
-  "benchmarkRuns": 0
+  "status": "isolated-measurements-complete",
+  "dependencyGraphInstalled": true,
+  "benchmarkRuns": 9,
+  "nativeAddonSha256": "f3334bff7642999579dbf34405b6d3e21ba45d12e534903992bb5400152f311d",
+  "web": {
+    "engine": "Playwright WebKit",
+    "playwrightVersion": "1.60.0",
+    "mode": "headless",
+    "benchmarkRuns": 3
+  },
+  "fixture": {
+    "entries": 2000,
+    "bytes": 477752,
+    "sha256": "46471f2c5a78d461e9e11b4f30129a23f18aee84644b856cd2440373e85ae238",
+    "roles": {
+      "user": 250,
+      "assistant": 1260,
+      "tool": 490
+    },
+    "diffs": 20,
+    "codeBlocks": 125
+  },
+  "reactMode": "production"
 }

@@ -1,0 +1,2422 @@
+{
+  "surface": "web",
+  "fixtureHash": "46471f2c5a78d461e9e11b4f30129a23f18aee84644b856cd2440373e85ae238",
+  "stream": [
+    {
+      "elapsedMs": 96,
+      "costMs": 73,
+      "input": "",
+      "height": 816
+    },
+    {
+      "elapsedMs": 64,
+      "costMs": 58,
+      "input": "",
+      "height": 816
+    },
+    {
+      "elapsedMs": 61,
+      "costMs": 54,
+      "input": "",
+      "height": 816
+    },
+    {
+      "elapsedMs": 57,
+      "costMs": 54,
+      "input": "",
+      "height": 816
+    },
+    {
+      "elapsedMs": 52.99999999999977,
+      "costMs": 49.99999999999977,
+      "input": "w",
+      "height": 816
+    },
+    {
+      "elapsedMs": 55.000000000000455,
+      "costMs": 53,
+      "input": "w",
+      "height": 816
+    },
+    {
+      "elapsedMs": 53.999999999999545,
+      "costMs": 50.999999999999545,
+      "input": "w",
+      "height": 816
+    },
+    {
+      "elapsedMs": 57,
+      "costMs": 55,
+      "input": "w",
+      "height": 816
+    },
+    {
+      "elapsedMs": 53,
+      "costMs": 50,
+      "input": "ww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 55,
+      "costMs": 52,
+      "input": "ww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 53,
+      "costMs": 50,
+      "input": "ww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 54,
+      "costMs": 50,
+      "input": "ww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 67.99999999999955,
+      "costMs": 56.999999999999545,
+      "input": "www",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 40,
+      "input": "www",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "www",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41,
+      "costMs": 38,
+      "input": "www",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43,
+      "costMs": 40,
+      "input": "wwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 51,
+      "costMs": 40,
+      "input": "wwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 52,
+      "costMs": 41,
+      "input": "wwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43.000000000000455,
+      "costMs": 39.000000000000455,
+      "input": "wwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 47,
+      "costMs": 43,
+      "input": "wwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 49,
+      "costMs": 46,
+      "input": "wwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 50,
+      "costMs": 38,
+      "input": "wwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 49,
+      "costMs": 41,
+      "input": "wwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 40,
+      "costMs": 37,
+      "input": "wwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 47,
+      "costMs": 43,
+      "input": "wwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41,
+      "costMs": 38,
+      "input": "wwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 40,
+      "costMs": 37,
+      "input": "wwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48,
+      "costMs": 42,
+      "input": "wwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41.000000000000455,
+      "costMs": 38,
+      "input": "wwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43.999999999999545,
+      "costMs": 40.999999999999545,
+      "input": "wwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 63,
+      "costMs": 59,
+      "input": "wwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 47,
+      "costMs": 42,
+      "input": "wwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 46,
+      "costMs": 42,
+      "input": "wwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 41,
+      "input": "wwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48.999999999999545,
+      "costMs": 42,
+      "input": "wwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 41,
+      "input": "wwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48.00000000000091,
+      "costMs": 39,
+      "input": "wwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 46,
+      "costMs": 41,
+      "input": "wwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 55,
+      "costMs": 52,
+      "input": "wwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43,
+      "costMs": 40,
+      "input": "wwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 45,
+      "costMs": 42,
+      "input": "wwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 45,
+      "costMs": 41,
+      "input": "wwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 46,
+      "costMs": 42,
+      "input": "wwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 57,
+      "costMs": 44,
+      "input": "wwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 50,
+      "costMs": 40,
+      "input": "wwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43,
+      "costMs": 39,
+      "input": "wwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 46,
+      "costMs": 42,
+      "input": "wwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43,
+      "costMs": 40,
+      "input": "wwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48,
+      "costMs": 44,
+      "input": "wwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 41,
+      "input": "wwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 41,
+      "input": "wwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 63,
+      "costMs": 51,
+      "input": "wwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43.99999999999909,
+      "costMs": 40.99999999999909,
+      "input": "wwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 40,
+      "costMs": 37,
+      "input": "wwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 43,
+      "costMs": 39.00000000000091,
+      "input": "wwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 47,
+      "costMs": 43,
+      "input": "wwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 52,
+      "costMs": 40,
+      "input": "wwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 52,
+      "costMs": 41,
+      "input": "wwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41,
+      "costMs": 38,
+      "input": "wwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 46,
+      "costMs": 42.00000000000091,
+      "input": "wwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 44,
+      "costMs": 40,
+      "input": "wwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 42,
+      "costMs": 39,
+      "input": "wwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 58,
+      "costMs": 42,
+      "input": "wwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48,
+      "costMs": 40,
+      "input": "wwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41,
+      "costMs": 38,
+      "input": "wwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 40.99999999999909,
+      "costMs": 37.99999999999909,
+      "input": "wwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 50,
+      "costMs": 44,
+      "input": "wwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 48,
+      "costMs": 45,
+      "input": "wwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 47,
+      "costMs": 43,
+      "input": "wwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 45.00000000000091,
+      "costMs": 42,
+      "input": "wwwwwwwwwwwwwwwwwww",
+      "height": 816
+    }
+  ],
+  "keys": [
+    {
+      "elapsedMs": 33.00000000000023,
+      "costMs": 4,
+      "input": "w",
+      "height": 816
+    },
+    {
+      "elapsedMs": 31,
+      "costMs": 2,
+      "input": "ww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 17.000000000000455,
+      "costMs": 2,
+      "input": "www",
+      "height": 816
+    },
+    {
+      "elapsedMs": 21,
+      "costMs": 2,
+      "input": "wwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 26,
+      "costMs": 1,
+      "input": "wwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 25.000000000000455,
+      "costMs": 2,
+      "input": "wwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 28,
+      "costMs": 2,
+      "input": "wwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 40,
+      "costMs": 1,
+      "input": "wwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 31,
+      "costMs": 2,
+      "input": "wwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 41,
+      "costMs": 1,
+      "input": "wwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 5,
+      "costMs": 2,
+      "input": "wwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 27,
+      "costMs": 2.0000000000009095,
+      "input": "wwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 21,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 25,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 17.00000000000091,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32,
+      "costMs": 1,
+      "input": "wwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 25,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 26,
+      "costMs": 1.0000000000009095,
+      "input": "wwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 27,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 26.99999999999909,
+      "costMs": 0.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    }
+  ],
+  "scroll": [
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 1,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 0.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999909,
+      "costMs": 2.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 1,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 2.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 35,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999909,
+      "costMs": 2.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 45.00000000000091,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 26.99999999999909,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 28,
+      "costMs": 2.0000000000009095,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999909,
+      "costMs": 2.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999909,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 1.9999999999990905,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34.00000000000091,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999909,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2.0000000000009095,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34.00000000000182,
+      "costMs": 2.000000000001819,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999818,
+      "costMs": 2.999999999998181,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 35,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3.000000000001819,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000182,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999818,
+      "costMs": 3.999999999998181,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 4,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000182,
+      "costMs": 4,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.99999999999818,
+      "costMs": 2.999999999998181,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 35,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33.00000000000182,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 32.99999999999818,
+      "costMs": 1.999999999998181,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2.000000000001819,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 2,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 4,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 33,
+      "costMs": 3,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    },
+    {
+      "elapsedMs": 34,
+      "costMs": 1,
+      "input": "wwwwwwwwwwwwwwwwwwww",
+      "height": 816
+    }
+  ],
+  "observations": [
+    {
+      "name": "stream-0",
+      "entryType": "measure",
+      "startTime": 1714,
+      "duration": 97
+    },
+    {
+      "name": "stream-1",
+      "entryType": "measure",
+      "startTime": 1811,
+      "duration": 64
+    },
+    {
+      "name": "stream-2",
+      "entryType": "measure",
+      "startTime": 1875,
+      "duration": 61
+    },
+    {
+      "name": "stream-3",
+      "entryType": "measure",
+      "startTime": 1936,
+      "duration": 57
+    },
+    {
+      "name": "keys-0",
+      "entryType": "measure",
+      "startTime": 1993,
+      "duration": 33.00000000000023
+    },
+    {
+      "name": "stream-4",
+      "entryType": "measure",
+      "startTime": 2027.0000000000002,
+      "duration": 52.99999999999977
+    },
+    {
+      "name": "stream-5",
+      "entryType": "measure",
+      "startTime": 2080,
+      "duration": 55.000000000000455
+    },
+    {
+      "name": "stream-6",
+      "entryType": "measure",
+      "startTime": 2135.0000000000005,
+      "duration": 53.999999999999545
+    },
+    {
+      "name": "stream-7",
+      "entryType": "measure",
+      "startTime": 2189,
+      "duration": 57
+    },
+    {
+      "name": "keys-1",
+      "entryType": "measure",
+      "startTime": 2246,
+      "duration": 31
+    },
+    {
+      "name": "stream-8",
+      "entryType": "measure",
+      "startTime": 2277,
+      "duration": 53
+    },
+    {
+      "name": "stream-9",
+      "entryType": "measure",
+      "startTime": 2331,
+      "duration": 55
+    },
+    {
+      "name": "stream-10",
+      "entryType": "measure",
+      "startTime": 2386,
+      "duration": 53
+    },
+    {
+      "name": "stream-11",
+      "entryType": "measure",
+      "startTime": 2439,
+      "duration": 54
+    },
+    {
+      "name": "keys-2",
+      "entryType": "measure",
+      "startTime": 2493,
+      "duration": 17.000000000000455
+    },
+    {
+      "name": "stream-12",
+      "entryType": "measure",
+      "startTime": 2510.0000000000005,
+      "duration": 67.99999999999955
+    },
+    {
+      "name": "stream-13",
+      "entryType": "measure",
+      "startTime": 2578,
+      "duration": 44
+    },
+    {
+      "name": "stream-14",
+      "entryType": "measure",
+      "startTime": 2622,
+      "duration": 42
+    },
+    {
+      "name": "stream-15",
+      "entryType": "measure",
+      "startTime": 2665,
+      "duration": 41
+    },
+    {
+      "name": "keys-3",
+      "entryType": "measure",
+      "startTime": 2706,
+      "duration": 21
+    },
+    {
+      "name": "stream-16",
+      "entryType": "measure",
+      "startTime": 2727,
+      "duration": 43
+    },
+    {
+      "name": "stream-17",
+      "entryType": "measure",
+      "startTime": 2770,
+      "duration": 51
+    },
+    {
+      "name": "stream-18",
+      "entryType": "measure",
+      "startTime": 2822,
+      "duration": 52
+    },
+    {
+      "name": "stream-19",
+      "entryType": "measure",
+      "startTime": 2874,
+      "duration": 43.000000000000455
+    },
+    {
+      "name": "keys-4",
+      "entryType": "measure",
+      "startTime": 2918,
+      "duration": 26
+    },
+    {
+      "name": "stream-20",
+      "entryType": "measure",
+      "startTime": 2944,
+      "duration": 42
+    },
+    {
+      "name": "stream-21",
+      "entryType": "measure",
+      "startTime": 2986,
+      "duration": 47
+    },
+    {
+      "name": "stream-22",
+      "entryType": "measure",
+      "startTime": 3033,
+      "duration": 42
+    },
+    {
+      "name": "stream-23",
+      "entryType": "measure",
+      "startTime": 3076,
+      "duration": 42
+    },
+    {
+      "name": "keys-5",
+      "entryType": "measure",
+      "startTime": 3118,
+      "duration": 25.000000000000455
+    },
+    {
+      "name": "stream-24",
+      "entryType": "measure",
+      "startTime": 3144,
+      "duration": 49
+    },
+    {
+      "name": "stream-25",
+      "entryType": "measure",
+      "startTime": 3194,
+      "duration": 50
+    },
+    {
+      "name": "stream-26",
+      "entryType": "measure",
+      "startTime": 3244,
+      "duration": 48.000000000000455
+    },
+    {
+      "name": "stream-27",
+      "entryType": "measure",
+      "startTime": 3293,
+      "duration": 40
+    },
+    {
+      "name": "keys-6",
+      "entryType": "measure",
+      "startTime": 3333,
+      "duration": 28
+    },
+    {
+      "name": "stream-28",
+      "entryType": "measure",
+      "startTime": 3361,
+      "duration": 47
+    },
+    {
+      "name": "stream-29",
+      "entryType": "measure",
+      "startTime": 3408,
+      "duration": 42
+    },
+    {
+      "name": "stream-30",
+      "entryType": "measure",
+      "startTime": 3450,
+      "duration": 41
+    },
+    {
+      "name": "stream-31",
+      "entryType": "measure",
+      "startTime": 3491,
+      "duration": 40
+    },
+    {
+      "name": "keys-7",
+      "entryType": "measure",
+      "startTime": 3531,
+      "duration": 40
+    },
+    {
+      "name": "stream-32",
+      "entryType": "measure",
+      "startTime": 3571,
+      "duration": 48
+    },
+    {
+      "name": "stream-33",
+      "entryType": "measure",
+      "startTime": 3619,
+      "duration": 42
+    },
+    {
+      "name": "stream-34",
+      "entryType": "measure",
+      "startTime": 3662,
+      "duration": 41.000000000000455
+    },
+    {
+      "name": "stream-35",
+      "entryType": "measure",
+      "startTime": 3703.0000000000005,
+      "duration": 43.999999999999545
+    },
+    {
+      "name": "keys-8",
+      "entryType": "measure",
+      "startTime": 3747,
+      "duration": 30
+    },
+    {
+      "name": "stream-36",
+      "entryType": "measure",
+      "startTime": 3778,
+      "duration": 62
+    },
+    {
+      "name": "stream-37",
+      "entryType": "measure",
+      "startTime": 3841,
+      "duration": 47
+    },
+    {
+      "name": "stream-38",
+      "entryType": "measure",
+      "startTime": 3888,
+      "duration": 46
+    },
+    {
+      "name": "stream-39",
+      "entryType": "measure",
+      "startTime": 3934,
+      "duration": 44
+    },
+    {
+      "name": "keys-9",
+      "entryType": "measure",
+      "startTime": 3978,
+      "duration": 41
+    },
+    {
+      "name": "stream-40",
+      "entryType": "measure",
+      "startTime": 4020.0000000000005,
+      "duration": 48.999999999999545
+    },
+    {
+      "name": "stream-41",
+      "entryType": "measure",
+      "startTime": 4069,
+      "duration": 44
+    },
+    {
+      "name": "stream-42",
+      "entryType": "measure",
+      "startTime": 4113,
+      "duration": 48.00000000000091
+    },
+    {
+      "name": "stream-43",
+      "entryType": "measure",
+      "startTime": 4162,
+      "duration": 46
+    },
+    {
+      "name": "keys-10",
+      "entryType": "measure",
+      "startTime": 4208,
+      "duration": 5
+    },
+    {
+      "name": "stream-44",
+      "entryType": "measure",
+      "startTime": 4213,
+      "duration": 55
+    },
+    {
+      "name": "stream-45",
+      "entryType": "measure",
+      "startTime": 4268,
+      "duration": 43
+    },
+    {
+      "name": "stream-46",
+      "entryType": "measure",
+      "startTime": 4311,
+      "duration": 45
+    },
+    {
+      "name": "stream-47",
+      "entryType": "measure",
+      "startTime": 4356,
+      "duration": 45
+    },
+    {
+      "name": "keys-11",
+      "entryType": "measure",
+      "startTime": 4401,
+      "duration": 27
+    },
+    {
+      "name": "stream-48",
+      "entryType": "measure",
+      "startTime": 4428,
+      "duration": 46
+    },
+    {
+      "name": "stream-49",
+      "entryType": "measure",
+      "startTime": 4474,
+      "duration": 57
+    },
+    {
+      "name": "stream-50",
+      "entryType": "measure",
+      "startTime": 4531,
+      "duration": 50
+    },
+    {
+      "name": "stream-51",
+      "entryType": "measure",
+      "startTime": 4581,
+      "duration": 42
+    },
+    {
+      "name": "keys-12",
+      "entryType": "measure",
+      "startTime": 4623,
+      "duration": 21
+    },
+    {
+      "name": "stream-52",
+      "entryType": "measure",
+      "startTime": 4644,
+      "duration": 42
+    },
+    {
+      "name": "stream-53",
+      "entryType": "measure",
+      "startTime": 4687,
+      "duration": 43
+    },
+    {
+      "name": "stream-54",
+      "entryType": "measure",
+      "startTime": 4730,
+      "duration": 46
+    },
+    {
+      "name": "stream-55",
+      "entryType": "measure",
+      "startTime": 4776,
+      "duration": 43
+    },
+    {
+      "name": "keys-13",
+      "entryType": "measure",
+      "startTime": 4819,
+      "duration": 25
+    },
+    {
+      "name": "stream-56",
+      "entryType": "measure",
+      "startTime": 4844,
+      "duration": 48
+    },
+    {
+      "name": "stream-57",
+      "entryType": "measure",
+      "startTime": 4892,
+      "duration": 44
+    },
+    {
+      "name": "stream-58",
+      "entryType": "measure",
+      "startTime": 4936,
+      "duration": 44
+    },
+    {
+      "name": "stream-59",
+      "entryType": "measure",
+      "startTime": 4980,
+      "duration": 63
+    },
+    {
+      "name": "keys-14",
+      "entryType": "measure",
+      "startTime": 5043,
+      "duration": 17.00000000000091
+    },
+    {
+      "name": "stream-60",
+      "entryType": "measure",
+      "startTime": 5060.000000000001,
+      "duration": 43.99999999999909
+    },
+    {
+      "name": "stream-61",
+      "entryType": "measure",
+      "startTime": 5104,
+      "duration": 42
+    },
+    {
+      "name": "stream-62",
+      "entryType": "measure",
+      "startTime": 5146,
+      "duration": 40
+    },
+    {
+      "name": "stream-63",
+      "entryType": "measure",
+      "startTime": 5186,
+      "duration": 43
+    },
+    {
+      "name": "keys-15",
+      "entryType": "measure",
+      "startTime": 5229,
+      "duration": 32
+    },
+    {
+      "name": "stream-64",
+      "entryType": "measure",
+      "startTime": 5261,
+      "duration": 47
+    },
+    {
+      "name": "stream-65",
+      "entryType": "measure",
+      "startTime": 5308,
+      "duration": 52
+    },
+    {
+      "name": "stream-66",
+      "entryType": "measure",
+      "startTime": 5360,
+      "duration": 51.00000000000091
+    },
+    {
+      "name": "stream-67",
+      "entryType": "measure",
+      "startTime": 5412,
+      "duration": 41
+    },
+    {
+      "name": "keys-16",
+      "entryType": "measure",
+      "startTime": 5453,
+      "duration": 25
+    },
+    {
+      "name": "stream-68",
+      "entryType": "measure",
+      "startTime": 5478,
+      "duration": 46
+    },
+    {
+      "name": "stream-69",
+      "entryType": "measure",
+      "startTime": 5524,
+      "duration": 42
+    },
+    {
+      "name": "stream-70",
+      "entryType": "measure",
+      "startTime": 5566,
+      "duration": 44
+    },
+    {
+      "name": "stream-71",
+      "entryType": "measure",
+      "startTime": 5610,
+      "duration": 42
+    },
+    {
+      "name": "keys-17",
+      "entryType": "measure",
+      "startTime": 5652,
+      "duration": 26
+    },
+    {
+      "name": "stream-72",
+      "entryType": "measure",
+      "startTime": 5678,
+      "duration": 58
+    },
+    {
+      "name": "stream-73",
+      "entryType": "measure",
+      "startTime": 5736,
+      "duration": 48
+    },
+    {
+      "name": "stream-74",
+      "entryType": "measure",
+      "startTime": 5784,
+      "duration": 41
+    },
+    {
+      "name": "stream-75",
+      "entryType": "measure",
+      "startTime": 5826.000000000001,
+      "duration": 40.99999999999909
+    },
+    {
+      "name": "keys-18",
+      "entryType": "measure",
+      "startTime": 5867,
+      "duration": 27
+    },
+    {
+      "name": "stream-76",
+      "entryType": "measure",
+      "startTime": 5894,
+      "duration": 50
+    },
+    {
+      "name": "stream-77",
+      "entryType": "measure",
+      "startTime": 5944,
+      "duration": 48
+    },
+    {
+      "name": "stream-78",
+      "entryType": "measure",
+      "startTime": 5992,
+      "duration": 47
+    },
+    {
+      "name": "stream-79",
+      "entryType": "measure",
+      "startTime": 6039,
+      "duration": 45.00000000000091
+    },
+    {
+      "name": "keys-19",
+      "entryType": "measure",
+      "startTime": 6084.000000000001,
+      "duration": 26.99999999999909
+    },
+    {
+      "name": "scroll-0",
+      "entryType": "measure",
+      "startTime": 6111,
+      "duration": 33
+    },
+    {
+      "name": "scroll-1",
+      "entryType": "measure",
+      "startTime": 6144,
+      "duration": 34
+    },
+    {
+      "name": "scroll-2",
+      "entryType": "measure",
+      "startTime": 6178,
+      "duration": 33
+    },
+    {
+      "name": "scroll-3",
+      "entryType": "measure",
+      "startTime": 6211,
+      "duration": 33
+    },
+    {
+      "name": "scroll-4",
+      "entryType": "measure",
+      "startTime": 6244,
+      "duration": 34.00000000000091
+    },
+    {
+      "name": "scroll-5",
+      "entryType": "measure",
+      "startTime": 6278.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-6",
+      "entryType": "measure",
+      "startTime": 6311,
+      "duration": 33
+    },
+    {
+      "name": "scroll-7",
+      "entryType": "measure",
+      "startTime": 6345,
+      "duration": 33
+    },
+    {
+      "name": "scroll-8",
+      "entryType": "measure",
+      "startTime": 6378,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-9",
+      "entryType": "measure",
+      "startTime": 6411.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-10",
+      "entryType": "measure",
+      "startTime": 6444,
+      "duration": 34
+    },
+    {
+      "name": "scroll-11",
+      "entryType": "measure",
+      "startTime": 6478,
+      "duration": 33
+    },
+    {
+      "name": "scroll-12",
+      "entryType": "measure",
+      "startTime": 6511,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-13",
+      "entryType": "measure",
+      "startTime": 6544.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-14",
+      "entryType": "measure",
+      "startTime": 6577,
+      "duration": 34
+    },
+    {
+      "name": "scroll-15",
+      "entryType": "measure",
+      "startTime": 6611,
+      "duration": 33
+    },
+    {
+      "name": "scroll-16",
+      "entryType": "measure",
+      "startTime": 6644,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-17",
+      "entryType": "measure",
+      "startTime": 6677.000000000001,
+      "duration": 33.99999999999909
+    },
+    {
+      "name": "scroll-18",
+      "entryType": "measure",
+      "startTime": 6711,
+      "duration": 33
+    },
+    {
+      "name": "scroll-19",
+      "entryType": "measure",
+      "startTime": 6745,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-20",
+      "entryType": "measure",
+      "startTime": 6778.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-21",
+      "entryType": "measure",
+      "startTime": 6811,
+      "duration": 33
+    },
+    {
+      "name": "scroll-22",
+      "entryType": "measure",
+      "startTime": 6844,
+      "duration": 34
+    },
+    {
+      "name": "scroll-23",
+      "entryType": "measure",
+      "startTime": 6878,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-24",
+      "entryType": "measure",
+      "startTime": 6911.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-25",
+      "entryType": "measure",
+      "startTime": 6944,
+      "duration": 33
+    },
+    {
+      "name": "scroll-26",
+      "entryType": "measure",
+      "startTime": 6977,
+      "duration": 33
+    },
+    {
+      "name": "scroll-27",
+      "entryType": "measure",
+      "startTime": 7010,
+      "duration": 35
+    },
+    {
+      "name": "scroll-28",
+      "entryType": "measure",
+      "startTime": 7045,
+      "duration": 33
+    },
+    {
+      "name": "scroll-29",
+      "entryType": "measure",
+      "startTime": 7078,
+      "duration": 33
+    },
+    {
+      "name": "scroll-30",
+      "entryType": "measure",
+      "startTime": 7111,
+      "duration": 33
+    },
+    {
+      "name": "scroll-31",
+      "entryType": "measure",
+      "startTime": 7145.000000000001,
+      "duration": 32
+    },
+    {
+      "name": "scroll-32",
+      "entryType": "measure",
+      "startTime": 7177.000000000001,
+      "duration": 33.99999999999909
+    },
+    {
+      "name": "scroll-33",
+      "entryType": "measure",
+      "startTime": 7211,
+      "duration": 33
+    },
+    {
+      "name": "scroll-34",
+      "entryType": "measure",
+      "startTime": 7244,
+      "duration": 34.00000000000091
+    },
+    {
+      "name": "scroll-35",
+      "entryType": "measure",
+      "startTime": 7278.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-36",
+      "entryType": "measure",
+      "startTime": 7311,
+      "duration": 34
+    },
+    {
+      "name": "scroll-37",
+      "entryType": "measure",
+      "startTime": 7345,
+      "duration": 33
+    },
+    {
+      "name": "scroll-38",
+      "entryType": "measure",
+      "startTime": 7378,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-39",
+      "entryType": "measure",
+      "startTime": 7411.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-40",
+      "entryType": "measure",
+      "startTime": 7444,
+      "duration": 34
+    },
+    {
+      "name": "scroll-41",
+      "entryType": "measure",
+      "startTime": 7478,
+      "duration": 45.00000000000091
+    },
+    {
+      "name": "scroll-42",
+      "entryType": "measure",
+      "startTime": 7523.000000000001,
+      "duration": 26.99999999999909
+    },
+    {
+      "name": "scroll-43",
+      "entryType": "measure",
+      "startTime": 7550,
+      "duration": 28
+    },
+    {
+      "name": "scroll-44",
+      "entryType": "measure",
+      "startTime": 7578,
+      "duration": 33
+    },
+    {
+      "name": "scroll-45",
+      "entryType": "measure",
+      "startTime": 7611,
+      "duration": 33
+    },
+    {
+      "name": "scroll-46",
+      "entryType": "measure",
+      "startTime": 7644,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-47",
+      "entryType": "measure",
+      "startTime": 7677.000000000001,
+      "duration": 33.99999999999909
+    },
+    {
+      "name": "scroll-48",
+      "entryType": "measure",
+      "startTime": 7711,
+      "duration": 33
+    },
+    {
+      "name": "scroll-49",
+      "entryType": "measure",
+      "startTime": 7744,
+      "duration": 33
+    },
+    {
+      "name": "scroll-50",
+      "entryType": "measure",
+      "startTime": 7777,
+      "duration": 34
+    },
+    {
+      "name": "scroll-51",
+      "entryType": "measure",
+      "startTime": 7811,
+      "duration": 33
+    },
+    {
+      "name": "scroll-52",
+      "entryType": "measure",
+      "startTime": 7844,
+      "duration": 34
+    },
+    {
+      "name": "scroll-53",
+      "entryType": "measure",
+      "startTime": 7878,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-54",
+      "entryType": "measure",
+      "startTime": 7911.000000000001,
+      "duration": 33.99999999999909
+    },
+    {
+      "name": "scroll-55",
+      "entryType": "measure",
+      "startTime": 7945,
+      "duration": 33
+    },
+    {
+      "name": "scroll-56",
+      "entryType": "measure",
+      "startTime": 7978,
+      "duration": 33.00000000000091
+    },
+    {
+      "name": "scroll-57",
+      "entryType": "measure",
+      "startTime": 8011.000000000001,
+      "duration": 33
+    },
+    {
+      "name": "scroll-58",
+      "entryType": "measure",
+      "startTime": 8044.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-59",
+      "entryType": "measure",
+      "startTime": 8077,
+      "duration": 34.00000000000091
+    },
+    {
+      "name": "scroll-60",
+      "entryType": "measure",
+      "startTime": 8111.000000000001,
+      "duration": 32.99999999999909
+    },
+    {
+      "name": "scroll-61",
+      "entryType": "measure",
+      "startTime": 8144,
+      "duration": 33
+    },
+    {
+      "name": "scroll-62",
+      "entryType": "measure",
+      "startTime": 8177,
+      "duration": 34
+    },
+    {
+      "name": "scroll-63",
+      "entryType": "measure",
+      "startTime": 8211,
+      "duration": 34.00000000000182
+    },
+    {
+      "name": "scroll-64",
+      "entryType": "measure",
+      "startTime": 8245.000000000002,
+      "duration": 32.99999999999818
+    },
+    {
+      "name": "scroll-65",
+      "entryType": "measure",
+      "startTime": 8278,
+      "duration": 33
+    },
+    {
+      "name": "scroll-66",
+      "entryType": "measure",
+      "startTime": 8311,
+      "duration": 35
+    },
+    {
+      "name": "scroll-67",
+      "entryType": "measure",
+      "startTime": 8346,
+      "duration": 33
+    },
+    {
+      "name": "scroll-68",
+      "entryType": "measure",
+      "startTime": 8379,
+      "duration": 33
+    },
+    {
+      "name": "scroll-69",
+      "entryType": "measure",
+      "startTime": 8412,
+      "duration": 33
+    },
+    {
+      "name": "scroll-70",
+      "entryType": "measure",
+      "startTime": 8445,
+      "duration": 33
+    },
+    {
+      "name": "scroll-71",
+      "entryType": "measure",
+      "startTime": 8478,
+      "duration": 33.00000000000182
+    },
+    {
+      "name": "scroll-72",
+      "entryType": "measure",
+      "startTime": 8511.000000000002,
+      "duration": 33.99999999999818
+    },
+    {
+      "name": "scroll-73",
+      "entryType": "measure",
+      "startTime": 8545,
+      "duration": 33
+    },
+    {
+      "name": "scroll-74",
+      "entryType": "measure",
+      "startTime": 8578,
+      "duration": 34
+    },
+    {
+      "name": "scroll-75",
+      "entryType": "measure",
+      "startTime": 8612,
+      "duration": 33
+    },
+    {
+      "name": "scroll-76",
+      "entryType": "measure",
+      "startTime": 8645,
+      "duration": 34
+    },
+    {
+      "name": "scroll-77",
+      "entryType": "measure",
+      "startTime": 8679,
+      "duration": 33
+    },
+    {
+      "name": "scroll-78",
+      "entryType": "measure",
+      "startTime": 8712,
+      "duration": 33.00000000000182
+    },
+    {
+      "name": "scroll-79",
+      "entryType": "measure",
+      "startTime": 8745.000000000002,
+      "duration": 33.99999999999818
+    },
+    {
+      "name": "scroll-80",
+      "entryType": "measure",
+      "startTime": 8779,
+      "duration": 33
+    },
+    {
+      "name": "scroll-81",
+      "entryType": "measure",
+      "startTime": 8812,
+      "duration": 34
+    },
+    {
+      "name": "scroll-82",
+      "entryType": "measure",
+      "startTime": 8846,
+      "duration": 33
+    },
+    {
+      "name": "scroll-83",
+      "entryType": "measure",
+      "startTime": 8879,
+      "duration": 32
+    },
+    {
+      "name": "scroll-84",
+      "entryType": "measure",
+      "startTime": 8911,
+      "duration": 35
+    },
+    {
+      "name": "scroll-85",
+      "entryType": "measure",
+      "startTime": 8946,
+      "duration": 33.00000000000182
+    },
+    {
+      "name": "scroll-86",
+      "entryType": "measure",
+      "startTime": 8979.000000000002,
+      "duration": 32.99999999999818
+    },
+    {
+      "name": "scroll-87",
+      "entryType": "measure",
+      "startTime": 9012,
+      "duration": 33
+    },
+    {
+      "name": "scroll-88",
+      "entryType": "measure",
+      "startTime": 9045,
+      "duration": 34
+    },
+    {
+      "name": "scroll-89",
+      "entryType": "measure",
+      "startTime": 9079,
+      "duration": 33
+    },
+    {
+      "name": "scroll-90",
+      "entryType": "measure",
+      "startTime": 9112,
+      "duration": 33
+    },
+    {
+      "name": "scroll-91",
+      "entryType": "measure",
+      "startTime": 9145,
+      "duration": 34
+    },
+    {
+      "name": "scroll-92",
+      "entryType": "measure",
+      "startTime": 9179,
+      "duration": 33
+    },
+    {
+      "name": "scroll-93",
+      "entryType": "measure",
+      "startTime": 9212,
+      "duration": 34
+    },
+    {
+      "name": "scroll-94",
+      "entryType": "measure",
+      "startTime": 9246,
+      "duration": 33
+    },
+    {
+      "name": "scroll-95",
+      "entryType": "measure",
+      "startTime": 9279,
+      "duration": 33
+    },
+    {
+      "name": "scroll-96",
+      "entryType": "measure",
+      "startTime": 9312,
+      "duration": 34
+    },
+    {
+      "name": "scroll-97",
+      "entryType": "measure",
+      "startTime": 9346,
+      "duration": 33
+    },
+    {
+      "name": "scroll-98",
+      "entryType": "measure",
+      "startTime": 9379,
+      "duration": 33
+    },
+    {
+      "name": "scroll-99",
+      "entryType": "measure",
+      "startTime": 9412,
+      "duration": 34
+    }
+  ],
+  "rows": 2000,
+  "width": 1200,
+  "height": 816,
+  "inputAcknowledged": 20,
+  "tokens": 80,
+  "streamMs": 4418,
+  "tokensPerSecond": 18.10774105930285,
+  "measurement": "Headless WebKit synchronous JS/React/layout task and dispatch-to-second-rAF; no displayed frame",
+  "browserVersion": "26.4",
+  "run": 3
+}
