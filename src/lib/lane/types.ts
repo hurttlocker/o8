@@ -394,6 +394,7 @@ export type LaneEventVerb =
   // Dependency setup completed and its package-script binaries were checked
   // before a worker could start. The incomplete event is a launch blocker.
   | 'dependency_materialized'
+  | 'worktree_preparation_timing'
   | 'dependency_materialization_incomplete'
   // Worker-requested bounded scope expansion. Payload records requested paths,
   // effective allowlist, reason, and whether the request widened the scope.
