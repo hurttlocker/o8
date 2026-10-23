@@ -415,6 +415,13 @@
       ]
     },
     {
+      "path": "src/lib/cortex/indexer/root-docs-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/cortex/qa/llm/byok-keys.test.ts",
       "reasons": [
         "child-process"
