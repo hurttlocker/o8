@@ -5,7 +5,7 @@ import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
-import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
@@ -24,7 +24,7 @@ import { canReadSessionContext } from './use-orchestrator-stream/session-context
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
-import { primeCompactedOrchestratorSession, refreshOrchestratorTokenTelemetry, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
+import { primeCompactedOrchestratorSession, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
   appendSnapshotTurnFailure,
   useNoSnapshotBusyFallback,
@@ -45,6 +45,7 @@ import {
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
 import { useOrchestratorAutoCompaction } from './use-orchestrator-stream/auto-compaction';
+import { useOrchestratorTokenTelemetry } from './use-orchestrator-stream/token-telemetry';
 import {
   createOrchestratorMessageHandler,
   type CurrentAssistantStreamState,
@@ -220,35 +221,15 @@ export function useOrchestratorStream(
     setRunningTotal(value);
   }, []);
 
-  const refreshTokenTelemetry = useCallback(async () => {
-    return await refreshOrchestratorTokenTelemetry({
-      repoPath: repoPathRef.current,
-      threadId: threadIdRef.current,
-      backend: isOrchestratorBackendId(lastBackendRef.current) ? lastBackendRef.current : null,
-      setRunningTotal: updateRunningTotal,
-      setTokenCount,
-      telemetryBindingRef,
-      telemetryTotalRef,
-    });
-  }, [updateRunningTotal]);
-
-  const requestCompaction = useCallback(async (
-    activeRepoPath: string,
-    nextRunningTotal: number,
-    options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
-  ) => {
-    const activeThreadId = options?.threadId ?? threadIdRef.current;
-    if (!activeThreadId) return null;
-    return await requestOrchestratorCompaction(activeRepoPath, nextRunningTotal, {
-      ...options,
-      threadId: activeThreadId,
-    });
-  }, []);
+  const { refreshTokenTelemetry, requestCompaction } = useOrchestratorTokenTelemetry({
+    repoPathRef, threadIdRef, lastBackendRef, messagesRef, updateRunningTotal, setTokenCount,
+    telemetryBindingRef, telemetryTotalRef,
+  });
 
   const primeCompactedSession = useCallback(async (
     activeRepoPath: string,
     payload: Awaited<ReturnType<typeof requestOrchestratorCompaction>>,
-    options?: { setTranscript?: boolean; threadId?: string | null },
+    options?: { threadId?: string | null },
   ) => {
     if (!payload) return null;
     const compactThreadId = options?.threadId ?? threadIdRef.current;
@@ -261,7 +242,6 @@ export function useOrchestratorStream(
       setMessages: syncMessages,
       setRunningTotal: updateRunningTotal,
       setTokenCount,
-      setTranscript: options?.setTranscript,
       telemetrySessionKeyRef: telemetryBindingRef,
       telemetryTotalRef,
       isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
@@ -803,7 +783,6 @@ export function useOrchestratorStream(
     }
     if (threadIdRef.current !== activeThreadId) return null;
     const primed = await primeCompactedSession(activeRepoPath, payload, {
-      setTranscript: false,
       threadId: activeThreadId,
     });
     if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== activeThreadId) return null;
@@ -923,7 +902,6 @@ export function useOrchestratorStream(
           });
           if (threadIdRef.current !== sendHandle.threadId) return;
           const primed = payload ? await primeCompactedSession(activeRepoPath, payload, {
-            setTranscript: false,
             threadId: sendHandle.threadId,
           }) : null;
           if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== sendHandle.threadId) return;
@@ -947,7 +925,7 @@ export function useOrchestratorStream(
             throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${displayMessage}`);
           }
           planCaptureSource = primed.transcript;
-          setMessages(primed.transcript);
+          setMessages((previous) => previous.filter(entry => entry.id !== compactingId));
         } catch (error) {
           activeTurnBackendRef.current = null;
           setMessages((prev) => [

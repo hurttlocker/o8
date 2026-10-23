@@ -4,8 +4,18 @@ import { describe, expect, it } from 'vitest';
 import { deserializeStoredTranscript, serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 import { resolveTurnReceiptMode } from '@/lib/lane/orchestrator-send-entry';
 import { buildTurnSummaryStats, TurnSummaryCard } from './TurnSummaryCard';
+import { parseTerminalTurnReceipt } from '../use-orchestrator-stream/terminal-receipt';
 
 describe('TurnSummaryCard', () => {
+  it('keeps the outside-workspace grant visible after receipt parsing and transcript reload', () => {
+    const receipt = parseTerminalTurnReceipt({ leadModel: 'pi', effort: 'medium', mode: 'solo', permissionMode: 'outside-workspace' });
+    expect(receipt?.permissionMode).toBe('outside-workspace');
+    const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
+      id: 'outside-receipt', role: 'assistant', text: 'Complete.', receipt,
+    }]));
+    const html = renderToStaticMarkup(createElement(TurnSummaryCard, { persistedEntry }));
+    expect(html).toContain('Outside workspace');
+  });
   it('keeps Shared in the persisted receipt instead of reporting a fleet-engine mode change', () => {
     const [persistedEntry] = deserializeStoredTranscript(serializeTranscriptForStorage([{
       id: 'shared-return', role: 'assistant', text: 'Worker returned.',

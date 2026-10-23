@@ -44,6 +44,7 @@ import {
 import { createOwnedSessionIo } from './session-io';
 import { registerOwnedStopHandler } from './stop-outcome';
 import { createOwnedRunController } from './run-controller';
+import { OwnedProcessIdentityError } from './process-identity';
 import { createReviewTailController } from './review-tail';
 import {
   OwnedWorkspaceUnavailableError,
@@ -259,10 +260,10 @@ export function createOwnedSessionStore(
       await io.saveSession(session);
       run = await runController.spawnOwnedRun(session, prompt, 'launch');
     } catch (error) {
-      if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError) {
+      if (error instanceof OwnedWorkspaceUnavailableError || error instanceof OwnedArtifactAdmissionError || error instanceof OwnedProcessIdentityError) {
         return {
           ok: false, runtime: runtimeId, surfaceId: session.surfaceId,
-          note: error.message, sideEffect: error.sideEffect,
+          note: error.message, sideEffect: error instanceof OwnedProcessIdentityError ? 'unknown' : error.sideEffect,
         };
       }
       throw error;
