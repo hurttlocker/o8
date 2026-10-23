@@ -135,10 +135,24 @@ async function main(): Promise<void> {
     } else if (method === 'turn/plan/updated') {
       out({ type: 'event_msg', payload: { type: 'plan_update', explanation: params.explanation ?? null, plan: params.plan ?? [] } });
     } else if (method === 'thread/tokenUsage/updated') {
-      const last = asObject(asObject(params.tokenUsage)?.last);
+      const tokenUsage = asObject(params.tokenUsage);
+      const last = asObject(tokenUsage?.last);
       usage.input_tokens += Number(last?.inputTokens) || 0;
       usage.cached_input_tokens += Number(last?.cachedInputTokens) || 0;
       usage.output_tokens += Number(last?.outputTokens) || 0;
+      // Preserve the latest request beside the billing rollup. App-server's
+      // `last.inputTokens` includes cached input; `total` is cumulative usage.
+      const toUsage = (value: Json | null) => value ? {
+        input_tokens: value.inputTokens,
+        cached_input_tokens: value.cachedInputTokens,
+        output_tokens: value.outputTokens,
+        total_tokens: value.totalTokens,
+      } : null;
+      out({ type: 'event_msg', payload: { type: 'token_count', info: {
+        last_token_usage: toUsage(last),
+        total_token_usage: toUsage(asObject(tokenUsage?.total)),
+        model_context_window: tokenUsage?.modelContextWindow,
+      } } });
     } else if (method === 'error') {
       if (params.willRetry !== true) out({ type: 'error', message: text(asObject(params.error)?.message) || 'Codex turn error' });
     } else if (method === 'turn/completed') {

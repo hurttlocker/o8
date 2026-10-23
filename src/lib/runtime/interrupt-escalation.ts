@@ -10,6 +10,7 @@ import {
 } from '@/lib/runtimes/shared/owned-session/helpers';
 import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 import { withOwnedStopOutcome } from '@/lib/runtimes/shared/owned-session/stop-outcome';
+import { probeOwnedSignalIdentity, type OwnedProcessEvidence } from '@/lib/runtimes/shared/owned-session/process-identity';
 import {
   probeOwnedRunProcessClaim,
   resolveSpawnedProcessGroupId,
@@ -28,7 +29,7 @@ export type InterruptEscalationSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
  */
 export type InterruptEscalationMechanism = InterruptEscalationSignal | 'taskkill-tree';
 
-export interface InterruptEscalationTarget {
+export interface InterruptEscalationTarget extends OwnedProcessEvidence {
   pid?: number;
   processGroupId?: number;
   tmuxSession?: string;
@@ -303,6 +304,10 @@ async function defaultKill(
     return;
   }
   if (!target.pid) return;
+  if (target.processIdentityRequired || target.processIdentity) {
+    const proof = await probeOwnedSignalIdentity(target);
+    if (proof.state !== 'match') throw new Error('Worker start identity changed or is unavailable; no signal was sent.');
+  }
   if (process.platform === 'win32') {
     // Windows has no negative-pid process groups, and the recorded pid is the
     // INTERPRETER — the runtime CLI is its child. TerminateProcess on the
@@ -340,6 +345,12 @@ async function defaultKill(
 
   let groupSignaled = false;
   let groupSignalError: string | undefined;
+  const strictIdentity = Boolean(target.processIdentityRequired || target.processIdentity);
+  // Snapshotting descendants awaits OS queries. Recheck the leader immediately
+  // before signaling; an absent leader cannot authorize a possibly reused PGID.
+  if (strictIdentity && (await probeOwnedSignalIdentity(target)).state !== 'match') {
+    throw new Error('Worker identity is no longer verified; no process group was signaled.');
+  }
   try {
     process.kill(-tree.processGroupId, signal);
     tree.groupObserved = true;
@@ -364,6 +375,9 @@ async function defaultKill(
       if (processGroupId === tree.processGroupId) continue;
       if (processGroupId === null && !isPidAlive(pid)) continue;
     }
+    // Escaped descendants have no persisted start cookie. Keep Stop unconfirmed
+    // rather than sending a later rung to a potentially reused descendant PID.
+    if (strictIdentity) { unaddressed.push(pid); continue; }
     try {
       signalPid(pid, signal);
     } catch {
@@ -567,6 +581,14 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
     };
   }
 
+  if (!activeRun.tmuxSession && (activeRun.processIdentityRequired || activeRun.processIdentity)) {
+    const proof = await probeOwnedSignalIdentity(activeRun);
+    if (proof.state !== 'match') {
+      return { attempted: false, confirmedDead: false, alreadyDead: false, steps: [], pid: activeRun.pid,
+        note: 'Worker start identity changed or is unavailable; the run remains held and no process was signaled.' };
+    }
+  }
+
   // The bridge is the durable owner when present. Wrapper pids can go stale or
   // be replaced after exec while the tmux session remains alive, so a reused
   // pid must never override positive bridge liveness.
@@ -624,6 +646,9 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
 
   return withOwnedStopOutcome(surfaceId, activeRun, () => escalateInterrupt({
     pid: activeRun.pid,
+    processIdentity: activeRun.processIdentity,
+    processIdentitySource: activeRun.processIdentitySource,
+    processIdentityRequired: activeRun.processIdentityRequired,
     processGroupId: activeRun.processGroupId,
     tmuxSession: activeRun.tmuxSession,
     commandLabel,
