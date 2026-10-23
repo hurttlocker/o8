@@ -1,4 +1,6 @@
 export { handleCreateMission } from './mission-create';
+export { handleResetPacket, handleRetryPacket } from './packet-reset';
+import { lifecycleErrorResult } from './lifecycle-error';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -9,7 +11,6 @@ import {
   dispatchMission,
   getMissionStatus,
   rerunWithFeedback,
-  resetPacket,
   submitPacketReview,
 } from '@/lib/mcp/operator-mission-tools';
 import { getPacketScope, projectPacketScope } from '@/lib/lanes/scope';
@@ -956,10 +957,10 @@ export async function handleTaskDispatch(args: Record<string, unknown>): Promise
       projectId: optionalString(args, 'projectId') || null,
       repoPath: optionalString(args, 'repoPath') || null,
     });
+    if (!result.ok) return lifecycleErrorResult('o8_task_dispatch', { code: 'task_dispatch_failed', note: result.note }, result.packetId ?? args.taskId);
     return jsonResult(result);
   } catch (error) {
-    console.error(`${'[mcp-operator]'} o8_task_dispatch failed: ${errorText(error)}`);
-    return textResult(`Failed to dispatch task: ${errorText(error)}`, true);
+    return lifecycleErrorResult('o8_task_dispatch', error, args.taskId);
   }
 }
 
@@ -1122,40 +1123,6 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
     console.error(`${'[mcp-operator]'} submit_review failed: ${errorText(error)}`);
     return textResult(`Failed to submit review: ${errorText(error)}`, true);
   }
-}
-
-// F33 (#1025): reset_packet and retry_packet share an implementation but
-// differ in semantics — reset implies "wipe and try again," retry implies
-// "preserve and resume." When clearWorktree was uniformly defaulted to false,
-// reset_packet without the explicit flag left orphan worktree dirs that
-// collided with the next dispatch and produced -<suffix> duplicates on the
-// same branch. Splitting the defaults keeps the two verbs honest.
-async function doResetPacket(
-  args: Record<string, unknown>,
-  defaultClearWorktree: boolean,
-): Promise<McpToolResult> {
-  try {
-    const clearWorktree = args.clearWorktree === undefined
-      ? defaultClearWorktree
-      : args.clearWorktree === true;
-    const result = await resetPacket({
-      packetId: requiredString(args, 'packetId'),
-      reason: optionalString(args, 'reason') || undefined,
-      clearWorktree,
-    });
-    return jsonResult(result, 'error' in result);
-  } catch (error) {
-    console.error(`${'[mcp-operator]'} reset/retry failed: ${errorText(error)}`);
-    return textResult(`Failed to reset packet: ${errorText(error)}`, true);
-  }
-}
-
-export async function handleResetPacket(args: Record<string, unknown>): Promise<McpToolResult> {
-  return doResetPacket(args, /* default clearWorktree */ true);
-}
-
-export async function handleRetryPacket(args: Record<string, unknown>): Promise<McpToolResult> {
-  return doResetPacket(args, /* default clearWorktree */ false);
 }
 
 export async function handleRerunWithFeedback(args: Record<string, unknown>): Promise<McpToolResult> {

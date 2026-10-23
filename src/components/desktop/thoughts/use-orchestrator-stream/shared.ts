@@ -47,7 +47,20 @@ export function approxTokens(value: string): number {
 }
 
 export function sortTranscriptEntries(entries: MobileTranscriptEntry[]) {
-  return [...entries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
+  const next: MobileTranscriptEntry[] = [];
+  let segment: MobileTranscriptEntry[] = [];
+  const flush = () => {
+    next.push(...segment.sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0)));
+    segment = [];
+  };
+  // A queued send can have an earlier timestamp than the compaction it waited
+  // for. Persisted boundaries remain in place when restoring that timeline.
+  for (const entry of entries) {
+    if (entry.type === 'compaction' || entry.compaction) { flush(); next.push(entry); }
+    else segment.push(entry);
+  }
+  flush();
+  return next;
 }
 
 export function normalizeRepoPath(value: string | null | undefined) {

@@ -229,7 +229,7 @@ export function useOrchestratorStream(
   const primeCompactedSession = useCallback(async (
     activeRepoPath: string,
     payload: Awaited<ReturnType<typeof requestOrchestratorCompaction>>,
-    options?: { setTranscript?: boolean; threadId?: string | null },
+    options?: { threadId?: string | null },
   ) => {
     if (!payload) return null;
     const compactThreadId = options?.threadId ?? threadIdRef.current;
@@ -242,7 +242,6 @@ export function useOrchestratorStream(
       setMessages: syncMessages,
       setRunningTotal: updateRunningTotal,
       setTokenCount,
-      setTranscript: options?.setTranscript,
       telemetrySessionKeyRef: telemetryBindingRef,
       telemetryTotalRef,
       isCurrent: () => mountedRef.current && repoPathRef.current === activeRepoPath && threadIdRef.current === compactThreadId,
@@ -784,7 +783,6 @@ export function useOrchestratorStream(
     }
     if (threadIdRef.current !== activeThreadId) return null;
     const primed = await primeCompactedSession(activeRepoPath, payload, {
-      setTranscript: false,
       threadId: activeThreadId,
     });
     if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== activeThreadId) return null;
@@ -904,7 +902,6 @@ export function useOrchestratorStream(
           });
           if (threadIdRef.current !== sendHandle.threadId) return;
           const primed = payload ? await primeCompactedSession(activeRepoPath, payload, {
-            setTranscript: false,
             threadId: sendHandle.threadId,
           }) : null;
           if (!mountedRef.current || repoPathRef.current !== activeRepoPath || threadIdRef.current !== sendHandle.threadId) return;
@@ -928,7 +925,7 @@ export function useOrchestratorStream(
             throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${displayMessage}`);
           }
           planCaptureSource = primed.transcript;
-          setMessages(primed.transcript);
+          setMessages((previous) => previous.filter(entry => entry.id !== compactingId));
         } catch (error) {
           activeTurnBackendRef.current = null;
           setMessages((prev) => [

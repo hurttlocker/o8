@@ -1,4 +1,5 @@
 import { errorText } from '@/lib/mcp/operator-handlers/shared';
+import { lifecycleErrorResult } from './lifecycle-error';
 import {
   type McpTool,
   type McpToolResult,
@@ -539,8 +540,7 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     );
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
-    console.error(`[o8-operator] steer_packet failed: `, err);
-    return textResult(`Failed to steer packet: ${errorText(err)}`, true);
+    return lifecycleErrorResult('steer_packet', err, args.packetId);
   }
 }
 
