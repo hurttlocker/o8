@@ -97,3 +97,60 @@ it.each(['claude-code', 'gemini'])('revocation still scrubs unregistered owned-%
     expect(JSON.parse(readFileSync(join(home, 'auth.json'), 'utf8'))).toEqual({ oauth: { access_token: 'fixture-account' } });
   }
 });
+
+it.each([[undefined, false], ['acp', false], ['acp', true]] as const)('ACP identity %s cannot read a saved key through owned HOME (registered/disabled=%s)', async (runtimeId, disabled) => {
+  const { mutateProviderKey } = await import('@/lib/providers/key-store');
+  const { writeOwnedRuntimeArtifact } = await import('@/lib/providers/owned-artifacts');
+  const { AcpClient } = await import('@/lib/acp/client');
+  mutateProviderKey('OPENAI_API_KEY', { key });
+  const home = join(state.dir, 'hermes-o8');
+  const profile = join(home, '.hermes'); mkdirSync(profile, { recursive: true });
+  const auth = join(profile, 'auth.json');
+  if (disabled) {
+    writeOwnedRuntimeArtifact(auth, 'hermes', '{}');
+    mutateProviderKey('OPENAI_API_KEY', { enabled: false });
+  }
+  // A legacy profile, or a late stale write by the preceding API child.
+  writeFileSync(auth, JSON.stringify({ OPENAI_API_KEY: key, oauth: { access_token: 'fixture-account' } }));
+  writeFileSync(join(profile, 'config.yaml'), '');
+  const peer = join(state.home, 'owned-home-peer.cjs');
+  writeFileSync(peer, `const fs=require('node:fs'),p=require('node:path');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:1}:m.method==='session/new'?{sessionId:'fixture',configOptions:[{id:'model',type:'select',currentValue:String(JSON.parse(fs.readFileSync(p.join(process.env.HOME,'.hermes','auth.json'),'utf8')).OPENAI_API_KEY!==undefined),options:[]}]}:{}})+'\\n');});`);
+  // Exercise the runtime boundary for an untyped caller with no identity too.
+  const client = new AcpClient({ runtimeId: runtimeId as string, command: process.execPath, args: [peer], env: { HOME: home } });
+  try {
+    await client.initialize();
+    const session = await client.newSession(state.home, []);
+    expect(session.configOptions[0].currentValue).toBe('false');
+    expect(JSON.parse(readFileSync(auth, 'utf8'))).toEqual({ oauth: { access_token: 'fixture-account' } });
+  } finally { client.kill(); }
+});
+
+it.each([['disabled', false], ['removed', false], ['disabled', true], ['removed', true]] as const)('the next unidentified launch scrubs every registered artifact after a key is %s and rewritten (missing during revocation=%s)', async (change, missing) => {
+  const { mutateProviderKey } = await import('@/lib/providers/key-store');
+  const { writeOwnedRuntimeArtifact } = await import('@/lib/providers/owned-artifacts');
+  const { execFileSync: launch } = await import('@/lib/providers/child-process');
+  mutateProviderKey('OPENAI_API_KEY', { key });
+  const file = join(state.home, 'unselected-owned-profile.json');
+  writeOwnedRuntimeArtifact(file, 'hermes', '{}');
+  if (missing) rmSync(file);
+  mutateProviderKey('OPENAI_API_KEY', change === 'disabled' ? { enabled: false } : { key: null });
+  writeFileSync(file, JSON.stringify({ nested: { header: `Bearer ${key}` }, BRAVE_API_KEY: 'fixture-search' }));
+  const peer = join(state.home, 'unselected-profile-peer.cjs');
+  writeFileSync(peer, `process.stdout.write(require('node:fs').readFileSync(${JSON.stringify(file)},'utf8'));`);
+  const output = JSON.parse(launch(process.execPath, [peer], { encoding: 'utf8', env: { NODE_ENV: 'test' } }));
+  expect(output).toEqual({ nested: {}, BRAVE_API_KEY: 'fixture-search' });
+  expect(readFileSync(file, 'utf8')).not.toContain(key);
+});
+
+it.each(['acp', 'unknown-runtime'])('an API record for generic or unknown identity %s cannot grant credentials to an actual child', async runtimeId => {
+  const { mutateProviderKey } = await import('@/lib/providers/key-store');
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+  const { childEnvironment } = await import('@/lib/providers/spawn-environment');
+  const { execFileSync: launch } = await import('@/lib/providers/child-process');
+  mutateProviderKey('OPENAI_API_KEY', { key });
+  saveRuntimeBillingMode(runtimeId, 'api');
+  const output = launch(process.execPath, ['-e', 'process.stdout.write(String(Boolean(process.env.OPENAI_API_KEY||process.env.CODEX_API_KEY||process.env.LLM_API_KEY)))'], {
+    env: childEnvironment({ runtimeId, env: { LLM_PROVIDER: 'openai', LLM_API_KEY: key } }), encoding: 'utf8',
+  });
+  expect(output).toBe('false');
+});

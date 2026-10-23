@@ -25,9 +25,10 @@ it.each(['hermes', 'acp'] as const)('%s established processes recycle after save
   };
   await mode('subscription'); await save(); const subscription = await turn();
   expect(subscription.key).toBeNull(); expect(subscription.alias).toBeNull();
-  await mode('api'); const api = await turn(); expect(api.key).toBe('fixture-acp-key'); expect(api.pid).not.toBe(subscription.pid);
+  const authorizedKey = runtimeId === 'hermes' ? 'fixture-acp-key' : null;
+  await mode('api'); const api = await turn(); expect(api.key).toBe(authorizedKey); expect(api.pid).not.toBe(subscription.pid);
   expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
   const removed = await turn(); expect(removed.key).toBeNull(); expect(removed.alias).toBeNull(); expect(removed.pid).not.toBe(api.pid);
-  await save(); const restored = await turn(); expect(restored.key).toBe('fixture-acp-key');
+  await save(); const restored = await turn(); expect(restored.key).toBe(authorizedKey);
   await mode('subscription'); const switched = await turn(); expect(switched.key).toBeNull(); expect(switched.pid).not.toBe(restored.pid);
 }, 30_000);

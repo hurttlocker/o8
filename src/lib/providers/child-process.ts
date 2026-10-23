@@ -41,7 +41,7 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    assertOwnedArtifactsForLaunch(context?.runtimeId, env, args);
+    assertOwnedArtifactsForLaunch(env, args);
     stampChildPolicy(env);
     return create(env);
   };

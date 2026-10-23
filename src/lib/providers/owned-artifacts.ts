@@ -128,12 +128,12 @@ function discovered(): { path: string; runtime: string }[] {
   walk(join(homedir(), '.openclaw-o8'), 'openclaw', 5);
   return found;
 }
-/** Caller holds .provider-keys.lock. Used by both mutation and actual child launch. */
-export function purgeOwnedRuntimeArtifacts(): void {
+/** Reconcile every owned file, even when a child does not declare that path or runtime. */
+function reconcileOwnedRuntimeArtifacts(candidates: { path: string; runtime: string }[] = []): void {
   const records = registry();
-  for (const record of records) decode(record);
+  const previous = new Map(records.map(record => [record.path, decode(record)]));
   const entries = new Map(records.map(record => [record.path, { path: record.path, runtime: record.runtime }]));
-  for (const record of discovered()) { const path = canonical(record.path); entries.set(path, { ...record, path }); }
+  for (const record of [...discovered(), ...candidates]) { const path = canonical(record.path); entries.set(path, { ...record, path }); }
   const prepared: { path: string; safe: string; changed: boolean }[] = [];
   for (const record of entries.values()) {
     assertRegular(record.path);
@@ -142,14 +142,22 @@ export function purgeOwnedRuntimeArtifacts(): void {
     const safe = sanitizeRuntimeConfigText(record.path, raw, record.runtime);
     prepared.push({ path: record.path, safe, changed: raw !== safe });
   }
-  // Refresh encrypted cleanup payloads before changing existing files. This also
-  // preserves OAuth tokens refreshed by a CLI since its initial registration.
-  persist(prepared.map(record => {
+  // Retain ownership when a file is temporarily missing: an older child can
+  // recreate it after revocation. Never restore contents from this registry.
+  const next = new Map(records.map(record => [record.path, record]));
+  for (const record of prepared) {
     const runtime = entries.get(record.path)!.runtime;
-    return { path: record.path, runtime, owner: 'o8', replacement: encode(record.path, runtime, record.safe) };
-  }));
+    if (next.get(record.path)?.runtime !== runtime || previous.get(record.path) !== record.safe) {
+      next.set(record.path, { path: record.path, runtime, owner: 'o8', replacement: encode(record.path, runtime, record.safe) });
+    }
+  }
+  // Commit cleanup ownership before any destination change, preserving fresh
+  // OAuth while avoiding registry writes on unchanged ordinary launches.
+  if (next.size !== records.length || records.some(record => next.get(record.path) !== record)) persist([...next.values()]);
   for (const record of prepared) if (record.changed) replaceOpened(record.path, record.safe);
 }
+/** Caller holds .provider-keys.lock. Used by both mutation and actual child launch. */
+export function purgeOwnedRuntimeArtifacts(): void { reconcileOwnedRuntimeArtifacts(); }
 function knownOwnedPath(file: string): boolean {
   const roots = [getDataDir(), join(homedir(), '.openclaw-o8')];
   for (const [name, value] of Object.entries(process.env)) if (/^(O8|CORTEX_IDE)_OWNED_[A-Z0-9_]+_ROOT$/.test(name) && value) roots.push(value, `${value.replace(/\/+$/, '')}-archive`);
@@ -159,43 +167,19 @@ function knownOwnedPath(file: string): boolean {
   });
 }
 /** Synchronous launch seam. The central child-process wrapper already owns the lock. */
-export function assertOwnedArtifactsForLaunch(runtimeId: string | undefined, env: Record<string, string | undefined>, args: readonly string[] = []): void {
-  const records = registry();
-  const candidates: { file: string; runtime: string }[] = [];
+export function assertOwnedArtifactsForLaunch(env: Record<string, string | undefined>, args: readonly string[] = []): void {
+  const candidates: { path: string; runtime: string }[] = [];
   for (const [name, value] of Object.entries(env)) {
     if (!value || !isAbsolute(value) || !knownOwnedPath(value)) continue;
-    if (name === 'CLAUDE_CONFIG_DIR') for (const file of ['settings.json', 'settings.local.json', '.claude.json', 'auth.json']) candidates.push({ file: join(value, file), runtime: 'claude-code' });
-    if (name === 'HERMES_HOME' || name === 'HOME' && runtimeId === 'hermes') {
+    if (name === 'CLAUDE_CONFIG_DIR') for (const file of ['settings.json', 'settings.local.json', '.claude.json', 'auth.json']) candidates.push({ path: join(value, file), runtime: 'claude-code' });
+    if (name === 'HERMES_HOME' || name === 'HOME') {
       const home = name === 'HOME' ? join(value, '.hermes') : value;
-      for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) candidates.push({ file: join(home, file), runtime: 'hermes' });
+      for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) candidates.push({ path: join(home, file), runtime: 'hermes' });
     }
-    if (name === 'OPENCLAW_CONFIG_PATH') candidates.push({ file: value, runtime: 'openclaw' });
+    if (name === 'OPENCLAW_CONFIG_PATH') candidates.push({ path: value, runtime: 'openclaw' });
   }
-  for (const arg of args) if (isAbsolute(arg) && knownOwnedPath(arg) && /^orchestrator-.*\.json$/.test(basename(arg))) candidates.push({ file: arg, runtime: 'claude-code' });
-  for (const candidate of candidates) {
-    if (!existsSync(candidate.file)) continue;
-    const path = canonical(candidate.file);
-    if (records.some(record => record.path === path)) continue;
-    assertRegular(path);
-    const raw = readFileSync(path, 'utf8');
-    const safe = sanitizeRuntimeConfigText(path, raw, candidate.runtime);
-    const record: Artifact = { path, runtime: candidate.runtime, owner: 'o8', replacement: encode(path, candidate.runtime, safe) };
-    records.push(record);
-    persist(records);
-    if (raw !== safe) replaceOpened(path, safe);
-  }
-  let changed = false;
-  for (const record of records) {
-    const selected = Object.entries(env).some(([name, value]) => /^(CLAUDE_CONFIG_DIR|HERMES_HOME|OPENCLAW_CONFIG_PATH)$/.test(name) && value && (record.path === value || record.path.startsWith(`${value}/`)))
-      || args.some(arg => arg === record.path || arg.endsWith(`=${record.path}`));
-    if ((!runtimeId || record.runtime !== runtimeId) && !selected) continue;
-    assertRegular(record.path);
-    if (!existsSync(record.path)) continue;
-    const raw = readFileSync(record.path, 'utf8');
-    const safe = sanitizeRuntimeConfigText(record.path, raw, record.runtime);
-    const previous = decode(record);
-    if (safe !== previous) { record.replacement = encode(record.path, record.runtime, safe); changed = true; }
-    if (raw !== safe) replaceOpened(record.path, safe);
-  }
-  if (changed) persist(records);
+  for (const arg of args) if (isAbsolute(arg) && knownOwnedPath(arg) && /^orchestrator-.*\.json$/.test(basename(arg))) candidates.push({ path: arg, runtime: 'claude-code' });
+  // Owned files never carry saved keys, including for API billing. Only the
+  // concrete runtime's freshly resolved API environment may carry credentials.
+  reconcileOwnedRuntimeArtifacts(candidates.filter(candidate => existsSync(candidate.path)));
 }

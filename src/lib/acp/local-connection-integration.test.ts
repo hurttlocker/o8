@@ -9,7 +9,7 @@ vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () =
 vi.mock('@/lib/mcp/tool-spine/build', () => ({ buildToolRegistry: () => { throw new Error('Fixture has no tools'); } }));
 import { localAcpProcessLaunch, saveLocalAcpConnection } from './local-connection';
 import { probeAcpModels } from '@/lib/orchestrator/acp-model-probe';
-import { acpBackend } from '@/lib/lane/orchestrator-backends/acp';
+import { acpBackend, makeAcpBackend } from '@/lib/lane/orchestrator-backends/acp';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import { normalizeOrchestratorTurnModel } from '@/lib/orchestrator/turn-model-selection';
 import { prepareOrchestratorTurn } from '@/components/desktop/thoughts/use-orchestrator-stream/turn-option-resolution';
@@ -107,13 +107,14 @@ it('refreshes an unused child after the connection changes and excludes unchecke
   expect(events.some(event => event.type === 'done')).toBe(true);
 });
 
-it('uses the latest opted-in key when hydration happened after ensureSession but before sendTurn', async () => {
-  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('acp', 'api');
+it('uses the latest opted-in key for a concrete runtime when hydration happened after ensureSession but before sendTurn', async () => {
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('hermes', 'api');
+  const keyedBackend = makeAcpBackend({ id: 'hermes', label: 'Concrete ACP fixture', resolveLaunch: () => localAcpProcessLaunch() });
   connect('default', true);
-  acpBackend.ensureSession(state.dir, 'default', 'key-change');
+  keyedBackend.ensureSession(state.dir, 'default', 'key-change');
   vi.stubEnv('OPENROUTER_API_KEY', 'fixture-new');
   const events: OrchestratorEvent[] = [];
-  await acpBackend.sendTurn(state.dir, 'fixture', event => events.push(event), { threadId: 'key-change' });
+  await keyedBackend.sendTurn(state.dir, 'fixture', event => events.push(event), { threadId: 'key-change' });
   expect(events.filter(event => event.type === 'text')).toEqual([{ type: 'text', text: JSON.stringify({ label: 'default', key: 'fixture-new' }) }]);
   expect(events.some(event => event.type === 'done')).toBe(true);
 });

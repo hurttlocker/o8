@@ -8,6 +8,10 @@ import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES, providerCredentialMaterials, r
 import { matchesProviderCredential } from './credential-materials';
 import { runtimeBillingMode } from './runtime-billing';
 import { ensureLaunchPolicy } from './launch-policy';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+
+const permitsApiCredentials = (runtimeId: string | undefined): boolean => Boolean(runtimeId && runtimeId !== 'codex'
+  && (Object.hasOwn(ORCHESTRATOR_RUNTIMES, runtimeId) || runtimeId === 'openclaw') && runtimeBillingMode(runtimeId) === 'api');
 
 // These aliases have no provider identity. Resolve the selected provider; never trust their literal value.
 const SCOPED_ALIASES: Record<string, string> = { O8_FABLE_ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' };
@@ -101,7 +105,7 @@ export function providerConfigEnvironment(input: Record<string, string>, runtime
 /** The only ambient inheritance point. Runtime identity and persisted API opt-in are required. */
 export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
   const input = options.inherit === false ? options.env ?? {} : { ...process.env, ...options.env };
-  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && options.runtimeId !== 'codex' && runtimeBillingMode(options.runtimeId!) === 'api', { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
+  return resolvedEnvironment(input, options.inject !== false && permitsApiCredentials(options.runtimeId), { ...options, deniedValues: [...((options as Context).deniedValues ?? []), ...(options.env ? contexts.get(options.env)?.deniedValues ?? [] : [])] });
 }
 
 export function childEnvironmentContext(env: Record<string, string | undefined> | undefined): Context | undefined {
@@ -151,6 +155,6 @@ export function stampChildPolicy(env: NodeJS.ProcessEnv): void {
   const directory = realpathSync(getDataDir());
   const approvedCredentials = Object.fromEntries(Object.entries(env).filter(([name, value]) => providerCredentialName(name) && value?.trim()).map(([name, value]) => [name, digest(value!)]));
   env.O8_CHILD_CREDENTIAL_POLICY = JSON.stringify({ runtimeId: context.runtimeId, directory, ...ensureLaunchPolicy(),
-    apiAllowed: runtimeBillingMode(context.runtimeId) === 'api', approvedCredentials,
+    apiAllowed: permitsApiCredentials(context.runtimeId), approvedCredentials,
     sqliteModule: createRequire(import.meta.url).resolve('better-sqlite3') });
 }
