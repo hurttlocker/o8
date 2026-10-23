@@ -12,8 +12,7 @@
  */
 
 import { homedir } from 'node:os';
-import { Type } from '@earendil-works/pi-ai';
-import { defineExtension, defineTool, section, type Extension } from '@earendil-works/pi-durable';
+import type { Extension } from '@earendil-works/pi-durable';
 import type { PiHostTool } from '@/lib/pi/sdk/session';
 import { createO8CommandTools, listO8Commands } from '@/lib/pi/orchestrator/o8-commands';
 import { openO8Servers, type O8ServerSet } from '@/lib/pi/orchestrator/o8-servers';
@@ -38,7 +37,10 @@ export interface SymonO8Tools {
   close(): Promise<void>;
 }
 
-export function createSymonO8Tools(open: OpenSymonO8Servers, idleMs = SYMON_O8_TOOLS_IDLE_MS): SymonO8Tools {
+export async function createSymonO8Tools(open: OpenSymonO8Servers, idleMs = SYMON_O8_TOOLS_IDLE_MS): Promise<SymonO8Tools> {
+  const [{ Type }, { defineExtension, defineTool, section }] = await Promise.all([
+    import('@earendil-works/pi-ai'), import('@earendil-works/pi-durable'),
+  ]);
   let ready: Promise<{ set: O8ServerSet; tools: PiHostTool[] }> | null = null;
   let idle: ReturnType<typeof setTimeout> | undefined;
   let active = 0;

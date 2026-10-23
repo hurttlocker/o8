@@ -7,13 +7,11 @@
  * bounded text before an event is stored.
  */
 
-import {
-  createAssistantMessageEventStream,
-  createProvider,
-  type AssistantMessage,
-  type Model,
-  type Provider,
-  type ProviderStreams,
+import type {
+  AssistantMessage,
+  Model,
+  Provider,
+  ProviderStreams,
 } from '@earendil-works/pi-ai';
 import type { Context as PiCompatContext } from '@earendil-works/pi-ai/compat';
 import { O8_MANAGED_PI_MODEL } from '@/lib/pi/sdk/live-contract';
@@ -47,9 +45,10 @@ function failedMessage(model: Model<'openai-completions'>, errorMessage: string)
   };
 }
 
-export function createSymonManagedProvider(
+export async function createSymonManagedProvider(
   options: Omit<ManagedPiTransportOptions, 'model'> = {},
-): Provider<'openai-completions'> {
+): Promise<Provider<'openai-completions'>> {
+  const { createAssistantMessageEventStream, createProvider } = await import('@earendil-works/pi-ai');
   const transport = createManagedPiTransport({ ...options, model: SYMON_MANAGED_MODEL });
   const run: ProviderStreams['streamSimple'] = (_model, context, streamOptions) => {
     const stream = createAssistantMessageEventStream();
