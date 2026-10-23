@@ -72,10 +72,13 @@ export function useActivityPrHoverDetail(repo: string | null, number: number | n
   const queryClient = useQueryClient();
   const canonicalRepo = repo?.trim().toLowerCase() ?? '';
   const options = useMemo(() => hoverQuery(canonicalRepo, number), [canonicalRepo, number]);
+  const [now, setNow] = useState(() => Date.now());
   const query = useQuery({
     ...options,
     enabled: (entry) => Boolean(canonicalRepo) && number !== null
-      && !(entry.state.error instanceof PrHoverDeferredError && Date.now() < entry.state.error.retryAt),
+      && !(entry.state.error instanceof PrHoverDeferredError && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
+    // A refused manual refresh must recover even if its retained snapshot is still fresh.
+    staleTime: entry => entry.state.error instanceof PrHoverDeferredError ? 0 : options.staleTime,
   });
   const retry = useCallback(async () => {
     if (!canonicalRepo || number === null) return;
@@ -87,11 +90,12 @@ export function useActivityPrHoverDetail(repo: string | null, number: number | n
     }
   }, [queryClient, canonicalRepo, number, options]);
 
-  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!query.isError) return;
+    // Catch up immediately when reopening an error entry after time spent closed.
+    const catchUp = setTimeout(() => setNow(Date.now()), 0);
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => { clearTimeout(catchUp); clearInterval(timer); };
   }, [query.isError]);
   const status: ActivityPrHoverStatus = {
     error: query.isFetching ? null : query.error?.message ?? null,
