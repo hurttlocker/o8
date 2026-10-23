@@ -6,6 +6,8 @@
 import { memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRepoPullRequests } from '@/lib/github-client';
+import { useRepoCIRuns } from '@/lib/github-client/ci-runs';
+import { relativeAge } from '@/lib/util/relative-age';
 import {
   formatRelativeTime,
   resolveFloatingPanelPosition,
@@ -172,61 +174,32 @@ function useRepoStatus(localPath: string, enabled: boolean) {
   return { state, loading };
 }
 
-function useCiSnapshot(slug: string | null, enabled: boolean): { state: CiSnapshot | null; loading: boolean } {
-  const [state, setState] = useState<CiSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!enabled || !slug) {
-      setState(null);
-      return;
-    }
-    let active = true;
-    setLoading(true);
-    const controller = new AbortController();
-    fetch(`/api/panel/ci?repo=${encodeURIComponent(slug)}`, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data: { runs?: Array<{ conclusion?: string | null; status?: string | null; updatedAt?: string | null }> }) => {
-        if (!active) return;
-        const runs = data.runs ?? [];
-        let passed = 0;
-        let failed = 0;
-        let pending = 0;
-        for (const run of runs) {
-          const concl = (run.conclusion ?? '').toLowerCase();
-          const status = (run.status ?? '').toLowerCase();
-          if (concl === 'success') passed += 1;
-          else if (concl === 'failure' || concl === 'timed_out' || concl === 'cancelled') failed += 1;
-          else if (status === 'in_progress' || status === 'queued' || status === 'pending' || !concl) pending += 1;
-        }
-        const latest = runs[0];
-        const latestConclusion: CiSnapshot['latestConclusion'] = latest
-          ? (latest.conclusion?.toLowerCase() === 'success' ? 'success'
-            : latest.conclusion?.toLowerCase() === 'failure' ? 'failure'
-            : 'pending')
-          : null;
-        setState({
-          passed,
-          failed,
-          pending,
-          total: runs.length,
-          latestRelativeTime: latest?.updatedAt ? formatRelativeTime(latest.updatedAt) : null,
-          latestConclusion,
-        });
-      })
-      .catch(() => {
-        if (active) setState(null);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [enabled, slug]);
-
-  return { state, loading };
+function useCiSnapshot(slug: string | null, enabled: boolean) {
+  const query = useRepoCIRuns(slug ?? undefined, enabled && Boolean(slug?.trim()));
+  const runs = enabled && slug?.trim() ? query.data?.runs : null;
+  if (!runs) return { ...query, state: null, loading: enabled && query.isFetching };
+  let passed = 0;
+  let failed = 0;
+  let pending = 0;
+  for (const run of runs) {
+    const concl = (run.conclusion ?? '').toLowerCase();
+    const status = (run.status ?? '').toLowerCase();
+    if (concl === 'success') passed += 1;
+    else if (concl === 'failure' || concl === 'timed_out' || concl === 'cancelled') failed += 1;
+    else if (status === 'in_progress' || status === 'queued' || status === 'pending' || !concl) pending += 1;
+  }
+  const latest = runs[0];
+  const latestConclusion: CiSnapshot['latestConclusion'] = latest
+    ? (latest.conclusion?.toLowerCase() === 'success' ? 'success'
+      : latest.conclusion?.toLowerCase() === 'failure' ? 'failure'
+      : 'pending')
+    : null;
+  return {
+    ...query,
+    state: { passed, failed, pending, total: runs.length,
+      latestRelativeTime: latest?.updatedAt ? formatRelativeTime(latest.updatedAt) : null, latestConclusion },
+    loading: query.isFetching,
+  };
 }
 
 function usePrSnapshot(slug: string | null, enabled: boolean): { state: PrSnapshot | null; loading: boolean } {
@@ -418,8 +391,9 @@ function RepoStatusHoverBase({
     : ci.state?.latestConclusion === 'pending' ? '#d4a050'
     : ci.state?.latestConclusion === 'success' ? '#4ea672'
     : 'var(--t-text-faint)';
-  const ciValue = !githubSlug ? <MutedValue>No remote</MutedValue>
+  const ciValue = !githubSlug?.trim() ? <MutedValue>No remote</MutedValue>
     : ci.loading && !ci.state ? <MutedValue>Loading…</MutedValue>
+    : ci.isError && !ci.state ? <MutedValue>CI unavailable</MutedValue>
     : !ci.state || ci.state.total === 0 ? <MutedValue>No runs</MutedValue>
     : (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -434,6 +408,13 @@ function RepoStatusHoverBase({
         ) : null}
       </span>
     );
+
+  const ciFeedback = githubSlug?.trim() && ci.isError ? (
+    <div role="status" style={{ marginTop: 3, whiteSpace: 'normal', fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
+      {ci.state ? `Last known CI status · ${relativeAge(ci.dataUpdatedAt)}. ` : 'Refresh failed. '}
+      <button type="button" aria-label="Retry CI status" onClick={() => { void ci.refetch(); }} style={{ color: 'var(--t-text)', background: 'var(--t-panel)', border: '1px solid var(--t-divider)', borderRadius: 4, cursor: 'pointer' }}>Retry</button>
+    </div>
+  ) : null;
 
   const prTone = (prs.state?.awaitingReview ?? 0) > 0 ? 'attention' as const : 'neutral' as const;
   const prValue = !githubSlug ? <MutedValue>No remote</MutedValue>
@@ -579,7 +560,7 @@ function RepoStatusHoverBase({
       <StatusRow
         icon={<IconChecks size={13} />}
         label="CI"
-        value={ciValue}
+        value={<>{ciValue}{ciFeedback}</>}
         tone={ciTone}
       />
       <StatusRow
@@ -599,4 +580,6 @@ function RepoStatusHoverBase({
   );
 }
 
-export const RepoStatusHover = memo(RepoStatusHoverBase);
+export const RepoStatusHover = memo(function RepoStatusHover(props: RepoStatusHoverProps) {
+  return props.anchorRect ? <RepoStatusHoverBase {...props} /> : null;
+});
