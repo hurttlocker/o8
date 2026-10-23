@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { shortWorkerTitle } from './worker-pane-chrome';
 import type { WorkerLaunchContext } from '@/lib/orchestrator/types';
 import { workerLaunchOriginLabel } from '@/lib/orchestrator/worker-launch-context';
 
@@ -79,6 +80,8 @@ export function PacketHeaderCard({
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        title={branch || title}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -110,7 +113,7 @@ export function PacketHeaderCard({
           <span
             style={{
               fontSize: 13,
-              fontWeight: 400,
+              fontWeight: 300,
               color: 'var(--t-text)',
               letterSpacing: '-0.1px',
               overflow: 'hidden',
@@ -120,7 +123,7 @@ export function PacketHeaderCard({
               minWidth: 0,
             }}
           >
-            {title}
+            {shortWorkerTitle({ label: title, branch })}
           </span>
           <svg
             width={10}

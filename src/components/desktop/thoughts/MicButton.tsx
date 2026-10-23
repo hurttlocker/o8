@@ -11,7 +11,7 @@
  * of this setting — naturally fits the keyboard.
  */
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore, type CSSProperties } from 'react';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { useComposerDictationId } from '@/components/desktop/dictation/ComposerDictation';
 import {
@@ -32,7 +32,7 @@ function useInputMode(): DictationInputMode {
   );
 }
 
-export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: string } = {}) {
+export function MicButton({ idleColor = 'var(--t-text-muted)', buttonStyle }: { idleColor?: string; buttonStyle?: CSSProperties } = {}) {
   void idleColor;
   const host = useDictationHostOptional();
   const inputMode = useInputMode();
@@ -131,6 +131,7 @@ export function MicButton({ idleColor = 'var(--t-text-muted)' }: { idleColor?: s
         cursor: 'pointer',
         transition: 'color 120ms, background 120ms',
         userSelect: 'none',
+        ...buttonStyle,
       }}
     >
       <svg
