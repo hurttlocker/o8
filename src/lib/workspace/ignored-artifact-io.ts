@@ -113,6 +113,7 @@ async function capture(input) {
   }
   const excluded = input.rebuildablePaths.map(safeRelative);
   const copied = input.copiedEnvironment;
+  const references = input.environmentReferences || {};
   const entries = [];
   const seen = new Set();
   const started = Date.now();
@@ -128,6 +129,7 @@ async function capture(input) {
       client ??= await connectArtifactNode(workerScript, '.', rootIdentity, rootIdentity.canonicalPath,
         started + 10000, async () => { throw new Error('Capture cannot publish restore receipts.'); });
       const captured = await client.request({ action: 'capture', path: relative, originalPath: relative,
+        referenceTarget: Object.prototype.hasOwnProperty.call(references, relative) ? references[relative] : null,
         copiedBound, copiedHash: copiedBound ? copied[relative] : null, remainingBytes: 32 * 1024 * 1024 - bytes });
       if (captured.entry) entries.push(captured.entry);
       if (captured.stat.kind === 'directory') {
@@ -309,6 +311,7 @@ export function captureIgnoredArtifacts(input: {
   treeSha: string;
   rebuildablePaths: string[];
   copiedEnvironment: Record<string, string | null>;
+  environmentReferences?: Record<string, string>;
   discardSource?: boolean;
   requireCleanSource?: true;
 }): Promise<IgnoredArtifactCapture> {

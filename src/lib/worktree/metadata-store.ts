@@ -92,6 +92,14 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
     && (entry.isolationKind === undefined
       || entry.isolationKind === 'git-worktree'
       || entry.isolationKind === 'apfs-cow-clone')
+    && (entry.environmentReferences === undefined
+      || (typeof entry.environmentReferences === 'object' && entry.environmentReferences !== null
+        && !Array.isArray(entry.environmentReferences)
+        && Object.entries(entry.environmentReferences).every(([relativePath, target]) => (
+          relativePath.length > 0 && !path.isAbsolute(relativePath)
+          && !relativePath.split(/[\\/]/).some((part) => !part || part === '.' || part === '..' || part === '.git')
+          && typeof target === 'string' && path.isAbsolute(target)
+        ))))
     && (entry.hydrationPaths === undefined
       || (Array.isArray(entry.hydrationPaths)
         && entry.hydrationPaths.every((item) => typeof item === 'string')))

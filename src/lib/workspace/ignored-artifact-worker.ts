@@ -69,6 +69,19 @@ async function closeChildren() {
 }
 function captureLeaf(leaf, request) {
   const stat = fs.lstatSync(leaf);
+  if (request.referenceTarget !== null) {
+    if (typeof request.referenceTarget !== 'string' || !stat.isSymbolicLink() || stat.nlink !== 1
+      || fs.readlinkSync(leaf) !== request.referenceTarget) {
+      throw new Error('Managed environment reference changed.');
+    }
+    const repeatedTarget = fs.readlinkSync(leaf);
+    const after = fs.lstatSync(leaf);
+    if (!same(stat, after) || repeatedTarget !== request.referenceTarget) {
+      throw new Error('Managed environment reference changed during capture.');
+    }
+    // A reference has no private bytes to preserve. Never open its target.
+    return { stat: statRecord(after), entry: null };
+  }
   if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
     throw new Error('Unique ignored content has an unsupported filesystem node.');
   }
