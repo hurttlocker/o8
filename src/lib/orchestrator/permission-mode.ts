@@ -26,3 +26,10 @@ export function assertOrchestratorPermissionMode(backend: string, value: unknown
 export function permissionModeRank(mode: unknown): number {
   return mode === 'outside-workspace' ? 2 : mode === 'full' ? 1 : 0;
 }
+
+/** Outside workspace is an explicit operator choice for one turn, never an automatic grant. */
+export function automaticContinuationPermissionMode(
+  originMode: OrchestratorPermissionMode | undefined,
+): OrchestratorPermissionMode | undefined {
+  return originMode === 'outside-workspace' ? 'full' : originMode;
+}

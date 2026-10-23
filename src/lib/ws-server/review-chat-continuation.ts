@@ -3,6 +3,7 @@ import { appendEvent } from '@/lib/lane/registry';
 import { claimReviewChatContinuation, resolveReviewChatOrigin, type ReviewChatOrigin } from '@/lib/orchestrator/review-continuation-origin';
 import type { ReviewContinuationLane } from '@/lib/orchestrator/review-continuation';
 import { runBoundChatContinuation, type BoundChatContinuationHooks } from './bound-chat-continuation';
+import { automaticContinuationPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 export type ReviewChatContinuationHooks = BoundChatContinuationHooks;
 
@@ -18,6 +19,7 @@ export async function runReviewChatContinuation(
     }
   };
   await runBoundChatContinuation({ repoPath: lane.repoPath, origin: expected, message,
+    permissionMode: automaticContinuationPermissionMode(expected.permissionMode),
     assistantMessageId: `assistant-review-${randomUUID()}`, check,
     legacyPermissionMode: 'full', claim: () => claimReviewChatContinuation(lane, expected) }, {
     ...hooks,
