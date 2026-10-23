@@ -137,7 +137,8 @@ it('Windows owned launch uses direct spawn when the POSIX bridge is enabled', as
 });
 it('ACP launch retains an explicit unmanaged provider override instead of an ambient key', async () => {
   const { AcpClient } = await import('@/lib/acp/client');
-  const client = new AcpClient({ command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
+  const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing'); saveRuntimeBillingMode('hermes', 'api');
+  const client = new AcpClient({ runtimeId: 'hermes', command: process.execPath, args: [], env: { XAI_API_KEY: 'fixture-explicit-xai' } });
   expect(state.envs.at(-1)?.XAI_API_KEY).toBe('fixture-explicit-xai');
   client.kill();
 });

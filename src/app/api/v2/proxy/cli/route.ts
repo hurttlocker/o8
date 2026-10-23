@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { spawn } from 'node:child_process';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import { NextResponse } from 'next/server';
 
 import { formatMissingCliError } from '@/lib/runtimes/shared/cli-unavailable';
@@ -245,7 +246,7 @@ export async function POST(request: Request) {
             windowsHide: true,
             cwd: repoRoot,
             stdio: ['ignore', 'pipe', 'pipe'],
-            env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+            env: providerSpawnEnvironment({ ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, { runtimeId: runtime }),
           });
 
           let buffer = '';

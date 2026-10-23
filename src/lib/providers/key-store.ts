@@ -17,7 +17,6 @@ export const PROVIDER_KEY_ALIASES: Readonly<Record<string, readonly string[]>> =
   OPENAI_API_KEY: ['CODEX_API_KEY'],
   ANTHROPIC_API_KEY: ['ANTHROPIC_AUTH_TOKEN'],
 };
-const managedEnv = new Map<string, string>();
 const managedName = (name: string) => `O8_KEY_MANAGED_${name}`;
 const disabledName = (name: string) => `O8_KEY_DISABLED_${name}`;
 function textFile(path: string): string {
@@ -57,33 +56,20 @@ export function providerKeyEnabled(name: string): boolean {
   }
   return true;
 }
-export function updateManagedProviderKey(name: string, value: string | null): void {
-  managedEnv.set(name, value ?? '');
-  if (value) process.env[name] = value;
-  else delete process.env[name];
-}
-/** Fresh on every use. A persisted removal suppresses legacy/ambient resurrection. */
-export function clearManagedProviderKey(name: string): void {
-  if (managedEnv.has(name) && process.env[name] === managedEnv.get(name)) updateManagedProviderKey(name, null);
-}
+/** Fresh on every use. Resolution never exports a managed secret into server state. */
 export function resolveProviderKey(name: string, ambient: Record<string, string | undefined> = process.env): string | null {
   try {
     const { values } = snapshot();
     cleanupLegacyProviderKeys(values);
-    if (!providerKeyEnabled(name)) { clearManagedProviderKey(name); return null; }
+    if (!providerKeyEnabled(name)) return null;
     const raw = values.get(name);
     if (values.get(managedName(name)) === '1') {
-      const value = raw ? decode(raw) || null : null;
-      updateManagedProviderKey(name, value);
-      return value;
+      return raw ? decode(raw) || null : null;
     }
     const candidate = ambient[name]?.trim()
       || PROVIDER_KEY_ALIASES[name]?.map(alias => ambient[alias]?.trim()).find(Boolean);
-    if (candidate && (ambient !== process.env || candidate !== managedEnv.get(name))) return candidate;
-    const value = raw ? decode(raw) || null : null;
-    updateManagedProviderKey(name, value);
-    return value;
-  } catch { clearManagedProviderKey(name); return null; }
+    return candidate || (raw ? decode(raw) || null : null);
+  } catch { return null; }
 }
 export function mutateProviderKey(name: string, change: { key?: string | null; enabled?: boolean }): void {
   if (!(PROVIDER_ENV_KEYS as readonly string[]).includes(name)) throw new Error('Unsupported provider key');

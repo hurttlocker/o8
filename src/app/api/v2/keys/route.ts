@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { MasterKeyUnavailableError } from '@/lib/db/master-key';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
-import { assertProviderStoreAvailable, mutateProviderKey, storedProviderKey, resolveProviderKey, updateManagedProviderKey, providerKeyEnabled } from '@/lib/providers/key-store';
+import { assertProviderStoreAvailable, mutateProviderKey, storedProviderKey, resolveProviderKey, providerKeyEnabled } from '@/lib/providers/key-store';
 import { checkOpenRouterKey, clearOpenRouterCheck, openRouterConnectionView, readOpenRouterConnection, recordOpenRouterCheck, setOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 import { invalidateRuntimeAuthCache } from '@/lib/runtimes/shared/auth-detect';
 
@@ -167,8 +167,6 @@ async function handlePOST(request: NextRequest) {
   if (config.id === 'openrouter') readOpenRouterConnection();
   mutateProviderKey(config.envVar, { key });
 
-  // Also set in process.env so it takes effect immediately (no restart needed)
-  resolveProviderKey(config.envVar);
   let warning = validation.error;
   let connection;
   if (openRouterCheck) {
@@ -207,11 +205,9 @@ async function handleDELETE(request: NextRequest) {
   mutateProviderKey(config.envVar, { key: null });
 
   let warning = 'External environment and project-local keys are managed separately.';
-  // Clear from process.env
   if (config.id === 'openrouter') {
-    updateManagedProviderKey(config.envVar, null);
     try { clearOpenRouterCheck(); } catch { warning = 'Key removed. Provider check status cleanup is pending.'; }
-  } else updateManagedProviderKey(config.envVar, null);
+  }
   invalidateRuntimeAuthCache();
 
   return NextResponse.json({ success: true, provider: config.id, warning });

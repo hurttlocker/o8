@@ -161,6 +161,7 @@ async function hermesStatus(cliPath: string): Promise<{ registered: boolean; raw
     // function would report as "installed but not registered".
     const list = cliInvocation(cliPath, ['mcp', 'ls']);
     const { stdout } = await execFileAsync(list.command, list.args, {
+      env: providerSpawnEnvironment(process.env, { runtimeId: 'hermes' }),
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
@@ -177,7 +178,7 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
   // Wipe any prior entry first so re-install always lands the current shape.
   try {
     const wipe = cliInvocation(cliPath, ['mcp', 'remove', 'o8']);
-    await execFileAsync(wipe.command, wipe.args, { windowsHide: true, timeout: 5000 });
+    await execFileAsync(wipe.command, wipe.args, { windowsHide: true, timeout: 5000, env: providerSpawnEnvironment(process.env, { runtimeId: 'hermes' }) });
   } catch {
     // remove fails when it doesn't exist — that's fine
   }
@@ -189,7 +190,7 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
 
   await new Promise<void>((resolve, reject) => {
     const launch = cliInvocation(cliPath, args);
-    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { onlyExisting: true }), stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { runtimeId: 'hermes' }), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -218,7 +219,7 @@ async function hermesRemove(cliPath: string): Promise<void> {
   // Same stdin-Y trick as install.
   await new Promise<void>((resolve, reject) => {
     const launch = cliInvocation(cliPath, ['mcp', 'remove', 'o8']);
-    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { onlyExisting: true }), stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(launch.command, launch.args, { windowsHide: true, env: providerSpawnEnvironment(process.env, { runtimeId: 'hermes' }), stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -248,6 +249,7 @@ async function openclawStatus(cliPath: string): Promise<{ registered: boolean; r
   try {
     const show = cliInvocation(cliPath, ['mcp', 'show', 'o8']);
     await execFileAsync(show.command, show.args, {
+      env: providerSpawnEnvironment(process.env, { runtimeId: 'openclaw' }),
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5000,
@@ -268,6 +270,7 @@ async function openclawInstall(cliPath: string, server: McpServerConfig): Promis
   // keys), never user free text — see the constraint noted in cli-spawn.
   const set = cliInvocation(cliPath, ['mcp', 'set', 'o8', payload]);
   await execFileAsync(set.command, set.args, {
+    env: providerSpawnEnvironment(process.env, { runtimeId: 'openclaw' }),
     windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,
@@ -277,6 +280,7 @@ async function openclawInstall(cliPath: string, server: McpServerConfig): Promis
 async function openclawRemove(cliPath: string): Promise<void> {
   const unset = cliInvocation(cliPath, ['mcp', 'unset', 'o8']);
   await execFileAsync(unset.command, unset.args, {
+    env: providerSpawnEnvironment(process.env, { runtimeId: 'openclaw' }),
     windowsHide: true,
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,

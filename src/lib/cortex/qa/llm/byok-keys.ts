@@ -1,16 +1,9 @@
 import 'server-only';
-import { resolveProviderKey, updateManagedProviderKey, clearManagedProviderKey } from '@/lib/providers/key-store';
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import { isOpenRouterEnabled } from '@/lib/providers/openrouter-connection';
 
-export function updateManagedOpenRouterKey(value: string | null): void {
-  updateManagedProviderKey('OPENROUTER_API_KEY', value);
-}
 export async function resolveOpenRouterKey(): Promise<string | null> {
-  if (!isOpenRouterEnabled()) {
-    // Clear only hydrated values. Explicit shell credentials remain caller-owned.
-    clearManagedProviderKey('OPENROUTER_API_KEY');
-    return null;
-  }
+  if (!isOpenRouterEnabled()) return null;
   const value = resolveProviderKey('OPENROUTER_API_KEY');
   return value;
 }
