@@ -18,17 +18,18 @@ export function getRequestedCheckTime() {
 }
 
 /** The native loop reads this request through the existing state API, without a webview. */
-export async function ensureFreshUpdateCheck(): Promise<boolean> {
-  const age = checkFreshness().checkAgeMs;
-  if (age !== null && age < UPDATE_CHECK_INTERVAL_MS) return true;
+export async function ensureFreshUpdateCheck(force = false): Promise<boolean> {
   if (pending) return pending;
+  const age = checkFreshness().checkAgeMs;
+  if (!force && age !== null && age < UPDATE_CHECK_INTERVAL_MS) return true;
+  const previous = Date.parse(getAppUpdateState().check.checkedAt ?? '');
   requestedAt = new Date().toISOString();
   const started = Date.now();
   pending = (async () => {
     while (Date.now() - started < CHECK_WAIT_MS) {
       await new Promise(resolve => setTimeout(resolve, 100));
       const time = Date.parse(getAppUpdateState().check.checkedAt ?? '');
-      if (Number.isFinite(time) && time >= started) return true;
+      if (Number.isFinite(time) && time >= started && (!Number.isFinite(previous) || time > previous)) return true;
     }
     return false;
   })().finally(() => { pending = null; requestedAt = null; });
