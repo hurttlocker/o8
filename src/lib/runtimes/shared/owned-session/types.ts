@@ -203,7 +203,8 @@ export interface OwnedTailEntry {
     name: string;
     args?: Record<string, unknown>;
     preview?: string;
-    status: 'running' | 'done';
+    status: 'running' | 'done' | 'error';
+    result?: string;
   };
 }
 

@@ -517,7 +517,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             ref={contentRef}
             style={{
               width: '100%', maxWidth: 'var(--cortex-chat-column-max)', minHeight: '100%',
-              marginRight: 'auto', marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 18,
+              marginRight: 'auto', marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 8,
             }}
           >
             <WorkspaceTranscript
@@ -528,6 +528,8 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
               isStreaming={status === 'running'}
               repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace ?? null}
               packetId={packet?.id}
+              laneId={packet?.lane?.laneId}
+              onOpenReview={onOpenReview}
             />
           </div>
         )}

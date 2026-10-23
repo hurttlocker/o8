@@ -1,4 +1,5 @@
 /** Pure Codex log parsing; importing this module creates no runtime store. */
+import { truncateText } from '@/lib/util/text';
 import { compactText } from '@/lib/runtimes/shared/owned-session/helpers';
 import type { OwnedRunRecord, OwnedTailEntry, ParsedRunLog } from '@/lib/runtimes/shared/owned-session/types';
 
@@ -203,7 +204,7 @@ export function codexParseRunLog(
       }
 
       if (type === 'event_msg' && payload?.type === 'agent_message') {
-        const text = compactText(
+        const text = truncateText(
           typeof payload.message === 'string' ? payload.message : extractStructuredText(payload.content),
           500,
         );
@@ -237,6 +238,7 @@ export function codexParseRunLog(
         const command = readStringField(payload, 'parsed_cmd', 'cmd', 'command');
         entries.push({
           id: `${run.id}:exec-begin:${lineIndex}`,
+          toolCall: { id: `${run.id}:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`, name: 'exec_command', args: { command }, status: 'running' },
           kind: 'tool',
           label: 'exec_command',
           text: command ? `Run ${compactText(command, 180)}` : 'Run shell command',
@@ -248,9 +250,10 @@ export function codexParseRunLog(
 
       if (type === 'event_msg' && payload?.type === 'exec_command_end') {
         const output = toolOutputPreview(payload.aggregated_output ?? payload.output);
-        if (output) {
+        {
           entries.push({
             id: `${run.id}:exec-output:${lineIndex}`,
+            toolCall: { id: `${run.id}:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`, name: 'exec_command', status: payload.exit_code != null && payload.exit_code !== 0 ? 'error' : 'done', result: output },
             kind: 'tool-output',
             label: 'Tool output',
             text: output,
@@ -266,6 +269,7 @@ export function codexParseRunLog(
         const toolInput = payload.type === 'custom_tool_call' ? payload.input : payload.arguments;
         entries.push({
           id: `${run.id}:tool-call:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`,
+          toolCall: { id: `${run.id}:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`, name: toolName, args: parseJsonObject(toolInput) ?? { input: toolInput }, status: 'running' },
           kind: 'tool',
           label: toolName,
           text: describeToolActivity(toolName, toolInput),
@@ -277,9 +281,10 @@ export function codexParseRunLog(
 
       if (type === 'response_item' && (payload?.type === 'function_call_output' || payload?.type === 'custom_tool_call_output')) {
         const output = toolOutputPreview(payload.output);
-        if (output) {
+        {
           entries.push({
             id: `${run.id}:tool-output:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`,
+            toolCall: { id: `${run.id}:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`, name: 'tool', status: payload.is_error === true ? 'error' : 'done', result: output },
             kind: 'tool-output',
             label: 'Tool output',
             text: output,
@@ -297,7 +302,7 @@ export function codexParseRunLog(
         }
 
         if (item.type === 'agent_message') {
-          const text = compactText(
+          const text = truncateText(
             readStringField(item, 'text')
               ?? extractStructuredText(item.content)
               ?? extractStructuredText(item.message),
@@ -323,40 +328,34 @@ export function codexParseRunLog(
         if (item.type === 'tool_use') {
           const toolName = readStringField(item, 'name', 'tool_name') ?? 'tool';
           const toolInput = item.input ?? item.arguments ?? item.invocation ?? item;
-          entries.push({
-            id: `${run.id}:tool-use:${readStringField(item, 'id') ?? lineIndex}`,
-            kind: 'tool',
-            label: toolName,
-            text: describeToolActivity(toolName, toolInput),
-            timestamp,
-            timestampLabel,
-          });
+          const id = `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`;
+          const existing = entries.find(entry => entry.id === id);
+          const entry: OwnedTailEntry = {
+            id, kind: 'tool', label: toolName, text: describeToolActivity(toolName, toolInput),
+            timestamp: existing?.timestamp ?? timestamp, timestampLabel: existing?.timestampLabel ?? timestampLabel,
+            toolCall: { id: `${run.id}:${readStringField(item, 'id') ?? lineIndex}`, name: toolName,
+              args: parseJsonObject(toolInput) ?? { input: toolInput }, status: item.is_error === true ? 'error' : 'done',
+              result: toolOutputPreview(item.output ?? item.result) },
+          };
+          if (existing) Object.assign(existing, entry);
+          else entries.push(entry);
           continue;
         }
 
         if (item.type === 'command_execution') {
           const command = String(item.command ?? '').trim();
           const output = toolOutputPreview(item.aggregated_output);
-
-          entries.push({
-            id: `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`,
-            kind: 'tool',
-            label: 'exec_command',
-            text: command ? `Run ${compactText(command, 180)}` : 'Run shell command',
-            timestamp,
-            timestampLabel,
-          });
-
-          if (output) {
-            entries.push({
-              id: `${run.id}:tool-output:${readStringField(item, 'id') ?? lineIndex}`,
-              kind: 'tool-output',
-              label: 'Tool output',
-              text: output,
-              timestamp,
-              timestampLabel,
-            });
-          }
+          const itemId = `${run.id}:${readStringField(item, 'id') ?? lineIndex}`;
+          const id = `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`;
+          const existing = entries.find(entry => entry.id === id);
+          const entry: OwnedTailEntry = {
+            id, kind: 'tool', label: 'exec_command', text: command ? `Run ${command}` : 'Run shell command',
+            timestamp: existing?.timestamp ?? timestamp, timestampLabel: existing?.timestampLabel ?? timestampLabel,
+            toolCall: { id: itemId, name: 'exec_command', args: { command },
+              status: item.exit_code != null && item.exit_code !== 0 || item.status === 'failed' ? 'error' : 'done', result: output },
+          };
+          if (existing) Object.assign(existing, entry);
+          else entries.push(entry);
           continue;
         }
       }
@@ -366,9 +365,10 @@ export function codexParseRunLog(
         if (item?.type === 'command_execution') {
           const command = String(item.command ?? '').trim();
           entries.push({
-            id: `${run.id}:tool-start:${readStringField(item, 'id') ?? lineIndex}`,
+            id: `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`,
             kind: 'tool',
             label: 'exec_command',
+            toolCall: { id: `${run.id}:${readStringField(item, 'id') ?? lineIndex}`, name: 'exec_command', args: { command }, status: 'running' },
             text: command ? `Running ${compactText(command, 180)}` : 'Running shell command',
             timestamp,
             timestampLabel,
@@ -379,7 +379,8 @@ export function codexParseRunLog(
           const toolName = readStringField(item, 'name', 'tool_name') ?? 'tool';
           const toolInput = item.input ?? item.arguments ?? item.invocation ?? item;
           entries.push({
-            id: `${run.id}:tool-start:${readStringField(item, 'id') ?? lineIndex}`,
+            id: `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`,
+            toolCall: { id: `${run.id}:${readStringField(item, 'id') ?? lineIndex}`, name: toolName, args: parseJsonObject(toolInput) ?? { input: toolInput }, status: 'running' },
             kind: 'tool',
             label: toolName,
             text: describeToolActivity(toolName, toolInput),
