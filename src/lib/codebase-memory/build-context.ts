@@ -51,7 +51,7 @@ import {
   directiveAppliesToRepo,
   resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
-import { getProjectContext, type ProjectContext } from '@/lib/projects/context';
+import { getProjectContext, PROJECT_REPO_POLICY, type ProjectContext } from '@/lib/projects/context';
 import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 import type { CloseUnmergedDisposition } from '@/lib/orchestrator/close-unmerged';
 
@@ -320,7 +320,7 @@ function renderProjectScopeSection(context: ProjectContext): string[] {
   if (context.instructions) {
     lines.push(`- Project instructions: ${clampLine(context.instructions, 360)}`);
   }
-  lines.push('- Repo policy: treat the main repo as the product anchor; use the current repo for repo-specific work; edit siblings only when the task explicitly requires cross-repo changes.');
+  lines.push(`- ${PROJECT_REPO_POLICY}`);
   return lines;
 }
 
