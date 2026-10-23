@@ -2377,6 +2377,12 @@
       ]
     },
     {
+      "path": "tests/delegate-effort-correction-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dependency-directory-clone-real-path.test.ts",
       "reasons": [
         "apfs-tool",
