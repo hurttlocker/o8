@@ -73,7 +73,7 @@ async function performStableCliUpdate(
   const receiptPath = path.join(directory, `${runtime}-cli-update.json`);
   let receipt: { runtime: string; status: string; selectedPath: string; manager: string; targetVersion: string; startedAt: string; finishedAt?: string } | undefined;
   try {
-    await lock.writeFile(JSON.stringify({ operationId: reservation.id }));
+    await lock.writeFile(JSON.stringify({ ...reservation.owner, pid: process.pid, operationId: reservation.id }));
     const tool = (await checkCliUpdates(true, runtime))[0];
     if (tool?.status !== 'update-available' || tool.selectedPath !== selected.path || !tool.latestVersion
       || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tool.latestVersion)) throw new CodexUpdateRefusal('not-outdated', 'A newer release could not be verified for this selected installation. Check again.');

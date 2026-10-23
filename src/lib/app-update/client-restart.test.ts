@@ -72,4 +72,16 @@ describe('relaunchInstalledUpdate', () => {
     expect(relaunch).not.toHaveBeenCalled();
   });
 
+  it('keeps an idle confirmation unforced so new work is protected by native admission', async () => {
+    await relaunchInstalledUpdate({ beforeRestart: async () => true });
+    expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: false });
+  });
+
+  it('reads explicit interruption consent after the final caller check', async () => {
+    let confirmed = false;
+    const beforeRestart = Object.assign(async () => { confirmed = true; return true; }, { interruptWork: () => confirmed });
+    await relaunchInstalledUpdate({ beforeRestart });
+    expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: true });
+  });
+
 });

@@ -11,6 +11,7 @@
  * (inline | child); default resolved by the caller.
  */
 
+import { reserveWorkLaunch, WorkAdmissionExpiredError, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -39,20 +40,35 @@ export function createInlineTerminalHost(ptyModule: InlinePtyModule): TerminalHo
   return {
     mode: 'inline',
     spawn(spec: PtySpawnSpec): TerminalHandle {
-      const p = ptyModule.spawn(spec.file, spec.args, {
-        name: spec.name ?? 'xterm-256color',
-        cols: spec.cols,
-        rows: spec.rows,
-        cwd: spec.cwd,
-        env: spec.env,
-      });
+      const lease = reserveWorkLaunch(`Terminal ${spec.file}`);
+      let p: ChildPty | undefined;
+      try {
+        lease.started(process.pid);
+        p = ptyModule.spawn(spec.file, spec.args, {
+          name: spec.name ?? 'xterm-256color',
+          cols: spec.cols,
+          rows: spec.rows,
+          cwd: spec.cwd,
+          env: spec.env,
+        });
+        try { lease.started(p.pid); } catch (error) {
+          if (error instanceof WorkAdmissionExpiredError) {
+            p.kill('SIGKILL');
+            lease.release();
+            throw error;
+          }
+          // Preserve uncertain ownership through exit on a PID write I/O fault.
+        }
+        p.onExit(lease.release);
+      } catch (error) { if (!p) lease.release(); throw error; }
+      const terminal = p;
       return {
-        get pid() { return p.pid; },
-        onData: (cb) => p.onData(cb),
-        onExit: (cb) => p.onExit((e) => cb({ exitCode: e.exitCode, signal: e.signal })),
-        write: (d) => p.write(d),
-        resize: (c, r) => p.resize(c, r),
-        kill: (s) => p.kill(s),
+        get pid() { return terminal.pid; },
+        onData: (cb) => terminal.onData(cb),
+        onExit: (cb) => terminal.onExit((e) => cb({ exitCode: e.exitCode, signal: e.signal })),
+        write: (d) => terminal.write(d),
+        resize: (c, r) => terminal.resize(c, r),
+        kill: (s) => terminal.kill(s),
       };
     },
     dispose() { /* PTYs are killed by ws-server per-attachment */ },
@@ -70,6 +86,7 @@ class ChildHandle implements TerminalHandle {
   constructor(
     private readonly id: string,
     private readonly child: ChildProcess,
+    readonly lease: WorkLaunchLease,
   ) {}
 
   onData(cb: (data: string) => void): void { this.dataCb = cb; }
@@ -88,9 +105,12 @@ class ChildHandle implements TerminalHandle {
   /** @internal — fed by the host from IPC frames. */
   _emitData(data: string): void { this.dataCb?.(data); }
   /** @internal */
-  _emitExit(e: { exitCode: number; signal?: number }): void {
+  _emitExit(e: { exitCode: number; signal?: number }, confirmed = true): void {
     if (this.exited) return;
     this.exited = true;
+    // If the host dies before acknowledging a spawn, a PTY may still exist.
+    // Retain its uncertain reader instead of guessing that it exited.
+    if (confirmed && this.pid) this.lease.release();
     this.exitCb?.(e);
   }
 }
@@ -137,8 +157,13 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
     switch (msg.type) {
       case 'spawned':
         h.pid = msg.pid;
+        try { h.lease.started(msg.pid); } catch (error) {
+          if (error instanceof WorkAdmissionExpiredError) h.kill('SIGKILL');
+          // Other PID write faults retain the reader until confirmed exit.
+        }
         break;
       case 'spawn-error':
+        h.lease.release();
         log(`spawn-error for ${msg.id}: ${msg.message}`);
         handles.delete(msg.id);
         h._emitExit({ exitCode: 1 });
@@ -161,7 +186,7 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
     // down (broadcasts 'exited', cleans clients). No auto-respawn — child mode
     // is opt-in; a crash falls back visibly rather than silently reconnecting.
     for (const h of handles.values()) {
-      h._emitExit({ exitCode: code ?? 1, signal: signal ? 1 : undefined });
+      h._emitExit({ exitCode: code ?? 1, signal: signal ? 1 : undefined }, false);
     }
     handles.clear();
   });
@@ -174,11 +199,12 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
     mode: 'child',
     spawn(spec: PtySpawnSpec): TerminalHandle {
       const id = `t${(seq += 1)}`;
-      const handle = new ChildHandle(id, child);
+      const lease = reserveWorkLaunch(`Terminal ${spec.file}`);
+      const handle = new ChildHandle(id, child, lease);
       handles.set(id, handle);
       // IPC preserves order: the child processes this spawn (creating the pty)
       // before any subsequent write/resize/kill on the same id.
-      child.send?.({ type: 'spawn', id, spec });
+      child.send?.({ type: 'spawn', id, spec, admissionId: lease.id });
       return handle;
     },
     dispose() {

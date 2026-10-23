@@ -6,6 +6,8 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 export const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 
 export interface InstallUpdateOutcome {
+  /** The actual plugin result, which can differ from a previously displayed check. */
+  version?: string;
   /** True when the update downloaded and installed. */
   installed: boolean;
   /** The update installed, but the caller's final safety check deferred relaunch. */
@@ -17,7 +19,8 @@ export interface InstallUpdateOutcome {
 }
 
 export interface InstallUpdateOptions {
-  beforeRestart?: () => Promise<boolean>;
+  beforeRestart?: (() => Promise<boolean>) & { interruptWork?: () => boolean };
+  interruptWork?: () => boolean;
   /**
    * False when the running install cannot replace itself (a deb/rpm Linux
    * install — see `isSelfUpdatableInstall`). Such a call opens the release
@@ -63,13 +66,26 @@ async function isVersionPulled(version: string): Promise<{ pulled: boolean; note
   }
 }
 
-export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+/** Explicit interruption consent can bypass a CLI wait; ordinary restart checks stay final. */
+async function confirmRestartAdmission(options: InstallUpdateOptions): Promise<boolean> {
   const { waitForConnectedCliUpdates } = await import('./update-hub-client');
+  const force = () => (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true;
+  if (force() || options.beforeRestart?.interruptWork) {
+    if (options.beforeRestart && !(await options.beforeRestart())) return false;
+    if (!force()) await waitForConnectedCliUpdates();
+    // Native admission always inspects current work under the reservation.
+    return true;
+  }
   await waitForConnectedCliUpdates();
-  if (options.beforeRestart && !(await options.beforeRestart())) return false;
+  return !options.beforeRestart || await options.beforeRestart();
+}
+
+export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+  if (!(await confirmRestartAdmission(options))) return false;
+  const force = (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true;
   const { invoke } = await import('@tauri-apps/api/core');
   let reservationId: string;
-  try { reservationId = await invoke<string>('prepare_app_restart'); }
+  try { reservationId = await invoke<string>('prepare_app_restart', { force }); }
   catch (error) { if (String(error).includes('cli_operation_blocked:')) return false; throw error; }
   if (typeof reservationId !== 'string' || !reservationId.trim()) throw new Error('Native restart reservation was not recorded.');
   try {
@@ -110,12 +126,26 @@ export async function installUpdateAndRestart(
   let receivedBytes = 0;
   let totalBytes: number | null = null;
   options.onProgress?.({ stage: 'downloading', receivedBytes, totalBytes });
-  await result.downloadAndInstall((event) => {
+  const { invoke, Channel } = await import('@tauri-apps/api/core');
+  const channel = new Channel<import('@tauri-apps/plugin-updater').DownloadEvent>();
+  channel.onmessage = (event) => {
     if (event.event === 'Started') totalBytes = event.data.contentLength ?? null;
     else if (event.event === 'Progress') receivedBytes += event.data.chunkLength;
     options.onProgress?.({ stage: event.event === 'Finished' ? 'installing' : 'downloading', receivedBytes, totalBytes });
-  });
+  };
+  const downloadedRid = await invoke<number>('download_app_update', { rid: result.rid, onEvent: channel });
+  try {
+    if (result.installExits) {
+      // Windows exits in the native installer. Confirm against fresh work after
+      // download, then pass that consent to its final native exit guard.
+      if (!(await confirmRestartAdmission(options))) return { installed: false, version: result.version };
+    }
+    await invoke('install_app_update', { rid: downloadedRid,
+      force: (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true });
+  } finally {
+    await invoke('discard_app_update_download', { rid: downloadedRid }).catch(() => {});
+  }
   options.onProgress?.({ stage: 'restarting', receivedBytes, totalBytes });
   const restarted = await relaunchInstalledUpdate(options);
-  return { installed: true, restartDeferred: !restarted };
+  return { installed: true, version: result.version, restartDeferred: !restarted };
 }

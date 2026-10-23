@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { getSWR, setSWR } from '@/lib/panel/fetch-cache';
+import { invalidatePrPanelDetail } from './detail-query';
 import { invalidatePrTimeline } from './timeline-query-key';
 import type { PrMergeMethod, PrReviewAction } from './types';
 
@@ -42,9 +42,7 @@ export function usePrComment(repo: string | null | undefined, number: number) {
       const partialClose = action === 'close-with-comment' && result?.commentPosted === true && result.ok !== true;
       if (!partialClose && (!response.ok || result?.ok !== true)) throw new Error('Delivery could not be confirmed.');
       update(key, { ...idle, posted: true, postedAction: partialClose ? 'comment' : action, partialClose, error: partialClose ? 'Comment posted. Closing could not be confirmed. Retry close without posting again.' : null });
-      const detailKey = 'pr-detail:' + repo + ':' + number;
-      const cached = getSWR<Record<string, unknown>>(detailKey).data;
-      if (cached) setSWR(detailKey, { ...cached, loadedAt: 0 });
+      invalidatePrPanelDetail(repo, number);
       invalidatePrTimeline(repo, number);
       window.dispatchEvent(new CustomEvent('o8:pr-updated', { detail: { repo, number, action } }));
       return true;
