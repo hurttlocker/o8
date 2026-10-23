@@ -94,7 +94,7 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'about', tabLabel: 'About', group: "Developer", label: "Preview onboarding", description: "Runs the flow without resetting state (dev builds only)" },
   { tab: 'about', tabLabel: 'About', group: "Developer", label: "Reset + run onboarding", description: "Clears setup state and restarts the flow (dev builds only)" },
   { tab: 'about', tabLabel: 'About', group: "Links", label: "Documentation", description: "Architecture, workflows, and guides" },
-  { tab: 'about', tabLabel: 'About', group: "Links", label: "GitHub", description: "hurttlocker/o8" },
+  { tab: 'about', tabLabel: 'About', group: "Links", label: "GitHub", description: "o8-run/o8" },
   { tab: 'about', tabLabel: 'About', group: "Links", label: "Releases", description: "Changelog and downloads" },
   { tab: 'about', tabLabel: 'About', group: "Onboarding", label: "Replay onboarding", description: "Replays the welcome flow (intro, repos, runtimes)" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Theme", label: "Workspace theme", description: "Light Solid, Dark Solid, or All Glass", keywords: ['window chrome', 'palette', 'transparency'] },

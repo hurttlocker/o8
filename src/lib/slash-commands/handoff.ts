@@ -1,5 +1,5 @@
 import { formatModelLabel } from '@/lib/format';
-import { buildSlashCommandEntry, excerptTranscriptEntries } from './shared';
+import { buildSlashCommandEntry, excerptNewestFirst } from './shared';
 import type { ParsedOrchestratorSlashCommand, SlashCommandContext, SlashCommandExecutionResult } from './types';
 
 export async function handleHandoffSlashCommand(
@@ -25,7 +25,7 @@ export async function handleHandoffSlashCommand(
     ? compacted.resumePrelude.trim()
     : [
       'Fresh-session handoff',
-      excerptTranscriptEntries(context.transcript.slice(-8), 8, 2600) || 'No existing transcript context is available.',
+      excerptNewestFirst(context.transcript.slice(-8), 8, 2600) || 'No existing transcript context is available.',
       'Continue from that context using the next operator message as the active instruction.',
     ].join('\n\n');
 

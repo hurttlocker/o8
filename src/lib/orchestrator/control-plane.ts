@@ -171,11 +171,14 @@ function breakLock(judged: LockHolderMeta | null): void {
 let heldLockToken: string | null = null;
 let heldLockBypassed = false;
 
-async function acquireFsLock(): Promise<void> {
+async function acquireFsLock(options: ControlPlaneLockOptions, waitStartedAt: number): Promise<void> {
   const { waitBudgetMs, hardCeilingMs } = lockTiming();
   const startedAt = Date.now();
   let slowHolderRecorded = false;
   for (;;) {
+    if (options.waitTimeoutMs !== undefined && Date.now() - waitStartedAt >= options.waitTimeoutMs) {
+      throw new ControlPlaneLockTimeoutError(options.waitTimeoutMs);
+    }
     const token = randomUUID();
     try {
       mkdirSync(LOCK_DIR);
@@ -229,6 +232,7 @@ function releaseFsLock(): void {
 }
 
 async function acquireLock(options: ControlPlaneLockOptions = {}): Promise<void> {
+  const waitStartedAt = Date.now();
   const waitForPrevious = lockTail;
   let release!: () => void;
   lockTail = new Promise<void>((resolve) => {
@@ -259,7 +263,7 @@ async function acquireLock(options: ControlPlaneLockOptions = {}): Promise<void>
   } else {
     await waitForPrevious;
   }
-  try { await acquireFsLock(); }
+  try { await acquireFsLock(options, waitStartedAt); }
   catch (error) {
     // A failed filesystem acquisition owns this FIFO slot, but no lock.
     // Release the slot so a repaired parent can be acquired on the next call.

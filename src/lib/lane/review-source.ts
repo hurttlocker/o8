@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import 'server-only';
 
 import { execFile } from 'node:child_process';
@@ -83,7 +84,7 @@ function unavailable(snapshot: WorkspaceSnapshotRecord, reason: string): never {
 }
 
 async function gitOutput(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout: GIT_TIMEOUT_MS,

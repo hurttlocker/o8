@@ -4,7 +4,7 @@
  * SQLite for local/dev, designed to map cleanly to PostgreSQL for production.
  * All monetization features (auth, billing, usage, teams) depend on these tables.
  *
- * Issue: https://github.com/hurttlocker/o8/issues/217
+ * Issue: https://github.com/o8-run/o8/issues/217
  */
 
 import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';

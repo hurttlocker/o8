@@ -15,6 +15,8 @@ import { sendLeadTerminalStatus } from './lead-terminal-status';
 import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
 import { checkComposerQueuePrecondition } from '@/lib/orchestrator/composer-queue-precondition';
 import { permissionModeRank } from '@/lib/orchestrator/permission-mode';
+import { claimComposerSteer, deferComposerSteer } from '@/lib/orchestrator/composer-queue';
+import { appendMobileOrchestratorUserMessage } from '@/lib/mobile/orchestrator-thread-history';
 
 export function publishComposerQueueChange(threadId: string) {
   void publishRealtimeMutation({ mutation: { mutationId: `composer-queue-${threadId}-${Date.now()}`,
@@ -30,7 +32,7 @@ function originFor(item: QueuedComposerSendRecord): ReviewChatOrigin {
     mode: collide ? 'fleet' : route.mode, threadId: item.threadId, turnId: `assistant-queued-${item.id}` };
 }
 
-function checkQueueBinding(item: QueuedComposerSendRecord): void {
+export function checkComposerQueueBinding(item: QueuedComposerSendRecord): void {
   assertComposerSendClaim(item.id);
   validateComposerQueueTarget(item);
   checkComposerQueuePrecondition(item);
@@ -48,9 +50,25 @@ function checkQueueBinding(item: QueuedComposerSendRecord): void {
   }
 }
 
+/** Native input is acknowledged before its transcript label can claim delivery. */
+export async function runQueuedComposerSteer(item: QueuedComposerSendRecord): Promise<void> {
+  checkComposerQueueBinding(item);
+  if (item.payload.afterTaskId) { deferComposerSteer(item.id, 'Queued for the original task to finish.'); return; }
+  const backend = getOrchestratorBackend(originFor(item).backend, targetFor(item));
+  if (!backend.liveSteer) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  const result = await backend.liveSteer(item.repoPath, item.payload.wireMessage, {
+    ...item.payload.routing, threadId: item.threadId, clientUserMessageId: item.id, attachments: item.payload.images, orchestrationMode: item.payload.routing.mode,
+    beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Message admission was cancelled.'); },
+  });
+  if (result.accepted !== true) { deferComposerSteer(item.id, 'Steer declined; queued for the next turn.'); return; }
+  appendMobileOrchestratorUserMessage({ tabId: item.threadId, repoPath: item.repoPath, message: item.payload.text,
+    messageId: `composer-steer-${item.id}`, backend: item.payload.routing.backend, timestampMs: item.createdAt });
+  settleComposerSend(item.id, { status: 'applied' });
+}
+
 /** User-requested next turns use saved routing, never whichever composer is currently open. */
 export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hooks: BoundChatContinuationHooks): Promise<void> {
-  checkQueueBinding(item);
+  checkComposerQueueBinding(item);
   const repoPath = readPersistedLlmChat(item.threadId)!.history.repoPath!;
   if (findLeadThreadBinding(item.threadId)) {
     const origin = originFor(item);
@@ -59,7 +77,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
       message: item.payload.wireMessage, displayMessage: item.payload.text, projectId: origin.projectId,
       backend: origin.backend, model: origin.model, effort: origin.effort, permissionMode: origin.permissionMode,
       attachments: validateLeadAttachments(item.payload.images), idempotencyKey: `composer-queue:${item.id}`,
-      beforeAdmit: () => { checkQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Queued message admission was cancelled.'); } });
+      beforeAdmit: () => { checkComposerQueueBinding(item); if (!admitComposerSend(item.id)) throw new Error('Queued message admission was cancelled.'); } });
     if (!result) throw new Error('Persistent chat binding disappeared.');
     const sessionName = getOrchestratorBackend(origin.backend).ensureSession(repoPath, undefined, item.threadId).sessionName;
     hooks.publish(sessionName, 'status', { ...targetFor(item), backend: result.lead.routing.backend,
@@ -74,7 +92,7 @@ export async function runQueuedComposerSend(item: QueuedComposerSendRecord, hook
     displayMessage: item.payload.text, images: item.payload.images, assistantMessageId: `assistant-queued-${item.id}`,
     serviceTier: item.payload.routing.serviceTier,
     collideBaseBackend: originFor(item).backend === 'collide' ? item.payload.routing.backend : undefined,
-    check: () => checkQueueBinding(item), admit: () => admitComposerSend(item.id) }, hooks);
+    check: () => checkComposerQueueBinding(item), admit: () => admitComposerSend(item.id) }, hooks);
 }
 
 function targetFor(item: QueuedComposerSendRecord) { return { repoPath: item.repoPath, threadId: item.threadId }; }
@@ -82,10 +100,23 @@ function targetFor(item: QueuedComposerSendRecord) { return { repoPath: item.rep
 export function createComposerQueueHeartbeat(input: SharedWorkerHeartbeatHooks): () => void {
   recoverComposerSends();
   const active = new Set<string>();
+  const steering = new Set<string>();
   return () => {
     for (const target of listComposerQueueTargets()) {
       try {
       const key = `${target.repoPath}\0${target.threadId}`;
+      const steer = listQueuedComposerSends(target).find(item => item.intent === 'steer-now' && item.status === 'queued');
+      if (steer && !steering.has(key)) {
+        const claimed = claimComposerSteer(steer.id);
+        if (claimed) {
+          steering.add(key); publishComposerQueueChange(target.threadId);
+          void runQueuedComposerSteer(claimed).catch(error => {
+            settleComposerSend(claimed.id, { status: 'held', reason: `Steer unconfirmed; queued for inspection. ${error instanceof Error ? error.message : ''}` });
+          }).finally(() => { steering.delete(key); publishComposerQueueChange(target.threadId); });
+        }
+        continue;
+      }
+      if (steering.has(key)) continue;
       const next = listQueuedComposerSends(target)[0];
       if (!next || next.status !== 'queued' || active.has(key) || input.isBusy(target.repoPath, originFor(next))) continue;
       const item = claimNextComposerSend(target);

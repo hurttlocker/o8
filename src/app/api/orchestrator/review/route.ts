@@ -4,6 +4,7 @@ import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/
 import { submitPacketReview } from '@/lib/orchestrator/operator-mission-service';
 import { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
 import { readCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
+import { ReviewValidationError } from '@/lib/orchestrator/operator-mission-service/review-validation';
 import {
   bindIdempotencyClientMutation,
   deriveIdempotencyKey,
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     return operatorError(
       'invalid_missing_contract_waiver',
       'A missing-contract waiver requires an operator, an approved review, a full reviewed HEAD, and a reason of at most 500 characters.',
-      principal.role === 'operator' ? 400 : 403,
+      principal.role === 'operator' ? 422 : 403,
     );
   }
   const clientKey = typeof record.clientMutationId === 'string'
@@ -104,12 +105,14 @@ export async function POST(request: NextRequest) {
         return {
           ok: false as const,
           message: error instanceof Error ? error.message : 'Unable to submit review.',
+          code: error instanceof ReviewValidationError ? error.code : 'review_failed',
+          status: error instanceof ReviewValidationError ? 422 : 500,
         };
       }
     });
     if (outcome.inProgress) return unresolvedIdempotencyResponse(outcome, 'packet review') ?? operatorSuccess(replayShape(outcome), 202);
     if (!outcome.result.ok) {
-      const response = operatorError('review_failed', outcome.result.message, 500);
+      const response = operatorError(outcome.result.code ?? 'review_failed', outcome.result.message, outcome.result.status ?? 500);
       if (outcome.replayed) response.headers.set('x-o8-idempotency-replayed', '1');
       return response;
     }

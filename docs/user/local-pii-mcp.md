@@ -68,4 +68,4 @@ curl -sS -X POST "http://127.0.0.1:${O8_PORT}/api/setup/mcp-servers" \
 - `src/lib/mcp/tool-spine/build.ts` — catalog assembly
 - `docs/user/operator-mcp-bridge.md` — operator MCP
 - `docs/internals/runtime-adapter-contract.md` — worker MCP injection
-- Follow-ups (builtin promotion, automatic pre-LLM scrub): [#2074](https://github.com/hurttlocker/o8/issues/2074)
+- Follow-ups (builtin promotion, automatic pre-LLM scrub): [#2074](https://github.com/o8-run/o8/issues/2074)

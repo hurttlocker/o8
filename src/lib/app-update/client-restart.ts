@@ -3,7 +3,7 @@
 import { isTauri } from '@/lib/tauri/bridge';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
-export const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
+export const RELEASE_URL = 'https://github.com/o8-run/o8/releases/latest';
 
 export interface InstallUpdateOutcome {
   /** The actual plugin result, which can differ from a previously displayed check. */

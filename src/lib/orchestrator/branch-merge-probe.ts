@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -36,7 +37,7 @@ function normalizeRef(value: string, label: string): string {
 }
 
 async function gitValue(repoPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd: repoPath,
     timeout: GIT_TIMEOUT_MS,

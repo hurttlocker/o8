@@ -14,11 +14,12 @@
  * Auto-toggle: worktree isolation defaults ON when repo has active agents,
  * OFF when it's the first/only agent.
  *
- * @see https://github.com/hurttlocker/o8/issues/65
- * @see https://github.com/hurttlocker/o8/issues/608
+ * @see https://github.com/o8-run/o8/issues/65
+ * @see https://github.com/o8-run/o8/issues/608
  */
 
 import { WorktreeManager } from './manager';
+import { withPinnedWorkspaceReadSession } from './materialization-read-session';
 import type { AgentType, WorktreeInfo, WorkspaceIsolationPreference } from './types';
 import type { RepoSetupConfig, RepoSetupEnvMode } from '@/lib/repos/types';
 
@@ -140,7 +141,7 @@ export async function prepareLaunchWorktree(
   // #608 — claude-code packets now go through the same managed worktree path
   // as Codex so the pre-launch rebase runs. Force `managed: true` on claude-code
   // to bypass the Claude-self-managed early-return in WorktreeManager.create.
-  const worktree = await mgr.create({
+  const worktree = await withPinnedWorkspaceReadSession(() => mgr.create({
     agentType: opts.agentType,
     taskName: opts.taskName,
     branchName: opts.branchName,
@@ -155,7 +156,7 @@ export async function prepareLaunchWorktree(
     storageAdmissionReservationId: opts.storageAdmissionReservationId,
     beforeReady,
     managed: opts.agentType === 'claude-code' ? true : undefined,
-  });
+  }));
 
   return {
     worktree,

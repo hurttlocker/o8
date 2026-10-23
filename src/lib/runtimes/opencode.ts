@@ -227,6 +227,7 @@ export const opencodeRuntime: AgentRuntime = {
       ok: result.ok,
       note: result.note,
       sessionKey: result.surfaceId,
+      sideEffect: result.sideEffect,
     };
   },
 

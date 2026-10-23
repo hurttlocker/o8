@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFileSync } from 'node:child_process';
 
 import { getSqlite } from '@/lib/db';
@@ -227,7 +228,7 @@ function listDiffFilesForLane(row: LaneTouchRow): string[] {
   }
 
   try {
-    const output = execFileSync('git', ['diff', '--name-only', `${row.base_branch}...HEAD`], {
+    const output = execFileSync(resolveGitBinary(), ['diff', '--name-only', `${row.base_branch}...HEAD`], {
       windowsHide: true,
       cwd,
       encoding: 'utf-8',

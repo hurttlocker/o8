@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile, execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { devNull } from 'node:os';
@@ -57,7 +58,7 @@ function runGitPlanSync<T>(plan: GitPlan<T>): T {
   while (!step.done) {
     let output: string;
     try {
-      output = execFileSync('git', step.value.args, { cwd: step.value.cwd, env: step.value.env, encoding: 'utf8',
+      output = execFileSync(resolveGitBinary(), step.value.args, { cwd: step.value.cwd, env: step.value.env, encoding: 'utf8',
         timeout: GIT_READ_TIMEOUT_MS, ...(step.value.maxBuffer ? { maxBuffer: step.value.maxBuffer } : {}),
         stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
@@ -78,7 +79,7 @@ async function runGitPlan<T>(plan: GitPlan<T>): Promise<T> {
   while (!step.done) {
     const read = step.value;
     const result = await new Promise<{ output: string } | { error: unknown }>((resolve) => {
-      execFile('git', read.args, { cwd: read.cwd, env: read.env, encoding: 'utf8', timeout: GIT_READ_TIMEOUT_MS,
+      execFile(resolveGitBinary(), read.args, { cwd: read.cwd, env: read.env, encoding: 'utf8', timeout: GIT_READ_TIMEOUT_MS,
         ...(read.maxBuffer ? { maxBuffer: read.maxBuffer } : {}) }, (error, stdout) => {
         if (!error) { resolve({ output: stdout }); return; }
         const code = (error as { code?: unknown }).code;
@@ -260,7 +261,7 @@ export function laneGitInvocationAsync(worktreePath: string, repoPath: string, a
 
 export function laneGitSync(worktreePath: string, repoPath: string, args: readonly string[], options: ExecFileSyncOptions & LaneGitOptions = {}): string {
   const invocation = laneGitInvocation(worktreePath, repoPath, args, false, options);
-  return execFileSync('git', invocation.args, { windowsHide: true, timeout: 15_000,
+  return execFileSync(resolveGitBinary(), invocation.args, { windowsHide: true, timeout: 15_000,
     maxBuffer: 10 * 1024 * 1024, ...options, ...invocation, encoding: 'utf8' }).toString();
 }
 

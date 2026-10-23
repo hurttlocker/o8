@@ -1,0 +1,59 @@
+{
+  "schema": "o8/native-acl-startup/v1",
+  "profile": "release optimized",
+  "sourceBase": "251e92c574f4736fe528254a12c47899e96f6ae8",
+  "capabilitiesSha256": "55d040ad412426fe71603d8f4d1071cf585e7b843a2fcaff246ac8e77bab748f",
+  "measurement": "Unprofiled sequential loader latency; separate stack-logged diagnostic memory samples. Original loader, application sidecars and optional speech helpers excluded. WebKit FCP, not compositor or dashboard interactive timing. Host load uncontrolled.",
+  "before": {
+    "binarySha256": "b4f7f14da9f529085d7e45ada317774dd639ffe323ce86a35f11ff0deee2c051",
+    "contextMs": [
+      3201,
+      3946,
+      3439
+    ],
+    "loaderFcpMs": [
+      4362,
+      4910,
+      4278
+    ],
+    "matcherBytes": [
+      503115264,
+      503115264,
+      503115264
+    ]
+  },
+  "after": {
+    "binarySha256": "86767c5d4a1162fa4c45acfd712f1727fb335b0209b4c116cf56695f1f147844",
+    "contextMs": [
+      9,
+      11,
+      12
+    ],
+    "loaderFcpMs": [
+      663,
+      683,
+      765
+    ],
+    "matcherBytes": [
+      556544,
+      556544,
+      556544
+    ]
+  },
+  "aclParity": {
+    "rows": 133588,
+    "allowed": 25396,
+    "sha256": "b1b2e68da8b0853ec06dfd0d0a5c72835e40cbe92012d69f06f403d754122044"
+  },
+  "verification": {
+    "nativeLibraryPassed": 476,
+    "nativeLibraryIgnored": 2,
+    "aclIntegrationPassed": 2,
+    "codegenLibraryPassed": 1,
+    "codegenRedActualParses": 4,
+    "codegenExpectedParses": 2,
+    "rustClippy": "pass with pre-existing application warnings",
+    "rustfmt": "pass",
+    "ruleCheckTypeScriptFiles": 0
+  }
+}

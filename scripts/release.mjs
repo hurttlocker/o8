@@ -45,9 +45,9 @@ import { buildLatestShip, scrubPublicText } from './lib/public-release.mjs';
 import { resolveReleaseChannel } from './lib/release-channel.mjs';
 import { formatReleaseSummary, prepareReleaseSummary } from './lib/release-summary.mjs';
 
-const REPO = 'hurttlocker/o8';
+const REPO = 'o8-run/o8';
 const PUBLIC_MIRROR = 'hurttlocker/o8-releases';
-// The real source repo. EMPTY until hurttlocker/o8 is public — see composeReleaseAnnouncement().
+// Optional source link for release announcements; see composeReleaseAnnouncement().
 // Q 2026-07-31: "they need to point to the real repo because it will be public soon."
 const SOURCE_REPO = process.env.O8_SOURCE_REPO || '';
 // Q 2026-07-31: "ping on big ships or necessary updates" — o8 ships ~2x/day, and an @everyone on
@@ -584,10 +584,8 @@ function composeReleaseAnnouncement() {
     .slice(0, 6)
     .map((s) => `- ${s.charAt(0).toUpperCase()}${s.slice(1)}`);
   const date = new Date().toISOString().slice(0, 10);
-  // SOURCE_REPO is the real code repo, linked ALONGSIDE the release mirror once it goes public.
-  // Deliberately empty today: hurttlocker/o8 is still PRIVATE (verified via `gh repo view`
-  // 2026-07-31), and linking it now sends the whole server to a 404. Flip this to 'hurttlocker/o8'
-  // the day the repo flips — that is the only edit needed.
+  // Source links remain opt-in: set O8_SOURCE_REPO=o8-run/o8 to include the code repository.
+  // The release mirror remains the download destination for announcements.
   const sourceLine = SOURCE_REPO
     ? `Source: https://github.com/${SOURCE_REPO}`
     : null;

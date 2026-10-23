@@ -108,7 +108,7 @@ capabilities. Adapters that omit the capability keep their existing behavior.
 
 ### Attaching operator MCP servers to your runtime's workers
 
-[#1750](https://github.com/hurttlocker/o8/issues/1750) lets an operator opt each
+[#1750](https://github.com/o8-run/o8/issues/1750) lets an operator opt each
 stdio server into worker attachment from Settings → MCP with **Attach to
 supported workers**. The shared controller reads only those opted-in
 operator-owned records; packets and missions cannot contribute server records or

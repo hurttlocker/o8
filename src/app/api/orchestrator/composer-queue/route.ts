@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readVisualQueueReceipt } from '@/lib/composer/visual-queue-receipt';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
-import { cancelComposerSend, enqueueComposerSend, listQueuedComposerSends, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
-import { COMPOSER_STEER_UNAVAILABLE_REASON, type ComposerQueueTarget } from '@/lib/orchestrator/composer-queue-types';
+import { cancelComposerSend, enqueueComposerSend, listComposerTranscriptSends, promoteComposerSend, validateComposerQueueTarget } from '@/lib/orchestrator/composer-queue';
+import type { ComposerQueueTarget } from '@/lib/orchestrator/composer-queue-types';
+import { getOrchestratorBackend } from '@/lib/lane/orchestrator-backends/registry';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,7 +24,11 @@ export async function GET(request: NextRequest) {
       const receipt = readVisualQueueReceipt(target, id);
       return receipt ? NextResponse.json(receipt, { headers: { 'Cache-Control': 'no-store' } }) : NextResponse.json({ error: 'This visual request was not found in this chat.' }, { status: 404 });
     }
-    return NextResponse.json({ items: listQueuedComposerSends(target) }, { headers: { 'Cache-Control': 'no-store' } });
+    const backend = request.nextUrl.searchParams.get('backend');
+    const canSteer = (id: unknown) => isOrchestratorBackendId(id) && Boolean(getOrchestratorBackend(id, target).liveSteer);
+    const items = listComposerTranscriptSends(target);
+    const steerableIds = items.filter(item => canSteer(item.payload.routing.collide && item.payload.routing.mode !== 'single' ? 'collide' : item.payload.routing.backend)).map(item => item.id);
+    return NextResponse.json({ items, canSteer: canSteer(backend), steerableIds }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }
 export async function POST(request: NextRequest) {
@@ -30,9 +36,19 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'A queue request is required.' }, { status: 400 });
-    if (body?.intent === 'steer-now') return NextResponse.json({ error: COMPOSER_STEER_UNAVAILABLE_REASON }, { status: 409 });
     const item = enqueueComposerSend(body);
     await changed(item, item.id).catch(() => {});
+    return NextResponse.json({ item });
+  } catch (error) { return failure(error); }
+}
+export async function PATCH(request: NextRequest) {
+  const denied = requirePanelAuth(request); if (denied) return denied;
+  try {
+    const body = await request.json();
+    const target = validateComposerQueueTarget(body);
+    if (typeof body.id !== 'string') throw new Error('A queued message identity is required.');
+    const item = promoteComposerSend(target, body.id);
+    await changed(target, item.id).catch(() => {});
     return NextResponse.json({ item });
   } catch (error) { return failure(error); }
 }

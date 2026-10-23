@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 /**
  * Shared helpers for the owned-session primitive.
  *
@@ -21,6 +22,7 @@ import { codexAuthRecoveryMessage } from '@/lib/runtimes/shared/codex-auth-failu
 
 import type { OwnedChildExitOutcome, OwnedRunOutcome, OwnedRunRecord, ParsedRunLog } from './types';
 import { probeOwnedRunProcessClaim, resolveSpawnedProcessGroupId } from './run-process-proof';
+import { probeOwnedRunIdentity } from './process-identity';
 
 const execFileAsync = promisify(execFile);
 
@@ -207,7 +209,7 @@ export async function validateWorkspace(targetCwd: string) {
   // spawn). Fall back to the resolved folder itself — the CLIs run fine in a
   // non-git directory; isolation/worktrees are separately gated on git.
   try {
-    const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['-C', real, 'rev-parse', '--show-toplevel'], {
       windowsHide: true,
       maxBuffer: 256 * 1024,
     });
@@ -220,7 +222,7 @@ export async function validateWorkspace(targetCwd: string) {
 
 export async function gitValue(repoPath: string, args: string[]) {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['-C', repoPath, ...args], {
       windowsHide: true,
       maxBuffer: 256 * 1024,
     });
@@ -359,6 +361,7 @@ export function commandLineMatchesOwnedRun(
 
 /** POSIX run ownership survives wrapper exec; an argv mention does not prove ownership. */
 export async function canSignalOwnedRun(run: OwnedRunRecord, fallbackBinaryName: string): Promise<boolean> {
+  if ((run.processIdentityRequired || run.processIdentity) && (await probeOwnedRunIdentity(run)).state !== 'match') return false;
   if (process.platform === 'win32') {
     return commandLineMatchesOwnedRun(await pidCommandLine(run.pid), run.commandIdentity, fallbackBinaryName);
   }
@@ -366,7 +369,8 @@ export async function canSignalOwnedRun(run: OwnedRunRecord, fallbackBinaryName:
   const claim = await probeOwnedRunProcessClaim({ pid: run.pid, marker: run.processMarker, rootPid: run.pid });
   if (claim.state !== 'match') return false;
   const group = await resolveSpawnedProcessGroupId(run.pid);
-  return group !== undefined && group === (run.processGroupId ?? run.pid);
+  return group !== undefined && group === (run.processGroupId ?? run.pid)
+    && (!(run.processIdentityRequired || run.processIdentity) || (await probeOwnedRunIdentity(run)).state === 'match');
 }
 
 export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<boolean> {
@@ -377,6 +381,11 @@ export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<bool
   // the inventory build past its hard timeout and wedges the observable in
   // "warming" forever. A finished run's process is gone by definition.
   if (run.finishedAt) return false;
+  if (run.processIdentityRequired || run.processIdentity) {
+    const proof = await probeOwnedRunIdentity(run);
+    // Unknown identity preserves the record; startup and control require a match.
+    return proof.state === 'match' || proof.state === 'unknown';
+  }
   if (isPidAlive(run.pid)) return true;
   if (run.tmuxSession) {
     return isBridgeSessionAlive(run.tmuxSession);

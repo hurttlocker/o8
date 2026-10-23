@@ -41,6 +41,7 @@ use base64::Engine;
 
 mod supervise;
 mod directory_move;
+mod process_identity;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -721,6 +722,9 @@ fn run() -> io::Result<bool> {
 fn main() {
     // `supervise` runs one approved command and ends every process it starts (#3350).
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).map(|arg| arg == "process-identity").unwrap_or(false) {
+        std::process::exit(process_identity::run(&args[2..]));
+    }
     if args.len() == 2 && args[1] == "move-directory-no-replace" {
         std::process::exit(directory_move::run());
     }

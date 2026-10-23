@@ -189,13 +189,13 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
   const checkForUpdate = useCallback(async () => {
     if (!canUseTauriEvents()) return { version: null, error: 'o8 update checking is available in the desktop app.' };
     try {
-      const { check } = await import('@/lib/app-update/check');
-      const result = await check();
+      const { requestFreshAppUpdateCheck } = await import('@/lib/app-update/recorded-update-client');
+      const { info: result } = await requestFreshAppUpdateCheck();
       if (result) {
         setUpdate({
           version: result.version,
           currentVersion: result.currentVersion || undefined,
-          notes: result.body ?? undefined,
+          notes: result.notes ?? undefined,
           date: result.date ?? undefined,
         });
         setCheckReport(updateCheckReport('available'));

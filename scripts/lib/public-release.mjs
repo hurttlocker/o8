@@ -226,7 +226,7 @@ export function buildLatestShip({
   if (!/^\d{4}-\d{2}-\d{2}T/.test(ship.publishedAt) || Number.isNaN(Date.parse(ship.publishedAt))) {
     throw new Error('latest-ship publishedAt must be an ISO timestamp');
   }
-  if (!ship.releaseUrl.startsWith('https://github.com/hurttlocker/o8/releases/tag/')) {
+  if (!ship.releaseUrl.startsWith('https://github.com/o8-run/o8/releases/tag/')) {
     throw new Error('latest-ship releaseUrl must point to an o8 release tag');
   }
   return ship;

@@ -17,7 +17,7 @@
  *
  * Usage:
  *   npm run ship:linux-sig -- --tag v0.1.724
- *   npm run ship:linux-sig -- --tag v0.1.724 --repo hurttlocker/o8 --repo hurttlocker/o8-releases
+ *   npm run ship:linux-sig -- --tag v0.1.724 --repo o8-run/o8 --repo hurttlocker/o8-releases
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';

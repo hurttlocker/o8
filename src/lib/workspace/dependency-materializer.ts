@@ -30,7 +30,7 @@ import {
   type DependencyInstallReceipt,
 } from './dependency-install';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
-import { tryCloneDependencyDirectory } from './dependency-directory-clone';
+import { tryCloneDependencyDirectory, type DependencySelection } from './dependency-directory-clone';
 import { profileDependencyClone } from './dependency-clone-profile';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
@@ -50,7 +50,7 @@ export interface DependencyMaterializationReceipt {
   generation: string | null;
   workspaceDevice: number;
   workspaceInode: number;
-  source?: 'directory-clone';
+  source?: 'directory-clone' | 'dependency-pool';
 }
 
 export interface DependencyMaterializationResult {
@@ -115,6 +115,8 @@ export interface DependencyMaterializerOptions extends Pick<DependencyInstallOpt
   'run' | 'resolveVersion' | 'cacheRoot' | 'now' | 'materializationIdentity'> {
   preparedRecipe?: DependencyInstallRecipe;
   cloneSourceWorkspace?: string;
+  useDependencyPool?: boolean;
+  onSelection?: (selection: DependencySelection) => Promise<void>;
   /** Deterministic race seam after native publication, before source revalidation. */
   afterDependencyDirectoryClone?: () => Promise<void>;
   imageRegistryRoot?: string;
@@ -270,6 +272,7 @@ async function runNativeMaterialization(
   options: DependencyMaterializerOptions,
   queuePublication: boolean,
 ): Promise<DependencyMaterializationResult> {
+  await options.onSelection?.({ path: 'native-install', reason: 'directory-clone-not-requested' });
   const installReceipt = await runDependencyInstall(workspacePath, installCommand, {
     run: options.run,
     resolveVersion: options.resolveVersion,
@@ -349,8 +352,19 @@ export async function materializeDependencyInstall(
     );
   }
   const imageRequired = Boolean(options.expectedLease || options.exactGenerationRemount);
+  let cloneSource: 'directory-clone' | 'dependency-pool' = 'directory-clone';
+  let fallbackReason = imageRequired ? 'image-required' : 'directory-clone-not-requested';
   if (!imageRequired && options.cloneSourceWorkspace && await tryCloneDependencyDirectory({
     sourceWorkspace: options.cloneSourceWorkspace,
+    usePool: options.useDependencyPool,
+    onDecision: async (decision) => {
+      if (decision.path === 'fallback') fallbackReason = decision.reason;
+      else {
+        cloneSource = decision.path;
+        await options.onSelection?.({ path: decision.path, reason: decision.reason,
+          ...(decision.pool ? { pool: decision.pool } : {}) });
+      }
+    },
     afterClone: options.afterDependencyDirectoryClone,
     workspace,
     identity,
@@ -360,11 +374,13 @@ export async function materializeDependencyInstall(
     const receipt: DependencyMaterializationReceipt = {
       mode: 'native', status: 'mounted', installCommand, recipeKey: recipe.key,
       leaseId: null, generation: null, workspaceDevice: identity.device, workspaceInode: identity.inode,
-      source: 'directory-clone',
+      source: cloneSource,
     };
     await options.persistReceipt?.(receipt);
     return { receipt, installReceipt: null };
   }
+  const onSelection = options.onSelection;
+  options = { ...options, onSelection: (selection) => onSelection?.({ ...selection, reason: fallbackReason }) ?? Promise.resolve() };
   if ((!enabled && !imageRequired) || platform !== 'darwin'
     || !await isDependencyImageRecipeEligible(workspace, recipe)) {
     if (imageRequired) {
@@ -447,6 +463,7 @@ export async function materializeDependencyInstall(
   let mount: Awaited<ReturnType<DependencyImageProvider['mount']>> | null = null;
   const prepared = { receipt: null as DependencyMaterializationReceipt | null };
   try {
+    await options.onSelection?.({ path: 'image', reason: fallbackReason });
     mount = await provider.mount({
       workspacePath: workspace,
       installCommand,

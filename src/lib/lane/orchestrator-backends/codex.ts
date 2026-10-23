@@ -1,6 +1,6 @@
 /**
- * Codex orchestrator backend — a thin delegate over the existing, UNMODIFIED
- * `codex-orchestrator-session.ts`. Extracted verbatim from `registry.ts` so the
+ * Codex orchestrator backend, a delegate over `codex-orchestrator-session.ts`.
+ * Extracted from `registry.ts` so the
  * MoA/Collide backend can import it without a registry ↔ moa import cycle.
  * File-per-backend, matching openclaw/acp.
  */
@@ -14,6 +14,14 @@ import {
   sendToCodexOrchestrator,
 } from '@/lib/lane/codex-orchestrator-session';
 import type { OrchestratorBackend } from './types';
+import { getCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer';
+import { getRemoteCodexAppBridgeSteer } from '@/lib/codex/app-bridge-steer-relay';
+
+/** Capability is scoped to a specific running bridge, never a global setting. */
+export function codexLiveSteerForThread(repoPath: string, threadId: string): OrchestratorBackend['liveSteer'] {
+  return getCodexAppBridgeSteer(getCodexOrchestratorSession(repoPath, threadId))
+    ?? getRemoteCodexAppBridgeSteer({ repoPath, threadId });
+}
 
 export const codexBackend: OrchestratorBackend = {
   id: 'codex',

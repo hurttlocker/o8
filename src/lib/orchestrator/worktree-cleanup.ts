@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { orphanCloseOwner, orphanCloseRefusal, orphanCloseRetirement } from './close-orphaned-owner';
 import { OrphanCloseRefusal } from './close-orphaned-process';
 /**
@@ -75,7 +76,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
 async function isWorktreeDirty(worktreePath: string): Promise<'clean' | 'dirty' | 'unknown'> {
   try {
-    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['status', '--porcelain'], {
       windowsHide: true,
       cwd: worktreePath,
       timeout: 5000,
