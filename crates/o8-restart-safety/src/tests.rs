@@ -356,3 +356,31 @@ fn legacy_unbound_age_is_monotonic_at_native_admission() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn unavailable_identity_refuses_normal_restart_but_force_records_before_cleanup() {
+    let (root, state, calls) = fixture();
+    let receipts = root.join("forced-restarts");
+    let state = state.with_work_inspection(move |_, _| {
+        assert!(fs::read_dir(&receipts)
+            .unwrap()
+            .flatten()
+            .any(|entry| fs::read_to_string(entry.path())
+                .unwrap()
+                .contains("identity unavailable")));
+        Ok(())
+    });
+    lease_owner::IDENTITY_UNAVAILABLE.with(|unavailable| unavailable.set(true));
+    let normal = state.prepare();
+    let forced = state.prepare_with_work(true);
+    lease_owner::IDENTITY_UNAVAILABLE.with(|unavailable| unavailable.set(false));
+    assert!(normal.unwrap_err().contains("identity unavailable"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let id =
+        forced.expect("force must retain explicit interruption consent when identity is unknown");
+    let operation = read_operation(&root.join(DIRECTORY)).unwrap();
+    assert!(operation.owner_identity.is_null());
+    state.before_restart(Some(&id)).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    fs::remove_dir_all(root).unwrap();
+}

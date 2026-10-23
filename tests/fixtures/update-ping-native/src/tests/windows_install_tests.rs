@@ -16,7 +16,13 @@ use tauri::{Manager, WebviewWindowBuilder};
 
 #[test]
 fn windows_webview_installer_guards_late_work_and_honors_recorded_force() {
-    for scenario in ["terminal", "worker", "cli-force", "auto-worker"] {
+    for scenario in [
+        "terminal",
+        "worker",
+        "cli-force",
+        "cli-force-identity-unavailable",
+        "auto-worker",
+    ] {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -32,14 +38,20 @@ fn windows_webview_installer_guards_late_work_and_honors_recorded_force() {
             String::from_utf8_lossy(&result.stderr)
         );
         assert!(
-            String::from_utf8_lossy(&result.stdout).contains(if scenario == "cli-force" {
-                "native-force-recorded"
-            } else {
-                "native-installer-refused"
-            }),
+            String::from_utf8_lossy(&result.stdout).contains(
+                if scenario.starts_with("cli-force") {
+                    "native-force-recorded"
+                } else {
+                    "native-installer-refused"
+                }
+            ),
             "{scenario}: plugin exited before native admission returned: {}",
             String::from_utf8_lossy(&result.stdout)
         );
+        if scenario == "cli-force-identity-unavailable" {
+            assert!(String::from_utf8_lossy(&result.stdout)
+                .contains("native-force-identity-unavailable-recorded"));
+        }
     }
 }
 
@@ -57,7 +69,8 @@ fn windows_install_child() {
     let origin = base.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let done = stop.clone();
-    let force = scenario == "cli-force";
+    let force = scenario.starts_with("cli-force");
+    let unknown_identity = scenario == "cli-force-identity-unavailable";
     let automatic = scenario == "auto-worker";
     std::thread::spawn(move || {
         while !done.load(Ordering::Acquire) {
@@ -173,6 +186,14 @@ fn windows_install_child() {
                     .any(|entry| std::fs::read_to_string(entry.path())
                         .unwrap_or_default()
                         .contains("fixture")));
+                if unknown_identity {
+                    assert!(receipts
+                        .iter()
+                        .any(|entry| std::fs::read_to_string(entry.path())
+                            .unwrap_or_default()
+                            .contains("identity unavailable")));
+                    println!("native-force-identity-unavailable-recorded");
+                }
                 println!("native-force-recorded");
                 std::io::stdout().flush().unwrap();
             }
@@ -232,6 +253,14 @@ fn windows_install_child() {
         .unwrap()
         .deserialize::<u32>()
         .unwrap();
+        if unknown_identity {
+            // Remove only this child fixture's process-query executable lookup.
+            std::env::set_var("PATH", root.join("no-process-tools"));
+            assert!(std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", "exit 0"])
+                .status()
+                .is_err());
+        }
         let error = invoke(
             "install_app_update",
             serde_json::json!({"rid":bytes,"force":force}),

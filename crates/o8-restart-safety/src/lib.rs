@@ -345,6 +345,18 @@ impl RestartSafety {
         if force {
             self.record_force(&id, "prepare", None)?;
         }
+        let owner_identity = match lease_owner::identity(std::process::id()) {
+            Some(identity) => identity,
+            None if force => {
+                self.record_force(
+                    &id,
+                    "identity-unavailable",
+                    Some("Restart process identity unavailable.".into()),
+                )?;
+                serde_json::Value::Null
+            }
+            None => return Err(refusal("Restart process identity unavailable.")),
+        };
         let operation = Operation {
             version: 1,
             id: id.clone(),
@@ -352,8 +364,7 @@ impl RestartSafety {
             pid: std::process::id(),
             runtime: None,
             owner_pid: std::process::id(),
-            owner_identity: lease_owner::identity(std::process::id())
-                .ok_or_else(|| refusal("Restart process identity unavailable."))?,
+            owner_identity,
             created_at_ms: lease_owner::now_ms(),
             created_monotonic_ms: monotonic::now_ms(),
             started_at: format!("{:?}", std::time::SystemTime::now()),

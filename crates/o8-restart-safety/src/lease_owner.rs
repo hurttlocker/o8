@@ -9,9 +9,16 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static IDENTITY_UNAVAILABLE: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
 const UNBOUND_MS: f64 = 30_000.0;
 type Observation = (Option<SystemTime>, u64, Instant);
 static OBSERVED: OnceLock<Mutex<HashMap<PathBuf, Observation>>> = OnceLock::new();
+#[cfg(windows)]
+static OWN_IDENTITY: Mutex<Option<Value>> = Mutex::new(None);
 pub fn read(path: &Path) -> Value {
     if !fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
@@ -31,7 +38,7 @@ pub fn now_ms() -> u128 {
         .as_millis()
 }
 
-fn command(program: &str, args: &[&str]) -> Option<String> {
+fn command(program: &str, args: &[&str]) -> Result<String, String> {
     let mut command = Command::new(program);
     #[cfg(windows)]
     {
@@ -44,34 +51,66 @@ fn command(program: &str, args: &[&str]) -> Option<String> {
         .env("LANG", "C")
         .env("TZ", "UTC")
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .ok()?;
-    let deadline = Instant::now() + Duration::from_secs(2);
+        .map_err(|error| error.to_string())?;
+    // Cold Windows PowerShell/CIM startup may exceed two seconds. Keep a bound
+    // but do not mistake the query's startup deadline for an absent process.
+    let budget = Duration::from_secs(if cfg!(windows) { 10 } else { 2 });
+    let deadline = Instant::now() + budget;
     loop {
-        if let Some(status) = child.try_wait().ok()? {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            let output = child
+                .wait_with_output()
+                .map_err(|error| error.to_string())?;
             if !status.success() {
-                return None;
+                return Err(format!(
+                    "exit {status}: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
             }
-            let output = child.wait_with_output().ok()?;
-            return Some(
-                String::from_utf8(output.stdout)
-                    .ok()?
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            );
+            return Ok(String::from_utf8(output.stdout)
+                .map_err(|error| error.to_string())?
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "));
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return None;
+            return Err(format!(
+                "process query timed out after {} ms",
+                budget.as_millis()
+            ));
         }
         std::thread::sleep(Duration::from_millis(5));
     }
 }
 
 pub fn identity(pid: u32) -> Option<Value> {
+    #[cfg(test)]
+    if IDENTITY_UNAVAILABLE.with(|unavailable| unavailable.get()) {
+        return None;
+    }
+    #[cfg(windows)]
+    if pid == std::process::id() {
+        // Serialize the first CIM query; concurrent callers must not launch a
+        // cold PowerShell process each. Cache only a successful immutable cookie.
+        let mut own = OWN_IDENTITY.lock().ok()?;
+        if own.is_none() {
+            *own = probe_identity(pid);
+        }
+        return own.clone();
+    }
+    probe_identity(pid)
+}
+
+#[cfg(windows)]
+fn windows_script(pid: u32) -> String {
+    format!("$process = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop; if ($null -eq $process) {{ exit 3 }}; $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().Ticks; $started = $process.CreationDate.ToUniversalTime().Ticks; [Console]::Out.Write(\"$boot $started\")")
+}
+
+fn probe_identity(pid: u32) -> Option<Value> {
     #[cfg(target_os = "linux")]
     {
         let boot = fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
@@ -83,15 +122,16 @@ pub fn identity(pid: u32) -> Option<Value> {
     }
     #[cfg(target_os = "macos")]
     {
-        let boot = command("/usr/sbin/sysctl", &["-n", "kern.bootsessionuuid"])?;
-        let start = command("/bin/ps", &["-o", "lstart=", "-p", &pid.to_string()])?;
+        let boot = command("/usr/sbin/sysctl", &["-n", "kern.bootsessionuuid"]).ok()?;
+        let start = command("/bin/ps", &["-o", "lstart=", "-p", &pid.to_string()]).ok()?;
         if boot.is_empty() || start.is_empty() {
             return None;
         }
         let seconds = command(
             "/bin/date",
             &["-j", "-u", "-f", "%a %b %e %T %Y", &start, "+%s"],
-        )?;
+        )
+        .ok()?;
         if seconds.parse::<u64>().ok()? == 0 {
             return None;
         }
@@ -101,12 +141,16 @@ pub fn identity(pid: u32) -> Option<Value> {
     }
     #[cfg(windows)]
     {
-        let script = format!("$process = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop; if ($null -eq $process) {{ exit 3 }}; $boot = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().Ticks; $started = $process.CreationDate.ToUniversalTime().Ticks; [Console]::Out.Write(\"$boot $started\")");
+        let script = windows_script(pid);
         let result = command(
             "powershell.exe",
             &["-NoProfile", "-NonInteractive", "-Command", &script],
-        )?;
+        )
+        .ok()?;
         let (boot, start) = result.split_once(' ')?;
+        if boot.parse::<u64>().ok()? == 0 || start.parse::<u64>().ok()? == 0 {
+            return None;
+        }
         return Some(json!({"version":1,"platform":"win32","bootId":boot,"startId":start}));
     }
     #[allow(unreachable_code)]
@@ -127,9 +171,12 @@ fn absent(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
+        if pid == std::process::id() {
+            return false;
+        }
         // A successful empty query proves absence; command failures do not.
         return command("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command",
-            &format!("$p = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop; if ($null -eq $p) {{ [Console]::Out.Write('absent') }}")]).as_deref() == Some("absent");
+            &format!("$p = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop; if ($null -eq $p) {{ [Console]::Out.Write('absent') }}")]).ok().as_deref() == Some("absent");
     }
     #[allow(unreachable_code)]
     false
@@ -205,4 +252,30 @@ pub fn expire_observation(path: &Path) {
             }
         }
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_cim_probe_reports_live_owner_and_elapsed_time() {
+    let started = Instant::now();
+    let script = windows_script(std::process::id());
+    let result = command(
+        "powershell.exe",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    );
+    println!(
+        "Windows CIM self probe: elapsedMs={}, outcome={}",
+        started.elapsed().as_millis(),
+        match &result {
+            Ok(_) => "live owner".into(),
+            Err(error) => error.clone(),
+        }
+    );
+    let output = result.expect("the running caller must be queryable with its normal permissions");
+    let (boot, start) = output.split_once(' ').unwrap();
+    assert!(boot.parse::<u64>().unwrap() > 0);
+    assert!(start.parse::<u64>().unwrap() > 0);
+    let cookie = identity(std::process::id()).unwrap();
+    assert_eq!(cookie["bootId"], boot);
+    assert_eq!(cookie["startId"], start);
 }
