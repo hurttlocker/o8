@@ -18,8 +18,10 @@ import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
-import { EFFORT_CHOICE_LIST } from '@/lib/orchestrator/effort-pin';
+import { EFFORT_CHOICE_LIST, resolveEffortPin } from '@/lib/orchestrator/effort-pin';
 import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
+import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,6 +94,19 @@ export async function POST(request: NextRequest) {
   }
 
   const launchRequest = canonicalLaunchRequest(payload, runtimeName, clientMutationId);
+  // A concrete pin must survive the adapter's mapping. Validate before the
+  // receipt binding so a rejected selection can be corrected with the same ID.
+  if (isOrchestratorRuntime(runtimeName) && launchRequest.effort && launchRequest.effort !== 'adaptive') {
+    const effortPin = resolveEffortPin({
+      requestedEffort: launchRequest.effort,
+      runtime: runtimeName,
+      model: launchRequest.model
+        ?? (runtimeName === 'codex' ? resolveDefaultDispatchModelSync() || null : null),
+    });
+    if (!effortPin.ok) {
+      return NextResponse.json({ error: effortPin.message, code: effortPin.code }, { status: 400 });
+    }
+  }
   try { assertSingleAttemptLaunch({ ...launchRequest, executionCarrier: payload.executionCarrier }, launchRequest.workMode); }
   catch { return NextResponse.json({ error: 'Single-attempt workers require exact native runtime, model, effort and read-only pins.' }, { status: 400 }); }
   const canonicalBody = JSON.stringify(launchRequest);
