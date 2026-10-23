@@ -1,10 +1,12 @@
 /** All application child processes cross this environment and artifact boundary. */
 import * as processApi from 'node:child_process';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { assertChildArguments, childEnvironmentContext, refreshChildEnvironment, stampChildPolicy } from './spawn-environment';
 import { credentialPolicyFingerprint } from './credential-policy';
 import { withProviderStoreLock } from './store-lock';
 import { assertLegacyRuntimeConfigSelection } from './legacy-runtime-config';
+import { recordRuntimeProfileChild } from './runtime-profile-processes';
 export type * from 'node:child_process';
 
 /** Keychain bootstrap cannot read the provider store it unlocks. Inherit nothing. */
@@ -29,11 +31,11 @@ function invoke(name: Operation, supplied: unknown[], asPromise = false): unknow
     options.env = env;
     const operation = asPromise ? (processApi[name] as unknown as { [promisify.custom]: (...values: unknown[]) => unknown })[promisify.custom] : processApi[name];
     return Reflect.apply(operation, processApi, args);
-  }, !options.shell && name !== 'exec' && name !== 'execSync');
+  }, !options.shell && name !== 'exec' && name !== 'execSync', options.cwd instanceof URL ? fileURLToPath(options.cwd) : options.cwd as string | undefined);
 }
 
 /** Node and native PTY creation share the same synchronous policy boundary. */
-export function withChildEnvironment<T>(input: Record<string, string | undefined> | undefined, args: readonly string[], create: (env: Record<string, string>) => T, allowDeferredMcp = false): T {
+export function withChildEnvironment<T>(input: Record<string, string | undefined> | undefined, args: readonly string[], create: (env: Record<string, string>) => T, allowDeferredMcp = false, cwd?: string): T {
   const context = childEnvironmentContext(input);
   const launch = () => {
     if (context?.runtimeId && context.policy !== credentialPolicyFingerprint(context.runtimeId)) {
@@ -41,9 +43,11 @@ export function withChildEnvironment<T>(input: Record<string, string | undefined
     }
     const env = refreshChildEnvironment(input);
     assertChildArguments(args, input, env, allowDeferredMcp);
-    if (context?.runtimeId || context?.runtimeLaunch) assertLegacyRuntimeConfigSelection(context.runtimeId, env, args);
+    const profiles = context?.runtimeId || context?.runtimeLaunch ? assertLegacyRuntimeConfigSelection(context.runtimeId, env, args, cwd) : [];
     stampChildPolicy(env);
-    return create(env);
+    const result = create(env);
+    recordRuntimeProfileChild(result, context?.runtimeId, profiles, env);
+    return result;
   };
   return withProviderStoreLock(launch);
 }

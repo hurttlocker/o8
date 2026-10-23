@@ -33,17 +33,18 @@ it('seeds a new subscription profile with OAuth and service auth without changin
   expect(readFileSync(join(source, auth), 'utf8')).toBe(before);
   expect(readFileSync(join(owned, auth), 'utf8')).not.toContain('fixture-saved-key');
 });
-it('leaves an earlier profile unchanged and refuses reuse instead of reconciling it', () => {
+it('uses an earlier operator profile unchanged instead of reconciling it', () => {
   prepareOpenclawProfile(34123);
   const file = join(owned, auth), raw = '{"OPENAI_API_KEY":"fixture-older-child-key"}';
   writeFileSync(file, raw);
-  expect(() => prepareOpenclawProfile(34123)).toThrow(/#4340/);
+  expect(() => prepareOpenclawProfile(34123)).not.toThrow();
   expect(readFileSync(file, 'utf8')).toBe(raw);
 });
-it('refuses provider Authorization headers before copying instead of rewriting the operator config', () => {
+it('omits provider Authorization headers from a new copy without rewriting the operator config', () => {
   const file = join(source, 'openclaw.json'), config = JSON.parse(readFileSync(file, 'utf8'));
   config.models = { providers: { openai: { headers: { Authorization: 'Bearer fixture-source-key' } } } };
   const raw = JSON.stringify(config); writeFileSync(file, raw);
-  expect(() => prepareOpenclawProfile(34123)).toThrow(/#4340/);
+  prepareOpenclawProfile(34123);
+  expect(readFileSync(join(owned, 'openclaw.json'), 'utf8')).not.toContain('fixture-source-key');
   expect(readFileSync(file, 'utf8')).toBe(raw);
 });

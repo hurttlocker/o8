@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync as rawExec } from 'node:child_process';
@@ -34,6 +34,10 @@ it('unidentified ACP launch does not receive a saved key from a prepared owned H
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: saved }));
   writeFileSync(join(home, 'config.yaml'), '');
+  const { encryptValueSync } = await import('@/lib/db/master-key');
+  const file = join(home, 'auth.json');
+  const encrypted = encryptValueSync(JSON.stringify({ path: realpathSync(file), runtime: 'hermes', owner: 'o8', contents: '{}' }));
+  writeFileSync(join(s.dir, 'owned-credential-artifacts.json'), JSON.stringify([{ path: realpathSync(file), runtime: 'hermes', owner: 'o8', replacement: `enc:${encrypted.iv}:${encrypted.ciphertext}` }]));
   const peer = join(s.home, 'acp-peer.cjs');
   writeFileSync(peer, `const fs=require('node:fs'),p=require('node:path');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:m.method==='initialize'?{protocolVersion:1}:m.method==='session/new'?{sessionId:'review',configOptions:[{id:'model',type:'select',currentValue:String(JSON.parse(fs.readFileSync(p.join(process.env.HERMES_HOME,'auth.json'),'utf8')).OPENAI_API_KEY!==undefined),options:[]}]}:{}})+'\\n')});`.replaceAll("'\\\\n'", "'\\n'"));
   expect(() => new AcpClient({ command: process.execPath, args: [peer], env: { HERMES_HOME: home } } as never)).toThrow(/#4340/);

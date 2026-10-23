@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -49,8 +49,8 @@ async function legacyHermesFile() {
   mkdirSync(join(home, '.hermes'), { recursive: true });
   writeFileSync(file, JSON.stringify({ OPENAI_API_KEY: key }));
   const { encryptValueSync } = await import('@/lib/db/master-key');
-  const encrypted = encryptValueSync(JSON.stringify({ path: file, runtime: 'hermes', owner: 'o8', contents: '{}' }));
-  writeFileSync(join(state.data, 'owned-credential-artifacts.json'), JSON.stringify([{ path: file, runtime: 'hermes', owner: 'o8', replacement: `enc:${encrypted.iv}:${encrypted.ciphertext}` }]));
+  const encrypted = encryptValueSync(JSON.stringify({ path: realpathSync(file), runtime: 'hermes', owner: 'o8', contents: '{}' }));
+  writeFileSync(join(state.data, 'owned-credential-artifacts.json'), JSON.stringify([{ path: realpathSync(file), runtime: 'hermes', owner: 'o8', replacement: `enc:${encrypted.iv}:${encrypted.ciphertext}` }]));
   return { home, file };
 }
 
@@ -92,25 +92,25 @@ it('leaves earlier o8 files untouched on disable/removal and warns only once per
   expect(notices.flat().join(' ')).not.toContain(key);
 });
 
-it('Hermes preparation refuses a saved key before copying and preserves the operator source', async () => {
+it('Hermes preparation omits a saved key from its new copy and preserves the operator source', async () => {
   const source = join(state.home, '.hermes'); mkdirSync(source);
   const raw = `model:\n  provider: openai\n  api_key: ${key}\n`;
   writeFileSync(join(source, 'config.yaml'), raw);
   const { prepareHermesWorkerHome } = await import('@/lib/hermes/worker-profile');
   const session = join(state.data, 'session'); mkdirSync(session);
-  expect(() => prepareHermesWorkerHome(session)).toThrow(/#4340/);
+  prepareHermesWorkerHome(session);
   expect(readFileSync(join(source, 'config.yaml'), 'utf8')).toBe(raw);
-  expect(existsSync(join(session, 'hermes-home', 'config.yaml'))).toBe(false);
+  expect(readFileSync(join(session, 'hermes-home', 'config.yaml'), 'utf8')).not.toContain(key);
 });
 
-it('OpenClaw preparation refuses a saved key before profile creation and preserves the operator source', async () => {
+it('OpenClaw preparation omits a saved key from its new profile and preserves the operator source', async () => {
   const source = join(state.home, '.openclaw'); mkdirSync(source);
   const raw = JSON.stringify({ agents: { list: [{ id: 'main' }] }, models: { providers: { openai: { apiKey: key } } }, mcp: { servers: { o8: {} } } });
   writeFileSync(join(source, 'openclaw.json'), raw);
   const { prepareOpenclawProfile } = await import('@/lib/lane/orchestrator-backends/openclaw-profile');
-  expect(() => prepareOpenclawProfile(34123)).toThrow(/#4340/);
+  prepareOpenclawProfile(34123);
   expect(readFileSync(join(source, 'openclaw.json'), 'utf8')).toBe(raw);
-  expect(existsSync(join(state.home, '.openclaw-o8', 'openclaw.json'))).toBe(false);
+  expect(readFileSync(join(state.home, '.openclaw-o8', 'openclaw.json'), 'utf8')).not.toContain(key);
 });
 
 it.each(['relative', 'symlink'])('refuses a %s alias to an earlier Hermes profile through the actual child boundary', async alias => {
@@ -121,7 +121,7 @@ it.each(['relative', 'symlink'])('refuses a %s alias to an earlier Hermes profil
   const { execFileSync } = await import('@/lib/providers/child-process');
   expect(() => execFileSync(process.execPath, ['-e', 'process.stdout.write("started")'], { env: childEnvironment({ runtimeId: 'acp', env: { HERMES_HOME: alias === 'relative' ? relative(process.cwd(), selected) : selected } }) })).toThrow(/#4340/);
 });
-it('refuses a freshly seeded Hermes profile after an older writer replaces its auth file', async () => {
+it('permits operator-auth changes to an unregistered freshly seeded Hermes profile without rewriting them', async () => {
   const source = join(state.home, '.hermes'); mkdirSync(source);
   writeFileSync(join(source, 'config.yaml'), 'model: {provider: openai}');
   const { prepareHermesWorkerHome } = await import('@/lib/hermes/worker-profile');
@@ -129,7 +129,7 @@ it('refuses a freshly seeded Hermes profile after an older writer replaces its a
   const file = join(hermesHome, 'auth.json'); writeFileSync(file, JSON.stringify({ OPENAI_API_KEY: key }));
   const { childEnvironment } = await import('@/lib/providers/spawn-environment');
   const { execFileSync } = await import('@/lib/providers/child-process');
-  expect(() => execFileSync(process.execPath, ['-e', 'process.stdout.write("started")'], { env: childEnvironment({ runtimeId: 'hermes', env: { HERMES_HOME: hermesHome } }) })).toThrow(/#4340/);
+  expect(execFileSync(process.execPath, ['-e', 'process.stdout.write("started")'], { encoding: 'utf8', env: childEnvironment({ runtimeId: 'hermes', env: { HERMES_HOME: hermesHome } }) })).toBe('started');
   expect(readFileSync(file, 'utf8')).toContain(key);
 });
 
@@ -143,13 +143,13 @@ it.each(['hermes', 'openclaw', 'acp'])('%s ignores a stale API billing record th
   });
   expect(output).toBe('false');
 });
-it('refuses a generic ACP launch selecting an unregistered legacy Claude profile through a symlink', async () => {
+it('permits a generic ACP launch selecting an unregistered operator Claude profile through a symlink', async () => {
   const home = join(state.data, 'owned-claude-code', 'session', 'config'); mkdirSync(home, { recursive: true });
   const file = join(home, 'settings.json'); writeFileSync(file, JSON.stringify({ env: { OPENAI_API_KEY: key } }));
   const alias = join(state.home, 'selected-profile'); symlinkSync(home, alias);
   const { childEnvironment } = await import('@/lib/providers/spawn-environment');
   const { execFileSync } = await import('@/lib/providers/child-process');
-  expect(() => execFileSync(process.execPath, ['-e', 'process.stdout.write("started")'], { env: childEnvironment({ runtimeId: 'acp', env: { CLAUDE_CONFIG_DIR: alias } }) })).toThrow(/#4340/);
+  expect(execFileSync(process.execPath, ['-e', 'process.stdout.write("started")'], { encoding: 'utf8', env: childEnvironment({ runtimeId: 'acp', env: { CLAUDE_CONFIG_DIR: alias } }) })).toBe('started');
   expect(readFileSync(file, 'utf8')).toContain(key);
 });
 

@@ -51,7 +51,7 @@ export function createInlineTerminalHost(ptyModule: InlinePtyModule): TerminalHo
           rows: spec.rows,
           cwd: spec.cwd,
           env,
-        }));
+        }), false, spec.cwd);
         try { lease.started(p.pid); } catch (error) {
           if (error instanceof WorkAdmissionExpiredError) {
             p.kill('SIGKILL');

@@ -119,22 +119,16 @@ it.each(cases.flatMap(([runtime, mode]) => ['enabled', 'disable', 'remove'].map(
     if (action !== 'enabled') await changeProvider(provider, action === 'disable' ? { enabled: false } : { key: null });
   }
   const result = await modules[runtime].launch({ cwd: repo, prompt: 'fixture', runtimeConfig: { museConfigRoot: join(state.dir, 'muse-config'), museDataRoot: join(state.dir, 'muse-data') } } as never);
-  if (runtime === 'hermes') {
-    expect(result).toMatchObject({ ok: false });
-    expect(JSON.stringify(result)).toContain('#4340');
-    expect(state.envs).toEqual([]);
-    return;
-  }
   expect(result).toMatchObject({ ok: true });
   expect(state.envs.length).toBeGreaterThan(0);
   for (const env of state.envs) {
     for (const [index, key] of keys.entries()) {
-      const enabled = runtime !== 'codex' && action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
+      const enabled = !['codex', 'hermes'].includes(runtime) && action === 'enabled' && mode !== 'sdk' && !(runtime === 'muse' && key === 'OPENROUTER_API_KEY');
       expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(enabled ? `fixture-saved-${providers[index]}` : null);
     }
     for (const key of aliases) {
       const provider = key === 'CODEX_API_KEY' ? 'openai' : key === 'ANTHROPIC_AUTH_TOKEN' ? 'anthropic' : 'gemini';
-      expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(runtime !== 'codex' && action === 'enabled' && mode !== 'sdk' ? `fixture-saved-${provider}` : null);
+      expect(env[key] || null, `${runtime} ${mode} ${key}`).toBe(!['codex', 'hermes'].includes(runtime) && action === 'enabled' && mode !== 'sdk' ? `fixture-saved-${provider}` : null);
     }
     if (mode !== 'sdk') { expect(env.XAI_API_KEY).toBe('fixture-unmanaged-xai'); expect(env.NOUS_API_KEY).toBe('fixture-unmanaged-nous'); }
   }

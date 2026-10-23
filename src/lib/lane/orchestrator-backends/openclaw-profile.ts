@@ -4,8 +4,8 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
-import { assertRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
-import { assertNewRuntimeProfile } from '@/lib/providers/legacy-runtime-config';
+import { sanitizeRuntimeConfigText, copyRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { assertRuntimeProfilesAvailable } from '@/lib/providers/legacy-runtime-config';
 export const OPENCLAW_PROFILE = 'o8';
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 export const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
@@ -132,10 +132,11 @@ export function buildGovernedO8Profile(source: Record<string, unknown>, o8Entry:
  * the npm/plugins runtime dirs are symlink-borrowed, so the isolated profile
  * can authenticate and load the codex harness.
  *
- * Existing profiles are left untouched and deferred to #4340.
+ * Existing profiles are used unchanged. File-based API billing belongs to #4340.
  */
 export function prepareOpenclawProfile(gatewayPort: number): void {
-  assertNewRuntimeProfile(OPENCLAW_O8_HOME);
+  assertRuntimeProfilesAvailable([OPENCLAW_O8_HOME]);
+  if (existsSync(OPENCLAW_O8_CONFIG)) return;
   assertOwnedDirectory(OPENCLAW_O8_HOME);
   assertOwnedFile(OPENCLAW_O8_CONFIG);
   if (!existsSync(OPENCLAW_SOURCE_CONFIG)) {
@@ -145,7 +146,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     );
   }
 
-  const source = JSON.parse(assertRuntimeConfigText(OPENCLAW_SOURCE_CONFIG, readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8'), 'openclaw')) as Record<string, unknown>;
+  const source = JSON.parse(sanitizeRuntimeConfigText(OPENCLAW_SOURCE_CONFIG, readFileSync(OPENCLAW_SOURCE_CONFIG, 'utf8'), 'openclaw')) as Record<string, unknown>;
   mkdirSync(OPENCLAW_O8_HOME, { recursive: true });
   // The plugin runtime (incl. the codex agent-runtime) is symlink-borrowed —
   // ensured every call (cheap), even when the config itself is up to date.
@@ -182,7 +183,7 @@ export function prepareOpenclawProfile(gatewayPort: number): void {
     toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8, gatewayPort,
   );
 
-  writeFileSync(OPENCLAW_O8_CONFIG, assertRuntimeConfigText(OPENCLAW_O8_CONFIG, JSON.stringify(o8Config), 'openclaw'), { flag: 'wx', mode: 0o600 });
+  writeFileSync(OPENCLAW_O8_CONFIG, sanitizeRuntimeConfigText(OPENCLAW_O8_CONFIG, JSON.stringify(o8Config), 'openclaw'), { flag: 'wx', mode: 0o600 });
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
   // unrecognized keys inside its own config).
   mkdirSync(getDataDir(), { recursive: true });

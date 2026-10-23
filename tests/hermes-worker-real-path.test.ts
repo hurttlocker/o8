@@ -3,7 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
+  readFileSync, realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -23,6 +23,21 @@ const executedModelLog = path.join(root, 'executed-models.log');
 const fixture = path.join(process.cwd(), 'tests', 'fixtures', 'hermes-acp-runtime.mjs');
 const wrapper = path.join(root, 'hermes');
 const previousHome = process.env.HOME;
+
+async function waitForAssistant(
+  read: () => Promise<Array<{ role: string; text: string }>>,
+  count: number,
+  settled: () => Promise<boolean>,
+): Promise<Array<{ role: string; text: string }>> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const transcript = await read();
+    const answers = transcript.filter((entry) => entry.role === 'assistant');
+    if (answers.length >= count && answers.at(-1)?.text === `hermes fixture response ${count}` && await settled()) return transcript;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${count} Hermes assistant messages.`);
+}
 
 beforeAll(() => {
   mkdirSync(workspace, { recursive: true });
@@ -62,20 +77,92 @@ afterAll(() => {
 });
 
 describe('Hermes worker production runtime seam', () => {
-  it('refuses file-dependent subscription launch and leaves operator config untouched until #4340', async () => {
+  it('isolates Hermes state, preserves HOME, runs in the packet cwd, resumes on ACP, and normalizes output', async () => {
     const { hermesRuntime } = await import('@/lib/runtimes/hermes');
-    const file = path.join(userHome, '.hermes', 'config.yaml');
-    const before = readFileSync(file, 'utf8');
-    const launched = await hermesRuntime.launch({ cwd: workspace, prompt: 'must not execute', packetId: 'packet-fixture', model: 'fixture/model' });
-    expect(launched).toMatchObject({ ok: false, sideEffect: 'none' });
-    expect(launched.note).toContain('#4340');
-    expect(readFileSync(file, 'utf8')).toBe(before);
-    expect(existsSync(pidLog)).toBe(false);
+
+    const launched = await hermesRuntime.launch({
+      cwd: workspace,
+      prompt: 'first turn',
+      clientMutationId: 'hermes-real-path-1',
+      packetId: 'packet-fixture',
+      laneId: 'lane-fixture',
+      model: 'fixture/model',
+    });
+    expect(launched).toMatchObject({ ok: true });
+    expect(launched.sessionKey).toMatch(/^hermes-owned:/);
+    const sessionKey = launched.sessionKey!;
+    const waitForTurn = (count: number) => waitForAssistant(
+      () => hermesRuntime.readTranscript(sessionKey), count,
+      async () => (await hermesRuntime.discoverSessions()).some((session) => session.sessionKey === sessionKey && session.lifecycle?.lastOutcome === 'finished'),
+    );
+
+    await waitForTurn(1);
+    await expect(hermesRuntime.resume(sessionKey, 'second turn')).resolves.toMatchObject({ ok: true });
+    const transcript = await waitForTurn(2);
+
+    expect(transcript.filter((entry) => entry.role === 'user').map((entry) => entry.text)).toEqual([
+      'first turn',
+      'second turn',
+    ]);
+    expect(transcript.filter((entry) => entry.role === 'assistant').map((entry) => entry.text)).toEqual([
+      'hermes fixture response 1',
+      'hermes fixture response 2',
+    ]);
+
+    const firstPids = readFileSync(pidLog, 'utf8').trim().split('\n');
+    expect(firstPids).toHaveLength(2);
+    expect(new Set(firstPids).size).toBe(1);
+    expect(readFileSync(permissionLog, 'utf8').trim().split('\n')).toEqual([
+      'allow-once',
+      'allow-once',
+    ]);
+
+    const firstLaunch = JSON.parse(readFileSync(launchLog, 'utf8').trim().split('\n')[0]) as {
+      cwd: string;
+      home: string;
+      hermesHome: string;
+      argv: string[];
+    };
+    expect(realpathSync(firstLaunch.cwd)).toBe(realpathSync(workspace));
+    expect(firstLaunch.argv).toEqual(['acp', '--accept-hooks']);
+    expect(firstLaunch.home).toBe(userHome);
+    expect(firstLaunch.hermesHome.startsWith(sessionsRoot)).toBe(true);
+    expect(existsSync(path.join(firstLaunch.hermesHome, 'config.yaml'))).toBe(true);
+    expect(existsSync(path.join(firstLaunch.hermesHome, '.env'))).toBe(true);
+    expect(readFileSync(modelLog, 'utf8').trim().split('\n')).toEqual(['fixture/model']);
+    expect(readFileSync(executedModelLog, 'utf8').trim().split('\n')).toEqual([
+      'fixture/model', 'fixture/model',
+    ]);
+
+    await expect(hermesRuntime.interrupt(sessionKey)).resolves.toMatchObject({ ok: true });
+    await expect(hermesRuntime.resume(sessionKey, 'third turn')).resolves.toMatchObject({ ok: true });
+    const resumedTranscript = await waitForTurn(3);
+    expect(resumedTranscript.filter((entry) => entry.role === 'assistant').map((entry) => entry.text)).toEqual([
+      'hermes fixture response 1', 'hermes fixture response 2', 'hermes fixture response 3',
+    ]);
+    expect(resumedTranscript.some((entry) => entry.text.includes('Replayed history'))).toBe(false);
+    expect(readFileSync(executedModelLog, 'utf8').trim().split('\n')).toEqual([
+      'fixture/model', 'fixture/model', 'fixture/model',
+    ]);
+
+    const pids = readFileSync(pidLog, 'utf8').trim().split('\n');
+    expect(pids).toHaveLength(3);
+    expect(pids[0]).toBe(pids[1]);
+    expect(pids[2]).not.toBe(pids[0]);
+    expect(readFileSync(modelLog, 'utf8').trim().split('\n')).toEqual([
+      'fixture/model',
+      'fixture/model',
+    ]);
+
+    await expect(hermesRuntime.discoverSessions()).resolves.toEqual([
+      expect.objectContaining({ sessionKey, runtimeId: 'hermes', ownership: 'owned' }),
+    ]);
+    await expect(hermesRuntime.interrupt(sessionKey)).resolves.toMatchObject({ ok: true });
   });
 
   it.each([
-    ['fixture/unavailable', '#4340'],
-    ['fixture/unconfirmed', '#4340'],
+    ['fixture/unavailable', 'model unavailable'],
+    ['fixture/unconfirmed', 'did not confirm a session'],
   ])('does not submit a prompt when model %s is not confirmed', async (model, reason) => {
     const { hermesRuntime } = await import('@/lib/runtimes/hermes');
     const previousPrompts = existsSync(pidLog) ? readFileSync(pidLog, 'utf8') : '';

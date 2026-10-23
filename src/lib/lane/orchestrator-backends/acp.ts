@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { resolveLocalAcpLaunch, localAcpProcessLaunch, acpLaunchFingerprint } from '@/lib/acp/local-connection';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
@@ -430,7 +431,7 @@ export const hermesBackend: OrchestratorBackend = makeAcpBackend({
           + 'would break the orchestrator≠worker guarantee (#1075).',
       );
     }
-    return { command: bin, args: ['acp', '--accept-hooks'], env: { HOME: governed.home } };
+    return { command: bin, args: ['acp', '--accept-hooks'], env: { HOME: governed.home, HERMES_HOME: join(governed.home, '.hermes') } };
   },
 });
 

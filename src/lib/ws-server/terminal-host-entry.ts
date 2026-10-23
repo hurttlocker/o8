@@ -41,7 +41,7 @@ function spawnPty(spec: PtySpawnSpec): ChildPty {
     rows: spec.rows,
     cwd: spec.cwd,
     env,
-  }));
+  }), false, spec.cwd);
 }
 
 const child = createTerminalHostChild({

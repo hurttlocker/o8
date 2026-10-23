@@ -73,10 +73,15 @@ export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: 
 }
 
 export function copyRuntimeConfigFile(source: string, destination: string, runtimeId: string): void {
+  if (existsSync(destination)) return;
   const raw = readFileSync(source);
-  assertRuntimeConfigText(source, raw.toString('utf8'), runtimeId);
-  // Baseline seeding may create a new file, never rewrite an existing profile.
-  if (!existsSync(destination)) writeFileSync(destination, raw, { flag: 'wx', mode: 0o600 });
+  const text = raw.toString('utf8');
+  // Remove provider credentials before the first destination write. Opaque OAuth
+  // blobs retain their bytes, provided they contain no known saved key.
+  const contents = /\.(?:json|toml|ya?ml)$/.test(source) || source.endsWith('.env')
+    ? sanitizeRuntimeConfigText(source, text, runtimeId)
+    : (assertRuntimeConfigText(source, text, runtimeId), raw);
+  writeFileSync(destination, contents, { flag: 'wx', mode: 0o600 });
 }
 
 const meaningful = (value: unknown): unknown => {
