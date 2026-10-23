@@ -6,7 +6,7 @@ import type { OwnedSessionRecord } from '@/lib/runtimes/shared/owned-session/typ
 const state = vi.hoisted(() => ({ dir: '' }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 state.dir = mkdtempSync(join(tmpdir(), 'o8-spawn-authority-'));
-const { providerSpawnEnvironment } = await import('./spawn-environment');
+const { providerSpawnEnvironment, refreshChildEnvironment } = await import('./spawn-environment');
 const { saveRuntimeBillingMode } = await import('./runtime-billing');
 const { mutateProviderKey } = await import('./key-store');
 const { ownedSpawnEnvironment } = await import('@/lib/runtimes/shared/owned-session/restricted-spawn-env');
@@ -38,10 +38,25 @@ it.each(['openrouter', 'codex-subscription'])('preserves explicit %s gateway tra
     ANTHROPIC_BASE_URL: 'http://127.0.0.1/fixture', ANTHROPIC_AUTH_TOKEN: 'fixture-gateway-token', ANTHROPIC_API_KEY: '',
   });
   expect(env.ANTHROPIC_AUTH_TOKEN).toBe('fixture-gateway-token'); expect(env.ANTHROPIC_API_KEY).toBe('');
+  expect(refreshChildEnvironment(env).ANTHROPIC_AUTH_TOKEN).toBe('fixture-gateway-token');
+  expect(refreshChildEnvironment(env).ANTHROPIC_API_KEY).toBe('');
 });
 
 it.each(['', 'fixture-ambient-xai'])('preserves an explicit unmanaged key through the resolver when ambient is %s', ambient => {
   vi.stubEnv('XAI_API_KEY', ambient);
   saveRuntimeBillingMode('hermes', 'api');
   expect(providerSpawnEnvironment({ XAI_API_KEY: 'fixture-explicit-xai' }, { runtimeId: 'hermes' }).XAI_API_KEY).toBe('fixture-explicit-xai');
+});
+
+it.each(['enabled', 'disabled', 'removed'])('preserves a freshly authorized OpenRouter carrier when Anthropic is %s', state => {
+  mutateProviderKey('OPENROUTER_API_KEY', { key: 'fixture-router' });
+  mutateProviderKey('ANTHROPIC_API_KEY', { key: 'fixture-anthropic' });
+  if (state === 'disabled') mutateProviderKey('ANTHROPIC_API_KEY', { enabled: false });
+  if (state === 'removed') mutateProviderKey('ANTHROPIC_API_KEY', { key: null });
+  saveRuntimeBillingMode('claude-code', 'api');
+  const env = ownedSpawnEnvironment({ surfaceId: 'claude-code-owned:fixture', runtimeConfig: { modelSource: 'openrouter' } } as unknown as OwnedSessionRecord, {
+    ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', ANTHROPIC_AUTH_TOKEN: 'fixture-router', ANTHROPIC_API_KEY: '',
+  });
+  expect(refreshChildEnvironment(env).ANTHROPIC_AUTH_TOKEN).toBe('fixture-router');
+  expect(refreshChildEnvironment(env).ANTHROPIC_API_KEY).toBe('');
 });

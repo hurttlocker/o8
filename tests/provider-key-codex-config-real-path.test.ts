@@ -36,12 +36,9 @@ it.each(['subscription', 'api', 'disable', 'remove'])('Codex config writer filte
   const copied = parse(readFileSync(join(prepared.codexHome, 'config.toml'), 'utf8')) as {
     model_providers: { openai: typeof provider }; service: unknown;
   };
-  expect(copied.model_providers.openai.http_headers).toEqual(action === 'api'
-    ? { Authorization: 'Bearer fixture-saved-header-key', 'OpenAI-Organization': 'fixture-org' }
-    : { 'OpenAI-Organization': 'fixture-org' });
-  expect(copied.model_providers.openai.env_http_headers).toEqual(action === 'api'
-    ? { Authorization: 'OPENAI_API_KEY', 'OpenAI-Organization': 'ORG_ID' }
-    : { 'OpenAI-Organization': 'ORG_ID' });
+  expect(copied.model_providers.openai.http_headers).toEqual({ 'OpenAI-Organization': 'fixture-org' });
+  expect(copied.model_providers.openai.env_http_headers).toEqual({ Authorization: 'OPENAI_API_KEY', 'OpenAI-Organization': 'ORG_ID' });
+  expect(readFileSync(join(prepared.codexHome, 'config.toml'), 'utf8')).not.toContain('fixture-saved-header-key');
   expect(copied.service).toEqual({ http_headers: { Authorization: 'Bearer fixture-service-token' }, env_http_headers: { Authorization: 'SERVICE_TOKEN' } });
   expect(readFileSync(source, 'utf8')).toContain('fixture-source-key');
 });

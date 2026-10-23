@@ -39,7 +39,7 @@ it('API overlays reconcile removal after a fresh module load without rewriting u
   expect((await billing.POST(request('runtime/billing', { runtimeId: 'openclaw', mode: 'api' }))).status).toBe(200);
   expect((await keys.POST(request('v2/keys', { provider: 'openai', key: 'fixture-saved-key' }))).status).toBe(200);
   prepareOpenclawProfile(34123);
-  expect(readFileSync(join(owned, auth), 'utf8')).toContain('fixture-saved-key');
+  expect(readFileSync(join(owned, auth), 'utf8')).not.toContain('fixture-saved-key');
   mkdirSync(join(owned, 'agents/main/sessions'), { recursive: true });
   const unrelated = join(owned, 'agents/main/sessions/state.json'); writeFileSync(unrelated, '{"apiKey":"fixture-unrelated-state"}');
   expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
@@ -79,9 +79,7 @@ it.each(['subscription', 'api', 'disable', 'remove'])('provider headers honor %s
   if (action === 'remove') expect((await keys.DELETE(request('v2/keys', { provider: 'openai' }, 'DELETE'))).status).toBe(200);
   prepareOpenclawProfile(34123);
   const copied = JSON.parse(readFileSync(join(owned, 'openclaw.json'), 'utf8'));
-  expect(copied.models.providers.openai.headers).toEqual(action === 'api'
-    ? { Authorization: 'Bearer fixture-header-key', 'x-api-key': 'fixture-header-key', 'OpenAI-Organization': 'fixture-org' }
-    : { 'OpenAI-Organization': 'fixture-org' });
+  expect(copied.models.providers.openai.headers).toEqual({ 'OpenAI-Organization': 'fixture-org' });
   expect(copied.service.headers).toEqual(config.service.headers);
   expect(readFileSync(file, 'utf8')).toContain('fixture-source-key');
 });

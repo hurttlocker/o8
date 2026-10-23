@@ -1,7 +1,8 @@
-import { execFile } from 'node:child_process';
+import { execFile } from '../providers/child-process';
 import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { scanSpawnEnvironment } from './spawn-environment-rule';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
@@ -16,7 +17,9 @@ export type RuleId =
   | 'icon-library'
   | 'file-ceiling'
   | 'hardcoded-port'
-  | 'hardcoded-home-path';
+  | 'hardcoded-home-path'
+  | 'child-process-boundary'
+  | 'spawn-environment';
 
 export interface RuleViolation {
   file: string;
@@ -211,6 +214,7 @@ export async function runRuleCheck(cwd: string, baseRef = 'main'): Promise<RuleC
     const changedLines = changedLinesByFile.get(relPath) ?? null;
     const oldLineCount = await getOldLineCount(cwd, baseRef, relPath);
 
+    violations.push(...scanSpawnEnvironment(relPath, content).slice(0, MAX_VIOLATIONS_REPORTED - violations.length));
     scanFileContent(relPath, content, violations, { changedLines, oldLineCount });
   }
 

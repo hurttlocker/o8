@@ -66,7 +66,7 @@ it.each(races)('%s requested %s rejects stale MCP credentials after %s during re
   } finally { resume(); }
   const remaining = copies().some(file => readFileSync(file, 'utf8').includes(secret));
   const result = await pending;
-  expect(containedKey).toBe(true); expect(remaining).toBe(false); expect(state.spawns).toHaveLength(0); expect(result.ok).toBe(false);
+  expect(containedKey).toBe(false); expect(remaining).toBe(false); expect(state.spawns).toHaveLength(0); expect(result.ok).toBe(false);
 }, 30_000);
 it.each(['codex', 'claude-code'])('%s permits current API-mode MCP configuration on the guarded direct spawn', async runtime => {
   await authorize(runtime); vi.stubEnv('O8_CRASH_SURVIVABLE_WORKERS', '0');
@@ -76,7 +76,9 @@ it.each(['codex', 'claude-code'])('%s permits current API-mode MCP configuration
 });
 it('a real API mutation after module restart scrubs previously generated owned MCP files', async () => {
   await authorize('claude-code'); expect((await launch('claude-code')).ok).toBe(true);
-  const paths = copies(); expect(paths.some(file => readFileSync(file, 'utf8').includes(secret))).toBe(true);
+  const paths = copies(); expect(paths.length).toBeGreaterThan(0); expect(paths.some(file => readFileSync(file, 'utf8').includes(secret))).toBe(false);
+  // A legacy writer can still leave plaintext; restarted mutation must purge it.
+  writeFileSync(paths[0], JSON.stringify({ mcpServers: { fixture: { env: { GEMINI_API_KEY: secret } } } }));
   vi.resetModules(); const restarted = await import('@/app/api/v2/keys/route');
   expect((await restarted.DELETE(request('v2/keys', { provider: 'gemini' }, 'DELETE'))).status).toBe(200);
   expect(copies().some(file => readFileSync(file, 'utf8').includes(secret))).toBe(false);

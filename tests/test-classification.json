@@ -831,6 +831,13 @@
       ]
     },
     {
+      "path": "src/lib/providers/embedded-child-policy.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal"
+      ]
+    },
+    {
       "path": "src/lib/runtime/actions-owned-surface.test.ts",
       "reasons": [
         "process-signal"
@@ -933,6 +940,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/sandbox-credential-policy.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
       "reasons": [
         "child-process",
@@ -1023,6 +1036,14 @@
       "reasons": [
         "real-path",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "src/lib/supervisor/rule-check-spawn.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "terminal-host"
       ]
     },
     {
@@ -4221,9 +4242,25 @@
       ]
     },
     {
+      "path": "tests/provider-key-background-consumers-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/provider-key-chat-routes-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/provider-key-child-boundary-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
         "real-path"
       ]
     },
@@ -4254,9 +4291,35 @@
       ]
     },
     {
+      "path": "tests/provider-key-orchestrator-config-race-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/provider-key-owned-artifacts-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/provider-key-runtime-setup-real-path.test.ts",
       "reasons": [
         "child-process",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/provider-launch-policy-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "native-build",
         "real-path"
       ]
     },

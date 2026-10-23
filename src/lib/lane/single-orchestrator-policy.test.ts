@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
+import { spawn as runtimeSpawn } from '@/lib/providers/child-process';
 import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -9,6 +10,8 @@ import { prepareSingleOrchestratorLaunch, singleOrchestratorEnvironment } from '
 
 const tempRoots: string[] = [];
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
+const originalMaster = process.env.O8_MASTER_KEY;
+process.env.O8_MASTER_KEY = Buffer.alloc(32, 107).toString('base64url');
 const originalMediaRoot = process.env.CORTEX_IDE_MEDIA_ROOT;
 const bundledCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
 const bundledCodeModeHost = '/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host';
@@ -29,12 +32,13 @@ async function runPrepared(
   cwd = process.cwd(),
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(prepared.binary, prepared.args, {
+    const child = runtimeSpawn(prepared.binary, prepared.args, {
       cwd, env: prepared.env, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => {
+      try { prepared.sealOnOutput(); } catch (error) { child.kill('SIGTERM'); reject(error); return; }
       stdout += chunk.toString('utf8');
     });
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
@@ -84,7 +88,31 @@ afterEach(() => {
   while (tempRoots.length) rmSync(tempRoots.pop()!, { recursive: true, force: true });
 });
 
+afterAll(() => { if (originalMaster === undefined) delete process.env.O8_MASTER_KEY; else process.env.O8_MASTER_KEY = originalMaster; });
+
 describe('Single orchestrator process boundary', () => {
+  it.skipIf(process.platform !== 'darwin')('API Solo launches the guarded sandbox directly and seals its executable before relaying output', async () => {
+    const repo = tempRoot('o8-single-api-repo-');
+    const data = tempRoot('o8-single-api-data-');
+    process.env.CORTEX_IDE_DATA_DIR = data;
+    const home = join(data, 'codex-runtime'); mkdirSync(home);
+    const binary = join(data, 'fixture-codex');
+    writeFileSync(binary, '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o700 });
+    const { mutateProviderKey } = await import('@/lib/providers/key-store');
+    const { saveRuntimeBillingMode } = await import('@/lib/providers/runtime-billing');
+    mutateProviderKey('OPENAI_API_KEY', { key: 'fixture-solo-api-key' });
+    saveRuntimeBillingMode('codex', 'api');
+    const prepared = await prepareSingleOrchestratorLaunch({ repoPath: repo, codexHome: home, binary, env: process.env,
+      args: ['-c', 'printf "$OPENAI_API_KEY"; sleep 0.2; test ! -x "$O8_TEST_LAUNCH_BINARY"'],
+    });
+    prepared.env.O8_TEST_LAUNCH_BINARY = prepared.launchBinaryPath;
+    try {
+      expect(prepared.binary).toBe(SANDBOX_EXEC_PATH);
+      expect(prepared.sealInParent).toBe(true);
+      expect(await runPrepared(prepared, repo)).toBe('fixture-solo-api-key');
+    } finally { prepared.cleanup(); }
+  });
+
   it('removes inherited control-plane credentials and pins an invalid bearer', () => {
     const env = singleOrchestratorEnvironment({
       ...process.env,
