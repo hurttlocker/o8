@@ -1,5 +1,6 @@
 'use client';
 
+import { recordedWorkerActivity } from '@/components/desktop/workspace-terminal/fixtures/recorded-worker-activity';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { ThemeProvider } from '@/lib/theme/context';
 import { WorkspaceTranscript } from '@/components/desktop/workspace-terminal/WorkspaceTranscript';
@@ -18,7 +19,13 @@ const work = [
   activity('test', 'npx vitest run tests/router.test.ts'),
   { id: 'edit', role: 'tool' as const, text: '', toolCalls: [{ id: 'edit', name: 'Edit', args: { file_path: 'src/router.ts' }, status: 'done' as const, startedAt: at, finishedAt: at + 120_000 }] },
 ];
+const recordedEntries: MobileTranscriptEntry[] = recordedWorkerActivity.map((sample, index) => ({
+  id: `recorded-${index}`, role: 'tool', text: '', toolCalls: [{ ...sample.tool, id: `recorded-${index}`,
+    status: sample.exitCode === 130 ? 'stopped' : sample.exitCode ? 'error' : 'done',
+    result: sample.exitCode ? `Recorded exit code ${sample.exitCode}.` : undefined }],
+}));
 const fixtures: Array<{ id: string; title: string; entries: MobileTranscriptEntry[]; busy?: boolean; narrow?: boolean; handback?: WorkerHandbackData }> = [
+  { id: 'real-data', title: 'Recorded activity: 30 commands and a native edit receipt', entries: [...recordedEntries, prose('recorded-result', 'Sanitized worker history. Command structure and exit status are preserved. The native file-change receipt supplies the patch tool’s file path.')] },
   { id: 'in-flight', title: 'In-flight trace', busy: true, entries: [prose('ask', 'Check how routing reaches the worker.', 'user'), prose('intro', 'I found the routing boundary. I’m checking the tests before changing it.'), ...work.slice(0, 3), activity('live', "/bin/zsh -lc 'npm test'", 'running')] },
   { id: 'collapsed', title: 'Finished and collapsed', entries: [prose('ask', 'Make the routing update.', 'user'), ...work, prose('final', 'The worker now receives the correct route. All focused tests pass.\n\nThe change is limited to `src/router.ts`.')] },
   { id: 'failed', title: 'Failed command', entries: [activity('test-failed', 'npm test', 'error', 'Permission denied: the fixture directory is read-only.'), activity('check', 'git status --short'), prose('final', 'The test could not create its fixture. I preserved the changes and stopped at that boundary.')] },

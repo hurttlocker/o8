@@ -33,19 +33,24 @@ function duration(ms: number) {
 function TraceStep({ step, live }: { step: ActivityStep; live: boolean }) {
   const reduced = useSyncExternalStore(subscribeMotion, motionReduced, serverReduced);
   const running = live && step.status === 'running';
+  const singleName = step.files.length === 1 ? step.files[0].split('/').pop() : null;
+  const files = singleName && [step.label, step.liveLabel].some(label => label.endsWith(` ${singleName}`)) ? [] : step.files;
   return <li data-activity-step={step.status} style={{ position: 'relative', listStyle: 'none', minWidth: 0, paddingLeft: 18, paddingTop: 5, paddingBottom: 5 }}>
     <span aria-label={step.status} style={{ position: 'absolute', left: -3, top: 13, width: 5, height: 5, borderRadius: '50%',
       background: step.status === 'failed' ? 'var(--t-tone-fail)' : running ? 'var(--t-text)' : 'var(--t-text-faint)',
       animation: running && !reduced ? 'o8-text-shimmer 1.9s ease-in-out infinite' : 'none' }} />
-    <div title={step.command} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: mono, fontSize: 11, lineHeight: '18px',
-      color: running ? 'var(--t-text)' : step.status === 'failed' || step.status === 'stopped' ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
-      animation: running && !reduced ? 'o8-text-shimmer 1.9s ease-in-out infinite' : 'none' }}>
-      {running ? step.liveLabel : step.label}
-    </div>
+    <details>
+      <summary data-activity-label title={step.command} style={{ display: 'block', listStyle: 'none', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-sans-system)', fontSize: 12, fontWeight: 300, lineHeight: '18px',
+        color: running ? 'var(--t-text)' : step.status === 'failed' || step.status === 'stopped' ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+        animation: running && !reduced ? 'o8-text-shimmer 1.9s ease-in-out infinite' : 'none' }}>
+        {running ? step.liveLabel : step.label}
+      </summary>
+      <code data-activity-command title={step.command} style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontFamily: mono, fontSize: 11, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.command}</code>
+    </details>
     {step.reason ? <div title={step.reason} style={{ color: 'var(--t-text-faint)', fontSize: 11, lineHeight: 1.45, overflowWrap: 'anywhere' }}>{step.reason}</div> : null}
-    {step.files.length ? <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-      {step.files.slice(0, 4).map(path => <ActivityFileChip key={path} path={path} />)}
-      {step.files.length > 4 ? <span title={step.files.slice(4).join('\n')} style={{ ...chip, background: 'transparent' }}>+{step.files.length - 4} more</span> : null}
+    {files.length ? <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+      {files.slice(0, 4).map(path => <ActivityFileChip key={path} path={path} />)}
+      {files.length > 4 ? <span title={files.slice(4).join('\n')} style={{ ...chip, background: 'transparent' }}>+{files.length - 4} more</span> : null}
     </div> : null}
   </li>;
 }

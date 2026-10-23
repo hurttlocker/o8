@@ -1,4 +1,5 @@
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { activityCommandWords } from './worker-command';
 
 export type ActivityKind = 'read' | 'search' | 'list' | 'edit' | 'command';
 export interface HumanActivity {
@@ -27,11 +28,6 @@ export interface ActivityBlock {
 }
 export type WorkerTranscriptBlock = ActivityBlock | { kind: 'message'; id: string; entry: MobileTranscriptEntry };
 
-function words(text: string): string[] {
-  return (text.match(/"(?:\\.|[^"\\])*"|'[^']*'|[^\s]+/g) ?? [])
-    .map(word => word.replace(/^(['"])([\s\S]*)\1$/, '$2'));
-}
-
 /** Display-only shell parsing. Never execute or interpolate the command. */
 export function stripShellWrapper(raw: string | string[]): string {
   let command = Array.isArray(raw) ? raw.join(' ') : raw.trim();
@@ -57,9 +53,7 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
   if (!command && shell && tool.preview && /^(?:Run(?:ning)?\s)/.test(tool.preview)) {
     command = stripShellWrapper(tool.preview.replace(/^Run(?:ning)?\s+/, ''));
   }
-  const segments = command.split(/\s*(?:&&|;|\|\|)\s*/).filter(part => !/^cd\s/.test(part));
-  const tokens = words(segments.at(-1) ?? command);
-  while (tokens[0] && (/^[A-Za-z_]+=.*/.test(tokens[0]) || /^(env|npx|sudo)$/.test(tokens[0]))) tokens.shift();
+  const tokens = activityCommandWords(shell && typeof raw === 'string' ? raw : command);
   const executable = (tokens[0] ?? name).split('/').pop() ?? name;
   const nativePath = args.file_path ?? args.filePath ?? args.path ?? args.filename ?? args.target_file;
   const paths = typeof nativePath === 'string' ? [nativePath] : [];
@@ -71,6 +65,7 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
     // File-like operands only: flags, search patterns and sed programs are not sources.
     const operands = tokens.slice(1).filter((token, index, all) => {
       if (token.startsWith('-') || /^\d+(?:,\d+)?[a-z]$/.test(token)) return false;
+      if (/^(?:\d*[<>]|\/dev\/)/.test(token) || /[<>]$/.test(all[index - 1] ?? '') || token.includes('..')) return false;
       if (/^(rg|grep)$/.test(executable)) {
         const patternIndex = all.findIndex(value => !value.startsWith('-'));
         if (index === patternIndex || /^(?:-e|--regexp|-g|--glob)$/.test(all[index - 1] ?? '')) return false;
@@ -86,7 +81,7 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
   let liveLabel = `Running ${executable || 'tool'}`;
   if (/^(cat|sed|head|tail|nl|less|read|read_file)$/.test(executable)) {
     kind = 'read'; label = `Read ${object}`; liveLabel = `Reading ${object}`;
-  } else if (/^(rg|grep|find|search|search_code|search_web|grep_search|websearch|web_search)$/.test(executable)) {
+  } else if (executable === 'git' && tokens[1] === 'grep' || /^(rg|grep|find|search|search_code|search_web|grep_search|websearch|web_search)$/.test(executable)) {
     kind = 'search'; label = 'Searched the codebase'; liveLabel = 'Searching the codebase';
     if (/web/.test(executable)) { label = 'Searched the web'; liveLabel = 'Searching the web'; }
   } else if (/^(ls|glob|list|list_files|list_directory)$/.test(executable)) {
@@ -115,7 +110,7 @@ function summarize(steps: ActivityStep[]): string {
     const count = kind === 'read' || kind === 'edit' ? files.size || matching.length : matching.length;
     const noun = kind === 'command' ? 'command' : kind === 'search' ? 'time' : kind === 'list' ? 'directory' : 'file';
     const plural = noun === 'directory' ? 'directories' : `${noun}s`;
-    parts.push(`${verb} ${count} ${count === 1 ? noun : plural}`);
+    parts.push(kind === 'search' && count === 1 ? 'Searched once' : `${verb} ${count} ${count === 1 ? noun : plural}`);
   }
   return parts.join(' · ');
 }

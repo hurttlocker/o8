@@ -53,3 +53,19 @@ describe('runtime-neutral worker transcript', () => {
     expect(html).toContain('+128'); expect(html).toContain('−36'); expect(html).toContain('Open PR');
   });
 });
+
+it('omits a single file chip when the step label already names that file', () => {
+  const [block] = workerTranscriptBlocks([{ id: 'edit', role: 'tool', text: '', toolCalls: [{ name: 'Edit', args: { file_path: 'src/router.ts' }, status: 'done' }] }], true);
+  if (block.kind !== 'activity') throw new Error('Expected activity');
+  const html = renderToStaticMarkup(createElement(WorkerActivityTrace, { block }));
+  expect(html).toContain('Edited router.ts');
+  expect(html).not.toContain('title="src/router.ts"');
+});
+
+it('retains chips for a multi-file step', () => {
+  const [block] = workerTranscriptBlocks([{ id: 'read', role: 'tool', text: '', toolCalls: [{ name: 'exec_command', args: { command: 'cat src/router.ts src/routes.ts' }, status: 'done' }] }], true);
+  if (block.kind !== 'activity') throw new Error('Expected activity');
+  const html = renderToStaticMarkup(createElement(WorkerActivityTrace, { block }));
+  expect(html).toContain('title="src/router.ts"');
+  expect(html).toContain('title="src/routes.ts"');
+});
