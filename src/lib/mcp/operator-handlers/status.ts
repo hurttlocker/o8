@@ -10,7 +10,7 @@ import {
   textResult,
 } from './shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
-import { runtimeConnectionRows } from '@/lib/runtimes/shared/connection-evidence';
+import { readStatusSnapshot } from './status-snapshot';
 
 const LANE_EVENTS_MAX_LONG_POLL_MS = 12_000;
 const LANE_EVENTS_FETCH_MARGIN_MS = 2_500;
@@ -58,13 +58,17 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_status',
     description:
-      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
+      'USE THIS WHEN the user asks "what\'s running", "any approvals waiting", "show me my agents", or about pending agent work. Returns a composite overview: running agents, pending approvals, recent activity, and runtime connection evidence with sources and check times. Includes snapshot capture time and age; revalidates after 5 seconds and waits for refresh at 15 seconds. Pass fresh: true to wait for a refresh explicitly. Call this FIRST before assuming nothing is happening. Example: o8_status() returns all agents. o8_status({sessionKey: "codex-owned:abc123"}) filters to one session.',
     inputSchema: {
       type: 'object',
       properties: {
         sessionKey: {
           type: 'string',
           description: 'Filter to a specific session. Returns all if omitted.',
+        },
+        fresh: {
+          type: 'boolean',
+          description: 'Wait for a coalesced refresh instead of using the bounded snapshot. May take longer.',
         },
       },
     },
@@ -546,10 +550,11 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
 
 export async function handleStatus(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
+    if (args.fresh !== undefined && typeof args.fresh !== 'boolean') {
+      return textResult('fresh must be a boolean', true);
+    }
     const sessionKey = args.sessionKey as string | undefined;
-    const qs = sessionKey ? `?sessionKey=${encodeURIComponent(sessionKey)}` : '';
-    const data = await apiFetch(`/api/operator/status${qs}`) as Record<string, unknown>;
-    const connections = await Promise.resolve(apiFetch('/api/panel/operator-defaults')).catch(() => null);
+    const { data, runtimeConnections, snapshot } = await readStatusSnapshot(sessionKey, args.fresh === true);
 
     const agents = (data.agents ?? []) as Array<Record<string, unknown>>;
     const rawApprovals = data.approvals as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
@@ -578,7 +583,8 @@ export async function handleStatus(args: Record<string, unknown>): Promise<McpTo
     return jsonResult({
       summary,
       data: {
-        runtimeConnections: runtimeConnectionRows(connections),
+        runtimeConnections,
+        snapshot,
         agents,
         approvals: approvalItems,
         approvalCount,
