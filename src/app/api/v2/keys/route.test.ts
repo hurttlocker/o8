@@ -4,28 +4,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 
-const state = vi.hoisted(() => ({ dir: '', denied: false, locked: false, invalidate: vi.fn() }));
+const state = vi.hoisted(() => ({ dir: '', denied: false, invalidate: vi.fn() }));
 vi.mock('@/lib/data-dir-migration', () => ({ getDataDir: () => state.dir }));
 vi.mock('@/lib/panel/auth', () => ({ requirePanelAuth: () => state.denied ? NextResponse.json({ error: 'unauthorized' }, { status: 401 }) : null }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ invalidateRuntimeAuthCache: state.invalidate }));
-vi.mock('@/lib/db/master-key', async (importOriginal) => {
-  const real = await importOriginal<typeof import('@/lib/db/master-key')>();
-  return { ...real,
-    encryptValueSync: (value: string) => { if (state.locked) throw new Error('locked'); return real.encryptValueSync(value); },
-    decryptValueSync: (value: string, iv: string) => state.locked ? null : real.decryptValueSync(value, iv),
-  };
-});
 vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 19).toString('base64url'));
 state.dir = mkdtempSync(join(tmpdir(), 'o8-keys-test-'));
 const routes = await import('./route');
+const { clearMasterKeyCache } = await import('@/lib/db/master-key');
 const request = (method: string, body?: unknown) => new NextRequest('http://localhost/api/v2/keys', { method, ...(body ? { body: JSON.stringify(body) } : {}) });
 beforeEach(() => {
-  vi.stubEnv('OPENROUTER_API_KEY', ''); state.denied = false; state.locked = false;
+  vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 19).toString('base64url')); clearMasterKeyCache();
+  vi.stubEnv('OPENROUTER_API_KEY', ''); state.denied = false;
   rmSync(join(state.dir, 'providers'), { recursive: true, force: true });
   writeFileSync(join(state.dir, '.env.local'), '# preserve\nUNRELATED=value\n');
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
 });
-afterAll(() => { rmSync(state.dir, { recursive: true, force: true }); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterAll(() => { rmSync(state.dir, { recursive: true, force: true }); vi.unstubAllEnvs(); vi.unstubAllGlobals(); clearMasterKeyCache(); });
 it('saves an encrypted key, masks inventory, and really removes its persisted line', async () => {
   expect((await routes.POST(request('POST', { provider: 'openrouter', key: 'synthetic-test-key' }))).status).toBe(200);
   expect(readFileSync(join(state.dir, '.env.local'), 'utf8')).toContain('OPENROUTER_API_KEY=enc:');
@@ -115,7 +110,8 @@ it('preserves encrypted credentials and connection state when the store cannot d
   await routes.POST(request('POST', { provider: 'openrouter', key: 'synthetic-protected-key' }));
   const original = readFileSync(join(state.dir, '.env.local'), 'utf8');
   const connection = readFileSync(recordPath(), 'utf8');
-  state.locked = true;
+  // Exercise real AES decryption failure against the already persisted store.
+  vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 20).toString('base64url')); clearMasterKeyCache();
   for (const [method, body] of [
     ['POST', { provider: 'openrouter', key: 'synthetic-replacement' }],
     ['DELETE', { provider: 'openrouter' }],
