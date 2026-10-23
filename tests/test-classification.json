@@ -3698,6 +3698,12 @@
       ]
     },
     {
+      "path": "tests/operator-defaults-values-invalidation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-mcp-review-merge-freshness-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -4940,6 +4946,14 @@
       ]
     },
     {
+      "path": "tests/speed-render-samples-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/stable-cli-update-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -5687,6 +5701,15 @@
         "git-cli",
         "worktree",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/worktree-pinned-read-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path",
+        "worktree"
       ]
     },
     {

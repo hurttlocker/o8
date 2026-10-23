@@ -107,8 +107,9 @@ function runNodeHarness(scriptName) {
 }
 
 function parseMsFromSeconds(raw) {
-  const value = Number(raw);
-  return Number.isFinite(value) ? Math.round(value * 1000) : null;
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const milliseconds = Number(raw) * 1000;
+  return Number.isFinite(milliseconds) && milliseconds >= 0 ? Math.round(milliseconds) : null;
 }
 
 function parseInteger(raw) {
@@ -125,6 +126,15 @@ function assignParsed(metrics, name, value, note = 'metric not found') {
   metrics[name] = typeof value === 'number' ? value : nullMetric(note);
 }
 
+function renderSample(columns, durationColumn) {
+  const status = columns[4];
+  if (!/^2\d{2}$/.test(status ?? '')) {
+    return nullMetric(/^\d{3}$/.test(status ?? '') ? `HTTP ${status}` : 'HTTP status missing or invalid');
+  }
+  const duration = parseMsFromSeconds(columns[durationColumn]);
+  return duration ?? nullMetric('render duration missing or invalid');
+}
+
 function parseRender(stdout, metrics) {
   let coldDashboard = null;
   let warmDashboard = null;
@@ -132,16 +142,16 @@ function parseRender(stdout, metrics) {
   for (const line of stdout.split('\n')) {
     const col = line.split('\t');
     if (col[0] === 'cold' && col[1] === '/dashboard') {
-      coldDashboard = parseMsFromSeconds(col[2]);
+      coldDashboard = renderSample(col, 2);
     } else if (col[0] === 'warm' && col[1] === '/dashboard') {
-      warmDashboard = parseMsFromSeconds(col[2]);
+      warmDashboard = renderSample(col, 2);
     } else if (col[0] === 'warm' && col[1] === '/api/mobile/bootstrap') {
-      warmBootstrap = parseMsFromSeconds(col[3]);
+      warmBootstrap = renderSample(col, 3);
     }
   }
-  assignParsed(metrics, 'dashboard_cold_ttfb_ms', coldDashboard);
-  assignParsed(metrics, 'dashboard_warm_ttfb_ms', warmDashboard);
-  assignParsed(metrics, 'bootstrap_warm_total_ms', warmBootstrap);
+  metrics.dashboard_cold_ttfb_ms = coldDashboard ?? nullMetric('metric not found');
+  metrics.dashboard_warm_ttfb_ms = warmDashboard ?? nullMetric('metric not found');
+  metrics.bootstrap_warm_total_ms = warmBootstrap ?? nullMetric('metric not found');
 }
 
 function parseCli(stdout, metrics) {
