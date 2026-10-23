@@ -175,7 +175,8 @@ export interface RuntimeTranscriptToolCall {
   name: string;
   args?: Record<string, unknown>;
   preview?: string;
-  status?: 'calling' | 'running' | 'done';
+  status?: 'calling' | 'running' | 'done' | 'error';
+  result?: string;
 }
 
 export interface RuntimeTranscriptEntry {

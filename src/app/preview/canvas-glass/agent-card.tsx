@@ -307,6 +307,7 @@ export const AgentGlassCard = memo(function AgentGlassCard({
     const requestBody = JSON.stringify({
       packetId,
       message: text,
+      source: 'operator',
       idempotencyKey: crypto.randomUUID(),
     });
     void fetchCorrelatedActionReceipt('/api/orchestrator/steer-packet', {

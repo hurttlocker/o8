@@ -118,7 +118,7 @@ type GitHubPullRequestPayload = {
   user?: { login?: string | null; type?: string | null } | null;
   author_association?: string | null;
   head?: { ref?: string | null; sha?: string | null };
-  base?: { ref?: string | null };
+  base?: { ref?: string | null; repo?: { id?: number } | null };
   additions?: number;
   deletions?: number;
   changed_files?: number;
@@ -254,6 +254,7 @@ function mapPullRequestSnapshot(
 ): GitHubPullRequestSnapshot {
   return {
     pullRequestId: item.id,
+    repositoryId: item.base?.repo?.id ?? (detail.id === item.id ? detail.base?.repo?.id : null) ?? null,
     repoFullName,
     number: item.number,
     title: item.title,
@@ -544,9 +545,10 @@ async function syncPullRequests(repoFullName: string) {
     for (const item of items.values()) {
       const stored = getGitHubPullRequestByNumber(repoFullName, item.number);
       // Retry unassessed attention using the detail's authoritative comment count.
-      if (item.updated_at && stored?.state === 'open' && stored.updatedAt === item.updated_at
+      if (item.updated_at && stored?.state === 'open' && stored.pullRequestId === item.id && stored.updatedAt === item.updated_at
         && previousState.get(item.number)?.attentionAssessed) {
-        openPulls.push(stored);
+        openPulls.push({ ...stored, repositoryId: item.base?.repo?.id ?? stored.repositoryId,
+          url: item.html_url ?? (item.base?.repo?.id != null ? '' : stored.url) });
         continue;
       }
       const detail = await fetchPullRequestDetail(repoFullName, item);
@@ -557,12 +559,18 @@ async function syncPullRequests(repoFullName: string) {
 
   const closedItems = await fetchRecentlyClosedPullRequests(repoFullName, cutoffIso, cutoffMs);
   const closedPairs: Array<{ item: GitHubPullRequestPayload; detail: GitHubPullRequestPayload }> = [];
+  const unchangedClosed: GitHubPullRequestSnapshot[] = [];
   for (const item of closedItems) {
     const stored = previousState.get(item.number);
+    const cached = getGitHubPullRequestByNumber(repoFullName, item.number);
     if (
       stored?.updatedAt === (item.updated_at ?? item.created_at ?? '')
-      && stored.attentionAssessed
-    ) continue;
+      && stored.attentionAssessed && cached?.pullRequestId === item.id
+    ) {
+      unchangedClosed.push({ ...cached, repositoryId: item.base?.repo?.id ?? cached.repositoryId,
+        url: item.html_url ?? (item.base?.repo?.id != null ? '' : cached.url) });
+      continue;
+    }
     try {
       closedPairs.push({ item, detail: await fetchPullRequestDetail(repoFullName, item) });
     } catch (error) {
@@ -582,7 +590,7 @@ async function syncPullRequests(repoFullName: string) {
     )),
     previousState,
   );
-  const closedPulls = closedPairs.map(({ item, detail }) => mapPullRequestSnapshot(repoFullName, item, detail));
+  const closedPulls = [...unchangedClosed, ...closedPairs.map(({ item, detail }) => mapPullRequestSnapshot(repoFullName, item, detail))];
 
   if (openPulls) {
     replaceGitHubPullRequests(repoFullName, [...openPulls, ...closedPulls]);

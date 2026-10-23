@@ -227,6 +227,7 @@ describe('contextual thread panel navigation', () => {
     expect(container.textContent).not.toContain('[object Object]');
     expect(field.disabled).toBe(true);
     const first = fetchMock.mock.calls.find((call) => call[0] === '/api/orchestrator/steer-packet')!;
+    expect(JSON.parse(first[1].body).source).toBe('operator');
     expect(JSON.parse(sessionStorage.getItem(`o8:pending-thread-steer:packet-${label}`)!)).toEqual({ id: JSON.parse(first[1].body).idempotencyKey, message: 'Check the result' });
     act(() => button('Threads').click());
     act(() => container.querySelector<HTMLButtonElement>(`[aria-label="View thread ${label}"]`)!.click());

@@ -81,7 +81,7 @@ export function ThreadDetail({ task, active, evidenceRevision, onBack, actions, 
         result?: { note?: string; status?: string; inProgress?: boolean };
       }>('/api/orchestrator/steer-packet', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ packetId: task.packetId, message: request.message, idempotencyKey: request.id }),
+        body: JSON.stringify({ packetId: task.packetId, message: request.message, source: 'operator', idempotencyKey: request.id }),
       }, { fetch: ipcFetch });
       if (!response.ok || payload?.ok !== true) {
         const failure = typeof payload?.error === 'object' ? payload.error : null;

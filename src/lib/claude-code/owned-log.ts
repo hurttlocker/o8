@@ -136,7 +136,8 @@ export function parseClaudeOwnedRunLog(raw: string, run: OwnedRunRecord): Parsed
           name: event.name ?? 'tool',
           ...(event.args ? { args: event.args } : {}),
           ...(event.preview ? { preview: event.preview } : {}),
-          status: 'done',
+          status: event.isError ? 'error' : 'done',
+          ...(event.output ? { result: event.output } : {}),
         },
       });
       eventOrdinal += 1;

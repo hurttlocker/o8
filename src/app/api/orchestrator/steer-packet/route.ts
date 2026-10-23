@@ -69,7 +69,15 @@ export async function POST(request: NextRequest) {
 
   const packetId = typeof record.packetId === 'string' ? record.packetId.trim() : '';
   const message = typeof record.message === 'string' ? record.message.trim() : '';
-  const source = typeof record.source === 'string' ? record.source.trim() : undefined;
+  const sourceHint = typeof record.source === 'string' ? record.source.trim() : undefined;
+  // The CLI and canvas used to omit provenance. Only an authenticated operator
+  // outside an agent-tool call gets operator standing by default. Tool callers
+  // may explicitly forward a human correction with the operator credential.
+  const source = sourceHint?.toLowerCase()
+    || (principal === 'operator' && request.headers.get('x-o8-agent-tool') !== '1' ? 'operator' : 'orchestrator');
+  if (source === 'operator' && principal !== 'operator') {
+    return operatorError('forbidden', 'Operator steering provenance requires the operator credential.', 403);
+  }
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
@@ -89,7 +97,7 @@ export async function POST(request: NextRequest) {
       400,
     );
   }
-  const canonicalBody = JSON.stringify({ packetId, message, source });
+  const canonicalBody = JSON.stringify({ packetId, message, source: sourceHint });
   const key = deriveIdempotencyKey({ verb: 'steer_packet', scopeId: packetId, clientKey, body: canonicalBody });
 
   try {

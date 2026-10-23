@@ -1,3 +1,4 @@
+import { humanizeActivity } from './worker-activity';
 import {
   adHocLaneTitle,
   laneDisplayTitle,
@@ -468,22 +469,7 @@ export function buildCheckpointLabel(tab: TerminalTab, messages: MobileTranscrip
 }
 
 export function workspaceToolLabel(toolName: string, args?: Record<string, unknown>) {
-  if (toolName === 'search_web') return `Searching "${String(args?.query ?? '')}"`;
-  if (toolName === 'read_file' || toolName === 'Read') {
-    return `Reading ${String(args?.path ?? args?.file_path ?? '').split('/').pop() || 'file'}`;
-  }
-  if (toolName === 'search_code' || toolName === 'Grep') return `Searching code for "${String(args?.query ?? args?.pattern ?? '')}"`;
-  if (toolName === 'list_files' || toolName === 'Glob') return `Listing ${String(args?.path ?? args?.pattern ?? '.')}`;
-  if (toolName === 'create_github_issue') return 'Creating GitHub issue';
-  if (toolName === 'read_github_issue_or_pr') return `Reading #${String(args?.number ?? '')}`;
-  if (toolName === 'create_pull_request') return 'Creating pull request';
-  if (toolName === 'Bash') return `Running ${String(args?.description ?? 'shell command')}`;
-  if (toolName === 'Edit' || toolName === 'Write' || toolName === 'NotebookEdit') return `Editing ${String(args?.file_path ?? args?.path ?? 'files')}`;
-  if (toolName === 'Task') return `Running task ${String(args?.description ?? '')}`.trim();
-  if (toolName === 'WebFetch') return `Fetching ${String(args?.url ?? 'web page')}`;
-  if (toolName === 'WebSearch') return `Searching "${String(args?.query ?? '')}"`;
-  if (toolName === 'Skill') return `Using skill ${String(args?.skill ?? '')}`.trim();
-  return `Running ${toolName}`;
+  return humanizeActivity({ name: toolName, args }).liveLabel;
 }
 
 export function buildWorkspaceThinkingStep(tool: MobileTranscriptToolCall): MobileTranscriptThinkingStep {
@@ -503,7 +489,8 @@ export function buildWorkspaceThinkingStep(tool: MobileTranscriptToolCall): Mobi
 }
 
 export function upsertWorkspaceToolCall(previous: MobileTranscriptToolCall[], next: MobileTranscriptToolCall) {
-  const existingIndex = previous.findIndex((tool) => tool.name === next.name);
+  const existingIndex = previous.findIndex((tool) => next.id ? tool.id === next.id
+    : !tool.id && tool.name === next.name && (tool.status === 'running' || tool.status === 'calling'));
   if (existingIndex >= 0) {
     return previous.map((tool, index) => (
       index === existingIndex ? { ...tool, ...next, status: next.status ?? tool.status } : tool

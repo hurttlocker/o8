@@ -50,6 +50,7 @@ import { pollCorrelatedMcpApiMutation } from '@/lib/mcp/correlated-mutation';
 import { createCortexDelegationHandlers } from '@/lib/mcp/cortex-delegation-handlers';
 import { CORTEX_WORKER_TOOLS } from './cortex-worker-tools';
 import { createWorkerObservationHandlers } from './worker-observation';
+import { TRANSCRIPT_READ_TOOL } from './transcript-read-tool';
 
 /**
  * Resolve the backend base URL from env, port file, or legacy default.
@@ -329,24 +330,7 @@ const TOOLS: McpTool[] = [
   },
   {
     name: 'cortex_read_transcript',
-    description:
-      'Read a runtime transcript with stable entry IDs. Pass nextCursor as sinceId to read newer entries. Text previews disclose truncation and use a bounded response budget.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        sessionKey: {
-          type: 'string',
-          description: 'The surfaceId/sessionKey of the agent session.',
-        },
-        limit: {
-          type: 'number',
-          description: 'Number of transcript entries to return, 1 to 100. Default 20.',
-        },
-        sinceId: { type: 'string', description: 'Existing transcript entry ID; return entries after it.' },
-        maxTextChars: { type: 'integer', minimum: 100, maximum: 12000, description: 'Maximum characters per text preview. Default 4000; total text is bounded to 24000 characters.' },
-      },
-      required: ['sessionKey'],
-    },
+    ...TRANSCRIPT_READ_TOOL,
   },
   {
     name: 'cortex_interrupt_agent',
