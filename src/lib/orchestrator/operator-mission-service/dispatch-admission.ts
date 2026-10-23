@@ -7,6 +7,7 @@ import { preparePacketsForExplicitDispatch } from './dispatch-runtime-override';
 import { captureCurrentDispatchRegistry } from './dispatch-registry-publication';
 import { resolveMissionDispatchTarget } from './mission';
 import { currentMissionState } from './shared';
+import { missionDispatchQueue } from './dispatch-queue';
 import type { DispatchMissionInput } from './types';
 
 /**
@@ -28,7 +29,7 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
         if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
         return { state: prepared, result: undefined };
       });
-      return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold) };
+      return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold), queued: missionDispatchQueue(state) };
     }
 
     const { state } = await withLockedState(async (stored) => {
@@ -38,6 +39,6 @@ export async function prepareMissionDispatch(input: DispatchMissionInput) {
       if (!prepared.lifecycleHold) preparePacketsForExplicitDispatch(prepared, input.runtime);
       Object.assign(stored, prepared);
     });
-    return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold) };
+    return { missionId: requestedMissionId, blocked: Boolean(state.lifecycleHold), queued: missionDispatchQueue(state) };
   });
 }

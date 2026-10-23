@@ -1,3 +1,4 @@
+import { missionDispatchQueue } from './dispatch-queue';
 import { resolveSealedMissionContract } from '@/lib/orchestrator/sealed-task-contract';
 import { captureMissionProject, resolveCapturedMissionProject } from '@/lib/orchestrator/mission-project-context';
 import { aggregateMissionCost, laneSessionHistoryForMission } from '@/lib/orchestrator/cost-aggregator';
@@ -632,6 +633,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
   }
 
   const graph = buildDependencyGraph(state.packets);
+  const queueById = new Map(missionDispatchQueue(state).map((entry) => [entry.packetId, entry]));
   const dag = buildDagMetadata(state.packets);
   const packetById = new Map(state.packets.map((packet) => [packet.id, packet] as const));
   const laneByPacketId = new Map(state.packets.map((packet) => [packet.id, findLaneByPacket(packet.id)] as const));
@@ -645,7 +647,6 @@ export async function getMissionStatus(input: MissionStatusInput) {
     [packet.id, await readPacketCompletionContext(packet.id)] as const
   ))));
   const mergePolicy = currentLaneMergePolicy();
-
   const agents = state.packets
     .map((packet) => {
       const lane = laneByPacketId.get(packet.id);
@@ -685,7 +686,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
       return {
         packetId: node.packetId,
         blockedBy: node.blockedBy,
-        reason: packet?.blockedReason ?? null,
+        reason: queueById.get(node.packetId)?.detail ?? packet?.blockedReason ?? null,
       };
     })
     .filter((blocker) => blocker.blockedBy.length > 0 || blocker.reason);
@@ -742,7 +743,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
         queueState: packet.status === 'blocked' && lane && ['awaiting_input', 'awaiting_orchestrator', 'awaiting_human'].includes(lane.status) ? 'held' : packet.queueState,
         releaseState: packet.releaseState,
         blockedBy: node.blockedBy,
-        blockedReason: packet.blockedReason ?? null,
+        blockedReason: queueById.get(packet.id)?.detail ?? packet.blockedReason ?? null,
+        dispatchQueue: queueById.get(packet.id) ?? null,
         summary: packet.completionSummary?.trim()
           || completionContext?.selfReview?.outcome?.trim()
           || completionContext?.summary?.trim()
