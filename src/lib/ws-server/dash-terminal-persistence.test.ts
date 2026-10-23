@@ -121,7 +121,7 @@ describe('dashboard terminal persistence real fallback path', () => {
     })).toBe(true);
     expect(exec.mock.calls.map((call) => call[1])).toEqual([
       ['-L', 'o8-dashboard', 'has-session', '-t', '=cortex-dash-test'],
-      ['-L', 'o8-dashboard', 'new-session', '-d', '-s', 'cortex-dash-test', '-x', '120', '-y', '30', '/bin/zsh', '-l'],
+      ['-L', 'o8-dashboard', 'new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', 'cortex-dash-test', '-x', '120', '-y', '30', '/bin/zsh', '-l'],
       ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', DASH_PROFILE_OWNER_OPTION, 'profile-fixture'],
       ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', 'history-limit', '50000'],
       ['-L', 'o8-dashboard', 'set-option', '-t', '=cortex-dash-test:', 'status', 'off'],

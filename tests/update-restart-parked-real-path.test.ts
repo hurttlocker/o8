@@ -18,9 +18,12 @@ let sessions: unknown[] = [];
 let beforeTerminalReply: (() => Promise<void>) | null = null;
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-update-parked-'));
-const previous = { CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, O8_DATA_DIR: process.env.O8_DATA_DIR, O8_WS_PORT: process.env.O8_WS_PORT };
+const previous = { CORTEX_IDE_DATA_DIR: process.env.CORTEX_IDE_DATA_DIR, O8_DATA_DIR: process.env.O8_DATA_DIR,
+  O8_WS_PORT: process.env.O8_WS_PORT, APPIMAGE: process.env.APPIMAGE };
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_DATA_DIR = dataDir;
+// Native install admission needs a self-updatable identity on Linux too.
+process.env.APPIMAGE = join(dataDir, 'fixture.AppImage');
 
 // The idle window reads the live terminal inventory from the WebSocket server.
 // This fixture answers that one route with no attached terminals.
