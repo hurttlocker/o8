@@ -21,6 +21,7 @@ import type {
 } from './types';
 // Side-effect import: registers the 'codex' cost parser in the registry.
 import '@/lib/runtimes/codex-cost-parser';
+import { readCodexContext } from './codex-context';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
 import { ownedTailToRuntimeTranscript } from '@/lib/runtimes/shared/owned-transcript';
 import { createOwnedExecutionPolicy } from '@/lib/runtimes/shared/owned-session/execution-policy';
@@ -529,6 +530,7 @@ export const codexRuntime: AgentRuntime = {
       const totalTokens = sessionCost.inputTokens + sessionCost.outputTokens + sessionCost.cacheReadTokens;
       return {
         totalTokens,
+        ...await readCodexContext(rolloutPath ? [rolloutPath] : telemetrySources.stdoutPaths),
         estimatedCostUsd: sessionCost.totalCostUsd,
         inputTokens: sessionCost.inputTokens,
         outputTokens: sessionCost.outputTokens,
@@ -553,6 +555,7 @@ export const codexRuntime: AgentRuntime = {
 
     return {
       totalTokens,
+      ...await readCodexContext([rolloutPath]),
       estimatedCostUsd: sessionCost.totalCostUsd,
       inputTokens: sessionCost.inputTokens,
       outputTokens: sessionCost.outputTokens,

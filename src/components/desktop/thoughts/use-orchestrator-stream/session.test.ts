@@ -122,3 +122,17 @@ describe('orchestrator context telemetry', () => {
     expect(tokenDeltas).toEqual([0]);
   });
 });
+
+it.each(['pi', 'o8', 'fable', 'codex', 'claude'] as const)('keeps a nonzero %s transcript estimate when the telemetry endpoint fails', async (backend) => {
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fixture offline'); }));
+  const setRunningTotal = vi.fn();
+  const setContextSource = vi.fn();
+  await refreshOrchestratorTokenTelemetry({
+    repoPath: '/repo', threadId: 'thoughts-offline', backend,
+    messages: [{ id: 'answer', role: 'assistant', text: 'Synthetic findings. '.repeat(5_000) }],
+    setRunningTotal, setContextSource, setTokenCount: vi.fn(),
+    telemetryBindingRef: { current: null }, telemetryTotalRef: { current: null },
+  });
+  expect(setRunningTotal.mock.calls[0][0]).toBeGreaterThan(15_000);
+  expect(setContextSource).toHaveBeenCalledWith('transcript-estimate');
+});

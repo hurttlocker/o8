@@ -427,11 +427,19 @@ export function resolveTerminalStatusEvidence(
       sourceRank: 2,
     });
   }
+  // Historical questions and review reports stay in the evidence list, but
+  // only the latest lane observation can describe its current lifecycle.
+  // Pending approval/review rows below remain independently unresolved.
+  const latestLaneState = selectNewest(laneCandidates);
+  const currentGovernanceCandidates = latestLaneState
+    && (latestLaneState.state === 'blocked' || latestLaneState.state === 'review-ready')
+    ? [latestLaneState]
+    : [];
   for (const approval of input.approvals ?? []) {
     if (approval.status !== 'pending') continue;
     const observedAt = validIso(approval.updatedAt);
     if (!observedAt) continue;
-    laneCandidates.push({
+    const candidate: StatusCandidate = {
       authority: 'lane-state',
       state: 'blocked',
       observedAt,
@@ -439,7 +447,9 @@ export function resolveTerminalStatusEvidence(
       source: `approval:${approval.id}`,
       value: `pending · ${oneLine(approval.summary || approval.title)}`,
       sourceRank: 3,
-    });
+    };
+    laneCandidates.push(candidate);
+    currentGovernanceCandidates.push(candidate);
   }
   for (const review of input.reviewQueue ?? []) {
     const observedAt = validIso(review.updatedAt);
@@ -448,7 +458,7 @@ export function resolveTerminalStatusEvidence(
       ? 'review-ready'
       : null;
     if (!state) continue;
-    laneCandidates.push({
+    const candidate: StatusCandidate = {
       authority: 'lane-state',
       state,
       observedAt,
@@ -456,7 +466,9 @@ export function resolveTerminalStatusEvidence(
       source: `review_queue:${review.id}`,
       value: review.status,
       sourceRank: 3,
-    });
+    };
+    laneCandidates.push(candidate);
+    currentGovernanceCandidates.push(candidate);
   }
 
   const rawCandidates: StatusCandidate[] = [];
@@ -479,9 +491,7 @@ export function resolveTerminalStatusEvidence(
   }
 
   const selectedRuntime = selectNewest(runtimeCandidates);
-  const selectedGovernanceLane = selectNewest(laneCandidates.filter((candidate) => (
-    candidate.state === 'review-ready' || candidate.state === 'blocked'
-  )));
+  const selectedGovernanceLane = selectNewest(currentGovernanceCandidates);
   const governanceLaneOutranksFinishedRuntime = selectedRuntime?.state === 'complete'
     && Boolean(selectedGovernanceLane);
   const selected = governanceLaneOutranksFinishedRuntime

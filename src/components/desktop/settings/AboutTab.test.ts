@@ -37,6 +37,7 @@ afterEach(async () => {
   Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function mount() {
@@ -45,11 +46,40 @@ async function mount() {
   });
 }
 
+it('requests a fresh native check from the actual About control without applying it', async () => {
+  const fetchMock = vi.fn(async () => Response.json({ ok: true, requested: false, result: { code: 'check_available' },
+    state: { updatePending: true, version: '0.1.999', check: { outcome: 'available', checkedAt: new Date().toISOString(), error: null } } }));
+  vi.stubGlobal('fetch', fetchMock);
+  await mount();
+  await act(async () => linkButton('Check for updates').click());
+  expect(fetchMock).toHaveBeenCalledWith('/api/panel/update/apply', expect.objectContaining({ method: 'POST', body: JSON.stringify({ checkOnly: true }) }));
+  expect(container.textContent).toContain('Update 0.1.999 is ready.');
+});
+
 function linkButton(label: string) {
   const button = [...container.querySelectorAll('button')].find((row) => row.textContent?.startsWith(label));
   expect(button).toBeDefined();
   return button!;
 }
+
+it('shows staged progress while waiting for the native check and clears it on completion', async () => {
+  vi.useFakeTimers();
+  let finish!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+  await mount();
+  await act(async () => linkButton('Check for updates').click());
+  expect([...container.querySelectorAll('button')].some(row => row.textContent?.startsWith('Check for updates'))).toBe(false);
+  expect(container.textContent).toContain('Requesting a fresh check…');
+  await act(async () => { vi.advanceTimersByTime(1_000); });
+  expect(container.textContent).toContain('Waiting for the native updater…');
+  expect(container.querySelector('progress')).not.toBeNull();
+  await act(async () => { vi.advanceTimersByTime(2_000); });
+  expect(container.textContent).toContain('Waiting for the release check to finish…');
+  await act(async () => finish(Response.json({ ok: true, state: { check: { outcome: 'current' } } })));
+  expect(container.textContent).toContain('o8 is up to date.');
+  expect(linkButton('Check for updates').disabled).toBe(false);
+  expect(container.querySelector('progress')).toBeNull();
+});
 
 it.each(links)('opens %s through the native-aware helper from the rendered row', async (label, url) => {
   await mount();
