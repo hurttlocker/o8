@@ -1,4 +1,4 @@
-import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
+import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Minimal MCP-stdio JSON-RPC client for codebase-memory tool calls.
  *
@@ -93,7 +93,7 @@ export async function withCodebaseMemoryToolSession<T>(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: input.cwd,
-      env: providerSpawnEnvironment({ ...process.env }, { onlyExisting: true }),
+      env: providerMcpEnvironment({ ...process.env }),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

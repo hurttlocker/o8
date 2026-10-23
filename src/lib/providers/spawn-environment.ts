@@ -15,14 +15,13 @@ function genericProvider(input: Record<string, string | undefined>, alias: strin
   return provider && Object.hasOwn(providers, provider) ? providers[provider] : null;
 }
 
-/** Every provider credential crosses one authority boundary before a local launch or config write. */
-export function providerSpawnEnvironment(input: Record<string, string | undefined>, options: { inject?: boolean; clearInherited?: boolean; runtimeId?: string; onlyExisting?: boolean } = {}): Record<string, string> & Pick<NodeJS.ProcessEnv, 'NODE_ENV'> {
+type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; onlyExisting?: boolean };
+function resolvedEnvironment(input: Record<string, string | undefined>, inject: boolean, options: SpawnOptions): Record<string, string> & Pick<NodeJS.ProcessEnv, 'NODE_ENV'> {
   const aliases = [...Object.values(PROVIDER_KEY_ALIASES).flat(), ...GENERIC_ALIASES, ...Object.keys(SCOPED_ALIASES)];
   const canonical = new Set<string>([...PROVIDER_ENV_KEYS, ...Object.keys(input).filter(name => providerCredentialName(name) && !aliases.includes(name))]);
   const credentials = new Set([...canonical, ...aliases]);
   const env = Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0])));
   if (options.clearInherited) for (const name of credentials) env[name] = '';
-  const inject = options.inject !== false && (!options.runtimeId || runtimeBillingMode(options.runtimeId) === 'api');
   if (inject) {
     for (const name of canonical) {
       if (options.onlyExisting && !(name in input) && !PROVIDER_KEY_ALIASES[name]?.some(alias => alias in input)) continue;
@@ -44,8 +43,18 @@ export function providerSpawnEnvironment(input: Record<string, string | undefine
   return { ...env, NODE_ENV: mode === 'development' || mode === 'test' ? mode : 'production' };
 }
 
+/** Runtime launches fail closed without a runtime identity and saved API opt-in. */
+export function providerSpawnEnvironment(input: Record<string, string | undefined>, options: SpawnOptions = {}): ReturnType<typeof resolvedEnvironment> {
+  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && runtimeBillingMode(options.runtimeId!) === 'api', options);
+}
+
+/** Standalone MCP services have explicit credential slots, not a subscription CLI payer. */
+export function providerMcpEnvironment(input: Record<string, string | undefined>): ReturnType<typeof resolvedEnvironment> {
+  return resolvedEnvironment(input, true, { onlyExisting: true });
+}
+
 /** Config env blocks must not acquire unrelated process variables. */
-export function providerConfigEnvironment(input: Record<string, string>, runtimeId?: string): Record<string, string> {
+export function providerConfigEnvironment(input: Record<string, string>, runtimeId: string): Record<string, string> {
   const env: Record<string, string> = providerSpawnEnvironment(input, { onlyExisting: true, runtimeId });
   if (!('NODE_ENV' in input)) delete env.NODE_ENV;
   return env;

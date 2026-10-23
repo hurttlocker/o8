@@ -17,7 +17,8 @@ beforeEach(() => {
 afterAll(() => { vi.unstubAllEnvs(); rmSync(state.dir, { recursive: true, force: true }); });
 it('injects saved canonical credentials and their aliases instead of inherited overrides', () => {
   mutateProviderKey('GEMINI_API_KEY', { key: 'fixture-saved-gemini' });
-  const env = providerSpawnEnvironment({ GEMINI_API_KEY: 'fixture-stale', GOOGLE_API_KEY: 'fixture-stale-alias' });
+  saveRuntimeBillingMode('gemini', 'api');
+  const env = providerSpawnEnvironment({ GEMINI_API_KEY: 'fixture-stale', GOOGLE_API_KEY: 'fixture-stale-alias' }, { runtimeId: 'gemini' });
   expect(env.GEMINI_API_KEY).toBe('fixture-saved-gemini'); expect(env.GOOGLE_API_KEY).toBe('fixture-saved-gemini');
 });
 it('keeps restricted workers credential-free despite a saved provider key', () => {
@@ -41,5 +42,6 @@ it.each(['openrouter', 'codex-subscription'])('preserves explicit %s gateway tra
 
 it.each(['', 'fixture-ambient-xai'])('preserves an explicit unmanaged key through the resolver when ambient is %s', ambient => {
   vi.stubEnv('XAI_API_KEY', ambient);
-  expect(providerSpawnEnvironment({ XAI_API_KEY: 'fixture-explicit-xai' }).XAI_API_KEY).toBe('fixture-explicit-xai');
+  saveRuntimeBillingMode('hermes', 'api');
+  expect(providerSpawnEnvironment({ XAI_API_KEY: 'fixture-explicit-xai' }, { runtimeId: 'hermes' }).XAI_API_KEY).toBe('fixture-explicit-xai');
 });

@@ -192,7 +192,7 @@ export function mapStopReason(stopReason: AcpStopReason, sessionId: string | nul
 }
 
 export interface AcpClientOptions {
-  runtimeId?: string;
+  runtimeId: string;
   command: string;
   args: string[];
   /** Working directory used to boot the ACP agent and its private service. */
