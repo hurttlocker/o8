@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { invalidateSWR } from '@/lib/panel/fetch-cache';
+import { getQueryClient } from '@/lib/query/client';
 import type { PrDetail } from './types';
 import { PrPanel } from './PrPanel';
 
@@ -23,19 +23,20 @@ let host: HTMLDivElement;
 let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
 let onClose: ReturnType<typeof vi.fn<() => void>>;
-const settleTimeline = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
-const render = (prNumber: number, repoSlug = 'example/repo', active = true) => act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, onClose, active }))));
+const settleTimeline = () => act(async () => {
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1);
+  else await new Promise(resolve => setTimeout(resolve, 0));
+});
+const render = async (prNumber: number, repoSlug = 'example/repo', active = true) => { await act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, onClose, active })))); await settleTimeline(); };
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  invalidateSWR('pr-detail');
-  invalidateSWR('pr-timeline');
+  client = getQueryClient(); client.clear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   onClose = vi.fn(); fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); invalidateSWR('pr-detail'); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); client.clear(); vi.unstubAllGlobals(); });
 
 describe('pull request selection', () => {
   it('uses the loaded files for the same breakdown in the header and Changes without another request', async () => {
@@ -132,13 +133,15 @@ describe('pull request selection', () => {
     await render(9401); await render(9401, 'example/repo', false); await render(9401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await act(async () => pending.resolve(Response.json({ pr: detail(9401) })));
+    await settleTimeline();
     await render(9402, 'example/repo', false); await render(9401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    await act(async () => invalidateSWR('pr-detail'));
+    await act(async () => client.invalidateQueries({ queryKey: ['gh', 'example/repo', 'pr-panel'], refetchType: 'none' }));
     fetchMock.mockRejectedValueOnce(new DOMException('Aborted', 'AbortError')).mockResolvedValueOnce(Response.json({ pr: detail(9401) }));
     await render(9401, 'example/repo', false); await render(9401);
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('interrupted. Retry.');
     await act(async () => Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Retry')!.click());
+    await settleTimeline();
     expect(host.textContent).toContain('Change 9401');
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
@@ -147,6 +150,7 @@ describe('pull request selection', () => {
     const receive = vi.fn(); window.addEventListener('o8:open-composer-brain', receive);
     try {
       await act(async () => root.render(provide(createElement(PrPanel, { prNumber: 9501, repoSlug: 'example/repo', repoPath: '/workspace/repo', onClose }))));
+      await settleTimeline();
       expect(host.querySelector('[data-pr-brain-chat]')).toBeNull();
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
       await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === 'Ask Brain')!.click());
@@ -158,7 +162,7 @@ describe('pull request selection', () => {
   });
   it('retains a separate comment draft and mode through PR switching without posting', async () => {
     fetchMock.mockImplementation(async (url: string) => Response.json({ pr: detail(Number(url.match(/prs\/(\d+)/)?.[1])) }));
-    const show = (prNumber: number, repoSlug = 'example/repo') => act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose }))));
+    const show = async (prNumber: number, repoSlug = 'example/repo') => { await act(async () => root.render(provide(createElement(PrPanel, { prNumber, repoSlug, repoPath: '/workspace/repo', onClose })))); await settleTimeline(); };
     const type = async (selector: string, text: string) => act(async () => { const input = host.querySelector<HTMLTextAreaElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
     await show(9601);
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Pull request actions"]')!.click());
@@ -190,6 +194,7 @@ describe('pull request selection', () => {
     expect(host.querySelector('[role="status"]')?.textContent).toContain('Loading activity for PR #9101');
     await render(9102);
     await act(async () => pending.resolve(Response.json({ events: [{ id: 'comment:old', kind: 'commented', actor: 'previous', avatarUrl: null, title: 'commented', at: '', body: 'Previous discussion', url: 'https://github.com/example/repo/pull/9101' }], nextPage: null })));
+    await settleTimeline();
     expect(host.textContent).not.toContain('Previous discussion');
     await clickTimeline();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Activity interrupted');
@@ -225,6 +230,7 @@ describe('pull request selection', () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Close pull request"]')!.click());
     expect(onClose).toHaveBeenCalledOnce();
     await act(async () => pending.resolve(Response.json({ pr: detail(3384, 'Incoming change') })));
+    await settleTimeline();
     expect(host.textContent).toContain('Incoming change');
     expect(host.querySelector('[role="status"]')).toBeNull();
   });
@@ -235,13 +241,16 @@ describe('pull request selection', () => {
       .mockResolvedValueOnce(Response.json({ pr: detail(1, 'First change') }));
     await render(1); await render(2);
     await act(async () => second.resolve(Response.json({ pr: detail(2, 'Second change') })));
+    await settleTimeline();
     await act(async () => first.resolve(Response.json({ pr: detail(1, 'First change') })));
+    await settleTimeline();
     expect(host.textContent).toContain('Second change');
     expect(host.textContent).not.toContain('First change');
     await render(2, 'example/other');
     expect(host.textContent).not.toContain('Second change');
     expect(host.querySelector('[role="status"]')?.textContent).toContain('#2');
     await act(async () => otherRepo.resolve(Response.json({ pr: detail(2, 'Other repository') })));
+    await settleTimeline();
     expect(host.textContent).toContain('Other repository');
     await render(1);
     expect(host.textContent).toContain('First change');
@@ -256,12 +265,14 @@ describe('pull request selection', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('Connection interrupted');
     const retryButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Retry')!;
     await act(async () => retryButton.click());
+    await settleTimeline();
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.querySelector('[role="status"]')?.textContent).toContain('#3');
     await render(4);
     await act(async () => retry.resolve(Response.json({ pr: detail(3) })));
     expect(host.textContent).not.toContain('Change 3');
     await act(async () => next.resolve(Response.json({ pr: detail(4) })));
+    await settleTimeline();
     expect(host.textContent).toContain('Change 4');
   });
 
