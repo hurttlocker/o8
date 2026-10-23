@@ -38,6 +38,7 @@ import { getApfsCowCapability } from './apfs';
 import { worktreeActivityMtimeMs } from './activity';
 import {
   readWorktreeMetaSnapshot,
+  sameWorktreeCreation,
   withWorktreeMetadataBoundary,
   withWorktreeMetaTransaction,
 } from './metadata-store';
@@ -331,6 +332,10 @@ export class WorktreeManager {
       packetId: opts.packetId,
       reservationId: opts.storageAdmissionReservationId,
     }, async (volumeId, rootIdentity) => {
+      const repositoryPath = await realpath(this.repoRoot);
+      const authorizations = await import('@/lib/action-plugins/host')
+        .then(({ captureWorktreeCreatedAuthorizations }) => captureWorktreeCreatedAuthorizations(repositoryPath))
+        .catch(() => []);
       let baseIdentity: StorageRootIdentity | null = null;
       const created = await this.createMaterialized(
         opts, volumeId, rootIdentity, (identity) => { baseIdentity = identity; },
@@ -354,8 +359,29 @@ export class WorktreeManager {
           if (!entry || entry.claudeManaged) {
             throw new Error('Managed workspace metadata disappeared before ownership was receipted.');
           }
-          await transaction.save(created.id, { ...entry, materializationIdentity });
+          const ready = { ...entry, status: 'ready' as const, materializationIdentity, actionTriggerEventPending: true, actionTriggerAuthorizations: authorizations };
+          delete ready.creationOwner;
+          await transaction.save(created.id, ready);
         }));
+      try {
+        const { publishWorktreeCreated } = await import('@/lib/action-plugins/host');
+        publishWorktreeCreated({
+          repositoryPath,
+          worktreeId: created.id,
+          worktreePath: created.path,
+          branch: created.branch,
+          createdAt: new Date(created.createdAt).toISOString(),
+        }, authorizations);
+        await withWorktreeMetaTransaction(this.repoRoot, async (transaction) => {
+          const entry = (await transaction.readAll())[created.id];
+          if (entry?.actionTriggerEventPending && sameWorktreeCreation(entry, { id: created.id, createdAt: created.createdAt, branchName: created.branch, materializationIdentity })) await transaction.save(created.id, { ...entry, actionTriggerEventPending: false });
+        });
+      } catch (error) {
+        console.warn('[action-triggers] Worktree event publication failed', { error: String(error) });
+        void import('@/lib/action-plugins/host')
+          .then(({ reconcileWorktreeCreatedEvents }) => reconcileWorktreeCreatedEvents())
+          .catch((retryError) => console.warn('[action-triggers] Event reconciliation failed', { error: String(retryError) }));
+      }
       return created;
     });
   }
@@ -673,7 +699,6 @@ export class WorktreeManager {
 
     opts.beforeReady?.(info);
     info.status = 'ready';
-    await this.updateMetaStatus(taskId, 'ready');
     if (info.dependencyMaterialization) {
       queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
     }
@@ -880,7 +905,6 @@ export class WorktreeManager {
 
       opts.beforeReady?.(info);
       info.status = 'ready';
-      await this.updateMetaStatus(taskId, 'ready');
       if (info.dependencyMaterialization) {
         queueDependencyImagePublication(worktreePath, info.dependencyMaterialization);
       }

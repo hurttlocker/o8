@@ -199,6 +199,10 @@ export interface WorktreeMetaEntry {
     canonicalPath: string;
     volumeId?: string;
   };
+  /** Exact opt-in generations captured before this workspace was materialized. */
+  actionTriggerAuthorizations?: Array<{ pluginId: string; revision: string; triggerId: string; consentId: string }>;
+  /** Ready creation still needs its action event copied into the durable trigger journal. */
+  actionTriggerEventPending?: boolean;
   /** Exact parent namespace that owns the materialized directory name. */
   materializationParentIdentity?: {
     device: number;

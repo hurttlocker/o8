@@ -35,6 +35,15 @@ import { assertWorktreeMetadataEntryBudget, chargeWorktreeMetadataRead, worktree
 
 const META_FILENAME = '.meta.json';
 
+export function sameWorktreeCreation(current: WorktreeMetaEntry, expected: Pick<WorktreeMetaEntry, 'id' | 'createdAt' | 'branchName' | 'materializationIdentity'>): boolean {
+  const actual = current.materializationIdentity;
+  const captured = expected.materializationIdentity;
+  return current.id === expected.id && current.createdAt === expected.createdAt
+    && current.branchName === expected.branchName && !!actual && !!captured
+    && actual.canonicalPath === captured.canonicalPath && actual.device === captured.device
+    && actual.inode === captured.inode && actual.volumeId === captured.volumeId;
+}
+
 const mutationQueues = new Map<string, Promise<void>>();
 export interface WorktreeMetadataBoundary {
   root: StorageRootIdentity;
@@ -141,6 +150,13 @@ function isWorktreeMetaEntry(value: unknown, id: string): value is WorktreeMetaE
         && (entry.materializationIdentity.volumeId === undefined
           || (typeof entry.materializationIdentity.volumeId === 'string'
             && entry.materializationIdentity.volumeId.length > 0))))
+    && (entry.actionTriggerAuthorizations === undefined || (Array.isArray(entry.actionTriggerAuthorizations)
+      && entry.actionTriggerAuthorizations.every((authorization) => authorization && typeof authorization === 'object'
+        && typeof authorization.pluginId === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(authorization.pluginId)
+        && typeof authorization.triggerId === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(authorization.triggerId)
+        && typeof authorization.revision === 'string' && /^[a-f0-9]{64}$/.test(authorization.revision)
+        && typeof authorization.consentId === 'string' && /^[a-f0-9-]{36}$/.test(authorization.consentId))))
+    && (entry.actionTriggerEventPending === undefined || typeof entry.actionTriggerEventPending === 'boolean')
     && (entry.materializationParentIdentity === undefined
       || (typeof entry.materializationParentIdentity === 'object'
         && entry.materializationParentIdentity !== null

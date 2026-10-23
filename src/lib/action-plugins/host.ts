@@ -1,13 +1,15 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { constants, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { createBroadcastRedactionContext, redactBroadcastText } from '@/lib/broadcast/redaction';
 import { resolveScope } from '@/lib/customize/storage';
+import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
+import type { WorktreeMetaEntry } from '@/lib/worktree/types';
 import { ActionPluginError } from './errors';
 import { acquiredSource, githubSourceSchema, type GithubActionSource } from './source-storage';
 import { verifyGithubFiles } from './github-files';
@@ -23,14 +25,29 @@ const digest = z.string().regex(/^[a-f0-9]{64}$/);
 // the host long enough to terminate the group if the host exits unexpectedly.
 const actionRunner = String.raw`
 const { spawn } = require('node:child_process');
-const entry = process.argv[1];
-const args = process.argv.slice(2);
+const fs = require('node:fs');
+const expected = process.argv[1] ? JSON.parse(process.argv[1]) : null;
+const entry = process.argv[2];
+const args = process.argv.slice(3);
 const stop = () => { try { process.kill(-process.pid, 'SIGKILL'); } catch { process.exit(1); } };
 process.on('disconnect', stop);
 process.on('SIGTERM', stop);
 const timer = setTimeout(stop, Number(process.env.O8_ACTION_TIMEOUT_MS) + 1000);
 let action;
-try { action = spawn(entry, args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); }
+let permitted = true;
+if (expected) {
+  try {
+    const actual = fs.lstatSync('.');
+    if (!actual.isDirectory() || actual.isSymbolicLink() || actual.dev !== expected.device
+      || actual.ino !== expected.inode || fs.realpathSync('.') !== expected.canonicalPath) {
+      throw new Error('Managed workspace ownership changed before action execution.');
+    }
+  } catch (error) {
+    permitted = false;
+    process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(78));
+  }
+}
+try { if (permitted) { action = spawn(entry, args, { stdio: ['pipe', 'inherit', 'inherit'], env: { PATH: process.env.PATH, NODE_ENV: process.env.NODE_ENV, ...(process.env.O8_PLUGIN_STATE_DIR ? { O8_PLUGIN_STATE_DIR: process.env.O8_PLUGIN_STATE_DIR } : {}) } }); action.stdin.on('error', () => {}); process.stdin.pipe(action.stdin); } }
 catch (error) { process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)); }
 if (action) {
   action.on('error', (error) => process.send?.({ type: 'spawn_error', message: error.message }, () => process.exit(1)));
@@ -63,16 +80,24 @@ export const actionManifestSchema = z.object({
     entry: fileName,
     args: z.array(z.string().max(256).refine((arg) => !arg.includes('\0'), 'Arguments cannot contain NUL characters.')).max(16).default([]),
   }).strict()).min(1).max(12).optional(),
+  triggers: z.array(z.object({
+    id: slug,
+    event: z.literal('worktree.created'),
+    actionId: slug,
+  }).strict()).max(12).optional(),
 }).strict().superRefine((manifest, ctx) => {
+  if (manifest.triggers?.length && manifest.workspace !== 'registered-project') ctx.addIssue({ code: 'custom', message: 'Triggers require a registered project' });
   if (new Set(manifest.files.map((file) => file.path)).size !== manifest.files.length) ctx.addIssue({ code: 'custom', message: 'Duplicate files' });
   if (new Set(manifest.actions.map((action) => action.id)).size !== manifest.actions.length) ctx.addIssue({ code: 'custom', message: 'Duplicate actions' });
+  if (new Set((manifest.triggers ?? []).map((trigger) => trigger.id)).size !== (manifest.triggers ?? []).length) ctx.addIssue({ code: 'custom', message: 'Duplicate triggers' });
   for (const action of manifest.actions) if (!manifest.files.some((file) => file.path === action.entry)) ctx.addIssue({ code: 'custom', message: 'Action entry is not a declared file' });
+  for (const trigger of manifest.triggers ?? []) if (!manifest.actions.some((action) => action.id === trigger.actionId)) ctx.addIssue({ code: 'custom', message: 'Trigger action is not declared' });
   if (!manifest.actions.length && !manifest.terminals?.length) ctx.addIssue({ code: 'custom', message: 'Declare an action or a terminal' });
   if (manifest.terminals && new Set(manifest.terminals.map((terminal) => terminal.id)).size !== manifest.terminals.length) ctx.addIssue({ code: 'custom', message: 'Duplicate terminals' });
   for (const terminal of manifest.terminals ?? []) if (!manifest.files.some((file) => file.path === terminal.entry)) ctx.addIssue({ code: 'custom', message: 'Terminal entry is not a declared file' });
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
-type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
+type Saved = { manifest: ActionManifest; revision: string; enabled: boolean; enabledAt?: string | null; enabledTriggers: string[]; triggerEnabledAt?: Record<string, string>; triggerConsentIds?: Record<string, string>; linkedAt: string; sourceDirectory: string; workspaceRoot: string | null; source?: GithubActionSource };
 function sha(data: Buffer | string) { return createHash('sha256').update(data).digest('hex'); }
 function revisionFor(manifest: ActionManifest, workspaceRoot: string | null, sourceDirectory: string, source?: GithubActionSource) { return sha(JSON.stringify({ manifest, workspaceRoot, sourceDirectory, ...(source ? { source } : {}) })); }
 function root(create: boolean) {
@@ -143,8 +168,16 @@ function readSaved(id: string): Saved {
   const manifest = actionManifestSchema.parse(saved.manifest);
   const source = saved.source === undefined ? undefined : githubSourceSchema.parse(saved.source);
   if (manifest.id !== id || typeof saved.sourceDirectory !== 'string' || (saved.workspaceRoot !== null && typeof saved.workspaceRoot !== 'string')
-    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory, source) || typeof saved.enabled !== 'boolean') throw new ActionPluginError('damaged', 'Action installation is damaged.');
-  return { ...saved, manifest };
+    || saved.revision !== revisionFor(manifest, saved.workspaceRoot, saved.sourceDirectory, source) || typeof saved.enabled !== 'boolean'
+    || (saved.enabled && saved.enabledAt === null)
+    || (saved.enabledAt !== undefined && saved.enabledAt !== null && (typeof saved.enabledAt !== 'string' || Number.isNaN(Date.parse(saved.enabledAt))))
+    || (saved.triggerEnabledAt !== undefined && (typeof saved.triggerEnabledAt !== 'object' || saved.triggerEnabledAt === null || Array.isArray(saved.triggerEnabledAt)
+      || Object.entries(saved.triggerEnabledAt).some(([triggerId, enabledAt]) => !manifest.triggers?.some((trigger) => trigger.id === triggerId) || typeof enabledAt !== 'string' || Number.isNaN(Date.parse(enabledAt)))))
+    || (saved.triggerConsentIds !== undefined && (typeof saved.triggerConsentIds !== 'object' || saved.triggerConsentIds === null || Array.isArray(saved.triggerConsentIds)
+      || Object.entries(saved.triggerConsentIds).some(([triggerId, consentId]) => !manifest.triggers?.some((trigger) => trigger.id === triggerId) || !z.string().uuid().safeParse(consentId).success)))
+    || (saved.enabledTriggers !== undefined && (!Array.isArray(saved.enabledTriggers) || new Set(saved.enabledTriggers).size !== saved.enabledTriggers.length
+      || saved.enabledTriggers.some((triggerId) => typeof triggerId !== 'string' || !manifest.triggers?.some((trigger) => trigger.id === triggerId))))) throw new ActionPluginError('damaged', 'Action installation is damaged.');
+  return { ...saved, manifest, enabledTriggers: saved.enabledTriggers ?? [] };
 }
 function db() {
   const file = path.join(root(true), 'receipts.sqlite');
@@ -164,6 +197,15 @@ function db() {
     const columns = database.prepare('PRAGMA table_info(receipts)').all() as Array<{ name: string }>;
     if (!columns.some((column) => column.name === 'source_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN source_metadata TEXT');
     if (!columns.some((column) => column.name === 'state_metadata')) database.exec('ALTER TABLE receipts ADD COLUMN state_metadata TEXT');
+    if (!columns.some((column) => column.name === 'event_id')) database.exec('ALTER TABLE receipts ADD COLUMN event_id TEXT');
+    if (!columns.some((column) => column.name === 'trigger_id')) database.exec('ALTER TABLE receipts ADD COLUMN trigger_id TEXT');
+  }).immediate();
+  database.exec('CREATE TABLE IF NOT EXISTS trigger_events (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at TEXT NOT NULL)');
+  database.exec('CREATE TABLE IF NOT EXISTS trigger_deliveries (event_id TEXT NOT NULL, plugin_id TEXT NOT NULL, trigger_id TEXT NOT NULL, action_id TEXT NOT NULL, revision TEXT NOT NULL, status TEXT NOT NULL, receipt_id TEXT, eligible_at_publish INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (event_id, plugin_id, trigger_id))');
+  database.transaction(() => {
+    const deliveryColumns = database.prepare('PRAGMA table_info(trigger_deliveries)').all() as { name: string }[];
+    if (!deliveryColumns.some((column) => column.name === 'eligible_at_publish')) database.exec('ALTER TABLE trigger_deliveries ADD COLUMN eligible_at_publish INTEGER NOT NULL DEFAULT 0');
+    if (!deliveryColumns.some((column) => column.name === 'consent_id')) database.exec('ALTER TABLE trigger_deliveries ADD COLUMN consent_id TEXT');
   }).immediate();
   return database;
 }
@@ -317,7 +359,8 @@ export async function linkActionSource(directory: string, expectedRevision: stri
         if (sha(data) !== file.sha256) throw new ActionPluginError('conflict', 'Source changed during linking.', 409);
         writeFileSync(path.join(stage, file.path), data, { flag: 'wx', mode: 0o700 });
       }
-      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, linkedAt: new Date().toISOString(), sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot, ...(reviewed.source ? { source: reviewed.source } : {}) };
+      const linkedAt = new Date().toISOString();
+      const saved: Saved = { manifest: reviewed.manifest, revision: reviewed.revision, enabled: true, enabledAt: linkedAt, enabledTriggers: [], triggerEnabledAt: {}, linkedAt, sourceDirectory: reviewed.sourceDirectory, workspaceRoot: reviewed.workspaceRoot, ...(reviewed.source ? { source: reviewed.source } : {}) };
       writeFileSync(path.join(stage, 'installed.json'), JSON.stringify(saved), { flag: 'wx', mode: 0o600 });
       renameSync(stage, destination);
       return saved;
@@ -338,10 +381,34 @@ export function changeActionPlugin(id: string, revision: string, action: 'enable
     }
     const temporary = path.join(dir, `.save-${randomUUID()}`);
     try {
-      writeFileSync(temporary, JSON.stringify({ ...saved, enabled: action === 'enable' }), { flag: 'wx', mode: 0o600 });
+      const triggerConsentIds = action === 'enable' && !saved.enabled
+        ? Object.fromEntries(saved.enabledTriggers.map((triggerId) => [triggerId, randomUUID()])) : saved.triggerConsentIds;
+      writeFileSync(temporary, JSON.stringify({ ...saved, triggerConsentIds, enabled: action === 'enable', enabledAt: action === 'enable' ? new Date().toISOString() : null }), { flag: 'wx', mode: 0o600 });
       renameSync(temporary, path.join(dir, 'installed.json'));
     } finally { rmSync(temporary, { force: true }); }
     return { cleanupPending: false };
+  });
+}
+export function changeActionPluginTrigger(id: string, revision: string, triggerId: string, enabled: boolean) {
+  return lifecycle((database) => {
+    refuseRunning(database, id);
+    const saved = readSaved(id);
+    if (revision !== saved.revision) throw new ActionPluginError('conflict', 'Plugin changed since review.', 409);
+    if (!saved.manifest.triggers?.some((trigger) => trigger.id === triggerId)) throw new ActionPluginError('not_found', 'Trigger does not exist.', 404);
+    const enabledTriggers = enabled
+      ? [...new Set([...saved.enabledTriggers, triggerId])]
+      : saved.enabledTriggers.filter((candidate) => candidate !== triggerId);
+    const triggerEnabledAt = { ...saved.triggerEnabledAt };
+    const triggerConsentIds = { ...saved.triggerConsentIds };
+    if (enabled) { triggerEnabledAt[triggerId] ??= new Date().toISOString(); triggerConsentIds[triggerId] ??= randomUUID(); }
+    else { delete triggerEnabledAt[triggerId]; delete triggerConsentIds[triggerId]; }
+    const dir = path.dirname(savedPath(id));
+    const temporary = path.join(dir, `.save-${randomUUID()}`);
+    try {
+      writeFileSync(temporary, JSON.stringify({ ...saved, enabledTriggers, triggerEnabledAt, triggerConsentIds }), { flag: 'wx', mode: 0o600 });
+      renameSync(temporary, path.join(dir, 'installed.json'));
+    } finally { rmSync(temporary, { force: true }); }
+    return { enabledTriggers };
   });
 }
 export function clearActionPluginState(id: string, revision: string) {
@@ -381,15 +448,28 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
       database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, source_metadata, state_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(receiptId, id, actionId, actor, fresh.revision, 'running', startedAt, fresh.source ? JSON.stringify(fresh.source) : null, state ? JSON.stringify(state) : null);
       return { saved: fresh, action: currentAction, state };
   });
-  const action = claimed.action;
+  return runClaimedAction({ id, actionId, action: claimed.action, saved: claimed.saved, cwd, receiptId, startedAt, actor, signal, state: claimed.state });
+}
+type ClaimedAction = {
+  id: string; actionId: string; action: ActionManifest['actions'][number]; saved: Saved; cwd: string;
+  receiptId: string; startedAt: string; actor: string; signal?: AbortSignal;
+  input?: string; eventId?: string; triggerId?: string;
+  workspaceIdentity?: WorktreeMaterializationIdentity;
+  state?: ActionState;
+};
+async function runClaimedAction(claimed: ClaimedAction) {
+  const { id, actionId, action, cwd, receiptId, startedAt, actor, signal, input, eventId, triggerId, workspaceIdentity } = claimed;
+  const dir = path.dirname(savedPath(id));
   const result = await new Promise<{ status: string; exitCode: number | null; stdout: string; stderr: string; error: string | null }>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(process.execPath, ['-e', actionRunner, path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs), ...(claimed.state ? { O8_PLUGIN_STATE_DIR: claimed.state.directory } : {}) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], detached: true });
+      child = spawn(process.execPath, ['-e', actionRunner, workspaceIdentity ? JSON.stringify(workspaceIdentity) : '', path.join(dir, action.entry), ...action.args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', NODE_ENV: process.env.NODE_ENV ?? 'production', O8_ACTION_TIMEOUT_MS: String(action.timeoutMs), ...(claimed.state ? { O8_PLUGIN_STATE_DIR: claimed.state.directory } : {}) }, stdio: ['pipe', 'pipe', 'pipe', 'ipc'], detached: true });
     } catch (error) {
       resolve({ status: 'spawn_error', exitCode: null, stdout: '', stderr: '', error: error instanceof Error ? error.message : 'Could not start action.' });
       return;
     }
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(input);
     let stdout = ''; let stderr = ''; let outputBytes = 0; let retainedBytes = 0; let done = false;
     let cause: 'timeout' | 'cancelled' | 'output_limit' | 'spawn_error' | null = null;
     let failureDetail: string | null = null;
@@ -440,23 +520,256 @@ export async function invokeActionPlugin(id: string, actionId: string, actor = '
   } catch {
     safeResult = { ...result, stdout: '[redacted-output]', stderr: '[redacted-output]', error: result.error ? '[redacted-error]' : null };
   }
-  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, state: claimed.state ?? null, startedAt, finishedAt, ...safeResult };
+  const receipt = { id: receiptId, pluginId: id, actionId, actor, actorKind: 'authorization-class' as const, actorIdentity: null, revision: claimed.saved.revision, source: claimed.saved.source ?? null, state: claimed.state ?? null, eventId: eventId ?? null, triggerId: triggerId ?? null, startedAt, finishedAt, ...safeResult };
   const finishDb = db();
-  try { finishDb.prepare('UPDATE receipts SET status = ?, finished_at = ?, exit_code = ?, stdout = ?, stderr = ?, error = ? WHERE id = ?').run(safeResult.status, finishedAt, safeResult.exitCode, safeResult.stdout, safeResult.stderr, safeResult.error, receiptId); }
+  try {
+    finishDb.transaction(() => {
+      finishDb.prepare('UPDATE receipts SET status = ?, finished_at = ?, exit_code = ?, stdout = ?, stderr = ?, error = ? WHERE id = ?').run(safeResult.status, finishedAt, safeResult.exitCode, safeResult.stdout, safeResult.stderr, safeResult.error, receiptId);
+      if (eventId && triggerId) finishDb.prepare('UPDATE trigger_deliveries SET status = ? WHERE event_id = ? AND plugin_id = ? AND trigger_id = ? AND receipt_id = ?').run(safeResult.status, eventId, id, triggerId, receiptId);
+    })();
+  }
   finally { finishDb.close(); }
   return receipt;
+}
+const worktreeCreatedPayload = z.object({
+  eventId: digest,
+  event: z.literal('worktree.created'),
+  repositoryPath: z.string().min(1).max(4096),
+  worktreeId: z.string().min(1).max(256),
+  worktreePath: z.string().min(1).max(4096),
+  branch: z.string().min(1).max(1024),
+  createdAt: z.string().datetime(),
+}).strict();
+type WorktreeCreatedPayload = z.infer<typeof worktreeCreatedPayload>;
+type DeliveryRow = { event_id: string; plugin_id: string; trigger_id: string; action_id: string; revision: string; payload: string; eligible_at_publish: number; consent_id: string | null };
+type TriggerAuthorizations = NonNullable<WorktreeMetaEntry['actionTriggerAuthorizations']>;
+/** Snapshot consent before materialization; later settings can never grant an older event. */
+export function captureWorktreeCreatedAuthorizations(repositoryPath: string): TriggerAuthorizations {
+  try {
+    return listActionPlugins().installed.flatMap((saved) => saved.enabled && saved.workspaceRoot === repositoryPath
+      ? (saved.manifest.triggers ?? []).flatMap((trigger) => saved.enabledTriggers.includes(trigger.id) && saved.triggerConsentIds?.[trigger.id]
+        ? [{ pluginId: saved.manifest.id, revision: saved.revision, triggerId: trigger.id, consentId: saved.triggerConsentIds[trigger.id] }] : []) : []);
+  } catch { return []; }
+}
+/** The worktree manager calls this only after the managed ready metadata is durable. */
+export function publishWorktreeCreated(input: Omit<WorktreeCreatedPayload, 'eventId' | 'event'>, authorizations: TriggerAuthorizations = []) {
+  const eventId = sha(JSON.stringify({ event: 'worktree.created', repositoryPath: input.repositoryPath, worktreeId: input.worktreeId, createdAt: input.createdAt }));
+  const payload = worktreeCreatedPayload.parse({ eventId, event: 'worktree.created', ...input });
+  lifecycle((database) => {
+    const inserted = database.prepare('INSERT OR IGNORE INTO trigger_events (event_id, payload, created_at) VALUES (?, ?, ?)')
+      .run(eventId, JSON.stringify(payload), new Date().toISOString());
+    if (!inserted.changes) return;
+    for (const saved of listActionPlugins().installed) {
+      if (saved.workspaceRoot !== payload.repositoryPath) continue;
+      for (const trigger of saved.manifest.triggers ?? []) {
+        const authorization = authorizations.find((authorization) =>
+          authorization.pluginId === saved.manifest.id && authorization.revision === saved.revision && authorization.triggerId === trigger.id
+          && authorization.consentId === saved.triggerConsentIds?.[trigger.id]);
+        const eligible = saved.enabled && saved.enabledTriggers.includes(trigger.id) && Boolean(authorization);
+        database.prepare('INSERT INTO trigger_deliveries (event_id, plugin_id, trigger_id, action_id, revision, status, eligible_at_publish, consent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(eventId, saved.manifest.id, trigger.id, trigger.actionId, saved.revision, 'pending', eligible ? 1 : 0, authorization?.consentId ?? null);
+      }
+    }
+  });
+  void recoverActionPluginTriggers().catch((error) => console.warn('[action-triggers] Delivery failed', { error: String(error) }));
+  return eventId;
+}
+let reconcilePromise: Promise<void> | null = null;
+let reconcileRetryTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReconcileRetry() {
+  if (reconcileRetryTimer) return;
+  reconcileRetryTimer = setTimeout(() => {
+    reconcileRetryTimer = null;
+    void reconcileWorktreeCreatedEvents().catch((error) => console.warn('[action-triggers] Event reconciliation failed', { error: String(error) }));
+  }, 30_000);
+  reconcileRetryTimer.unref();
+}
+/** Recopy any ready worktree whose metadata commit preceded an unavailable event journal. */
+export function reconcileWorktreeCreatedEvents(): Promise<void> {
+  if (reconcilePromise) return reconcilePromise;
+  reconcilePromise = reconcilePendingWorktreeEvents().finally(() => { reconcilePromise = null; });
+  return reconcilePromise;
+}
+async function reconcilePendingWorktreeEvents() {
+  const [{ listReposFresh }, { readWorktreeMetaSnapshot, sameWorktreeCreation, withWorktreeMetaTransaction }, { resolveWorktreeRootLayout }] = await Promise.all([
+    import('@/lib/repos/registry'), import('@/lib/worktree/metadata-store'), import('@/lib/worktree/root-layout'),
+  ]);
+  let failed = false;
+  try {
+    for (const repo of await listReposFresh()) {
+      try {
+        const entries = await readWorktreeMetaSnapshot(repo.localPath);
+        for (const entry of Object.values(entries)) {
+          if (!entry.actionTriggerEventPending) continue;
+          if (entry.claudeManaged || !entry.branchName || !entry.materializationIdentity) {
+            failed = true;
+            continue;
+          }
+          try {
+            publishWorktreeCreated({
+              repositoryPath: realpathSync(repo.localPath),
+              worktreeId: entry.id,
+              worktreePath: path.join(resolveWorktreeRootLayout(repo.localPath).primaryBase, entry.id),
+              branch: entry.branchName,
+              createdAt: new Date(entry.createdAt).toISOString(),
+            }, entry.actionTriggerAuthorizations ?? []);
+            await withWorktreeMetaTransaction(repo.localPath, async (transaction) => {
+              const current = (await transaction.readAll())[entry.id];
+              if (current?.actionTriggerEventPending && sameWorktreeCreation(current, entry)) await transaction.save(entry.id, { ...current, actionTriggerEventPending: false });
+            });
+          } catch (error) {
+            failed = true;
+            console.warn('[action-triggers] Ready worktree event remains pending', { worktreeId: entry.id, error: String(error) });
+          }
+        }
+      } catch (error) {
+        failed = true;
+        console.warn('[action-triggers] Could not read worktree event markers', { error: String(error) });
+      }
+    }
+  } catch (error) {
+    scheduleReconcileRetry();
+    throw error;
+  }
+  if (failed) scheduleReconcileRetry();
+}
+let drainPromise: Promise<void> | null = null;
+let claimedSweepTimer: ReturnType<typeof setTimeout> | null = null;
+let busyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let drainRequested = false;
+function scheduleBusyRetry() {
+  if (busyRetryTimer) return;
+  busyRetryTimer = setTimeout(() => {
+    busyRetryTimer = null;
+    void recoverActionPluginTriggers().catch((error) => console.warn('[action-triggers] Busy retry failed', { error: String(error) }));
+  }, 1_000);
+  busyRetryTimer.unref();
+}
+export function recoverActionPluginTriggers(): Promise<void> {
+  if (drainPromise) { drainRequested = true; return drainPromise; }
+  drainPromise = (async () => {
+    do {
+      drainRequested = false;
+      await drainActionPluginTriggers();
+    } while (drainRequested);
+  })().finally(() => {
+    drainPromise = null;
+    if (drainRequested) void recoverActionPluginTriggers().catch((error) => console.warn('[action-triggers] Recovery failed', { error: String(error) }));
+  });
+  return drainPromise;
+}
+async function drainActionPluginTriggers() {
+  lifecycle((database) => {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    database.prepare("UPDATE receipts SET status = 'interrupted', finished_at = ?, error = 'Host stopped before completion' WHERE event_id IS NOT NULL AND status = 'running' AND started_at < ?")
+      .run(new Date().toISOString(), cutoff);
+    database.prepare("UPDATE trigger_deliveries SET status = 'interrupted' WHERE status = 'claimed' AND receipt_id IN (SELECT id FROM receipts WHERE status = 'interrupted')").run();
+  });
+  const database = db();
+  let pending: DeliveryRow[];
+  try {
+    pending = database.prepare("SELECT d.*, e.payload FROM trigger_deliveries d JOIN trigger_events e ON e.event_id = d.event_id WHERE d.status = 'pending' ORDER BY e.created_at, d.plugin_id, d.trigger_id").all() as DeliveryRow[];
+  } finally { database.close(); }
+  for (const row of pending) await deliverTrigger(row);
+  const followupDb = db();
+  try {
+    const active = followupDb.prepare("SELECT MIN(r.started_at) AS started_at FROM trigger_deliveries d JOIN receipts r ON r.id = d.receipt_id WHERE d.status = 'claimed'")
+      .get() as { started_at: string | null };
+    if (active.started_at && !claimedSweepTimer) {
+      const delay = Math.max(1, 60_001 - (Date.now() - Date.parse(active.started_at)));
+      claimedSweepTimer = setTimeout(() => {
+        claimedSweepTimer = null;
+        void recoverActionPluginTriggers().catch((error) => console.warn('[action-triggers] Recovery failed', { error: String(error) }));
+      }, delay);
+      claimedSweepTimer.unref();
+    }
+  } finally { followupDb.close(); }
+}
+async function deliverTrigger(row: DeliveryRow) {
+  const payload = worktreeCreatedPayload.parse(JSON.parse(row.payload));
+  const receiptId = randomUUID();
+  const startedAt = new Date().toISOString();
+  let busy = false;
+  const claimed = lifecycle((database) => {
+    const current = database.prepare('SELECT status FROM trigger_deliveries WHERE event_id = ? AND plugin_id = ? AND trigger_id = ?')
+      .get(row.event_id, row.plugin_id, row.trigger_id) as { status: string } | undefined;
+    if (current?.status !== 'pending') return null;
+    let saved: Saved | null = null;
+    let action: ActionManifest['actions'][number] | null = null;
+    let state: ActionState | undefined;
+    let problem: string | null = null;
+    try {
+      saved = readSaved(row.plugin_id);
+      if (!row.eligible_at_publish) problem = 'Trigger was not enabled when this worktree was created.';
+      else if (saved.revision !== row.revision) problem = 'Plugin revision changed after event publication.';
+      else if (!saved.enabled) problem = 'Plugin is disabled.';
+      else if (!saved.enabledTriggers.includes(row.trigger_id)) problem = 'Trigger is not enabled.';
+      else if (!row.consent_id || saved.triggerConsentIds?.[row.trigger_id] !== row.consent_id) problem = 'Trigger consent changed after this worktree was created.';
+      else if (!saved.manifest.triggers?.some((trigger) => trigger.id === row.trigger_id && trigger.event === 'worktree.created' && trigger.actionId === row.action_id)) problem = 'Trigger is missing or changed.';
+      else if (process.platform === 'win32' || !saved.manifest.supportedPlatforms.includes(process.platform as 'darwin' | 'linux')) problem = 'Platform is unsupported.';
+      else if (saved.workspaceRoot !== payload.repositoryPath) problem = 'Event repository does not match the installed project.';
+      else {
+        action = saved.manifest.actions.find((candidate) => candidate.id === row.action_id) ?? null;
+        if (!action) problem = 'Trigger action is missing.';
+        else {
+          const dir = path.dirname(savedPath(row.plugin_id));
+          for (const file of saved.manifest.files) if (sha(safeFile(dir, file.path, 1024 * 1024)) !== file.sha256) throw new ActionPluginError('damaged', 'Action file changed after linking.', 409);
+          refuseRunning(database, row.plugin_id);
+          if (saved.manifest.state) state = provisionActionState({ ...saved, id: row.plugin_id });
+        }
+      }
+    } catch (error) {
+      if (error instanceof ActionPluginError && error.code === 'busy') { busy = true; return null; }
+      problem = error instanceof ActionPluginError ? error.message : 'Action installation is unavailable.';
+    }
+    const status = problem ? 'skipped' : 'running';
+    database.prepare('INSERT INTO receipts (id, plugin_id, action_id, actor, revision, status, started_at, finished_at, error, event_id, trigger_id, source_metadata, state_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(receiptId, row.plugin_id, row.action_id, 'event-trigger', row.revision, status, startedAt, problem ? startedAt : null, problem, row.event_id, row.trigger_id, saved?.source ? JSON.stringify(saved.source) : null, state ? JSON.stringify(state) : null);
+    database.prepare('UPDATE trigger_deliveries SET status = ?, receipt_id = ? WHERE event_id = ? AND plugin_id = ? AND trigger_id = ?')
+      .run(problem ? 'skipped' : 'claimed', receiptId, row.event_id, row.plugin_id, row.trigger_id);
+    return problem || !saved || !action ? null : { saved, action, state };
+  });
+  if (!claimed) { if (busy) scheduleBusyRetry(); return; }
+  try {
+    const resolved = await resolveScope(payload.repositoryPath);
+    if (!resolved || resolved !== claimed.saved.workspaceRoot) throw new ActionPluginError('invalid_workspace', 'Event repository is no longer registered.', 409);
+    const [{ readWorktreeMetaSnapshot }, { resolveWorktreeRootLayout }, { assertWorktreeMaterializationIdentity }] = await Promise.all([
+      import('@/lib/worktree/metadata-store'), import('@/lib/worktree/root-layout'), import('@/lib/worktree/materialization-identity'),
+    ]);
+    const entry = (await readWorktreeMetaSnapshot(resolved))[payload.worktreeId];
+    const expectedPath = path.join(resolveWorktreeRootLayout(resolved).primaryBase, payload.worktreeId);
+    if (!entry || entry.claudeManaged || (entry.status !== 'ready' && entry.status !== 'active') || entry.branchName !== payload.branch
+      || new Date(entry.createdAt).toISOString() !== payload.createdAt || payload.worktreePath !== expectedPath) {
+      throw new ActionPluginError('invalid_workspace', 'Created worktree no longer matches durable managed metadata.', 409);
+    }
+    const workspaceIdentity = await assertWorktreeMaterializationIdentity(payload.worktreePath, entry.materializationIdentity);
+    await runClaimedAction({
+      id: row.plugin_id, actionId: row.action_id, action: claimed.action, saved: claimed.saved, cwd: payload.worktreePath,
+      receiptId, startedAt, actor: 'event-trigger', input: `${JSON.stringify(payload)}\n`, eventId: row.event_id, triggerId: row.trigger_id, workspaceIdentity, state: claimed.state,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Trigger execution failed.';
+    lifecycle((database) => {
+      database.prepare("UPDATE receipts SET status = 'failed', finished_at = ?, error = ? WHERE id = ? AND status = 'running'")
+        .run(new Date().toISOString(), message, receiptId);
+      database.prepare("UPDATE trigger_deliveries SET status = 'failed' WHERE event_id = ? AND plugin_id = ? AND trigger_id = ? AND receipt_id = ?")
+        .run(row.event_id, row.plugin_id, row.trigger_id, receiptId);
+    });
+  }
 }
 export function actionReceipts(id?: string) {
   const database = db();
   try {
     const rows = id ? database.prepare('SELECT * FROM receipts WHERE plugin_id = ? ORDER BY started_at DESC LIMIT 100').all(slug.parse(id)) : database.prepare('SELECT * FROM receipts ORDER BY started_at DESC LIMIT 100').all();
     return rows.map((row) => {
-      const { source_metadata: metadata, state_metadata: stateMetadata, ...receipt } = row as Record<string, unknown>;
+      const { source_metadata: metadata, state_metadata: stateMetadata, ...receipt } = row as Record<string, unknown> & {
+        id: string; status: string; event_id?: string | null; trigger_id?: string | null;
+      };
       let source: GithubActionSource | null = null;
       let state: ActionState | null = null;
       try { if (typeof metadata === 'string') source = githubSourceSchema.parse(JSON.parse(metadata)); } catch { /* Never present malformed origin metadata as verified source. */ }
       try { if (typeof stateMetadata === 'string') state = actionStateSchema.parse(JSON.parse(stateMetadata)); } catch { /* Malformed historical state metadata is not an approved scope. */ }
-      return { ...receipt, source, state, actorKind: 'authorization-class' as const, actorIdentity: null };
+      return { ...receipt, eventId: receipt.event_id ?? null, triggerId: receipt.trigger_id ?? null, source, state, actorKind: 'authorization-class' as const, actorIdentity: null };
     });
   }
   finally { database.close(); }

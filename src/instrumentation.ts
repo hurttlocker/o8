@@ -34,6 +34,18 @@ export async function register(): Promise<void> {
     // current directory from EXECUTABLE lookup; explicit paths still work.
     if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1';
 
+    // Resume unclaimed action deliveries without replaying a claimed action.
+    if (process.env.NEXT_PHASE !== PHASE_PRODUCTION_BUILD) {
+      setTimeout(() => {
+        void import('@/lib/action-plugins/host')
+          .then(async ({ reconcileWorktreeCreatedEvents, recoverActionPluginTriggers }) => {
+            await reconcileWorktreeCreatedEvents();
+            await recoverActionPluginTriggers();
+          })
+          .catch((error) => console.warn('[action-triggers] Recovery failed', { error: String(error) }));
+      }, 1_500);
+    }
+
     // A packaged API sidecar can restart while its WebSocket sibling stays up.
     // Resume its durable queues without requiring another sibling startup POST.
     // Keep builds and standalone development on the existing explicit-start path.
