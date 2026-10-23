@@ -1727,6 +1727,12 @@
       ]
     },
     {
+      "path": "tests/canvas-custom-background-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/catch-up-ranking-real-path.test.ts",
       "reasons": [
         "real-path"

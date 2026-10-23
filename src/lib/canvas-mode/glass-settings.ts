@@ -1,5 +1,7 @@
 'use client';
 
+import { readCustomCanvasBackground, type CustomCanvasBackgroundSettings } from './custom-background';
+
 /**
  * canvas-mode/glass-settings — operator-tunable glass material for Canvas
  * mode (#1232). Two layers, persisted client-side and applied as CSS vars
@@ -46,6 +48,7 @@ export interface CanvasGlassSettings {
   /** Depth layer painted over the veil — paper grain / mesh / aurora.
    *  Ids match CANVAS_BACKDROPS; rendered by the canvas page, not a var. */
   backdrop: string;
+  customBackground?: CustomCanvasBackgroundSettings;
   /** Floating orchestrator chat cards get their OWN material dial — they
    *  carry conversation text, so they run heavier than the ambient glass
    *  and the operator tunes them apart (--cnv-chat-frost / --cnv-chat-tint). */
@@ -137,6 +140,7 @@ export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'pulse', label: 'Pulse' },
   { id: 'radial', label: 'Radial' },
   { id: 'ember', label: 'Ember' },
+  { id: 'custom', label: 'Custom image' },
 ];
 
 export const CANVAS_GLASS_RANGES = {
@@ -249,6 +253,9 @@ export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
 export const LIQUID_MIN_BACKDROP_FROST = 6;
 
 function normalizeForMaterial(settings: CanvasGlassSettings): CanvasGlassSettings {
+  if (settings.backdrop === 'custom' && !settings.customBackground) {
+    settings = { ...settings, backdrop: 'none' };
+  }
   if (settings.material === 'none' && settings.backdropFrost < LIQUID_MIN_BACKDROP_FROST) {
     return { ...settings, backdropFrost: LIQUID_MIN_BACKDROP_FROST };
   }
@@ -275,6 +282,7 @@ export function readPersonalDefault(): CanvasGlassSettings | null {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      customBackground: readCustomCanvasBackground(candidate.customBackground, CANVAS_BACKDROPS.filter(item => item.id !== 'custom').map(item => item.id)),
       backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
         ? candidate.backdrop
         : CANVAS_GLASS_DEFAULTS.backdrop,
@@ -330,6 +338,7 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      customBackground: readCustomCanvasBackground(candidate.customBackground, CANVAS_BACKDROPS.filter(item => item.id !== 'custom').map(item => item.id)),
       backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
         ? candidate.backdrop
         : CANVAS_GLASS_DEFAULTS.backdrop,
@@ -350,12 +359,13 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
 
 /** Persist + apply. Returns the normalized settings (the Liquid frost
  *  floor may bump backdropFrost) — callers should adopt the return. */
-export function writeCanvasGlassSettings(settings: CanvasGlassSettings): CanvasGlassSettings {
+export function writeCanvasGlassSettings(settings: CanvasGlassSettings, options?: { requirePersistence?: boolean }): CanvasGlassSettings {
   const normalized = normalizeForMaterial(settings);
   if (typeof window === 'undefined') return normalized;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-  } catch {
+  } catch (error) {
+    if (options?.requirePersistence) throw error;
     // non-critical — the look just won't survive reload
   }
   applyCanvasGlassSettings(normalized);
@@ -428,6 +438,7 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // existed) can never throw here and crash the canvas mount.
   const value = { ...CANVAS_GLASS_DEFAULTS, ...(settings ?? readCanvasGlassSettings()) };
   const root = document.documentElement;
+  root.style.setProperty('--cnv-custom-backdrop-scrim', value.tone === 'light' ? 'rgba(252, 253, 255, 0.86)' : 'rgba(7, 9, 13, 0.86)');
   const base = toneVocabulary(value.tone, value.tint);
   // ONE text color for the whole canvas — the universal slider drives
   // every pane's ink so a single move keeps chat, terminal, o8.md, and
