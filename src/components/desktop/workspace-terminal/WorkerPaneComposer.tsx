@@ -9,11 +9,11 @@ import { WORKER_CONTROL_SIZE, WORKER_ICON_BUTTON } from './WorkerPaneHeader';
 import type { WorkerAttention } from './worker-pane-chrome';
 
 export function WorkerPaneComposer({ textareaRef, scopeKey, active, compact, input, onInputChange, onSend,
-  disabled = false, canSend, attention, onResume, onStop, busy, repoPath,
+  disabled = false, canSend, attention, onResume, onStop, onOpenReview, busy, repoPath,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>; scopeKey: string; active: boolean; compact: boolean;
   input: string; onInputChange: (input: string) => void; onSend: () => void; disabled?: boolean; canSend: boolean;
-  attention?: WorkerAttention | null; onResume?: () => void; onStop?: () => void; busy?: boolean;
+  attention?: WorkerAttention | null; onResume?: () => void; onStop?: () => void; onOpenReview?: () => void; busy?: boolean;
   repoPath?: string | null;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -89,13 +89,14 @@ export function WorkerPaneComposer({ textareaRef, scopeKey, active, compact, inp
         <span title={attention.label} style={{ height: 20, lineHeight: '20px', borderRadius: 8,
           paddingLeft: 6, paddingRight: 6, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           color: `var(--t-${attention.tone})`, background: `var(--t-${attention.tone}-soft)` }}>{attention.label}</span>
-        {(['Resume', 'Stop'] as const).map(label => {
-          const action = label === 'Resume' ? onResume : onStop;
-          return <button type="button" key={label} disabled={busy || !action} onClick={action}
-            title={!action ? 'Review the worker state before continuing' : label}
+        {attention.actions.map(label => {
+          const action = label === 'Resume' ? onResume : label === 'Stop' ? onStop : onOpenReview;
+          if (!action) return null;
+          return <button type="button" key={label} data-worker-state-action={label} disabled={busy} onClick={action}
+            title={label}
             style={{ height: 20, border: 0, borderRadius: 8, paddingTop: 0, paddingBottom: 0, paddingLeft: 6, paddingRight: 6,
-              flexShrink: 0, background: 'transparent', color: action ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
-              fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: action && !busy ? 'pointer' : 'default' }}>{label}</button>;
+              flexShrink: 0, background: 'transparent', color: 'var(--t-text-muted)',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 300, cursor: !busy ? 'pointer' : 'default' }}>{label}</button>;
         })}
       </div> : null}
     </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TerminalTab } from './types';
-import { isCompactWorkerPane, shortWorkerTitle, workerTabLabels } from './worker-pane-chrome';
+import { isCompactWorkerPane, shortWorkerTitle, workerAttention, workerTabLabels } from './worker-pane-chrome';
 
 function tab(id: string, label: string, llmSummary?: string): TerminalTab {
   return { id, label, llmSummary, kind: 'orchestrator', tmuxSession: null, createdAt: 0, lastActivity: 0 };
@@ -11,11 +11,22 @@ describe('shortWorkerTitle', () => {
     expect(shortWorkerTitle({ label: 'Fix CI regression', branch: 'inline/117313077011567-old-task' })).toBe('Fix CI regression');
   });
   it.each([
-    ['inline/117313077011567-fix-the-linux-ci-regression-on-pr-408', 'Fix the linux ci regression on pr 408'],
+    ['inline/117313077011567-fix-the-linux-ci-regression-on-pr-408', 'Fix the Linux CI regression on PR 408'],
     ['issue/4080-repair-worker-input', 'Repair worker input'],
     ['improve-worker-tabs', 'Improve worker tabs'],
   ])('humanizes branch %s', (branch, expected) => {
     expect(shortWorkerTitle({ branch })).toBe(expected);
+  });
+  it.each([
+    'CI', 'PR', 'API', 'UI', 'UX', 'MCP', 'CLI', 'ID', 'URL', 'JSON', 'SQL', 'CSS', 'HTML',
+    'iOS', 'macOS', 'Linux', 'Windows', 'GitHub', 'npm', 'OAuth', 'SSH', 'TLS', 'VM', 'Tauri', 'Codex', 'Claude', 'o8',
+  ])('restores %s at the start and within a branch title', word => {
+    expect(shortWorkerTitle({ branch: `inline/123-check-${word.toLowerCase()}-support` })).toBe(`Check ${word} support`);
+    expect(shortWorkerTitle({ branch: `issue/4080-${word.toLowerCase()}-support` })).toBe(`${word} support`);
+  });
+  it('matches casing words as whole words and leaves task labels alone', () => {
+    expect(shortWorkerTitle({ branch: 'check-client-liquid-jsonify-sqlite-apis' })).toBe('Check client liquid jsonify sqlite apis');
+    expect(shortWorkerTitle({ label: 'Use the custom cli name' })).toBe('Use the custom cli name');
   });
   it('recognizes a cached raw branch label', () => {
     expect(shortWorkerTitle({ label: 'o8 • inline/123-fix-input', branch: 'inline/123-fix-input' })).toBe('Fix input');
@@ -54,4 +65,22 @@ describe('pane-local compact thresholds', () => {
       expect(isCompactWorkerPane(width, height)).toBe(compact);
     },
   );
+});
+
+
+describe('worker attention actions', () => {
+  it.each([
+    ['paused', undefined, 'Paused', ['Resume', 'Stop']],
+    ['recovering', undefined, 'Paused', ['Resume', 'Stop']],
+    ['blocked', 'CI', 'Blocked: CI', ['Open checks', 'Stop']],
+    ['blocked', 'ci_failed', 'Blocked: ci failed', ['Open checks', 'Stop']],
+    ['blocked', 'worktree_conflict', 'Blocked: worktree conflict', ['Open details', 'Stop']],
+    ['blocked', 'Awaiting operator input', 'Needs review', ['Review', 'Stop']],
+    ['awaiting_review', undefined, 'Needs review', ['Review', 'Stop']],
+    ['waiting', undefined, 'Waiting', []],
+    ['blocked', 'worker_question', 'Waiting', []],
+    ['blocked', 'huddle_ready', 'Waiting', []],
+  ] as const)('%s / %s exposes the matching actions', (status, reason, label, actions) => {
+    expect(workerAttention(status, reason)).toMatchObject({ label, actions });
+  });
 });

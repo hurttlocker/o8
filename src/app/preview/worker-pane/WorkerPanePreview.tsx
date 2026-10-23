@@ -31,6 +31,7 @@ function FixturePane({ fixture }: { fixture: Fixture }) {
   const [input, setInput] = useState('');
   const [status, setStatus] = useState(fixture.status);
   const [hidden, setHidden] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const title = shortWorkerTitle({ label: fixture.label, branch: fixture.branch });
   const attention = workerAttention(status, fixture.reason);
   return <SessionPaneFrame>
@@ -38,7 +39,7 @@ function FixturePane({ fixture }: { fixture: Fixture }) {
       {hidden ? <button type="button" onClick={() => setHidden(false)} style={{ color: 'var(--t-text)', background: 'transparent', border: 0 }}>Restore {title}</button> : <>
         <WorkerPaneHeader title={title} branch={fixture.branch} issueNumber={fixture.issue} runtime="Codex" model="gpt-6-sol"
           compact={compact} status={status} statusLabel={status.replace(/_/g, ' ')} actions={<>
-            {status === 'awaiting_review' ? <button type="button" aria-label="Review changes" onClick={() => setStatus('paused')} style={WORKER_ICON_BUTTON}>
+            {status === 'awaiting_review' ? <button type="button" aria-label="Review changes" onClick={() => setReviewOpen(true)} style={WORKER_ICON_BUTTON}>
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 4v16M18 4v5a6 6 0 0 1-6 6H6" /><circle cx="6" cy="4" r="2" /><circle cx="18" cy="4" r="2" /></svg>
             </button> : null}
             <button type="button" aria-label="Hide pane" onClick={() => setHidden(true)} style={WORKER_ICON_BUTTON}>
@@ -52,10 +53,15 @@ function FixturePane({ fixture }: { fixture: Fixture }) {
           </div>
           <div style={{ color: 'var(--t-text-muted)', fontSize: 12, marginBottom: 8 }}>Read 6 files · Ran 2 checks ›</div>
           <div>{fixture.prose}</div>
+          {reviewOpen ? <div role="region" aria-label="Worker review fixture" style={{ marginTop: 8, color: 'var(--t-text-muted)', fontSize: 12 }}>
+            Fixture review and checks
+            <button type="button" onClick={() => setReviewOpen(false)} style={{ border: 0, background: 'transparent', color: 'var(--t-text)', fontSize: 12 }}>Close review</button>
+          </div> : null}
         </div>
         <WorkerPaneComposer textareaRef={textareaRef} scopeKey={fixture.branch} active={false} compact={compact}
           input={input} onInputChange={setInput} canSend={Boolean(input.trim())} onSend={() => { setInput(''); setStatus('running'); }}
-          disabled={status === 'blocked'} attention={attention} onResume={status === 'blocked' ? undefined : () => setStatus('running')} onStop={() => setStatus('paused')} />
+          disabled={status === 'blocked'} attention={attention} onResume={status === 'blocked' ? undefined : () => setStatus('running')}
+          onStop={() => setStatus('paused')} onOpenReview={() => setReviewOpen(true)} />
       </>}
     </div>
   </SessionPaneFrame>;

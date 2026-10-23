@@ -394,7 +394,7 @@ describe('AgentTilePane worker identity', () => {
       packet: { id: 'blocked', title: '', branchTarget: 'issue/4080-check-ci', status: 'blocked', blockedReason: 'CI' } as OrchestratorPacket,
       focused: true, onClose: () => {}, onFocus: () => {},
     })));
-    expect(host?.querySelector('[data-worker-title]')?.textContent).toBe('Check ci');
+    expect(host?.querySelector('[data-worker-title]')?.textContent).toBe('Check CI');
     expect(host?.querySelector('textarea')?.disabled).toBe(true);
     await act(async () => [...host!.querySelectorAll('button')].find(button => button.textContent === 'Stop')!.click());
     expect(host?.querySelector('[data-worker-steer-receipt]')?.textContent).toContain('Interrupt could not be confirmed.');
@@ -481,4 +481,37 @@ it('opens review from the matching worker header with its exact lane and reposit
     act(() => root?.render(createElement('div', null, ...packets.map(packet => createElement(SessionTranscriptPane, { key: packet.id, sessionKey: packet.lane!.sessionKey! })))));
     expect(host!.querySelector('[data-worker-pane-header] [data-worker-open-review]')).toBeNull();
   } finally { context.value = null; }
+});
+
+
+it.each([
+  ['blocked', 'CI', 'Open checks'],
+  ['blocked', 'worktree_conflict', 'Open details'],
+  ['awaiting_review', undefined, 'Review'],
+] as const)('opens the existing lane review surface from %s / %s with %s', (status, blockedReason, label) => {
+  const openPanel = vi.fn();
+  const packet = { id: 'state-action', title: 'Inspect the task', status, blockedReason,
+    lane: { laneId: 'lane-state-action', sessionKey: 'session-state-action', repoPath: '/projects/frame' },
+  } as OrchestratorPacket;
+  context.value = { agents: [], missionState: { packets: [packet] }, onOpenO8Panel: openPanel } as unknown as OrchestratorDataValue;
+  try {
+    act(() => root?.render(createElement(SessionTranscriptPane, { sessionKey: 'session-state-action' })));
+    const row = host!.querySelector('[data-worker-state-row]')!;
+    expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual([label, 'Stop']);
+    expect(row.textContent).not.toContain('Resume');
+    act(() => row.querySelector<HTMLButtonElement>(`[data-worker-state-action="${label}"]`)!.click());
+    expect(openPanel).toHaveBeenCalledExactlyOnceWith({ tab: 'review', reviewLaneId: 'lane-state-action', repoPath: '/projects/frame' });
+  } finally { context.value = null; }
+});
+
+it('keeps a worker question answerable with only its state pill beside the composer', () => {
+  act(() => root?.render(createElement(AgentTilePane, {
+    sessionKey: 'codex-owned:question-worker', agent: { name: 'Worker', status: 'idle', runtime: 'codex' },
+    packet: { id: 'question', title: 'Choose a recovery path', status: 'blocked', blockedReason: 'worker_question' } as OrchestratorPacket,
+    focused: true, onClose: () => {}, onFocus: () => {}, onOpenReview: vi.fn(),
+  })));
+  const row = host!.querySelector('[data-worker-state-row]')!;
+  expect(row.textContent).toBe('Waiting');
+  expect(row.querySelectorAll('button')).toHaveLength(0);
+  expect(host!.querySelector('textarea')!.disabled).toBe(false);
 });

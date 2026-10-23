@@ -546,7 +546,7 @@ function AgentTilePaneBase({ sessionKey, agent, packet, focused, onClose, onFocu
             disabled={!canSteer || sending || steerReceipt === 'unknown'} attention={attention}
             busy={sending || steerReceipt === 'unknown'}
             onResume={canSteer ? () => submitSteer(trimmedDraft || 'Continue the assigned task.') : undefined}
-            onStop={stopWorker} repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace}
+            onStop={stopWorker} onOpenReview={onOpenReview} repoPath={packet?.lane?.worktreePath ?? packet?.lane?.repoPath ?? agent?.workspace}
           />
           {steerReceipt === 'failed' || steerReceipt === 'unknown' ? (
             <div data-worker-steer-receipt role={steerReceipt === 'failed' ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, color: steerReceipt === 'failed' ? 'var(--t-danger)' : 'var(--t-text-secondary)', fontSize: 11, paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>

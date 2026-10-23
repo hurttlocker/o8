@@ -8,6 +8,7 @@ import { WorkerPaneHeader } from './WorkerPaneHeader';
 import { WorkerPaneComposer } from './WorkerPaneComposer';
 import { TabBar } from './TabBar';
 import type { TerminalTab } from './types';
+import { workerAttention } from './worker-pane-chrome';
 
 vi.mock('./WorkspaceLaunchPicker', () => ({ WorkspaceLaunchPicker: () => null }));
 vi.mock('@/components/desktop/thoughts/AttachFilesButton', () => ({ AttachFilesButton: () => createElement('button', { type: 'button' }, 'Attach files') }));
@@ -96,19 +97,35 @@ it('renders distinct full thread titles and a complete label in the real tab bar
   expect(select).toHaveBeenCalledWith('1');
 });
 
-it('keeps Resume and Stop reachable for a blocked worker while disabling message entry', () => {
-  function BlockedFixture() {
+it.each([
+  ['paused', undefined, ['Resume', 'Stop']],
+  ['blocked', 'CI', ['Open checks', 'Stop']],
+  ['blocked', 'worktree_conflict', ['Open details', 'Stop']],
+  ['blocked', 'worker_question', []],
+  ['waiting', undefined, []],
+  ['awaiting_review', undefined, ['Review', 'Stop']],
+] as const)('renders and binds only the actions for %s / %s', (status, reason, labels) => {
+  const resume = vi.fn(); const stop = vi.fn(); const openReview = vi.fn();
+  function AttentionFixture() {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     // eslint-disable-next-line react-hooks/refs -- createElement forwards this ref; the composer reads it only in effects and events.
-    return createElement(WorkerPaneComposer, { textareaRef, scopeKey: 'blocked', active: false, compact: true, input: '',
-      onInputChange: vi.fn(), onSend: vi.fn(), disabled: true, canSend: false,
-      attention: { label: 'Blocked: CI', tone: 'danger' }, onResume: resume, onStop: stop });
+    return createElement(WorkerPaneComposer, { textareaRef, scopeKey: 'attention', active: false, compact: true, input: '',
+      onInputChange: vi.fn(), onSend: vi.fn(), disabled: status === 'blocked' && reason !== 'worker_question', canSend: false,
+      attention: workerAttention(status, reason), onResume: resume, onStop: stop, onOpenReview: openReview });
   }
-  const resume = vi.fn();
-  const stop = vi.fn();
-  act(() => root.render(createElement(BlockedFixture)));
-  expect(host.querySelector('textarea')?.disabled).toBe(true);
-  expect(host.querySelector('[data-worker-state-row]')?.textContent).toBe('Blocked: CIResumeStop');
-  act(() => [...host.querySelectorAll('button')].find(button => button.textContent === 'Stop')!.click());
-  expect(stop).toHaveBeenCalledOnce();
+  act(() => root.render(createElement(AttentionFixture)));
+  const row = host.querySelector('[data-worker-state-row]')!;
+  const actions = [...row.querySelectorAll('button')];
+  expect(actions.map(button => button.textContent)).toEqual(labels);
+  for (const button of actions) {
+    expect(button.disabled).toBe(false);
+    act(() => button.click());
+  }
+  expect(resume).toHaveBeenCalledTimes(labels.some(label => label === 'Resume') ? 1 : 0);
+  expect(stop).toHaveBeenCalledTimes(labels.some(label => label === 'Stop') ? 1 : 0);
+  expect(openReview).toHaveBeenCalledTimes(labels.some(label => label === 'Review' || label.startsWith('Open')) ? 1 : 0);
+  if (!labels.length) {
+    expect(row.textContent).toBe('Waiting');
+    expect(host.querySelector('textarea')?.disabled).toBe(false);
+  }
 });

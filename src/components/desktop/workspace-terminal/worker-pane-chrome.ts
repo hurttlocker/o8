@@ -1,5 +1,10 @@
 import type { TerminalTab } from './types';
 
+const TITLE_WORD_CASE = new Map([
+  'CI', 'PR', 'API', 'UI', 'UX', 'MCP', 'CLI', 'ID', 'URL', 'JSON', 'SQL', 'CSS', 'HTML',
+  'iOS', 'macOS', 'Linux', 'Windows', 'GitHub', 'npm', 'OAuth', 'SSH', 'TLS', 'VM', 'Tauri', 'Codex', 'Claude', 'o8',
+].map(word => [word.toLowerCase(), word]));
+
 function cleanLabel(value: string): string {
   const words = value.replace(/\s+/g, ' ').trim().replace(/[:;,\s]+$/g, '').split(' ');
   while (words.length > 1 && /^(a|an|the|to|for|with|and|or|of|in|on|by|from|at|into|via|per)$/i.test(words.at(-1)!)) words.pop();
@@ -16,7 +21,8 @@ export function shortWorkerTitle({ label, branch, fallback = 'Worker' }: {
     return cleanLabel(task.replace(/^(?:feat|fix|chore|refactor|design|perf|test|docs)(?:\([^)]*\))?:\s*/i, '')) || fallback;
   }
   const source = (rawBranch || task).replace(/^(?:inline|issue)\/\d+-/, '').replace(/[-_]+/g, ' ').trim().toLowerCase();
-  return cleanLabel(source.charAt(0).toUpperCase() + source.slice(1)) || fallback;
+  const sentence = source.charAt(0).toUpperCase() + source.slice(1);
+  return cleanLabel(sentence.replace(/\b[a-z][a-z0-9]*\b/gi, word => TITLE_WORD_CASE.get(word.toLowerCase()) ?? word)) || fallback;
 }
 
 export function workerTabLabels(tabs: readonly TerminalTab[]): string[] {
@@ -42,13 +48,19 @@ export function isCompactWorkerPane(width: number, height: number): boolean {
   return width < 480 || height < 360;
 }
 
-export interface WorkerAttention { label: string; tone: 'warning' | 'danger' }
+export type WorkerStateAction = 'Resume' | 'Open checks' | 'Open details' | 'Review' | 'Stop';
+export interface WorkerAttention { label: string; tone: 'warning' | 'danger'; actions: readonly WorkerStateAction[] }
 
 export function workerAttention(status?: string | null, blockedReason?: string | null): WorkerAttention | null {
-  if (status === 'blocked') return { label: blockedReason && !/^(worker_question|huddle_ready)$/.test(blockedReason)
-    ? `Blocked: ${blockedReason.replace(/_/g, ' ')}` : 'Blocked', tone: 'danger' };
-  if (/paused|recovering/.test(status ?? '')) return { label: 'Paused', tone: 'warning' };
-  if (/awaiting_review|review/.test(status ?? '')) return { label: 'Needs review', tone: 'warning' };
-  if (/wait|pending|approval/.test(status ?? '')) return { label: 'Waiting', tone: 'warning' };
+  const reason = blockedReason?.trim().replace(/_/g, ' ') ?? '';
+  if (status === 'blocked') {
+    if (/^(worker question|huddle ready)$/i.test(reason)) return { label: 'Waiting', tone: 'warning', actions: [] };
+    if (/^awaiting operator input$/i.test(reason)) return { label: 'Needs review', tone: 'warning', actions: ['Review', 'Stop'] };
+    const action = /\b(ci|checks?|build|tests?)\b/i.test(reason) ? 'Open checks' : 'Open details';
+    return { label: reason ? `Blocked: ${reason}` : 'Blocked', tone: 'danger', actions: [action, 'Stop'] };
+  }
+  if (/paused|recovering/.test(status ?? '')) return { label: 'Paused', tone: 'warning', actions: ['Resume', 'Stop'] };
+  if (/awaiting_review|review/.test(status ?? '')) return { label: 'Needs review', tone: 'warning', actions: ['Review', 'Stop'] };
+  if (/wait|pending|approval/.test(status ?? '')) return { label: 'Waiting', tone: 'warning', actions: [] };
   return null;
 }
