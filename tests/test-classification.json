@@ -5331,6 +5331,12 @@
       ]
     },
     {
+      "path": "tests/terminal-status-history-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/terminal-visibility-real-path.test.ts",
       "reasons": [
         "child-process",
