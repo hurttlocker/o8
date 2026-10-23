@@ -15,6 +15,7 @@ const cliEntry = join(dataDir, 'o8.mjs');
 const children = new Set<ChildProcess>();
 let server: Server | null = null;
 let apiPort = 0;
+let emulateNativeCheck = false;
 
 function stateRequest(body: unknown) {
   return new Request('http://127.0.0.1/api/panel/app/update-state', {
@@ -28,11 +29,19 @@ async function forwardUpdateApply(request: import('node:http').IncomingMessage) 
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   const body = Buffer.concat(chunks).toString('utf8');
-  return updateApplyRoute.POST(new Request('http://127.0.0.1/api/panel/update/apply', {
+  const pending = updateApplyRoute.POST(new Request('http://127.0.0.1/api/panel/update/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
   }));
+  if (emulateNativeCheck) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const control = await (await updateStateRoute.GET()).json();
+    expect(control.checkRequestedAt).toEqual(expect.any(String));
+    await updateStateRoute.POST(stateRequest({ updatePending: false, checkOutcome: 'failed',
+      checkedAt: new Date().toISOString(), checkError: 'synthetic native feed failure' }));
+  }
+  return pending;
 }
 
 async function runCli(args: string[]) {
@@ -111,36 +120,20 @@ afterAll(async () => {
 });
 
 describe('update check state through the real route and CLI parser', () => {
-  it('reports an absent check instead of claiming no update is available', async () => {
-    await updateStateRoute.POST(stateRequest({
-      updatePending: false,
-      checkOutcome: 'never',
-      checkedAt: null,
-      checkError: null,
-    }));
-
+  it('refreshes an absent check and keeps native failure distinct from current, including force', async () => {
+    emulateNativeCheck = true;
     const result = await runCli(['update', 'apply']);
+    emulateNativeCheck = false;
     expect(result.exitCode, result.stderr).toBe(5);
-    const payload = JSON.parse(result.stdout) as {
-      message?: string;
-      error?: { code?: string };
-    };
-    expect(payload.error?.code).toBe('update_check_not_run');
-    expect(payload.message).not.toMatch(/no .*available update|no update available/i);
-
-    const forcedResult = await runCli(['update', 'apply', '--force']);
-    expect(forcedResult.exitCode, forcedResult.stderr).toBe(5);
-    const forcedPayload = JSON.parse(forcedResult.stdout) as {
-      message?: string;
-      error?: { code?: string };
-    };
-    expect(forcedPayload.error?.code).toBe('update_check_not_run');
-    expect(forcedPayload.message).toMatch(/force cannot apply.*no updater check/i);
-    expect(forcedPayload.message).not.toMatch(/no .*available update|no update available/i);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: false, error: { code: 'update_check_failed' },
+      check: { outcome: 'failed', checkedAt: expect.any(String) } });
+    const forced = await runCli(['update', 'apply', '--force']);
+    expect(forced.exitCode, forced.stderr).toBe(5);
+    expect(JSON.parse(forced.stdout)).toMatchObject({ ok: false, error: { code: 'update_check_failed' } });
   });
 
   it('returns failed and current check outcomes as distinct route states', async () => {
-    const checkedAt = '2026-09-12T16:00:00.000Z';
+    const checkedAt = new Date().toISOString();
     await updateStateRoute.POST(stateRequest({
       updatePending: false,
       checkOutcome: 'failed',
@@ -200,7 +193,7 @@ describe('update check state through the real route and CLI parser', () => {
     await updateStateRoute.POST(stateRequest({
       updatePending: false,
       checkOutcome: 'failed',
-      checkedAt: '2026-09-12T15:59:59.000Z',
+      checkedAt: new Date(Date.parse(checkedAt) - 1_000).toISOString(),
       checkError: 'stale synthetic failure',
     }));
     const olderStateResponse = await updateStateRoute.GET();

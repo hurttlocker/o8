@@ -1,4 +1,7 @@
+import { recoverStoppedNativeTask } from '@/lib/app-update/native-task';
 import { NextResponse } from 'next/server';
+import { getRequestedCheckTime } from '@/lib/app-update/fresh-check';
+import { controlAutoApply } from '@/lib/app-update/auto-apply';
 
 import {
   getAppUpdateState,
@@ -22,16 +25,30 @@ function invalidState(code: string, message: string) {
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, state: getAppUpdateState() }, { headers: NO_STORE_HEADERS });
+  return NextResponse.json({ ok: true, state: getAppUpdateState(), checkRequestedAt: getRequestedCheckTime() }, { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
+  if (isRecord(body) && isRecord(body.autoApply)) {
+    try {
+      return NextResponse.json(await controlAutoApply(body.autoApply), { headers: NO_STORE_HEADERS });
+    } catch {
+      return NextResponse.json({ allowed: false, error: { code: 'auto_apply_inventory_unavailable',
+        message: 'Update work inventory is unavailable.', retryable: true, retryAfterMs: 5_000 } },
+      { status: 503, headers: NO_STORE_HEADERS });
+    }
+  }
   // An install outcome from the webview (#3588), separate from check results.
   if (isRecord(body) && isRecord(body.install)) {
     const { outcome, version, error } = body.install;
-    if (outcome !== 'started' && outcome !== 'failed') {
-      return invalidState('invalid_install_outcome', 'install.outcome must be started or failed.');
+    if (outcome !== 'started' && outcome !== 'installed' && outcome !== 'failed' && outcome !== 'cancelled') {
+      return invalidState('invalid_install_outcome', 'install.outcome must be started, installed, failed, or cancelled.');
+    }
+    recoverStoppedNativeTask();
+    if (['installing', 'restarting'].includes(getAppUpdateState().autoApply?.phase ?? '')) {
+      return NextResponse.json({ error: { code: 'update_install_in_progress',
+        message: 'The native updater is already installing this update.' } }, { status: 409, headers: NO_STORE_HEADERS });
     }
     const state = recordAppUpdateInstall({ outcome,
       version: typeof version === 'string' ? version : null,
@@ -61,6 +78,7 @@ export async function POST(request: Request) {
     version: typeof body.version === 'string' && body.version.trim() ? body.version.trim() : null,
     checkOutcome,
     checkedAt: typeof body.checkedAt === 'string' ? body.checkedAt : null,
+    info: isRecord(body.info) ? body.info : null,
     checkError: typeof body.checkError === 'string' ? body.checkError : null,
   });
   return NextResponse.json({ ok: true, state }, { headers: NO_STORE_HEADERS });

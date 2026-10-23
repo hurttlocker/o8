@@ -11,7 +11,7 @@ const terminalSession = {
 };
 
 describe('evaluateUpdateIdleWindow', () => {
-  it('lists every non-terminal lane and ignores only lifecycle-terminal lanes', () => {
+  it('lists parked records separately from active work and ignores terminal lanes', () => {
     const result = evaluateUpdateIdleWindow({
       lanes: [
         { id: 'idle', label: 'Idle lane', status: 'idle', runtime: 'codex', sessionKey: null },
@@ -27,8 +27,9 @@ describe('evaluateUpdateIdleWindow', () => {
       checkedAt: '2026-07-31T12:00:00.000Z',
     });
 
-    expect(result.idle).toBe(false);
-    expect(result.active.lanes.map((lane) => lane.id)).toEqual(['idle', 'review']);
+    expect(result.idle).toBe(true);
+    expect(result.active.lanes).toEqual([]);
+    expect(result.parkedLanes.map(lane => lane.id)).toEqual(['idle', 'review']);
   });
 
   it('blocks attached terminals and owned managed processes but ignores detached shells', () => {

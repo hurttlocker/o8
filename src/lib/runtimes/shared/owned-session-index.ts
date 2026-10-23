@@ -235,8 +235,9 @@ export async function lookupOwnedActiveRunFresh(surfaceId: string): Promise<Owne
 }
 
 /** List every owned session whose persisted metadata still carries an active run. */
-export async function listOwnedActiveRuns(now: number = Date.now()): Promise<IndexedOwnedActiveRun[]> {
-  const indexes = await Promise.all(ownedRoots().map(({ root }) => getRootIndex(root, now)));
+export async function listOwnedActiveRuns(now: number = Date.now(), fresh = false): Promise<IndexedOwnedActiveRun[]> {
+  const indexes = await Promise.all(ownedRoots().map(({ root }) => fresh ? buildRootIndex(root) : getRootIndex(root, now)));
+  if (fresh && indexes.some(index => index.unreadable)) throw new Error('Owned session inventory is unavailable.');
   const active = new Map<string, IndexedOwnedActiveRun>();
   for (const index of indexes) {
     for (const [surfaceId, run] of index.runs) {

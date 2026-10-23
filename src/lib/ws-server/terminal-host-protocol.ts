@@ -24,7 +24,7 @@ export interface PtySpawnSpec {
 
 /** Parent → child. */
 export type TerminalHostRequest =
-  | { type: 'spawn'; id: string; spec: PtySpawnSpec }
+  | { type: 'spawn'; id: string; spec: PtySpawnSpec; admissionId: string }
   | { type: 'write'; id: string; data: string }
   | { type: 'resize'; id: string; cols: number; rows: number }
   | { type: 'kill'; id: string; signal?: string };
