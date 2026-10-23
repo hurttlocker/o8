@@ -4860,6 +4860,12 @@
       ]
     },
     {
+      "path": "tests/sidebar-review-layout-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/sign-and-notarize.test.ts",
       "reasons": [
         "native-build"

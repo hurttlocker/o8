@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } 
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import { formatElapsedAgo } from './repo-focus/tabs/chats/helpers';
 import { ScheduledTaskMark } from './ScheduledTaskMark';
-import { SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
+import { CHAT_ROW_RADIUS, COMPACT_CHAT_ROW_HEIGHT, SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './repo-focus/tabs/chats/constants';
 import { shouldRecede, type AttentionBand } from './repo-focus/tabs/chats/sections';
 import type { TerminalStatusEvidence } from '@/lib/terminal-status/resolve';
 import { WorkerReviewAction } from './workspace-terminal/WorkerReviewAction';
@@ -225,9 +225,10 @@ export function ExtraAgentRowView({
       title={[row.name, dotLabel, row.repoPath, row.statusEvidence?.summary].filter(Boolean).join(' · ')}
       style={{
         width: '100%', boxSizing: 'border-box',
-        minHeight: roomy ? 52 : 31,
-        paddingTop: roomy ? 10 : 5,
-        paddingBottom: roomy ? 10 : 5,
+        minHeight: roomy ? 52 : showPreview ? 31 : COMPACT_CHAT_ROW_HEIGHT,
+        borderRadius: CHAT_ROW_RADIUS,
+        paddingTop: roomy ? 10 : showPreview ? 5 : 4,
+        paddingBottom: roomy ? 10 : showPreview ? 5 : 4,
         paddingLeft: 12,
         paddingRight: 12,
         borderWidth: 0,
@@ -264,7 +265,7 @@ export function ExtraAgentRowView({
               right: 6,
               bottom: 2,
               left: 6,
-              borderRadius: 8,
+              borderRadius: CHAT_ROW_RADIUS,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
           }}
