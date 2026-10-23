@@ -23,6 +23,7 @@ import { listLanes } from '@/lib/lane/registry';
 import { launchSharedCheckoutWorker } from '@/lib/orchestrator/shared-checkout-launch';
 import { findSharedCheckoutMemberByMutation, readSharedCheckoutTeam } from '@/lib/orchestrator/shared-checkout-team';
 import { DelegationSelectionError, resolveDelegationSelection } from '@/lib/orchestrator/delegation-selection';
+import { resolveEffortAliases } from '@/lib/orchestrator/effort-pin';
 import { getWorkerCatalog } from '@/lib/orchestrator/worker-catalog';
 import { isOrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import { requirePanelAuth } from '@/lib/panel/auth';
@@ -393,6 +394,12 @@ export async function POST(request: NextRequest) {
     : '';
   if (!clientMutationId) {
     return NextResponse.json({ ok: false, error: 'clientMutationId is required' }, { status: 400 });
+  }
+  // Invalid effort has no launch effect and must not consume the caller's
+  // mutation identity. Keep correction possible with the same correlation ID.
+  const effortAliases = resolveEffortAliases(body?.requestedEffort, body?.thinkingEffort);
+  if (!effortAliases.ok) {
+    return NextResponse.json({ ok: false, code: effortAliases.code, error: effortAliases.message }, { status: 400 });
   }
   const canonicalBody = JSON.stringify({
     prompt: typeof body?.prompt === 'string' ? body.prompt.trim() : '',

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   guardedWorkspaceInvocation,
+  guardedWorkspaceReadScriptInvocation,
 } from './materialization-execution';
 import type { WorktreeMaterializationIdentity } from './materialization-identity';
 import { resolveStorageVolumeId } from './storage-telemetry';
@@ -536,10 +537,13 @@ async function runPinnedLeaf(
   afterPinnedStep?: (segment: string) => Promise<void>,
   expectedTargetIdentity?: PinnedWorkspaceFileIdentity | null,
 ): Promise<{ code: number; stdout: string }> {
-  const invocation = guardedWorkspaceInvocation(process.execPath, [
-    '-e', PINNED_LEAF_IO_SCRIPT, operation, safeRelativePath(relativePath),
+  const args = [
+    operation, safeRelativePath(relativePath),
     ...(sourceOrTarget ? [sourceOrTarget] : []),
-  ], identity);
+  ];
+  const invocation = operation === 'read' || operation === 'inspect-entry'
+    ? guardedWorkspaceReadScriptInvocation(PINNED_LEAF_IO_SCRIPT, args, identity)
+    : guardedWorkspaceInvocation(process.execPath, ['-e', PINNED_LEAF_IO_SCRIPT, ...args], identity);
   const child = spawn(invocation.command, invocation.args, {
     cwd: workspacePath,
     env: {

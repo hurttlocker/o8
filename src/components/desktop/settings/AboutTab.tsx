@@ -13,6 +13,7 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { ReportIssueSection } from './ReportIssueSection';
+import { ReleaseNotesSignup } from '../ReleaseNotesSignup';
 
 // ── Minimal raw-SVG glyphs for row icon tiles ──
 
@@ -114,6 +115,7 @@ export function AboutTab() {
           <SettingsRow icon={<LaptopIcon />} label="Platform" value={platform} divider />
           <SettingsRow icon={<CodeIcon />} label="Mode" value={isProduction ? 'Production' : 'Development'} />
         </SettingsGroup>
+        <div style={{ marginTop: 16, paddingLeft: 14, paddingRight: 14 }}><ReleaseNotesSignup /></div>
       </section>
 
       <section style={{ marginTop: 28 }}>
