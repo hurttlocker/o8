@@ -276,6 +276,12 @@
       ]
     },
     {
+      "path": "src/components/desktop/thoughts/chat-panel/compaction-thread-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "src/components/desktop/thoughts/mission-panel/PacketMetaRows.test.ts",
       "reasons": [
         "apfs-tool"
