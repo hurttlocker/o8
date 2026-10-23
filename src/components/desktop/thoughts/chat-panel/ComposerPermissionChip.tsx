@@ -10,24 +10,27 @@ import type { ThoughtsChatPermissionMode } from './types';
 export const WORKSPACE_FULL_ACCESS_DETAIL = 'Can edit files and run commands that write only in this workspace';
 
 /** Next-message permissions sit inside the composer and shrink with its row. */
-export function ComposerPermissionChip({ mode, onChange, fullAccessDetail = 'Can edit files and run actions' }: {
+export function ComposerPermissionChip({ mode, onChange, fullAccessDetail = 'Can edit files and run actions', allowOutsideWorkspace = false }: {
   mode: ThoughtsChatPermissionMode;
   onChange: (mode: ThoughtsChatPermissionMode) => void;
   fullAccessDetail?: string;
+  allowOutsideWorkspace?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const reduceMotion = useReducedMotion();
-  const label = mode === 'full' ? 'Full access' : 'Plan only';
+  const label = mode === 'outside-workspace' ? 'Outside workspace' : mode === 'full' ? 'Full access' : 'Plan only';
+  const detail = mode === 'outside-workspace' ? 'Commands can edit files outside this workspace with your user permissions'
+    : mode === 'full' ? fullAccessDetail : 'Inspect and propose without edits';
   return <>
-    <button ref={triggerRef} type="button" aria-label={`Permissions: ${label}`} title={`${label} · ${mode === 'full' ? fullAccessDetail : 'Inspect and propose without edits'}`}
+    <button ref={triggerRef} type="button" aria-label={`Permissions: ${label}`} title={`${label} · ${detail}`}
       aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}
       style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, paddingTop: 0, paddingBottom: 0,
         paddingLeft: 0, paddingRight: 0, border: 0, borderRadius: 7, background: 'transparent',
-        color: mode === 'full' ? 'var(--t-brand-orange)' : 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 300,
+        color: mode !== 'plan' ? 'var(--t-brand-orange)' : 'var(--t-accent)', cursor: 'pointer', fontSize: 10.5, fontWeight: 300,
         fontFamily: 'var(--font-sans-system)', whiteSpace: 'nowrap', flexShrink: 0 }}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <motion.g initial={false} animate={{ opacity: mode === 'full' ? 1 : 0, scale: mode === 'full' ? 1 : 0.8 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} style={{ transformOrigin: '12px 12px' }}>
+        <motion.g initial={false} animate={{ opacity: mode !== 'plan' ? 1 : 0, scale: mode !== 'plan' ? 1 : 0.8 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} style={{ transformOrigin: '12px 12px' }}>
           <rect x="4" y="11" width="16" height="10" rx="3" /><path d="M8 11V7a4 4 0 0 1 7.5-2M12 15v2" />
         </motion.g>
         <motion.g initial={false} animate={{ opacity: mode === 'plan' ? 1 : 0, scale: mode === 'plan' ? 1 : 0.8 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} style={{ transformOrigin: '12px 12px' }}>
@@ -40,6 +43,8 @@ export function ComposerPermissionChip({ mode, onChange, fullAccessDetail = 'Can
         {([
           { mode: 'full', label: 'Full access', detail: fullAccessDetail },
           { mode: 'plan', label: 'Plan only', detail: 'Inspect and propose without edits' },
+          ...(allowOutsideWorkspace ? [{ mode: 'outside-workspace', label: 'Outside workspace',
+            detail: 'Commands can edit files outside this workspace with your user permissions' } as const] : []),
         ] as const).map(option => <button key={option.mode} type="button" role="menuitemradio" aria-checked={mode === option.mode}
           onClick={() => { onChange(option.mode); setOpen(false); triggerRef.current?.focus(); }}
           style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', paddingTop: 8, paddingBottom: 8,

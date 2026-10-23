@@ -18,7 +18,7 @@ export interface ComposerQueuePayload {
     model: string;
     effort: ThinkingEffort;
     serviceTier?: OrchestratorServiceTier;
-    permissionMode: 'full' | 'plan';
+    permissionMode: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode;
     mode: OrchestratorExecutionMode;
     pickedMode: ComposerWireMode;
     collide: boolean;
