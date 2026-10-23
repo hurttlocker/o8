@@ -12,6 +12,7 @@ export interface DurableReviewAssessment {
   highConfidence: boolean;
   approvalId: string | null;
   reason: string;
+  secondPassPending?: boolean;
   /**
    * Deterministic per-requirement coverage verdict. Present whenever a sealed
    * contract applied; `null` for legacy packets. Merge preview surfaces
@@ -326,6 +327,7 @@ export async function assessDurableApprovedReview(
         highConfidence: false,
         approvalId: null,
         reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
+        secondPassPending: true,
       };
     }
     const matching = latestReview

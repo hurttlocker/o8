@@ -927,6 +927,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/process-identity.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
       "reasons": [
         "child-process",
@@ -2509,6 +2515,14 @@
       ]
     },
     {
+      "path": "tests/dispatch-queue-receipt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/dispatch-stale-base-refresh.test.ts",
       "reasons": [
         "child-process",
@@ -2674,6 +2688,12 @@
         "apfs-tool",
         "process-signal",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/fixtures/worktree-publication-child.test.ts",
+      "reasons": [
+        "worktree"
       ]
     },
     {
@@ -3371,6 +3391,12 @@
       ]
     },
     {
+      "path": "tests/mcp-response-budget-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-source-boot.test.ts",
       "reasons": [
         "child-process",
@@ -3469,6 +3495,17 @@
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/mission-create-retry-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "network-listener",
+        "real-path",
+        "worktree-api"
       ]
     },
     {
@@ -3783,6 +3820,14 @@
       ]
     },
     {
+      "path": "tests/orchestrator-compaction-context-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-handoff-transport-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3889,6 +3934,16 @@
       ]
     },
     {
+      "path": "tests/owned-codex-restart-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/owned-codex-resume-pinning-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3905,6 +3960,14 @@
     },
     {
       "path": "tests/owned-marker-process-proof-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/owned-process-identity-real-path.test.ts",
       "reasons": [
         "child-process",
         "process-signal",
@@ -5289,6 +5352,14 @@
       ]
     },
     {
+      "path": "tests/team-session-presence-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/telemetry-consent-contrast-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5327,6 +5398,12 @@
         "git-cli",
         "real-path",
         "worktree"
+      ]
+    },
+    {
+      "path": "tests/terminal-status-history-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

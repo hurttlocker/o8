@@ -143,6 +143,26 @@ describe('control-plane lock with a slow holder (#2399)', () => {
     expect(readControlPlaneLockEvents().some((event) => event.kind === 'hard_ceiling_bypassed')).toBe(false);
   }, 60_000);
 
+  it('honors an explicit wait deadline across a real child-owned filesystem lock', async () => {
+    await withLockedState(() => undefined);
+    const holder = holdLockInChild({ packetId: 'pkt-child', holdMs: 1_500, hardCeilingMs: 30_000 });
+    await holder.waitFor('LOCKED');
+    const owner = readFileSync(join(LOCK_DIR, 'holder.json'), 'utf8');
+    let entered = false;
+    try {
+      await expect(withLockedState(() => { entered = true; }, { waitTimeoutMs: 100 }))
+        .rejects.toMatchObject({ name: 'ControlPlaneLockTimeoutError', waitTimeoutMs: 100 });
+      expect(entered).toBe(false);
+      expect(readFileSync(join(LOCK_DIR, 'holder.json'), 'utf8')).toBe(owner);
+      expect(readControlPlaneLockEvents().some(event => event.kind === 'hard_ceiling_bypassed')).toBe(false);
+    } finally {
+      await holder.waitFor('DONE');
+    }
+    expect(persistedPacketIds()).toEqual(['pkt-child']);
+    await withLockedState(state => { state.packets.push(packet('pkt-later')); });
+    expect(persistedPacketIds()).toEqual(['pkt-child', 'pkt-later']);
+  }, 30_000);
+
   it('merges instead of replacing when a live holder passes the hard ceiling', async () => {
     await withLockedState(() => undefined);
     process.env.O8_CONTROL_PLANE_LOCK_HARD_CEILING_MS = '800';
