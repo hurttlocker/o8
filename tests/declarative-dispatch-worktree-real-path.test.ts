@@ -16,6 +16,8 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
+const readinessBoundary = vi.hoisted(() => ({ real: false }));
+
 const worktreeFailure = vi.hoisted(() => ({
   enabled: false,
   message: 'synthetic packet worktree provision failure',
@@ -83,21 +85,19 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 
-vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
-  ensureDispatchBackendReady: vi.fn(async () => ({
-    ready: true,
-    reason: 'test',
-    waitedMs: 0,
-    attempts: 1,
-    lastCheck: {
-      ready: true,
-      reason: 'test',
-      apiBase: 'http://127.0.0.1:1',
-      portSource: 'default',
-      apiPortFilePresent: false,
-    },
-  })),
-}));
+vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtimes/shared/dispatch-readiness')>();
+  return {
+    ...actual,
+    ensureDispatchBackendReady: vi.fn(async (...args: Parameters<typeof actual.ensureDispatchBackendReady>) => (
+      readinessBoundary.real ? actual.ensureDispatchBackendReady(...args) : {
+        ready: true, reason: 'test', waitedMs: 0, attempts: 1,
+        lastCheck: { ready: true, reason: 'test', apiBase: 'http://127.0.0.1:1',
+          portSource: 'default', apiPortFilePresent: false },
+      }
+    )),
+  };
+});
 
 vi.mock('@/lib/analytics/server', () => ({
   emitProductEvent: vi.fn(async () => undefined),
@@ -272,6 +272,7 @@ async function waitFor<T>(
 
 describe('declarative packet dispatch worktree reachability', () => {
   beforeEach(() => {
+    readinessBoundary.real = false;
     worktreeFailure.enabled = false;
     provisioningRace.enabled = false;
     provisioningRace.promptEntered = false;
@@ -292,6 +293,7 @@ describe('declarative packet dispatch worktree reachability', () => {
   });
 
   it('spawns in the packet worktree, reports process death, and blocks when provisioning fails', async () => {
+    readinessBoundary.real = true;
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
     const repoPath = createRemoteBackedRepo();
     await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
@@ -315,6 +317,9 @@ describe('declarative packet dispatch worktree reachability', () => {
     }, 'fake qoder spawn');
     expect(realpathSync(spawn.cwd)).not.toBe(realpathSync(repoPath));
     expect(launchedLane?.worktreePath).toBeTruthy();
+    expect(laneRegistry.getLaneEvents(launchedLane!.id, 200)
+      .filter((event) => event.verb === 'runtime_launch_step').map((event) => event.payload.phase))
+      .toEqual(['started', 'completed']);
     expect(launchedPacket.lane?.worktreePath).toBe(launchedLane?.worktreePath);
     const worktreePath = realpathSync(launchedLane!.worktreePath!);
     expect(realpathSync(spawn.cwd)).toBe(worktreePath);
@@ -359,7 +364,41 @@ describe('declarative packet dispatch worktree reachability', () => {
     ]));
     const captureAfterFailure = readFileSync(capturePath, 'utf8').trim().split('\n').filter(Boolean);
     expect(captureAfterFailure).toEqual(captureBeforeFailure);
-  }, 40_000);
+  }, 120_000);
+
+  it('records a failed backend handoff on the real declarative packet lane and never spawns', async () => {
+    readinessBoundary.real = true;
+    const captureBefore = existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '';
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('private transport details', { cause: { code: 'ECONNREFUSED' } });
+    }));
+    const repoPath = createRemoteBackedRepo();
+    await import('@/lib/repos/registry').then(({ addRepo }) => addRepo(repoPath));
+    const [{ runDispatchTick }, lanes] = await Promise.all([
+      import('@/lib/orchestrator/scheduling'), import('@/lib/lane/registry'),
+    ]);
+    const packetId = 'pkt-backend-handoff-refused';
+    const result = await runDispatchTick(await mission(repoPath, packet(repoPath, packetId)), {
+      launchBudget: { maxLaunches: 1 },
+    });
+    const lane = lanes.findLatestLaneByPacket(packetId)!;
+    const events = lanes.getLaneEvents(lane.id, 200);
+    const steps = events.filter((event) => event.verb === 'runtime_launch_step');
+    expect(steps.map((event) => event.payload.phase)).toEqual(['started', 'failed']);
+    expect(steps[0].payload).toMatchObject({ packetId, runtime: 'qoder', step: 'backend_readiness', deadlineMs: 20_000 });
+    expect(steps[1].payload).toMatchObject({
+      code: 'dispatch_backend_not_ready', reason: 'fetch_failed', transportCode: 'ECONNREFUSED',
+      url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/api\/setup\/status$/),
+      elapsedMs: expect.any(Number), portSource: expect.any(String),
+    });
+    expect(Number(steps[1].payload.elapsedMs)).toBeLessThan(25_000);
+    expect(lane.status).not.toBe('launching');
+    expect(lane.sessionKey).toBeNull();
+    expect(result.packets[0].blockedReason).toContain('ECONNREFUSED');
+    expect(result.packets[0].blockedReason).not.toMatch(/warming|private/);
+    expect(events.some((event) => event.payload.eventLabel === 'session_launched')).toBe(false);
+    expect(existsSync(capturePath) ? readFileSync(capturePath, 'utf8') : '').toBe(captureBefore);
+  }, 120_000);
 
   it('verifies a materialized dev binary and blocks launch when the binary is incomplete', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
