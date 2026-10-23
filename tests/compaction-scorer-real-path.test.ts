@@ -175,7 +175,7 @@ describe('judgment-scored compaction through autoCompactOrchestratorThread', () 
     const huge = body.state.entries.find((entry) => entry.id === 'm2')!;
     expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(ENTRY_TEXT_BUDGET);
     expect(huge.role).toBe('tool');
-    expect(huge.clipped).toEqual({ chars: HUGE_TOOL_RESULT.length, headChars: 800, tailChars: 800 });
+    expect(huge.clipped).toEqual({ chars: HUGE_TOOL_RESULT.length + '\n\nTool: exec_command\ndone'.length, headChars: 800, tailChars: 800 });
     expect(huge.text).toContain(HUGE_HEAD);
     expect(huge.text).toContain(HUGE_TAIL);
     expect(huge.text!.length).toBeLessThan(ENTRY_TEXT_BUDGET);

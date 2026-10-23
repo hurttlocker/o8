@@ -67,6 +67,23 @@ describe('interrupt escalation ladder', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('POSIX process-tree escalation', () => {
+  it.each([undefined, { version: 1 as const, platform: process.platform as 'darwin' | 'linux', bootId: 'prior-boot', startId: 'kernel:1:000001' }])(
+    'strict identity never signals an absent root group using missing or prior-boot evidence %j', async (processIdentity) => {
+    const pid = 2_000_000_009;
+    const signals: unknown[] = [];
+    const realKill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation((target, signal) => {
+      if (target === pid) throw errnoError('ESRCH');
+      if (target === -pid) { if (signal !== 0) signals.push(signal); return true; }
+      return realKill(target, signal);
+    });
+    const result = await escalateInterrupt({ pid, processIdentity, processIdentityRequired: true }, {
+      isAlive: () => true, sleep: async () => {},
+    });
+    expect(signals).toEqual([]);
+    expect(result.confirmedDead).toBe(false);
+  });
+
   it('kills and verifies descendants when the recorded pid is not a process-group leader', async () => {
     const grandchildScript = [
       "process.on('SIGINT', () => {});",

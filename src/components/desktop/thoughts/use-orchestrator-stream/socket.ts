@@ -11,6 +11,7 @@ import {
 import { parseTerminalTurnReceipt, parseTerminalUsage } from './terminal-receipt';
 import { parseHandoffEventData } from './handoff-socket';
 import { createAssistantState, continuationUserMessage } from './continuation-start';
+import { isCarriedCompactionUser } from '@/lib/transcripts/compaction';
 
 interface RefLike<T> {
   current: T;
@@ -112,6 +113,7 @@ const ORCH_SNAPSHOT_BUSY_RECONCILE_MS = 6000;
 export function createOrchestratorMessageHandler(
   options: CreateOrchestratorMessageHandlerOptions,
 ) {
+  const contextAssistantIds = new Set<string>();
   const setTranscriptMessages = (update: SetStateAction<MobileTranscriptEntry[]>) => {
     options.setMessages((prev) => {
       const next = typeof update === 'function'
@@ -174,6 +176,19 @@ export function createOrchestratorMessageHandler(
       if (ownThreadId && evtThreadId !== ownThreadId) return;
       if (!ownThreadId && isPaneOwnedThread(evtThreadId)) return;
     }
+
+    // A prime/replay turn reuses carried context, not an operator send. Its
+    // assistant output belongs to that context too, never to the live reply.
+    const assistantId = typeof msg.data?.assistantMessageId === 'string' ? msg.data.assistantMessageId : null;
+    const carried = msg.event === 'turn-start' ? continuationUserMessage(msg.data) : null;
+    if (carried && isCarriedCompactionUser(carried, options.messagesRef.current)) {
+      if (assistantId) {
+        contextAssistantIds.add(assistantId);
+        if (contextAssistantIds.size > 32) contextAssistantIds.delete(contextAssistantIds.values().next().value!);
+      }
+      return;
+    }
+    if (assistantId && contextAssistantIds.has(assistantId)) return;
 
     const terminal = msg.data?.voiceTerminal as Record<string, unknown> | undefined;
     if (terminal && typeof terminal.userMessageId === 'string' && typeof terminal.text === 'string'

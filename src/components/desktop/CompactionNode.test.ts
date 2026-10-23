@@ -85,6 +85,13 @@ describe('CompactionNode disclosure relationships', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
   });
 
+  it.each([1, 2])('uses sentence case and pluralizes %i compacted turns', (count) => {
+    const [button] = renderNodes([{ summary: `<compacted_context turns="${count}" at="2030-01-02 11:33">Synthetic summary</compacted_context>` }]);
+    expect(button.textContent).toBe(`Context compacted · ${count} turn${count === 1 ? '' : 's'} · 11:33`);
+    expect(button.style.fontFamily).toBe('var(--font-sans-system)');
+    expect(container.textContent).not.toContain('Synthetic summary');
+  });
+
   it.each([
     {},
     { compactedCount: 2, summary: ' \n ' },

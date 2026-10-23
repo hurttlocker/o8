@@ -1,12 +1,15 @@
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { activityCommandWords } from './worker-command';
+import { activitySearchTerms } from './worker-search';
+import { activityRepetitions } from './worker-activity-groups';
 
-export type ActivityKind = 'read' | 'search' | 'list' | 'edit' | 'command';
+export type ActivityKind = 'read' | 'search' | 'list' | 'edit' | 'diff' | 'status' | 'history' | 'test' | 'typecheck' | 'lint' | 'command';
 export interface HumanActivity {
   label: string;
   liveLabel: string;
   command: string;
   files: string[];
+  searchTerms: string[];
   kind: ActivityKind;
 }
 export interface ActivityStep extends HumanActivity {
@@ -55,6 +58,7 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
   }
   const tokens = activityCommandWords(shell && typeof raw === 'string' ? raw : command);
   const executable = (tokens[0] ?? name).split('/').pop() ?? name;
+  const searchTerms = activitySearchTerms(executable, tokens, args);
   const nativePath = args.file_path ?? args.filePath ?? args.path ?? args.filename ?? args.target_file;
   const paths = typeof nativePath === 'string' ? [nativePath] : [];
   const patch = typeof args.patch === 'string' ? args.patch : typeof raw === 'string' ? raw : command;
@@ -64,7 +68,7 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
   if (command) {
     // File-like operands only: flags, search patterns and sed programs are not sources.
     const operands = tokens.slice(1).filter((token, index, all) => {
-      if (token.startsWith('-') || /^\d+(?:,\d+)?[a-z]$/.test(token)) return false;
+      if (token.startsWith('-') || searchTerms.includes(token) || /^\d+(?:,\d+)?[a-z]$/.test(token)) return false;
       if (/^(?:\d*[<>]|\/dev\/)/.test(token) || /[<>]$/.test(all[index - 1] ?? '') || token.includes('..')) return false;
       if (/^(rg|grep)$/.test(executable)) {
         const patternIndex = all.findIndex(value => !value.startsWith('-'));
@@ -90,22 +94,28 @@ export function humanizeActivity(tool: MobileTranscriptToolCall): HumanActivity 
     kind = 'edit'; label = `Edited ${object}`; liveLabel = `Editing ${object}`;
   } else if (executable === 'git' && /^(diff|status|log)$/.test(tokens[1] ?? '')) {
     const target = tokens[1] === 'diff' ? 'the diff' : tokens[1] === 'log' ? 'history' : 'status';
+    kind = tokens[1] === 'log' ? 'history' : tokens[1] === 'diff' ? 'diff' : 'status';
     label = `Checked ${target}`; liveLabel = `Checking ${target}`;
   } else if (/^(vitest|jest|pytest)$/.test(executable) || /^(npm|pnpm|yarn|bun|cargo)$/.test(executable) && tokens.slice(1).some(token => /^test(?::|$)/.test(token))) {
-    label = 'Ran tests'; liveLabel = 'Running tests';
+    kind = 'test'; label = 'Ran tests'; liveLabel = 'Running tests';
   } else if (executable === 'tsc' || tokens.some(token => /^(typecheck|type-check)$/.test(token))) {
-    label = 'Type-checked'; liveLabel = 'Type-checking';
+    kind = 'typecheck'; label = 'Type-checked'; liveLabel = 'Type-checking';
   } else if (executable === 'eslint' || tokens.some(token => token === 'lint')) {
-    label = 'Linted'; liveLabel = 'Linting';
+    kind = 'lint'; label = 'Linted'; liveLabel = 'Linting';
   }
-  return { label, liveLabel, files, kind, command: command || `${tool.name}${typeof nativePath === 'string' ? ` ${nativePath}` : ''}` };
+  return { label, liveLabel, files, searchTerms: kind === 'search' ? searchTerms : [], kind, command: command || `${tool.name}${typeof nativePath === 'string' ? ` ${nativePath}` : ''}` };
 }
 
 function summarize(steps: ActivityStep[]): string {
   const parts: string[] = [];
-  for (const [kind, verb] of [['read', 'Read'], ['search', 'Searched'], ['list', 'Listed'], ['command', 'Ran'], ['edit', 'Edited']] as const) {
+  for (const [kind, verb] of [['test', 'Ran tests'], ['typecheck', 'Type-checked'], ['lint', 'Linted'], ['read', 'Read'], ['search', 'Searched'], ['list', 'Listed'],
+    ['diff', 'Checked the diff'], ['status', 'Checked status'], ['history', 'Checked history'], ['command', 'Ran'], ['edit', 'Edited']] as const) {
     const matching = steps.filter(step => step.kind === kind);
     if (!matching.length) continue;
+    if (['test', 'typecheck', 'lint', 'diff', 'status', 'history'].includes(kind)) {
+      parts.push(`${verb}${activityRepetitions(matching.length)}`);
+      continue;
+    }
     const files = new Set(matching.flatMap(step => step.files));
     const count = kind === 'read' || kind === 'edit' ? files.size || matching.length : matching.length;
     const noun = kind === 'command' ? 'command' : kind === 'search' ? 'time' : kind === 'list' ? 'directory' : 'file';
