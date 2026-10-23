@@ -11,6 +11,8 @@ export interface OwnedSessionLifecycleRegistration {
   runtimeId: string;
   surfaceIdPrefix: string;
   commandLabel: string;
+  /** Shared batch stores retain independent stdio and enforce packet start identity. */
+  detachedPacketIdentity?: boolean;
   resolveRoot(): string;
   sessionState(surfaceId: string): Promise<OwnedSessionState>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
@@ -45,6 +47,7 @@ export function registerOwnedSessionLifecycle(options: {
     runtimeId: options.runtimeId,
     surfaceIdPrefix: options.surfaceIdPrefix,
     commandLabel: options.commandLabel,
+    detachedPacketIdentity: true,
     resolveRoot: () => process.env[options.rootEnvVar] || options.rootDefault,
     sessionState: (surfaceId) => options.store.sessionState(surfaceId),
     archiveSession: (surfaceId) => options.store.archiveSession(surfaceId),

@@ -13,6 +13,10 @@ async function main() {
   const { reconcileStuckLanes } = await import('../../src/lib/lane/reconcile');
   const { probeLaneSessionAlive } = await import('../../src/lib/lane/owned-session-liveness');
   const { getOwnedCodexRuntimeTail, getOwnedCodexFleetAdditions, sweepOrphanedCodexSessions } = await import('../../src/lib/codex/owned');
+  const claude = await import('../../src/lib/claude-code/owned');
+  const runtimeId = process.env.O8_RESTART_FIXTURE_RUNTIME === 'claude-code' ? 'claude-code' : 'codex';
+  const readFleet = runtimeId === 'claude-code' ? claude.getOwnedClaudeCodeFleetAdditions : getOwnedCodexFleetAdditions;
+  const readTail = runtimeId === 'claude-code' ? claude.getOwnedClaudeCodeRuntimeTail : getOwnedCodexRuntimeTail;
   const { updateOperatorDefaults } = await import('../../src/lib/operator/defaults');
   const { getOrCreateWsToken } = await import('../../src/lib/ws-auth');
   const { writeOrchestratorControlPlaneState } = await import('../../src/lib/orchestrator/control-plane');
@@ -53,12 +57,12 @@ async function main() {
           const branch = payload.branch ?? 'inline/restart-fixture';
           const repoPath = join(process.env.O8_RESTART_FIXTURE_ROOT!, 'repo');
           const lane = registry.createLane({ repoPath, branch, baseBranch: 'main',
-            runtime: 'codex', packetId, label: 'Restart fixture' });
+            runtime: runtimeId, packetId, label: 'Restart fixture' });
           registry.setLaneStatus(lane.id, 'launching', 'system');
           writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({
             ...createEmptyOrchestratorMissionState(), missionId: 'mission-restart-fixture', repoPath,
             packets: [{ id: packetId, title: 'Restart fixture', summary: 'Offline packet restart',
-              status: 'running', queueState: 'running', releaseState: 'released', runtime: 'codex',
+              status: 'running', queueState: 'running', releaseState: 'released', runtime: runtimeId,
               workMode: 'edit', workspaceTargetPath: repoPath, branchTarget: lane.branch }],
           }));
           response = NextResponse.json(lane);
@@ -67,9 +71,9 @@ async function main() {
         } else if (path === '/api/fixture/state') {
           const surface = request.nextUrl.searchParams.get('surface')!;
           let lifecycleError: string | undefined;
-          try { await getOwnedCodexFleetAdditions({ fresh: true }); } catch (error) { lifecycleError = String(error); }
+          try { await readFleet({ fresh: true }); } catch (error) { lifecycleError = String(error); }
           let tail: unknown;
-          try { tail = await getOwnedCodexRuntimeTail(surface); } catch (error) { tail = { error: String(error) }; }
+          try { tail = await readTail(surface); } catch (error) { tail = { error: String(error) }; }
           const lane = registry.getLane(request.nextUrl.searchParams.get('lane')!);
           response = NextResponse.json({ lane, tail, lifecycleError, alive: lane ? await probeLaneSessionAlive(lane) : null });
         } else response = NextResponse.json({ ok: true });

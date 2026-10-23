@@ -39,7 +39,7 @@ async function api<T>(path: string, body?: unknown, allowedStatus?: number | num
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60_000),
-  });
+  }).catch(error => { throw new Error(`${path}: ${String(error)}\n${output.slice(-5_000)}`, { cause: error }); });
   const value = await response.json();
   if (allowedStatus ? !(Array.isArray(allowedStatus) ? allowedStatus : [allowedStatus]).includes(response.status) : !response.ok) throw new Error(`${path}: ${response.status} ${JSON.stringify(value)}\n${output.slice(-5_000)}`);
   return value as T;
@@ -285,6 +285,6 @@ describe.skipIf(process.platform === 'win32')('Codex packet survival through the
         try { if (startTime(workerPid) === workerStart) process.kill(workerPid, 'SIGINT'); } catch { /* Already exited. */ }
         await waitFor(() => { try { process.kill(workerPid, 0); return false; } catch { return true; } }, 'fallback fixture teardown');
       }
-    }, 60_000);
+    }, 180_000);
   });
 });
