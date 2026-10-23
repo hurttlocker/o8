@@ -69,7 +69,9 @@ describe('programmatic prompt catalog v1', () => {
     expect(review).toContain('An agent has completed work on lane "Prompt work"');
     expect(review).toContain('## Outcome closure review');
     expect(review).toContain('Treat the worker self-review as a claim');
-    expect(review).toContain('lane_command with verb "merge"');
+    expect(review).toContain('This lane has no packet ID.');
+    expect(review).not.toContain('lane_command');
+    expect(review).not.toContain('call approve_and_merge(');
     expect(review).toContain('COMPLETENESS trace - when the change establishes or restores an invariant');
     expect(review).toContain('`INVARIANT: <one sentence, or NONE>`');
     expect(review).toContain('`SITE: <file:line> covered=<yes|no> evidence=<file:line|reason>`');

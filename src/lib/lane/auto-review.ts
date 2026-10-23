@@ -597,7 +597,7 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
   //     the connected Codex subscription.
   //   - toggle ON              → the resident Claude Code harness runs the
   //     review with the model source selected in Settings > Models.
-  // Both backends can call `submit_review` and `lane_command`. Fail-closed
+  // Both backends can call `submit_review` and `approve_and_merge`. Fail-closed
   // approval is enforced by the durable review gate (`requiresSecondPass`),
   // not by backend capability asymmetry.
   // Backend selected via the orchestrator-backend registry (#1075). Behavior
