@@ -16,7 +16,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, stat } from 'node:fs';
+import { access, constants, stat } from 'node:fs';
 import path from 'node:path';
 
 import { executableSuffixes, pathLookupProgram, pickLookupResult } from '@/lib/runtimes/shared/cli-locate';
@@ -28,6 +28,7 @@ import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
 
 const execFileAsync = promisify(execFile);
 const statAsync = promisify(stat);
+const accessAsync = promisify(access);
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ export interface CliResolverSpec {
   binaryName: string;
   /**
    * Primary env-var override key (convention: O8_<RUNTIME>_BIN, e.g. O8_CODEX_BIN).
-   * Checked first — if set and the path exists we use it immediately.
+   * Checked first. If set, it must point to an executable regular file.
    */
   envOverride: string;
   /** Additional env-var overrides checked after envOverride (e.g. CLAUDE_BIN). */
@@ -188,10 +189,9 @@ export function getCachedCli(runtimeId: string): ResolvedCli | undefined {
 /** Returns true when the path exists and is executable. */
 async function canExec(binPath: string): Promise<boolean> {
   try {
-    await statAsync(binPath);
-    // stat succeeded → file exists; we assume it's executable if the caller
-    // provided a path (env override or static fallback) since we can't easily
-    // check execute permission in a cross-platform way without spawning.
+    if (!(await statAsync(binPath)).isFile()) return false;
+    // Windows CLI shims are executed through cliInvocation, without POSIX mode bits.
+    if (process.platform !== 'win32') await accessAsync(binPath, constants.X_OK);
     return true;
   } catch {
     return false;
@@ -249,20 +249,24 @@ function binaryNames(spec: CliResolverSpec): string[] {
   return [spec.binaryName, ...(spec.aliases ?? [])];
 }
 
+function executableEnvKeys(spec: CliResolverSpec): string[] {
+  // Older caller specs listed this data-home setting as an executable alias.
+  // Ignore it centrally so a background caller cannot poison the shared cache.
+  return [spec.envOverride, ...(spec.extraEnvOverrides ?? [])].filter((key) => key !== 'CODEX_HOME');
+}
+
 // ── Resolution strategies ─────────────────────────────────────────────────────
 
 /** Strategy 1: explicit env-var overrides. */
 async function resolveViaEnv(
   spec: CliResolverSpec,
 ): Promise<ResolvedCli | null> {
-  const envKeys = [spec.envOverride, ...(spec.extraEnvOverrides ?? [])];
+  const envKeys = executableEnvKeys(spec);
   for (const key of envKeys) {
     const value = process.env[key];
     if (!value) continue;
-    const exists = await canExec(value);
-    if (!exists) {
-      console.log(`[cli-resolver] Env override ${key}='${value}' set but path does not exist — skipping.`);
-      continue;
+    if (!(await canExec(value))) {
+      throw new Error(`Invalid executable override ${key}: expected an executable file.`);
     }
     console.log(`[cli-resolver] Using ${spec.binaryName} from env override ${key}='${value}'.`);
     const version = await probeVersion(value, spec);
@@ -405,7 +409,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // Single accept point: every successful strategy passes through the version
   // skew check before being cached, so the warning fires at most once per
   // cache fill (10-minute TTL).
-  const accept = (resolved: ResolvedCli): ResolvedCli | null => {
+  const accept = async (resolved: ResolvedCli): Promise<ResolvedCli | null> => {
     // A path that does not exist on this filesystem must never be cached OR
     // shimmed. Git-for-Windows answers `sh -lc 'command -v x'` with an MSYS
     // path (/c/Users/...) that Node cannot spawn; accepting it wrote a
@@ -413,9 +417,9 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
     // checks — so one bad answer outlived its own cache TTL and kept being
     // rediscovered. Falling through to the next strategy is always better than
     // persisting an unspawnable answer.
-    if (!existsSync(resolved.path)) {
+    if (!(await canExec(resolved.path))) {
       console.warn(
-        `[cli-resolver] Ignoring ${spec.binaryName} at ${resolved.path} (source: ${resolved.source}) — path does not exist.`,
+        `[cli-resolver] Ignoring ${spec.binaryName} at ${resolved.path} (source: ${resolved.source}) — expected an executable file.`,
       );
       return null;
     }
@@ -435,10 +439,10 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 1: env overrides ---
   const fromEnv = await resolveViaEnv(spec);
   if (fromEnv) {
-    const accepted = accept(fromEnv);
+    const accepted = await accept(fromEnv);
     if (accepted) return accepted;
   }
-  const envKeys = [spec.envOverride, ...(spec.extraEnvOverrides ?? [])].filter((k) => process.env[k]);
+  const envKeys = executableEnvKeys(spec).filter((k) => process.env[k]);
   if (envKeys.length === 0) {
     // Only record "tried env" when env vars weren't set — otherwise we already logged
     triedPaths.push(`env:${spec.envOverride}`);
@@ -447,7 +451,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 2: which ---
   const fromWhich = await resolveViaWhich(spec);
   if (fromWhich) {
-    const accepted = accept(fromWhich);
+    const accepted = await accept(fromWhich);
     if (accepted) return accepted;
   }
   for (const name of binaryNames(spec)) {
@@ -457,7 +461,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 3: login-shell ---
   const fromShell = await resolveViaLoginShell(spec);
   if (fromShell) {
-    const accepted = accept(fromShell);
+    const accepted = await accept(fromShell);
     if (accepted) return accepted;
   }
   for (const name of binaryNames(spec)) {
@@ -467,7 +471,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 4: static fallbacks ---
   const fromFallback = await resolveViaStaticFallbacks(spec);
   if (fromFallback) {
-    const accepted = accept(fromFallback);
+    const accepted = await accept(fromFallback);
     if (accepted) return accepted;
   }
   for (const { dir } of staticFallbackDirs()) {

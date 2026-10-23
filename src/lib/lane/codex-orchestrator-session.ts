@@ -440,7 +440,6 @@ async function sendToCodexOrchestratorAttempt(
       runtimeId: 'codex',
       binaryName: 'codex',
       envOverride: 'O8_CODEX_BIN',
-      extraEnvOverrides: ['CODEX_HOME'],
     });
     codexBin = resolved.path;
     // The model-gated clamp (flagship models may use max/ultra) is not enough — the

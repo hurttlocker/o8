@@ -598,7 +598,11 @@ export function createOwnedRunController({
       ...sandboxEnvExtra,
     };
     try {
-      await ensureDispatchBackendReady(runtimeId, mode);
+      if (session.laneId) {
+        await ensureDispatchBackendReady(runtimeId, mode, { laneId: session.laneId, packetId: session.packetId });
+      } else {
+        await ensureDispatchBackendReady(runtimeId, mode);
+      }
       const durableSession = await io.findSession(session.surfaceId);
       assertOwnedActionAdmission(durableSession);
       assertDurableOwnedSpawn(durableSession, session, runtimeId, mode);
