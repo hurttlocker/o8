@@ -6036,6 +6036,14 @@
       "reasons": [
         "network-listener"
       ]
+    },
+    {
+      "path": "tests/ws-parity-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path"
+      ]
     }
   ]
 }

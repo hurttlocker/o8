@@ -1,0 +1,79 @@
+use o8d::{
+    websocket::{serve, ServerConfig},
+    EventBus,
+};
+use serde_json::{json, Value};
+use std::{env, sync::Arc};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::TcpListener,
+};
+use uuid::Uuid;
+
+#[tokio::main(worker_threads = 2)]
+async fn main() {
+    if run().await.is_err() {
+        eprintln!("o8d failed: verify opt-in, listener, credential, and producer input");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if !arguments
+        .iter()
+        .any(|argument| argument == "--experimental-ws")
+    {
+        return Err("explicit opt-in required".into());
+    }
+    let option = |name: &str| {
+        arguments
+            .windows(2)
+            .find(|pair| pair[0] == name)
+            .map(|pair| pair[1].clone())
+    };
+    let address = option("--listen")
+        .ok_or("listener required")?
+        .parse::<std::net::SocketAddr>()?;
+    // Until device credentials and E2EE exist, the prototype cannot expose a remote listener.
+    if !address.ip().is_loopback() {
+        return Err("loopback listener required".into());
+    }
+    let token = env::var("WS_TOKEN")?.trim().to_owned();
+    if token.is_empty() {
+        return Err("credential required".into());
+    }
+    let initial: Vec<Value> = match option("--initial-state") {
+        Some(path) => serde_json::from_slice(&std::fs::read(path)?)?,
+        None => vec![],
+    };
+    let config = ServerConfig {
+        token,
+        initial,
+        server_version: env::var("O8D_SERVER_VERSION")?,
+        instance_id: Uuid::new_v4().to_string(),
+        boot_id: Uuid::new_v4().to_string(),
+    };
+    let bus = Arc::new(EventBus::new(Uuid::new_v4().to_string(), 400));
+    let listener = TcpListener::bind(address).await?;
+    println!(
+        "{}",
+        json!({"listening":listener.local_addr()?.to_string()})
+    );
+    let producer = bus.clone();
+    let input = tokio::spawn(async move {
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
+        // This inherited pipe is a trusted TypeScript producer seam, never a WS client command.
+        while let Ok(Some(line)) = lines.next_line().await {
+            let events = serde_json::from_str::<Vec<Value>>(&line).map_err(|_| ())?;
+            producer.publish(events).await.map_err(|_| ())?;
+        }
+        Ok::<(), ()>(())
+    });
+    tokio::select! {
+        result = serve(listener, config, bus) => { result?; }
+        result = input => { result?.map_err(|_| "invalid producer input")?; }
+        _ = tokio::signal::ctrl_c() => {}
+    }
+    Ok(())
+}

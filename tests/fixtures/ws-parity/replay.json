@@ -1,0 +1,527 @@
+{
+  "name": "reconnect, epoch-bound replay, unsubscribe",
+  "actions": [
+    {
+      "op": "connect",
+      "client": "a"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "system",
+            "event": "connected",
+            "data": {
+              "clientId": {
+                "$capture": "aId",
+                "type": "string"
+              },
+              "gateway": "disabled",
+              "realtimeSeq": {
+                "$capture": "aSeq",
+                "type": "number"
+              },
+              "instanceId": {
+                "$capture": "instanceId",
+                "type": "string"
+              },
+              "bootId": {
+                "$capture": "bootId",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "orchestrator-threads",
+            "event": "snapshot",
+            "data": {
+              "threads": []
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "inbox",
+            "event": "update",
+            "data": {
+              "generatedAt": "2026-01-01T00:00:00.000Z",
+              "mode": "live",
+              "sourceLabel": "o8",
+              "sessions": [],
+              "fleetSessions": [],
+              "approvals": [],
+              "reviewUnits": [],
+              "items": [],
+              "summary": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-negotiate",
+        "protocol": {
+          "min": 1,
+          "max": 1
+        },
+        "appVersion": "1.0.0",
+        "clientKind": "test",
+        "capabilities": [
+          "mobile-inbox-delta-v1"
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "welcome",
+            "data": {
+              "protocol": 1,
+              "serverVersion": {
+                "$capture": "serverVersion",
+                "type": "string"
+              },
+              "epoch": {
+                "$capture": "epoch",
+                "type": "string"
+              },
+              "features": [
+                "mobile-inbox-delta-v1"
+              ],
+              "legacyFallback": {
+                "supported": true,
+                "protocol": 1,
+                "removalDate": "2027-08-12",
+                "removalProtocol": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-subscribe",
+        "subscriptions": [
+          {
+            "stream": "session",
+            "sessionKey": "parity"
+          }
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "batch",
+            "data": {
+              "delivery": "bootstrap",
+              "stream": "session:parity",
+              "events": [
+                {
+                  "protocol": 1,
+                  "seq": {
+                    "$capture": "seed",
+                    "type": "number"
+                  },
+                  "stream": "session:parity",
+                  "channel": "history",
+                  "event": "history.snapshot",
+                  "ts": {
+                    "$capture": "seedTime",
+                    "type": "string"
+                  },
+                  "snapshot": true,
+                  "entityId": "parity",
+                  "health": {
+                    "state": "live"
+                  },
+                  "data": {
+                    "sessionKey": "parity",
+                    "entries": [
+                      {
+                        "id": "history-0",
+                        "role": "assistant",
+                        "text": "history 0"
+                      }
+                    ],
+                    "replace": true
+                  },
+                  "delivery": "bootstrap",
+                  "capturedSeq": {
+                    "$ref": "seed",
+                    "add": -1
+                  }
+                }
+              ],
+              "epoch": {
+                "$ref": "epoch"
+              },
+              "latestSeq": {
+                "$ref": "seed"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "http",
+      "target": "fixture",
+      "path": "/fixture/history",
+      "body": {
+        "version": 1
+      },
+      "status": 200
+    },
+    {
+      "op": "http",
+      "path": "/internal/realtime",
+      "body": {
+        "kind": "refresh",
+        "targets": [
+          "sessionHistory"
+        ],
+        "sessionKeys": [
+          "parity"
+        ],
+        "fresh": true
+      },
+      "status": 202
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "batch",
+            "data": {
+              "delivery": "live",
+              "stream": "session:parity",
+              "events": [
+                {
+                  "protocol": 1,
+                  "seq": {
+                    "$capture": "live",
+                    "type": "number"
+                  },
+                  "stream": "session:parity",
+                  "channel": "history",
+                  "event": "history.snapshot",
+                  "ts": {
+                    "$capture": "liveTime",
+                    "type": "string"
+                  },
+                  "snapshot": true,
+                  "entityId": "parity",
+                  "health": {
+                    "state": "live"
+                  },
+                  "data": {
+                    "sessionKey": "parity",
+                    "entries": [
+                      {
+                        "id": "history-1",
+                        "role": "assistant",
+                        "text": "history 1"
+                      }
+                    ],
+                    "replace": true
+                  }
+                }
+              ],
+              "epoch": {
+                "$ref": "epoch"
+              },
+              "latestSeq": {
+                "$ref": "live"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "close",
+      "client": "a",
+      "code": 1000,
+      "reason": "done"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "done"
+        }
+      ]
+    },
+    {
+      "op": "connect",
+      "client": "b"
+    },
+    {
+      "op": "receive",
+      "client": "b",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "system",
+            "event": "connected",
+            "data": {
+              "clientId": {
+                "$capture": "bId",
+                "type": "string"
+              },
+              "gateway": "disabled",
+              "realtimeSeq": {
+                "$capture": "bSeq",
+                "type": "number"
+              },
+              "instanceId": {
+                "$capture": "instanceId",
+                "type": "string"
+              },
+              "bootId": {
+                "$capture": "bootId",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "orchestrator-threads",
+            "event": "snapshot",
+            "data": {
+              "threads": []
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "inbox",
+            "event": "update",
+            "data": {
+              "generatedAt": "2026-01-01T00:00:00.000Z",
+              "mode": "live",
+              "sourceLabel": "o8",
+              "sessions": [],
+              "fleetSessions": [],
+              "approvals": [],
+              "reviewUnits": [],
+              "items": [],
+              "summary": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "b",
+      "frame": {
+        "type": "realtime-negotiate",
+        "protocol": {
+          "min": 1,
+          "max": 1
+        },
+        "appVersion": "1.0.0",
+        "clientKind": "test",
+        "capabilities": [
+          "mobile-inbox-delta-v1"
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "b",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "welcome",
+            "data": {
+              "protocol": 1,
+              "serverVersion": {
+                "$capture": "serverVersion",
+                "type": "string"
+              },
+              "epoch": {
+                "$capture": "epoch",
+                "type": "string"
+              },
+              "features": [
+                "mobile-inbox-delta-v1"
+              ],
+              "legacyFallback": {
+                "supported": true,
+                "protocol": 1,
+                "removalDate": "2027-08-12",
+                "removalProtocol": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "b",
+      "frame": {
+        "type": "realtime-subscribe",
+        "subscriptions": [
+          {
+            "stream": "session:parity",
+            "epoch": {
+              "$ref": "epoch"
+            },
+            "since": {
+              "$ref": "live",
+              "add": -1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "b",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "batch",
+            "data": {
+              "delivery": "replay",
+              "stream": "session:parity",
+              "events": [
+                {
+                  "protocol": 1,
+                  "seq": {
+                    "$capture": "live",
+                    "type": "number"
+                  },
+                  "stream": "session:parity",
+                  "channel": "history",
+                  "event": "history.snapshot",
+                  "ts": {
+                    "$capture": "liveTime",
+                    "type": "string"
+                  },
+                  "snapshot": true,
+                  "entityId": "parity",
+                  "health": {
+                    "state": "live"
+                  },
+                  "data": {
+                    "sessionKey": "parity",
+                    "entries": [
+                      {
+                        "id": "history-1",
+                        "role": "assistant",
+                        "text": "history 1"
+                      }
+                    ],
+                    "replace": true
+                  }
+                }
+              ],
+              "epoch": {
+                "$ref": "epoch"
+              },
+              "latestSeq": {
+                "$ref": "live"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "b",
+      "frame": {
+        "type": "realtime-subscribe",
+        "subscriptions": []
+      }
+    },
+    {
+      "op": "http",
+      "target": "fixture",
+      "path": "/fixture/history",
+      "body": {
+        "version": 2
+      },
+      "status": 200
+    },
+    {
+      "op": "http",
+      "path": "/internal/realtime",
+      "body": {
+        "kind": "refresh",
+        "targets": [
+          "sessionHistory"
+        ],
+        "sessionKeys": [
+          "parity"
+        ],
+        "fresh": true
+      },
+      "status": 202
+    },
+    {
+      "op": "delay",
+      "ms": 350
+    },
+    {
+      "op": "close",
+      "client": "b",
+      "code": 1000,
+      "reason": "done"
+    },
+    {
+      "op": "receive",
+      "client": "b",
+      "entries": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "done"
+        }
+      ]
+    }
+  ]
+}
