@@ -1,0 +1,22 @@
+{
+  "baseline": "d283e620b72fc0f774c8c1db9e1ee2f66fb5ccea",
+  "gpuix": {
+    "repository": "https://github.com/remorses/gpuix.git",
+    "tag": "@gpuix/native@0.11.0",
+    "commit": "2e31b47ff6432ceebe70e7fc7b0f51a76d7d30cf",
+    "nativeVersion": "0.11.0",
+    "reactAdapterVersion": "0.11.0",
+    "rustToolchain": "1.97.1",
+    "nativeCargoLockSha256": "8e571739885b57803db59052742c2ccfa9dee35a264f0712d6656bf336f3f36a",
+    "terminalCargoLockSha256": "d4ffd26ec2b017ecf88903fef99d11f25195bef290d387f1aaf26e9c4977a68f",
+    "bunLockSha256": "f5fa9fa985c3674957fa8cc5cedd780110f97e5c0734d0c25adddb40b7226303"
+  },
+  "gpuiSubmodule": {
+    "repository": "https://github.com/remorses/zed.git",
+    "commit": "f77e5cfe9dad04288566f00c66ecf3c58d6f84b3"
+  },
+  "target": "x86_64-apple-darwin",
+  "status": "stopped-before-install",
+  "dependencyGraphInstalled": false,
+  "benchmarkRuns": 0
+}
