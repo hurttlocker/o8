@@ -1,6 +1,7 @@
 import { sep } from 'node:path';
 
 const TOP_LEVEL_NAMED_FILES = new Set(['CLAUDE.md', 'AGENTS.md', 'DESIGN.md']);
+const ROOT_DOC_FILES = new Set(['README.md', 'ROADMAP.md', 'CONTRIBUTING.md']);
 
 /**
  * Match documentation paths shared by the batch distiller and live watcher.
@@ -12,7 +13,7 @@ export function isWhitelistedDocPath(relPath: string): boolean {
   const depth = segments.length - 1;
 
   if (TOP_LEVEL_NAMED_FILES.has(base)) return true;
-  if (base === 'README.md' && depth === 0) return true;
+  if (depth === 0 && ROOT_DOC_FILES.has(base)) return true;
   if (segments[0] === 'docs' && depth >= 1 && /\.md$/i.test(base)) return true;
   return false;
 }
