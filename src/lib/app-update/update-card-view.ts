@@ -21,7 +21,7 @@ export function describeInstallError(error: unknown): string {
   try { return JSON.stringify(error) ?? ''; } catch { return ''; }
 }
 
-interface UpdateIdleLaneView { label?: string; status?: string }
+interface UpdateIdleLaneView { label?: string; status?: string; processLive?: boolean }
 export interface UpdateIdleResponse {
   idle?: {
     idle?: boolean;
@@ -35,9 +35,29 @@ export interface UpdateIdleResponse {
       ownedSessions?: Array<{ surfaceId?: string }>;
       cloudJobs?: Array<{ id?: string }>;
       cliInstallers?: Array<{ runtime?: string; state?: string }>;
+      workLaunches?: Array<{ label?: string }>;
       restartPending?: boolean;
     };
   };
+}
+
+/** Parked records are preserved by restart and never represent running work. */
+export function canRestartWhenIdle(payload: UpdateIdleResponse | null): boolean {
+  return payload?.idle?.idle === true || payload?.idle?.idleExceptParked === true;
+}
+
+export function describeWaitingUpdate(payload: UpdateIdleResponse | null, installed: boolean): string {
+  const { live } = describeUpdateBlockers(payload);
+  const prefix = installed ? 'Update installed.' : 'Update ready.';
+  return live.length ? `${prefix} Waiting for: ${live.join('; ')}.`
+    : canRestartWhenIdle(payload) ? `${prefix} Restart now to apply it. Waiting tasks keep their state.`
+      : `${prefix} Running-work inventory is unavailable. Check again or confirm a restart.`;
+}
+
+/** This label never promises an override of the native installer reservation. */
+export function updateRestartLabel(blockers: AppUpdateBlockers | null | undefined): string {
+  return blockers?.live.length && !blockers.live.some(item => item.startsWith('CLI update')
+    || item.startsWith('Another app restart')) ? 'Restart anyway' : 'Restart now';
 }
 
 const PARKED_LABEL: Record<string, string> = {
@@ -57,11 +77,12 @@ export function describeUpdateBlockers(payload: UpdateIdleResponse | null): AppU
   const parkedStatuses = new Set((idle?.parkedLanes ?? []).map(lane => lane.status));
   const live = [
     ...(idle?.active?.lanes ?? [])
-      .filter(lane => !parkedStatuses.has(lane.status))
+      .filter(lane => lane.processLive || !parkedStatuses.has(lane.status))
       .map(lane => `${name(lane.label, 'Task')} (${(lane.status ?? 'active').replace(/_/g, ' ')})`),
     ...(idle?.active?.terminalSessions ?? []).map(session => `Terminal ${name(session.name, 'session')}`),
     ...(idle?.active?.managedRuns ?? []).map(run => `Run: ${name(run.command, 'command')}`),
     ...(idle?.active?.ownedSessions ?? []).map(session => `Agent session ${name(session.surfaceId, '')}`.trim()),
+    ...(idle?.active?.workLaunches ?? []).map(work => name(work.label, 'Starting process')),
     ...(idle?.active?.cloudJobs ?? []).map(job => `Cloud job ${name(job.id, '')}`.trim()),
     ...(idle?.active?.restartPending ? ['Another app restart is already reserved'] : []),
     ...(idle?.active?.cliInstallers ?? []).map(installer => installer.state === 'active'

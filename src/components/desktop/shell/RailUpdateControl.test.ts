@@ -57,7 +57,7 @@ it('names waiting tasks and keeps explicit restart accessible with cached runnin
       blockers: { live: ['Build the release (running)'], parked: ['Fix the login form (waiting for review)'] } }));
     expect(panel().textContent).toContain('Work to check before restarting:');
     expect(panel().textContent).toContain('Build the release (running)');
-    await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Restart now')!.click());
+    await act(async () => [...panel().querySelectorAll('button')].find(button => button.textContent === 'Restart anyway')!.click());
     expect(restart).toHaveBeenCalledTimes(2);
   } finally {
     window.removeEventListener('o8:restart-app-update', restart);

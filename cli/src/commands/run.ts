@@ -14,6 +14,7 @@
  * `o8 run stop <runId>` kills a registered managed run.
  */
 
+import { reserveWorkLaunch } from '../../../src/lib/app-update/work-launch-admission';
 import { randomUUID } from 'node:crypto';
 import { extractRunCommand, loadRunSettlementBinding, registerRunWithReplay, settlementBindingDigest } from './run-settlement.js';
 import { execFileSync } from 'node:child_process';
@@ -444,13 +445,16 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     `exit $__o8_ec`,
   ].join('; ');
 
+  const workLaunch = reserveWorkLaunch(`Run: ${command[0]}`);
   try {
+    workLaunch.started(process.pid);
     execFileSync(
       'tmux',
       ['new-session', '-d', '-s', session, '-x', '220', '-y', '50', 'sh', '-c', wrapper, 'o8run', ...command],
       { windowsHide: true, timeout: 10_000, stdio: 'ignore' },
     );
   } catch (err) {
+    workLaunch.release();
     for (const f of [logFile, exitFile, metadataFile, goFile, envFile]) {
       try { rmSync(f, { force: true }); } catch {}
     }
@@ -474,6 +478,16 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     }).trim();
     panePid = Number.parseInt(out, 10) || null;
   } catch { /* informational only */ }
+  try { workLaunch.started(panePid ?? undefined); }
+  catch (error) {
+    // The command is still behind its go-gate; settle the waiting shell.
+    try { execFileSync('tmux', ['kill-session', '-t', session], { windowsHide: true, timeout: 3_000, stdio: 'ignore' }); } catch { /* Already gone. */ }
+    workLaunch.release();
+    for (const file of [logFile, exitFile, metadataFile, goFile, envFile]) {
+      try { rmSync(file, { force: true }); } catch { /* Already gone. */ }
+    }
+    throw error;
+  }
   let processGroupId: number | null = null;
   if (panePid && process.platform !== 'win32') {
     try {
@@ -572,6 +586,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   try {
     writeFileSync(goFile, ''); // release — command starts only after registration
+    if (registered) workLaunch.release(); // Otherwise retain pane-PID ownership until confirmed exit.
   } catch (error) {
     process.off('SIGINT', onSigint);
     await discardUnreleasedManagedRun({

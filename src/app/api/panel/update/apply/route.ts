@@ -1,3 +1,5 @@
+import { recordForcedRestart } from '@/lib/app-update/forced-restart-receipt';
+import { checkFreshness, ensureFreshUpdateCheck, UPDATE_RETRY } from '@/lib/app-update/fresh-check';
 import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -12,7 +14,7 @@ export const dynamic = 'force-dynamic';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 
 function response(payload: unknown, status = 200) {
-  return NextResponse.json(payload, { status, headers: NO_STORE_HEADERS });
+  return NextResponse.json({ ...(payload as object), ...checkFreshness() }, { status, headers: NO_STORE_HEADERS });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,6 +63,9 @@ export async function POST(request: Request) {
   }
 
   const force = body.force === true;
+  if (!await ensureFreshUpdateCheck()) return response({ ok: false, requested: false,
+    error: { code: 'update_check_unavailable', message: 'A fresh native updater check did not finish within 25 seconds.', ...UPDATE_RETRY },
+    state: getAppUpdateState() }, 503);
   const state = getAppUpdateState();
   if (!state.updatePending) {
     if (state.check.outcome === 'current') {
@@ -87,11 +92,11 @@ export async function POST(request: Request) {
   }
 
   const admission = inspectCliOperationAdmission();
-  if (admission.blocked) return response({ ok: false, requested: false,
+  if (!force && admission.blocked) return response({ ok: false, requested: false,
     error: { code: admission.code, message: admission.message }, state }, 409);
 
   const idle = await readIdleWindow();
-  if (!force && !idle.idle) {
+  if (!force && !(idle.idle || idle.idleExceptParked)) {
     return response({
       ok: false,
       requested: false,
@@ -104,6 +109,11 @@ export async function POST(request: Request) {
     }, 409);
   }
 
+  if (force) {
+    try { recordForcedRestart('update-apply', { admission, idle }); }
+    catch { return response({ ok: false, requested: false, error: { code: 'restart_receipt_unavailable',
+      message: 'The forced restart receipt could not be recorded.' } }, 503); }
+  }
   const now = new Date().toISOString();
   const published = await publishRealtimeMutation({
     mutation: {
@@ -121,7 +131,7 @@ export async function POST(request: Request) {
     return response({
       ok: false,
       requested: false,
-      error: { code: 'update_signal_unavailable', message: 'The realtime bridge could not accept the update request.' },
+      error: { code: 'update_signal_unavailable', message: 'The realtime bridge could not accept the update request.', ...UPDATE_RETRY },
       idle,
       state,
     }, 503);

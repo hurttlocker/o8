@@ -10,7 +10,7 @@ import {
 export const UPDATE_TOOLS: McpTool[] = [
   {
     name: 'o8_update_apply',
-    description: 'Apply the staged or available o8 update through the desktop webview. Refuses while lanes or worker terminals are live unless force is true.',
+    description: 'Apply the staged or available o8 update through the desktop webview. Refreshes stale checks, preserves parked lanes, and refuses live work unless force is true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -34,6 +34,7 @@ export async function handleUpdateApply(args: Record<string, unknown>): Promise<
       method: 'POST',
       body: JSON.stringify({ force: args.force === true }),
       acceptedErrorStatuses: [409, 503],
+      timeoutMs: 35_000,
     }) as { ok?: boolean };
     return { ...jsonResult(result), isError: result.ok !== true };
   } catch (error) {

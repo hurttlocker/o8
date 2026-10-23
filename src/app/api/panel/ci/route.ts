@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { fetchGitHubWorkflowRuns, resolveRepoSlug, DEFAULT_GITHUB_REPO } from '@/lib/github-broker';
 import { getCached, setCached, SLOW_TTL_MS } from '@/lib/github/cache';
+import { GitHubRequestDeferredError } from '@/lib/github-broker/request-budget';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -24,6 +25,12 @@ export async function GET(request: Request) {
     setCached(cacheKey, runs);
     return NextResponse.json({ runs, repo });
   } catch (err) {
+    if (err instanceof GitHubRequestDeferredError) {
+      return NextResponse.json({ error: err.message, runs: [], repo }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil((err.retryAt - Date.now()) / 1000))) },
+      });
+    }
     console.error('[panel-ci] Read failed:', err);
     const message = 'Unable to read CI runs.';
     return NextResponse.json({ error: message, runs: [], repo }, { status: 200 });
