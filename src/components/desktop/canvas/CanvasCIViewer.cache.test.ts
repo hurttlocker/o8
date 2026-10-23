@@ -22,7 +22,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 const lists = () => fetchMock.mock.calls.filter(([url]) => new URL(String(url), 'https://fixture.invalid').pathname === '/api/panel/ci');
 const details = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/panel/ci/'));
 const rows = () => [...host.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent !== 'Retry');
-const settle = async (ms = 0) => { await act(async () => vi.advanceTimersByTimeAsync(ms)); };
+const settle = async (ms = 1) => { await act(async () => vi.advanceTimersByTimeAsync(ms)); };
 async function render(count = 1, repo: string | null = repoA, initialRunId?: number) {
   await act(async () => root.render(createElement(QueryClientProvider, { client },
     ...Array.from({ length: count }, (_, key) => createElement(CIViewer, { key, repo: repo ?? undefined, initialRunId })),
@@ -77,9 +77,10 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
 
   it.each([false, true])('uses the shared polling interval when hidden=%s', async hidden => {
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden);
+    const startedAt = Date.now();
     await render(5);
     const interval = hidden ? 300_000 : 120_000;
-    await settle(interval - 1); expect(lists()).toHaveLength(1);
+    await settle(interval - 1 - (Date.now() - startedAt)); expect(lists()).toHaveLength(1);
     fetchMock.mockImplementation(async () => list('Polled run'));
     await settle(1); await settle(1);
     expect(lists()).toHaveLength(2); expect(host.textContent?.match(/Polled run/g)).toHaveLength(5);
@@ -141,6 +142,7 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
   it('preserves the selected run, detail and list scroll during background refresh', async () => {
     await render(1, repoA, 11);
     await act(async () => rows()[1].click());
+    await settle();
     expect(host.textContent).toContain(`Detail 12 ${repoA}`);
     const scroller = rows()[0].parentElement!; scroller.scrollTop = 140;
     const detailCount = details().length;
@@ -151,6 +153,7 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
 
   it('clears a selected old-repository run rather than requesting it from the new repository', async () => {
     await render(); await act(async () => rows()[0].click());
+    await settle();
     expect(host.textContent).toContain(`Logs 11 ${repoA}`);
     fetchMock.mockImplementation(async input => String(input).startsWith('/api/panel/ci?') ? list('Other repository run', 21) : detail(11, repoB));
     await render(1, repoB);
@@ -163,6 +166,7 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
     const pending = deferred();
     fetchMock.mockImplementation(async input => String(input).startsWith('/api/panel/ci?') ? list() : pending.promise);
     await act(async () => rows()[1].click());
+    await settle();
     const signal = details().at(-1)![1]?.signal;
     fetchMock.mockImplementation(async input => String(input).startsWith('/api/panel/ci?') ? list('Other run', 21) : new Response(null, { status: 503 }));
     await render(1, repoB, 21);
@@ -204,6 +208,7 @@ describe('Canvas CI shared run-list snapshots through the real viewer', () => {
     expect(host.textContent).toContain('Loading run details');
     expect(host.textContent).not.toContain(`Logs 11 ${repoA}`);
     await act(async () => pending.resolve(detail(11, repoB)));
+    await settle();
     expect(host.textContent).toContain(`Logs 11 ${repoB}`);
   });
 
