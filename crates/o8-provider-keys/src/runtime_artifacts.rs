@@ -197,7 +197,9 @@ pub(crate) fn purge(dir: &Path) -> Result<(), String> {
         let runtime = if name.contains("HERMES") { "hermes" } else { "codex" };
         walk(&root, runtime, 6, &mut seen, &mut found)?; walk(&PathBuf::from(format!("{}-archive", value.trim_end_matches('/'))), runtime, 6, &mut seen, &mut found)?;
     } }
-    if let Ok(home) = std::env::var("HOME") { walk(&PathBuf::from(home).join(".openclaw-o8"), "openclaw", 5, &mut seen, &mut found)?; }
+    let home = std::env::var_os("HOME").filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE").filter(|value| !value.is_empty()));
+    if let Some(home) = home { walk(&PathBuf::from(home).join(".openclaw-o8"), "openclaw", 5, &mut seen, &mut found)?; }
     for entry in fs::read_dir(std::env::temp_dir()).map_err(|_| ERROR.to_string())? { let entry = entry.map_err(|_| ERROR.to_string())?; let name = entry.file_name().to_string_lossy().into_owned(); if name.starts_with("o8-codex-app-") && name.ends_with(".json") { found.insert(entry.path(), "codex".into()); } }
     let mut prepared = Vec::new(); let mut records = Vec::new();
     for (path, runtime) in found {

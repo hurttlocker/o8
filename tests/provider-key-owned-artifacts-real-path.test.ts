@@ -54,7 +54,7 @@ it('restarted native mutation scrubs registered files plus undiscovered legacy a
   execFileSync('cargo', ['build', '--locked', '--manifest-path', resolve('tests/provider-keys/Cargo.toml')], { env: { ...process.env, CARGO_BUILD_JOBS: '2' }, stdio: 'pipe', timeout: 120_000 });
   const binary = resolve(`tests/provider-keys/target/debug/o8-provider-key-tests${process.platform === 'win32' ? '.exe' : ''}`);
   expect(existsSync(binary)).toBe(true);
-  const output = execFileSync(binary, { input: JSON.stringify({ action: 'save', pref: 'openrouter_api_key', value: '' }), encoding: 'utf8', env: { ...process.env, O8_DATA_DIR: state.dir, HOME: state.home, O8_MASTER_KEY: master, O8_TEST_DISABLE_VOICE_PROVIDER_KEYS: '1' } });
+  const output = execFileSync(binary, { input: JSON.stringify({ action: 'save', pref: 'openrouter_api_key', value: '' }), encoding: 'utf8', env: { ...process.env, O8_DATA_DIR: state.dir, HOME: '', USERPROFILE: state.home, O8_MASTER_KEY: master, O8_TEST_DISABLE_VOICE_PROVIDER_KEYS: '1' } });
   expect(JSON.parse(output).ok).toBe(true);
   expect(readFileSync(openclaw, 'utf8')).not.toContain(key);
   expect(readFileSync(source, 'utf8')).toContain(key);
@@ -112,7 +112,7 @@ it.each(['node', 'native'])('%s restarted mutation strips retired provider bytes
   } else {
     execFileSync('cargo', ['build', '--locked', '--manifest-path', resolve('tests/provider-keys/Cargo.toml')], { env: { ...process.env, CARGO_BUILD_JOBS: '2' }, stdio: 'pipe', timeout: 120_000 });
     const binary = resolve(`tests/provider-keys/target/debug/o8-provider-key-tests${process.platform === 'win32' ? '.exe' : ''}`);
-    const result = execFileSync(binary, { input: JSON.stringify({ action: 'save', pref: 'openrouter_enabled', value: false }), encoding: 'utf8', env: { ...process.env, O8_DATA_DIR: state.dir, HOME: state.home, O8_MASTER_KEY: master, O8_TEST_DISABLE_VOICE_PROVIDER_KEYS: '1' } });
+    const result = execFileSync(binary, { input: JSON.stringify({ action: 'save', pref: 'openrouter_enabled', value: false }), encoding: 'utf8', env: { ...process.env, O8_DATA_DIR: state.dir, HOME: '', USERPROFILE: state.home, O8_MASTER_KEY: master, O8_TEST_DISABLE_VOICE_PROVIDER_KEYS: '1' } });
     expect(JSON.parse(result).ok).toBe(true);
   }
   expect(readFileSync(toml, 'utf8')).not.toContain(key);
