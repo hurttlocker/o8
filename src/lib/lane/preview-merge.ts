@@ -22,6 +22,7 @@ import type { DirectiveCitationsPreview } from '@/lib/judgment/directive-citatio
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
 import { runLaneRebaseLint, UNCONFINED_LINT_NOTE, type LaneRebaseLintResult } from './rebase-lint';
 import { immutableSnapshotDiffBase, resolveLaneReviewSource } from './review-source';
+import { mergeReviewPrerequisites, type MergeReviewRequirements } from './merge-review-prerequisites';
 
 // ── Public Types ──
 
@@ -34,7 +35,9 @@ export type MergeCheckName =
   | 'self-review-integrity'
   | 'typecheck'
   | 'lint'
-  | 'contract-review';
+  | 'contract-review'
+  | 'durable-review'
+  | 'file-size-approval';
 
 export type MergeCheckVerdict = 'pass' | 'fail' | 'skipped';
 
@@ -63,6 +66,7 @@ export interface MergePreviewResult {
   directiveCitations?: DirectiveCitationsPreview;
   /** Contract state that approval and merge still need, separate from mechanical checks. */
   reviewPrerequisite?: string;
+  reviewRequirements?: MergeReviewRequirements;
 }
 
 interface MergePreviewOptions {
@@ -257,10 +261,12 @@ export async function buildPreviewForLane(
       ?.mission.packets.find((candidate) => candidate.id === packetId);
   }
   let reviewPrerequisite: string | undefined;
+  const prerequisites = await mergeReviewPrerequisites(resolvedLane, packet);
+  checks.push(...prerequisites.checks);
+  blockers.push(...prerequisites.checks.filter(check => check.verdict === 'fail').map(check => check.name));
   let contractReviewReady = true;
   if (packet?.taskContractRequired && packet.taskContract) {
-    const { assessDurableApprovedReview } = await import('./durable-review-approval');
-    const assessment = await assessDurableApprovedReview(resolvedLane);
+    const assessment = prerequisites.review;
     contractReviewReady = assessment.approved;
     reviewPrerequisite = assessment.approved
       ? 'The current HEAD has an approved review with task-contract evidence.'
@@ -273,8 +279,7 @@ export async function buildPreviewForLane(
     if (!contractReviewReady) blockers.push('contract-review');
   } else if (packet?.taskContractRequired && !packet.taskContract) {
     if (packet.taskContractSource === 'default') {
-      const { assessDurableApprovedReview } = await import('./durable-review-approval');
-      const assessment = await assessDurableApprovedReview(resolvedLane);
+      const assessment = prerequisites.review;
       contractReviewReady = assessment.approved && assessment.contractCoverage?.status === 'waived';
       reviewPrerequisite = contractReviewReady
         ? assessment.contractCoverage?.reason ?? 'The operator waived missing-contract coverage for this reviewed HEAD.'
@@ -302,13 +307,14 @@ export async function buildPreviewForLane(
     : undefined;
   return {
     packetId,
-    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail && contractReviewReady,
+    wouldMerge: gateResult.passed && lint.ok && !dirtyDetail && contractReviewReady && prerequisites.ready,
     checks,
     blockers,
     branch: lane.branch ?? null,
     diffBase: gateResult.diffBase,
     reviewSource: reviewSource.kind,
     ...(reviewPrerequisite ? { reviewPrerequisite } : {}),
+    reviewRequirements: prerequisites.requirements,
     ...(directiveCitations ? { directiveCitations } : {}),
   };
 }
