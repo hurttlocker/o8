@@ -152,6 +152,7 @@ describe.sequential('workspace manifest packet launch real path', () => {
         label: packetId,
         packetId,
       });
+      setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
       const prepared = await prepareLaunchWorktree({
         repoRoot: repoPath,
         agentType: 'codex',

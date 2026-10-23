@@ -10,6 +10,7 @@ const boundary = vi.hoisted(() => ({
   wedge: false,
   invalidateLane: false,
   humanDecision: false,
+  spoofManifestReceipt: false,
   preparedPaths: [] as string[],
   launch: vi.fn(async () => ({ ok: true, sessionKey: 'codex-owned:fixture', note: 'fixture launch' })),
 }));
@@ -64,12 +65,20 @@ beforeAll(async () => {
     }
     if (boundary.invalidateLane) registry.setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'launch_stalled');
     if (boundary.humanDecision) registry.setLaneStatus(lane.id, 'awaiting_human', 'user', 'operator_review');
+    if (boundary.spoofManifestReceipt) {
+      registry.appendEvent(lane.id, 'workspace_manifest_applied', 'orchestrator', { state: 'completed' });
+    }
   });
   const { getRuntime } = await import('@/lib/runtimes');
   vi.spyOn(getRuntime('codex')!, 'launch').mockImplementation(boundary.launch);
   boundary.launch.mockImplementation(async () => ({ ok: true, sessionKey: 'codex-owned:fixture', note: 'fixture launch' }));
 });
-afterEach(() => { boundary.wedge = false; boundary.invalidateLane = false; boundary.humanDecision = false; });
+afterEach(() => {
+  boundary.wedge = false;
+  boundary.invalidateLane = false;
+  boundary.humanDecision = false;
+  boundary.spoofManifestReceipt = false;
+});
 afterAll(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -165,4 +174,49 @@ describe('launch provisioning through mission HTTP entry points', () => {
       expect(polled.blockedReason).toContain(state === 'awaiting_orchestrator' ? 'launch_stalled' : 'orchestrator_wedge_timeout');
     }
   });
+
+  it.each(['applied', 'failed', 'skipped', 'watchdog', 'human', 'spoofed'] as const)(
+    'preserves launch authority with a manifest outcome: %s', async (outcome) => {
+      const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
+      const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest');
+      await updateOperatorDefaults({ workspaceManifestPolicy: outcome === 'skipped' ? 'disabled' : 'auto' });
+      writeFileSync(join(repoPath, 'o8.workspace.json'), JSON.stringify({
+        version: 1,
+        setup: outcome === 'failed' ? ['exit 1'] : [],
+      }));
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: repoPath, stdio: 'pipe' });
+      git('add', 'o8.workspace.json');
+      git('-c', 'user.email=test@o8.invalid', '-c', 'user.name=o8-test', 'commit', '--allow-empty', '-m', `manifest ${outcome}`);
+      git('push', 'origin', 'main');
+      boundary.wedge = outcome === 'watchdog' || outcome === 'human';
+      boundary.humanDecision = outcome === 'human';
+      boundary.spoofManifestReceipt = outcome === 'spoofed';
+      const packet = persistMission(`provisioning-manifest-${outcome}`);
+      const launches = boundary.launch.mock.calls.length;
+      await dispatch(packet);
+      const lane = registry.findLatestLaneByPacket(packet.id)!;
+      const expectedVerb = outcome === 'failed'
+        ? 'workspace_manifest_failed'
+        : outcome === 'skipped' ? 'workspace_manifest_skipped' : 'workspace_manifest_applied';
+      expect(registry.getLaneEvents(lane.id, 200)).toContainEqual(expect.objectContaining({
+        verb: expectedVerb, actor: 'system',
+      }));
+      if (outcome === 'human' || outcome === 'spoofed') {
+        expect(boundary.launch).toHaveBeenCalledTimes(launches);
+        expect(existsSync(boundary.preparedPaths.at(-1)!)).toBe(false);
+        expect((await status(packet)).blockedReason).toContain('exact unbound pre-launch lane');
+        if (outcome === 'human') {
+          expect(lane).toMatchObject({ status: 'awaiting_human', lastEventLabel: 'operator_review' });
+        }
+      } else {
+        expect(boundary.launch).toHaveBeenCalledTimes(launches + 1);
+        expect(lane).toMatchObject({ status: 'running', sessionKey: 'codex-owned:fixture' });
+        expect((await status(packet)).status).toBe('running');
+        const receipt = await readWorkspaceManifestReceipt(lane.worktreePath!);
+        if (outcome === 'skipped') expect(receipt).toBeNull();
+        else expect(receipt).toMatchObject({ state: outcome === 'failed' ? 'failed' : 'completed' });
+        registry.setLaneStatus(lane.id, 'failed', 'system', 'fixture complete');
+      }
+    }, 120_000,
+  );
 });
