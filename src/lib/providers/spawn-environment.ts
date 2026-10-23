@@ -1,5 +1,12 @@
-import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES, resolveProviderKey } from './key-store';
+import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { credentialPolicyFingerprint } from './credential-policy';
+import { PROVIDER_ENV_KEYS, PROVIDER_KEY_ALIASES, providerCredentialMaterials, resolveProviderKey, type ProviderCredentialMaterials } from './key-store';
+import { matchesProviderCredential } from './credential-materials';
 import { runtimeBillingMode } from './runtime-billing';
+import { ensureLaunchPolicy } from './launch-policy';
 
 // These aliases have no provider identity. Resolve the selected provider; never trust their literal value.
 const SCOPED_ALIASES: Record<string, string> = { O8_FABLE_ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' };
@@ -15,12 +22,33 @@ function genericProvider(input: Record<string, string | undefined>, alias: strin
   return provider && Object.hasOwn(providers, provider) ? providers[provider] : null;
 }
 
-type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; onlyExisting?: boolean };
+export function providerCanonicalName(input: Record<string, string | undefined>, name: string): string | null {
+  if (Object.hasOwn(SCOPED_ALIASES, name)) return SCOPED_ALIASES[name];
+  if (GENERIC_ALIASES.includes(name)) return genericProvider(input, name);
+  return Object.entries(PROVIDER_KEY_ALIASES).find(([, aliases]) => aliases.includes(name))?.[0] ?? (providerCredentialName(name) ? name : null);
+}
+
+export type SpawnOptions = { inject?: boolean; clearInherited?: boolean; runtimeId?: string; onlyExisting?: boolean; omitEnv?: readonly string[] };
+type Context = SpawnOptions & { policy?: string; transport?: Record<string, string>; brokerKey?: string };
+const contexts = new WeakMap<object, Context>();
+const observedSecrets = new Set<string>();
+const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+function credentialMaterials(input: Record<string, string | undefined>, allowed: ReadonlySet<string> = new Set()): ProviderCredentialMaterials {
+  const saved = providerCredentialMaterials();
+  for (const value of saved.values) observedSecrets.add(value);
+  const secrets = new Set(observedSecrets);
+  for (const [name, value] of Object.entries(input)) if (providerCredentialName(name) && value) secrets.add(value.trim());
+  const hashes = new Set(saved.hashes);
+  for (const value of allowed) hashes.delete(digest(value));
+  return { ...saved, hashes, values: [...secrets].filter(value => !allowed.has(value)) };
+}
 function resolvedEnvironment(input: Record<string, string | undefined>, inject: boolean, options: SpawnOptions): Record<string, string> & Pick<NodeJS.ProcessEnv, 'NODE_ENV'> {
   const aliases = [...Object.values(PROVIDER_KEY_ALIASES).flat(), ...GENERIC_ALIASES, ...Object.keys(SCOPED_ALIASES)];
   const canonical = new Set<string>([...PROVIDER_ENV_KEYS, ...Object.keys(input).filter(name => providerCredentialName(name) && !aliases.includes(name))]);
   const credentials = new Set([...canonical, ...aliases]);
-  const env = Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0])));
+  const materials = credentialMaterials(input);
+  const env = Object.fromEntries(Object.entries(input).filter((entry): entry is [string, string] => entry[1] !== undefined && !credentials.has(entry[0]) && entry[0] !== 'O8_MASTER_KEY'
+    && !matchesProviderCredential(entry[1], materials)));
   if (options.clearInherited) for (const name of credentials) env[name] = '';
   if (inject) {
     for (const name of canonical) {
@@ -39,23 +67,85 @@ function resolvedEnvironment(input: Record<string, string | undefined>, inject: 
       if (value) env[alias] = value;
     }
   }
+  if (inject) {
+    const allowed = new Set([...credentials].map(name => env[name]).filter(Boolean));
+    const denied = credentialMaterials(input, allowed);
+    for (const [name, value] of Object.entries(input)) if (value && !credentials.has(name) && name !== 'O8_MASTER_KEY' && !matchesProviderCredential(value, denied)) env[name] = value;
+  }
   const mode = input.NODE_ENV;
-  return { ...env, NODE_ENV: mode === 'development' || mode === 'test' ? mode : 'production' };
+  const result = { ...env, NODE_ENV: mode === 'development' || mode === 'test' ? mode : 'production' } as Record<string, string> & Pick<NodeJS.ProcessEnv, 'NODE_ENV'>;
+  for (const name of options.omitEnv ?? []) delete result[name];
+  contexts.set(result, { ...options, policy: options.runtimeId ? credentialPolicyFingerprint(options.runtimeId) : undefined });
+  return result;
 }
 
 /** Runtime launches fail closed without a runtime identity and saved API opt-in. */
 export function providerSpawnEnvironment(input: Record<string, string | undefined>, options: SpawnOptions = {}): ReturnType<typeof resolvedEnvironment> {
-  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && runtimeBillingMode(options.runtimeId!) === 'api', options);
+  return childEnvironment({ ...options, env: input, inherit: false });
 }
 
-/** Standalone MCP services have explicit credential slots, not a subscription CLI payer. */
-export function providerMcpEnvironment(input: Record<string, string | undefined>): ReturnType<typeof resolvedEnvironment> {
-  return resolvedEnvironment(input, true, { onlyExisting: true });
+/** MCP provider slots follow the billing policy of their owning runtime. */
+export function providerMcpEnvironment(input: Record<string, string | undefined>, runtimeId?: string): ReturnType<typeof resolvedEnvironment> {
+  return providerSpawnEnvironment(input, { onlyExisting: true, runtimeId: runtimeId ?? contexts.get(input)?.runtimeId });
 }
 
 /** Config env blocks must not acquire unrelated process variables. */
 export function providerConfigEnvironment(input: Record<string, string>, runtimeId: string): Record<string, string> {
-  const env: Record<string, string> = providerSpawnEnvironment(input, { onlyExisting: true, runtimeId });
+  const env: Record<string, string> = providerSpawnEnvironment(input, { onlyExisting: true, runtimeId, inject: false });
   if (!('NODE_ENV' in input)) delete env.NODE_ENV;
   return env;
+}
+
+/** The only ambient inheritance point. Runtime identity and persisted API opt-in are required. */
+export function childEnvironment(options: SpawnOptions & { env?: Record<string, string | undefined>; inherit?: boolean } = {}): ReturnType<typeof resolvedEnvironment> {
+  const input = options.inherit === false ? options.env ?? {} : { ...process.env, ...options.env };
+  return resolvedEnvironment(input, options.inject !== false && Boolean(options.runtimeId) && runtimeBillingMode(options.runtimeId!) === 'api', options);
+}
+
+export function childEnvironmentContext(env: Record<string, string | undefined> | undefined): Context | undefined {
+  return env ? contexts.get(env) : undefined;
+}
+
+/** The process boundary refreshes values and policy, including prepared environments. */
+export function refreshChildEnvironment(env?: Record<string, string | undefined>): ReturnType<typeof resolvedEnvironment> {
+  const context = childEnvironmentContext(env);
+  const result = childEnvironment({ ...context, env, inherit: env === undefined });
+  const authorized = new Set(Object.entries(result).filter(([name]) => providerCredentialName(name)).map(([, value]) => value));
+  const denied = credentialMaterials({}, authorized);
+  for (const [name, value] of Object.entries(context?.transport ?? {})) if (!matchesProviderCredential(value, denied)) result[name] = value;
+  if (context?.brokerKey) { result.O8_MASTER_KEY = context.brokerKey; contexts.get(result)!.brokerKey = context.brokerKey; }
+  for (const [name, value] of Object.entries(env ?? {})) if (value === '') result[name] = '';
+  return result;
+}
+
+/** Explicit local subscription transport, never a managed provider key. */
+export function retainChildTransportCredentials(env: Record<string, string>, names: string[]): void {
+  const context = contexts.get(env);
+  if (context) context.transport = Object.fromEntries(names.filter(name => env[name] !== undefined).map(name => [name, env[name]]));
+}
+
+/** Prepared argv cannot retain a provider value that the fresh environment denied. */
+export function assertChildArguments(args: readonly string[], input: Record<string, string | undefined> | undefined, fresh: NodeJS.ProcessEnv): void {
+  const allowed = new Set(Object.entries(fresh).filter(([name]) => providerCredentialName(name)).map(([, value]) => value).filter((value): value is string => Boolean(value)));
+  const denied = credentialMaterials(input ?? {}, allowed);
+  if (args.some(arg => matchesProviderCredential(arg, denied))) throw new Error('Prepared child arguments contain revoked or unauthorized provider credentials.');
+}
+
+/** Trusted internal brokers reread encrypted policy; runtime children never inherit this key. */
+export function internalBrokerEnvironment(input?: Record<string, string | undefined>): ReturnType<typeof resolvedEnvironment> {
+  const result = refreshChildEnvironment(input);
+  const key = process.env.O8_MASTER_KEY;
+  if (key) { result.O8_MASTER_KEY = key; contexts.get(result)!.brokerKey = key; }
+  return result;
+}
+
+/** Non-secret generation stamp for our delayed nested-execution helpers. */
+export function stampChildPolicy(env: NodeJS.ProcessEnv): void {
+  const context = childEnvironmentContext(env);
+  if (!context?.runtimeId) { delete env.O8_CHILD_CREDENTIAL_POLICY; return; }
+  const directory = realpathSync(getDataDir());
+  const approvedCredentials = Object.fromEntries(Object.entries(env).filter(([name, value]) => providerCredentialName(name) && value).map(([name, value]) => [name, digest(value!)]));
+  env.O8_CHILD_CREDENTIAL_POLICY = JSON.stringify({ runtimeId: context.runtimeId, directory, ...ensureLaunchPolicy(),
+    apiAllowed: runtimeBillingMode(context.runtimeId) === 'api', approvedCredentials,
+    sqliteModule: createRequire(import.meta.url).resolve('better-sqlite3') });
 }

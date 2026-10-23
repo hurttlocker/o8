@@ -1,7 +1,8 @@
+import { invalidateLaunchPolicy } from './launch-policy';
 import { credentialPolicyChanged } from './policy-events';
 import { withProviderStoreLock } from './store-lock';
 import { purgeOwnedMcpArtifacts } from './mcp-artifacts';
-import 'server-only';
+import { purgeOwnedRuntimeArtifacts } from './owned-artifacts';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -22,7 +23,9 @@ export function runtimeBillingMode(runtimeId: string): RuntimeBillingMode {
 export function saveRuntimeBillingMode(runtimeId: string, mode: RuntimeBillingMode): void {
   if (!validId(runtimeId) || (mode !== 'api' && mode !== 'subscription')) throw new Error('Invalid runtime billing mode');
   withProviderStoreLock(() => {
+    invalidateLaunchPolicy();
     purgeOwnedMcpArtifacts();
+    purgeOwnedRuntimeArtifacts();
     mkdirSync(directory(), { recursive: true, mode: 0o700 });
     const target = join(directory(), `${runtimeId}.json`);
     const temporary = `${target}.${randomUUID()}.tmp`;

@@ -1,86 +1,80 @@
-import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { providerCredentialMaterials } from './key-store';
+import { matchesProviderCredential } from './credential-materials';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { providerCredentialName, providerSpawnEnvironment, providerConfigEnvironment } from './spawn-environment';
-import { runtimeBillingMode } from './runtime-billing';
-import { parseKeyEnv } from './env-format';
-import { PROVIDER_KEY_ALIASES } from './key-store';
+import { writeOwnedRuntimeArtifact } from './owned-artifacts';
 
+const PROVIDER_NAMES = new Set(['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'DEEPSEEK_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_AI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY', 'GROQ_API_KEY', 'ELEVENLABS_API_KEY', 'GOOGLE_TTS_API_KEY']);
 const PROVIDERS: Record<string, string> = { openai: 'OPENAI_API_KEY', codex: 'OPENAI_API_KEY', 'openai-codex': 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', 'claude-code': 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY', google: 'GEMINI_API_KEY', gemini: 'GEMINI_API_KEY', deepseek: 'DEEPSEEK_API_KEY', groq: 'GROQ_API_KEY' };
+const providerName = (name: string) => PROVIDER_NAMES.has(name) || name.endsWith('_API_KEY') || ['LLM_API_KEY', 'GOOSE_API_KEY', 'COPILOT_PROVIDER_API_KEY', 'COPILOT_PROVIDER_BEARER_TOKEN'].includes(name);
+const credentialHeader = /^(authorization|proxy-authorization|x-api-key|api-key|apikey|x-goog-api-key|xi-api-key|x-auth-token|x-access-token)$/i;
 
-/** Sanitize o8-owned overlays, preserving account OAuth and non-provider MCP authentication. */
-export function filterRuntimeConfig(value: unknown, runtimeId: string, provider = runtimeId, location: string[] = []): unknown {
-  if (Array.isArray(value)) return value.map(item => filterRuntimeConfig(item, runtimeId, provider, location));
+/** Owned files never contain provider secrets. Account OAuth and service auth stay intact. */
+export function filterRuntimeConfig(value: unknown, runtimeId: string, provider = runtimeId, location: string[] = [], materials = providerCredentialMaterials()): unknown {
+  if (typeof value === 'string') return matchesProviderCredential(value, materials) ? undefined : value;
+  if (Array.isArray(value)) return value.map(item => filterRuntimeConfig(item, runtimeId, provider, location, materials)).filter(item => item !== undefined);
   if (!value || typeof value !== 'object') return value;
   const record = value as Record<string, unknown>;
   const selected = typeof record.provider === 'string' ? record.provider : provider;
-  const providerMap = (location.length === 1 && location[0] === 'model_providers')
-    || (location.length === 2 && location[0] === 'models' && location[1] === 'providers');
+  const modelProviders = location.lastIndexOf('model_providers');
+  const models = location.lastIndexOf('models');
+  const providerMap = modelProviders === location.length - 1 && modelProviders >= 0
+    || models >= 0 && location[models + 1] === 'providers' && models + 2 === location.length;
+  const providerHeaders = modelProviders >= 0 && location.length > modelProviders + 1
+    || models >= 0 && location[models + 1] === 'providers' && location.length > models + 2;
   const out: Record<string, unknown> = {};
+  const references: Record<string, unknown> = {};
   for (const [name, item] of Object.entries(record)) {
-    if (name === 'headers' || name === 'http_headers' || name === 'env_http_headers') {
-      const providerHeaders = (location[0] === 'models' && location[1] === 'providers' && location.length >= 3)
-        || (location[0] === 'model_providers' && location.length >= 2);
-      out[name] = providerHeaders ? filterProviderHeaders(item, runtimeId, selected, name === 'env_http_headers') : item;
-    } else if (name === 'env' && item && typeof item === 'object' && !Array.isArray(item)) {
-      out[name] = providerConfigEnvironment(item as Record<string, string>, runtimeId);
-    } else if (providerCredentialName(name) && typeof item === 'string') {
-      const resolved = providerSpawnEnvironment({ [name]: item }, { runtimeId, onlyExisting: true });
-      if (resolved[name]) out[name] = resolved[name];
-    } else if (/^(api_?key|experimental_bearer_token)$/i.test(name) || ((name === 'key' || name === 'token') && (record.type === 'api_key' || record.type === 'api-key'))) {
-      const canonical = Object.hasOwn(PROVIDERS, selected) ? PROVIDERS[selected] : undefined;
-      const resolved = canonical && typeof item === 'string' ? providerSpawnEnvironment({ [canonical]: item }, { runtimeId, onlyExisting: true })[canonical] : null;
-      if (resolved) out[name] = resolved;
+    if (providerName(name)) continue;
+    if ((location.at(-1) !== 'headers' && /^(api_?key|experimental_bearer_token)$/i.test(name))
+      || ((name === 'key' || name === 'token') && (record.type === 'api_key' || record.type === 'api-key'))) continue;
+    if (providerHeaders && (name === 'headers' || name === 'http_headers' || name === 'env_http_headers')) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const retained: Record<string, unknown> = {};
+      for (const [header, raw] of Object.entries(item)) {
+        if (typeof raw === 'string' && matchesProviderCredential(raw, materials)) {
+          if (name !== 'env_http_headers' && credentialHeader.test(header) && runtimeId === 'codex' && modelProviders >= 0 && PROVIDERS[selected]) references[header] = PROVIDERS[selected];
+          continue;
+        }
+        if (!credentialHeader.test(header)) retained[header] = raw;
+        else if (name === 'env_http_headers' && typeof raw === 'string' && PROVIDER_NAMES.has(raw)) retained[header] = raw;
+        else if (name !== 'env_http_headers' && runtimeId === 'codex' && modelProviders >= 0 && PROVIDERS[selected]) references[header] = PROVIDERS[selected];
+      }
+      out[name] = retained;
     } else {
-      out[name] = filterRuntimeConfig(item, runtimeId, Object.hasOwn(PROVIDERS, name) ? name : providerMap ? '' : selected, [...location, name]);
+      const filtered = filterRuntimeConfig(item, runtimeId, Object.hasOwn(PROVIDERS, name) ? name : providerMap ? '' : selected, [...location, name], materials);
+      if (filtered !== undefined) out[name] = filtered;
     }
   }
-  if (runtimeId === 'codex' && runtimeBillingMode(runtimeId) === 'subscription' && out.auth_mode === 'apikey') out.auth_mode = 'chatgpt';
+  if (Object.keys(references).length) out.env_http_headers = { ...references, ...(out.env_http_headers as object ?? {}) };
+  if (runtimeId === 'codex' && out.auth_mode === 'apikey') delete out.auth_mode;
   return out;
 }
 
-function filterProviderHeaders(headers: unknown, runtimeId: string, provider: string, environmentReferences = false): unknown {
-  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return {};
-  const canonical = Object.hasOwn(PROVIDERS, provider) ? PROVIDERS[provider] : undefined;
-  return Object.fromEntries(Object.entries(headers).flatMap(([name, raw]) => {
-    if (!/^(authorization|proxy-authorization|x-api-key|api-key|apikey|x-goog-api-key|xi-api-key|x-auth-token|x-access-token)$/i.test(name)) return [[name, raw]];
-    if (!canonical || typeof raw !== 'string') return [];
-    if (environmentReferences) {
-      // Unknown environment names cannot be reconciled with the canonical store.
-      if (raw !== canonical && !PROVIDER_KEY_ALIASES[canonical]?.includes(raw)) return [];
-      const env = providerSpawnEnvironment({ [raw]: process.env[raw] }, { runtimeId, onlyExisting: true });
-      return env[raw] ? [[name, raw]] : [];
-    }
-    const prefix = /^(Bearer|Token)\s+/i.exec(raw)?.[0] ?? '';
-    const value = providerSpawnEnvironment({ [canonical]: raw.slice(prefix.length) }, { runtimeId, onlyExisting: true })[canonical];
-    return value ? [[name, `${prefix}${value}`]] : [];
-  }));
+/** Parse before writing a destination, so even interrupted preparation has no plaintext window. */
+export function sanitizeRuntimeConfigText(file: string, raw: string, runtimeId: string): string {
+  if (file.endsWith('.json')) return `${JSON.stringify(filterRuntimeConfig(JSON.parse(raw), runtimeId) ?? null, null, 2)}\n`;
+  if (file.endsWith('.toml')) {
+    const original = parseToml(raw);
+    const filtered = filterRuntimeConfig(original, runtimeId) as Record<string, unknown>;
+    return JSON.stringify(original) === JSON.stringify(filtered) && !matchesProviderCredential(raw, providerCredentialMaterials()) ? raw : stringifyToml(filtered);
+  }
+  if (file.endsWith('.yaml') || file.endsWith('.yml')) return stringifyYaml(filterRuntimeConfig(parseYaml(raw), runtimeId));
+  const materials = providerCredentialMaterials();
+  return raw.split('\n').filter(line => {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
+    return (!match || !providerName(match[1])) && !matchesProviderCredential(line, materials);
+  }).join('\n');
 }
 
-/** Reconcile every launch, including profiles already seeded before a revocation or restart. */
+export function copyRuntimeConfigFile(source: string, destination: string, runtimeId: string): void {
+  writeOwnedRuntimeArtifact(destination, runtimeId, readFileSync(source, 'utf8'));
+}
+
+/** Reconcile and register existing owned profiles on every preparation. */
 export function reconcileRuntimeConfigFile(file: string, runtimeId: string): void {
   if (!existsSync(file)) return;
   if (!lstatSync(file).isFile()) throw new Error('Runtime credential overlays must be regular files.');
-  const raw = readFileSync(file, 'utf8');
-  let next: string;
-  if (file.endsWith('.json')) next = `${JSON.stringify(filterRuntimeConfig(JSON.parse(raw), runtimeId), null, 2)}\n`;
-  else if (file.endsWith('.toml')) {
-    const original = parseToml(raw); const filtered = filterRuntimeConfig(original, runtimeId) as Record<string, unknown>;
-    next = JSON.stringify(original) === JSON.stringify(filtered) ? raw : stringifyToml(filtered);
-  }
-  else if (file.endsWith('.yaml') || file.endsWith('.yml')) next = stringifyYaml(filterRuntimeConfig(parseYaml(raw), runtimeId));
-  else {
-    const input = Object.fromEntries(parseKeyEnv(raw.replace(/^\s*export\s+/gm, '')));
-    const env = providerSpawnEnvironment(input, { runtimeId, onlyExisting: true });
-    next = raw.split('\n').map(line => {
-      const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
-      return match && providerCredentialName(match[1]) ? (env[match[1]] ? `${match[1]}=${JSON.stringify(env[match[1]])}` : '') : line;
-    }).join('\n');
-  }
-  if (raw !== next) {
-    const temporary = `${file}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, next, { mode: 0o600, flag: 'wx' });
-    renameSync(temporary, file);
-  }
+  writeOwnedRuntimeArtifact(file, runtimeId, readFileSync(file, 'utf8'));
 }

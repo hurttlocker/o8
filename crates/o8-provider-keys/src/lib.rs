@@ -1,10 +1,13 @@
 //! Shared encrypted provider store. Wire-compatible with src/lib/providers/key-store.ts.
 mod artifacts;
+mod launch_policy;
+mod runtime_artifacts;
 use aes_gcm::{
     aead::{rand_core::RngCore, Aead, OsRng},
     Aes256Gcm, KeyInit, Nonce,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
@@ -323,6 +326,20 @@ fn mutate_inner(
             }
         }
     }
+    let hash_name = format!("O8_KEY_HASHES_{name}");
+    let mut hashes: std::collections::BTreeSet<String> = match map.get(&hash_name) {
+        Some(raw) => serde_json::from_str(raw).map_err(|_| "Invalid credential fingerprints".to_string())?,
+        None => Default::default(),
+    };
+    let length_name = format!("O8_KEY_LENGTHS_{name}");
+    let mut lengths: std::collections::BTreeSet<usize> = match map.get(&length_name) {
+        Some(raw) => serde_json::from_str(raw).map_err(|_| "Invalid credential lengths".to_string())?,
+        None => Default::default(),
+    };
+    if let Some(previous) = map.get(name) { let plain = decrypt(previous)?; hashes.insert(hex::encode(Sha256::digest(plain.as_bytes()))); lengths.insert(plain.len()); }
+    if let Some(Some(next)) = key { if !next.trim().is_empty() { hashes.insert(hex::encode(Sha256::digest(next.trim().as_bytes()))); lengths.insert(next.trim().len()); } }
+    if !hashes.is_empty() { updates.insert(hash_name, Some(serde_json::to_string(&hashes).map_err(|_| "Invalid credential fingerprints".to_string())?)); }
+    if !lengths.is_empty() { updates.insert(length_name, Some(serde_json::to_string(&lengths).map_err(|_| "Invalid credential lengths".to_string())?)); }
     if let Some(key) = key {
         updates.insert(
             name.into(),
@@ -349,6 +366,7 @@ fn mutate_inner(
         }
     }
     let mut nonce = [0u8; 12];
+    launch_policy::invalidate(&dir)?;
     artifacts::purge(&dir)?;
     OsRng.fill_bytes(&mut nonce);
     let temporary = dir.join(format!(".provider-keys.{}.tmp", hex::encode(nonce)));

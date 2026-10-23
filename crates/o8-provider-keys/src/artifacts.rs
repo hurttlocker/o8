@@ -207,5 +207,6 @@ pub(crate) fn purge(dir: &Path) -> Result<(), String> {
             return Err(ERROR.into());
         }
     }
+    super::runtime_artifacts::purge(dir)?;
     Ok(())
 }

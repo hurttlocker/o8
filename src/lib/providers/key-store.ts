@@ -1,10 +1,11 @@
+import { invalidateLaunchPolicy } from './launch-policy';
 import { credentialPolicyChanged } from './policy-events';
 import { purgeOwnedMcpArtifacts } from './mcp-artifacts';
+import { purgeOwnedRuntimeArtifacts } from './owned-artifacts';
 /** Shared Node/native credential protocol. See crates/o8-provider-keys. */
-import 'server-only';
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { cleanupLegacyProviderKeys } from './legacy-key-cleanup';
@@ -72,6 +73,31 @@ export function resolveProviderKey(name: string, ambient: Record<string, string 
     return candidate || (raw ? decode(raw) || null : null);
   } catch { return null; }
 }
+export interface ProviderCredentialMaterials { values: readonly string[]; hashes: ReadonlySet<string>; lengths: ReadonlySet<number> }
+let readingCredentialMaterials = false;
+/** Read-only snapshot: never resolves ambient aliases or triggers legacy cleanup. */
+export function providerCredentialMaterials(): ProviderCredentialMaterials {
+  const materials: string[] = [];
+  const hashes = new Set<string>();
+  const lengths = new Set<number>();
+  const { values } = snapshot();
+  const decryptSaved = !readingCredentialMaterials;
+  readingCredentialMaterials = true;
+  try {
+    for (const name of PROVIDER_ENV_KEYS) {
+      for (const hash of JSON.parse(values.get(`O8_KEY_HASHES_${name}`) || '[]') as string[]) if (/^[a-f0-9]{64}$/.test(hash)) hashes.add(hash);
+      for (const length of JSON.parse(values.get(`O8_KEY_LENGTHS_${name}`) || '[]') as number[]) if (Number.isSafeInteger(length) && length > 0) lengths.add(length);
+      const saved = values.get(name);
+      if (saved && (decryptSaved || !saved.startsWith('enc:'))) {
+        const plain = decode(saved);
+        if (plain) { materials.push(plain); hashes.add(createHash('sha256').update(plain).digest('hex')); lengths.add(Buffer.byteLength(plain)); }
+      }
+    }
+  } finally { readingCredentialMaterials = !decryptSaved; }
+  return { values: materials, hashes, lengths };
+}
+/** Durable non-secret fingerprints also suppress stale copies after rotation or removal. */
+export function providerCredentialHashes(): ReadonlySet<string> { return providerCredentialMaterials().hashes; }
 export function mutateProviderKey(name: string, change: { key?: string | null; enabled?: boolean }): void {
   if (!(PROVIDER_ENV_KEYS as readonly string[]).includes(name)) throw new Error('Unsupported provider key');
   const dir = getDataDir();
@@ -93,6 +119,13 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
         updates.set(provider, `enc:${iv}:${ciphertext}`);
       }
     }
+    const hashes = new Set<string>(JSON.parse(values.get(`O8_KEY_HASHES_${name}`) || '[]') as string[]);
+    const lengths = new Set<number>(JSON.parse(values.get(`O8_KEY_LENGTHS_${name}`) || '[]') as number[]);
+    const previous = values.get(name);
+    if (previous) { const plain = decode(previous); hashes.add(createHash('sha256').update(plain).digest('hex')); lengths.add(Buffer.byteLength(plain)); }
+    if (change.key?.trim()) { hashes.add(createHash('sha256').update(change.key.trim()).digest('hex')); lengths.add(Buffer.byteLength(change.key.trim())); }
+    if (hashes.size) updates.set(`O8_KEY_HASHES_${name}`, JSON.stringify([...hashes]));
+    if (lengths.size) updates.set(`O8_KEY_LENGTHS_${name}`, JSON.stringify([...lengths]));
     if ('key' in change) {
       let encoded: string | null = null;
       if (change.key) {
@@ -105,7 +138,9 @@ export function mutateProviderKey(name: string, change: { key?: string | null; e
     if (change.enabled !== undefined) updates.set(disabledName(name), change.enabled ? '0' : '1');
     const lines = raw.split('\n').filter(line => !updates.has(line.split('=')[0].trim()));
     for (const [key, value] of updates) if (value !== null) lines.push(`${key}=${value}`);
+    invalidateLaunchPolicy();
     purgeOwnedMcpArtifacts();
+    purgeOwnedRuntimeArtifacts();
     // Preserve all untouched ciphertext and unrelated lines, including comments.
     temporary = join(dir, `.provider-keys.${randomUUID()}.tmp`);
     writeFileSync(temporary, lines.join('\n'), { mode: 0o600, flag: 'wx' });
