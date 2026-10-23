@@ -1,53 +1,12 @@
 'use client';
-/* eslint-disable react-hooks/set-state-in-effect -- preserved from legacy Canvas.tsx extraction */
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import { ExternalLink, GitPullRequest } from '../lucide-shims';
 import { MarkdownBody } from '@/components/desktop/MarkdownBody';
 import { formatAge } from '@/components/desktop/canvas-utils';
 import { relativeAge } from '@/lib/util/relative-age';
-import { useCanvasCIRuns, type CIRun } from './useCanvasCIRuns';
-
-interface CIAnnotation {
-  path: string;
-  startLine: number;
-  endLine: number;
-  level: string;
-  message: string;
-  title: string;
-  rawDetails: string;
-  blobUrl: string;
-  jobName?: string;
-  jobUrl?: string;
-}
-
-interface CIBotComment {
-  id: number;
-  prNumber: number;
-  kind: 'issue' | 'review';
-  author: string;
-  body: string;
-  createdAt: string;
-  path?: string;
-  line?: number | null;
-  url: string;
-}
-
-interface CIRunDetail extends CIRun {
-  jobs: {
-    databaseId: number;
-    name: string;
-    status: string;
-    conclusion: string;
-    startedAt: string;
-    completedAt: string;
-    url?: string;
-    checkRunId?: number | null;
-    annotations?: CIAnnotation[];
-  }[];
-  annotations: CIAnnotation[];
-  botComments: CIBotComment[];
-}
+import { useCanvasCIRuns } from './useCanvasCIRuns';
+import { useCanvasCIDetail } from './useCanvasCIDetail';
 
 function ciColor(conclusion: string, status: string): string {
   if (status === 'in_progress' || status === 'queued') return '#f59e0b';
@@ -74,38 +33,10 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
   const [selection, setSelection] = useState<{ scope: string; id: number | null }>(() => ({ scope: selectionScope, id: initialRunId ?? null }));
   const requestedRun = selection.scope === selectionScope ? selection.id : initialRunId ?? null;
   const selectedRun = runs.some(run => run.databaseId === requestedRun) ? requestedRun : null;
-  const detailScope = JSON.stringify([repoScope, selectedRun]);
-  const [detail, setDetail] = useState<{
-    scope: string; run: CIRunDetail | null; logs: string; pending: boolean; failed: boolean;
-  } | null>(null);
-  const currentDetail = detail?.scope === detailScope ? detail : null;
-  const runDetail = currentDetail?.run ?? null;
-  const logs = currentDetail?.logs ?? '';
-  const detailLoading = Boolean(selectedRun && (!currentDetail || currentDetail.pending));
-
-  useEffect(() => {
-    if (!selectedRun) return;
-    const controller = new AbortController();
-    setDetail({ scope: detailScope, run: null, logs: '', pending: true, failed: false });
-    const repoParam = repoScope ? `?repo=${encodeURIComponent(repoScope)}` : '';
-    fetch(`/api/panel/ci/${selectedRun}${repoParam}`, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('Unable to load run details');
-        return response.json();
-      })
-      .then((data) => {
-        if (data.error || !data.run) throw new Error('Unable to load run details');
-        if (!controller.signal.aborted) {
-          setDetail({ scope: detailScope, run: data.run, logs: data.logs ?? '', pending: false, failed: false });
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setDetail({ scope: detailScope, run: null, logs: '', pending: false, failed: true });
-        }
-      });
-    return () => controller.abort();
-  }, [detailScope, repoScope, selectedRun]);
+  const detailQuery = useCanvasCIDetail(repo, selectedRun, runQuery.data?.repo);
+  const runDetail = detailQuery.data?.run ?? null;
+  const logs = detailQuery.data?.logs ?? '';
+  const detailLoading = Boolean(selectedRun && detailQuery.isPending);
 
   const listError = runQuery.isError ? (
     <div role="status" style={{ paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14, fontSize: 12, color: 'var(--t-text-muted)' }}>
@@ -204,6 +135,14 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
+        {selectedRun && detailQuery.isError ? (
+          <div role="status" style={{ paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: 'var(--t-text-muted)', fontSize: 12 }}>
+            {detailQuery.data
+              ? `Showing last successful run details · ${relativeAge(detailQuery.dataUpdatedAt)}. Refresh failed. `
+              : 'Unable to load run details. '}
+            <button type="button" aria-label="Retry run details" onClick={() => { void detailQuery.refresh(); }} style={{ color: 'var(--t-text)', background: 'var(--t-panel)', border: '1px solid var(--t-divider)', borderRadius: 6, cursor: 'pointer' }}>Retry details</button>
+          </div>
+        ) : null}
         {!selectedRun ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Select a run to view details
@@ -513,8 +452,6 @@ function CIViewerBase({ repo, initialRunId }: { repo?: string; initialRunId?: nu
               </div>
             ) : null}
           </div>
-        ) : currentDetail?.failed ? (
-          <div role="status" style={{ paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20, color: 'var(--t-text-muted)' }}>Unable to load run details</div>
         ) : null}
       </div>
     </div>
