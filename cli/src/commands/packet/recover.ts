@@ -263,13 +263,15 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
 
 function steerSource(): 'operator' | 'orchestrator' {
   // Match the existing agent-session markers used by lease ownership. These
-  // only lower attribution; the route still authenticates every request.
+  // only lower attribution; operator standing also requires an interactive
+  // terminal. The route still authenticates every request.
   const agentSession = [
     process.env.O8_WORKER_PACKET_ID, process.env.O8_OWNED_RUN_MARKER,
     process.env.CODEX_SESSION_ID, process.env.CODEX_THREAD_ID,
     process.env.CLAUDE_CODE_SESSION_ID, process.env.CLAUDECODE, process.env.AI_AGENT,
   ].some(value => Boolean(value?.trim()));
-  return agentSession ? 'orchestrator' : 'operator';
+  return process.stdin.isTTY === true && process.stdout.isTTY === true && !agentSession
+    ? 'operator' : 'orchestrator';
 }
 
 async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number> {

@@ -6,7 +6,6 @@ import {
   apiFetchCorrelatedMutation,
   jsonResult,
   requiredString,
-  McpInputError,
   textResult,
 } from './shared';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
@@ -79,11 +78,6 @@ export const STATUS_TOOLS: McpTool[] = [
         packetId: {
           type: 'string',
           description: 'Packet id for the parked session to steer.',
-        },
-        source: {
-          type: 'string',
-          enum: ['operator', 'orchestrator'],
-          description: 'Use operator only to forward an explicit human-authored correction. Autonomous agent steering defaults to orchestrator.',
         },
         message: {
           type: 'string',
@@ -532,10 +526,6 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
   try {
     const packetId = requiredString(args, 'packetId');
     const message = requiredString(args, 'message');
-    const source = args.source ?? 'orchestrator';
-    if (source !== 'operator' && source !== 'orchestrator') {
-      throw new McpInputError('source must be operator or orchestrator.');
-    }
     // #2 Stage 4: route through /api/orchestrator/steer-packet so the lane
     // resolution + status flip run in the Next process (the live registry +
     // warm-session pool), not this MCP process's stale registry instance.
@@ -544,7 +534,7 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
       result?: Record<string, unknown>;
     }>(
       '/api/orchestrator/steer-packet',
-      { packetId, message, source },
+      { packetId, message, source: 'orchestrator' },
       'idempotencyKey',
     );
     return jsonResult({ ok: true, ...(res.result ?? {}) });
