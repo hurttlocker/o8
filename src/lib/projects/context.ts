@@ -449,6 +449,8 @@ function formatRepoLabel(repo: ProjectContextRepo) {
   return `${repo.name}${repo.role ? ` [${repo.role}]` : ''}`;
 }
 
+export const PROJECT_REPO_POLICY = 'Repo policy: treat all project repositories as one codebase. Choose the repositories needed for the task, including cross-repository changes, from the project repository list. Search, read files, and query Engineering Brain across those repositories using their repository scopes. The main repo identifies the navigation default. Plan a separate packet for each repository that needs changes. Each packet stays within its assigned repository, worktree, allowed paths, and task contract; each repository keeps its own branch, review, and merge. Preserve project membership, approvals, and locks.';
+
 export function buildProjectTaskBrief(context: ProjectContext, options: ProjectTaskBriefOptions = {}): string {
   const siblingRepos = context.relatedRepos.filter((repo) => repo.id !== context.currentRepo?.id);
   const lines = [
@@ -462,6 +464,9 @@ export function buildProjectTaskBrief(context: ProjectContext, options: ProjectT
     siblingRepos.length > 0
       ? `Related repos: ${siblingRepos.map(formatRepoLabel).join(', ')}`
       : null,
+    context.repos.length > 0
+      ? `Project repositories:\n${context.repos.map(repo => `- ${formatRepoLabel(repo)}${options.includeLocalPaths === false ? '' : ` at ${repo.localPath}`}`).join('\n')}`
+      : null,
     context.instructions
       ? `Project instructions:\n${context.instructions}`
       : null,
@@ -471,7 +476,7 @@ export function buildProjectTaskBrief(context: ProjectContext, options: ProjectT
     options.taskBody?.trim()
       ? `Task detail: ${truncateText(options.taskBody, 700, { normalizeWhitespace: true })}`
       : null,
-    'Repo policy: treat the main repo as the product anchor, use the current repo for repo-specific work, read sibling repos as context, and edit sibling repos only when the task explicitly requires cross-repo changes.',
+    PROJECT_REPO_POLICY,
     'Output policy: call out which repo(s) changed, any locks/conflicts encountered, and whether follow-up project wiring is needed.',
   ].filter((line): line is string => Boolean(line));
 
