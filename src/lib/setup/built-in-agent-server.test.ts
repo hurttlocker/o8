@@ -44,25 +44,26 @@ describe('bundled-agent registry gate', () => {
   });
 
   it('never inserts a selectable agent missing from the discovered inventory', () => {
-    const builtIn = createBuiltInAgentRuntime({ id: 'codex', backend: 'codex' }, 'free', 'darwin');
+    const builtIn = createBuiltInAgentRuntime({ id: 'codex', backend: 'codex' }, 'darwin');
     expect(applyBuiltInAgentRuntime([], builtIn)).toEqual([]);
   });
 
-  it('shows free and paid copy from the effective entitlement', async () => {
+  it('shows the same readiness copy for every legacy entitlement', async () => {
     state.registration = { id: 'codex', backend: 'codex' };
-    expect((await readBuiltInAgentRuntime())?.builtIn?.planDetail).toContain('free daily');
-    for (const plan of ['pro', 'team', 'founder'] as const) {
+    for (const plan of ['free', 'pro', 'team', 'founder'] as const) {
       state.plan = plan;
-      expect((await readBuiltInAgentRuntime())?.builtIn?.planDetail).toBe('Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.');
+      const detail = (await readBuiltInAgentRuntime())?.builtIn?.planDetail;
+      expect(detail).not.toMatch(/plan|allowance|weekly|daily|included|upgrade/i);
+      expect(detail).toContain('configured');
     }
   });
 
   it('is ready without detection on supported platforms and visibly unavailable on Windows', () => {
     const registration = { id: 'codex', backend: 'codex' } as const;
     for (const platform of ['darwin', 'linux']) {
-      expect(createBuiltInAgentRuntime(registration, 'free', platform)).toMatchObject({ available: true, unavailableReason: null });
+      expect(createBuiltInAgentRuntime(registration, platform)).toMatchObject({ available: true, unavailableReason: null });
     }
-    const windows = createBuiltInAgentRuntime(registration, 'free', 'win32');
+    const windows = createBuiltInAgentRuntime(registration, 'win32');
     expect(windows.available).toBe(false);
     expect(windows.detail).toContain('Windows');
     expect(windows.unavailableReason).toBe('unsupported_platform');

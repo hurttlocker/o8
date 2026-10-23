@@ -1,5 +1,4 @@
 import 'server-only';
-import { getEntitlementSync } from '@/lib/entitlement/store';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { BUILT_IN_AGENT_REGISTRATION, createBuiltInAgentRuntime } from './built-in-agent';
 import type { SetupRuntime } from './runtime-recommendation';
@@ -15,7 +14,7 @@ export async function readBuiltInAgentRuntime(): Promise<SetupRuntime | null> {
   ]);
   if (!getRuntime(registration.id)?.capabilities.launch
     || getOrchestratorBackend(registration.backend).id !== registration.backend) return null;
-  return createBuiltInAgentRuntime(registration, getEntitlementSync().plan, process.platform);
+  return createBuiltInAgentRuntime(registration, process.platform);
 }
 
 /** Never add a selectable runtime that the discovery registry did not list. */

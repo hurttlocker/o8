@@ -230,7 +230,7 @@ describe('projectAgentRoleRoutes', () => {
     const entitledBrain = project({}, availability, true)[3];
 
     expect(freeBrain.effective.backend).toBe('auto-cascade');
-    expect(freeBrain.reason).toContain('free-plan');
+    expect(freeBrain.reason).not.toMatch(/plan|paid|upgrade/i);
     expect(entitledBrain.effective).toMatchObject({ backend: 'managed-inference', model: 'managed' });
     expect(entitledBrain.fallbacks.join(' ')).toContain('visible managed error');
   });

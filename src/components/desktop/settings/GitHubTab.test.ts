@@ -24,7 +24,6 @@ const auth: O8AuthState = {
 function props(overrides: Partial<GitHubConnectionProps> = {}): GitHubConnectionProps {
   return {
     auth,
-    managedAppEntitled: false,
     accounts: [],
     repoCount: 0,
     broker: {
@@ -68,34 +67,16 @@ describe('GitHub managed App entitlement', () => {
     container.remove();
   });
 
-  it('shows Upgrade and local setup to Free without exposing the managed action', () => {
+  it('keeps local setup primary and offers no commercial action', () => {
     act(() => root.render(createElement(GitHubConnectionSections, props())));
-
-    expect(container.textContent).toContain('included with Pro');
-    expect(container.textContent).toContain('Upgrade');
+    expect(container.textContent).not.toMatch(/upgrade|pricing|paid|included with Pro/i);
     expect(container.textContent).toContain('Set up locally');
-    expect(container.textContent).not.toContain('Use managed app');
     expect(container.textContent).not.toContain('Install');
-
-    const localSetup = Array.from(container.querySelectorAll<HTMLAnchorElement>('a'))
-      .find((link) => link.textContent === 'Set up locally');
-    expect(localSetup?.href).toBe('https://github.com/settings/apps/new');
   });
 
-  it('opens pricing from the Free upgrade action', () => {
-    act(() => root.render(createElement(GitHubConnectionSections, props())));
-
-    const upgrade = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => button.textContent === 'Upgrade');
-    act(() => upgrade?.click());
-
-    expect(openExternalUrl).toHaveBeenCalledWith('https://o8.run/pricing');
-  });
-
-  it('opens only the server-provided install URL for a paid account', () => {
+  it('opens only the server-provided install URL without an edition requirement', () => {
     const managedInstallUrl = 'https://github.com/apps/o8-run/installations/new';
     act(() => root.render(createElement(GitHubConnectionSections, props({
-      managedAppEntitled: true,
       broker: {
         ...props().broker!,
         managedInstallUrl,
@@ -112,9 +93,21 @@ describe('GitHub managed App entitlement', () => {
     expect(openExternalUrl).not.toHaveBeenCalledWith('https://github.com/settings/apps/new');
   });
 
-  it('does not substitute the create-App URL when a paid install URL is absent', () => {
+  it('requires account sign-in before opening a managed installation', () => {
+    const signedOut = { ...auth, signedIn: false };
+    vi.mocked(auth.signIn).mockClear();
     act(() => root.render(createElement(GitHubConnectionSections, props({
-      managedAppEntitled: true,
+      auth: signedOut,
+      broker: { ...props().broker!, managedInstallUrl: 'https://github.com/apps/o8-run/installations/new' },
+    }))));
+    const install = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Install');
+    act(() => install!.click());
+    expect(auth.signIn).toHaveBeenCalledOnce();
+    expect(openExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it('does not substitute the create-App URL when an install URL is absent', () => {
+    act(() => root.render(createElement(GitHubConnectionSections, props({
     }))));
 
     expect(container.textContent).not.toContain('Use managed app');

@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { clearDesktopAuthError, getDesktopAuthError, subscribeDesktopAuthError, type DesktopAuthError } from '@/lib/auth/desktop-auth-error';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
 import { APP_FONT_STACK, RamsButton, SETTINGS_CONTENT_MAX_WIDTH, TabHeading } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
@@ -16,7 +14,6 @@ function AccountIcon() {
 /** Optional account controls, kept out of the workspace and quick settings. */
 export function AccountTab() {
   const auth = useO8Auth();
-  const { founder } = useEntitlement();
   const [authError, setAuthError] = useState<DesktopAuthError | null>(() => getDesktopAuthError());
   const [signingOut, setSigningOut] = useState(false);
   const [waitingForSignOut, setWaitingForSignOut] = useState(false);
@@ -56,7 +53,6 @@ export function AccountTab() {
   const signedIn = auth.isLoaded && auth.signedIn;
   const unavailable = auth.accountConnection ? auth.accountConnection === 'unavailable' : !auth.isLoaded && accountReadTimedOut;
   const identity = signedIn ? auth.user?.name || auth.user?.email || 'Signed in' : auth.isLoaded ? 'Local desktop profile' : unavailable ? 'Account unavailable' : 'Loading account…';
-  const serial = auth.isLoaded && (signedIn || !auth.clerkEnabled) && founder ? String(founder.operatorNumber).padStart(3, '0') : null;
 
   return (
     <div style={{ maxWidth: SETTINGS_CONTENT_MAX_WIDTH, padding: 8, fontFamily: APP_FONT_STACK }}>
@@ -70,7 +66,6 @@ export function AccountTab() {
           subtitle={signedIn ? auth.user?.email : 'Connect your account to sync across devices.'}
           divider={signedIn}
           accessory={<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {serial ? <span title={`${PLAN_LABELS.founder} · No. ${serial}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--t-text-muted)', fontSize: 10.5, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}><span aria-hidden="true" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--t-brand-orange)' }} />{serial}</span> : null}
             {signedIn ? <RamsButton onClick={auth.openManageAccount}>Manage account</RamsButton>
               : auth.accountConnection ? <RamsButton disabled={!unavailable} onClick={auth.retryAccountConnection}>{unavailable ? 'Retry account connection' : 'Connecting account…'}</RamsButton>
               : auth.clerkEnabled ? <RamsButton onClick={auth.signIn}>Sign in to o8</RamsButton> : <ValuePill>Local</ValuePill>}

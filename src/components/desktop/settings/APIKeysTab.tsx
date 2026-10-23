@@ -50,7 +50,7 @@ const NATIVE_KEYS: NativeKeyConfig[] = [
     envVar: 'GEMINI_API_KEY',
     placeholder: 'AIza...',
     docsUrl: 'https://aistudio.google.com/app/apikey',
-    description: 'Direct Gemini access for Symon and dictation polish. A managed plan route remains available when your plan includes it.',
+    description: 'Direct Gemini access for Symon and dictation polish. Without a key, the o8 managed route is used when your account has access.',
   },
   {
     id: 'openrouter_api_key',
