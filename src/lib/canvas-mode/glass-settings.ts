@@ -1,5 +1,7 @@
 'use client';
 
+import { readCustomCanvasBackground, type CustomCanvasBackgroundSettings } from './custom-background';
+
 /**
  * canvas-mode/glass-settings — operator-tunable glass material for Canvas
  * mode (#1232). Two layers, persisted client-side and applied as CSS vars
@@ -46,6 +48,7 @@ export interface CanvasGlassSettings {
   /** Depth layer painted over the veil — paper grain / mesh / aurora.
    *  Ids match CANVAS_BACKDROPS; rendered by the canvas page, not a var. */
   backdrop: string;
+  customBackground?: CustomCanvasBackgroundSettings;
   /** Floating orchestrator chat cards get their OWN material dial — they
    *  carry conversation text, so they run heavier than the ambient glass
    *  and the operator tunes them apart (--cnv-chat-frost / --cnv-chat-tint). */
@@ -137,6 +140,7 @@ export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'pulse', label: 'Pulse' },
   { id: 'radial', label: 'Radial' },
   { id: 'ember', label: 'Ember' },
+  { id: 'custom', label: 'Custom image' },
 ];
 
 export const CANVAS_GLASS_RANGES = {
@@ -249,6 +253,9 @@ export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
 export const LIQUID_MIN_BACKDROP_FROST = 6;
 
 function normalizeForMaterial(settings: CanvasGlassSettings): CanvasGlassSettings {
+  if (settings.backdrop === 'custom' && !settings.customBackground) {
+    settings = { ...settings, backdrop: 'none' };
+  }
   if (settings.material === 'none' && settings.backdropFrost < LIQUID_MIN_BACKDROP_FROST) {
     return { ...settings, backdropFrost: LIQUID_MIN_BACKDROP_FROST };
   }
@@ -275,6 +282,7 @@ export function readPersonalDefault(): CanvasGlassSettings | null {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      customBackground: readCustomCanvasBackground(candidate.customBackground, CANVAS_BACKDROPS.filter(item => item.id !== 'custom').map(item => item.id)),
       backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
         ? candidate.backdrop
         : CANVAS_GLASS_DEFAULTS.backdrop,
@@ -330,6 +338,7 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      customBackground: readCustomCanvasBackground(candidate.customBackground, CANVAS_BACKDROPS.filter(item => item.id !== 'custom').map(item => item.id)),
       backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
         ? candidate.backdrop
         : CANVAS_GLASS_DEFAULTS.backdrop,
@@ -350,12 +359,13 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
 
 /** Persist + apply. Returns the normalized settings (the Liquid frost
  *  floor may bump backdropFrost) — callers should adopt the return. */
-export function writeCanvasGlassSettings(settings: CanvasGlassSettings): CanvasGlassSettings {
+export function writeCanvasGlassSettings(settings: CanvasGlassSettings, options?: { requirePersistence?: boolean }): CanvasGlassSettings {
   const normalized = normalizeForMaterial(settings);
   if (typeof window === 'undefined') return normalized;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-  } catch {
+  } catch (error) {
+    if (options?.requirePersistence) throw error;
     // non-critical — the look just won't survive reload
   }
   applyCanvasGlassSettings(normalized);
@@ -412,11 +422,11 @@ function shadeRgb(shade: number): [number, number, number] {
   return anchors[anchors.length - 1][1];
 }
 
-function inkFromShade(shade: number, alpha: number) {
+function inkFromShade(shade: number, alpha: number, mutedAlpha = alpha * 0.62) {
   const [r, g, b] = shadeRgb(shade);
   return {
     ink: `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`,
-    inkMuted: `rgba(${r}, ${g}, ${b}, ${(alpha * 0.62).toFixed(2)})`,
+    inkMuted: `rgba(${r}, ${g}, ${b}, ${mutedAlpha.toFixed(2)})`,
   };
 }
 
@@ -428,23 +438,30 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // existed) can never throw here and crash the canvas mount.
   const value = { ...CANVAS_GLASS_DEFAULTS, ...(settings ?? readCanvasGlassSettings()) };
   const root = document.documentElement;
-  const base = toneVocabulary(value.tone, value.tint);
-  // ONE text color for the whole canvas — the universal slider drives
-  // every pane's ink so a single move keeps chat, terminal, o8.md, and
-  // chrome in sync.
-  const text = inkFromShade(value.textShade, value.ink);
-  root.style.setProperty('--cnv-frost', `${Math.round(value.frost)}px`);
+  const custom = value.backdrop === 'custom' && !!value.customBackground;
+  // The image stays visible. Contrast belongs to each frosted reading surface,
+  // including secondary ink, even with a saved clear-glass recipe. These are
+  // render-time floors only; switching back restores the operator's tuning.
+  const surfaceTint = (tint: number) => custom ? Math.max(0.8, tint) : tint;
+  const surfaceFrost = (frost: number) => Math.round(custom ? Math.max(24, frost) : frost);
+  const imageInk = (tone: CanvasGlassSettings['tone']) => inkFromShade(defaultTextShadeForTone(tone), 1, 0.78);
+  root.style.setProperty('--cnv-custom-backdrop-scrim', value.tone === 'light' ? 'rgba(252, 253, 255, 0.20)' : 'rgba(7, 9, 13, 0.20)');
+  const base = toneVocabulary(value.tone, surfaceTint(value.tint));
+  // Custom images use readable theme ink. Otherwise the universal slider
+  // keeps chat, terminal, o8.md, and chrome in sync.
+  const text = custom ? imageInk(value.tone) : inkFromShade(value.textShade, value.ink);
+  root.style.setProperty('--cnv-frost', `${surfaceFrost(value.frost)}px`);
   root.style.setProperty('--cnv-tint', base.tint);
   root.style.setProperty('--cnv-tint-deep', base.tintDeep);
   root.style.setProperty('--cnv-ink', text.ink);
   root.style.setProperty('--cnv-ink-muted', text.inkMuted);
   root.style.setProperty('--cnv-edge', base.edge);
-  root.style.setProperty('--cnv-media-rim', base.mediaRim);
+  root.style.setProperty('--cnv-media-rim', custom ? base.tint : base.mediaRim);
   // Popovers must CONTRAST with the universal text, not follow the pane
   // tone — light text gets the dark near-solid base (the composer-pill
   // family), dark text gets the white one. Menus stay readable at any
   // slider position.
-  const popTone = value.textShade < 0.5 ? 'dark' : 'light';
+  const popTone = custom ? value.tone : value.textShade < 0.5 ? 'dark' : 'light';
   const pop = toneVocabulary(popTone, Math.min(0.92, value.tint + 0.16));
   root.style.setProperty('--cnv-pop-tint', pop.tintDeep);
   root.style.setProperty('--cnv-pop-base', pop.popBase);
@@ -459,15 +476,16 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-bg-veil', `rgba(${bgLight ? '244, 242, 237' : '28, 28, 28'}, ${value.veil.toFixed(2)})`);
   root.style.setProperty('--cnv-bg-dot', bgLight ? 'rgba(12, 15, 22, 0.05)' : 'rgba(255, 255, 255, 0.055)');
   // Chat cards: their own frost + tint amounts, optionally their own pane
-  // tone — but the TEXT is the universal shade, same as everything else.
+  // tone. Over an image, their ink must contrast with that specific tone.
   const chatTone = value.chatTone === 'match' ? value.tone : value.chatTone;
-  const chat = toneVocabulary(chatTone, value.chatTint);
-  root.style.setProperty('--cnv-chat-frost', `${Math.round(value.chatFrost)}px`);
+  const chat = toneVocabulary(chatTone, surfaceTint(value.chatTint));
+  const chatText = custom ? imageInk(chatTone) : text;
+  root.style.setProperty('--cnv-chat-frost', `${surfaceFrost(value.chatFrost)}px`);
   root.style.setProperty('--cnv-chat-tint', chat.tint);
   root.style.setProperty('--cnv-chat-tint-deep', chat.tintDeep);
-  root.style.setProperty('--cnv-chat-tint-soft', toneVocabulary(chatTone, Math.max(0, value.chatTint - 0.2)).tint);
-  root.style.setProperty('--cnv-chat-ink', text.ink);
-  root.style.setProperty('--cnv-chat-ink-muted', text.inkMuted);
+  root.style.setProperty('--cnv-chat-tint-soft', toneVocabulary(chatTone, surfaceTint(Math.max(0, value.chatTint - 0.2))).tint);
+  root.style.setProperty('--cnv-chat-ink', chatText.ink);
+  root.style.setProperty('--cnv-chat-ink-muted', chatText.inkMuted);
   root.style.setProperty('--cnv-chat-edge', chat.edge);
   // The docked orchestrator: its own veil, scoped to the dock so lightening
   // it never touches the window background. The dock has ALWAYS faded in the
@@ -478,7 +496,7 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // white fog and pins the ink dark so a lightened dock still reads.
   const dockToneResolved = value.dockTone === 'match' ? value.tone : value.dockTone;
   const dockVeilLight = dockToneResolved === 'light';
-  root.style.setProperty('--cnv-dock-veil', `rgba(${dockVeilLight ? '252, 253, 255' : '7, 9, 13'}, ${value.dockTint.toFixed(2)})`);
+  root.style.setProperty('--cnv-dock-veil', `rgba(${dockVeilLight ? '252, 253, 255' : '7, 9, 13'}, ${surfaceTint(value.dockTint).toFixed(2)})`);
   if (value.dockTone === 'match') {
     // Inherit the global vocabulary — the dock surface override is a no-op, so
     // the dock follows the appearance (light canvas → light dock, dark ink).
@@ -490,11 +508,11 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
     root.style.setProperty('--cnv-dock-pop-tint', pop.tintDeep);
     root.style.setProperty('--cnv-dock-pop-base', pop.popBase);
   } else {
-    const dockVocab = toneVocabulary(dockToneResolved, value.tint);
+    const dockVocab = toneVocabulary(dockToneResolved, surfaceTint(value.tint));
     root.style.setProperty('--cnv-dock-tint', dockVocab.tint);
     root.style.setProperty('--cnv-dock-tint-deep', dockVocab.tintDeep);
     root.style.setProperty('--cnv-dock-edge', dockVocab.edge);
-    const dockText = inkFromShade(dockVeilLight ? 0.9 : 0.06, value.ink);
+    const dockText = custom ? imageInk(dockToneResolved) : inkFromShade(dockVeilLight ? 0.9 : 0.06, value.ink);
     root.style.setProperty('--cnv-dock-ink', dockText.ink);
     root.style.setProperty('--cnv-dock-ink-muted', dockText.inkMuted);
     // Lane-menu popover contrasts the dock ink: light dock → light menu, dark dock → dark menu.
