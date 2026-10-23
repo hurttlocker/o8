@@ -10,6 +10,7 @@ import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import { getCanonicalChatHistoryPath, persistCanonicalChatHistoryRecord } from '@/lib/llm/chat-history-store';
 import { logUsage } from '@/lib/db/usage';
 import { scoreCompactionSegment } from '@/lib/orchestrator/compaction-scorer';
+import { clipCompactionText, compactionEntryText } from './compaction-text';
 const ARCHIVE_DIR = path.join(getDataDir(), 'orchestrator-archives');
 const inFlight = new Map<string, Promise<AutoCompactResult>>();
 type PersistedThread = { tabId: string; payload: Record<string, unknown>; messages: MobileTranscriptEntry[] };
@@ -36,7 +37,6 @@ const notApplied = (transcript: MobileTranscriptEntry[], tokensAfter = 0): AutoC
 });
 const fmtStamp = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')} ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
 const approxTokens = (value: string) => Math.max(0, Math.ceil(value.length / 4));
-const stripCompactionTags = (value: string) => value.replace(/<\/?compacted_context\b[^>]*>/gi, '').trim();
 function coerceEntry(value: unknown): MobileTranscriptEntry | null {
   const record = value as Record<string, unknown> | null;
   const role = record?.role;
@@ -67,21 +67,11 @@ async function readThread(repoPath: string, threadId: string): Promise<Persisted
     return null;
   }
 }
-// Orchestrator replies open with progress and end with the result, so a long
-// turn keeps both ends and marks the cut (#2958).
-const EXCERPT_TURN_HEAD_CHARS = 400;
-const EXCERPT_TURN_TAIL_CHARS = 1_000;
-function clipExcerptTurn(text: string) {
-  const omitted = text.length - EXCERPT_TURN_HEAD_CHARS - EXCERPT_TURN_TAIL_CHARS;
-  if (omitted <= 0) return text;
-  return `${text.slice(0, EXCERPT_TURN_HEAD_CHARS)}\n[... ${omitted} characters omitted ...]\n${text.slice(-EXCERPT_TURN_TAIL_CHARS)}`;
-}
 function buildExcerpt(messages: MobileTranscriptEntry[], maxChars: number) {
   const chunks = messages.map((entry, index) => {
     const role = entry.type === 'compaction' ? 'COMPACTION' : entry.role.toUpperCase();
-    const text = clipExcerptTurn(entry.type === 'compaction' ? stripCompactionTags(entry.compaction?.summary ?? entry.text) : entry.text.trim()) || '[no text]';
-    const tools = entry.toolCalls?.map((tool) => tool.name).filter(Boolean).join(', ');
-    return [`Turn ${index + 1} · ${role}${entry.timestampLabel ? ` · ${entry.timestampLabel}` : ''}`, text, tools ? `Tools: ${tools}` : null].filter(Boolean).join('\n');
+    const text = compactionEntryText(entry, clipCompactionText) || '[no text]';
+    return [`Turn ${index + 1} · ${role}${entry.timestampLabel ? ` · ${entry.timestampLabel}` : ''}`, text].join('\n');
   });
   // Over budget, the oldest turns go first: the newest carry the live state. An
   // earlier compaction summary stays, since it already condenses everything before it.
@@ -304,6 +294,7 @@ export async function autoCompactOrchestratorThread(input: {
   threadId: string;
   /** Parent-session context tokens only. Child usage belongs to cost receipts. */
   runningTotal?: number;
+  contextSource?: string;
   keepTailCount?: number;
   trigger?: 'auto' | 'manual' | 'handoff';
   /** Explicit handoffs must compact truthfully even when background compaction is disabled. */
@@ -335,9 +326,14 @@ export async function autoCompactOrchestratorThread(input: {
     if (keepTailCount !== null && transcript.length <= keepTailCount + 1) {
       return notApplied(transcript);
     }
-    const compactedCount = keepTailCount !== null
+    let compactedCount = keepTailCount !== null
       ? Math.max(1, transcript.length - keepTailCount)
       : Math.max(1, Math.floor(transcript.length * 0.6));
+    // A message count is not a turn boundary. Include the answer and tool
+    // results belonging to the last selected user message in the summary.
+    while (compactedCount < transcript.length && transcript[compactedCount]!.role !== 'user') {
+      compactedCount += 1;
+    }
     const { compactedTurns, pinnedTurns, liveTurns, retainedTurns } = splitCompactionWindow(transcript, compactedCount);
     if (compactedTurns.length === 0) {
       return notApplied(transcript);
@@ -360,6 +356,7 @@ export async function autoCompactOrchestratorThread(input: {
       compaction: {
         timestamp: compactedAt.getTime(),
         tokensBefore: typeof input.runningTotal === 'number' ? input.runningTotal : undefined,
+        contextSource: input.contextSource,
         tokensAfter: undefined,
         trigger: input.trigger === 'handoff' ? 'manual' : input.trigger ?? 'auto',
         source: 'summary',

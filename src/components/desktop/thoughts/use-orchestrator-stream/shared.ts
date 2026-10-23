@@ -6,7 +6,7 @@ import { openSurfaceWebSocket } from '@/lib/connect/open-surface-websocket';
 
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
-export type OrchestratorPermissionMode = 'full' | 'plan';
+export type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 export const DEFAULT_ORCHESTRATOR_MODEL: string = MODEL_IDS.orchestratorDefault;
 
 export const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
@@ -23,7 +23,7 @@ export const ORCHESTRATOR_AUTO_COMPACT_THRESHOLD = 300_000;
 export const ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR = 12_000;
 export const ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD = 15_000;
 export const ORCHESTRATOR_FORCE_COMPACT_THRESHOLD = Math.floor(ORCHESTRATOR_CONTEXT_LIMIT * 0.85);
-export const ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS = 4_000;
+export { ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS } from '@/lib/orchestrator/context-estimate';
 export const ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS = 8_000;
 export const ORCHESTRATOR_COMPACTION_STATUS_MIN_MS = 1_200;
 export const ORCHESTRATOR_TOKEN_EVENT = 'cortex:orchestrator-token-usage';
@@ -47,7 +47,20 @@ export function approxTokens(value: string): number {
 }
 
 export function sortTranscriptEntries(entries: MobileTranscriptEntry[]) {
-  return [...entries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
+  const next: MobileTranscriptEntry[] = [];
+  let segment: MobileTranscriptEntry[] = [];
+  const flush = () => {
+    next.push(...segment.sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0)));
+    segment = [];
+  };
+  // A queued send can have an earlier timestamp than the compaction it waited
+  // for. Persisted boundaries remain in place when restoring that timeline.
+  for (const entry of entries) {
+    if (entry.type === 'compaction' || entry.compaction) { flush(); next.push(entry); }
+    else segment.push(entry);
+  }
+  flush();
+  return next;
 }
 
 export function normalizeRepoPath(value: string | null | undefined) {

@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { listPullRequestContext } from '@/lib/orchestrator/pull-request-context';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -91,6 +93,13 @@ export async function GET(request: NextRequest): Promise<Response> {
   const limit = limitFrom(request);
   const timeline = fullTimeline.slice(-limit);
 
+  let pullRequestContext;
+  try {
+    if (resolveRequestPrincipal(request) === 'operator') pullRequestContext = listPullRequestContext({ threadId });
+  } catch {
+    return noStore({ ok: false, error: { code: 'context_unavailable', message: 'Unable to read conversation PR context.' } }, 500);
+  }
+
   return noStore({
     schema: 'o8/orchestrator.history/v1',
     ok: true,
@@ -103,5 +112,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     count: fullTimeline.length,
     truncated: timeline.length < fullTimeline.length,
     timeline,
+    pullRequestContext,
   });
 }

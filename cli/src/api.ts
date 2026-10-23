@@ -47,6 +47,8 @@ export interface ApiRequestOptions {
   allowNotFound?: boolean;
   /** Return a structured 409/422 response instead of throwing. */
   allowConflict?: boolean;
+  /** Return a structured 503 response instead of throwing. */
+  allowUnavailable?: boolean;
 }
 
 export interface ApiResponse<T> {
@@ -368,6 +370,10 @@ export async function apiFetch<T = unknown>(
       `State machine rejected the operation (${res.status})${detail ? `: ${detail}` : '.'}`,
       EXIT.CONFLICT,
     );
+  }
+  if (res.status === 503 && opts.allowUnavailable) {
+    const json = parseResponseJson(responseText);
+    if (json) return { status: res.status, data: json as T };
   }
   if (!res.ok) {
     // Surface the server's error body — a bare "HTTP 500" hides the typed

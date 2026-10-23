@@ -1,3 +1,4 @@
+import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import { attachSymonTextSession } from '@/lib/mobile/symon-text-attachment';
 /**
  * Unified WebSocket server for o8 mobile.
@@ -5259,6 +5260,14 @@ async function handleOrchestratorSendMsgAdmitted(client: ClientState, msg: Recor
   }
   const requestedBackendId = resolveMsgBackendId(msg);
   const backendId = resolveOrchestratorExecutionBackendId(requestedBackendId, msg.orchestrationMode);
+  try {
+    assertOrchestratorPermissionMode(backendId, msg.permissionMode);
+  } catch (error) {
+    send(client, { channel: 'orchestrator', event: 'error', data: { repoPath, threadId,
+      error: error instanceof Error ? error.message : 'Invalid permission mode.',
+      ...orchestratorCommandAckCorrelation(correlationId) } });
+    return;
+  }
   if (attachments?.length && !composerBackendSupportsImages(backendId)) {
     send(client, {
       channel: 'orchestrator', event: 'error',
@@ -5358,8 +5367,7 @@ async function handleOrchestratorSendMsgOnce(
 
   // Permission mode travels with the user message. Defaults to 'full' to
   // match legacy behavior for clients that haven't been updated yet.
-  const permissionMode: 'full' | 'plan' =
-    msg.permissionMode === 'plan' ? 'plan' : 'full';
+  const permissionMode = resolveOrchestratorPermissionMode(msg.permissionMode);
   const thinkingEffort: ManualThinkingEffort | undefined = isManualThinkingEffort(msg.thinkingEffort)
     ? msg.thinkingEffort
     : undefined;

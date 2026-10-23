@@ -1,5 +1,6 @@
 import type { ExecFileOptions } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
 import {
   mkdirSync,
@@ -20,6 +21,7 @@ const setupInvocations = vi.hoisted(() => [] as Array<{
 const healthConnections = vi.hoisted(() => [] as number[]);
 const setupServers = vi.hoisted(() => [] as Server[]);
 const setupSockets = vi.hoisted(() => [] as Socket[]);
+const healthMode = vi.hoisted(() => ({ value: 'tcp' as 'tcp' | 'refused' | 'http-failed' | 'http-ok' }));
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
@@ -36,7 +38,15 @@ vi.mock('node:child_process', async (importOriginal) => {
     const env = options.env ?? process.env;
     setupInvocations.push({ cwd, env });
     const healthPort = Number(env.WEB_PORT);
-    const server = createServer((socket) => {
+    if (healthMode.value === 'refused') {
+      callback?.(null, '', '');
+      return {} as never;
+    }
+    const server = healthMode.value.startsWith('http') ? createHttpServer((_request, response) => {
+      healthConnections.push(healthPort);
+      response.writeHead(healthMode.value === 'http-failed' ? 503 : 200);
+      response.end('fixture health');
+    }) : createServer((socket) => {
       setupSockets.push(socket);
       healthConnections.push(healthPort);
       socket.end();
@@ -152,6 +162,7 @@ describe.sequential('workspace manifest packet launch real path', () => {
         label: packetId,
         packetId,
       });
+      setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
       const prepared = await prepareLaunchWorktree({
         repoRoot: repoPath,
         agentType: 'codex',
@@ -172,6 +183,11 @@ describe.sequential('workspace manifest packet launch real path', () => {
 
     const first = await launch('packet-manifest-first', 'test/manifest-first');
     const second = await launch('packet-manifest-second', 'test/manifest-second');
+    const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest/lifecycle');
+    expect((await readWorkspaceManifestReceipt(first.prepared.cwd))?.services).toEqual([
+      expect.objectContaining({ name: 'api', health: null }),
+      expect.objectContaining({ name: 'web', health: expect.objectContaining({ kind: 'tcp', ok: true }) }),
+    ]);
     const firstEvent = getLaneEvents(first.lane.id, 100).find(
       (event) => event.verb === 'workspace_manifest_applied',
     );
@@ -230,4 +246,62 @@ describe.sequential('workspace manifest packet launch real path', () => {
       expect(getLane(second.lane.id)?.worktreePath).toBeNull();
     }, { timeout: 60_000 });
   }, 120_000);
+
+  it.each([
+    { mode: 'refused', kind: 'tcp', failed: true, error: 'ECONNREFUSED' },
+    { mode: 'http-failed', kind: 'http', failed: true, error: 'HTTP health probe returned 503.' },
+    { mode: 'http-ok', kind: 'http', failed: false, error: null },
+  ] as const)('settles $mode health through launch and persisted receipts', async ({ mode, kind, failed, error }) => {
+    healthMode.value = mode;
+    writeFileSync(path.join(repoPath, 'o8.workspace.json'), JSON.stringify({
+      version: 1,
+      setup: ['prepare-workspace'],
+      services: [{
+        name: 'web', command: 'run-web', port: { preferred: 43_400, env: 'WEB_PORT' },
+        health: kind === 'tcp' ? { tcp: true, timeoutMs: 2_000 }
+          : { http: 'http://127.0.0.1:{{port}}/health', timeoutMs: 2_000 },
+      }],
+      preview: { url: 'http://127.0.0.1:{{service:web}}' },
+    }));
+    execFileSync('git', ['add', 'o8.workspace.json'], { cwd: repoPath });
+    execFileSync('git', ['-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-qm', `fixture ${mode}`], { cwd: repoPath });
+    const { createLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
+    const { prepareLaunchWorktree } = await import('@/lib/worktree/launch');
+    const { readWorkspaceManifestReceipt } = await import('@/lib/workspace/manifest/lifecycle');
+    const packetId = `packet-health-${mode}`;
+    const branch = `test/health-${mode}`;
+    const lane = createLane({ repoPath, branch, baseBranch: 'main', runtime: 'codex', label: packetId, packetId });
+    setLaneStatus(lane.id, 'launching', 'system', 'fixture launch');
+    const prepared = await prepareLaunchWorktree({
+      repoRoot: repoPath, agentType: 'codex', taskName: packetId, branchName: branch,
+      baseBranch: 'main', isolate: true, skipSetup: true, packetId, laneId: lane.id,
+    });
+    expect(prepared).not.toBeNull();
+    const receipt = await readWorkspaceManifestReceipt(prepared!.cwd);
+    expect(receipt?.state).toBe(failed ? 'failed' : 'completed');
+    expect(receipt?.finishedAt).toEqual(expect.any(String));
+    expect(receipt?.services).toHaveLength(1);
+    expect(receipt?.services[0]).toMatchObject({ name: 'web', health: { kind, ok: !failed } });
+    expect(receipt?.services[0].health?.checkedAt).toEqual(expect.any(String));
+    expect(receipt?.services[0].health?.durationMs).toBeGreaterThanOrEqual(0);
+    const events = getLaneEvents(lane.id, 100);
+    const applied = events.filter(event => event.verb === 'workspace_manifest_applied');
+    const failures = events.filter(event => event.verb === 'workspace_manifest_failed');
+    if (failed) {
+      expect(receipt?.step).toBe('services');
+      expect(receipt?.services[0].health?.error).toContain(error);
+      expect(receipt?.error).toContain('web');
+      expect(receipt?.error).toContain(error);
+      expect(applied).toEqual([]);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].payload).toMatchObject({ step: 'services', state: 'failed' });
+      expect(failures[0].payload.error).toContain('web');
+      expect(failures[0].payload).not.toHaveProperty('preview');
+    } else {
+      expect(failures).toEqual([]);
+      expect(applied).toHaveLength(1);
+      expect(applied[0].payload.preview).toBe(`http://127.0.0.1:${receipt?.ports.web}`);
+    }
+  }, 60_000);
 });

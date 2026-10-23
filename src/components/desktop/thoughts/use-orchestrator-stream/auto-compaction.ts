@@ -35,7 +35,7 @@ interface AutoCompactionOptions {
   primeCompactedSession: (
     repoPath: string,
     payload: CompactResponsePayload | null,
-    options: { setTranscript: boolean; threadId: string | null },
+    options: { threadId: string | null },
   ) => Promise<unknown>;
 }
 
@@ -87,10 +87,8 @@ export function useOrchestratorAutoCompaction(options: AutoCompactionOptions) {
             armedRef.current = true;
             return;
           }
-          // Auto-compaction is silent: replacing the visible transcript would
-          // erase client-only cards and system notes.
+          // Priming adds only the boundary, preserving visible history.
           await primeCompactedSession(repoPath, payload, {
-            setTranscript: false,
             threadId: compactThreadId,
           });
         } catch {

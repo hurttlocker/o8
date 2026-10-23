@@ -6,6 +6,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { isOrchestratorRuntime, runtimeFromOwnedSessionKey } from '@/lib/orchestrator/runtime-capabilities';
 import { currentRecoveryRun, recoveryInterrupted } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
 import { readOwnedSessionRecord } from '@/lib/runtimes/shared/owned-session-index';
+import { readTranscriptTextPage } from './transcript-text-pages';
 import { McpInputError, safeErrorText } from './api-error';
 
 type RecordValue = Record<string, unknown>;
@@ -147,36 +148,6 @@ export function createWorkerObservationHandlers(config: ObservationConfig, apiFe
       }), relatedWorkerCount: related.length, relatedWorkers: related.slice(0, 200), relatedWorkersTruncated: related.length > 200,
       observationOnly: true };
     }),
-    handleReadTranscript: guarded(async args => {
-      if (typeof args.sessionKey !== 'string' || !args.sessionKey || args.sessionKey.length > 240) throw new McpInputError('sessionKey is required.');
-      if (args.sinceId !== undefined && (typeof args.sinceId !== 'string' || args.sinceId.length > 1000)) throw new McpInputError('sinceId must be a transcript entry ID.');
-      const limit = integer(args.limit, 20, 1, 100, 'limit');
-      const maxTextChars = integer(args.maxTextChars, 4000, 100, 12_000, 'maxTextChars');
-      const query = new URLSearchParams({ sessionKey: args.sessionKey, limit: String(limit) });
-      if (typeof args.sinceId === 'string') query.set('sinceId', args.sinceId);
-      const data = record(await apiFetch(`/api/runtime/transcript?${query}`, { signal: AbortSignal.timeout(10_000) }));
-      let budget = 24_000;
-      let responseBudget = 32_000;
-      const source = rows(data.transcript);
-      const transcript = [];
-      for (const entry of source.slice(0, limit)) {
-        if (budget <= 0) break;
-        if (typeof entry.id !== 'string' || entry.id.length > 1000) throw new Error('Transcript entry identity is unavailable.');
-        const original = typeof entry.text === 'string' ? entry.text : '';
-        const text = original.slice(0, Math.min(maxTextChars, budget));
-        const meta = (value: unknown, max = 1000) => typeof value === 'string' ? value.slice(0, max) : null;
-        const row = { id: entry.id, role: meta(entry.role, 100), text, type: meta(entry.type, 100), tool: meta(entry.toolName),
-          file: meta(entry.filePath), time: meta(entry.timestampLabel, 100), timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : null,
-          truncated: text.length < original.length, originalTextChars: original.length };
-        const size = JSON.stringify(row).length;
-        if (size > responseBudget) break;
-        budget -= text.length; responseBudget -= size;
-        transcript.push(row);
-      }
-      return { entryCount: transcript.length, transcript, nextCursor: transcript.at(-1)?.id ?? args.sinceId ?? null,
-        truncated: source.length > transcript.length || transcript.some(entry => entry.truncated),
-        omittedEntries: Math.max(0, source.length - transcript.length), textBudgetChars: 24_000, responseBudgetChars: 35_000, maxTextChars,
-        cursorPolicy: 'Pass nextCursor as sinceId for newer entries. Truncated text is a preview; reread from the preceding entry with a larger maxTextChars to expand it within the response budget.' };
-    }),
+    handleReadTranscript: guarded(args => readTranscriptTextPage(args, apiFetch)),
   };
 }
