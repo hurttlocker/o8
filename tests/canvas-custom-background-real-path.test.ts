@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import os from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import esbuild from 'esbuild';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -15,23 +16,82 @@ async function open(page: Page, full = true) {
   await page.getByText('Appearance', { exact: true }).waitFor();
 }
 
-async function image(page: Page, color = '#ffffff') {
-  const data = await page.evaluate(color => {
-    const canvas = document.createElement('canvas'); canvas.width = 100; canvas.height = 100;
+async function image(page: Page, sample: 'bright' | 'dark' = 'bright') {
+  const data = await page.evaluate(sample => {
+    const canvas = document.createElement('canvas'); canvas.width = 1440; canvas.height = 900;
     const context = canvas.getContext('2d')!;
-    context.fillStyle = color; context.fillRect(0, 0, 100, 100);
-    context.fillStyle = '#777777'; context.fillRect(25, 25, 50, 50);
+    let seed = 2865;
+    const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    const sky = context.createLinearGradient(0, 0, 1100, 900);
+    const colors = sample === 'bright'
+      ? ['#f8ddbd', '#f2a39d', '#a2b8d0', '#44a8a3']
+      : ['#11192d', '#39445c', '#8b687a', '#173c48'];
+    colors.forEach((color, index) => sky.addColorStop(index / 3, color));
+    context.fillStyle = sky; context.fillRect(0, 0, 1440, 900);
+    const glow = context.createRadialGradient(460, 270, 0, 460, 270, 720);
+    glow.addColorStop(0, sample === 'bright' ? '#fff5cdbb' : '#d6a89666');
+    glow.addColorStop(1, '#ffffff00');
+    context.fillStyle = glow; context.fillRect(0, 0, 1440, 900);
+    // Layered, misty ridgelines give the darker gradient a photographic depth.
+    if (sample === 'dark') for (let ridge = 0; ridge < 5; ridge++) {
+      context.beginPath(); context.moveTo(0, 900);
+      for (let x = 0; x <= 1480; x += 40) {
+        context.lineTo(x, 400 + ridge * 95 + Math.sin(x / 210 + ridge) * 65 + random() * 20);
+      }
+      context.lineTo(1440, 900); context.closePath();
+      context.fillStyle = ['#58617366', '#3a536a88', '#29485bcc', '#193b4fee', '#102b39'][ridge];
+      context.fill();
+    }
+    // Seeded translucent brush strokes and fine grain, with no downloaded assets.
+    for (let stroke = 0; stroke < 3200; stroke++) {
+      const x = random() * 1440, y = random() * 900;
+      context.beginPath(); context.ellipse(x, y, 12 + random() * 90, 2 + random() * 18, -.4, 0, Math.PI * 2);
+      context.fillStyle = colors[Math.floor(random() * colors.length)];
+      context.globalAlpha = sample === 'bright' ? .035 : .015; context.fill();
+    }
+    for (let grain = 0; grain < 50000; grain++) {
+      context.globalAlpha = random() * .035;
+      context.fillStyle = grain % 2 ? '#ffffff' : '#000000';
+      context.fillRect(random() * 1440, random() * 900, 1, 1);
+    }
     return canvas.toDataURL('image/png').split(',')[1];
-  }, color);
-  return { name: 'sample.png', mimeType: 'image/png', buffer: Buffer.from(data, 'base64') };
+  }, sample);
+  return { name: `${sample === 'bright' ? 'Painterly coast' : 'Mountain dusk'}.png`, mimeType: 'image/png', buffer: Buffer.from(data, 'base64') };
 }
 
 const background = (page: Page) => page.locator('[data-custom-canvas-background] canvas');
-async function upload(page: Page, color?: string) {
-  await page.getByLabel('Choose custom canvas image').setInputFiles(await image(page, color));
+async function upload(page: Page, sample?: 'bright' | 'dark') {
+  await page.getByLabel('Choose custom canvas image').setInputFiles(await image(page, sample));
   await background(page).waitFor();
   await expect.poll(() => page.locator('[data-custom-canvas-background]').getAttribute('data-mode')).not.toBeNull();
   await expect.poll(() => page.getByRole('status').textContent()).toContain('Saved on this device');
+}
+
+async function panelContrast(page: Page) {
+  return page.evaluate(() => {
+    const rgba = (value: string) => value.match(/[\d.]+/g)!.map(Number);
+    const over = (paint: number[], base: number[]) => paint.slice(0, 3).map((c, i) => c * (paint[3] ?? 1) + base[i] * (1 - (paint[3] ?? 1)));
+    const lum = (rgb: number[]) => rgb.map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((n, c, i) => n + c * [.2126, .7152, .0722][i], 0);
+    const scrim = rgba(getComputedStyle(document.querySelector('[data-custom-canvas-scrim]')!).backgroundColor);
+    const canvas = document.querySelector('[data-custom-canvas-background] canvas') as HTMLCanvasElement;
+    const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    // Actual image pixels plus black/white bounds also cover blur and saturation.
+    const samples = [[0, 0, 0], [255, 255, 255]];
+    for (let i = 0; i < pixels.length; i += 400) samples.push(Array.from(pixels.slice(i, i + 3)));
+    const heading = Array.from(document.querySelectorAll('span')).find(span => span.textContent === 'Appearance')!;
+    const pickerLabel = document.querySelector('section[aria-label="Canvas background"] > span')!;
+    return [...document.querySelectorAll('[data-contrast-text]'), heading, pickerLabel].map(text => {
+      const panel = text.closest('[data-contrast-surface]') ?? heading.parentElement!;
+      const surface = rgba(getComputedStyle(panel).backgroundColor);
+      const ink = rgba(getComputedStyle(text).color);
+      const ratio = Math.min(...samples.map(pixel => {
+        const bg = over(surface, over(scrim, pixel));
+        const fg = over(ink, bg);
+        return (Math.max(lum(fg), lum(bg)) + .05) / (Math.min(lum(fg), lum(bg)) + .05);
+      }));
+      return { label: text.getAttribute('data-contrast-text') ?? `tuner-${text.textContent}`, ratio, blur: getComputedStyle(panel).backdropFilter };
+    });
+  });
 }
 
 async function removeImage(page: Page) {
@@ -47,7 +107,7 @@ describe.skipIf(!executablePath)('custom canvas backgrounds through the appearan
         import { createRoot } from 'react-dom/client';
         import { TunerPanel } from './src/app/preview/canvas-glass/tuner';
         import { CanvasBackdropLayer } from './src/app/preview/canvas-glass/backdrops';
-        import { glass } from './src/app/preview/canvas-glass/ui';
+        import { glass, glassChat } from './src/app/preview/canvas-glass/ui';
         import { applyCanvasGlassSettings, readCanvasGlassSettings, writeCanvasGlassSettings } from './src/lib/canvas-mode/glass-settings';
         function App() {
           const [settings, set] = useState(readCanvasGlassSettings);
@@ -58,9 +118,14 @@ describe.skipIf(!executablePath)('custom canvas backgrounds through the appearan
             <TunerPanel settings={settings} onChange={change} inTauri={false} personalDefault={null}
               loupeSize={100} loupeSizeRange={{min:80,max:200,step:1}} onLoupeSizeChange={()=>{}} onSaveDefault={()=>{}}
               full={new URLSearchParams(location.search).get('full') !== 'false'} />
-            <article style={{...glass(true),position:'absolute',top:100,left:32,zIndex:3,width:220,padding:20}}>
-              <p data-contrast-text style={{color:'var(--cnv-ink)',fontSize:14}}>Canvas conversation</p>
-              <p style={{color:'var(--cnv-ink-muted)',fontSize:12}}>Local image. Your work stays readable.</p>
+            <article data-contrast-surface style={{...glass(),position:'absolute',top:140,left:32,zIndex:3,width:'min(390px, 38vw)',padding:24,borderRadius:18}}>
+              <p data-contrast-text="card-primary" style={{fontSize:18,fontWeight:400,marginTop:0}}>A little room to think</p>
+              <p data-contrast-text="card-secondary" style={{color:'var(--cnv-ink-muted)',fontSize:13,lineHeight:1.65}}>Keep your ideas, notes and conversations together. A quieter workspace, with a view that feels like yours.</p>
+              <p style={{fontSize:12,lineHeight:1.65}}>Review the next draft<br/>Sketch a new direction<br/>Leave space for something unexpected</p>
+            </article>
+            <article data-contrast-surface style={{...glassChat(),position:'absolute',top:460,left:32,zIndex:3,width:'min(320px, 34vw)',padding:24,borderRadius:18}}>
+              <p data-contrast-text="chat-primary" style={{fontSize:14,marginTop:0}}>Canvas conversation</p>
+              <p data-contrast-text="chat-secondary" style={{color:'var(--cnv-chat-ink-muted)',fontSize:13,lineHeight:1.65,marginBottom:0}}>The latest draft is ready. Pick up where you left off, whenever you are ready.</p>
             </article>
           </>;
         }
@@ -154,7 +219,7 @@ describe.skipIf(!executablePath)('custom canvas backgrounds through the appearan
       await page.getByLabel('Choose custom canvas image').setInputFiles({ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('not an image') });
       await expect.poll(() => page.getByRole('alert').textContent()).toContain('could not be read');
       await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError'); }; });
-      await page.getByLabel('Choose custom canvas image').setInputFiles(await image(page, '#000000'));
+      await page.getByLabel('Choose custom canvas image').setInputFiles(await image(page, 'dark'));
       await expect.poll(() => page.getByRole('alert').textContent()).toContain('could not be saved');
       expect(await page.evaluate(() => localStorage.getItem('o8:canvas-glass'))).toBe(original);
       expect(await background(page).count()).toBe(1);
@@ -181,31 +246,50 @@ describe.skipIf(!executablePath)('custom canvas backgrounds through the appearan
     } finally { await page.context().close(); }
   });
 
-  for (const tone of ['light', 'dark']) for (const sample of ['bright', 'dark']) {
+  for (const tone of ['light', 'dark'] as const) for (const sample of ['bright', 'dark'] as const) {
     it(`keeps readable ${tone} text over the ${sample} image`, async () => {
-      const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+      const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
       try {
         await open(page); expect(await page.getByLabel('Choose custom canvas image').count()).toBe(1);
         await page.getByRole('button', { name: tone === 'light' ? 'Light' : 'Dark', exact: true }).click();
-        await upload(page, sample === 'bright' ? '#ffffff' : '#000000');
-        // Composite the actual rendered ink over the worst image pixel and scrim.
-        const ratio = await page.locator('[data-contrast-text]').evaluate((text, sample) => {
-          const ink = getComputedStyle(text).color.match(/[\d.]+/g)!.map(Number);
-          const scrim = getComputedStyle(document.querySelector('[data-custom-canvas-scrim]')!).backgroundColor.match(/[\d.]+/g)!.map(Number);
-          const bg = scrim.slice(0, 3).map(c => c * scrim[3] + (sample === 'bright' ? 255 : 0) * (1 - scrim[3]));
-          const fg = ink.slice(0, 3).map((c, i) => c * (ink[3] ?? 1) + bg[i] * (1 - (ink[3] ?? 1)));
-          const lum = (rgb: number[]) => rgb.map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((n, c, i) => n + c * [.2126, .7152, .0722][i], 0);
-          return (Math.max(lum(fg), lum(bg)) + .05) / (Math.min(lum(fg), lum(bg)) + .05);
-        }, sample);
-        expect(ratio).toBeGreaterThanOrEqual(4.5);
-        const directory = 'docs/evidence/2865';
+        await upload(page, sample);
+        const contrasts = await panelContrast(page);
+        for (const { ratio, blur } of contrasts) {
+          expect(ratio).toBeGreaterThanOrEqual(4.5);
+          expect(blur).toContain('blur(');
+        }
+        const wash = await page.locator('[data-custom-canvas-scrim]').evaluate(scrim => Number(getComputedStyle(scrim).backgroundColor.match(/[\d.]+/g)![3]));
+        expect(wash).toBeLessThanOrEqual(.25);
+        const directory = path.join(os.homedir(), 'o8-shots-2865');
         if (process.env.O8_CAPTURE_BACKGROUND_EVIDENCE === '1') {
           await mkdir(directory, { recursive: true });
           await page.screenshot({ path: `${directory}/${tone}-${sample}.png` });
+          await writeFile(path.join(directory, `${tone}-${sample}.json`), JSON.stringify(contrasts, null, 2));
         }
+        await page.setViewportSize({ width: 900, height: 700 });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.setViewportSize({ width: 1680, height: 1050 });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        // Persisted clear/low-ink tuning must not erase the image's reading surfaces.
+        await page.evaluate(() => {
+          const saved = JSON.parse(localStorage.getItem('o8:canvas-glass')!);
+          localStorage.setItem('o8:canvas-glass', JSON.stringify({ ...saved, frost: 0, chatFrost: 0, tint: 0, chatTint: 0, ink: .55,
+            chatTone: saved.tone === 'light' ? 'dark' : 'light' }));
+        });
+        await page.reload(); await background(page).waitFor();
+        for (const { ratio, blur } of await panelContrast(page)) {
+          expect(ratio).toBeGreaterThanOrEqual(4.5);
+          expect(blur).not.toContain('blur(0px)');
+        }
+        await removeImage(page);
+        const restored = await page.evaluate(() => ({
+          tint: getComputedStyle(document.documentElement).getPropertyValue('--cnv-tint'),
+          frost: getComputedStyle(document.documentElement).getPropertyValue('--cnv-frost'),
+          saved: JSON.parse(localStorage.getItem('o8:canvas-glass')!),
+        }));
+        expect(restored.tint).toContain('0.00)');
+        expect(restored.frost).toBe('0px');
+        expect(restored.saved).toMatchObject({ frost: 0, tint: 0, ink: .55 });
       } finally { await page.context().close(); }
     });
   }
