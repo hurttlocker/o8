@@ -79,7 +79,7 @@ export async function probeAcpModels(
     if (cached && Date.now() - cached.probedAt < CACHE_TTL_MS) return cached;
   }
 
-  const client = new AcpClient({ command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv });
+  const client = new AcpClient({ runtimeId: id, command: launch.command, args: launch.args, cwd: repoPath, env: launch.env, omitEnv: launch.omitEnv });
   const timeout = setTimeout(() => client.kill(), PROBE_TIMEOUT_MS);
   try {
     await client.initialize();

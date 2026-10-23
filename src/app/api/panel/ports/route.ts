@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { serverTimingHeaders } from '@/lib/performance/server-timing';
-import { execSync } from 'child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { resolvePortInfo } from '@/lib/panel/api-port';

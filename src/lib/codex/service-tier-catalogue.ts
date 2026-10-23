@@ -1,4 +1,6 @@
-import { spawn } from 'node:child_process';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn } from '@/lib/providers/child-process';
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -16,9 +18,9 @@ export async function getCodexSpeedCatalogue(home = path.join(homedir(), '.codex
   // Match prepareCodexHome's source account; validation passes the prepared home.
   const authStat = await stat(path.join(home, 'auth.json')).catch(() => null);
   const configStat = await stat(path.join(home, 'config.toml')).catch(() => null);
-  const key = `${binary.path}:${binary.version}:${home}:${authStat?.mtimeMs}:${configStat?.mtimeMs}`;
+  const key = `${binary.path}:${binary.version}:${home}:${authStat?.mtimeMs}:${configStat?.mtimeMs}:${credentialPolicyFingerprint('codex')}`;
   if (cache?.key === key && Date.now() - cache.at < 5 * 60_000) return cache.promise;
-  const promise = readCodexSpeedCatalogue(binary.path, { ...process.env, CODEX_HOME: home, PATH: pathWithNodeRuntime() });
+  const promise = readCodexSpeedCatalogue(binary.path, childEnvironment({ runtimeId: 'codex', env: { CODEX_HOME: home, PATH: pathWithNodeRuntime() } }));
   cache = { key, at: Date.now(), promise };
   promise.catch(() => { if (cache?.promise === promise) cache = null; });
   return promise;

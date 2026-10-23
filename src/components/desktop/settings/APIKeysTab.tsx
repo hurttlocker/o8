@@ -90,6 +90,7 @@ const NATIVE_KEYS: NativeKeyConfig[] = [
 // Provider keys use the existing encrypted key store.
 
 export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
+  const nativeKeychain = isTauri() && !isNonMacShell();
   const [providers, setProviders] = useState<ProviderKeyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -97,7 +98,6 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
   const [keyInput, setKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [removingProvider, setRemovingProvider] = useState<string | null>(null);
-  const nativeKeychain = isTauri() && !isNonMacShell();
   const mutationRef = useRef(false);
   const [feedback, setFeedback] = useState<{ provider: string; type: 'success' | 'error'; message: string } | null>(null);
   const mountedRef = useRef(true);
@@ -144,22 +144,9 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
       });
       const data = await res.json();
       if (res.ok) {
-        let partialFailure = false;
-        let message = data.warning || 'Saved. New sessions use this key; running sessions keep their connection.';
-        // One OpenRouter key for everything (#3583): Symon and voice always follow it.
-        if (providerId === 'openrouter' && nativeKeychain) {
-          try {
-            await voicePrefsSet('openrouter_api_key', keyInput.trim());
-            const prefs = await voicePrefsGet();
-            if (prefs?.openrouter_api_key_set !== true) throw new Error('Missing readback');
-            window.dispatchEvent(new Event('o8:voice-key-changed'));
-            message += ' Also saved for Symon and voice.';
-          } catch {
-            partialFailure = true;
-            message += ' Symon and voice could not be updated. Retry in the voice key section below.';
-          }
-        }
-        setFeedback({ provider: providerId, type: data.warning || partialFailure ? 'error' : 'success', message });
+        const message = data.warning || 'Saved. New sessions use this key; running sessions keep their connection.';
+        window.dispatchEvent(new Event('o8:voice-key-changed'));
+        setFeedback({ provider: providerId, type: data.warning ? 'error' : 'success', message });
         if (providerId === 'openrouter') window.dispatchEvent(new Event('o8:openrouter-connection-changed'));
         setEditingProvider(null);
         setKeyInput('');
@@ -172,7 +159,7 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
     }
     mutationRef.current = false;
     setSaving(false);
-  }, [keyInput, loadKeys, nativeKeychain]);
+  }, [keyInput, loadKeys]);
 
   const handleRemove = useCallback(async (providerId: string) => {
     if (mutationRef.current) return;
@@ -185,23 +172,11 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
         body: JSON.stringify({ provider: providerId }),
       });
       if (res.ok) {
-        let message = 'Removed from app storage. External environment keys are unchanged.';
-        let failed = false;
-        if (providerId === 'openrouter') {
-          if (nativeKeychain) {
-            try {
-              await voicePrefsSet('openrouter_api_key', '');
-              window.dispatchEvent(new Event('o8:voice-key-changed'));
-              message = 'Removed for o8, Symon and voice. External environment keys are unchanged.';
-            } catch {
-              failed = true;
-              message = 'Removed from app storage, but Symon and voice could not be updated. Remove it in the voice key section below.';
-            }
-          }
-          window.dispatchEvent(new Event('o8:openrouter-connection-changed'));
-        }
+        const message = 'Removed for o8, Symon and voice.';
+        window.dispatchEvent(new Event('o8:voice-key-changed'));
+        if (providerId === 'openrouter') window.dispatchEvent(new Event('o8:openrouter-connection-changed'));
         setRemovingProvider(null);
-        setFeedback({ provider: providerId, type: failed ? 'error' : 'success', message });
+        setFeedback({ provider: providerId, type: 'success', message });
         void loadKeys();
       } else {
         setFeedback({ provider: providerId, type: 'error', message: 'Could not remove this key. Try again.' });
@@ -209,7 +184,7 @@ export function ApiKeysProviderList({ providerId }: { providerId?: string }) {
     } catch { setFeedback({ provider: providerId, type: 'error', message: 'Network error. Key removal was not confirmed.' }); }
     mutationRef.current = false;
     setSaving(false);
-  }, [loadKeys, nativeKeychain]);
+  }, [loadKeys]);
 
   if (loading) {
     return (
@@ -560,10 +535,10 @@ export function NativeKeysList() {
     try {
       await voicePrefsSet(key.id, value);
       const next = await loadPresence();
-      if (!next[key.id]) throw new Error('Keychain readback did not confirm the saved key.');
+      if (!next[key.id]) throw new Error('Storage readback did not confirm the saved key.');
       setEditingKey(null);
       setKeyInput('');
-      setFeedback({ key: key.id, type: 'success', message: 'Saved in macOS Keychain.' });
+      setFeedback({ key: key.id, type: 'success', message: 'Saved in encrypted app storage.' });
     } catch (error) {
       setFeedback({
         key: key.id,

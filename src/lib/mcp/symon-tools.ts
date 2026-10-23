@@ -1,6 +1,10 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { onCredentialPolicyChange } from '@/lib/providers/policy-events';
+import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
+import { providerMcpEnvironment } from '@/lib/providers/spawn-environment';
 import 'server-only';
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from '@/lib/providers/child-process';
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   listEnabledExternalMcpServers,
@@ -128,7 +132,7 @@ class StdioSession implements McpSession {
     this.child = spawn(launch.command, launch.args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...(server.env ?? {}) },
+      env: providerMcpEnvironment(childEnvironment({ env: { ...(server.env ?? {}) } })),
     });
     this.child.stdout.on('data', (chunk: Buffer) => this.onStdout(chunk));
     this.child.stderr.on('data', () => {
@@ -378,8 +382,14 @@ const warnedUnavailable = new Set<string>();
 let catalogEntries: CatalogEntry[] | null = null;
 let catalogPromise: Promise<CatalogEntry[]> | null = null;
 let catalogGeneration = 0;
+let providerPolicy = '';
+function refreshProviderPolicy(): void {
+  const current = credentialPolicyFingerprint('mcp');
+  if (current !== providerPolicy) { providerPolicy = current; invalidateAll(); }
+}
 
 async function getSession(server: ExternalMcpServerRecord): Promise<McpSession> {
+  refreshProviderPolicy();
   const existing = sessions.get(server.id);
   if (existing) return existing;
   const pending = pendingSessions.get(server.id);
@@ -418,6 +428,7 @@ function invalidateAll(): void {
 }
 
 registerSymonMcpCacheInvalidator(invalidateAll);
+onCredentialPolicyChange(invalidateAll);
 process.once('exit', closeSessions);
 
 function sanitizeNamePart(value: string, maxLength: number): string {
@@ -471,6 +482,7 @@ async function buildCatalog(): Promise<CatalogEntry[]> {
 }
 
 async function entries(force = false): Promise<CatalogEntry[]> {
+  refreshProviderPolicy();
   if (!force && catalogEntries) return catalogEntries;
   if (catalogPromise) return catalogPromise;
   const generation = catalogGeneration;

@@ -1,3 +1,5 @@
+import { prepareProviderMcpLaunch } from '@/lib/providers/mcp-launch';
+import { providerConfigEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Emitter: Codex orchestrator `config.toml` mcp_servers blocks (Set A).
  *
@@ -59,7 +61,7 @@ export function serializeCodexMcpServers(servers: Record<string, OrchestratorMcp
 
     lines.push(`command = ${tomlString(server.command)}`);
     lines.push(`args = ${tomlStringArray(server.args)}`);
-    const envLines = serializeStringMap(`${serverSection}.env`, server.env);
+    const envLines = serializeStringMap(`${serverSection}.env`, server.env ? providerConfigEnvironment(server.env, 'codex') : undefined);
     if (envLines.length > 0) {
       lines.push('', ...envLines);
     }
@@ -71,7 +73,7 @@ export function serializeCodexMcpServers(servers: Record<string, OrchestratorMcp
 export function toCodexServersMap(r: ToolRegistry): Record<string, OrchestratorMcpServerConfig> {
   const out: Record<string, OrchestratorMcpServerConfig> = {};
   for (const { name, config } of entriesForSurface(r, 'codex-orchestrator')) {
-    out[name] = config;
+    out[name] = config.type === 'stdio' && config.env ? prepareProviderMcpLaunch(config, 'codex') : config;
   }
   return out;
 }

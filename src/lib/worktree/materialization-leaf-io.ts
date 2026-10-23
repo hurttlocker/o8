@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn } from '@/lib/providers/child-process';
 import path from 'node:path';
 
 import {
@@ -542,19 +543,13 @@ async function runPinnedLeaf(
   ], identity);
   const child = spawn(invocation.command, invocation.args, {
     cwd: workspacePath,
-    env: {
-      ...process.env,
-      ...(afterPinnedStep ? { O8_PINNED_STEP_HANDSHAKE: '1' } : {}),
-      ...(afterPinnedStep && operation === 'atomic-write'
+    env: childEnvironment({ env: { ...(afterPinnedStep ? { O8_PINNED_STEP_HANDSHAKE: '1' } : {}), ...(afterPinnedStep && operation === 'atomic-write'
         ? { O8_PINNED_ATOMIC_CONTENT: Buffer.from(content ?? '').toString('base64') }
-        : {}),
-      ...(afterPinnedStep && operation === 'ensure-file'
+        : {}), ...(afterPinnedStep && operation === 'ensure-file'
         ? { O8_PINNED_ENSURE_CONTENT: Buffer.from(content ?? '').toString('base64') }
-        : {}),
-      ...(operation === 'atomic-write' && expectedTargetIdentity !== undefined
+        : {}), ...(operation === 'atomic-write' && expectedTargetIdentity !== undefined
         ? { O8_PINNED_EXPECTED_TARGET: JSON.stringify(expectedTargetIdentity) }
-        : {}),
-    },
+        : {}) } }),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });

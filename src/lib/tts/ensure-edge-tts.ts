@@ -20,7 +20,7 @@
  * the same interpreter. Override with O8_TTS_PYTHON if needed.
  */
 
-import { spawn } from 'child_process';
+import { spawn } from '@/lib/providers/child-process';
 
 let attempted = false;
 

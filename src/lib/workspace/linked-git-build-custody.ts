@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
@@ -84,7 +85,7 @@ export async function captureLinkedGitBuildCustody(workspace: WorktreeMaterializ
   if (path.dirname(admin.canonicalPath) !== registrations.canonicalPath) throw new Error('Linked Git admin is outside its common registration directory.');
   const backPointer = await pointer(admin, 'gitdir');
   if (!path.isAbsolute(backPointer.text) || backPointer.text !== gitPath) throw new Error('Linked Git registration does not point back to this checkout.');
-  const env = { ...process.env };
+  const env = childEnvironment();
   for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
   Object.assign(env, { GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
   await withWorktreeMaterializationExecution(workspace.canonicalPath, workspace, async () => {

@@ -1,3 +1,6 @@
+import { ensureMcpConfig } from './claude-orchestrator-mcp-config';
+import { sessions, getWarmState, clearIdleTimer, killOrchestratorProc, reapIdleForCapacity, settleOrchestratorTurn, handleClaudeJsonLine, spawnOrchestratorProc } from './orchestrator-resident-process';
+export { getWarmState, attachOrchestratorProcHandlers } from './orchestrator-resident-process';
 /**
  * Resident Claude Code stream-json orchestrator. Each o8 chat owns one process,
  * Claude session, and carrier config directory; only stateless transport/auth is
@@ -6,19 +9,16 @@
  * all use this full interactive harness path; `-p` remains forbidden.
  */
 
-import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
-import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
 import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
 import {
-  createToolCallTracker, parseOrchestratorTurnUsage,
-  processStreamEvent,
+  createToolCallTracker,
   type OrchestratorEvent,
 } from '@/lib/lane/orchestrator-stream-events';
 import { claudeEffortFlagValue, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
@@ -27,34 +27,25 @@ import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { DEFAULT_CLAUDE_ORCHESTRATOR_MODEL, resolveClaudeOrchestratorModel } from './orchestrator-model-guard';
-import { fableEnvOverride } from '@/lib/lane/fable-profile';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 import { fingerprintMcpConfig } from '@/lib/lane/orchestrator-mcp-fingerprint';
-import { buildOrchestratorArgs } from '@/lib/lane/orchestrator-spawn-args';
 import { claudeModelSupportsFast, type OrchestratorServiceTier } from '@/lib/orchestrator/service-tier';
 import { procConfigMatches, firstProcConfigDivergence } from './orchestrator-session-state';
 import type {
   OrchestratorActiveTurn,
   OrchestratorProcConfig,
-  WarmState,
 } from './orchestrator-session-state';
-import { detectPermissionRequest, missingClaudeResumeError } from './orchestrator-session-predicates';
 export { detectPermissionRequest } from './orchestrator-session-predicates';
 import {
   orchestratorPromptFingerprint,
-  readDeliveredOrchestratorPrompt,
-  recordDeliveredOrchestratorPrompt,
   withCurrentOrchestratorPrompt,
 } from '@/lib/lane/orchestrator-prompt-ledger';
 import {
-  isFalseDispatchTurn,
   launchesWorker,
   runTurnWithFalseDispatchRetry,
   type FalseDispatchAttemptResult,
 } from '@/lib/lane/orchestrator-false-dispatch';
-import { pathWithNodeRuntime } from '@/lib/util/node-on-path';
-import { resolveClaudeBinary } from '@/lib/runtimes/shared/cli-locate';
 import {
   consumeResetSignal,
   ensureRegisteredSession,
@@ -64,7 +55,6 @@ import {
   orchestratorDataDir,
   PREEMPT_SETTLE_MS,
   PROCESS_TIMEOUT_MS,
-  repoHash,
   requestRegisteredSessionReset,
   sessionNameForRepo,
   waitForSessionIdle,
@@ -72,23 +62,16 @@ import {
 } from './orchestrator-session-core';
 import {
   crashSurvivableOrchestratorEnabled,
-  createOrchestratorTurnRecord,
   createOrchestratorTurnRecordForFiles,
-  discardOrchestratorTurnRecord,
   fileSize,
-  finishOrchestratorTurn,
   isPidAlive,
   isRehydratedTurnAlive,
   listActiveOrchestratorTurns,
-  openAppendFile,
   readJsonlLines,
   tailJsonlFile,
-  updateOrchestratorTurnPid,
   type OrchestratorCrashSurvivalMeta,
   type OrchestratorTurnRecord,
 } from './orchestrator-crash-survival';
-import { getDataDir } from '@/lib/data-dir-migration';
-import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
 import {
   nativeClaudeHarnessCarrier,
   resolveClaudeHarnessCarrier,
@@ -110,20 +93,9 @@ export interface OrchestratorSession {
 
 // ── Constants ──
 
-/**
- * Resolve the claude binary at SPAWN time, not import time (#1551), through
- * the SHARED validated resolver (F6JHXW): the old local forever-cache stayed
- * stuck on a dead symlink chain while Claude's native auto-updater was
- * mid-swap — resolveClaudeBinary re-validates the cached path on every call
- * and re-scans the moment it dies, so a turn during the update window lands
- * on any healthy sibling install instead of `spawn … ENOENT`.
- */
-function resolveClaudeBin(): string {
-  return resolveClaudeBinary();
-}
 const ORCHESTRATOR_STATE_DIR = orchestratorDataDir('orchestrator');
 
-const MCP_CONFIG_DIR = join(getDataDir(), 'mcp');
+
 const LOG_PREFIX = '[orchestrator-rehydrate]';
 /**
  * #457 — Kill the claude process if it doesn't finish within this window.
@@ -386,33 +358,9 @@ export async function rehydrateOrchestratorSessions(options: OrchestratorRehydra
   return startupRehydrationPromise;
 }
 
-/** Generate a temporary MCP config file for orchestrator context sources.
- *
- * `profile` selects the tool surface: `'full'` (default) is unchanged — same
- * path, byte-identical content. `'propose'` (Collide proposer) strips the
- * operator server and writes to a SEPARATE `-propose` file so a concurrent
- * full-profile turn for the same repo can never clobber it back to a config
- * that carries dispatch (the #1075 lockout would otherwise race). `'fable'`
- * likewise gets its own `-fable` file (keeps operator + cortex, strips externals)
- * so a concurrent full turn for the same repo can't clobber its surface either. */
-type ClaudeMcpConfig = ReturnType<typeof toClaudeJson>;
-
-function ensureMcpConfig(repoPath: string, profile: ToolProfile, config: ClaudeMcpConfig, threadId?: string | null): string {
-  if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
-
-  const suffix = `${profile === 'full' ? '' : `-${profile}`}${threadId ? `-${repoHash(threadId)}` : ''}`;
-  const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
-  // The caller fingerprints this exact object. Keeping construction out of the
-  // writer prevents transient resolver state from making the stored hash differ
-  // from the config the CLI actually reads.
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
-  console.log(`[orchestrator-session] MCP config written to ${configPath}`);
-  return configPath;
-}
-
 // ── Registry ──
 
-const sessions = new Map<string, OrchestratorSession>();
+
 
 export function orchestratorSessionName(repoPath: string, threadId?: string | null): string {
   return sessionNameForRepo('cortex-orchestrator', repoPath, threadId);
@@ -560,340 +508,6 @@ function attachmentToImageBlock(att: { dataUri: string }): { type: 'image'; sour
 // auto-deny, and one that needs no knowledge of the (UNDOCUMENTED) stream-json
 // permission-response envelope. The proc dies before the tool can execute;
 // assertNoPrintFlag and assertProposerEventAllowed remain the backstops.
-
-const IDLE_REAP_MS = 30 * 60_000;
-const MAX_LIVE_PROCS = 4; // mirror the Brain warm-pool cap
-const warmStates = new Map<string, WarmState>();
-
-export function getWarmState(sessionName: string): WarmState {
-  let w = warmStates.get(sessionName);
-  if (!w) {
-    w = { procConfig: null, activeTurn: null, idleTimer: null, stdoutLineBuffer: '', stderrBuffer: '', lastUsedAt: Date.now(), crashStdoutPath: null, crashStderrPath: null, resumeAfterKill: false, resumeUnavailable: false, sessionPrompt: null };
-    warmStates.set(sessionName, w);
-  }
-  return w;
-}
-
-function clearIdleTimer(w: WarmState): void {
-  if (w.idleTimer) { clearTimeout(w.idleTimer); w.idleTimer = null; }
-}
-
-function scheduleIdleReap(session: OrchestratorSession, w: WarmState): void {
-  clearIdleTimer(w);
-  if (session.status === 'dead' || !session.proc) return;
-  w.idleTimer = setTimeout(() => {
-    console.log(`[orchestrator-session] idle-reap ${session.sessionName}`);
-    killOrchestratorProc(session, w, true);
-  }, IDLE_REAP_MS);
-}
-
-function killOrchestratorProc(session: OrchestratorSession, w: WarmState, resumeSession = false): void {
-  clearIdleTimer(w);
-  const proc = session.proc;
-  session.proc = null;
-  w.resumeAfterKill = resumeSession;
-  w.procConfig = null;
-  w.crashStdoutPath = null;
-  w.crashStderrPath = null;
-  session.status = 'dead';
-  if (proc && proc.exitCode === null && proc.signalCode === null) {
-    proc.kill('SIGTERM');
-    setTimeout(() => { if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL'); }, 2_000);
-  }
-}
-
-function liveOrchestratorProcCount(): number {
-  let n = 0;
-  for (const s of sessions.values()) if (s.proc) n += 1;
-  return n;
-}
-
-/** At MAX_LIVE, reap the least-recently-used IDLE proc (never a busy one). */
-function reapIdleForCapacity(exceptSessionName: string): void {
-  if (liveOrchestratorProcCount() < MAX_LIVE_PROCS) return;
-  let lru: { session: OrchestratorSession; w: WarmState } | null = null;
-  for (const s of sessions.values()) {
-    if (s.sessionName === exceptSessionName || !s.proc || s.status !== 'ready') continue;
-    const w = warmStates.get(s.sessionName);
-    if (!w) continue;
-    if (!lru || w.lastUsedAt < lru.w.lastUsedAt) lru = { session: s, w };
-  }
-  if (lru) {
-    console.log(`[orchestrator-session] MAX_LIVE (${MAX_LIVE_PROCS}) — reaping idle ${lru.session.sessionName}`);
-    killOrchestratorProc(lru.session, lru.w, true);
-  }
-}
-
-/** Settle the active turn — emit `done` (+ an error event on a bad crash), run
- *  the narrate-and-exit / false-dispatch telemetry, resolve, and (if the proc is
- *  still alive) leave it READY + schedule the idle reap.
- *
- *  `successfulResult` (#2142) means this settle came from a successful stream
- *  `result` — the model finished the turn on its own. It defaults to FALSE so every other
- *  call site (watchdog timeout, user abort, stdin write failure, plan-mode
- *  LOCKOUT, crash-tail end, proc close, dead rehydrated turn) is excluded from
- *  false-dispatch handling by construction. Those turns are already abnormal;
- *  a turn that was killed mid-narration has no business being retried as a
- *  hallucinated dispatch. */
-function settleOrchestratorTurn(
-  session: OrchestratorSession,
-  w: WarmState,
-  error: Error | null,
-  successfulResult = false, terminalOutcome: 'completed' | 'failed' | 'unconfirmed' = 'unconfirmed',
-): void {
-  const turn = w.activeTurn;
-  if (!turn || turn.settled) return;
-  const hadCrashRecord = !!turn.crashRecord;
-  turn.settled = true;
-  clearTimeout(turn.timeout);
-  turn.stopCrashTail?.();
-  turn.stopCrashTail = null;
-  finishOrchestratorTurn(turn.crashRecord, error ? 'failed' : 'completed');
-  turn.crashRecord = null;
-  if (turn.abortSignal && turn.abortListener) {
-    turn.abortSignal.removeEventListener('abort', turn.abortListener);
-    turn.abortListener = null;
-  }
-  w.activeTurn = null;
-  w.lastUsedAt = Date.now();
-  if (turn.turnSessionId) session.claudeSessionId = turn.turnSessionId;
-  // Only a successful turn proves the session received this turn's prompt.
-  if (successfulResult && turn.turnSessionId && turn.promptFingerprint) {
-    w.sessionPrompt = turn.promptFingerprint;
-    recordDeliveredOrchestratorPrompt(turn.turnSessionId, turn.promptFingerprint);
-  }
-
-  let falseDispatch = false;
-  if (!error) {
-    const tail = turn.lastAssistantText.trim().slice(-1200);
-    const hasSummaryMarker = /VERDICT\s*[#-]|Dispatched\s+\d+\s+agent/i.test(tail);
-    if (turn.sawToolUseAfterText || !hasSummaryMarker) {
-      // #2142 decision — narrate-and-exit stays a warn. Its condition
-      // (`sawToolUseAfterText || !hasSummaryMarker`) is true for most ordinary
-      // turns: any turn that ends without a VERDICT/"Dispatched N agent" marker
-      // trips it, which is nearly every healthy conversational reply. Acting on
-      // it would fail turns wholesale. False dispatch is the opposite shape — a
-      // specific contradiction between what the turn DID and what it SAID — so
-      // only that one is promoted to a failure here.
-      console.warn(`[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: sawToolUseAfterText=${turn.sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} tailLen=${tail.length}`);
-    }
-    falseDispatch = isFalseDispatchTurn({
-      completedResult: successfulResult,
-      error,
-      launchAgentCallCount: turn.launchAgentCallCount,
-      assistantText: turn.lastAssistantText,
-    });
-    if (falseDispatch) {
-      console.warn(`[orchestrator-session] FALSE-DISPATCH for ${session.sessionName}: launchAgentCallCount=0 but text claims dispatch — text sample: ${JSON.stringify(turn.lastAssistantText.slice(-200))}`);
-    }
-  }
-
-  // A false-dispatch turn must NOT report success. Withhold `done` and hand it
-  // to the retry driver, which replays it only if the LAST attempt also fails
-  // (so the client latch still releases) and drops it for a discarded attempt.
-  const done: Extract<OrchestratorEvent, { type: 'done' }> = {
-    type: 'done', terminalOutcome: turn.abortSignal?.aborted ? 'unconfirmed' : successfulResult ? 'completed' : terminalOutcome, sessionId: turn.turnSessionId, cost: turn.cost, ...(turn.usage ? { usage: turn.usage } : {}),
-  };
-  if (!falseDispatch && !w.resumeUnavailable) turn.onEvent(done);
-  if (error && !w.resumeUnavailable) turn.onEvent({ type: 'error', error: error.message });
-
-  if ((session.proc || hadCrashRecord) && session.status !== 'dead') {
-    session.status = 'ready';
-    scheduleIdleReap(session, w);
-  }
-  turn.resolve({ falseDispatch, withheldDone: falseDispatch ? done : null });
-}
-
-function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: string): boolean {
-  if (!line.trim()) return true;
-  let raw: Record<string, unknown>;
-  try { raw = JSON.parse(line) as Record<string, unknown>; } catch { return true; }
-
-  // LOCKOUT auto-deny — a plan-mode proc that asks to escalate is killed.
-  if (w.procConfig?.permissionMode === 'plan' && detectPermissionRequest(raw)) {
-    console.warn(`[orchestrator-session] LOCKOUT auto-deny — plan-mode proc ${session.sessionName} emitted a permission request; killing (write blocked).`);
-    settleOrchestratorTurn(session, w, null); // proposal text already captured
-    killOrchestratorProc(session, w);
-    return false;
-  }
-
-  const turn = w.activeTurn;
-  if (!turn) return true; // stray output between turns
-  const resumeError = missingClaudeResumeError(raw, session.claudeSessionId);
-  if (resumeError) {
-    w.resumeUnavailable = true;
-    settleOrchestratorTurn(session, w, new Error(resumeError));
-    return false;
-  }
-  processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
-  if (raw.type === 'result') {
-    turn.usage = parseOrchestratorTurnUsage(raw);
-    const successfulResult = raw.is_error !== true && !(typeof raw.subtype === 'string' && raw.subtype.startsWith('error_'));
-    // Only a successful result drives false-dispatch checks and prompt delivery.
-    settleOrchestratorTurn(session, w, null, successfulResult, successfulResult ? 'completed' : 'failed');
-    return false;
-  }
-  return true;
-}
-
-export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: WarmState): void {
-  const proc = session.proc;
-  if (!proc) return;
-
-  // Every handler below is identity-guarded: after a recycle
-  // (killOrchestratorProc nulls session.proc, then a NEW proc spawns), the OLD
-  // proc's stdout tail / close / error events still fire on the event loop.
-  // Without the guard the old close settled the NEW turn as "proc exited with
-  // code 143" and clobbered session.proc — every recycle-triggering turn died
-  // instantly (live-hit 2026-07-13). Deliberate kill paths (timeout, interrupt,
-  // LOCKOUT, recycle) settle their turn explicitly before killing, so skipping
-  // the stale close loses nothing.
-  proc.stdout?.on('data', (chunk: Buffer) => {
-    if (session.proc !== proc) return;
-    w.stdoutLineBuffer += chunk.toString('utf-8');
-    const lines = w.stdoutLineBuffer.split('\n');
-    w.stdoutLineBuffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!handleClaudeJsonLine(session, w, line)) return;
-    }
-  });
-
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    if (session.proc !== proc) return;
-    w.stderrBuffer += chunk.toString('utf-8');
-    if (w.stderrBuffer.length > 4_000) w.stderrBuffer = w.stderrBuffer.slice(-4_000);
-  });
-
-  proc.on('error', (err) => {
-    if (session.proc !== proc) return;
-    clearIdleTimer(w);
-    session.proc = null;
-    w.procConfig = null;
-    session.status = 'dead';
-    const turn = w.activeTurn;
-    if (turn && !turn.settled) {
-      turn.settled = true;
-      clearTimeout(turn.timeout);
-      w.activeTurn = null;
-      turn.onEvent({ type: 'error', error: err.message });
-      turn.reject(err);
-    }
-  });
-
-  proc.on('close', (code) => {
-    if (session.proc !== proc) return;
-    clearIdleTimer(w);
-    session.proc = null;
-    w.procConfig = null;
-    if (w.activeTurn && !w.activeTurn.settled) {
-      // Crashed / killed mid-turn — flush the tail then settle (error event only
-      // on a non-clean exit, matching the cold path).
-      if (w.stdoutLineBuffer.trim()) {
-        try {
-          const raw = JSON.parse(w.stdoutLineBuffer) as Record<string, unknown>;
-          const turn = w.activeTurn;
-          processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
-          if (raw.type === 'result') turn.usage = parseOrchestratorTurnUsage(raw);
-        } catch { /* ignore */ }
-      }
-      w.stdoutLineBuffer = '';
-      const stderr = w.stderrBuffer.trim();
-      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`), false, code === 0 ? 'unconfirmed' : 'failed');
-    }
-    session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
-  });
-}
-
-/** Spawn a fresh resident proc with the baked config. First-turn cold. */
-function spawnOrchestratorProc(
-  session: OrchestratorSession,
-  w: WarmState,
-  config: OrchestratorProcConfig,
-  carrierEnv: Record<string, string>,
-  systemPrompt: string,
-): void {
-  // Layer B — a Fable turn keeps `--dangerously-skip-permissions` (kept MCP tools
-  // run autonomously) AND adds `--disallowedTools <native>` to strip Claude's
-  // native read/write tools (the token lever). isFable takes precedence over the
-  // plan branch so the lockout holds regardless of permission mode. See
-  // `fable-profile.ts` for the empirical basis.
-  const isFable = config.toolProfile === 'fable' || config.toolProfile === 'fable-solo';
-  const args = buildOrchestratorArgs({
-    permissionMode: config.permissionMode,
-    toolProfile: config.toolProfile,
-    effort: config.effort,
-    fastMode: config.fastMode,
-    mcpConfigPath: config.mcpConfigPath,
-    model: config.model,
-    claudeSessionId: session.claudeSessionId,
-    systemPrompt,
-  });
-
-  // The orchestrator must stay on the interactive REPL path for every carrier.
-  assertNoPrintFlag(args, 'Orchestrator REPL session');
-
-  let crashRecord: OrchestratorTurnRecord | null = null;
-  let stdoutFd: number | null = null;
-  let stderrFd: number | null = null;
-  const crashEnabled = crashSurvivableOrchestratorEnabled();
-  if (crashEnabled) {
-    crashRecord = createOrchestratorTurnRecord({
-      backend: 'claude',
-      sessionName: session.sessionName,
-      repoPath: session.repoPath,
-      threadId: session.threadId,
-      pid: 0,
-    });
-    stdoutFd = openAppendFile(crashRecord.stdoutPath);
-    stderrFd = openAppendFile(crashRecord.stderrPath);
-  }
-  // Preflight the cwd (#1551, shared helper): missing folder OR non-git folder
-  // fails here with a human-actionable message instead of "spawn claude ENOENT"
-  // (which names the healthy binary) or a confusing mid-turn tool error.
-  assertOrchestratorRepoPath(session.repoPath);
-  const launch = cliInvocation(resolveClaudeBin(), args);
-  const proc = spawn(launch.command, launch.args, { windowsHide: true,
-    cwd: session.repoPath,
-    // Fable key injection stays scoped; the selected harness carrier contributes
-    // only its explicit environment through carrierEnv.
-    env: {
-      ...process.env,
-      // claude is a node shim on some installs — server's runtime on PATH (#1551).
-      PATH: pathWithNodeRuntime(),
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-      O8_MANAGED_SESSION: '1',
-      ...carrierEnv,
-      ...(isFable ? fableEnvOverride() : {}),
-    },
-    detached: crashEnabled,
-    stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
-      ? ['pipe', stdoutFd, stderrFd]
-      : ['pipe', 'pipe', 'pipe'],
-  });
-  if (stdoutFd !== null) closeSync(stdoutFd);
-  if (stderrFd !== null) closeSync(stderrFd);
-  if (crashEnabled) proc.unref();
-  if (crashRecord) {
-    const updated = updateOrchestratorTurnPid(crashRecord, proc.pid ?? 0);
-    w.crashStdoutPath = updated.stdoutPath;
-    w.crashStderrPath = updated.stderrPath;
-    // This record only allocated the warm proc's stream files — per-turn
-    // records are created per send. Discard, don't settle (task #8 ledger).
-    discardOrchestratorTurnRecord(updated);
-  }
-  session.proc = proc;
-  w.resumeAfterKill = false;
-  w.procConfig = config;
-  // A resumed session keeps the prompt it last received; a new one gets this one.
-  w.sessionPrompt = session.claudeSessionId
-    ? readDeliveredOrchestratorPrompt(session.claudeSessionId)
-    : orchestratorPromptFingerprint(systemPrompt);
-  w.stdoutLineBuffer = '';
-  w.stderrBuffer = '';
-  attachOrchestratorProcHandlers(session, w);
-  console.log(`[orchestrator-session] spawned warm proc ${session.sessionName} (${config.permissionMode}/${config.toolProfile})`);
-}
 
 /**
  * Sends a message to the orchestrator through its RESIDENT `claude` process

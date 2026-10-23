@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import { O8_MANAGED_TEXT_MODEL, O8_MANAGED_ZERO_COST_MODEL } from '@/lib/cortex/qa/llm/inference-route';
 import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { toolsForAnthropic, toolsForOpenAI } from '@/lib/llm/tools';
@@ -284,7 +285,7 @@ export function isSupportedProvider(provider: string): provider is Provider {
 export function resolveApiKey(provider: Provider): string | null {
   if (provider === 'chatgpt') return null;
   if (provider === 'google' || provider === 'operator') {
-    return process.env[GOOGLE_PROVIDER_ENV_KEY] ?? null;
+    return resolveProviderKey('GEMINI_API_KEY');
   }
-  return process.env[PROVIDERS[provider].envKey] ?? null;
+  return resolveProviderKey(PROVIDERS[provider].envKey);
 }

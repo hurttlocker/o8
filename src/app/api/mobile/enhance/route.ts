@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 export const dynamic = 'force-dynamic';
 
 /**
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     // Resolve at request time, not module load — keys written to env after
     // boot (BYOK flow) would otherwise bake `key=undefined` into the URL
     // until the process restarts.
-    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const geminiApiKey = resolveProviderKey('GEMINI_API_KEY');
     if (!geminiApiKey) {
       return NextResponse.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
     }

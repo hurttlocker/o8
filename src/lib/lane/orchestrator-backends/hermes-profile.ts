@@ -1,3 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Governed Hermes profile — the #1075 orchestrator≠worker lockout for Hermes.
  *
@@ -16,8 +19,8 @@
  * never creates or stores provider keys itself.
  */
 
-import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { execFileSync } from '@/lib/providers/child-process';
+import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -57,8 +60,9 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   for (const file of ['config.yaml', '.env', 'auth.json', 'models_dev_cache.json']) {
     const src = join(userDir, file);
     if (existsSync(src)) {
-      try { cpSync(src, join(governedHermes, file)); } catch { /* best-effort */ }
+      copyRuntimeConfigFile(src, join(governedHermes, file), 'hermes');
     }
+    reconcileRuntimeConfigFile(join(governedHermes, file), 'hermes');
   }
 
   // Apply the deny via Hermes's own CLI against the ISOLATED home — never touches
@@ -67,7 +71,7 @@ export function governHermesProfile(hermesBin: string): { home: string } | null 
   try {
     execFileSync(hermesBin, ['tools', 'disable', ...HERMES_DENIED_TOOLSETS], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'hermes', env: { HOME: home } }), { runtimeId: 'hermes' }),
       stdio: 'ignore',
       timeout: 20000,
     });
@@ -91,7 +95,7 @@ export function isHermesProfileGoverned(home: string, hermesBin: string): boolea
   try {
     const out = execFileSync(hermesBin, ['tools', 'list'], {
       windowsHide: true,
-      env: { ...process.env, HOME: home },
+      env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'hermes', env: { HOME: home } }), { runtimeId: 'hermes' }),
       encoding: 'utf8',
       timeout: 20000,
     });

@@ -5,7 +5,7 @@
  * to build a system prompt that makes the model workspace-aware.
  */
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRenderedSkeletonCached } from '@/lib/skeleton';

@@ -311,7 +311,8 @@ export function externalServerToMcpConfig(server: ExternalMcpServerRecord): Orch
     return { type: 'http', url };
   }
 
-  const env = server.env ?? undefined;
+  const env: Record<string, string> | undefined = server.env ? { ...server.env } : undefined;
+  if (env && !('NODE_ENV' in (server.env ?? {}))) delete env.NODE_ENV;
   return {
     type: 'stdio',
     command: server.command,

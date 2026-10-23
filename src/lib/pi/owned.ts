@@ -1,3 +1,5 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
 import type { ChildProcess } from 'node:child_process';
 import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { appendFile, mkdir, readdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
@@ -309,7 +311,7 @@ async function spawnRpcProcess(session: PiSessionRecord, run: PiRunRecord, initi
     windowsHide: true,
     cwd: session.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, PI_CODING_AGENT_DIR: session.agentDir ?? piUserAgentDir(), FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: providerSpawnEnvironment(childEnvironment({ runtimeId: 'pi', env: { PI_CODING_AGENT_DIR: session.agentDir ?? piUserAgentDir(), FORCE_COLOR: '0', NO_COLOR: '1' } }), { runtimeId: 'pi' }),
   });
   run.pid = child.pid;
   let carry = '';

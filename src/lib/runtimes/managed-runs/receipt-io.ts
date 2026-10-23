@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawnSync } from '@/lib/providers/child-process';
 import { closeSync, constants, fstatSync, mkdirSync, openSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { resolveManagedRunExitReceipt } from './receipt-path';
@@ -51,7 +52,7 @@ export function managedRunReceiptIo(rec: ManagedRunRecord, writeUnknown = false)
     const result = spawnSync(process.execPath, ['-e', RECEIPT_IO], {
       cwd: directory, stdio: ['pipe', 'pipe', 'pipe', descriptor],
       input: JSON.stringify({ directory, device: captured.dev, inode: captured.ino, name: basename(path), writeUnknown }),
-      env: { ...process.env, NODE_OPTIONS: '' }, encoding: 'utf8', timeout: 5_000, maxBuffer: 1024,
+      env: childEnvironment({ env: { NODE_OPTIONS: '' } }), encoding: 'utf8', timeout: 5_000, maxBuffer: 1024,
       windowsHide: true,
     });
     return !result.error && result.status === 0 ? result.stdout : null;

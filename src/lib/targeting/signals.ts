@@ -12,7 +12,7 @@
  * files get a row — the cache is already capped at 2000 files.
  */
 
-import { execSync } from 'node:child_process';
+import { execSync } from '@/lib/providers/child-process';
 
 import { getAllCached } from '@/lib/skeleton/store';
 import { getInboundImporterCounts } from '@/lib/skeleton/import-graph';

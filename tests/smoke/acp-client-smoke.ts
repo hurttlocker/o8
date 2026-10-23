@@ -23,7 +23,7 @@ const MOCK = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'mock-acp
 
 async function partA(): Promise<void> {
   const events: OrchestratorEvent[] = [];
-  const client = new AcpClient({ command: process.execPath, args: [MOCK], onEvent: (e) => events.push(e) });
+  const client = new AcpClient({ runtimeId: 'acp', command: process.execPath, args: [MOCK], onEvent: (e) => events.push(e) });
   try {
     const init = await client.initialize();
     assert.strictEqual(init.protocolVersion, 1, 'mock initialize → protocolVersion 1');
@@ -62,7 +62,7 @@ async function partB(): Promise<void> {
     console.log('[acp-client-smoke] Part B SKIPPED — hermes acp --check not OK on this machine');
     return;
   }
-  const client = new AcpClient({ command: 'hermes', args: ['acp', '--accept-hooks'] });
+  const client = new AcpClient({ runtimeId: 'hermes', command: 'hermes', args: ['acp', '--accept-hooks'] });
   try {
     const init: AcpInitializeResult = await client.initialize();
     assert.strictEqual(init.protocolVersion, 1, 'live hermes initialize → protocolVersion 1');

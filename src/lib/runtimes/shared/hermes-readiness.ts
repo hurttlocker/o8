@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 import { access } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,12 +41,12 @@ export async function hermesReadiness(): Promise<Omit<RuntimeAuthStatus, 'house'
   }
 
   const authenticated = Boolean(
-    process.env.OPENROUTER_API_KEY?.trim()
+    resolveProviderKey('OPENROUTER_API_KEY')?.trim()
     || process.env.NOUS_API_KEY?.trim()
-    || process.env.OPENAI_API_KEY?.trim()
-    || process.env.ANTHROPIC_API_KEY?.trim()
-    || process.env.DEEPSEEK_API_KEY?.trim()
-    || process.env.GEMINI_API_KEY?.trim(),
+    || resolveProviderKey('OPENAI_API_KEY')?.trim()
+    || resolveProviderKey('ANTHROPIC_API_KEY')?.trim()
+    || resolveProviderKey('DEEPSEEK_API_KEY')?.trim()
+    || resolveProviderKey('GEMINI_API_KEY')?.trim(),
   ) || await fileExists(path.join(hermesHome, '.env'))
     || await fileExists(path.join(hermesHome, 'auth.json'));
 

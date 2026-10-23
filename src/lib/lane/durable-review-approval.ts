@@ -184,7 +184,7 @@ async function listChangedPathsForCoverage(
   headSha: string,
 ): Promise<{ paths: string[]; resolved: boolean }> {
   if (!cwd) return { paths: [], resolved: false };
-  const { execFile } = await import('node:child_process');
+  const { execFile } = await import('@/lib/providers/child-process');
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
 
@@ -222,7 +222,7 @@ const UNCOMMITTED_PATHS_SHOWN = 10;
  * Returns null when git cannot answer, so callers fail closed.
  */
 async function listUncommittedPaths(cwd: string): Promise<string[] | null> {
-  const { execFile } = await import('node:child_process');
+  const { execFile } = await import('@/lib/providers/child-process');
   const { promisify } = await import('node:util');
   try {
     const { stdout } = await promisify(execFile)(

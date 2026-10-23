@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execSync } from '@/lib/providers/child-process';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

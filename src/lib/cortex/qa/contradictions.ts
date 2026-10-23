@@ -1,3 +1,4 @@
+import { resolveProviderKey } from '@/lib/providers/key-store';
 /**
  * Contradiction detector — epic #915 sub-issue 3 wave B.
  *
@@ -221,9 +222,7 @@ export async function detectContradictions(input: {
     }
 
     const apiKey =
-      process.env.GOOGLE_AI_API_KEY ??
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-      process.env.GEMINI_API_KEY;
+      resolveProviderKey('GEMINI_API_KEY');
 
     if (!apiKey) {
       // No Flash key — fall back to structural contradictions only.

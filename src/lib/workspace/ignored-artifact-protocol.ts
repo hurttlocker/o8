@@ -1,7 +1,9 @@
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
+
 // The parent keeps every directory descriptor until its captured child exits.
 // Requests are serial; restore acknowledgements reach the file writer only
 // after the application persists the existing ownership receipt.
-export const ARTIFACT_PROTOCOL_SCRIPT = String.raw`
+export const ARTIFACT_PROTOCOL_SCRIPT = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -67,7 +69,7 @@ function syncCurrentDirectory() {
 }
 async function connectArtifactNode(script, cwd, identity, rootCanonical, deadline, onEvent) {
   if (Date.now() >= deadline) throw new Error('Artifact operation time bound was exceeded.');
-  const child = spawn(process.execPath, ['-e', script, script], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = withO8ChildPolicy(env => spawn(process.execPath, ['-e', script, script], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] }), { preserveStamp: true });
   let readyResolve, readyReject, endResolve;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   const ended = new Promise((resolve) => { endResolve = resolve; });

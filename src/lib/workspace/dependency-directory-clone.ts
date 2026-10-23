@@ -1,3 +1,4 @@
+import { EMBEDDED_CHILD_POLICY_SCRIPT } from '@/lib/providers/embedded-child-policy';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -15,12 +16,12 @@ import { purgeExactDirectory } from './exact-directory-purge';
 import { dependencyCloneSnapshotMatches } from './dependency-clone-snapshot';
 import { profileDependencyClone as profile } from './dependency-clone-profile';
 
-const CHECK_SOURCE_RECIPE = String.raw`
+const CHECK_SOURCE_RECIPE = EMBEDDED_CHILD_POLICY_SCRIPT + String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const recipe = JSON.parse(process.argv[1]);
-const tree = require('node:child_process').spawnSync('git', ['rev-parse', 'HEAD^{tree}'], {encoding:'utf8'});
+const tree = withO8ChildPolicy(env => require('node:child_process').spawnSync('git', ['rev-parse', 'HEAD^{tree}'], {env, encoding:'utf8'}));
 let matches = tree.status === 0 && tree.stdout.trim() === recipe.gitTreeSha;
 for (const input of [...recipe.inputDigests, recipe.lockfile]) {
   if (path.isAbsolute(input.path) || input.path.split('/').includes('..')) throw new Error('Unsafe dependency recipe input.');

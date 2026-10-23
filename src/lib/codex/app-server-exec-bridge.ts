@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 /**
  * Codex app-server bridge (#3573). Runs one orchestrator turn through
  * `codex app-server` in the operator's own Codex home and prints the same JSON
@@ -9,7 +10,7 @@
  * Exit 0 completed, 1 failed, 130 interrupted.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn } from '@/lib/providers/child-process';
 import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
 
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
     fail('Codex app bridge: malformed spec');
   }
 
-  const child = spawn(spec.codexBin, ['app-server'], { cwd: spec.cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(spec.codexBin, ['app-server'], { cwd: spec.cwd, env: childEnvironment({ runtimeId: 'codex' }), stdio: ['pipe', 'pipe', 'pipe'] });
   let childStderr = '';
   child.stderr.on('data', (chunk: Buffer) => { childStderr = (childStderr + chunk.toString('utf8')).slice(-2_000); });
 

@@ -14,6 +14,8 @@ const userCodexHome = join(userHome, '.codex');
 const dataDir = join(root, 'data');
 const repoPath = join(root, 'repo');
 const originalHome = process.env.HOME;
+const originalMaster = process.env.O8_MASTER_KEY;
+process.env.O8_MASTER_KEY = Buffer.alloc(32, 105).toString('base64url');
 const originalDataDir = process.env.CORTEX_IDE_DATA_DIR;
 const originalCodexBin = process.env.O8_CODEX_BIN;
 const originalCrashSurvival = process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
@@ -40,6 +42,7 @@ beforeEach(() => {
 });
 
 afterAll(() => {
+  if (originalMaster === undefined) delete process.env.O8_MASTER_KEY; else process.env.O8_MASTER_KEY = originalMaster;
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
   if (originalDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;

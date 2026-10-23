@@ -1,3 +1,6 @@
+import { providerSpawnEnvironment } from '@/lib/providers/spawn-environment';
+import { runtimeBillingMode } from '@/lib/providers/runtime-billing';
+import { copyRuntimeConfigFile, reconcileRuntimeConfigFile } from '@/lib/providers/runtime-config';
 import { randomUUID } from 'node:crypto';
 import {
   accessSync,
@@ -258,6 +261,8 @@ export async function prepareSingleOrchestratorLaunch(input: {
   launchBinaryPath: string;
   supervisorPath: string;
   cleanup: () => void;
+  sealOnOutput: () => void;
+  sealInParent: boolean;
 }> {
   const launchId = `${process.pid}-${randomUUID()}`;
   const launchesRoot = join(input.codexHome, '.single-turns');
@@ -277,10 +282,13 @@ export async function prepareSingleOrchestratorLaunch(input: {
     mkdirSync(rulesDir, { recursive: true, mode: 0o700 });
     for (const fileName of ['auth.json', 'installation_id', 'version.json']) {
       const source = join(input.codexHome, fileName);
-      if (existsSync(source)) copyFileSync(source, join(overlayHome, fileName));
+      if (existsSync(source)) {
+        if (fileName === 'auth.json') copyRuntimeConfigFile(source, join(overlayHome, fileName), 'codex');
+        else copyFileSync(source, join(overlayHome, fileName));
+      }
     }
     const overlayAuth = join(overlayHome, 'auth.json');
-    if (existsSync(overlayAuth)) chmodSync(overlayAuth, 0o600);
+    if (existsSync(overlayAuth)) { reconcileRuntimeConfigFile(overlayAuth, 'codex'); chmodSync(overlayAuth, 0o600); }
 
     const sessionsDir = join(input.codexHome, 'sessions');
     mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
@@ -332,7 +340,8 @@ export async function prepareSingleOrchestratorLaunch(input: {
       "import { chmodSync, rmSync } from 'node:fs';",
       "import { Transform } from 'node:stream';",
       'const [, , launchBinary, cleanupRoot, sandboxBinary, ...sandboxArgs] = process.argv;',
-      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });",
+      "const childEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.endsWith('_API_KEY') && !['ANTHROPIC_AUTH_TOKEN', 'COPILOT_PROVIDER_BEARER_TOKEN', 'O8_MASTER_KEY'].includes(name)));",
+      "const child = spawn(sandboxBinary, sandboxArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: childEnvironment });",
       'let sealed = false;',
       'let sealFailed = false;',
       'const relay = new Transform({ transform(chunk, _encoding, callback) {',
@@ -395,10 +404,18 @@ export async function prepareSingleOrchestratorLaunch(input: {
     const env = singleOrchestratorEnvironment(input.env, overlayHome);
     env.CODEX_SQLITE_HOME = input.codexHome;
     env.PATH = `${guardBinDir}${delimiter}${env.PATH ?? ''}`;
+    // API credentials enter the actual sandbox process under the central store
+    // lock. The detached subscription supervisor never carries provider material.
+    const direct = runtimeBillingMode('codex') === 'api';
+    let sealed = false;
     return {
-      binary: process.execPath,
-      args: [supervisorPath, launchBinaryPath, launchRoot, prepared.binary, ...prepared.args],
-      env,
+      binary: direct ? prepared.binary : process.execPath,
+      args: direct ? prepared.args : [supervisorPath, launchBinaryPath, launchRoot, prepared.binary, ...prepared.args],
+      env: providerSpawnEnvironment(env, { runtimeId: 'codex', inject: direct }),
+      sealInParent: direct,
+      sealOnOutput: () => {
+        if (direct && !sealed) { chmodSync(launchBinaryPath, 0o000); sealed = true; }
+      },
       profileText: prepared.profileText,
       profilePath: prepared.profilePath,
       overlayPath: overlayHome,

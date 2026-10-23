@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { RamsButton } from './shared';
 import { AcpRegistryPicker } from './AcpRegistryPicker';
+import { RuntimeBillingRow } from './RuntimeBillingRow';
 
 const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, border: '1px solid var(--t-border)', borderRadius: 8, padding: 10, background: 'var(--t-input-bg)', color: 'var(--t-text)', fontFamily: 'var(--font-sans-system)', fontSize: 12 };
 export function LocalAcpSection() {
@@ -81,6 +82,7 @@ export function LocalAcpSection() {
   };
   return <div style={{ marginTop: 20, color: 'var(--t-text)', fontSize: 12 }}>
     <p style={{ color: 'var(--t-text-muted)', lineHeight: 1.5 }}>Connect an installed ACP agent for conversations. The agent manages its tools, sign-in, and permissions. Saving does not start it.</p>
+    <RuntimeBillingRow runtimeId="acp" />
     <RamsButton variant="ghost" disabled={loading || busy || checking || locked} onClick={() => setRegistryOpen(value => !value)}>Browse agents</RamsButton>
     {registryOpen ? <AcpRegistryPicker onClose={() => { setRegistryOpen(false); queueMicrotask(() => commandField.current?.focus()); }} onChoose={connection => {
       setName(connection.name); setCommand(connection.command); setArgs(connection.args.join('\n')); setUseOpenRouter(false);
@@ -91,8 +93,8 @@ export function LocalAcpSection() {
       <label>Name<input style={fieldStyle} value={name} onChange={event => { setName(event.target.value); dirty(); }} /></label>
       <label>Executable<input ref={commandField} style={fieldStyle} value={command} placeholder="agent executable or full path" onChange={event => { setCommand(event.target.value); dirty(); }} /></label>
       <label>Arguments, one per line<textarea style={{ ...fieldStyle, minHeight: 76 }} value={args} placeholder="acp" onChange={event => { setArgs(event.target.value); dirty(); }} /></label>
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={useOpenRouter} onChange={event => { setUseOpenRouter(event.target.checked); dirty(); }} />Share the saved OpenRouter key with this agent</label>
-      <p style={{ color: 'var(--t-text-muted)', margin: 0 }}>Use one literal argument per line. Keep secrets out of arguments. OpenRouter credentials are excluded unless you enable sharing.</p>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={useOpenRouter} onChange={event => { setUseOpenRouter(event.target.checked); dirty(); }} />Share the saved OpenRouter key when My API key pays</label>
+      <p style={{ color: 'var(--t-text-muted)', margin: 0 }}>Use one literal argument per line. Keep secrets out of arguments. OpenRouter sharing requires both this option and My API key billing.</p>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><RamsButton variant="primary" busy={busy} disabled={!command.trim() || !name.trim()} onClick={() => void save()}>Save connection</RamsButton><RamsButton variant="ghost" disabled={!saved} onClick={() => void checkModels()}>Check connection</RamsButton></div>
     {configured ? <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>{confirmRemove ? <><span>Disconnect for new conversations? </span><RamsButton variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</RamsButton><RamsButton variant="ghost" onClick={() => void remove()}>Disconnect</RamsButton></> : <RamsButton variant="ghost" onClick={() => setConfirmRemove(true)}>Remove connection</RamsButton>}</div> : null}
     </fieldset>

@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawn } from '@/lib/providers/child-process';
 import { lstat } from 'node:fs/promises';
 
 import {
@@ -107,7 +108,7 @@ function runCommand(command: string, args: string[], input?: Buffer): Promise<Co
     const child = spawn(command, args, {
       stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
+      env: childEnvironment({ env: { LANG: 'C', LC_ALL: 'C' } }),
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

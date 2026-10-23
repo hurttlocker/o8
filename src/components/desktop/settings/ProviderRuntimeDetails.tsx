@@ -1,5 +1,6 @@
 'use client';
 
+import { RuntimeBillingRow } from './RuntimeBillingRow';
 import { RuntimeConnectionSummary } from '../onboarding/RuntimeConnectionSummary';
 import { connectionLabel, type RuntimeConnectionEvidence } from '@/lib/runtimes/shared/connection-evidence';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
@@ -57,6 +58,7 @@ export function ProviderRuntimeDetails({ runtimeId, tool, checking, detectionErr
   return <div style={{ display: 'grid', gap: 24 }}>
     <SettingsGroup header={`${runtime.label} runtime`}>
       <SettingsRow label="Account status" subtitle={tool?.authHint ?? 'Sign in through the provider’s own CLI.'} value={checking ? 'Checking…' : detectionError ? 'Check unavailable' : providerToolStatus(connection ? { ...tool, id: runtimeId, detected: connection.state !== 'not_installed', ready: readiness?.available, connection } : tool)} divider />
+      <RuntimeBillingRow key={runtimeId} runtimeId={runtimeId} />
       <SettingsRow label="Version" value={tool?.version ?? 'Not reported'} divider />
       <SettingsRow label="Binary path" subtitle={tool?.path ?? runtime.binaryName} />
     </SettingsGroup>

@@ -1,3 +1,4 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { buildErrorPayload } from '@/lib/api/error-format';
@@ -207,7 +208,7 @@ async function collectRepoCommits(
         windowsHide: true,
         timeout: 10_000,
         maxBuffer: 1024 * 1024,
-        env: { ...process.env, LC_ALL: 'C' },
+        env: childEnvironment({ env: { LC_ALL: 'C' } }),
       },
     );
     stdout = result.stdout;

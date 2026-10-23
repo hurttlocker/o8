@@ -13,6 +13,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { providerKeyEnabled, mutateProviderKey } from '@/lib/providers/key-store';
 import { getDataDir } from '@/lib/data-dir-migration';
 
 export const OPENROUTER_KEY_URL = 'https://openrouter.ai/api/v1/key';
@@ -105,13 +106,13 @@ function detailsFrom(value: unknown): OpenRouterKeyDetails | null {
 /** Reads the record fresh on every call: the API, WebSocket and native processes share it. */
 export function readOpenRouterConnection(): OpenRouterConnectionRecord {
   const path = recordPath();
-  if (!existsSync(path)) return { ...EMPTY_RECORD };
+  if (!existsSync(path)) return { ...EMPTY_RECORD, enabled: providerKeyEnabled('OPENROUTER_API_KEY') };
   try {
     const raw = JSON.parse(readFileSync(path, 'utf8')) as Partial<OpenRouterConnectionRecord>;
     const checkStatus = raw.checkStatus === 'ok' || raw.checkStatus === 'invalid' || raw.checkStatus === 'unavailable' ? raw.checkStatus : null;
     return {
       version: 1,
-      enabled: raw.enabled !== false,
+      enabled: providerKeyEnabled('OPENROUTER_API_KEY'),
       keyFingerprint: stringOrNull(raw.keyFingerprint),
       checkStatus,
       checkedAt: stringOrNull(raw.checkedAt),
@@ -121,7 +122,7 @@ export function readOpenRouterConnection(): OpenRouterConnectionRecord {
     };
   } catch {
     // An unreadable record must not turn a connection off or on by itself.
-    return { ...EMPTY_RECORD };
+    throw new Error('OpenRouter connection store unavailable');
   }
 }
 
@@ -136,11 +137,13 @@ function writeOpenRouterConnection(record: OpenRouterConnectionRecord): OpenRout
 
 /** False only after the operator turns the connection off. A missing record means on. */
 export function isOpenRouterEnabled(): boolean {
-  return readOpenRouterConnection().enabled;
+  try { return providerKeyEnabled('OPENROUTER_API_KEY'); } catch { return false; }
 }
 
 export function setOpenRouterEnabled(enabled: boolean): OpenRouterConnectionRecord {
-  return writeOpenRouterConnection({ ...readOpenRouterConnection(), enabled });
+  const previous = readOpenRouterConnection();
+  mutateProviderKey('OPENROUTER_API_KEY', { enabled });
+  return { ...previous, enabled };
 }
 
 export function recordOpenRouterCheck(key: string, result: OpenRouterCheckResult, now = new Date()): OpenRouterConnectionRecord {

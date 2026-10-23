@@ -2,7 +2,7 @@
 // the #568 tsx -e interop quirk — that smoke-test pattern was retired in
 // CLAUDE.md (use `tsx <file>` instead of `tsx -e "import(...)"`). Plain ESM
 // matches every other module in the codebase.
-import { execFile } from 'node:child_process';
+import { execFile } from '@/lib/providers/child-process';
 import { promisify } from 'node:util';
 import { and, eq, gte, isNull, or, sql } from 'drizzle-orm';
 import { approvals, dispatchRules, getDb, lanes } from '@/lib/db';

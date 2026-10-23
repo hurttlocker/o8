@@ -1,5 +1,6 @@
+import { childEnvironment } from '@/lib/providers/spawn-environment';
 import { NextResponse } from 'next/server';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from '@/lib/providers/child-process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -72,7 +73,7 @@ function safeExec(cmd: string, args: string[], timeoutMs = 2000, deadlineAt?: nu
       encoding: 'utf-8',
       timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, MUSE_NO_AUTO_UPDATE: '1' },
+      env: childEnvironment({ env: { MUSE_NO_AUTO_UPDATE: '1' } }),
     }).trim();
   } catch {
     return '';

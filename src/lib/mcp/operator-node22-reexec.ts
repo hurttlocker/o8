@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { childEnvironment } from '@/lib/providers/spawn-environment';
+import { spawnSync } from '@/lib/providers/child-process';
 
 import { buildNode22ReexecPlan, NODE22_REEXEC_GUARD } from './operator-node22-locator';
 import {
@@ -59,7 +60,7 @@ function reexecOnNode22IfNeeded(): void {
 
   const result = spawnSync(plan.nodePath, plan.argv, {
     windowsHide: true,
-    env: { ...process.env, [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' },
+    env: childEnvironment({ env: { [NODE22_REEXEC_GUARD]: '1', [NODE22_CHECKED]: '1' } }),
     stdio: 'inherit',
   });
 
