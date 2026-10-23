@@ -74,9 +74,13 @@ export function O8ActivityCIDetail({ repo, runId, children }: {
 }) {
   const client = useQueryClient();
   const options = useMemo(() => detailQuery(repo.trim().toLowerCase(), runId), [repo, runId]);
+  const [now, setNow] = useState(() => Date.now());
   const query = useQuery({
     ...options,
-    enabled: entry => !(entry.state.error instanceof CIDetailDeferredError && Date.now() < entry.state.error.retryAt),
+    enabled: entry => !(entry.state.error instanceof CIDetailDeferredError
+      && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
+    // A refused manual refresh must recover even if its retained snapshot is still fresh.
+    staleTime: entry => entry.state.error instanceof CIDetailDeferredError ? 0 : options.staleTime,
   });
   const retry = useCallback(async () => {
     try {
@@ -86,7 +90,6 @@ export function O8ActivityCIDetail({ repo, runId, children }: {
       // Preserve the known summary; the query exposes the new read error.
     }
   }, [client, options]);
-  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!query.isError) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
