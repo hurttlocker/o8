@@ -18,8 +18,8 @@
  *                                       commands unless you hold the `ship` lease
  *   o8 team init                     — install the guard hook into .claude/settings.json
  *
- * Identity comes from an explicit runtime/session binding or stable process
- * ancestry. Open-source extraction tracked separately; this is the in-o8 build
+ * Identity comes from an explicit runtime/session binding. A host process can
+ * serve multiple sessions and cannot identify an agent. This is the in-o8 build
  * (`o8 team`).
  */
 
@@ -30,7 +30,6 @@ import path from 'node:path';
 import { CliError, EXIT } from '../api.js';
 import { resolveCliDataDir } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
-import { resolveLeaseOwnerPid } from './lease.js';
 // PARITY: an agent's o8 team handle is the SAME canonical codename Symon speaks
 // (via o8_status) and the dashboard shows (SessionVisualizer / agent cards) —
 // one voice-friendly name follows the agent across every surface. Import the
@@ -68,20 +67,13 @@ interface Lease {
   expiresAt: string;
 }
 
-interface AgentProcessRow {
-  pid: number;
-  ppid: number;
-  command: string;
-}
-
 export interface ResolveAgentIdentityOptions {
   env?: NodeJS.ProcessEnv;
-  ppid?: number;
-  readProcess?: (pid: number) => AgentProcessRow | null;
 }
 
 interface TeamCommandOptions extends ResolveAgentIdentityOptions {
   cwd?: string;
+  ppid?: number;
 }
 
 function nowIso() {
@@ -174,12 +166,10 @@ export function resolveAgentIdentity(options: ResolveAgentIdentityOptions = {}):
   if (packetId) return packetId;
   const claudeSessionId = env.CLAUDE_CODE_SESSION_ID?.trim();
   if (claudeSessionId) return claudeSessionId;
-  const ownerPid = resolveLeaseOwnerPid({
-    env,
-    ppid: options.ppid,
-    readProcess: options.readProcess,
-  });
-  if (ownerPid !== null) return `pid-${ownerPid}`;
+  const codexSessionId = env.CODEX_SESSION_ID?.trim() || env.CODEX_THREAD_ID?.trim();
+  if (codexSessionId) return codexSessionId;
+  // Process ancestry proves a host, not a session. Refuse ambiguous callers
+  // before reading/adopting a presence record, including legacy pid-* records.
   throw new CliError(
     'identity_unresolved',
     'Unable to resolve a stable agent session identity. Set O8_AGENT_ID to a unique value for this session and retry.',
@@ -425,7 +415,16 @@ function cmdInbox(mode: OutputMode, rest: string[], options: TeamCommandOptions)
  *  Reads Claude Code's hook JSON on stdin; exit 2 blocks + feeds stderr back. */
 function cmdGuard(options: TeamCommandOptions): number {
   const { presence, leases, mailbox } = ensureRoom(options);
-  const me = touchPresence(presence, undefined, options);
+  let me: Presence;
+  try {
+    me = touchPresence(presence, undefined, options);
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+    // Hook errors other than exit 2 are nonblocking. An ambiguous or foreign
+    // identity must not bypass the lease guard or adopt another session.
+    process.stderr.write(`[o8 team] Blocked: ${error.message}\n`);
+    return 2;
+  }
   const box = readMailbox(mailbox, me.handle);
   const unread = box.all.slice(box.readCount);
 
