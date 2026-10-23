@@ -191,3 +191,57 @@ it.each([
   reply = () => Response.json(payload); await render(); await toggle(); expect(host.textContent).toContain('CI details delayed');
   await toggle(); reply = () => Response.json(detail()); await toggle(); expect(host.textContent).toContain('known job'); expect(reads()).toHaveLength(2);
 });
+
+const deadlineCases: Array<{ label: string; headers: HeadersInit }> = [
+  { label: 'numeric', headers: { 'retry-after': '30' } },
+  { label: 'HTTP-date', headers: { 'retry-after': 'Thu, 22 Oct 2026 12:30:30 GMT' } },
+  { label: 'reset', headers: { 'x-ratelimit-reset': String(Date.parse('2026-10-22T12:30:30Z') / 1000) } },
+];
+it.each(deadlineCases)('recovers an already-expanded row at its $label deadline without collapse or Retry', async ({ headers }) => {
+  reply = () => new Response(null, { status: 429, headers });
+  await render(); await toggle(); expect(reads()).toHaveLength(1); expect(host.textContent).toContain('CI details delayed');
+  reply = () => Response.json(detail(11, 'recovered'));
+  await settle(28_000); expect(reads()).toHaveLength(1);
+  await settle(3100); await settle();
+  expect(reads()).toHaveLength(2); expect(host.textContent).toContain('recovered job');
+  expect(host.textContent).toContain('recovered step'); expect(host.textContent).toContain('recovered error');
+  expect(host.textContent).not.toContain('CI details delayed');
+});
+
+it('shares one automatic recovery read across already-expanded panes', async () => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(Array(3).fill(repoA)); for (let i = 0; i < 3; i++) await toggle(i);
+  expect(reads()).toHaveLength(1); reply = () => Response.json(detail(11, 'recovered'));
+  await settle(31_100); await settle();
+  expect(reads()).toHaveLength(2); expect(host.textContent?.match(/recovered job/g)).toHaveLength(3);
+});
+
+it.each([false, true])('keeps a known summary until deadline recovery after a failed refresh (stale=%s)', async stale => {
+  await render(); await toggle();
+  if (stale) await settle(120_000);
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  for (const text of ['known job', 'known step', 'known error']) expect(host.textContent).toContain(text);
+  expect(host.textContent).toContain('Showing last known details');
+  reply = () => Response.json(detail(11, 'recovered')); await settle(28_000); expect(reads()).toHaveLength(2);
+  await settle(3100); await settle(); expect(reads()).toHaveLength(3);
+  expect(host.textContent).toContain('recovered job'); expect(host.textContent).not.toContain('known job');
+  expect(host.textContent).not.toContain('CI details delayed');
+});
+
+it('honors another refusal from the automatic recovery read before trying again', async () => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(); await toggle(); await settle(31_100); await settle(); expect(reads()).toHaveLength(2);
+  await settle(28_000); expect(reads()).toHaveLength(2);
+  reply = () => Response.json(detail(11, 'recovered')); await settle(3100); await settle();
+  expect(reads()).toHaveLength(3); expect(host.textContent).toContain('recovered job');
+});
+
+it.each(['collapse', 'inactive', 'filter'])('does no deadline read after the expanded row becomes %s', async mode => {
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await render(); await toggle(); expect(reads()).toHaveLength(1);
+  if (mode === 'collapse') await toggle();
+  else if (mode === 'inactive') await render([repoA], false);
+  else { await act(async () => host.querySelector<HTMLButtonElement>('button[title="Commits"]')!.click()); await settle(); }
+  reply = () => Response.json(detail()); await settle(31_100); await settle(); expect(reads()).toHaveLength(1);
+});
