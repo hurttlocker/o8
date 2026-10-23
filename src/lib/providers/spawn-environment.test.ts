@@ -35,11 +35,12 @@ it.each(['openrouter', 'codex-subscription'])('preserves explicit %s gateway tra
   saveRuntimeBillingMode('claude-code', source === 'openrouter' ? 'api' : 'subscription');
   mutateProviderKey('ANTHROPIC_API_KEY', { key: 'fixture-other-anthropic' });
   const env = ownedSpawnEnvironment({ surfaceId: 'claude-code-owned:fixture', runtimeConfig: { modelSource: source } } as unknown as OwnedSessionRecord, {
-    ANTHROPIC_BASE_URL: 'http://127.0.0.1/fixture', ANTHROPIC_AUTH_TOKEN: 'fixture-gateway-token', ANTHROPIC_API_KEY: '',
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1/fixture-gateway-token', ANTHROPIC_AUTH_TOKEN: 'fixture-gateway-token', ANTHROPIC_API_KEY: '',
   });
   expect(env.ANTHROPIC_AUTH_TOKEN).toBe('fixture-gateway-token'); expect(env.ANTHROPIC_API_KEY).toBe('');
   expect(refreshChildEnvironment(env).ANTHROPIC_AUTH_TOKEN).toBe('fixture-gateway-token');
   expect(refreshChildEnvironment(env).ANTHROPIC_API_KEY).toBe('');
+  expect(refreshChildEnvironment(env).ANTHROPIC_BASE_URL).toBe('http://127.0.0.1/fixture-gateway-token');
 });
 
 it.each(['', 'fixture-ambient-xai'])('preserves an explicit unmanaged key through the resolver when ambient is %s', ambient => {

@@ -33,8 +33,10 @@ export function ownedSpawnEnvironment(session: OwnedSessionRecord, env: Record<s
   // These are explicit transport credentials, never inherited provider aliases.
   const source = session.runtimeConfig?.modelSource;
   if (session.surfaceId?.startsWith('claude-code-owned:') && (!restricted || controlled) && (source === 'codex-subscription' || (source === 'openrouter' && runtimeBillingMode(runtimeId) === 'api' && resolveProviderKey('OPENROUTER_API_KEY'))) && env.ANTHROPIC_BASE_URL) {
-    for (const name of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) if (env[name] !== undefined) resolved[name] = env[name];
-    retainChildTransportCredentials(resolved, ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
+    // The local gateway URL includes its transport token in the path.
+    const transportNames = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'];
+    for (const name of transportNames) if (env[name] !== undefined) resolved[name] = env[name];
+    retainChildTransportCredentials(resolved, transportNames);
   }
   return resolved;
 }
