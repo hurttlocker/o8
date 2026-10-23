@@ -48,6 +48,8 @@ import {
   RAMS_INK_QUIET,
 } from './shared';
 import { GroupHeader, GroupFootnote } from './grouped';
+import { RamsButton } from './RamsButton';
+import { useDiagnosticsPrCount } from './useDiagnosticsPrCount';
 
 // ── Types ──
 
@@ -77,7 +79,6 @@ interface RecentCommit {
 interface LoopStatusData {
   cron: CronStateResponse | null;
   lanes: LaneSummary[];
-  openPrCount: number;
   recentCommits: RecentCommit[];
 }
 
@@ -114,20 +115,18 @@ export function LoopStatusSection() {
   const [data, setData] = useState<LoopStatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showMerges, setShowMerges] = useState(false);
+  const prCount = useDiagnosticsPrCount();
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [cron, lanes, prs, gitLog] = await Promise.all([
+        const [cron, lanes, gitLog] = await Promise.all([
           fetch('/api/panel/loop-status', { cache: 'no-store' })
             .then(async (res) => res.ok ? (await res.json()) as CronStateResponse : null)
             .catch(() => null),
           fetch('/api/lanes?active=true', { cache: 'no-store' })
             .then(async (res) => res.ok ? (await res.json()) as { lanes?: LaneSummary[] } : null)
-            .catch(() => null),
-          fetch('/api/panel/prs', { cache: 'no-store' })
-            .then(async (res) => res.ok ? (await res.json()) as { prs?: Array<{ state?: string }> } : null)
             .catch(() => null),
           fetch('/api/panel/git/log?limit=5', { cache: 'no-store' })
             .then(async (res) => res.ok ? (await res.json()) as { commits?: RecentCommit[] } : null)
@@ -136,10 +135,6 @@ export function LoopStatusSection() {
 
         if (cancelled) return;
 
-        const openPrs = (prs?.prs ?? []).filter(
-          (pr) => !pr.state || String(pr.state).toUpperCase() === 'OPEN',
-        );
-
         setData({
           cron: cron ?? null,
           lanes: (lanes?.lanes ?? []).map((lane) => ({
@@ -147,7 +142,6 @@ export function LoopStatusSection() {
             label: lane.label,
             status: lane.status,
           })),
-          openPrCount: openPrs.length,
           recentCommits: gitLog?.commits ?? [],
         });
       } finally {
@@ -162,7 +156,7 @@ export function LoopStatusSection() {
   const lastFiredMs = timestampDelta(cron?.lastFiredAt ?? null, 'past');
   const nextFireMs = timestampDelta(cron?.nextFireAt ?? null, 'future');
   const lanes = data?.lanes ?? [];
-  const openPrCount = data?.openPrCount ?? 0;
+  const openPrCount = prCount.count;
   const commits = data?.recentCommits ?? [];
 
   return (
@@ -214,6 +208,13 @@ export function LoopStatusSection() {
         ) : null}
       </div>
 
+      <div style={{ marginTop: 8, fontFamily: APP_FONT_STACK, fontSize: 12, color: 'var(--t-text-muted)' }}>
+        {prCount.isFetching ? (openPrCount === null ? 'Loading PR count… ' : 'Refreshing PR count… ') : null}
+        {prCount.error ? `PR count delayed: ${prCount.error}. ` : null}
+        {prCount.error && openPrCount !== null ? `Showing last known count (${prCount.ageSeconds}s old). ` : null}
+        <RamsButton variant="ghost" onClick={() => { void prCount.retry(); }}>Retry PR count</RamsButton>
+      </div>
+
       <GroupFootnote>
         Read-only. Loop is armed and disarmed via the cron tooling — this
         section never writes{' '}
@@ -234,7 +235,7 @@ function NoActiveLoop({
   showMerges,
   onToggleMerges,
 }: {
-  openPrCount: number;
+  openPrCount: number | null;
   laneCount: number;
   commits: RecentCommit[];
   showMerges: boolean;
@@ -251,7 +252,7 @@ function NoActiveLoop({
       <Row
         dot={RAMS_INK_QUIET}
         label="Open PRs"
-        value={String(openPrCount)}
+        value={openPrCount === null ? '—' : String(openPrCount)}
       />
       <Row
         dot={RAMS_INK_QUIET}
@@ -284,7 +285,7 @@ function ActiveLoopRows({
   lastFiredMs: number | null;
   nextFireMs: number | null;
   lanes: LaneSummary[];
-  openPrCount: number;
+  openPrCount: number | null;
   commits: RecentCommit[];
   showMerges: boolean;
   onToggleMerges: () => void;
@@ -321,7 +322,7 @@ function ActiveLoopRows({
       <Row
         dot={RAMS_INK_QUIET}
         label="Open PRs"
-        value={String(openPrCount)}
+        value={openPrCount === null ? '—' : String(openPrCount)}
       />
       <Row
         dot={lanes.length > 0 ? RAMS_ACCENT : RAMS_INK_QUIET}
