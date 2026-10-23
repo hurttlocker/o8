@@ -165,6 +165,34 @@ describe('ActivityFeed retained stream snapshots', () => {
     await refresh(); expectRows('recovered');
   });
 
+  it.each([
+    { name: 'long HTTP-date', status: 403, seconds: 900, retry: 'date' },
+    { name: 'short HTTP-date', status: 429, seconds: 90, retry: 'date' },
+    { name: 'later reset than numeric retry', status: 429, seconds: 180, retry: '60', reset: 180 },
+    { name: 'later reset than HTTP-date', status: 403, seconds: 180, retry: 'date', retrySeconds: 60, reset: 180 },
+    { name: 'later numeric retry than reset', status: 429, seconds: 180, retry: '180', reset: 60 },
+    { name: 'short reset', status: 429, seconds: 30, reset: 30 },
+    { name: 'malformed headers fallback', status: 429, seconds: 300, retry: 'invalid', reset: NaN },
+    { name: 'expired headers fallback', status: 403, seconds: 300, retry: 'expired', reset: -60 },
+  ])('honors $name across lifecycle, fallback polling and refreshKey triggers', async ({ status, seconds, retry, retrySeconds, reset }) => {
+    await render(); const now = Date.now();
+    const headers: Record<string, string> = {};
+    if (retry) headers['retry-after'] = retry === 'date' ? new Date(now + (retrySeconds ?? seconds) * 1000).toUTCString()
+      : retry === 'expired' ? new Date(now - 60_000).toUTCString() : retry;
+    if (reset !== undefined) headers['x-ratelimit-reset'] = String(now / 1000 + reset);
+    reply = () => new Response(null, { status, headers });
+    await refresh(); expectRows(repoA); expect(host.textContent).toContain('GitHub API paused');
+    const before = reads().length;
+    reply = stream => Response.json(payload(stream, 'deadline recovery'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(seconds * 1000 - 1); });
+    await refresh(); await render(repoA, 1);
+    expect(reads()).toHaveLength(before); expectRows(repoA);
+    expect(host.textContent).toContain('GitHub API paused');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await refresh(); expect(reads()).toHaveLength(before + 4); expectRows('deadline recovery');
+    expect(host.textContent).not.toContain('GitHub API paused');
+  });
+
   it('hides the old scope while loading and ignores its late rate-limit response', async () => {
     await render();
     const late = deferred();

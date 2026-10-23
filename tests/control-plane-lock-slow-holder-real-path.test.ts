@@ -23,7 +23,12 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 process.env.O8_CONTROL_PLANE_LOCK_WAIT_BUDGET_MS = '300';
 process.env.O8_CONTROL_PLANE_LOCK_HARD_CEILING_MS = '30000';
 
-const { readControlPlaneLockEvents, withLockedState } = await import('@/lib/orchestrator/control-plane');
+const {
+  readControlPlaneLockEvents,
+  readOrchestratorControlPlaneState,
+  syncOrchestratorControlPlaneState,
+  withLockedState,
+} = await import('@/lib/orchestrator/control-plane');
 
 const STATE_PATH = join(dataDir, 'orchestrator-state.json');
 const LOCK_DIR = `${STATE_PATH}.lock`;
@@ -184,6 +189,37 @@ describe('control-plane lock with a slow holder (#2399)', () => {
     expect(persistedPacketIds()).toEqual(['pkt-after-dead-holder']);
     const broken = readControlPlaneLockEvents().filter((event) => event.kind === 'dead_holder_broken');
     expect(broken.map((event) => event.holderPid)).toEqual([deadPid]);
+    expect(existsSync(LOCK_DIR)).toBe(false);
+  }, 30_000);
+});
+
+describe('control-plane sync uses persisted state (#2430)', () => {
+  it('cannot replace a newer persisted packet with an unsupported stale snapshot', async () => {
+    await withLockedState((state) => {
+      state.packets.push(packet('pkt-original'));
+    });
+    const stale = readOrchestratorControlPlaneState();
+    await withLockedState((state) => {
+      state.packets.push(packet('pkt-added-later'));
+    });
+
+    // @ts-expect-error Sync must not accept a caller-supplied mission snapshot.
+    const synced = await syncOrchestratorControlPlaneState(stale);
+
+    expect(synced.packets.map((entry) => entry.id).sort()).toEqual(['pkt-added-later', 'pkt-original']);
+    expect(persistedPacketIds()).toEqual(['pkt-added-later', 'pkt-original']);
+  });
+
+  it('reads after acquiring the lock so a pending writer survives sync', async () => {
+    await withLockedState(() => undefined);
+    const holder = holdLockInChild({ packetId: 'pkt-before-sync', holdMs: 1_500, hardCeilingMs: 30_000 });
+    await holder.waitFor('LOCKED');
+
+    const synced = await syncOrchestratorControlPlaneState();
+    await holder.waitFor('DONE');
+
+    expect(synced.packets.map((entry) => entry.id)).toEqual(['pkt-before-sync']);
+    expect(persistedPacketIds()).toEqual(['pkt-before-sync']);
     expect(existsSync(LOCK_DIR)).toBe(false);
   }, 30_000);
 });
