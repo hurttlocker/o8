@@ -12,7 +12,6 @@
 import { useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
-  CANVAS_BACKDROPS,
   CANVAS_CHAT_TONES,
   CANVAS_DOCK_TONES,
   CANVAS_GLASS_DEFAULTS,
@@ -25,6 +24,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { FONT, glass } from './ui';
+import { CanvasBackdropPicker } from './backdrop-picker';
 
 function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean {
   return a.frost === b.frost
@@ -35,6 +35,8 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.material === b.material
     && a.backdropFrost === b.backdropFrost
     && a.backdrop === b.backdrop
+    && a.customBackground?.dataUrl === b.customBackground?.dataUrl
+    && a.customBackground?.mode === b.customBackground?.mode
     && a.chatFrost === b.chatFrost
     && a.chatTint === b.chatTint
     && a.tone === b.tone
@@ -135,6 +137,8 @@ export function TunerPanel({
         ))}
       </div>
 
+      <CanvasBackdropPicker settings={settings} onChange={onChange} />
+
       {!full ? (
         <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5, fontFamily: FONT }}>
           Additional looks and controls are unavailable under the current workspace policy.
@@ -187,19 +191,6 @@ export function TunerPanel({
       <TunerSlider label="Background" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
       <TunerSlider label="Blur" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
       <TunerSlider label="Loupe size" display={`${Math.round(loupeSize)}px`} value={loupeSize} range={loupeSizeRange} onChange={onLoupeSizeChange} />
-
-      {/* Depth — the mood layer painted behind the glass. */}
-      <span style={SECTION_LABEL}>Depth</span>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
-        {CANVAS_BACKDROPS.map((backdrop) => (
-          <Chip
-            key={backdrop.id}
-            label={backdrop.label}
-            active={settings.backdrop === backdrop.id}
-            onClick={() => onChange({ backdrop: backdrop.id })}
-          />
-        ))}
-      </div>
 
       {/* Advanced — per-surface power tuning, collapsed so the panel stays calm. */}
       <button

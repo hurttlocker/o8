@@ -1,5 +1,6 @@
 import { assertSharedReturnBatchActive, type SharedWorkerReturnBatch } from '@/lib/orchestrator/shared-worker-returns';
 import { runBoundChatContinuation, type BoundChatContinuationHooks } from './bound-chat-continuation';
+import { automaticContinuationPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 export async function runSharedWorkerChatReturn(batch: SharedWorkerReturnBatch, hooks: BoundChatContinuationHooks): Promise<void> {
   const message = [
@@ -9,6 +10,7 @@ export async function runSharedWorkerChatReturn(batch: SharedWorkerReturnBatch, 
     ...batch.returns.map(row => `Worker ${row.surface_id}, run ${row.run_id}: ${row.outcome}\n${JSON.stringify(row.summary)}`),
   ].join('\n\n');
   await runBoundChatContinuation({ repoPath: batch.repoPath, origin: batch.origin, message,
+    permissionMode: automaticContinuationPermissionMode(batch.origin.permissionMode),
     assistantMessageId: `assistant-workers-${batch.returns[0].id}`,
     check: () => assertSharedReturnBatchActive(batch) }, hooks);
 }

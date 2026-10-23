@@ -58,6 +58,77 @@ describe('WorkspaceHeaderStrip session tabs (#2146)', () => {
     container.remove();
   });
 
+  it('uses complete task titles and numbered fallbacks in the crowded dashboard strip', async () => {
+    const headerTabs = [
+      { ...headerTab(0, 'Pull the latest changes for'), kind: 'terminal' },
+      { ...headerTab(1, 'Orchestrator'), llmSummary: 'Repair worker input' },
+      { ...headerTab(2, 'Orchestrator'), llmSummary: 'Review the pane frame' },
+      headerTab(3, 'Orchestrator'),
+      headerTab(4, 'Build exit:'),
+      headerTab(5, 'Build exit:'),
+      headerTab(6, 'Orchestrator'),
+      { ...headerTab(7, 'Orchestrator'), labelSource: 'user' as const, llmSummary: 'Keep my chosen label' },
+    ];
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({ headerTabs }))));
+    const pills = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
+    expect(pills.map(pill => pill.textContent)).toEqual([
+      'Pull the latest changes', 'Repair worker input', 'Review the pane frame',
+      'Orchestrator 1', 'Build exit 1', 'Build exit 2', 'Orchestrator 2', 'Orchestrator 3',
+    ]);
+    expect(container.querySelector('[aria-label="Close Repair worker input"]')).not.toBeNull();
+  });
+
+  it('names inactive tabs from saved thread metadata without loading their chat messages', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ conversations: [
+      { tabId: 'thoughts-saved', title: 'Trace the saved handoff', firstUserMessage: 'Older prompt' },
+      { tabId: 'thoughts-untitled', title: 'Untitled conversation', firstUserMessage: 'Repair the API connection for' },
+    ] }));
+    const headerTabs = [
+      { ...headerTab(0, 'Orchestrator'), llmSummary: 'Active worker task' },
+      { ...headerTab(1, 'Orchestrator'), orchestratorThreadId: 'thoughts-saved' },
+      { ...headerTab(2, 'Orchestrator'), orchestratorThreadId: 'thoughts-untitled' },
+      headerTab(3, 'Orchestrator'), headerTab(4, 'Orchestrator'),
+    ];
+    const titles = () => Array.from(container.querySelectorAll('[role="tab"]')).map(pill => pill.textContent);
+    try {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({ headerTabs, headerActiveTabId: 'tab-0' }))));
+      expect(titles()).toEqual(['Active worker task', 'Trace the saved handoff', 'Repair the API connection', 'Orchestrator 1', 'Orchestrator 2']);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(String(fetcher.mock.calls[0][0])).toBe('/api/v2/chat-history/list?include=orchestrator&archived=include');
+      fetcher.mockResolvedValue(Response.json({ conversations: [
+        { tabId: 'thoughts-saved', title: 'Verify the renamed handoff' },
+        { tabId: 'thoughts-untitled', title: 'Untitled conversation', firstUserMessage: 'Repair the API connection for' },
+      ] }));
+      await act(async () => window.dispatchEvent(new CustomEvent('o8:thread-title-maybe-updated', { detail: { threadId: 'thoughts-saved' } })));
+      expect(titles()[1]).toBe('Verify the renamed handoff');
+      expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Active worker task');
+    } finally { fetcher.mockRestore(); }
+  });
+
+  it('keeps packet titles, humanizes branch-only tabs and preserves chosen titles', async () => {
+    const branch = 'inline/117313077011567-fix-the-linux-ci-regression-on-pr-408';
+    await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({ headerTabs: [
+      { ...headerTab(0, 'Raw packet label'), kind: 'chat', orchestrationPacket: { title: 'Repair worker input', branchTarget: 'issue/4080-repair-worker-input' } },
+      { ...headerTab(1, branch), kind: 'chat' },
+      { ...headerTab(2, 'Release desk'), labelSource: 'user', llmSummary: 'Another task' },
+    ] }))));
+    const pills = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
+    expect(pills.map(pill => pill.textContent)).toEqual(['Repair worker input', 'Fix the Linux CI regression on PR 408', 'Release desk']);
+    expect(pills[0].title).toContain('issue/4080-repair-worker-input');
+  });
+
+  it('keeps live summaries and numbered fallbacks usable when saved metadata is unavailable', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Offline'));
+    try {
+      await act(async () => root.render(createElement(WorkspaceHeaderStrip, stripProps({ headerTabs: [
+        { ...headerTab(0, 'Orchestrator'), llmSummary: 'Review the worker diff', orchestratorThreadId: 'thoughts-unavailable' },
+        headerTab(1, 'Orchestrator'), headerTab(2, 'Orchestrator'),
+      ] }))));
+      expect(Array.from(container.querySelectorAll('[role="tab"]')).map(pill => pill.textContent))
+        .toEqual(['Review the worker diff', 'Orchestrator 1', 'Orchestrator 2']);
+    } finally { fetcher.mockRestore(); }
+  });
+
   it('follows visited tabs in both directions, skips closed tabs and branches after a new visit', async () => {
     const selected: string[] = [];
     const select = (event: Event) => selected.push((event as CustomEvent<{ tabId: string }>).detail.tabId);

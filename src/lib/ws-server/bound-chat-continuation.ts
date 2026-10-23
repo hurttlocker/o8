@@ -11,6 +11,7 @@ import { prepareOrchestratorProjectTurn, readPersistedOrchestratorProjectSelecti
 import { persistComposerImages } from '@/lib/mobile/orchestrator-image-media';
 import type { ComposerImageAttachment } from '@/lib/mobile/composer-image-validation';
 import { modelFacingComposerMessage } from '@/lib/orchestrator/composer-wire';
+import type { OrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 
 export interface BoundChatContinuationHooks {
   registerAbort(repoPath: string, origin: ReviewChatOrigin, controller: AbortController): () => void;
@@ -21,11 +22,13 @@ export interface BoundChatContinuationHooks {
 export async function runBoundChatContinuation(
   input: { repoPath: string; origin: ReviewChatOrigin; message: string; assistantMessageId: string;
     check: () => void; claim?: () => boolean; legacyPermissionMode?: 'full' | 'plan';
+    permissionMode?: OrchestratorPermissionMode;
     displayMessage?: string; images?: ComposerImageAttachment[]; admit?: () => boolean;
     serviceTier?: OrchestratorTurnOptions['serviceTier']; collideBaseBackend?: OrchestratorTurnOptions['collideBaseBackend'] },
   hooks: BoundChatContinuationHooks,
 ): Promise<void> {
   const { origin: expected, message, assistantMessageId } = input;
+  const permissionMode = input.permissionMode ?? expected.permissionMode;
   input.check();
   const backend = getOrchestratorBackend(expected.backend);
   const controller = new AbortController();
@@ -36,7 +39,7 @@ export async function runBoundChatContinuation(
   let turnError: string | null = null;
   let receipt: MobileTurnReceipt = { leadModel: expected.model, effort: expected.effort,
     mode: resolveTurnReceiptMode(expected.backend, expected.mode, expected.pickedMode),
-    permissionMode: expected.permissionMode, pickedMode: expected.pickedMode };
+    permissionMode, pickedMode: expected.pickedMode };
   const data = { repoPath: input.repoPath, threadId: expected.threadId, backend: backend.id, model: expected.model, assistantMessageId };
   const persist = (sessionId: string | null, done?: Extract<OrchestratorEvent, { type: 'done' }>) => upsertMobileOrchestratorAssistantMessage({
     tabId: expected.threadId, repoPath: input.repoPath, messageId: assistantMessageId, content: text,
@@ -88,7 +91,7 @@ export async function runBoundChatContinuation(
         case 'collide_phase': case 'collide_proposal': case 'handoff': break;
       }
     }, { threadId: expected.threadId, model: expected.model, thinkingEffort: expected.effort,
-      permissionMode: expected.permissionMode ?? input.legacyPermissionMode ?? 'plan', signal: controller.signal,
+      permissionMode: permissionMode ?? input.legacyPermissionMode ?? 'plan', signal: controller.signal,
       attachments: input.images,
       serviceTier: input.serviceTier, collideBaseBackend: input.collideBaseBackend,
       // Only the Codex and Claude subprocesses keep a crash record; Pi resumes from its own session file.

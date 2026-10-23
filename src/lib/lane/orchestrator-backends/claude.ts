@@ -24,6 +24,8 @@ export const claudeBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
-    return sendToOrchestrator(ensureOrchestratorSession(repoPath, options?.threadId), message, onEvent, options);
+    if (options?.permissionMode === 'outside-workspace') return Promise.reject(new Error('Outside workspace commands require the built-in lead.'));
+    return sendToOrchestrator(ensureOrchestratorSession(repoPath, options?.threadId), message, onEvent,
+      { ...options, permissionMode: options?.permissionMode });
   },
 };

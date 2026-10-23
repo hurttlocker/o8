@@ -34,6 +34,33 @@ beforeEach(() => getSqlite().exec('DELETE FROM composer_send_queue'));
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(fixture, { recursive: true, force: true }); });
 
 describe('durable composer queue API and persisted state', () => {
+  it('preserves an explicitly queued outside grant across database reopen and refuses a later downgrade', async () => {
+    const routing = { ...payload.routing, backend: 'pi' as const, model: 'pi', permissionMode: 'outside-workspace' as const,
+      projectId: undefined };
+    const item = await enqueue('queue-outside', { images: [], routing });
+    closeDb(); ensureV71ComposerQueueSchema(getSqlite());
+    expect(queue.readComposerSend(item.id)?.payload.routing.permissionMode).toBe('outside-workspace');
+    writeFileSync(join(fixture, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'pi',
+      messages: [{ id: 'later-turn', role: 'assistant', content: 'Workspace only.', timestamp: item.createdAt + 1,
+        backend: 'pi', receipt: { leadModel: 'pi', effort: 'low', mode: 'solo', permissionMode: 'full' } }] }));
+    const claimed = queue.claimNextComposerSend(target)!;
+    const { runQueuedComposerSend } = await import('@/lib/ws-server/composer-queue-heartbeat');
+    const publish = vi.fn();
+    await expect(runQueuedComposerSend(claimed, { publish, registerAbort: () => () => {} }))
+      .rejects.toThrow('permissions became more restrictive');
+    expect(publish).not.toHaveBeenCalled();
+    expect(queue.readComposerSend(item.id)?.admittedAt).toBeNull();
+    writeFileSync(join(fixture, 'chat-history', `${target.threadId}.json`), JSON.stringify({ repoPath: repo, backend: 'codex',
+      messages: [{ id: 'assistant', role: 'assistant', content: 'Working', timestamp: 1 }] }));
+  });
+
+  it.each(['codex', 'collide'])('refuses an outside grant queued for %s before persistence', async backend => {
+    const response = await POST(request('POST', { ...target, id: `queue-outside-${backend}`, intent: 'send-next',
+      payload: { ...payload, images: [], routing: { ...payload.routing, backend, permissionMode: 'outside-workspace' } } }));
+    expect(response.status).toBe(400);
+    expect(queue.listQueuedComposerSends(target)).toEqual([]);
+  });
+
   it('preserves FIFO, exact destination, images and routing after reopening the database', async () => {
     const first = await enqueue('queue-first');
     const second = await enqueue('queue-second', { text: 'Second message' });

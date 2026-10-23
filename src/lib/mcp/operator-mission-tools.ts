@@ -188,7 +188,7 @@ interface ApiErrorResponse {
 }
 
 type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
-type MissionToolError = { error: string };
+type MissionToolError = { error: string; code?: string };
 
 function log(message: string, details?: unknown) {
   if (details === undefined) {
@@ -366,7 +366,10 @@ async function correlatedApiRequest<T>(
 
 function missionToolError(action: string, error: unknown, fallback: string): MissionToolError {
   console.error(`${LOG_PREFIX} ${action} failed`, error);
-  return { error: error instanceof O8ApiError ? error.summary : error instanceof McpInputError ? error.message : fallback };
+  return {
+    error: error instanceof O8ApiError ? error.summary : error instanceof McpInputError ? error.message : fallback,
+    ...(error instanceof O8ApiError && error.routeError ? { code: error.routeError.code } : {}),
+  };
 }
 
 export async function createMission(input: CreateMissionInput) {
