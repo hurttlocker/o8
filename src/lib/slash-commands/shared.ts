@@ -114,6 +114,38 @@ export function excerptTranscriptEntries(entries: MobileTranscriptEntry[], maxEn
   return chunks.join('\n');
 }
 
+// Allocate the budget newest-first, then present retained turns in transcript order.
+// A truncated turn keeps its ending so handoff and focus retain the conclusion.
+export function excerptNewestFirst(entries: MobileTranscriptEntry[], maxEntries = 6, maxChars = 2400) {
+  if (maxEntries <= 0 || maxChars <= 0) return '';
+  let remaining = maxChars;
+  const chunks: string[] = [];
+  const window = entries.slice(-maxEntries);
+  for (let i = window.length - 1; i >= 0; i -= 1) {
+    const entry = window[i]!;
+    const role = entry.type === 'compaction' ? 'COMPACTION' : entry.role.toUpperCase();
+    const text = entryText(entry);
+    if (!text) continue;
+    const separator = chunks.length > 0 ? 1 : 0;
+    const budget = remaining - separator;
+    const line = `${role}: ${text}`;
+    if (line.length <= budget) {
+      chunks.unshift(line);
+      remaining -= line.length + separator;
+      if (remaining <= 0) break;
+      continue;
+    }
+    const prefix = `${role}: […truncated] `;
+    const tailBudget = budget - prefix.length;
+    if (tailBudget > 0) {
+      const tail = text.slice(-tailBudget).trimStart();
+      chunks.unshift(`${prefix}${tail}`);
+    }
+    break;
+  }
+  return chunks.join('\n');
+}
+
 export function collectRecentDecisionLines(entries: MobileTranscriptEntry[], limit = 3) {
   const decisions: string[] = [];
   for (let index = entries.length - 1; index >= 0; index -= 1) {

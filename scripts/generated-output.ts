@@ -1,6 +1,7 @@
 import { parkLegacyOutput, continueLegacyOutputPark, readLegacyOutputPark, listLegacyOutputParks } from '../src/lib/workspace/legacy-output-parking';
 import { parkFailedPrebuild, readFailedPrebuildPark, resumeFailedPrebuild } from '../src/lib/workspace/failed-prebuild-parking';
 import { captureWorktreeMaterializationIdentity } from '../src/lib/worktree/materialization-identity';
+import { previewParkedOutput, validParkedOutputSelection } from '../src/lib/workspace/parked-output-preview';
 import { recoverGeneratedOutput } from '../src/lib/workspace/generated-output-recovery';
 import { retireGeneratedOutputVerification } from '../src/lib/workspace/generated-output-recovery-retirement';
 import { adoptGeneratedOutput, retireGeneratedOutput } from '../src/lib/workspace/generated-output-retirement';
@@ -25,11 +26,19 @@ async function main() {
   const command = argv.shift(); const values = new Map<string, string>(); const evidencePaths: string[] = [];
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index]; const value = argv[index + 1];
-    if (!['--workspace', '--resource', '--repository', '--worktree-id', '--intent', '--evidence', '--operation'].includes(key)
+    if (!['--workspace', '--resource', '--repository', '--worktree-id', '--intent', '--evidence', '--operation', '--kind'].includes(key)
       || !value?.trim() || (key !== '--evidence' && values.has(key))) throw new Error('Invalid generated-output arguments.');
     if (key === '--evidence') evidencePaths.push(value); else values.set(key, value);
   }
   const resourceId = values.get('--resource'); const workspacePath = values.get('--workspace');
+  if (command === 'disposition-preview') {
+    const kind = values.get('--kind'); const operation = values.get('--operation');
+    if (!validParkedOutputSelection(kind, operation) || values.size !== 2 || evidencePaths.length) {
+      throw new Error('Disposition preview requires exactly --kind legacy|failed-prebuild and --operation UUID.');
+    }
+    process.stdout.write(`${JSON.stringify(previewParkedOutput(kind, operation!))}\n`);
+    return;
+  }
   if (['park-failed-prebuild', 'resume-failed-prebuild', 'failed-prebuild-status'].includes(command ?? '')) {
     let record;
     if (command === 'park-failed-prebuild') {

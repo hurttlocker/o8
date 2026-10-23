@@ -106,3 +106,20 @@ Preflight selects only the generation currently owning `.next`. Replaying a
 completed preservation checks the retained directory without moving a newer
 `.next`. The journal is bounded to sixteen retained failures per workspace;
 reaching the bound requires an explicit future retention policy, not deletion.
+
+## Read-only disposition inventory
+
+Select one completed parked operation explicitly:
+
+```sh
+node "$source/scripts/generated-output.mjs" disposition-preview \
+  --kind legacy --operation "$operation"
+node "$source/scripts/generated-output.mjs" disposition-preview \
+  --kind failed-prebuild --operation "$operation"
+```
+
+The corresponding operator-only API is `GET /api/orchestrator/workspace/output-disposition?kind=legacy&operationId=<uuid>` (or `kind=failed-prebuild`). It reads the selected profile's persisted journal, source resource, independent holds, exact claims and recorded continuation consumers. The fingerprint identifies that bounded recorded response, not an approved deletion plan. Collection truncation is explicit.
+
+The preview does not inspect the current filesystem, producer processes or evidence contents. Inventory bytes are recorded entry bytes, not allocated disk space or reclaimable bytes. Dependency links retain only their lexical node and target text; target bytes are neither followed nor owned. Legacy producer outcome remains unknown when no outcome was recorded. Other consumers remain unchecked.
+
+`executionSupported` is always false. No disposition, hold release, preservation package, removal scope or cleanup authority is created. Approval, preservation and journaled removal remain separate work.
