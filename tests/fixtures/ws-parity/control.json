@@ -1,0 +1,249 @@
+{
+  "name": "control, heartbeat, authentication",
+  "actions": [
+    {
+      "op": "connect",
+      "client": "a"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "system",
+            "event": "connected",
+            "data": {
+              "clientId": {
+                "$capture": "aId",
+                "type": "string"
+              },
+              "gateway": "disabled",
+              "realtimeSeq": {
+                "$capture": "aSeq",
+                "type": "number"
+              },
+              "instanceId": {
+                "$capture": "instanceId",
+                "type": "string"
+              },
+              "bootId": {
+                "$capture": "bootId",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "orchestrator-threads",
+            "event": "snapshot",
+            "data": {
+              "threads": []
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "inbox",
+            "event": "update",
+            "data": {
+              "generatedAt": "2026-01-01T00:00:00.000Z",
+              "mode": "live",
+              "sourceLabel": "o8",
+              "sessions": [],
+              "fleetSessions": [],
+              "approvals": [],
+              "reviewUnits": [],
+              "items": [],
+              "summary": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "raw": "invalid JSON"
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "unknown"
+      }
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "ping"
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "pong",
+            "ts": {
+              "$capture": "pongTime",
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "ping",
+      "client": "a",
+      "data": "fixture-ping"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "pong",
+          "data": "fixture-ping"
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-negotiate",
+        "protocol": {
+          "min": 1,
+          "max": 1
+        },
+        "appVersion": "1.0.0",
+        "clientKind": "test",
+        "capabilities": [
+          "mobile-inbox-delta-v1"
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "welcome",
+            "data": {
+              "protocol": 1,
+              "serverVersion": {
+                "$capture": "serverVersion",
+                "type": "string"
+              },
+              "epoch": {
+                "$capture": "epoch",
+                "type": "string"
+              },
+              "features": [
+                "mobile-inbox-delta-v1"
+              ],
+              "legacyFallback": {
+                "supported": true,
+                "protocol": 1,
+                "removalDate": "2027-08-12",
+                "removalProtocol": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-subscribe",
+        "subscriptions": [
+          {
+            "stream": "invalid"
+          }
+        ]
+      }
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "packet-tail-subscribe",
+        "packetId": ""
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "packet-tail",
+            "type": "error",
+            "error": "packetId is required"
+          }
+        }
+      ]
+    },
+    {
+      "op": "close",
+      "client": "a",
+      "code": 1000,
+      "reason": "fixture complete"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "fixture complete"
+        }
+      ]
+    },
+    {
+      "op": "connect",
+      "client": "invalid",
+      "credential": "invalid"
+    },
+    {
+      "op": "receive",
+      "client": "invalid",
+      "entries": [
+        {
+          "kind": "upgrade-rejected",
+          "status": 401
+        }
+      ]
+    },
+    {
+      "op": "connect",
+      "client": "missing",
+      "credential": "missing"
+    },
+    {
+      "op": "receive",
+      "client": "missing",
+      "entries": [
+        {
+          "kind": "upgrade-rejected",
+          "status": 401
+        }
+      ]
+    }
+  ]
+}

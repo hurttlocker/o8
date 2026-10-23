@@ -1,0 +1,162 @@
+{
+  "name": "incompatible protocol leaves transport open and rejects subscription",
+  "actions": [
+    {
+      "op": "connect",
+      "client": "a"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "system",
+            "event": "connected",
+            "data": {
+              "clientId": {
+                "$capture": "aId",
+                "type": "string"
+              },
+              "gateway": "disabled",
+              "realtimeSeq": {
+                "$capture": "aSeq",
+                "type": "number"
+              },
+              "instanceId": {
+                "$capture": "instanceId",
+                "type": "string"
+              },
+              "bootId": {
+                "$capture": "bootId",
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "orchestrator-threads",
+            "event": "snapshot",
+            "data": {
+              "threads": []
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "inbox",
+            "event": "update",
+            "data": {
+              "generatedAt": "2026-01-01T00:00:00.000Z",
+              "mode": "live",
+              "sourceLabel": "o8",
+              "sessions": [],
+              "fleetSessions": [],
+              "approvals": [],
+              "reviewUnits": [],
+              "items": [],
+              "summary": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-negotiate",
+        "protocol": {
+          "min": 2,
+          "max": 2
+        },
+        "appVersion": "2.0.0",
+        "clientKind": "test",
+        "capabilities": []
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "incompatible",
+            "data": {
+              "reason": "Realtime protocol 2-2 is unsupported. Update o8 mobile to continue.",
+              "updateRequired": true,
+              "supportedProtocol": {
+                "min": 1,
+                "max": 1
+              },
+              "serverVersion": {
+                "$capture": "version",
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "send",
+      "client": "a",
+      "frame": {
+        "type": "realtime-subscribe",
+        "subscriptions": [
+          {
+            "stream": "global"
+          }
+        ]
+      }
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "message",
+          "frame": {
+            "channel": "realtime",
+            "event": "incompatible",
+            "data": {
+              "reason": "Realtime subscription was rejected because this client is incompatible. Update o8 mobile and reconnect.",
+              "updateRequired": true,
+              "supportedProtocol": {
+                "min": 1,
+                "max": 1
+              },
+              "serverVersion": {
+                "$capture": "version",
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "op": "close",
+      "client": "a",
+      "code": 1000,
+      "reason": "done"
+    },
+    {
+      "op": "receive",
+      "client": "a",
+      "entries": [
+        {
+          "kind": "close",
+          "code": 1000,
+          "reason": "done"
+        }
+      ]
+    }
+  ]
+}

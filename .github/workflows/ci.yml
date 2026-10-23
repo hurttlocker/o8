@@ -393,6 +393,8 @@ jobs:
         run: node scripts/test-update-ping-native.mjs
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+      - name: Experimental o8d delivery bus
+        run: cargo test --locked --manifest-path crates/o8d/Cargo.toml --all-features
 
   roadmap-check:
     name: Roadmap Drift Check
