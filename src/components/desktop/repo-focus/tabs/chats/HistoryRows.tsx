@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as Reac
 import { CheckCircle2 } from '../../../lucide-shims';
 import { trackThreadDrag } from '@/lib/workspace-terminal/thread-drag';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
-import { HISTORY_ROW_TONES, SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './constants';
+import { CHAT_ROW_RADIUS, COMPACT_CHAT_ROW_HEIGHT, HISTORY_ROW_TONES, SIDEBAR_REPO_MAX_WIDTH, SIDEBAR_TITLE_MAX_WIDTH } from './constants';
 import {
   formatElapsedAgo,
   historySection,
@@ -47,7 +47,8 @@ export function ArchivedLaneCompactRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 31,
+        minHeight: COMPACT_CHAT_ROW_HEIGHT,
+        borderRadius: CHAT_ROW_RADIUS,
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -61,7 +62,7 @@ export function ArchivedLaneCompactRow({
         paddingTop: 5,
         paddingRight: 13,
         paddingBottom: 5,
-        paddingLeft: 37,
+        paddingLeft: 12,
         transition: 'background 180ms ease',
       }}
     >
@@ -114,7 +115,8 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
       title={packet.title}
       style={{
         width: '100%',
-        minHeight: compact ? 31 : 42,
+        minHeight: compact ? COMPACT_CHAT_ROW_HEIGHT : 42,
+        borderRadius: compact ? CHAT_ROW_RADIUS : undefined,
         display: 'flex',
         alignItems: 'center',
         gap: compact ? 6 : 8,
@@ -125,9 +127,8 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         paddingTop: compact ? 2 : 5,
         paddingRight: 12,
         paddingBottom: compact ? 2 : 5,
-        // Align with HistoryChatRow's chat-text X (37) so merged packets
-        // and active chats sit on the same vertical column.
-        paddingLeft: 37,
+        // Compact merged rows share the history title column.
+        paddingLeft: compact ? 12 : 37,
       }}
     >
       <span style={{ flex: 1, minWidth: 0 }}>
@@ -299,7 +300,8 @@ export function HistoryChatRow({
       aria-disabled={disabled}
       style={{
         width: '100%',
-        minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact ? 33 : 42,
+        minHeight: roomy ? (preview ? 78 : 52) : preview ? 64 : compact ? COMPACT_CHAT_ROW_HEIGHT : 42,
+        borderRadius: compact ? CHAT_ROW_RADIUS : undefined,
         display: 'flex',
         alignItems: preview ? 'flex-start' : 'center',
         gap: 8,
@@ -339,7 +341,7 @@ export function HistoryChatRow({
               right: 4,
               bottom: 2,
               left: 4,
-              borderRadius: 9,
+              borderRadius: compact ? CHAT_ROW_RADIUS : 9,
               background: active ? 'var(--t-input-bg)' : 'var(--t-hover)',
               zIndex: 0,
           }}

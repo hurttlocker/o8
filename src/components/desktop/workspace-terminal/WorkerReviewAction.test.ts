@@ -71,4 +71,17 @@ describe('shared worker review control', () => {
     await render({ onOpenReview: undefined });
     expect(button()).toBeNull();
   });
+
+  it.each(['focus', 'hover'])('clears stale %s feedback when eligibility or its callback disappears', async (feedback) => {
+    for (const hiddenProps of [{ packet: { ...packet, status: 'running' } }, { onOpenReview: undefined }]) {
+      await render();
+      if (feedback === 'focus') await act(async () => button().focus());
+      else await event('mouseover');
+      expect(button().style.background).toBe('var(--t-hover)');
+      await render(hiddenProps);
+      expect(button()).toBeNull();
+      await render();
+      expect(button().style.background).toBe('transparent');
+    }
+  });
 });

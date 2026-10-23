@@ -46,6 +46,11 @@ These are bugs, not choices:
 
 The numbers above are not starting suggestions. They are the result of visual comparison and tuning across every list surface in [`src/components/desktop/`](src/components/desktop/).
 
+Chat-history group labels use 12 px text at weight 300 with `var(--t-text-faint)`.
+Keep 16 px above and 6 px below each group. When a date group immediately follows
+the Recents header, use 8 px above that first date label to avoid stacking two
+full section gaps. Later date groups retain 16 px above.
+
 ### Where each token lives in code
 
 - `src/components/desktop/repo-focus/tabs/chats/HistoryRows.tsx` — `HistoryChatRow`, `CompactSessionRow`, `MergedPacketRow`, `ArchivedLaneCompactRow`
@@ -144,6 +149,11 @@ width, grouping, and disclosure to the task.
 | Row paddingLeft | 37 px | Chat / spawned / archived rows — aligns row text X with top-nav text X (see Section-label alignment above) |
 | Row paddingRight | 12 px (chats / spawned), 13 px (archived) | Right rail alignment column at x=233 / 232 (see Right-rail alignment) |
 | Top-nav paddingLeft / paddingRight | 10 / 10 px | MiniAgentPanelRow + MiniAgentPanelAction — chevron at x=235 |
+
+Compact history rows use a 28 px height and 8 px corner radius. Review controls
+remain 20 px inside compact worker rows, with 4 px of vertical padding. Rows with
+previews or a second metadata line retain their taller layout. Compact saved,
+worker, merged and archived row titles share a 12 px left inset with their labels.
 
 ### Mask gradient (scroll fade)
 

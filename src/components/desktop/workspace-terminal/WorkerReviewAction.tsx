@@ -13,14 +13,22 @@ export function WorkerReviewAction({ packet, onOpenReview, size = 30 }: {
   onOpenReview?: () => void;
   size?: number;
 }) {
+  if (!hasWorkerReviewAction(packet) || !onOpenReview) return null;
+  return <WorkerReviewButton title={packet?.title || 'this chat'} onOpenReview={onOpenReview} size={size} />;
+}
+
+function WorkerReviewButton({ title, onOpenReview, size }: {
+  title: string;
+  onOpenReview: () => void;
+  size: number;
+}) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  if (!hasWorkerReviewAction(packet) || !onOpenReview) return null;
   return (
     <button
       type="button"
       data-worker-open-review
-      aria-label={`Review merge for ${packet?.title || 'this chat'}`}
+      aria-label={`Review merge for ${title}`}
       title="Review changes and merge checks"
       onClick={(event) => { event.stopPropagation(); onOpenReview(); }}
       onMouseEnter={() => setHovered(true)}

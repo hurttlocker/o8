@@ -63,7 +63,8 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
   if (chatGroupBy === 'date' || chatGroupBy === 'repo') return <ChatHistoryShelf label="Recents" action={picker}
     storageKey={`o8:chat-${chatGroupBy}-recents-collapsed`}>
     {demos}
-    {chatGroupBy === 'date' ? flatHistoryDateGroups.map(group => <ChatHistoryShelf key={group.key}
+    {chatGroupBy === 'date' ? flatHistoryDateGroups.map((group, index) => <ChatHistoryShelf key={group.key}
+      followsHeader={index === 0 && fixtures.length === 0}
       label={group.label} storageKey={`o8:chat-date-${group.key}-collapsed`}>
       {group.items.map(item => renderHistoryRow(item))}
     </ChatHistoryShelf>) : flatHistoryRepoGroups.map(group => {
@@ -90,7 +91,8 @@ export function CompactChatHistory({ chatGroupBy, updateChatGroupBy, priority, r
       {deriveHistoryDateGroups<{ modifiedAt: string; item?: ChatHistoryItem; sample?: SidebarFixture }>([
         ...conversations.map(item => ({ item, modifiedAt: item.modifiedAt })),
         ...fixtures.map(sample => ({ sample, modifiedAt: sample.updatedAt })),
-      ].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))).map(group => <ChatHistoryShelf key={group.key}
+      ].sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))).map((group, index) => <ChatHistoryShelf key={group.key}
+        followsHeader={index === 0}
         label={group.label} storageKey={`o8:chat-chronological-date-${group.key}-collapsed`}>
         {group.items.map(entry => entry.item ? <Fragment key={entry.item.tabId}>{renderHistoryRow(entry.item)}</Fragment>
           : <SidebarDemoStates key={entry.sample!.tabId} mode="chronological" fixtures={[entry.sample!]} publishAttention={false}

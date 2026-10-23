@@ -31,6 +31,7 @@ export function SectionLabel({
   action,
   controls,
   status,
+  followsHeader = false,
 }: {
   label: string;
   compact?: boolean;
@@ -43,16 +44,17 @@ export function SectionLabel({
   action?: ReactNode;
   controls?: string;
   status?: ReactNode;
+  followsHeader?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const reducedMotion = useReducedMotion();
   const commonStyle = {
-    paddingTop: 16,
+    paddingTop: followsHeader ? 8 : 16,
     paddingRight: 12,
     paddingBottom: 6,
     paddingLeft: 12,
-    fontSize: 12.5,
+    fontSize: 12,
     lineHeight: '16px',
     fontWeight: 300,
     letterSpacing: '-0.1px',
