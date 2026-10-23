@@ -5345,6 +5345,14 @@
       ]
     },
     {
+      "path": "tests/team-session-presence-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/telemetry-consent-contrast-real-path.test.ts",
       "reasons": [
         "real-path"
