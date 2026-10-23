@@ -7,10 +7,12 @@ import {
   PacketStorageAdmissionError,
 } from '@/lib/orchestrator/storage-admission';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { withPacketLifecycleMutationLock } from '@/lib/orchestrator/lifecycle-mutation-lock';
+import { findLatestLaneByPacket, updateLane } from '@/lib/lane/registry';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import type { StorageRootIdentity } from '@/lib/workspace/storage-admission';
 import { probeMetadataLockProcessIdentity } from './metadata-lock-process-identity';
+import { withWorktreeProvisionQueue } from './provision-queue';
 import {
   assertManagedWorktreeMaterializationBoundary,
   resolveManagedWorktreeStorageTarget,
@@ -28,7 +30,16 @@ export async function withManagedWorktreeStorageAdmission<T>(
 ): Promise<T> {
   const canonicalRepo = await realpath(input.repoRoot);
   const rootKey = createHash('sha256').update(canonicalRepo).digest('hex');
-  return withPacketLifecycleMutationLock(`managed-worktree-root:${rootKey}`, () => (
+  return withWorktreeProvisionQueue(`managed-worktree-root:${rootKey}`, (position) => {
+    const lane = input.packetId ? findLatestLaneByPacket(input.packetId) : null;
+    if (!lane || lane.status !== 'launching' || lane.sessionKey) return;
+    const eventLabel = position > 0 ? 'worktree_provision_queued' : 'worktree_provision_started';
+    recordLaneEvent(lane.id, eventLabel, 'system', { packetId: input.packetId, position });
+    updateLane(lane.id, {
+      lastEventLabel: position > 0 ? `${eventLabel}:${position}` : eventLabel,
+      lastEventAt: new Date().toISOString(),
+    }, 'system', { eventLabel, position });
+  }, () => (
     withManagedWorktreeStorageAdmissionUnlocked(input, materialize)
   ));
 }

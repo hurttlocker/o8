@@ -383,6 +383,9 @@ export type LaneEventVerb =
   // Payload adds storageRelease: { decision, ownerGeneration,
   // releasedReservations, releasedBytes, retainedOwnerIds, reason }.
   | 'worktree_provision_failed'
+  | 'worktree_provision_queued'
+  | 'worktree_provision_started'
+  | 'artifact_admission_retry'
   // Cleanup positively confirmed the tracked child directory was gone. This
   // records observation only; it never claims retirement completed.
   // Payload: { reason: 'confirmed-missing-directory', action, workspacePath }

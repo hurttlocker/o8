@@ -39,7 +39,7 @@ export interface WorkspaceLifecycleLease {
 }
 
 export class WorkspaceLifecycleLeaseUnavailableError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly reason: 'unavailable' | 'contended' = 'unavailable') {
     super(message);
     this.name = 'WorkspaceLifecycleLeaseUnavailableError';
   }
@@ -172,6 +172,7 @@ export async function acquireWorkspaceLifecycleLease(
   }
   throw new WorkspaceLifecycleLeaseUnavailableError(
     `Timed out waiting for the exact workspace lifecycle owner of packet ${packetId}.`,
+    'contended',
   );
 }
 
