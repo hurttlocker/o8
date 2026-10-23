@@ -1748,6 +1748,12 @@
       ]
     },
     {
+      "path": "tests/canvas-custom-background-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/catch-up-ranking-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -1828,6 +1834,22 @@
         "git-cli",
         "real-path",
         "worktree-api"
+      ]
+    },
+    {
+      "path": "tests/claude-linux-cwd-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/cli-chat-effort-real-path.test.ts",
+      "reasons": [
+        "executable-fixture",
+        "real-path"
       ]
     },
     {
@@ -2246,6 +2268,12 @@
       ]
     },
     {
+      "path": "tests/conversation-pr-context-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/cortex-launch-agent-readonly-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -2267,6 +2295,15 @@
     {
       "path": "tests/cortex-observation-worker-authz-real-path.test.ts",
       "reasons": [
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/cortex-transcript-text-pages-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "process-signal",
         "real-path"
       ]
     },
