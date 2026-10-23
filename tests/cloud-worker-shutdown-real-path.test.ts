@@ -37,9 +37,11 @@ function isAlive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-async function bridge(immediateEmpty = false, holdHeartbeat = false) {
+async function bridge(immediateEmpty = false, holdHeartbeat = false,
+  failure?: { stage: 'heartbeat' | 'control'; ready: () => boolean }) {
   let polls = 0;
   let emptyResponses = 0;
+  let claimed = false;
   const waits: Array<number | null> = [];
   const server = createServer(async (incoming, outgoing) => {
     const disconnect = new AbortController();
@@ -53,16 +55,27 @@ async function bridge(immediateEmpty = false, holdHeartbeat = false) {
         ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
       });
       const route = new URL(request.url).pathname;
+      if (failure && claimed && route === '/api/cloud/worker-poll') {
+        // Observe the original attempt without a parallel poll reclaiming its failed job.
+        await new Promise<void>(resolve => {
+          if (disconnect.signal.aborted) resolve();
+          else disconnect.signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return;
+      }
       if (route === '/api/cloud/worker-poll') {
         polls += 1;
         const wait = new URL(request.url).searchParams.get('waitMs');
         waits.push(wait === null ? null : Number(wait));
       }
-      const response = route === '/api/cloud/worker-poll'
+      const refuse = failure?.ready() && (failure.stage === 'control' ? route === '/api/cloud/worker-control'
+        : route === '/api/cloud/worker-stream' && chunks.length && JSON.parse(Buffer.concat(chunks).toString()).type === 'heartbeat');
+      const response = refuse ? new Response(null, { status: 503 }) : route === '/api/cloud/worker-poll'
         ? immediateEmpty ? new Response(null, { status: 204 }) : await poll.GET(request)
         : route === '/api/cloud/worker-stream' ? await stream.POST(request)
           : route === '/api/cloud/worker-control' ? await control.GET(request)
             : new Response(null, { status: 404 });
+      if (route === '/api/cloud/worker-poll' && response.ok && response.status !== 204) claimed = true;
       if (holdHeartbeat && route === '/api/cloud/worker-stream'
         && chunks.length && JSON.parse(Buffer.concat(chunks).toString()).type === 'heartbeat') {
         // Persist the renewal, but lose its acknowledgement until this request
@@ -119,6 +132,67 @@ async function forceCleanup(child: ChildProcess) {
 }
 
 describe.skipIf(process.platform === 'win32')('built durable worker shutdown', () => {
+  it.each([
+    ['setup', 'heartbeat'], ['setup', 'control'], ['startup', 'heartbeat'], ['startup', 'control'],
+  ] as const)('persists the monitor cause during %s after a %s refusal', async (phase, stage) => {
+    const fixture = join(root, `failure-${phase}-${stage}`);
+    const repo = join(fixture, 'source');
+    const bare = join(fixture, 'remote.git');
+    const bin = join(fixture, 'bin');
+    const pidFile = join(fixture, 'startup.pid');
+    const invoked = join(fixture, 'unexpected-agent');
+    mkdirSync(repo, { recursive: true }); mkdirSync(bin);
+    const reserve = createServer();
+    await new Promise<void>(resolve => reserve.listen(0, '127.0.0.1', resolve));
+    const port = (reserve.address() as AddressInfo).port;
+    await new Promise<void>(resolve => reserve.close(() => resolve()));
+    const manifest = JSON.stringify({ version: 1, ...(phase === 'setup' ? { setup: ['exec node setup.js'] } : {}),
+      services: [{ name: 'web', command: 'exec node service.js', port: { preferred: port, env: 'PORT' },
+        health: { http: `http://127.0.0.1:${port}/health` } }] });
+    writeFileSync(join(repo, 'o8.workspace.json'), manifest);
+    const marker = `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));`;
+    writeFileSync(join(repo, 'setup.js'), `${marker}setInterval(()=>{},1000);`);
+    writeFileSync(join(repo, 'service.js'), `${marker}require('http').createServer((req,res)=>{res.statusCode=503;res.end('starting')}).listen(process.env.PORT,'127.0.0.1');`);
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: 'pipe' }).trim();
+    git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'fixture@example.invalid');
+    git('add', '.'); git('commit', '-m', 'test: startup failure source');
+    const sha = git('rev-parse', 'HEAD');
+    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
+    git('remote', 'add', 'origin', bare); git('push', 'origin', 'HEAD:refs/heads/main');
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nprintf unexpected > '${invoked}'\nexit 91\n`);
+    chmodSync(join(bin, 'codex'), 0o755);
+    const jobId = `startup-failure-${phase}-${stage}`;
+    enqueueCloudJob('team_default', jobId, {
+      cwd: repo, prompt: 'Do not run an agent before services are healthy.',
+      remoteSource: { repoUrl: 'https://example.invalid/startup.git', baseSha: sha, branch: 'o8/startup-failure' },
+      remoteManifestHash: createHash('sha256').update(manifest).digest('hex'),
+    });
+    const http = await bridge(false, false, { stage, ready: () => existsSync(pidFile) });
+    const worker = runner(http.url, join(fixture, 'worker'), {
+      PATH: `${bin}:${process.env.PATH ?? ''}`, GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: `url.file://${bare}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://example.invalid/startup.git',
+    });
+    try {
+      await until(() => readJobEvents('team_default', jobId).some(event => event.type === 'errored'));
+      closeDb();
+      const events = readJobEvents('team_default', jobId);
+      const route = stage === 'heartbeat' ? 'worker-stream' : 'worker-control';
+      const message = `[worker] ${stage === 'heartbeat' ? 'heartbeat' : 'control poll'} failed: [worker/cloud] /api/cloud/${route} rejected with HTTP 503`;
+      expect(events.filter(event => event.type === 'errored').map(event => event.payload)).toEqual([{ message }]);
+      expect(events.some(event => event.type === 'completed')).toBe(false);
+      expect(getJob('team_default', jobId)).toMatchObject({ status: 'pending', executionAttempts: 1, claimCount: 1 });
+      expect(worker.output()).toContain(message); expect(worker.output()).not.toContain(key.plaintext);
+      expect(existsSync(invoked)).toBe(false);
+      await until(() => !isAlive(Number(readFileSync(pidFile, 'utf8'))));
+      await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow();
+      expect(worker.child.exitCode).toBeNull();
+      expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/o8/startup-failure'], { stdio: 'pipe' })).toThrow();
+      worker.child.kill('SIGTERM'); await until(() => worker.child.exitCode !== null, 2500);
+    } finally {
+      cancelJob('team_default', jobId); await forceCleanup(worker.child); await http.close();
+    }
+  }, 20_000);
+
   it('persists the lease watchdog cause when a heartbeat acknowledgement is lost', async () => {
     process.env.O8_CLOUD_JOB_LEASE_MS = '6000';
     const jobId = 'lost-heartbeat-acknowledgement';
