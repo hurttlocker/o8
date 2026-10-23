@@ -271,6 +271,53 @@ describe('GitHub outsider attention sync', () => {
     expect(getGitHubPullRequestByNumber('example/widgets', 77)).toMatchObject({ headSha, mergeCommit });
   });
 
+  it('pins base repository identity from list and targeted provider responses', async () => {
+    const payload = { ...pullRequestPayload(78), base: { ref: 'main', repo: { id: 501 } },
+      head: { ref: 'work', repo: { id: 999 } } };
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/pulls?state=open')) return fetched([payload]);
+      if (path.includes('/pulls?state=closed')) return fetched([]);
+      if (path.endsWith('/pulls/78')) return fetched(payload);
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+    await ensureGitHubPullRequests('example/widgets');
+    expect(getGitHubPullRequestByNumber('example/widgets', 78)).toMatchObject({ repositoryId: 501 });
+    installationFetchMock.mockResolvedValue(fetched({ ...pullRequestPayload(79), base: { ref: 'main', repo: { id: 502 } } }));
+    await ensureGitHubPullRequest('example/widgets', 79);
+    expect(getGitHubPullRequestByNumber('example/widgets', 79)).toMatchObject({ repositoryId: 502 });
+    const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
+    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+    const { POST } = await import('@/app/api/orchestrator/pull-request-context/route');
+    const { NextRequest } = await import('next/server');
+    getSqlite().prepare('DELETE FROM github_repositories').run();
+    writePersistedLlmChat('thoughts-synced-pr', { messages: [] });
+    const response = await POST(new NextRequest('http://localhost/api/orchestrator/pull-request-context', {
+      method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+      body: JSON.stringify({ threadId: 'thoughts-synced-pr', host: 'github.com',
+        repositoryId: 502, pullRequestId: pullRequestPayload(79).id, number: 79 }),
+    }));
+    expect(response.status).toBe(201);
+    expect((await response.json()).result.link.repositoryFullName).toBe('example/widgets');
+  });
+
+  it('upgrades unchanged assessed open and closed PR identities during normal refresh', async () => {
+    for (const [number, state] of [[80, 'open'], [81, 'closed']] as const) {
+      upsertGitHubPullRequest(pullRequestSnapshot(number, state, state === 'closed' ? NOW.toISOString() : null));
+    }
+    getSqlite().prepare("UPDATE github_pull_requests SET last_human_comment_at = '2026-08-27T13:00:00.000Z'").run();
+    const open = { ...pullRequestPayload(80), base: { ref: 'main', repo: { id: 601 } } };
+    const closed = { ...pullRequestPayload(81, 'closed', NOW.toISOString()), base: { ref: 'main', repo: { id: 601 } } };
+    installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
+      if (path.includes('/pulls?state=open')) return fetched([open]);
+      if (path.includes('/pulls?state=closed')) return fetched([closed]);
+      if (path.endsWith('/pulls/80')) return fetched(open);
+      if (path.endsWith('/pulls/81')) return fetched(closed);
+      throw new Error(`Unexpected GitHub path: ${path}`);
+    });
+    await ensureGitHubPullRequests('example/widgets');
+    expect([80, 81].map(number => getGitHubPullRequestByNumber('example/widgets', number)?.repositoryId)).toEqual([601, 601]);
+  });
+
   it('keeps the latest human and insider comments across ascending comment pages', async () => {
     installationFetchMock.mockImplementation(async (_repo: string, path: string) => {
       if (path.includes('/comments?') && path.endsWith('page=2')) {

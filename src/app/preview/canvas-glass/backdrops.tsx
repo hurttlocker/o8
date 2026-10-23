@@ -14,6 +14,8 @@
  */
 
 import { useEffect, useRef, useSyncExternalStore } from 'react';
+import type { CustomCanvasBackgroundSettings } from '@/lib/canvas-mode/custom-background';
+import { CustomCanvasBackground } from './custom-background';
 import {
   GrainGradient,
   MeshGradient,
@@ -405,7 +407,7 @@ function OrbitPulse() {
   return <canvas ref={canvasRef} style={FILL} />;
 }
 
-export function CanvasBackdropLayer({ kind, tone }: { kind: string; tone: 'dark' | 'light' }) {
+export function CanvasBackdropLayer({ kind, tone, customBackground }: { kind: string; tone: 'dark' | 'light'; customBackground?: CustomCanvasBackgroundSettings }) {
   // WebGL2 probe — the shader library throws without it. Trails is 2D
   // canvas and exempt.
   const webgl = useSyncExternalStore(
@@ -415,6 +417,8 @@ export function CanvasBackdropLayer({ kind, tone }: { kind: string; tone: 'dark'
   );
 
   if (kind === 'none') return null;
+  if (kind === 'custom') return customBackground ? <CustomCanvasBackground image={customBackground}
+    fallback={<CanvasBackdropLayer kind={customBackground.previousBackdrop} tone={tone} />} /> : null;
 
   const wrap = (opacity: number, child: React.ReactNode) => (
     <div aria-hidden style={{ ...FILL, pointerEvents: 'none', zIndex: 1, overflow: 'hidden' }}>

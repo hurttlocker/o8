@@ -1,6 +1,8 @@
 'use client';
 
 import packageJson from '../../../../package.json';
+import { useEffect, useState } from 'react';
+import { requestFreshAppUpdateCheck } from '@/lib/app-update/recorded-update-client';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
@@ -13,6 +15,7 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { ReportIssueSection } from './ReportIssueSection';
+import { ReleaseNotesSignup } from '../ReleaseNotesSignup';
 
 // ── Minimal raw-SVG glyphs for row icon tiles ──
 
@@ -88,6 +91,27 @@ function TerminalIcon() {
 }
 
 export function AboutTab() {
+  const [checking, setChecking] = useState(false);
+  const [checkStage, setCheckStage] = useState(0);
+  const [checkMessage, setCheckMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!checking) return;
+    const waiting = setTimeout(() => setCheckStage(1), 1_000);
+    const slow = setTimeout(() => setCheckStage(2), 3_000);
+    return () => { clearTimeout(waiting); clearTimeout(slow); };
+  }, [checking]);
+  const checkNow = async () => {
+    if (checking) return;
+    setCheckStage(0);
+    setChecking(true);
+    setCheckMessage(null);
+    try {
+      const { info } = await requestFreshAppUpdateCheck();
+      setCheckMessage(info ? `Update ${info.version} is ready.` : 'o8 is up to date.');
+      if (info) window.dispatchEvent(new CustomEvent('o8:update-found', { detail: info }));
+    } catch (error) { setCheckMessage(error instanceof Error ? error.message : 'The update check could not finish. Try again.'); }
+    finally { setChecking(false); }
+  };
   const isProduction = process.env.NODE_ENV === 'production';
   const platform = (() => {
     if (typeof navigator !== 'undefined' && navigator.platform) return navigator.platform;
@@ -112,8 +136,17 @@ export function AboutTab() {
         <SettingsGroup header="Version">
           <SettingsRow icon={<InfoIcon />} label="Version" value={normalizeVersion(packageJson.version)} divider />
           <SettingsRow icon={<LaptopIcon />} label="Platform" value={platform} divider />
-          <SettingsRow icon={<CodeIcon />} label="Mode" value={isProduction ? 'Production' : 'Development'} />
+          <SettingsRow icon={<CodeIcon />} label="Mode" value={isProduction ? 'Production' : 'Development'} divider />
+          <SettingsRow
+            icon={<RotateIcon />}
+            label="Check for updates"
+            subtitle={checking ? ['Requesting a fresh check…', 'Waiting for the native updater…', 'Waiting for the release check to finish…'][checkStage] : checkMessage ?? 'Request a fresh o8 update check'}
+            accessory={checking && checkStage > 0 ? <progress aria-label="Checking for updates" style={{ width: 32, height: 8 }} /> : undefined}
+            disabled={checking}
+            onPress={() => { void checkNow(); }}
+          />
         </SettingsGroup>
+        <div style={{ marginTop: 16, paddingLeft: 14, paddingRight: 14 }}><ReleaseNotesSignup /></div>
       </section>
 
       <section style={{ marginTop: 28 }}>

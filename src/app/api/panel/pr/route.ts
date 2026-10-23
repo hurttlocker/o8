@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_GITHUB_REPO, fetchGitHubPullRequestDetail, resolveRepoSlug } from '@/lib/github-broker';
+import { readPullRequestStack } from '@/lib/github-broker/pull-request-stack';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const data = await fetchGitHubPullRequestDetail(repo, parseInt(number, 10));
+    const stack = await readPullRequestStack(repo, data.number, data.githubScope);
 
     const checksStatus = (() => {
       const checks = data.statusCheckRollup || [];
@@ -46,6 +48,7 @@ export async function GET(request: NextRequest) {
         deletions: f.deletions || 0,
       })),
       url: data.url,
+      stack,
     });
   } catch (err) {
     return NextResponse.json(

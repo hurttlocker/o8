@@ -57,4 +57,15 @@ describe('MCP API error summaries', () => {
     expect(error.status).toBeNull();
     expect(safeErrorText(error)).toBe('o8 API unreachable. Open the o8 desktop app, which starts the backend, or run `npm run desktop:dev` from the o8 repo.');
   });
+
+  it.each(['/api/orchestrator/steer-packet', '/api/orchestrator/reset-packet'])('preserves bounded lifecycle causes for %s', (path) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const refusal = apiError(path, 409, JSON.stringify({ error: { code: 'reset_state_changed', message: 'Packet changed; inspect current state.' } }));
+    expect(refusal.routeError).toEqual({ code: 'reset_state_changed', message: 'Packet changed; inspect current state.' });
+    const server = apiError(path, 503, JSON.stringify({ error: { code: 'mission_store_busy', message: 'private exception detail' } }));
+    expect(server.routeError).toEqual({ code: 'mission_store_busy', message: 'o8 API error (503)' });
+    expect(server.summary).not.toContain('private');
+    expect(apiError(path, 409, JSON.stringify({ error: { code: 'invalid code', message: 'refused' } })).routeError).toBeNull();
+    expect(apiError(path, 409, JSON.stringify({ error: { code: 'refused', message: 'private\nstack' } })).routeError).toBeNull();
+  });
 });

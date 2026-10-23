@@ -67,6 +67,8 @@ export function ensureMaintenanceDiscoverySchema(sqlite: Database.Database = get
     );
     CREATE INDEX IF NOT EXISTS idx_maintenance_held_roots
       ON worktree_maintenance_roots(metadata_root) WHERE held_reason IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_maintenance_held_repo_roots
+      ON worktree_maintenance_roots(repository_path, metadata_root) WHERE held_reason IS NOT NULL;
   `);
   const tableExists = (name: string) => sqlite.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -234,12 +236,20 @@ export function advanceMaintenanceCandidate(phase: MaintenancePhase, key: string
   if (cursor) writeMaintenanceState(`cursor:${phase}`, { ...cursor, after: key });
 }
 
-export function readWorktreeMaintenanceStatus(after = '', limit = 50) {
+export function readWorktreeMaintenanceStatus(after = '', limit = 50, repositoryPath?: string) {
   ensureMaintenanceDiscoverySchema();
   const pageLimit = Math.min(50, Math.max(1, limit));
+  const repo = repositoryPath === undefined ? undefined : canonicalRepoRoot(repositoryPath);
   const holds = getSqlite().prepare(`SELECT metadata_root AS metadataRoot,
     repository_path AS repositoryPath, held_reason AS reason, checked_at AS checkedAt
     FROM worktree_maintenance_roots WHERE held_reason IS NOT NULL AND metadata_root > ?
-    ORDER BY metadata_root LIMIT ?`).all(after, pageLimit);
-  return { schema: 'o8/worktree-maintenance/v1', lastPass: readMaintenanceState('last-pass'), holds };
+    ${repo === undefined ? '' : 'AND repository_path = ?'}
+    ORDER BY metadata_root LIMIT ?`).all(...(repo === undefined ? [after, pageLimit] : [after, repo, pageLimit]));
+  return {
+    schema: 'o8/worktree-maintenance/v1',
+    ...(repo === undefined ? {} : { repositoryPath: repo }),
+    // The persisted pass spans repositories; it cannot establish one repository's outcome.
+    lastPass: repo === undefined ? readMaintenanceState('last-pass') : null,
+    holds,
+  };
 }

@@ -40,6 +40,7 @@ export interface GitHubIssueSnapshot {
 
 export interface GitHubPullRequestSnapshot {
   pullRequestId: number;
+  repositoryId?: number | null;
   repoFullName: string;
   number: number;
   title: string;
@@ -74,6 +75,7 @@ export interface GitHubThreadAttentionSnapshot {
 
 type GitHubPullRequestRow = {
   pullRequestId: number;
+  repositoryId: number | null;
   repoFullName: string;
   number: number;
   title: string;
@@ -108,6 +110,7 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 function mapPullRequestRow(row: GitHubPullRequestRow): GitHubPullRequestSnapshot {
   return {
     pullRequestId: row.pullRequestId,
+    ...(row.repositoryId != null ? { repositoryId: row.repositoryId } : {}),
     repoFullName: row.repoFullName,
     number: row.number,
     title: row.title,
@@ -252,8 +255,8 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
     INSERT INTO github_pull_requests (
       pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
       base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
-      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit, repository_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(pull_request_id) DO UPDATE SET
       repo_full_name = excluded.repo_full_name,
       number = excluded.number,
@@ -274,7 +277,8 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
       closed_at = excluded.closed_at,
       merged_at = excluded.merged_at,
       head_sha = excluded.head_sha,
-      merge_commit = excluded.merge_commit
+      merge_commit = excluded.merge_commit,
+      repository_id = COALESCE(excluded.repository_id, github_pull_requests.repository_id)
   `).run(
     pull.pullRequestId,
     pull.repoFullName,
@@ -297,6 +301,7 @@ export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
     pull.mergedAt,
     pull.headSha ?? null,
     pull.mergeCommit ?? null,
+    Number.isSafeInteger(pull.repositoryId) && pull.repositoryId! > 0 ? pull.repositoryId! : null,
   );
 }
 
@@ -409,8 +414,8 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
     INSERT INTO github_pull_requests (
       pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
       base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
-      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      url, created_at, updated_at, closed_at, merged_at, head_sha, merge_commit, repository_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(pull_request_id) DO UPDATE SET
       repo_full_name = excluded.repo_full_name,
       number = excluded.number,
@@ -431,7 +436,8 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
       closed_at = excluded.closed_at,
       merged_at = excluded.merged_at,
       head_sha = excluded.head_sha,
-      merge_commit = excluded.merge_commit
+      merge_commit = excluded.merge_commit,
+      repository_id = COALESCE(excluded.repository_id, github_pull_requests.repository_id)
   `);
 
   const closeMissing = sqlite.prepare(`
@@ -465,6 +471,7 @@ export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPul
         pull.mergedAt,
         pull.headSha ?? null,
         pull.mergeCommit ?? null,
+        Number.isSafeInteger(pull.repositoryId) && pull.repositoryId! > 0 ? pull.repositoryId! : null,
       );
     }
   });
@@ -557,7 +564,7 @@ export function listMirroredGitHubIssuesByNumber(issueNumber: number): MirroredG
 export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestSnapshot[] {
   const sqlite = getSqlite();
   const rows = sqlite.prepare(`
-    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+    SELECT pull_request_id as pullRequestId, repository_id as repositoryId, repo_full_name as repoFullName, number, title, state,
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
@@ -574,7 +581,7 @@ export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestS
 export function getGitHubPullRequestByNumber(repoFullName: string, prNumber: number): GitHubPullRequestSnapshot | null {
   const sqlite = getSqlite();
   const row = sqlite.prepare(`
-    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+    SELECT pull_request_id as pullRequestId, repository_id as repositoryId, repo_full_name as repoFullName, number, title, state,
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
@@ -589,7 +596,7 @@ export function getGitHubPullRequestByNumber(repoFullName: string, prNumber: num
 export function getGitHubPullRequestByHead(repoFullName: string, headRefName: string): GitHubPullRequestSnapshot | null {
   const sqlite = getSqlite();
   const row = sqlite.prepare(`
-    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+    SELECT pull_request_id as pullRequestId, repository_id as repositoryId, repo_full_name as repoFullName, number, title, state,
            author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
            additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
            status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,

@@ -410,7 +410,11 @@ const DRAIN_BATCH = 8;
  * exactly once: the claim is the stamp, and only running or cancelling the
  * watch clears it.
  */
-export async function drainParkedSymonWatches(nowMs: number = Date.now()): Promise<AutomationFire[]> {
+export async function drainParkedSymonWatches(nowMs?: number): Promise<AutomationFire[]> {
+  const clock = () => nowMs ?? Date.now();
+  // A phone registration can drain between scheduler ticks. Its deadline must
+  // be enforced here too, before any completion frame leaves the desktop.
+  expireSymonWatches(clock());
   const parked = symonWatchRows(
     'symon_parked_at IS NOT NULL AND symon_nudged_at IS NULL',
     [],
@@ -418,7 +422,14 @@ export async function drainParkedSymonWatches(nowMs: number = Date.now()): Promi
   );
   const drained: AutomationFire[] = [];
   for (const row of parked) {
-    if (!claimWatchAnnouncement(row.id, nowMs)) continue;
+    // Earlier deliveries can wait on the bridge. Refresh the production clock
+    // before each announcement; a supplied scheduler/test time stays fixed.
+    const announcementAt = clock();
+    if (row.watchExpiresAt != null && row.watchExpiresAt <= announcementAt) {
+      expireSymonWatch(row, announcementAt);
+      continue;
+    }
+    if (!claimWatchAnnouncement(row.id, announcementAt)) continue;
     const fire = row.symonParkedFireId ? getAutomationFire(row.symonParkedFireId) ?? null : null;
     let delivered = 0;
     try {
@@ -439,7 +450,7 @@ export async function drainParkedSymonWatches(nowMs: number = Date.now()): Promi
       redactedSummary: row.name,
       outcome: 'delivered',
       sessionId: row.symonSessionId,
-      nowMs,
+      nowMs: announcementAt,
     });
     if (fire) drained.push(fire);
   }
@@ -454,25 +465,36 @@ export async function drainParkedSymonWatches(nowMs: number = Date.now()): Promi
  * disables an expired row but cannot reach Symon's ledger. It touches no
  * network, so it is cheap enough to run first.
  */
+function expireSymonWatch(row: AutomationRow, nowMs: number): boolean {
+  // The scheduler, a reconnect and a run claim may race across processes.
+  // Only the transition winner cancels fires and appends the expiry receipt.
+  const expired = getSqlite().prepare(`
+    UPDATE automations SET enabled = 0, symon_parked_at = NULL,
+      symon_parked_fire_id = NULL, symon_nudged_at = NULL,
+      symon_run_claimed_at = NULL, last_error_message = 'Watch expired.'
+    WHERE id = ? AND watch_expires_at IS NOT NULL AND watch_expires_at <= ?
+      AND (enabled = 1 OR symon_parked_at IS NOT NULL)
+  `).run(row.id, nowMs);
+  if (expired.changes !== 1) return false;
+  cancelAutomationFires(row.id, 'Watch expired.', nowMs);
+  recordSymonWatchLedgerEvent({
+    watchId: row.id,
+    phase: 'watch_expired',
+    redactedSummary: row.name,
+    outcome: 'expired',
+    sessionId: row.symonSessionId,
+    nowMs,
+  });
+  return true;
+}
+
 export function expireSymonWatches(nowMs: number = Date.now()): string[] {
   const expiring = symonWatchRows(
     'watch_expires_at IS NOT NULL AND watch_expires_at <= ?'
     + ' AND (enabled = 1 OR symon_parked_at IS NOT NULL)',
     [nowMs],
   );
-  for (const row of expiring) {
-    cancelAutomationFires(row.id, 'Watch expired.', nowMs);
-    closeWatch(row.id, 'Watch expired.');
-    recordSymonWatchLedgerEvent({
-      watchId: row.id,
-      phase: 'watch_expired',
-      redactedSummary: row.name,
-      outcome: 'expired',
-      sessionId: row.symonSessionId,
-      nowMs,
-    });
-  }
-  return expiring.map((row) => row.id);
+  return expiring.filter((row) => expireSymonWatch(row, nowMs)).map((row) => row.id);
 }
 
 // ── symon_watch_run ─────────────────────────────────────────────────────────
@@ -492,6 +514,10 @@ export function claimSymonWatchPlanBody(
   const row = getSymonWatch(id);
   if (!row) return { ok: false, error: 'unknown watch' };
   if (row.watchActionKind !== 'symon_plan') return { ok: false, error: 'this watch reports, it has no plan to run' };
+  if (row.watchExpiresAt != null && row.watchExpiresAt <= nowMs) {
+    expireSymonWatch(row, nowMs);
+    return { ok: false, error: 'this watch has expired' };
+  }
   if (row.symonParkedAt == null) return { ok: false, error: 'this watch has not fired yet' };
   const then = symonWatchThen(row);
   if (!then || then.kind !== 'plan') return { ok: false, error: 'the saved plan body is unreadable' };

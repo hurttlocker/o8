@@ -95,7 +95,7 @@ export async function runAutomationSchedulerTick(input: {
   // automations their tick.
   let symonDrained = 0;
   try {
-    symonDrained = (await drainParkedSymonWatches(nowMs)).length;
+    symonDrained = (await drainParkedSymonWatches(input.nowMs)).length;
   } catch (error) {
     console.warn('[automations-scheduler] Symon watch drain failed:', error);
   }

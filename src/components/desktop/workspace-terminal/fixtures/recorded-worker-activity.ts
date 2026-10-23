@@ -352,3 +352,13 @@ export const recordedWorkerActivity: RecordedWorkerActivity[] = [
     'source': 'file_change'
   }
 ];
+
+// This catalog was collected across runs, not as one chronological turn.
+// The acceptance preview arranges its unchanged samples into work phases.
+// Actual transcripts always retain their original order.
+export const phasedRecordedWorkerActivity = [
+  0, 1, 2, 3, 4, 5, 16, 29,
+  6, 7, 8, 9, 10, 28,
+  11, 12, 13, 14, 27, 15, 17, 18,
+  19, 20, 21, 22, 23, 24, 25, 26, 30,
+].map(index => recordedWorkerActivity[index]);

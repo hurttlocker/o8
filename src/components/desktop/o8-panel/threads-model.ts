@@ -42,7 +42,10 @@ export function scopeThreadAgents(agents: FleetAgent[], tasks: TaskPoolTask[], s
 }
 
 export function threadStatusLine(task: TaskPoolTask): string {
-  if (task.blockedReason) return task.blockedReason.replace(/_/g, ' ');
+  if (task.blockedReason) {
+    const reason = task.blockedReason;
+    return /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(reason) ? reason.replace(/_/g, ' ') : reason;
+  }
   if (task.execution?.leaseState === 'expired') return 'Worker connection expired. Reconnect or retry this task.';
   if (task.lastEventLabel && !/^[a-z]+(?:_[a-z0-9]+)+$/.test(task.lastEventLabel)) return task.lastEventLabel;
   return task.summary || THREAD_GROUPS.find((group) => group.id === task.group)?.label || 'Waiting for an update';

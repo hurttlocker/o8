@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeLaunchRequest, RuntimeLaunchResult } from '@/lib/runtime/actions';
 import { RuntimeLaunchPostEffectError } from '@/lib/runtime/launch-governance';
+import { THINKING_EFFORTS } from '@/lib/orchestrator/thinking-effort';
 
 const h = vi.hoisted(() => ({
   launch: vi.fn<(request: RuntimeLaunchRequest) => Promise<RuntimeLaunchResult>>(async (request) => ({
@@ -37,6 +38,7 @@ process.env.CORTEX_IDE_OWNED_CODEX_ROOT = join(dataDir, 'owned-codex');
 const route = await import('@/app/api/runtime/launch/route');
 const idempotency = await import('@/lib/orchestrator/idempotency-store');
 const { closeDb } = await import('@/lib/db');
+const { getOperatorDefaults, updateOperatorDefaults } = await import('@/lib/operator/defaults');
 
 function post(body: unknown) {
   return new NextRequest('http://localhost:3001/api/runtime/launch', {
@@ -84,6 +86,119 @@ describe('runtime launch persisted idempotency through the real route', () => {
     await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('clientMutationId') });
     expect(h.launch).not.toHaveBeenCalled();
     expect(h.publish).not.toHaveBeenCalled();
+  });
+
+  it.each(['turbo', '', 'HIGH', 1, false, null, {}, ['high']].map((effort) => [effort]))(
+    'rejects malformed effort %j before binding the mutation identity', async (effort) => {
+      const body = {
+        runtime: 'codex', prompt: 'Inspect the fixture.', cwd: dataDir,
+        clientMutationId: 'invalid-effort-correction', effort,
+      };
+      const response = await route.POST(post(body));
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining('effort'), code: 'invalid_effort',
+      });
+      expect(h.launch).not.toHaveBeenCalled();
+      expect(h.publish).not.toHaveBeenCalled();
+
+      const corrected = { ...body, effort: 'high' };
+      expect((await route.POST(post(corrected))).status).toBe(200);
+      expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'high' }));
+      closeDb();
+      const replay = await route.POST(post(corrected));
+      expect(replay.status).toBe(200);
+      expect(replay.headers.get('x-o8-idempotency-replayed')).toBe('1');
+      expect(h.launch).toHaveBeenCalledTimes(1);
+      expect(h.publish).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([undefined, ...THINKING_EFFORTS])('preserves supported effort %s', async (effort) => {
+    const response = await route.POST(post({
+      runtime: 'codex', prompt: 'Inspect the fixture.', cwd: dataDir,
+      clientMutationId: 'valid-effort', model: 'gpt-6.1-sol', effort,
+    }));
+    expect(response.status).toBe(200);
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort }));
+  });
+
+  it.each([
+    { runtime: 'gemini', model: 'gemini-3-pro-preview', effort: 'high', code: 'effort_unsupported_runtime' },
+    { runtime: 'opencode', model: 'opencode/deepseek-v4-flash-free', effort: 'low', code: 'effort_unsupported_runtime' },
+    { runtime: 'cursor', model: 'cursor-agent', effort: 'medium', code: 'effort_unsupported_runtime' },
+    { runtime: 'codex', model: 'gpt-6-luna', effort: 'ultra', code: 'effort_coerced' },
+    { runtime: 'codex', model: 'gpt-5.5', effort: 'max', code: 'effort_coerced' },
+    { runtime: 'cloud', model: 'gpt-6-luna', effort: 'ultra', code: 'effort_coerced' },
+    { runtime: 'claude-code', model: 'claude-opus-4-7', effort: 'ultra', code: 'effort_coerced' },
+  ])('refuses an unpreservable pin before binding: $runtime/$model/$effort', async ({ code, ...selection }) => {
+    const body = {
+      ...selection, prompt: 'Inspect the fixture.', cwd: dataDir,
+      clientMutationId: 'incompatible-effort-correction',
+    };
+    const response = await route.POST(post(body));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code });
+    expect(h.launch).not.toHaveBeenCalled();
+    expect(h.publish).not.toHaveBeenCalled();
+
+    // A refusal must leave the mutation ID usable, including after reopening
+    // the actual receipt database. A valid correction then has normal replay.
+    closeDb();
+    const corrected = { ...body, runtime: 'codex', model: 'gpt-6.1-sol', effort: 'high' };
+    expect((await route.POST(post(corrected))).status).toBe(200);
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      runtime: 'codex', model: 'gpt-6.1-sol', effort: 'high',
+    }));
+    closeDb();
+    const replay = await route.POST(post(corrected));
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('x-o8-idempotency-replayed')).toBe('1');
+    expect(h.launch).toHaveBeenCalledTimes(1);
+    expect(h.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { runtime: 'gemini', effort: undefined },
+    { runtime: 'gemini', effort: 'adaptive' },
+    { runtime: 'opencode', effort: 'adaptive' },
+    { runtime: 'codex', model: 'gpt-6-luna', effort: 'max' },
+    { runtime: 'claude-code', model: 'claude-opus-4-7', effort: 'max' },
+    { runtime: 'muse', model: 'muse-wonder', effort: 'high' },
+  ])('preserves supported selection $runtime/$effort', async (selection) => {
+    const response = await route.POST(post({
+      ...selection, prompt: 'Inspect the fixture.', cwd: dataDir,
+      clientMutationId: 'supported-runtime-effort',
+    }));
+    expect(response.status).toBe(200);
+    expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(selection));
+  });
+
+  it.each([
+    { defaultModel: '', model: undefined, status: 400 },
+    { defaultModel: 'gpt-6-luna', model: undefined, status: 400 },
+    { defaultModel: 'gpt-6.1-sol', model: undefined, status: 200 },
+    { defaultModel: 'gpt-6-luna', model: 'gpt-6.1-sol', status: 200 },
+  ])('checks the effective Codex model: default=$defaultModel, explicit=$model', async ({ defaultModel, model, status }) => {
+    const original = (await getOperatorDefaults()).values.defaultDispatchModel;
+    try {
+      await updateOperatorDefaults({ defaultDispatchModel: defaultModel });
+      closeDb();
+      const response = await route.POST(post({
+        runtime: 'codex', model, effort: 'ultra', prompt: 'Inspect the fixture.',
+        cwd: dataDir, clientMutationId: 'default-model-effort',
+      }));
+      expect(response.status).toBe(status);
+      if (status === 400) {
+        await expect(response.json()).resolves.toMatchObject({ code: 'effort_coerced' });
+        expect(h.launch).not.toHaveBeenCalled();
+        expect(h.publish).not.toHaveBeenCalled();
+      } else {
+        expect(h.launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ effort: 'ultra', model }));
+      }
+    } finally {
+      await updateOperatorDefaults({ defaultDispatchModel: original });
+    }
   });
 
   it('retains the single-attempt limit in the real route and its persisted request binding', async () => {

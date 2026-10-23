@@ -5,6 +5,8 @@ import { printHumanHeading, printJson, type OutputMode } from '../output.js';
 interface UpdateApplyResponse {
   ok?: boolean;
   requested?: boolean;
+  checkedAt?: string | null;
+  checkAgeMs?: number | null;
   forced?: boolean;
   message?: string;
   error?: { code?: string; message?: string };
@@ -35,21 +37,22 @@ export async function runUpdate(
   subcommand: string | undefined,
   rest: string[],
 ): Promise<number> {
-  if (subcommand !== 'apply') {
+  if (subcommand !== 'apply' && subcommand !== 'check') {
     throw new CliError(
       'unknown_update_subcommand',
       `Unknown update subcommand: ${subcommand ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Run `o8 update apply [--force]`.',
+      'Run `o8 update check` or `o8 update apply [--check] [--force]`.',
     );
   }
-  const unknown = rest.find((arg) => arg !== '--force');
+  const checkOnly = subcommand === 'check';
+  const unknown = rest.find((arg) => checkOnly || (arg !== '--force' && arg !== '--check'));
   if (unknown) {
     throw new CliError(
       'unknown_update_apply_flag',
       `Unknown update apply flag: ${unknown}`,
       EXIT.INVALID_ARGS,
-      'Run `o8 update apply [--force]`.',
+      'Run `o8 update check` or `o8 update apply [--check] [--force]`.',
     );
   }
 
@@ -57,24 +60,26 @@ export async function runUpdate(
   const response = await apiFetch<UpdateApplyResponse>(
     resolveConfig(),
     '/api/panel/update/apply',
-    { method: 'POST', body: { force }, allowConflict: true },
+    { method: 'POST', body: { force, ...(checkOnly ? { checkOnly: true } : rest.includes('--check') ? { checkNow: true } : {}) }, allowConflict: true, allowUnavailable: true, timeoutMs: 35_000 },
   );
   const data = response.data ?? {};
   const payload = {
-    schema: 'o8/cli/update.apply/v1',
+    schema: checkOnly ? 'o8/cli/update.check/v1' : 'o8/cli/update.apply/v1',
     ok: data.ok === true,
     requested: data.requested === true,
     forced: data.forced === true,
     version: data.state?.version ?? null,
     result: data.result?.code ?? null,
     check: data.state?.check ?? null,
+    checkedAt: data.checkedAt ?? null,
+    checkAgeMs: data.checkAgeMs ?? null,
     message: data.message ?? data.error?.message ?? null,
     error: data.error ?? null,
     idle: data.idle ?? null,
   };
 
   if (mode.human) {
-    printHumanHeading('o8 update apply');
+    printHumanHeading(`o8 update ${subcommand}`);
     process.stdout.write(`  ${payload.message ?? (payload.requested ? 'Update apply requested.' : 'Update apply refused.')}\n`);
     const active = data.idle?.active;
     for (const lane of active?.lanes ?? []) {
@@ -93,5 +98,5 @@ export async function runUpdate(
     printJson(payload);
   }
 
-  return response.status === 409 ? EXIT.CONFLICT : 0;
+  return response.status === 409 ? EXIT.CONFLICT : response.status === 503 ? EXIT.INVALID_ARGS : 0;
 }
