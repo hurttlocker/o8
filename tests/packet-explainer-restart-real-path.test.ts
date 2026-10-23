@@ -3,9 +3,12 @@ import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const backendMocks = vi.hoisted(() => ({ sendTurn: vi.fn() }));
+vi.mock('@/lib/startup/schedule', () => ({ scheduleNextServerStartup: vi.fn() }));
+vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: vi.fn() }));
 vi.mock('@/lib/telemetry/crash-capture', () => ({ installProcessCrashCapture: vi.fn() }));
 vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: vi.fn() }));
 vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: vi.fn() }));
@@ -113,6 +116,12 @@ describe('explainer process and durable queue restart contract', () => {
     const { register } = await import('@/instrumentation');
     try {
       await register();
+      const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+      const { POST } = await import('@/app/api/review/auto-review/route');
+      expect((await POST(new NextRequest('http://127.0.0.1/api/review/auto-review', {
+        method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
+        body: JSON.stringify({ action: 'bootstrap' }),
+      }))).status).toBe(200);
       await vi.waitFor(() => expect(serverRuntime.__o8ReviewQueueDrain).toBeDefined(), { timeout: 10_000 });
       expect(queueRow(id)).toMatchObject({ status: 'in_progress', claim_owner: owner });
       expect(backendMocks.sendTurn).not.toHaveBeenCalled();

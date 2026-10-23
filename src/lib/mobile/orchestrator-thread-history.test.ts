@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,24 @@ afterEach(() => {
 });
 
 describe('orchestrator thread history persistence', () => {
+  it('repairs persisted legacy history before first use while post-health startup is still pending', async () => {
+    const history = await loadHistoryModule();
+    mkdirSync(history.ORCHESTRATOR_HISTORY_DIR, { recursive: true });
+    const file = history.safeOrchestratorHistoryPath('thoughts-first-use');
+    writeFileSync(file, JSON.stringify({
+      repoPath: join(process.env.O8_DATA_DIR!, 'repo'), backend: 'codex',
+      messages: [
+        { id: 'answer', role: 'assistant', content: 'answer', timestamp: 999 },
+        { id: 'question', role: 'user', content: `${COMPOSER_MODE_DIRECTIVES.solo}\n\nquestion`, timestamp: 1_000 },
+      ],
+    }));
+    expect(history.readOrchestratorThreadMessages('thoughts-first-use')).toEqual([
+      { role: 'user', content: 'question' }, { role: 'assistant', content: 'answer' },
+    ]);
+    expect(JSON.parse(readFileSync(file, 'utf8')).messages.map((message: { role: string }) => message.role))
+      .toEqual(['user', 'assistant']);
+  });
+
   it('repairs exact legacy composer preambles in bubbles and auto-derived titles', async () => {
     const history = await loadHistoryModule();
     const thread = history.createMobileOrchestratorThread({
@@ -49,6 +67,8 @@ describe('orchestrator thread history persistence', () => {
       timestampMs: 1_000,
     });
 
+    // Simulate an install whose legacy history predates the repair marker.
+    rmSync(join(process.env.O8_DATA_DIR!, '.composer-preamble-repaired-v1'), { force: true });
     history.repairComposerPreamblePollution();
 
     const persisted = JSON.parse(

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   ensureReviewQueueDrainStarted: vi.fn(),
 }));
 
+vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: vi.fn() }));
+vi.mock('@/lib/lane/registry', () => ({ getLane: vi.fn() }));
+vi.mock('@/lib/lane/auto-review', () => ({ triggerAutoReview: vi.fn() }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({
   ensureReviewQueueDrainStarted: mocks.ensureReviewQueueDrainStarted,
 }));
@@ -58,10 +62,20 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useFakeTimers();
+  delete (globalThis as { __o8NextStartupScheduled?: boolean }).__o8NextStartupScheduled;
+  delete (globalThis as { __o8NextOptionalStartup?: Promise<void> }).__o8NextOptionalStartup;
+  vi.stubGlobal('fetch', mocks.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/panel/status')) return Response.json({ product: 'o8' });
+    const { POST } = await import('@/app/api/review/auto-review/route');
+    return POST(new NextRequest(url, { ...init, signal: init?.signal ?? undefined }));
+  }));
   process.env.NEXT_RUNTIME = 'nodejs';
   delete process.env.O8_PACKAGED_APP;
   delete process.env.NEXT_PHASE;
 });
+
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 afterAll(() => {
   vi.unstubAllGlobals();
@@ -84,10 +98,11 @@ describe('cold-start instrumentation', () => {
     const { register } = await import('@/instrumentation');
 
     await register();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.dynamicImportSettled();
 
     expect(mocks.warmupOpenRouter).not.toHaveBeenCalled();
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls.every(([url]) => new URL(String(url)).hostname === '127.0.0.1')).toBe(true);
     expect(mocks.ensureEdgeTtsInstalled).not.toHaveBeenCalled();
     expect(mocks.pythonSpawn).not.toHaveBeenCalled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
@@ -97,9 +112,10 @@ describe('cold-start instrumentation', () => {
     process.env.O8_PACKAGED_APP = '1';
     const { register } = await import('@/instrumentation');
     await register();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).toHaveBeenCalledTimes(1);
-    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls.every(([url]) => new URL(String(url)).hostname === '127.0.0.1')).toBe(true);
   });
 
   it('does not start queues during a production build or in the edge runtime', async () => {
@@ -107,12 +123,14 @@ describe('cold-start instrumentation', () => {
     process.env.NEXT_PHASE = 'phase-production-build';
     const { register } = await import('@/instrumentation');
     await register();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
     delete process.env.NEXT_PHASE;
     process.env.NEXT_RUNTIME = 'edge';
     await register();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.dynamicImportSettled();
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
   });
 });

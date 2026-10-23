@@ -8,13 +8,8 @@ import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const sourceFile = path.resolve('src/instrumentation.ts');
 const bootstrapRequests = [
-  '@/lib/lane/review-drain-bootstrap',
   '@/lib/telemetry/crash-capture',
-  '@/lib/telemetry/uploader',
-  '@/lib/telemetry/sentry-node',
-  '@/lib/mobile/orchestrator-thread-history',
-  '@/lib/search/backfill',
-  '@/lib/symon/messages-receiver/loop',
+  '@/lib/startup/schedule',
 ];
 
 interface CompilationStats {

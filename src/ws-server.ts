@@ -429,7 +429,7 @@ if (TERMINAL_HOST_MODE === 'child') {
   }
 }
 
-void import('node-pty')
+const terminalHostReady = import('node-pty')
   .then((mod) => {
     // Inline mode (or child fallback): back the host with in-process node-pty.
     if (!terminalHost) {
@@ -2173,8 +2173,11 @@ function wireForClient(client: ClientState, plaintext: string): string {
 /** Initial per-client state (inbox + orchestrator snapshot). Deferred past the
  *  handshake for E2EE clients so it never goes out in plaintext. */
 function sendInitialClientState(client: ClientState): void {
-  void syncClientInbox(client);
-  sendOrchestratorThreadSnapshot(client);
+  void wsStartupReady.then(() => {
+    if (client.ws.readyState !== WebSocket.OPEN) return;
+    void syncClientInbox(client);
+    sendOrchestratorThreadSnapshot(client);
+  });
 }
 
 /** Require E2EE for a remote per-device-token client. Initial state stays
@@ -3617,7 +3620,7 @@ function startAttachedBrowserRefreshLoop() {
 
 const clients = new Map<string, ClientState>();
 
-function handleClientMessage(client: ClientState, raw: string) {
+async function handleClientMessage(client: ClientState, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
 
@@ -3645,6 +3648,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     handleE2eeInit(client, msg);
     return;
   }
+
+  if (msg.type !== 'ping') await wsStartupReady;
+  if (shuttingDown || client.ws.readyState !== WebSocket.OPEN || !clients.has(client.id)) return;
 
   switch (msg.type) {
     case 'subscribe':
@@ -7655,7 +7661,17 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 
 // ── Server startup ──
 
-const httpServer = createServer((req, res) => {
+const httpServer = createServer(async (req, res) => {
+  // Transport health is independent of Next and recovery. Stateful requests
+  // retain the original recovery-before-use ordering.
+  if (req.url !== '/health') await wsStartupReady;
+  if (shuttingDown || req.destroyed || res.destroyed) {
+    if (!res.destroyed) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'startup_unavailable' }));
+    }
+    return;
+  }
   // CORS headers — allow localhost, Tauri, and private/Tailscale IPs (mobile remote access)
   const { apiPort } = resolvePortInfo();
   const allowedOrigins = new Set([
@@ -8917,7 +8933,9 @@ wss.on('connection', (ws, req) => {
   } else {
     sendInitialClientState(client);
   }
-  startBrowserDiscoveryRealtimeLoop();
+  void wsStartupReady.then(() => {
+    if (!shuttingDown && client.ws.readyState === WebSocket.OPEN) startBrowserDiscoveryRealtimeLoop();
+  });
 
   ws.on('message', (raw) => {
     handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString());
@@ -9399,63 +9417,64 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
   }
 }
 
-// Watch .git directory for changes (commits, merges, rebases)
-if (existsSync(GIT_DIR)) {
-  // Watch refs (branch tips change on commit/push)
-  const refsDir = resolve(GIT_DIR, 'refs');
-  if (existsSync(refsDir)) {
-    // An unhandled FSWatcher 'error' (refs pruned during rebase/gc) crashes the process.
-    watch(refsDir, { recursive: true }, () => {
-      markConflictsDirty();
-      scheduleReviewRefresh();
-    }).on('error', (err) => {
-      console.warn('[ws-server] git refs watcher error:', err);
-      conflictWatchersActive = false;
-    });
-    conflictWatchersActive = true;
+function startReviewWatchers(): void {
+  // Watch .git directory for changes (commits, merges, rebases)
+  if (existsSync(GIT_DIR)) {
+    // Watch refs (branch tips change on commit/push)
+    const refsDir = resolve(GIT_DIR, 'refs');
+    if (existsSync(refsDir)) {
+      // An unhandled FSWatcher 'error' (refs pruned during rebase/gc) crashes the process.
+      watch(refsDir, { recursive: true }, () => {
+        markConflictsDirty();
+        scheduleReviewRefresh();
+      }).on('error', (err) => {
+        console.warn('[ws-server] git refs watcher error:', err);
+        conflictWatchersActive = false;
+      });
+      conflictWatchersActive = true;
+    }
+    // Watch index (staged files change)
+    const indexFile = resolve(GIT_DIR, 'index');
+    if (existsSync(indexFile)) {
+      watch(indexFile, () => {
+        markConflictsDirty();
+        scheduleReviewRefresh();
+      }).on('error', (err) => {
+        console.warn('[ws-server] git index watcher error:', err);
+        conflictWatchersActive = false;
+      });
+    }
+    // Worktree metadata: HEAD/index writes for each linked worktree, plus the
+    // add/remove of the worktrees themselves. Small directory, cheap to watch —
+    // and a new worktree appearing is what tells us to attach its tree watcher.
+    const gitWorktreesDir = resolve(GIT_DIR, 'worktrees');
+    if (existsSync(gitWorktreesDir)) {
+      watch(gitWorktreesDir, { recursive: true }, () => {
+        markConflictsDirty();
+        ensureWorktreeWatchers();
+      }).on('error', (err) => {
+        console.warn('[ws-server] git worktrees watcher error:', err);
+        conflictWatchersActive = false;
+      });
+    }
+    console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
   }
-  // Watch index (staged files change)
-  const indexFile = resolve(GIT_DIR, 'index');
-  if (existsSync(indexFile)) {
-    watch(indexFile, () => {
-      markConflictsDirty();
-      scheduleReviewRefresh();
-    }).on('error', (err) => {
-      console.warn('[ws-server] git index watcher error:', err);
-      conflictWatchersActive = false;
-    });
-  }
-  // Worktree metadata: HEAD/index writes for each linked worktree, plus the
-  // add/remove of the worktrees themselves. Small directory, cheap to watch —
-  // and a new worktree appearing is what tells us to attach its tree watcher.
-  const gitWorktreesDir = resolve(GIT_DIR, 'worktrees');
-  if (existsSync(gitWorktreesDir)) {
-    watch(gitWorktreesDir, { recursive: true }, () => {
-      markConflictsDirty();
-      ensureWorktreeWatchers();
-    }).on('error', (err) => {
-      console.warn('[ws-server] git worktrees watcher error:', err);
-      conflictWatchersActive = false;
-    });
-  }
-  console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
+  ensureWorktreeWatchers();
+  // A worktree base dir created after boot (first dispatch of the session) has no
+  // watcher yet. Re-attaching is idempotent and costs a couple of stat()s, so a
+  // slow re-check closes that gap without any hot-path work — and pulls in the
+  // registered-repo bases (#1484) once the repo list is readable.
+  setInterval(() => {
+    void listRepoPaths()
+      .then((paths) => ensureWorktreeWatchers(paths))
+      .catch(() => ensureWorktreeWatchers());
+  }, 30_000).unref?.();
+
+  reviewPollTimer = setInterval(() => {
+    scheduleReviewRefresh(0, false);
+  }, REVIEW_POLL_INTERVAL_MS);
+  if (reviewPollTimer.unref) reviewPollTimer.unref();
 }
-
-ensureWorktreeWatchers();
-// A worktree base dir created after boot (first dispatch of the session) has no
-// watcher yet. Re-attaching is idempotent and costs a couple of stat()s, so a
-// slow re-check closes that gap without any hot-path work — and pulls in the
-// registered-repo bases (#1484) once the repo list is readable.
-setInterval(() => {
-  void listRepoPaths()
-    .then((paths) => ensureWorktreeWatchers(paths))
-    .catch(() => ensureWorktreeWatchers());
-}, 30_000).unref?.();
-
-reviewPollTimer = setInterval(() => {
-  scheduleReviewRefresh(0, false);
-}, REVIEW_POLL_INTERVAL_MS);
-if (reviewPollTimer.unref) reviewPollTimer.unref();
 
 // Session preservation strategy:
 // - cortex-dash-* sessions survive server restarts for reuse (findExistingDashSession).
@@ -9484,12 +9503,8 @@ async function recoverFromPortInUse(): Promise<void> {
       console.log(`[ws-server] Port ${WS_PORT} reported in use but no listener found — retrying`);
     }
     setTimeout(() => {
-      httpServer.listen(WS_PORT, '0.0.0.0', () => {
-        console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
-        wsWatchdog.start();
-        startRelayConnectorIfEnabled();
-        startMachineAttachSupervisor();
-      });
+      if (shuttingDown) return;
+      httpServer.listen(WS_PORT, '0.0.0.0');
     }, 500);
   } catch (error) {
     console.error(
@@ -9514,13 +9529,25 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 async function bootstrapWsServer() {
+  await new Promise<void>((done) => {
+    httpServer.once('listening', () => {
+      console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+      done();
+    });
+    httpServer.listen(WS_PORT, '0.0.0.0');
+  });
+
   await waitForNextReady();
+  if (shuttingDown) return;
+  await terminalHostReady;
+  if (shuttingDown) return;
 
   const db = getDb();
   if (db) {
     expireStaleApprovals();
   }
 
+  if (shuttingDown) return;
   try {
     await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);
   } catch (error) {
@@ -9529,6 +9556,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     const { runWorktreeMaintenanceTick } = await import('@/lib/lane/worktree-reaper');
     await runWorktreeMaintenanceTick(REPO_ROOT);
@@ -9538,6 +9566,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     const { sweepMergedPacketVerificationIncidents } = await import('@/lib/supervisor/merged-incident-resolution');
     const resolved = sweepMergedPacketVerificationIncidents({ event: 'startup_sweep' });
@@ -9563,9 +9592,12 @@ async function bootstrapWsServer() {
       );
     }
   };
+  if (shuttingDown) return;
   await checkLaunchAgentHealth();
+  if (shuttingDown) return;
   setInterval(() => { void checkLaunchAgentHealth(); }, 60_000).unref();
 
+  if (shuttingDown) return;
   try {
     const { sweepPacketsMergedByAncestry } = await import('@/lib/orchestrator/merged-by-ancestry');
     const result = await sweepPacketsMergedByAncestry();
@@ -9578,6 +9610,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
     const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
@@ -9590,6 +9623,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     const { startStorageAdmissionReconciliation } = await import(
       '@/lib/ws-server/storage-admission-reconciliation'
@@ -9622,6 +9656,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     const { reconcileResourceLeasesAtStartup } = await import(
       '@/lib/leases/resource-lease-service'
@@ -9642,6 +9677,7 @@ async function bootstrapWsServer() {
   }
 
   let dependencyImagesReconciled = false;
+  if (shuttingDown) return;
   try {
     const { reconcileDependencyImagesAtStartup } = await import(
       '@/lib/workspace/dependency-image-startup'
@@ -9670,6 +9706,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   try {
     const [
       { reconcileStuckLanes, reconcileOrphanedWorktrees },
@@ -9695,6 +9732,7 @@ async function bootstrapWsServer() {
     );
   }
 
+  if (shuttingDown) return;
   // #534 follow-up — periodic sweep catches lanes whose worktree was deleted
   // out-of-band (orchestrator bash-merge) so the UI heals within 30s even if
   // no API caller triggers the inline reconcile. Cheap: a few existsSync
@@ -9740,15 +9778,16 @@ async function bootstrapWsServer() {
     }
   }, 10 * 60 * 1000).unref();
 
+  if (shuttingDown) return;
+  startReviewWatchers();
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();
   scheduleRealtimeRuntimeRefresh({ reason: 'startup', fresh: false });
   scheduleRealtimeMobileInboxRefresh(500);
 
-  httpServer.listen(WS_PORT, '0.0.0.0', () => {
-    console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
-
+  // Recovery has completed before these services use its state.
+  {
     // Begin event-loop lag sampling (#1498 follow-up).
     wsWatchdog.start();
 
@@ -9945,14 +9984,19 @@ async function bootstrapWsServer() {
         );
       }
     })();
-  });
+  }
 }
 
-void bootstrapWsServer();
+let shuttingDown = false;
+const wsStartupReady = bootstrapWsServer().catch(() => {
+  console.error('[ws-server] Startup initialization failed.');
+  shutdown('startup-failed', 1);
+});
 
 // ── Graceful shutdown ──
 
-function shutdown(signal: string) {
+function shutdown(signal: string, exitCode = 0) {
+  shuttingDown = true;
   console.log(`[ws-server] ${signal} received — shutting down gracefully`);
 
   // Stop agent supervisor and stall detection
@@ -10004,12 +10048,12 @@ function shutdown(signal: string) {
   wss.close(() => {
     httpServer.close(() => {
       console.log('[ws-server] Clean shutdown complete');
-      process.exit(0);
+      process.exit(exitCode);
     });
   });
 
   // Force exit after 3s if something hangs
-  setTimeout(() => process.exit(0), 3000).unref();
+  setTimeout(() => process.exit(exitCode), 3000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
