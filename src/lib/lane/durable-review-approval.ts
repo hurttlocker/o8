@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import type { ApprovalRecord, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { allFindingsResolved } from '@/lib/approvals/orchestrator-review';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
@@ -12,6 +13,7 @@ export interface DurableReviewAssessment {
   highConfidence: boolean;
   approvalId: string | null;
   reason: string;
+  secondPassPending?: boolean;
   /**
    * Deterministic per-requirement coverage verdict. Present whenever a sealed
    * contract applied; `null` for legacy packets. Merge preview surfaces
@@ -190,7 +192,7 @@ async function listChangedPathsForCoverage(
 
   const collect = async (args: string[]): Promise<string[] | null> => {
     try {
-      const { stdout } = await run('git', args, { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 });
+      const { stdout } = await run(resolveGitBinary(), args, { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 });
       return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
     } catch {
       return null;
@@ -226,7 +228,7 @@ async function listUncommittedPaths(cwd: string): Promise<string[] | null> {
   const { promisify } = await import('node:util');
   try {
     const { stdout } = await promisify(execFile)(
-      'git',
+      resolveGitBinary(),
       ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
       { windowsHide: true, cwd, maxBuffer: 8 * 1024 * 1024 },
     );
@@ -326,6 +328,7 @@ export async function assessDurableApprovedReview(
         highConfidence: false,
         approvalId: null,
         reason: 'The latest AI review matches the current HEAD and is awaiting its required second pass.',
+        secondPassPending: true,
       };
     }
     const matching = latestReview

@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
@@ -10,6 +11,8 @@ import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 import { listWorkspaceSnapshotsByPacketId } from '@/lib/worktree/snapshot-state';
 import { enqueueInboxItem } from '@/lib/supervisor/inbox';
+import { probeLaneSessionAlive } from './owned-session-liveness';
+import { getOwnedSessionLifecycle } from '@/lib/runtimes/shared/owned-session-lifecycle';
 
 const execFileAsync = promisify(execFile);
 
@@ -95,7 +98,7 @@ const RECONCILABLE_WORKTREE_STATUSES: ReadonlySet<LaneStatus> = new Set<LaneStat
 // rather than O(lanes) on every reconcile tick.
 async function getLocalBranchSetForRepo(repoPath: string): Promise<Set<string> | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['branch', '--format=%(refname:short)'], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['branch', '--format=%(refname:short)'], {
       windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
@@ -120,7 +123,7 @@ async function getLocalBranchSetForRepo(repoPath: string): Promise<Set<string> |
 async function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: string, branch: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['log', '--format=%s', '-n', '50', baseBranch],
       {
         windowsHide: true,
@@ -139,7 +142,7 @@ async function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: st
 
 async function readRefSha(repoPath: string, ref: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', ref], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['rev-parse', '--verify', ref], {
       windowsHide: true,
       cwd: repoPath,
       encoding: 'utf-8',
@@ -156,7 +159,7 @@ async function isAncestorCommit(repoPath: string, ancestorSha: string, descendan
   try {
     // Direction matters: the lane head must be the ancestor and the base ref
     // must be the descendant. Swapping these args caused #1457-style lies.
-    await execFileAsync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
+    await execFileAsync(resolveGitBinary(), ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
       windowsHide: true,
       cwd: repoPath,
       timeout: 2_000,
@@ -359,7 +362,11 @@ export async function reconcileStuckLanes(): Promise<void> {
       continue;
     }
 
-    if (lane.sessionKey && liveSessionKeys.has(lane.sessionKey)) {
+    const owned = Boolean(lane.sessionKey && getOwnedSessionLifecycle(lane.sessionKey)?.detachedPacketIdentity);
+    const ownedAlive = owned ? await probeLaneSessionAlive(lane) : undefined;
+    // An unidentified survivor must neither rebind nor be finalized as lost.
+    if (owned && ownedAlive === undefined) continue;
+    if (owned ? ownedAlive : lane.sessionKey && liveSessionKeys.has(lane.sessionKey)) {
       reboundCount += 1;
       continue;
     }

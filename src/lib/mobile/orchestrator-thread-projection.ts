@@ -107,6 +107,16 @@ export function normalizeSessionIds(value: unknown): Record<string, string | nul
   return normalized;
 }
 
+/** Fable is a Claude REPL lead and binds the same native telemetry session. */
+export function updateNativeSessionId(value: unknown, backend: MobileOrchestratorBackend, sessionId: unknown) {
+  const ids = normalizeSessionIds(value);
+  const native = backend === 'fable' ? 'claude' : backend;
+  const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+  const touched = (native === 'claude' || native === 'codex') && !!id && ids[native] !== id;
+  if (touched) ids[native] = id;
+  return { ids, touched };
+}
+
 export function normalizeBackend(value: unknown): MobileOrchestratorBackend | null {
   return isOrchestratorBackendId(value) ? value : null;
 }

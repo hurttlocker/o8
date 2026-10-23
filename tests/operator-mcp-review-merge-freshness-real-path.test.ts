@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -39,7 +39,7 @@ const reviewRoute = await import('@/app/api/orchestrator/review/route');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { recordMission } = await import('@/lib/db/missions-store');
-const { createLane } = await import('@/lib/lane/registry');
+const { createLane, getLane, updateLane } = await import('@/lib/lane/registry');
 const { startReviewTurn } = await import('@/lib/lane/review-turn-state');
 const { handleApproveAndMerge } = await import('@/lib/mcp/operator-handlers/approve');
 const { handleSubmitReview } = await import('@/lib/mcp/operator-handlers/mission');
@@ -196,6 +196,54 @@ afterEach(() => {
 afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 
 describe('operator MCP review-to-merge freshness', () => {
+  it.skipIf(process.platform !== 'linux')('merges and retires the owned worktree when Git is absent from PATH', async () => {
+    const fixture = await createFixture();
+    const worktreePath = fixture.lane.worktreePath!;
+    const { readWorktreeMetaSnapshot } = await import('@/lib/worktree/metadata-store');
+    const { bindOwnedPacketSession } = await import('./helpers/managed-packet-worktree');
+    const metadata = Object.values(await readWorktreeMetaSnapshot(fixture.repo))
+      .find((entry) => entry.packetId === fixture.packetId)!;
+    const sessionKey = await bindOwnedPacketSession(fixture.repo, { id: metadata.id, path: worktreePath }, {
+      packetId: fixture.packetId, branch: fixture.lane.branch,
+    });
+    updateLane(fixture.lane.id, { sessionKey }, 'system');
+    await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+    startReviewTurn({ laneId: fixture.lane.id, threadId: `review-${fixture.packetId}`, backend: 'codex', surface: 'auto-review' });
+    parseToolResult(await handleSubmitReview({
+      packetId: fixture.packetId, findings: [], approved: true, reviewedHeadSha: fixture.reviewedHeadSha,
+    }));
+
+    const previousPath = process.env.PATH;
+    // Keep native process probes reachable; Git alone must resolve through a
+    // supported absolute fallback, without inheriting a warm PATH lookup.
+    const emptyPath = mkdtempSync(join(os.tmpdir(), 'o8-empty-git-path-'));
+    tempDirs.push(emptyPath);
+    for (const tool of ['ps', 'pgrep', 'lsof']) {
+      const executable = (previousPath ?? '').split(delimiter).filter(isAbsolute)
+        .map((directory) => join(directory, tool)).find(existsSync);
+      expect(executable, `${tool} is required for real cleanup process probes`).toBeTruthy();
+      symlinkSync(executable!, join(emptyPath, tool));
+    }
+    process.env.PATH = emptyPath;
+    try {
+      const merge = parseToolResult(await handleApproveAndMerge({
+        packetId: fixture.packetId, expectedHeadSha: fixture.reviewedHeadSha,
+      }));
+      expect(merge, JSON.stringify(merge)).toMatchObject({ merged: true });
+      expect(existsSync(worktreePath)).toBe(false);
+      expect(getLane(fixture.lane.id)).toMatchObject({ outcome: 'merged', worktreePath: null });
+      expect(Object.values(await readWorktreeMetaSnapshot(fixture.repo)))
+        .not.toContainEqual(expect.objectContaining({ packetId: fixture.packetId }));
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+    expect(git(fixture.repo, ['rev-parse', 'HEAD'])).toBe(fixture.reviewedHeadSha);
+    expect(git(fixture.repo, ['ls-remote', 'origin', 'refs/heads/main']).split(/\s+/)[0]).toBe(fixture.reviewedHeadSha);
+    expect(readOrchestratorControlPlaneState().packets.find((packet) => packet.id === fixture.packetId))
+      .toMatchObject({ releaseState: 'released', status: 'released' });
+  }, 60_000);
+
   it('merges from the review persisted by the immediately preceding submit_review', async () => {
     const fixture = await createFixture();
     const abbreviatedHeadSha = fixture.reviewedHeadSha.slice(0, 9);

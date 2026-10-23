@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
@@ -22,7 +23,7 @@ const loadLaneRegistry = () => import('@/lib/lane/registry');
 
 async function gitValue(cwd: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', args, {
+    const { stdout } = await execFileAsync(resolveGitBinary(), args, {
       cwd, windowsHide: true, timeout: 5_000, maxBuffer: 512 * 1024,
     });
     return stdout.trim();

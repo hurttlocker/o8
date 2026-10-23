@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { resolveDisplayMessages } from './resolve-display-messages';
+import { compactionThread } from './fixtures/compaction-thread';
 
 function entry(partial: Partial<MobileTranscriptEntry> & { id: string; role: MobileTranscriptEntry['role'] }): MobileTranscriptEntry {
   return { text: '', ...partial };
@@ -26,6 +27,12 @@ function persistedThread(): MobileTranscriptEntry[] {
 }
 
 describe('resolveDisplayMessages', () => {
+  it('inserts a late compaction boundary before later turns and omits carried aliases', () => {
+    const [user, reply, compact, nextUser, nextReply] = compactionThread;
+    const out = resolveDisplayMessages({ historyEntries: [], chatMessages: [user, reply, nextUser, nextReply],
+      streamMessages: [compact, { ...user, id: 'orch-user-orch-send-carried' }] });
+    expect(out.map(entry => entry.id)).toEqual(compactionThread.map(entry => entry.id));
+  });
   it('keeps the restored thread when one live event arrives (#1839)', () => {
     const chatMessages = persistedThread();
     // The stream starts empty and fills on the first live event. One dispatch

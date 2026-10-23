@@ -141,7 +141,7 @@ async function holdPacketForRetrySalvageUnlocked(
     guard.registryOwner = captureRetrySalvageRegistryOwner(fresh, target);
     markPacketRetrySalvageHeld(target, guard);
     return guard;
-  });
+  }, { waitTimeoutMs: 1_000 });
   if (currentGuard) return currentGuard;
 
   const registryEntry = findMissionRegistryEntryByPacketId(input.packetId, {

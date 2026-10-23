@@ -104,10 +104,11 @@ export function createOwnedSessionIo({
     if (!archivePath) return null;
     if (!(await pathExists(metadataPath(archivePath)))) return null;
     const session = await loadSession(archivePath);
-    const rebaseRun = <T extends { stdoutPath: string; stderrPath: string }>(run: T): T => ({
+    const rebaseRun = <T extends { stdoutPath: string; stderrPath: string; stdinPath?: string }>(run: T): T => ({
       ...run,
       stdoutPath: path.join(archivePath, RUNS_DIR, path.basename(run.stdoutPath)),
       stderrPath: path.join(archivePath, RUNS_DIR, path.basename(run.stderrPath)),
+      ...(run.stdinPath ? { stdinPath: path.join(archivePath, RUNS_DIR, path.basename(run.stdinPath)) } : {}),
     });
     return {
       ...session,

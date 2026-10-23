@@ -2,8 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { dirname, join, relative } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { collectBuildTraces, makeIgnoreFn } from 'next/dist/build/collect-build-traces';
+import { copyTracedFiles } from 'next/dist/build/utils';
+import loadConfig from 'next/dist/server/config';
+import { PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { Span } from 'next/dist/trace';
 import nextConfig from '../next.config';
 import { assertMacPackageSize } from '../scripts/lib/mac-package-size.mjs';
 import { assertTauriExportInputsSafe } from '../scripts/lib/tauri-export-safety.mjs';
@@ -69,10 +74,150 @@ function putCache(server: string, kind: 'cache' | 'dev' | 'trace' | 'trace-build
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe('packaging preflight through real filesystem and script entry points', () => {
+  it('filters checkout metadata through Next trace processing before its standalone copy', async () => {
+    const { root } = fixture();
+    const dist = join(root, '.next');
+    const route = join(dist, 'server/app/api/fixture/route.js');
+    const outside = join(root, 'external-checkout');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'keep'), 'outside sentinel');
+    const privateFiles = ['.git/config', '.env', '.env.production.local', '.mcp.json',
+      '.agents/instructions.md', '.claude/settings.json', '.codex/config.toml', '.o8-generated-output-store',
+      'packet-explainer.html'];
+    const runtimeFiles = ['.next/server/app/api/fixture/route.js', 'node_modules/example/.data/runtime.json',
+      'node_modules/example/template.html', 'src/runtime/schema.json', 'public/icon.svg'];
+    for (const file of [...privateFiles, ...runtimeFiles]) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), `fixture:${file}`);
+    }
+    const link = '.claude/worktrees/plugin';
+    mkdirSync(dirname(join(root, link)), { recursive: true });
+    symlinkSync(outside, join(root, link), 'dir');
+    writeFileSync(`${route}.nft.json`, JSON.stringify({ version: 1,
+      files: [...privateFiles, ...runtimeFiles, link].map(file => relative(dirname(route), join(root, file))) }));
+    writeFileSync(join(dist, 'next-server.js.nft.json'), '{"version":1,"files":[]}');
+    // Supply a compiler trace, bypassing the expensive framework dependency graph.
+    // Next's actual per-route exclusions and standalone copier run unchanged.
+    const span = new Span({ name: 'fixture-build' });
+    const traceChild = span.traceChild.bind(span);
+    vi.spyOn(span, 'traceChild').mockImplementation((name, attrs) => {
+      const child = traceChild(name, attrs);
+      if (name === 'node-file-trace-build') vi.spyOn(child, 'traceAsyncFn').mockImplementation(async () => undefined as never);
+      return child;
+    });
+    const config = await loadConfig(PHASE_PRODUCTION_BUILD, root, {
+      customConfig: { ...nextConfig, outputFileTracingRoot: root }, silent: true,
+    });
+    const sharedIgnore = makeIgnoreFn(root, config.outputFileTracingExcludes['*']);
+    for (const file of [...privateFiles, link]) expect(sharedIgnore(join(root, file)), file).toBe(true);
+    for (const file of runtimeFiles) expect(sharedIgnore(join(root, file)), file).toBe(false);
+    await collectBuildTraces({ dir: root, distDir: dist, outputFileTracingRoot: root, config,
+      nextBuildSpan: span, edgeRuntimeRoutes: {}, staticPages: [], buildTraceContext: { chunksTrace: {
+        action: { action: 'annotate', input: [], contextDirectory: root, processCwd: root },
+        outputPath: dist, entryNameFilesMap: { 'app/api/fixture/route': [] },
+      } } });
+    await copyTracedFiles(root, dist, [], ['api/fixture/route'], root, config,
+      { version: 3, middleware: {}, functions: {}, sortedMiddleware: [] }, false, false, new Set());
+    for (const file of [...privateFiles, link]) expect(existsSync(join(dist, 'standalone', file)), file).toBe(false);
+    for (const file of runtimeFiles) expect(readFileSync(join(dist, 'standalone', file), 'utf8')).toBe(`fixture:${file}`);
+    expect(readFileSync(join(outside, 'keep'), 'utf8')).toBe('outside sentinel');
+    expect(() => assertTauriExportInputsSafe(join(dist, 'standalone'))).not.toThrow();
+  });
+
+  it('removes Next explicit environment copies through the production build entry point', () => {
+    const { root } = fixture();
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    writeFileSync(join(root, 'scripts/bust-stale-patch-cache.mjs'), '');
+    const bin = join(root, 'node_modules/next/dist/bin/next.js');
+    mkdirSync(dirname(bin), { recursive: true });
+    writeFileSync(bin, `const fs = require('node:fs');
+      fs.mkdirSync('.next/standalone/.next/server', { recursive: true });
+      for (const name of ['.env', '.env.production']) fs.copyFileSync(name, '.next/standalone/' + name);
+      fs.writeFileSync('.next/standalone/.next/server/runtime.js', 'runtime');`);
+    for (const name of ['.env', '.env.production']) writeFileSync(join(root, name), 'SYNTHETIC_FIXTURE=preserve-source');
+    const result = spawnSync(process.execPath, [join(sourceRoot, 'scripts/build.mjs')], {
+      cwd: root, encoding: 'utf8', timeout: 20_000,
+      env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    for (const name of ['.env', '.env.production']) {
+      expect(existsSync(join(root, '.next/standalone', name)), name).toBe(false);
+      expect(readFileSync(join(root, name), 'utf8')).toBe('SYNTHETIC_FIXTURE=preserve-source');
+    }
+    expect(readFileSync(join(root, '.next/standalone/.next/server/runtime.js'), 'utf8')).toBe('runtime');
+  });
+
+  it('refuses a standalone asset link that detours outside before resolving back inside', () => {
+    const { root, server } = fixture();
+    const outside = join(root, 'outside-link');
+    const asset = join(server, 'public/linked');
+    symlinkSync(join(server, '.next'), outside, 'dir');
+    mkdirSync(dirname(asset), { recursive: true });
+    symlinkSync(outside, asset, 'dir');
+    expect(() => assertTauriExportInputsSafe(server)).toThrow('standalone asset link escapes the package');
+    expect(readFileSync(join(server, '.next/server/app/page.js'), 'utf8')).toContain('runtime:');
+  });
+
+  it.each(['next', 'standalone', 'environment'])('refuses linked %s output before removing an environment copy', kind => {
+    const { root } = fixture();
+    const outside = join(root, 'outside-output');
+    mkdirSync(join(outside, 'standalone'), { recursive: true });
+    for (const parent of [outside, join(outside, 'standalone')]) writeFileSync(join(parent, '.env'), 'outside sentinel');
+    mkdirSync(join(root, 'scripts'));
+    writeFileSync(join(root, 'scripts/bust-stale-patch-cache.mjs'), '');
+    const bin = join(root, 'node_modules/next/dist/bin/next.js');
+    mkdirSync(dirname(bin), { recursive: true });
+    writeFileSync(bin, `const fs = require('node:fs');
+      const outside = ${JSON.stringify(outside)};
+      const kind = ${JSON.stringify(kind)};
+      if (kind === 'next') fs.symlinkSync(outside, '.next', 'dir');
+      else {
+        fs.mkdirSync('.next', { recursive: true });
+        if (kind === 'standalone') fs.symlinkSync(outside, '.next/standalone', 'dir');
+        else {
+          fs.mkdirSync('.next/standalone');
+          fs.symlinkSync(outside + '/.env', '.next/standalone/.env');
+        }
+      }`);
+    const result = spawnSync(process.execPath, [join(sourceRoot, 'scripts/build.mjs')], {
+      cwd: root, encoding: 'utf8', timeout: 20_000,
+      env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root },
+    });
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain(kind === 'environment'
+      ? 'Standalone environment copy must be a regular generated file.'
+      : 'Standalone output must be an isolated generated directory.');
+    for (const parent of [outside, join(outside, 'standalone')]) expect(readFileSync(join(parent, '.env'), 'utf8')).toBe('outside sentinel');
+  });
+
+  it.each(['.git/config', '.env.local', '.mcp.json', '.claude/settings.json', '.codex/config.toml', '.agents/rules.md'])(
+    'refuses checkout metadata %s before the actual exporter clears staging', file => {
+      const { root } = fixture();
+      const standalone = join(root, '.next/standalone');
+      mkdirSync(dirname(join(standalone, file)), { recursive: true });
+      writeFileSync(join(standalone, file), 'synthetic metadata');
+      mkdirSync(join(root, 'out'));
+      writeFileSync(join(root, 'out/keep'), 'previous staging');
+      for (const script of ['tauri-export.mjs', 'native-bundle.mjs', 'tauri-hook-resources.mjs', 'run-lib.mjs',
+        'lib/release-config.mjs', 'lib/tauri-export-safety.mjs', 'lib/packaged-build-inputs.mjs']) {
+        const destination = join(root, 'scripts', script);
+        mkdirSync(dirname(destination), { recursive: true });
+        cpSync(join(sourceRoot, 'scripts', script), destination);
+      }
+      const result = spawnSync(process.execPath, [join(root, 'scripts/tauri-export.mjs')], {
+        cwd: root, encoding: 'utf8', timeout: 10_000, env: { NODE_ENV: 'test', PATH: process.env.PATH, HOME: root },
+      });
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain('standalone build contains checkout metadata');
+      expect(readFileSync(join(root, 'out/keep'), 'utf8')).toBe('previous staging');
+      expect(readFileSync(join(standalone, file), 'utf8')).toBe('synthetic metadata');
+    },
+  );
   it.each(['missing', 'existing', 'repo-denied', 'releases-denied', 'limited', 'ambiguous', 'wrong-tag', 'invalid-json'] as const)(
     'checks release absence through the actual preflight with REST response %s', (scenario) => {
       const f = fixture();

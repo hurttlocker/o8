@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
@@ -48,7 +49,7 @@ export async function performRemoteCustomerMerge(
   let savedBranch: string | null = null;
 
   try {
-    savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    savedBranch = (await execFileAsync(resolveGitBinary(), ['rev-parse', '--abbrev-ref', 'HEAD'], {
       windowsHide: true,
       cwd: lane.repoPath,
       maxBuffer: 1024 * 1024,
@@ -130,8 +131,8 @@ export async function performRemoteCustomerMerge(
       return { ok: false, laneId: command.laneId, note: historyPlan.note };
     }
 
-    await execFileAsync('git', ['checkout', lane.baseBranch], { windowsHide: true, cwd: lane.repoPath });
-    const preMergeHeadSha = (await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    await execFileAsync(resolveGitBinary(), ['checkout', lane.baseBranch], { windowsHide: true, cwd: lane.repoPath });
+    const preMergeHeadSha = (await execFileAsync(resolveGitBinary(), ['rev-parse', 'HEAD'], {
       windowsHide: true,
       cwd: lane.repoPath,
       timeout: 5000,
@@ -146,9 +147,9 @@ export async function performRemoteCustomerMerge(
       }
       mergeArgs.push(actualBranch);
       await withSessionMergePublication(lane.packetId, async () => {
-        await execFileAsync('git', mergeArgs, { windowsHide: true, cwd: lane.repoPath });
+        await execFileAsync(resolveGitBinary(), mergeArgs, { windowsHide: true, cwd: lane.repoPath });
         if (historyPlan.kind === 'squash') {
-          await execFileAsync('git', ['commit', '-m', historyPlan.commitMessage], { windowsHide: true, cwd: lane.repoPath });
+          await execFileAsync(resolveGitBinary(), ['commit', '-m', historyPlan.commitMessage], { windowsHide: true, cwd: lane.repoPath });
         }
       });
     } catch (mergeErr) {
@@ -158,7 +159,7 @@ export async function performRemoteCustomerMerge(
       }
       let conflictFiles: string[] = [];
       try {
-        const { stdout: unmerged } = await execFileAsync('git', ['diff', '--name-only', '--diff-filter=U'], {
+        const { stdout: unmerged } = await execFileAsync(resolveGitBinary(), ['diff', '--name-only', '--diff-filter=U'], {
           windowsHide: true,
           cwd: lane.repoPath,
         });
@@ -169,16 +170,16 @@ export async function performRemoteCustomerMerge(
 
       if (historyPlan.kind === 'squash') {
         try {
-          await execFileAsync('git', ['reset', '--merge'], { windowsHide: true, cwd: lane.repoPath });
+          await execFileAsync(resolveGitBinary(), ['reset', '--merge'], { windowsHide: true, cwd: lane.repoPath });
         } catch {
-          await execFileAsync('git', ['reset', '--hard', preMergeHeadSha], {
+          await execFileAsync(resolveGitBinary(), ['reset', '--hard', preMergeHeadSha], {
             windowsHide: true,
             cwd: lane.repoPath,
           });
         }
       } else {
         try {
-          await execFileAsync('git', ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
+          await execFileAsync(resolveGitBinary(), ['merge', '--abort'], { windowsHide: true, cwd: lane.repoPath });
         } catch {
           // already clean
         }
@@ -203,7 +204,7 @@ export async function performRemoteCustomerMerge(
     let pushedToOrigin = false;
     let pushError: string | undefined;
     try {
-      await withSessionMergePublication(lane.packetId, () => execFileAsync('git', ['push', 'origin', lane.baseBranch], {
+      await withSessionMergePublication(lane.packetId, () => execFileAsync(resolveGitBinary(), ['push', 'origin', lane.baseBranch], {
         windowsHide: true,
         cwd: lane.repoPath,
         timeout: 60_000,
@@ -216,7 +217,7 @@ export async function performRemoteCustomerMerge(
     }
 
     try {
-      await execFileAsync('git', ['push', 'origin', '--delete', workerRun.remoteBranch], {
+      await execFileAsync(resolveGitBinary(), ['push', 'origin', '--delete', workerRun.remoteBranch], {
         windowsHide: true,
         cwd: lane.repoPath,
         timeout: 60_000,
@@ -270,7 +271,7 @@ export async function performRemoteCustomerMerge(
   } finally {
     if (savedBranch) {
       try {
-        await execFileAsync('git', ['checkout', savedBranch], { windowsHide: true, cwd: lane.repoPath });
+        await execFileAsync(resolveGitBinary(), ['checkout', savedBranch], { windowsHide: true, cwd: lane.repoPath });
       } catch (restoreError) {
         console.warn(`[remote-merge] Failed to restore branch ${savedBranch}: ${formatLaneCommandError(restoreError)}`);
       }

@@ -20,6 +20,7 @@ import {
 } from '@/lib/orchestrator/runtime-capabilities';
 import { nextTerminalLabel } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
 import { parseTerminalExitState, terminalExitState } from '@/lib/terminal/exit-state';
+import { isDiscoveredCliSessionKey } from '@/lib/runtime/discovered-cli-session';
 import {
   claimWorkspaceTabId,
 } from '@/components/desktop/workspace-terminal/utils';
@@ -400,11 +401,13 @@ export async function computeRestoredTabs(
       const restoredClaudeSessionId = effectiveRuntime === 'claude-code'
         ? (rawClaudeSessionId || stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey))
         : undefined;
-      const shouldPreserveHistoricalSessionKey = isOwnedOrchestratorSessionKey(effectiveSessionKey)
-        || effectiveSessionKey.startsWith('codex-discovered:')
-        || effectiveSessionKey.startsWith('codex-live:');
+      // An absent discovery result does not turn a source transcript into a new
+      // writable chat. Keep its canonical identity even while the client is gone.
+      const historicalSessionKey = isDiscoveredCliSessionKey(effectiveRuntime ?? '', prefixedSessionKey)
+        ? prefixedSessionKey
+        : isOwnedOrchestratorSessionKey(effectiveSessionKey) ? effectiveSessionKey : undefined;
       const restoredChatSessionKey = liveSessionKey
-        ?? (shouldPreserveHistoricalSessionKey ? effectiveSessionKey : undefined);
+        ?? historicalSessionKey ?? undefined;
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);
       restoredTabs.push({
         id: tabId,

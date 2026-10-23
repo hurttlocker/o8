@@ -108,7 +108,7 @@ import {
   sameMetadataLockProcessIdentity,
 } from './metadata-lock-process-identity';
 import { writeManagedWorkspaceSafetyHooks } from './safety-hooks';
-import { timeWorktreePreparation } from './preparation-timing';
+import { recordDependencySelection, timeWorktreePreparation } from './preparation-timing';
 
 const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
@@ -1340,6 +1340,7 @@ export class WorktreeManager {
         const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
           cloneSourceWorkspace: this.repoRoot,
+          onSelection: (selection) => recordDependencySelection(launch, selection),
           persistReceipt: (receipt) => (
             receipt
               ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)

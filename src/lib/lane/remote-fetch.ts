@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -30,7 +31,7 @@ export async function fetchWorkerBranch(
 
   try {
     await mkdir(dirname(tempWorktreePath), { recursive: true });
-    await execFileAsync('git', ['worktree', 'remove', '--force', tempWorktreePath], {
+    await execFileAsync(resolveGitBinary(), ['worktree', 'remove', '--force', tempWorktreePath], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
@@ -40,19 +41,19 @@ export async function fetchWorkerBranch(
 
     // --end-of-options: a branch name can never be parsed as a flag, even if
     // the upstream validator ever regresses (#1644 defense-in-depth).
-    await execFileAsync('git', ['fetch', '--end-of-options', 'origin', remoteBranch], {
+    await execFileAsync(resolveGitBinary(), ['fetch', '--end-of-options', 'origin', remoteBranch], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 4 * 1024 * 1024,
       timeout: 60_000,
     });
-    const resolvedBaseRef = (await execFileAsync('git', ['rev-parse', '--verify', '--end-of-options', baseRef], {
+    const resolvedBaseRef = (await execFileAsync(resolveGitBinary(), ['rev-parse', '--verify', '--end-of-options', baseRef], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
       timeout: 15_000,
     })).stdout.trim();
-    await execFileAsync('git', ['worktree', 'add', '--force', '-B', remoteBranch, tempWorktreePath, resolvedBaseRef], {
+    await execFileAsync(resolveGitBinary(), ['worktree', 'add', '--force', '-B', remoteBranch, tempWorktreePath, resolvedBaseRef], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 4 * 1024 * 1024,
@@ -74,7 +75,7 @@ export async function fetchWorkerBranch(
 
 export async function cleanupRemoteMergeWorktree(repoPath: string, tempWorktreePath: string): Promise<void> {
   try {
-    await execFileAsync('git', ['worktree', 'remove', '--force', tempWorktreePath], {
+    await execFileAsync(resolveGitBinary(), ['worktree', 'remove', '--force', tempWorktreePath], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
