@@ -26,11 +26,13 @@ import { archiveRootForOwnedSessionRoot } from './owned-session/archive';
 import { readOwnedSessionMetadata } from './owned-session/metadata-read';
 import type { OwnedSessionRecord } from './owned-session/types';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
+import type { OwnedIdentitySource } from './owned-session/process-identity';
 
 export interface OwnedActiveRun {
   id?: string;
   pid?: number;
   processIdentity?: MetadataLockProcessIdentity;
+  processIdentitySource?: OwnedIdentitySource;
   processIdentityRequired?: boolean;
   processGroupId?: number;
   tmuxSession?: string;
@@ -184,7 +186,8 @@ async function buildRootIndex(root: string): Promise<RootIndex> {
           id: typeof parsed.activeRun.id === 'string' ? parsed.activeRun.id : undefined,
           pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
           processIdentity: parsed.activeRun.processIdentity,
-          ...((parsed.activeRun.processIdentityRequired || (process.platform !== 'win32'
+          processIdentitySource: parsed.activeRun.processIdentitySource,
+          ...((parsed.activeRun.processIdentityRequired || (parsed.activeRun.processIdentityRequired !== false && process.platform !== 'win32'
             && parsed.surfaceId.startsWith('codex-owned:') && Boolean(parsed.packetId) && !parsed.activeRun.tmuxSession))
             ? { processIdentityRequired: true } : {}),
           processGroupId: typeof parsed.activeRun.processGroupId === 'number'

@@ -921,6 +921,12 @@
       ]
     },
     {
+      "path": "src/lib/runtimes/shared/owned-session/process-identity.test.ts",
+      "reasons": [
+        "child-process"
+      ]
+    },
+    {
       "path": "src/lib/runtimes/shared/owned-session/sandbox.test.ts",
       "reasons": [
         "child-process",

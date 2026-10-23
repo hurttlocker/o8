@@ -647,6 +647,7 @@ export async function escalateInterruptOwnedSurface(surfaceId: string): Promise<
   return withOwnedStopOutcome(surfaceId, activeRun, () => escalateInterrupt({
     pid: activeRun.pid,
     processIdentity: activeRun.processIdentity,
+    processIdentitySource: activeRun.processIdentitySource,
     processIdentityRequired: activeRun.processIdentityRequired,
     processGroupId: activeRun.processGroupId,
     tmuxSession: activeRun.tmuxSession,

@@ -35,13 +35,13 @@ async function waitFor(check: () => boolean | Promise<boolean>, label: string, t
   }
   throw new Error(`${label}: ${output.slice(-5_000)}`);
 }
-async function api<T>(path: string, body?: unknown, allowedStatus?: number): Promise<T> {
+async function api<T>(path: string, body?: unknown, allowedStatus?: number | number[]): Promise<T> {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: body ? 'POST' : 'GET', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(60_000),
   });
   const value = await response.json();
-  if (allowedStatus ? response.status !== allowedStatus : !response.ok) throw new Error(`${path}: ${response.status} ${JSON.stringify(value)}\n${output.slice(-5_000)}`);
+  if (allowedStatus ? !(Array.isArray(allowedStatus) ? allowedStatus : [allowedStatus]).includes(response.status) : !response.ok) throw new Error(`${path}: ${response.status} ${JSON.stringify(value)}\n${output.slice(-5_000)}`);
   return value as T;
 }
 async function startServer(identityHelper = helper) {
@@ -218,25 +218,73 @@ describe.skipIf(process.platform === 'win32')('Codex packet survival through the
     expect(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
   }, 45_000);
 
-  it.runIf(process.platform === 'darwin')('replays an uncertain initial launch after restart without launching another worker', async () => {
-    await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: 'stop-original-after-restart' });
-    await stopServer('SIGTERM');
-    await startServer(join(root, 'missing-identity-helper'));
-    const packetId = 'pkt-uncertain-fixture';
-    const branchName = 'inline/uncertain-fixture';
-    const lane = await api<{ id: string }>('/api/fixture/lane', { packetId, branch: branchName });
-    const body = { ...launchBody, packetId, branchName, existingLaneId: lane.id, clientMutationId: 'uncertain-initial-launch' };
-    const uncertain = await api<{ ok: boolean; outcomeUnknown: boolean; surfaceId: string }>('/api/runtime/launch', body, 409);
-    expect(uncertain).toMatchObject({ ok: false, outcomeUnknown: true, surfaceId: expect.stringContaining('codex-owned:') });
-    surfaceId = uncertain.surfaceId;
-    workerPid = session().activeRun!.pid;
-    workerStart = startTime(workerPid);
-    await waitFor(() => Number(readFileSync(join(root, 'worker.pid'), 'utf8')) === workerPid, 'uncertain worker starts');
-    await stopServer('SIGKILL');
-    await startServer();
-    const replay = await api<{ surfaceId: string; replayed: boolean }>('/api/runtime/launch', body, 409);
-    expect(replay).toMatchObject({ surfaceId, replayed: true });
-    expect(startTime(workerPid)).toBe(workerStart);
-    expect(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim().split('\n')).toHaveLength(2);
-  }, 45_000);
+  describe.runIf(process.platform === 'darwin')('development helper compatibility', () => {
+    it.each(['missing', 'old'] as const)('reattaches and stops a packet with a %s helper using a pinned ps identity', async (kind) => {
+      await state();
+      if (session().activeRun) {
+        await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: `stop-prior-${kind}` });
+        await waitFor(() => { try { process.kill(workerPid, 0); return false; } catch { return true; } }, 'prior fixture stops');
+      }
+      await stopServer('SIGTERM');
+      const identityHelper = join(root, `${kind}-identity-helper`);
+      if (kind === 'old') { writeFileSync(identityHelper, '#!/bin/sh\nexit 1\n'); chmodSync(identityHelper, 0o700); }
+      await startServer(identityHelper);
+      const packetId = `pkt-fallback-${kind}`;
+      const branchName = `inline/fallback-${kind}`;
+      const lane = await api<{ id: string }>('/api/fixture/lane', { packetId, branch: branchName });
+      laneId = lane.id;
+      const body = { ...launchBody, packetId, branchName, existingLaneId: laneId, clientMutationId: `fallback-launch-${kind}` };
+      const beforeLaunches = readFileSync(join(root, 'launches.jsonl'), 'utf8').trim().split('\n').length;
+      const launched = await api<{ ok: boolean; surfaceId: string }>('/api/runtime/launch', body, [200, 409]);
+      surfaceId = launched.surfaceId;
+      workerPid = session().activeRun!.pid;
+      workerStart = startTime(workerPid);
+      try {
+        expect(launched).toMatchObject({ ok: true });
+        await waitFor(async () => { await state(); return session().threadId === 'restart-fixture-provider-session'; }, 'fallback provider session');
+        const first = session();
+        expect(first.activeRun).toMatchObject({ processIdentityRequired: true, processIdentitySource: 'ps',
+          processIdentity: { startId: workerStart } });
+        await stopServer('SIGKILL');
+        await startServer(identityHelper);
+        expect(await state()).toMatchObject({ alive: true, lane: { id: laneId, sessionKey: surfaceId, status: 'running' } });
+        expect(session()).toMatchObject({ threadId: first.threadId, activeRun: first.activeRun });
+        // Installing a new helper must not switch an existing ps identity's source.
+        await stopServer('SIGTERM');
+        await startServer();
+        expect((await state()).alive).toBe(true);
+        expect(session().activeRun).toMatchObject({ processIdentitySource: 'ps', processIdentity: first.activeRun!.processIdentity });
+        const replay = await api<{ surfaceId: string; replayed: boolean }>('/api/runtime/launch', body);
+        expect(replay).toMatchObject({ surfaceId, replayed: true });
+        expect(readFileSync(join(root, 'launches.jsonl'), 'utf8').trim().split('\n')).toHaveLength(beforeLaunches + 1);
+        const saved = session();
+        const changed = structuredClone(saved);
+        changed.activeRun!.processIdentity!.startId = 'different ps start time';
+        changed.recentRuns[0] = changed.activeRun!;
+        writeFileSync(sessionPath(), JSON.stringify(changed));
+        try {
+          await stopServer('SIGTERM');
+          await startServer();
+          expect((await state()).alive).toBe(false);
+          expect(await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: `reject-fallback-reuse-${kind}` }, 400))
+            .toMatchObject({ ok: false });
+          expect(startTime(workerPid)).toBe(workerStart);
+        } finally { writeFileSync(sessionPath(), JSON.stringify(saved)); }
+        // Stop also works while the dev helper is still unavailable or old.
+        await stopServer('SIGTERM');
+        await startServer(identityHelper);
+        expect((await state()).alive).toBe(true);
+        expect(await api('/api/runtime/action', { action: 'interrupt', surfaceId, clientMutationId: `stop-fallback-${kind}` }))
+          .toMatchObject({ ok: true });
+        await waitFor(() => { try { process.kill(workerPid, 0); return false; } catch { return true; } }, 'fallback worker stops');
+        await state();
+        expect(session().activeRun).toBeUndefined();
+      } finally {
+        // A failing red launch can leave an unidentified worker. Teardown owns
+        // this exact fixture executable and captured start time, never a fleet.
+        try { if (startTime(workerPid) === workerStart) process.kill(workerPid, 'SIGINT'); } catch { /* Already exited. */ }
+        await waitFor(() => { try { process.kill(workerPid, 0); return false; } catch { return true; } }, 'fallback fixture teardown');
+      }
+    }, 60_000);
+  });
 });

@@ -19,6 +19,7 @@ import type { SandboxDenial } from './sandbox-denial';
 import type { OwnedExecutionPolicy } from './execution-policy';
 import type { ControlledTaskBinding } from '@/lib/mcp/task-execution-store';
 import type { MetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
+import type { OwnedIdentitySource } from './process-identity';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
 
@@ -46,8 +47,9 @@ export interface OwnedRunRecord {
   startedAt: string;
   finishedAt?: string;
   pid: number;
-  /** Captured from the kernel at spawn; PID existence alone grants no reattachment. */
+  /** Captured at spawn; identified runs reattach only through the same source. */
   processIdentity?: MetadataLockProcessIdentity;
+  processIdentitySource?: OwnedIdentitySource;
   processIdentityRequired?: boolean;
   /** Spawned executable basename, used to reject recycled PIDs before signaling. */
   commandIdentity?: string;

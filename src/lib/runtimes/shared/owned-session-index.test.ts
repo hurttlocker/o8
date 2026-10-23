@@ -18,10 +18,10 @@ import {
 } from './owned-session-index';
 
 let root = '';
-function writeSession(dir: string, surfaceId: string, activeRun: unknown) {
+function writeSession(dir: string, surfaceId: string, activeRun: unknown, packetId?: string) {
   const d = join(root, dir);
   mkdirSync(d, { recursive: true });
-  writeFileSync(join(d, 'session.json'), JSON.stringify({ surfaceId, ...(activeRun !== undefined ? { activeRun } : {}) }));
+  writeFileSync(join(d, 'session.json'), JSON.stringify({ surfaceId, packetId, ...(activeRun !== undefined ? { activeRun } : {}) }));
 }
 
 beforeEach(() => {
@@ -50,6 +50,11 @@ afterEach(() => {
 });
 
 describe('lookupOwnedActiveRun', () => {
+  it('preserves explicit legacy capture instead of inferring required identity for the packet', async () => {
+    writeSession('legacy', 'codex-owned:legacy-capture', { pid: process.pid, processIdentityRequired: false }, 'packet');
+    expect((await lookupOwnedActiveRunFresh('codex-owned:legacy-capture'))?.processIdentityRequired).not.toBe(true);
+  });
+
   it('null when the surface is not present under its root', async () => {
     expect(await lookupOwnedActiveRun('codex-owned:absent', 1000)).toBeNull();
   });

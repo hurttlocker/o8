@@ -73,14 +73,18 @@ both callers, replacement registration, and the TERM/KILL argument boundary.
 At the inventory baseline, owned sessions persisted surface, lane, packet,
 provider thread, run identity, prepared/started spawn journal, PID, process group,
 inherited marker, output paths, outcome and child-exit evidence, but no kernel
-start cookie. Slice 1 adds boot identity plus kernel process start time for
-detached Codex packets. On macOS the bundled native helper reads
-`PROC_PIDTBSDINFO` seconds/microseconds and `kern.bootsessionuuid`; display time
-from `ps` is insufficient. Capture brackets the run-marker check with matching
-kernel probes. Startup rebind and Stop require the persisted identity. Missing,
-unreadable or mismatched live identity holds the record, including orphan sweeps;
-it cannot fall back to PID or cwd. An uncertain initial launch retains an
-outcome-unknown receipt so an exact mutation retry cannot start a second worker.
+start cookie. Slice 1 adds boot identity plus process start time for detached
+Codex packets. On macOS the bundled native helper reads `PROC_PIDTBSDINFO`
+seconds/microseconds and `kern.bootsessionuuid`. If a dev helper is missing or old,
+capture uses the existing metadata-lock probe's second-precision `ps` identity.
+The saved `processIdentitySource` pins subsequent probes to the same source,
+including after helper installation. Capture brackets the run-marker check with
+matching probes. Identified runs stay strict: missing, unreadable or mismatched
+identity holds the record through rebind, Stop and orphan sweeping; no PID/cwd
+fallback is allowed. If no capture source works, one warning records the reason
+and `processIdentityRequired: false` preserves legacy controls for the new run.
+Index inference honors that explicit flag. An uncertain launch caused by failed
+ownership proof still retains an outcome-unknown receipt against duplicate launch.
 Strict Stop rechecks the live leader before each group signal. If that leader
 exits or a descendant escapes its group, Stop may remain unconfirmed: this slice
 does not signal descendant PIDs without start identities. Supervisor-owned tree
@@ -96,7 +100,7 @@ Use direct detached spawning for existing batch paths. Add a small detached supe
 
 macOS facts: [Node detached spawning](https://nodejs.org/api/child_process.html#optionsdetached) creates a new process group/session and requires independent stdio plus `unref` for this use. [setsid](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/setsid.2.html) creates a session without a controlling terminal and rejects an existing group leader; it does not transfer I/O ownership. Installed node-pty uses the macOS setsid spawn flag for PTY children, yet the master remains owned by the caller. Thus detaching only the shell does not solve terminal lifetime. No external `setsid` utility is required.
 
-For safe reattachment, use boot identity plus kernel start seconds/microseconds for both worker and supervisor, not locale-dependent, second-resolution `ps lstart` alone. Darwin exposes these fields in [proc_bsdinfo](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info.h#L54). Add a per-run nonce handshake for supervisor control. Mismatched or unreadable identity grants neither attachment nor signal authority; preserve the record for recovery.
+Prefer boot identity plus kernel start seconds/microseconds for both worker and supervisor. Darwin exposes these fields in [proc_bsdinfo](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/proc_info.h#L54). The approved dev compatibility path uses boot identity plus second-resolution `ps lstart` when no native helper is available; its weaker precision cannot distinguish starts within the same second. Never compare clocks from different sources. Add a per-run nonce handshake for supervisor control. Mismatched or unreadable saved identity grants neither attachment nor signal authority; preserve the record for recovery.
 
 Recommended first implementation slice: harden the existing Codex packet path's identity and startup rebind, and add its missing restart acceptance test. Do not introduce a second batch launcher. Defer PTY/RPC migrations, native planner lifetime, other OS implementations and global idle-guard removal. Once every active-work path has survival proof, replace whole-app idleness with a bounded git/publication drain. This design PR does not close #4229.
 
