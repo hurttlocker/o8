@@ -2728,8 +2728,8 @@ fn restart_app(app: tauri::AppHandle, reservation_id: Option<String>) -> Result<
 }
 
 #[tauri::command]
-fn prepare_app_restart(app: tauri::AppHandle) -> Result<String, String> {
-    app.state::<o8_restart_safety::RestartSafety>().prepare()
+fn prepare_app_restart(app: tauri::AppHandle, force: Option<bool>) -> Result<String, String> {
+    app.state::<o8_restart_safety::RestartSafety>().prepare_with_work(force.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -8127,6 +8127,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             update_ping::check_app_update,
+            update_ping::download_app_update,
+            update_ping::discard_app_update_download,
+            update_ping::install_app_update,
             get_desktop_info,
             get_running_bundle_integrity,
             check_port,

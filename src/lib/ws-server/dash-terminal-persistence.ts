@@ -1,3 +1,4 @@
+import { reserveWorkLaunch, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recordPersistentTerminalHealth } from '@/lib/terminal/persistence-health';
@@ -103,6 +104,7 @@ export function createDashTmuxSessionSync(
   }
 
   let created = false;
+  let launch: WorkLaunchLease | undefined;
   const sessionTarget = `=${input.sessionName}`;
   try {
     try {
@@ -120,15 +122,20 @@ export function createDashTmuxSessionSync(
     } catch { /* not present, create it below */ }
 
     const profileOwner = (dependencies.resolveProfileOwnerId ?? dashProfileOwnerId)();
-    dependencies.execFileSync(tmuxBin, dashTmuxArgs(
-      'new-session', '-d', '-s', input.sessionName,
+    launch = reserveWorkLaunch(`Terminal ${input.sessionName}`);
+    launch.started(process.pid);
+    const createdPane = dependencies.execFileSync(tmuxBin, dashTmuxArgs(
+      'new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),
       // tmux parses standalone semicolons even in execFile argv. Keep reviewed
       // arguments inside one shell script, quoting every byte as literal data.
       ...(input.command ? ['/bin/sh', '-c', `exec ${[input.command.file, ...input.command.args].map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ')}`] : [input.shell, '-l']),
       ...(input.retainExited ? [';', 'set-option', '-t', `${sessionTarget}:`, 'remain-on-exit', 'on'] : []),
-    ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env });
+    ), { windowsHide: true, cwd: input.cwd, timeout: 8000, env: input.env, encoding: 'utf8' });
     created = true;
+    // Capture the process in the creation receipt before any setup can fail.
+    // A killed session then settles by PID liveness, even if setup threw.
+    launch.started(Number.parseInt(String(createdPane), 10));
     // Claim only a session this process created. Reusing legacy/foreign sessions
     // never grants automatic-retirement authority over their existing owner.
     dependencies.execFileSync(tmuxBin, dashTmuxArgs(
@@ -144,9 +151,30 @@ export function createDashTmuxSessionSync(
     // entry/exit while making full-screen scrolling use line feeds xterm keeps.
     ensureDashTerminalOverride(tmuxBin, dependencies);
     recordHealthSafely(dependencies, 'ready', 'session_created');
+    const pane = dependencies.execFileSync(tmuxBin, dashTmuxArgs('display-message', '-p', '-t', `${sessionTarget}:`, '#{pane_pid}'),
+      { windowsHide: true, timeout: 3000, encoding: 'utf8' });
+    launch.started(Number.parseInt(String(pane), 10));
     console.log(`[persistent-terminals] created backing session: ${input.sessionName}`);
     return true;
   } catch (error) {
+    if (!created && launch) {
+      // A timed-out tmux client may already have created its detached shell.
+      // Reconcile that process before deciding the start had no effect.
+      try {
+        const pane = dependencies.execFileSync(tmuxBin, dashTmuxArgs('display-message', '-p', '-t', `${sessionTarget}:`, '#{pane_pid}'),
+          { windowsHide: true, timeout: 3000, encoding: 'utf8' });
+        const pid = Number.parseInt(String(pane), 10);
+        if (Number.isSafeInteger(pid) && pid > 0) { launch.started(pid); created = true; }
+      } catch { /* A separate absence check below distinguishes failure from uncertainty. */ }
+      if (!created) {
+        try {
+          dependencies.execFileSync(tmuxBin, dashTmuxArgs('has-session', '-t', sessionTarget), { windowsHide: true, timeout: 3000, stdio: 'ignore' });
+          created = true;
+        } catch (inspection) {
+          if ((inspection as { status?: number }).status === 1) launch.release();
+        }
+      }
+    }
     if (created) {
       try {
         dependencies.execFileSync(tmuxBin, dashTmuxArgs('kill-session', '-t', sessionTarget), {
@@ -154,6 +182,8 @@ export function createDashTmuxSessionSync(
           timeout: 3000,
           stdio: 'ignore',
         });
+        // Keep ownership until a captured PID proves it exited; tmux success
+        // alone cannot prove a shell that ignored SIGHUP has stopped.
       } catch { /* cleanup is best effort; the durable degraded receipt remains */ }
     }
     recordHealthSafely(dependencies, 'degraded', 'session_create_failed');

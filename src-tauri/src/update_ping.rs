@@ -1,5 +1,9 @@
 //! Update checks use a device-only identity, separate from entitlement and sign-in.
 use serde::Serialize;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::{path::Path, time::Duration};
 use tauri::{AppHandle, Manager, Runtime, Webview};
 use tauri_plugin_store::StoreExt;
@@ -10,6 +14,8 @@ const SERVICE_TIMEOUT: Duration = Duration::from_secs(2);
 const FALLBACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 struct UpdateIdentity(String);
+
+pub(crate) struct RestartRefused(pub String);
 
 pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let path = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -65,6 +71,32 @@ fn macos_version() -> Option<String> {
 }
 
 pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
+    check_with(app, Arc::new(AtomicBool::new(false))).await
+}
+
+fn guarded_builder<R: Runtime>(
+    app: &AppHandle<R>,
+    builder: tauri_plugin_updater::UpdaterBuilder,
+    force: Arc<AtomicBool>,
+) -> tauri_plugin_updater::UpdaterBuilder {
+    let app = app.clone();
+    builder.on_before_exit(move || {
+        // Windows invokes this after extraction and before launching its installer.
+        // Its infallible hook must unwind to our command rather than exit on refusal.
+        if let Err(error) = crate::launch_updater::scheduler::auto_apply::commit_restart_with_work(
+            &app,
+            force.load(Ordering::Acquire),
+        ) {
+            std::panic::panic_any(RestartRefused(error));
+        }
+        app.cleanup_before_exit();
+    })
+}
+
+async fn check_with<R: Runtime>(
+    app: &AppHandle<R>,
+    force: Arc<AtomicBool>,
+) -> Result<Option<Update>, String> {
     let config: tauri_plugin_updater::Config = serde_json::from_value(
         app.config()
             .plugins
@@ -122,7 +154,9 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, Str
                 .header("X-O8-Macos-Version", version)
                 .map_err(|e| e.to_string())?;
         }
-        let updater = builder.build().map_err(|e| e.to_string())?;
+        let updater = guarded_builder(app, builder, force.clone())
+            .build()
+            .map_err(|e| e.to_string())?;
         // Also bound response-body parsing, including a stalled successful response.
         if let Ok(Ok(result)) = tokio::time::timeout(SERVICE_TIMEOUT, updater.check()).await {
             return Ok(result.map(|mut update| {
@@ -131,7 +165,7 @@ pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, Str
             }));
         }
     }
-    app.updater_builder()
+    guarded_builder(app, app.updater_builder(), force)
         .clear_headers()
         .endpoints(fallback.to_vec())
         .map_err(|e| e.to_string())?
@@ -152,13 +186,28 @@ pub struct UpdateMetadata {
     date: Option<String>,
     body: Option<String>,
     raw_json: serde_json::Value,
+    install_exits: bool,
 }
+
+pub(crate) struct CheckedUpdate {
+    pub update: Update,
+    force: Arc<AtomicBool>,
+    installing: Mutex<()>,
+}
+impl tauri::Resource for CheckedUpdate {}
+
+struct DownloadedUpdate {
+    checked: Arc<CheckedUpdate>,
+    bytes: Vec<u8>,
+}
+impl tauri::Resource for DownloadedUpdate {}
 
 #[tauri::command]
 pub async fn check_app_update<R: Runtime>(
     webview: Webview<R>,
 ) -> Result<Option<UpdateMetadata>, String> {
-    let Some(update) = check(webview.app_handle()).await? else {
+    let force = Arc::new(AtomicBool::new(false));
+    let Some(update) = check_with(webview.app_handle(), force.clone()).await? else {
         return Ok(None);
     };
     let metadata = UpdateMetadata {
@@ -171,7 +220,101 @@ pub async fn check_app_update<R: Runtime>(
             .map_err(|e| e.to_string())?,
         body: update.body.clone(),
         raw_json: update.raw_json.clone(),
-        rid: webview.resources_table().add(update),
+        install_exits: cfg!(target_os = "windows"),
+        rid: webview.resources_table().add(CheckedUpdate {
+            update,
+            force,
+            installing: Mutex::new(()),
+        }),
     };
     Ok(Some(metadata))
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+pub enum DownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started {
+        content_length: Option<u64>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Progress {
+        chunk_length: usize,
+    },
+    Finished,
+}
+
+#[tauri::command]
+pub async fn download_app_update<R: Runtime>(
+    webview: Webview<R>,
+    rid: tauri::ResourceId,
+    on_event: tauri::ipc::Channel<DownloadEvent>,
+) -> Result<tauri::ResourceId, String> {
+    let checked = webview
+        .resources_table()
+        .take::<CheckedUpdate>(rid)
+        .map_err(|error| error.to_string())?;
+    let mut started = false;
+    let bytes = crate::launch_updater::scheduler::auto_apply::download(
+        &checked.update,
+        |chunk_length, content_length| {
+            if !started {
+                started = true;
+                let _ = on_event.send(DownloadEvent::Started { content_length });
+            }
+            let _ = on_event.send(DownloadEvent::Progress { chunk_length });
+        },
+        || {
+            let _ = on_event.send(DownloadEvent::Finished);
+        },
+    )
+    .await?;
+    Ok(webview
+        .resources_table()
+        .add(DownloadedUpdate { checked, bytes }))
+}
+
+#[tauri::command]
+pub fn discard_app_update_download<R: Runtime>(
+    webview: Webview<R>,
+    rid: tauri::ResourceId,
+) -> Result<(), String> {
+    webview
+        .resources_table()
+        .take::<DownloadedUpdate>(rid)
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn install_app_update<R: Runtime>(
+    webview: Webview<R>,
+    rid: tauri::ResourceId,
+    force: Option<bool>,
+) -> Result<(), String> {
+    let downloaded = webview
+        .resources_table()
+        .take::<DownloadedUpdate>(rid)
+        .map_err(|error| error.to_string())?;
+    let _installing = downloaded
+        .checked
+        .installing
+        .try_lock()
+        .map_err(|_| "Update installation is already in progress.")?;
+    downloaded
+        .checked
+        .force
+        .store(force == Some(true), Ordering::Release);
+    // Never let the plugin's infallible Windows hook strand an IPC promise on
+    // refusal. Other platforms keep their normal stage-then-restart behavior.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        downloaded.checked.update.install(&downloaded.bytes)
+    }))
+    .map_err(|error| {
+        error
+            .downcast_ref::<RestartRefused>()
+            .map(|error| error.0.clone())
+            .unwrap_or_else(|| "Native installer stopped before restart.".into())
+    })?
+    .map_err(|error| error.to_string())
 }

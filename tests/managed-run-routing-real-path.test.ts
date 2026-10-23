@@ -132,4 +132,33 @@ await runVersion({ human: false, verbose: false });
     expect(execFileSync(tmux, ['-S', socket, 'show-environment', '-g', 'O8_API_PORT'], { encoding: 'utf8' }).trim())
       .toBe('O8_API_PORT=1');
   }, 30_000);
+
+  it('retains restart ownership for a detached command when soft registration fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'o8-unregistered-run-'));
+    roots.push(root);
+    const bundle = join(root, 'o8.mjs');
+    await build({ entryPoints: [cli], outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node22',
+      define: { __O8_CLI_VERSION__: JSON.stringify('test-fixture') },
+      banner: { js: `import { createRequire } from 'node:module'; const require = createRequire(import.meta.url); globalThis.require = require;` } });
+    const data = join(root, 'data'), bin = join(root, 'bin'), socket = `/tmp/o8-rg-${process.pid}-${Date.now()}`;
+    mkdirSync(data); mkdirSync(bin);
+    sockets.push(socket);
+    execFileSync(tmux, ['-S', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'fixture-keepalive', 'sleep 90']);
+    writeFileSync(join(bin, 'tmux'), `#!/bin/sh\nexec ${quote(tmux)} -S ${quote(socket)} "$@"\n`);
+    chmodSync(join(bin, 'tmux'), 0o700);
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+    for (const key of routingKeys) delete env[key];
+    delete env.O8_MANAGED_RUN_SETTLEMENT_BINDING;
+    delete env.O8_OWNED_RUN_MARKER;
+    Object.assign(env, { O8_DATA_DIR: data, CORTEX_IDE_DATA_DIR: data, O8_API_PORT: '1', O8_API_TOKEN: 'unreachable-fixture' });
+    const result = await run(bundle, ['run', '--detach', '--', process.execPath, '-e', 'setTimeout(() => {}, 60000)'], root, env);
+    expect(result.code, result.output).toBe(0);
+    expect(JSON.parse(result.output)).toMatchObject({ registered: false });
+    const leases = readdirSync(join(data, 'work-launches'));
+    expect(leases).toHaveLength(1);
+    const lease = JSON.parse(readFileSync(join(data, 'work-launches', leases[0]), 'utf8'));
+    expect(lease.pid).toBeGreaterThan(0);
+    expect(() => process.kill(lease.pid, 0)).not.toThrow();
+  }, 30_000);
+
 });

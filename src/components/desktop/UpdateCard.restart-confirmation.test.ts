@@ -42,6 +42,7 @@ describe('explicit staged-update restart through the real rail and confirmation 
     defaults = async () => Response.json({ values: { updateAutoApply: 'off' } });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.startsWith('/api/panel/app/update-state')) return Response.json({ ok: true });
       if (url.startsWith('/api/panel/update/apply')) {
         reads += 1;
         return readiness === null ? new Response(null, { status: 503 }) : Response.json(readiness);
@@ -67,7 +68,8 @@ describe('explicit staged-update restart through the real rail and confirmation 
   });
 
   function button(label: string) {
-    return [...document.querySelectorAll<HTMLButtonElement>('button')].find(row => row.textContent?.trim() === label);
+    const scope = label === 'Restart anyway' || label === 'Keep waiting' ? '[aria-modal="true"] button' : 'button';
+    return [...document.querySelectorAll<HTMLButtonElement>(scope)].find(row => row.textContent?.trim() === label);
   }
 
   async function mount(stage = true, showLegacy = false) {
@@ -83,7 +85,7 @@ describe('explicit staged-update restart through the real rail and confirmation 
   }
 
   async function clickRestart() {
-    const restart = button('Restart now');
+    const restart = button('Restart now') ?? [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Updates and release notes"] button')].find(row => row.textContent?.trim() === 'Restart anyway');
     expect(restart, 'A staged update must retain its explicit restart action').toBeDefined();
     await act(async () => restart!.click());
   }
@@ -99,7 +101,8 @@ describe('explicit staged-update restart through the real rail and confirmation 
     await act(async () => button('Keep waiting')!.click());
     expect(button('Restart anyway')).toBeUndefined();
     expect(invoke).not.toHaveBeenCalled();
-    expect(button('Restart now')?.disabled).toBe(false);
+    expect([...document.querySelectorAll<HTMLButtonElement>('[aria-label="Updates and release notes"] button')]
+      .find(row => row.textContent === 'Restart anyway')?.disabled).toBe(false);
   });
 
   it('accepts one explicit interruption confirmation and retains native restart admission', async () => {
@@ -114,8 +117,9 @@ describe('explicit staged-update restart through the real rail and confirmation 
 
   it('uses the same confirmation for the legacy card after installation is deferred', async () => {
     await mount(true, true);
-    expect(button('Restart')).toBeDefined();
-    await act(async () => button('Restart')!.click());
+    const legacy = document.querySelector<HTMLButtonElement>('[aria-label="Restart to install o8 v0.1.801"]');
+    expect(legacy).not.toBeNull();
+    await act(async () => legacy!.click());
     await vi.waitFor(() => expect(button('Restart anyway')).toBeDefined());
     expect(invoke).not.toHaveBeenCalled();
     await act(async () => button('Restart anyway')!.click());
@@ -154,24 +158,25 @@ describe('explicit staged-update restart through the real rail and confirmation 
 
   it('prevents duplicate clicks from queuing another confirmation or native restart', async () => {
     await mount();
-    const restart = button('Restart now');
+    const restart = button('Restart now') ?? [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Updates and release notes"] button')].find(row => row.textContent?.trim() === 'Restart anyway');
     expect(restart).toBeDefined();
     await act(async () => { restart!.click(); restart!.click(); });
     await vi.waitFor(() => expect(button('Restart anyway')).toBeDefined());
-    expect([...document.querySelectorAll('button')].filter(row => row.textContent === 'Restart anyway')).toHaveLength(1);
+    expect([...document.querySelectorAll('[aria-modal="true"] button')].filter(row => row.textContent === 'Restart anyway')).toHaveLength(1);
     await act(async () => button('Restart anyway')!.click());
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     expect(button('Restart anyway')).toBeUndefined();
     expect(invoke.mock.calls.map(row => row[0])).toEqual(['prepare_app_restart', 'restart_app']);
   });
 
-  it.each(['active', 'interrupted', 'unconfirmed'])('does not offer to force past a %s CLI installer', async state => {
+  it.each(['active', 'interrupted', 'unconfirmed'])('requires explicit consent to force past a %s CLI installer', async state => {
     readiness = { ...parked, idle: { ...parked.idle, idleExceptParked: false,
       active: { ...parked.idle.active, cliInstallers: [{ runtime: 'codex', state }] } } };
     await mount();
     await clickRestart();
-    expect(button('Restart anyway')).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(button('Restart anyway')).toBeDefined();
+    await act(async () => button('Restart anyway')!.click());
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: true }));
     expect(document.body.textContent).toContain('CLI update');
   });
 
@@ -181,26 +186,24 @@ describe('explicit staged-update restart through the real rail and confirmation 
     await vi.waitFor(() => expect(button('Restart anyway')).toBeDefined());
     invoke.mockRejectedValueOnce('cli_operation_blocked: A CLI update started while confirming.');
     await act(async () => button('Restart anyway')!.click());
-    expect(invoke).toHaveBeenCalledExactlyOnceWith('prepare_app_restart');
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('prepare_app_restart', { force: true });
     expect(button('Restart anyway')).toBeUndefined();
   });
 
-  it.each(['reserved restart', 'unavailable installer ownership'])('does not force past %s', async blocker => {
+  it.each(['reserved restart', 'unavailable installer ownership'])('requires explicit consent to force past %s', async blocker => {
     readiness = { ...parked, idle: { ...parked.idle, idleExceptParked: false,
       unavailable: blocker === 'unavailable installer ownership' ? ['cli-update-ownership'] : [],
       active: { ...parked.idle.active, restartPending: blocker === 'reserved restart' } } };
     await mount();
     await clickRestart();
-    expect(button('Restart anyway')).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(button('Restart anyway')).toBeDefined();
+    await act(async () => button('Restart anyway')!.click());
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: true }));
   });
 
-  it('keeps idle auto-apply and a non-forced remote apply gated without opening confirmation', async () => {
-    let resolveDefaults!: (response: Response) => void;
-    defaults = () => new Promise(resolve => { resolveDefaults = resolve; });
+  it('keeps non-forced remote apply gated without a component-owned auto timer', async () => {
     await mount(false);
-    await act(async () => resolveDefaults(Response.json({ values: { updateAutoApply: 'idle' } })));
-    await vi.waitFor(() => expect(reads).toBeGreaterThan(0));
+    expect(reads).toBe(0);
     await act(async () => { window.dispatchEvent(new CustomEvent('o8:realtime', { detail: { data: { events: [{ data: {
       mutation: { action: 'app-update-apply-requested', status: 'queued', mutationId: 'fixture-remote-apply' },
     } }] } } })); });

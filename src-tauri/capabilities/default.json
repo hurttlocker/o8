@@ -38,7 +38,6 @@
     "notification:default",
     "store:default",
     "log:default",
-    "updater:default",
     "global-shortcut:default",
     "clerk:default",
     {
