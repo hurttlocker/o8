@@ -84,8 +84,9 @@ export function useActivityCiHoverDetail(repo: string | null, id: number | null)
   }, [client, canonicalRepo, id, options]);
   useEffect(() => {
     if (!query.isError) return;
+    const catchUp = setTimeout(() => setNow(Date.now()), 0);
     const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return () => { clearTimeout(catchUp); clearInterval(timer); };
   }, [query.isError]);
   const status: ActivityCiHoverStatus = {
     error: query.isFetching ? null : query.error?.message ?? null,

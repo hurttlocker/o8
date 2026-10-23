@@ -36,6 +36,7 @@ async function hover(index = 0, id = 7, open = true) {
     bubbles: true, relatedTarget: document.body,
   })));
   await settle(open ? 1 : 150);
+  await settle();
 }
 const retry = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Retry CI details')!;
 const expectSummary = (label = 'Known') => {
@@ -125,6 +126,66 @@ it('recovers an already-open hover automatically after the quota deadline', asyn
   reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
   await render(); await hover(); reply = () => Response.json(body());
   await settle(31_000); await settle(); expectSummary(); expect(reads()).toHaveLength(2);
+});
+it.each([false, true])('recovers a retained summary after a refused Retry (stale=%s)', async stale => {
+  await render(); await hover();
+  if (stale) await settle(120_000);
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  expectSummary(); expect(document.body.textContent).toContain('CI details delayed');
+  reply = () => Response.json(body(7, 'Recovered'));
+  await settle(28_000); expect(reads()).toHaveLength(2); expectSummary();
+  expect(document.body.textContent).toContain(`(${stale ? 148 : 28}s old)`);
+  await settle(3100); await settle();
+  expect(reads()).toHaveLength(3); expectSummary('Recovered');
+  expect(document.body.textContent).not.toContain('Known job');
+  expect(document.body.textContent).not.toContain('CI details delayed');
+  await settle(120_000); expect(reads()).toHaveLength(3);
+});
+it('shares one deadline recovery across three hovers retaining a fresh summary', async () => {
+  await render(Array(3).fill(repoA));
+  for (let i = 0; i < 3; i++) await hover(i);
+  expect(reads()).toHaveLength(1);
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  expect(document.body.textContent?.match(/Known step/g)).toHaveLength(3);
+  reply = () => Response.json(body(7, 'Shared recovery'));
+  await settle(28_000); expect(reads()).toHaveLength(2);
+  await settle(3100); await settle(); expect(reads()).toHaveLength(3);
+  expect(document.body.textContent?.match(/Shared recovery step/g)).toHaveLength(3);
+});
+it.each([false, true])('recovers promptly on reopening an expired pause (known=%s)', async known => {
+  await render();
+  if (known) await hover();
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  if (known) { await act(async () => retry().click()); await settle(); } else await hover();
+  await hover(0, 7, false); const before = reads().length;
+  await settle(31_000); expect(reads()).toHaveLength(before);
+  reply = () => Response.json(body(7, 'Reopened')); await hover();
+  expect(reads()).toHaveLength(before + 1); expectSummary('Reopened');
+  expect(document.body.textContent).not.toContain('CI details delayed');
+});
+it('honors a renewed refusal before replacing the retained summary', async () => {
+  await render(); await hover();
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  await settle(31_000); await settle(); expect(reads()).toHaveLength(3); expectSummary();
+  reply = () => Response.json(body(7, 'Recovered'));
+  await settle(28_000); expect(reads()).toHaveLength(3);
+  await settle(3100); await settle(); expect(reads()).toHaveLength(4); expectSummary('Recovered');
+});
+it.each(['close', 'filter', 'unmount'])('stops deadline recovery after the final hover %s', async action => {
+  await render(); await hover();
+  reply = () => new Response(null, { status: 429, headers: { 'retry-after': '30' } });
+  await act(async () => retry().click()); await settle();
+  if (action === 'close') await hover(0, 7, false);
+  else if (action === 'filter') {
+    const filter = [...host.querySelectorAll('button')].find(b => b.getAttribute('aria-label')?.startsWith('Commits'))!;
+    await act(async () => filter.click()); await settle();
+  } else await render([]);
+  reply = () => Response.json(body(7, 'Closed'));
+  await settle(120_000); expect(reads()).toHaveLength(2);
+  expect(document.body.textContent).not.toContain('Closed step');
 });
 it('aborts on final close, ignores late replies and retries when reopened', async () => {
   const pending = deferred(); reply = () => pending.promise; await render(); await hover();
