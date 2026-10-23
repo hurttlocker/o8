@@ -9,7 +9,6 @@ import {
   formatBytes,
   githubSlugFromRemote,
   githubUrlFromRemote,
-  mergeRiskLabel,
   normalizeSetupDraft,
   pointWithinRect,
   requestJson,
@@ -20,7 +19,6 @@ import {
   type FocusRepoSetupDetail,
   type OrchestratorPacket,
   type RepoPreviewPullRequest,
-  type RepoPreviewPullRequestDetail,
   type RepoRegistryEntry,
   type RepoSetupConfig,
   type RepoSetupEnvMode,
@@ -95,8 +93,6 @@ export function useRepoCardModel({
   const prPreview = useMemo(() => (Array.isArray(prList.data?.prs) ? prList.data.prs : []).filter(pr => pr.state === 'OPEN'), [prList.data?.prs]);
   const prPreviewLoaded = Array.isArray(prList.data?.prs);
   const prPreviewLoading = prList.isFetching && !prPreviewLoaded;
-  const [prPreviewDetail, setPrPreviewDetail] = useState<RepoPreviewPullRequestDetail | null>(null);
-  const [prPreviewDetailLoading, setPrPreviewDetailLoading] = useState(false);
   const [worktreeSummary, setWorktreeSummary] = useState<RepoWorktreeSummary | null>(null);
   const [worktreeSummaryLoading, setWorktreeSummaryLoading] = useState(false);
   const hoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -509,7 +505,6 @@ export function useRepoCardModel({
       .slice(0, 3),
     [previewChecks],
   );
-  const mergeRisk = useMemo(() => mergeRiskLabel(prPreviewDetail), [prPreviewDetail]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -569,32 +564,6 @@ export function useRepoCardModel({
     }
     return null;
   }, [staleWorktrees.length, worktreeSummary, worktreeSummaryLoading]);
-
-  useEffect(() => {
-    if (!githubSlug || !prPreview[0]?.number || prPreviewDetail || prPreviewDetailLoading) return;
-    let active = true;
-    setPrPreviewDetailLoading(true);
-    fetch(`/api/panel/pr?repo=${encodeURIComponent(githubSlug)}&number=${prPreview[0].number}`)
-      .then((response) => response.json())
-      .then((detail) => {
-        if (!active || detail?.error) return;
-        setPrPreviewDetail({
-          mergeable: Boolean(detail.mergeable),
-          checksStatus: detail.checksStatus ?? 'unknown',
-          reviewDecision: detail.reviewDecision ?? null,
-          files: detail.files ?? [],
-        });
-      })
-      .catch(() => {
-        if (active) setPrPreviewDetail(null);
-      })
-      .finally(() => {
-        if (active) setPrPreviewDetailLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [githubSlug, prPreview, prPreviewDetail, prPreviewDetailLoading]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -674,8 +643,6 @@ export function useRepoCardModel({
     prPreviewLoading,
     prPreview,
     prPreviewLoaded,
-    prPreviewDetail,
-    prPreviewDetailLoading,
     worktreeSummary,
     worktreeSummaryLoading,
     checkoutTarget,
@@ -704,7 +671,6 @@ export function useRepoCardModel({
     closeBranchHover,
     previewCheckCounts,
     previewFailingChecks,
-    mergeRisk,
     worktreesByBranch,
     worktreeHealthBanner,
     handleSave,

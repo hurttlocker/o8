@@ -1,94 +1,69 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { getSWR, refreshSWR, subscribeSWR } from '@/lib/panel/fetch-cache';
-import type { PrDetail, PrDetailResponse } from './types';
-import { PrReadDeferredError, readPrJson } from './read-pr-json';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { PrDetail } from './types';
+import { PrReadDeferredError } from './read-pr-json';
+import { prPanelDetailQuery, refreshPrPanelDetail } from './detail-query';
 
-type Snapshot = PrDetail & { loadedAt: number };
-
-interface UsePrDetailResult {
-  detail: PrDetail | null;
-  loading: boolean;
-  error: string | null;
-  refresh: () => void;
+function hasRunningChecks(detail: PrDetail | undefined): boolean {
+  return Boolean(detail?.statusCheckRollup.some(check => ['in_progress', 'queued', 'pending', 'waiting'].includes((check.status ?? '').toLowerCase())));
 }
 
-function hasRunningChecks(detail: PrDetail | null): boolean {
-  if (!detail) return false;
-  return detail.statusCheckRollup.some((check) => {
-    const status = (check.status ?? '').toLowerCase();
-    return status === 'in_progress' || status === 'queued' || status === 'pending' || status === 'waiting';
-  });
-}
-
-export function usePrDetail(prNumber: number | null, repoSlug?: string | null, visible = true): UsePrDetailResult {
-  const key = prNumber ? `pr-detail:${repoSlug ?? ''}:${prNumber}` : null;
-  const [reloadNonce, setReloadNonce] = useState(0);
-  const [failure, setFailure] = useState<{ key: string; nonce: number; message: string } | null>(null);
-  // Read only this selection's snapshot during render. A new PR must never
-  // inherit the previous PR's content while its request is in flight.
-  const subscribe = useCallback((listener: () => void) => key ? subscribeSWR(key, listener) : () => {}, [key]);
-  const readSnapshot = useCallback(() => key ? getSWR<Snapshot>(key).data ?? null : null, [key]);
-  const detail = useSyncExternalStore(subscribe, readSnapshot, () => null);
-  const error = failure?.key === key && failure.nonce === reloadNonce ? failure.message : null;
+export function usePrDetail(prNumber: number | null, repoSlug?: string | null, visible = true) {
+  const client = useQueryClient();
+  const options = useMemo(() => prPanelDetailQuery(repoSlug, prNumber ?? 0), [repoSlug, prNumber]);
+  const query = useQuery({ ...options, enabled: Boolean(visible && prNumber) });
 
   useEffect(() => {
-    if (!visible || !prNumber || !key) return;
-    const selectionKey = key;
-
+    if (!visible || !prNumber) return;
     let active = true;
-    const repoQuery = repoSlug ? `?repo=${encodeURIComponent(repoSlug)}` : '';
-    const url = `/api/panel/prs/${prNumber}${repoQuery}`;
-
-    let retryAt = 0;
-    const fetchDetail = async (background: boolean) => {
-      const data = await readPrJson<PrDetailResponse>(`${url}${background ? `${repoQuery ? '&' : '?'}poll=1` : ''}`);
-      return { ...data.pr, loadedAt: Date.now() };
-    };
-    async function fetchOnce(background = false) {
-      if (!active) return;
-      if (background && (document.visibilityState === 'hidden' || Date.now() < retryAt)) return;
-      setFailure(null);
-      try {
-        await refreshSWR(selectionKey, () => fetchDetail(background));
-      } catch (err) {
-        if (!active) return;
-        if (err instanceof PrReadDeferredError) retryAt = Date.now() + err.retryAfterMs;
-        setFailure({ key: selectionKey, nonce: reloadNonce, message: err instanceof Error ? err.message : 'Failed to load PR' });
-      }
-    }
-
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    function retryAt() {
+      const state = client.getQueryState(options.queryKey);
+      return state?.error instanceof PrReadDeferredError ? state.errorUpdatedAt + state.error.retryAfterMs : 0;
+    }
+    async function backgroundRead(scheduled = false) {
+      if (!active || document.visibilityState === 'hidden' || Date.now() < retryAt()) return;
+      const state = client.getQueryState(options.queryKey);
+      const cadence = state?.data?.state.toLowerCase() === 'open' && hasRunningChecks(state.data) ? 30_000 : 120_000;
+      // Staggered observers may fire after a sibling's read has already settled.
+      if (scheduled && state && Date.now() - Math.max(state.dataUpdatedAt, state.errorUpdatedAt) < cadence) return;
+      try {
+        await client.fetchQuery({ ...prPanelDetailQuery(repoSlug, prNumber!, true), staleTime: 0 });
+      } catch { /* The shared query retains detail and exposes recovery to all observers. */ }
+    }
     function scheduleNext() {
       if (!active) return;
-      const current = getSWR<PrDetail>(selectionKey).data ?? null;
-      const isOpen = (current?.state ?? '').toLowerCase() === 'open';
-      const fast = isOpen && hasRunningChecks(current);
-      const intervalMs = Math.max(fast ? 30_000 : 120_000, retryAt - Date.now());
-      timeoutId = setTimeout(() => {
-        void fetchOnce(true).finally(scheduleNext);
-      }, intervalMs);
+      if (timeoutId) clearTimeout(timeoutId);
+      const current = client.getQueryData(options.queryKey);
+      const fast = current?.state.toLowerCase() === 'open' && hasRunningChecks(current);
+      timeoutId = setTimeout(() => { void backgroundRead(true).finally(scheduleNext); }, Math.max(fast ? 30_000 : 120_000, retryAt() - Date.now()));
     }
-    const cached = getSWR<Snapshot>(selectionKey).data;
-    // Opening a recently read PR is immediate and does not restart its read.
-    // Manual Retry/Refresh and visible check polling always request fresh data.
-    if (!reloadNonce && cached && Date.now() - cached.loadedAt < 20_000) scheduleNext();
-    else void fetchOnce().finally(scheduleNext);
-
-    const onVisible = () => { if (document.visibilityState !== 'hidden') void fetchOnce(true); };
+    const cache = client.getQueryCache();
+    const tracked = cache.find({ queryKey: options.queryKey, exact: true });
+    const unsubscribe = cache.subscribe(event => {
+      if (event.type === 'updated' && event.query === tracked && (event.action.type === 'success' || event.action.type === 'error')) scheduleNext();
+    });
+    // Join the initial read (or reuse a warm snapshot) before choosing the check cadence.
+    void client.fetchQuery(options).catch(() => {}).finally(scheduleNext);
+    const onVisible = () => { if (document.visibilityState !== 'hidden') void backgroundRead(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       active = false;
-      document.removeEventListener('visibilitychange', onVisible);
+      unsubscribe();
       if (timeoutId) clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [visible, prNumber, repoSlug, key, reloadNonce]);
+  }, [client, options, prNumber, repoSlug, visible]);
 
+  const refresh = useCallback(() => {
+    if (prNumber) void refreshPrPanelDetail(client, repoSlug, prNumber).catch(() => {});
+  }, [client, prNumber, repoSlug]);
   return {
-    detail,
-    loading: Boolean(key && !detail && !error),
-    error,
-    refresh: () => setReloadNonce((value) => value + 1),
+    detail: query.data ?? null,
+    loading: Boolean(prNumber && !query.data && (!query.error || query.isFetching)),
+    error: query.isFetching ? null : query.error?.message ?? null,
+    refresh,
   };
 }

@@ -35,9 +35,11 @@ export function captureLaunchLaneValidation(opts: WorktreeLaunchOptions): ((work
       .all(laneId, anchor.sequence, EVENT_LIMIT + 1) as StoredEvent[];
     if (anchorPresent !== anchor.id || rows.length > EVENT_LIMIT) throw new Error(INVALID_LANE);
     const suffix = rows.map((event) => ({ ...event, payload: JSON.parse(event.payload_json) as Record<string, unknown> }));
-    // Dependency receipts do not grant or revoke launch authority. Every other
-    // intervening decision, binding, reservation or new attempt invalidates it.
-    const decisions = suffix.filter((event) => !(event.actor === 'system' && event.verb === 'dependency_materialized'));
+    // Dependency and preparation-timing receipts do not grant or revoke launch
+    // authority. Every other intervening decision, binding, reservation or new
+    // attempt invalidates it.
+    const decisions = suffix.filter((event) => !(event.actor === 'system'
+      && (event.verb === 'dependency_materialized' || event.verb === 'worktree_preparation_timing')));
     if (lane.status === 'launching' && decisions.length === 0) return;
     const [wedge, transition] = decisions;
     if (lane.status !== 'awaiting_orchestrator' || lane.lastEventLabel !== 'launch_stalled'
