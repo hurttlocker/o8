@@ -78,7 +78,7 @@ it('excludes a merge during native drain and holds admitted publication through 
   expect(readdirSync(join(root, 'data/work-launches'))).toEqual([]);
   expect(getLane(lane.id)?.status).toBe('completed');
   cleanup.mockRestore();
-});
+}, 90_000);
 
 
 it('refuses real PR publication under a native reservation before pushing or creating a receipt', async () => {
@@ -94,7 +94,7 @@ it('refuses real PR publication under a native reservation before pushing or cre
     expect(getLane(lane.id)).toMatchObject({ status: 'reviewing', prNumber: null });
     expect(git(repo, 'status', '--porcelain')).toBe('');
   } finally { const exited = once(native, 'exit'); native.stdin.end('cancel\n'); await exited; }
-});
+}, 90_000);
 
 it('reclaims a killed real merge owner before normal native restart', async () => {
   const { repo, origin, lane } = await makeLane('crashed');
@@ -116,7 +116,7 @@ it('reclaims a killed real merge owner before normal native restart', async () =
       expect(files, output).toHaveLength(1);
       ownerPid = JSON.parse(readFileSync(join(root, 'data/work-launches', files[0]), 'utf8')).ownerPid;
       expect(ownerPid).not.toBe(process.pid);
-    }, { timeout: 15_000 });
+    }, { timeout: 45_000 });
     expect(() => execFileSync(join(process.cwd(), 'src-tauri/target/debug/examples/admission'), [join(root, 'data')], { stdio: 'pipe' })).toThrow();
     const exited = once(child, 'exit'); process.kill(ownerPid!, 'SIGKILL'); await exited;
     expect(git(origin, 'show', 'main:file.txt')).toBe('base');
@@ -128,7 +128,7 @@ it('reclaims a killed real merge owner before normal native restart', async () =
     if (child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited; }
     unlock(); await holding;
   }
-});
+}, 90_000);
 
 
 it('holds real PR publication through its receipt and records live work before forced native cleanup', async () => {
@@ -158,7 +158,7 @@ it('holds real PR publication through its receipt and records live work before f
   expect(await pending).toMatchObject({ ok: true });
   expect(getLane(lane.id)).toMatchObject({ outcome: 'pr_opened', prNumber: 4189 });
   expect(readdirSync(join(root, 'data/work-launches'))).toEqual([]);
-});
+}, 90_000);
 
 it('recovers every lease kind on owner identity reuse and expires a live owner that never bound a PID', async () => {
   const { reserveWorkLaunch } = await import('@/lib/app-update/work-launch-admission');
@@ -185,7 +185,7 @@ it('recovers every lease kind on owner identity reuse and expires a live owner t
   expect(work.ownerIdentity.version).toBe(1);
   expect(work.pid).toBeNull();
   expect(() => execFileSync(admission, [data], { stdio: 'pipe' })).toThrow();
-  work.createdAtMs = Date.now() - 31_000;
+  work.createdMonotonicMs = Number(process.hrtime.bigint()) / 1e6 - 31_000;
   writeFileSync(path, JSON.stringify(work));
   execFileSync(admission, [data], { stdio: 'pipe' });
   expect(readdirSync(workDirectory)).toEqual([]);

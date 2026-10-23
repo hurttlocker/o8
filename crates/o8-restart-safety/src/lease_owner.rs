@@ -1,13 +1,17 @@
 //! Same boot/start identity wire format as metadata-lock-process-identity.ts.
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const UNBOUND_MS: u128 = 30_000;
+const UNBOUND_MS: f64 = 30_000.0;
+type Observation = (Option<SystemTime>, u64, Instant);
+static OBSERVED: OnceLock<Mutex<HashMap<PathBuf, Observation>>> = OnceLock::new();
 pub fn read(path: &Path) -> Value {
     if !fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
@@ -38,6 +42,7 @@ fn command(program: &str, args: &[&str]) -> Option<String> {
         .args(args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
+        .env("TZ", "UTC")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -83,7 +88,16 @@ pub fn identity(pid: u32) -> Option<Value> {
         if boot.is_empty() || start.is_empty() {
             return None;
         }
-        return Some(json!({"version":1,"platform":"darwin","bootId":boot,"startId":start}));
+        let seconds = command(
+            "/bin/date",
+            &["-j", "-u", "-f", "%a %b %e %T %Y", &start, "+%s"],
+        )?;
+        if seconds.parse::<u64>().ok()? == 0 {
+            return None;
+        }
+        return Some(
+            json!({"version":1,"platform":"darwin","bootId":boot,"startId":format!("epoch:{seconds}")}),
+        );
     }
     #[cfg(windows)]
     {
@@ -133,23 +147,62 @@ pub fn stale(value: &Value, path: &Path) -> bool {
         && owner["platform"].is_string();
     if let Some(pid) = pid {
         if absent(pid as u32)
-            || (identified && identity(pid as u32).is_some_and(|current| &current != owner))
+            || (identified
+                && identity(pid as u32).is_some_and(|current| {
+                    // Local display-time cookies from older versions are not comparable
+                    // to epoch cookies. A boot mismatch still proves owner death.
+                    let comparable = owner["platform"] != "darwin"
+                        || owner["startId"]
+                            .as_str()
+                            .is_some_and(|s| s.starts_with("epoch:"))
+                        || owner["bootId"] != current["bootId"];
+                    comparable && &current != owner
+                }))
         {
             return true;
         }
     }
-    let created = value["createdAtMs"]
-        .as_u64()
-        .map(|n| n as u128)
-        .or_else(|| {
-            fs::metadata(path)
-                .ok()?
-                .modified()
-                .ok()?
-                .duration_since(UNIX_EPOCH)
-                .ok()
-                .map(|n| n.as_millis())
-        });
-    (value["pid"].is_null() || !identified)
-        && created.is_some_and(|created| now_ms().saturating_sub(created) >= UNBOUND_MS)
+    if !value["pid"].is_null() && identified {
+        return false;
+    }
+    if let (Some(created), Some(now)) = (
+        value["createdMonotonicMs"].as_f64(),
+        crate::monotonic::now_ms(),
+    ) {
+        if created.is_finite() && created >= 0.0 && created <= now {
+            return now - created >= UNBOUND_MS;
+        }
+    }
+    // Legacy/partial records get a local Instant grace window. Modification time
+    // distinguishes replacement records; it never determines their age.
+    let Ok(metadata) = fs::metadata(path) else {
+        return !path.exists();
+    };
+    let stamp = metadata.modified().ok();
+    let size = metadata.len();
+    let Ok(mut observed) = OBSERVED.get_or_init(|| Mutex::new(HashMap::new())).lock() else {
+        return false;
+    };
+    let first = observed
+        .entry(path.to_path_buf())
+        .or_insert_with(|| (stamp, size, Instant::now()));
+    if first.0 != stamp || first.1 != size {
+        *first = (stamp, size, Instant::now());
+    }
+    let expired = first.2.elapsed() >= Duration::from_millis(UNBOUND_MS as u64);
+    if expired {
+        observed.remove(path);
+    }
+    expired
+}
+
+#[cfg(test)]
+pub fn expire_observation(path: &Path) {
+    if let Some(observed) = OBSERVED.get() {
+        for (entry, (_, _, since)) in observed.lock().unwrap().iter_mut() {
+            if entry == path {
+                *since = Instant::now() - Duration::from_secs(31);
+            }
+        }
+    }
 }

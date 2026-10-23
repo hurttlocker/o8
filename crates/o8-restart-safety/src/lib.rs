@@ -1,4 +1,5 @@
 mod lease_owner;
+mod monotonic;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -34,6 +35,8 @@ struct Operation {
     owner_identity: serde_json::Value,
     #[serde(default)]
     created_at_ms: u128,
+    #[serde(default)]
+    created_monotonic_ms: Option<f64>,
 }
 
 struct Pending {
@@ -352,6 +355,7 @@ impl RestartSafety {
             owner_identity: lease_owner::identity(std::process::id())
                 .ok_or_else(|| refusal("Restart process identity unavailable."))?,
             created_at_ms: lease_owner::now_ms(),
+            created_monotonic_ms: monotonic::now_ms(),
             started_at: format!("{:?}", std::time::SystemTime::now()),
             stage: "preparing".into(),
         };

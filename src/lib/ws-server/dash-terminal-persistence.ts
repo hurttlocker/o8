@@ -123,6 +123,7 @@ export function createDashTmuxSessionSync(
 
     const profileOwner = (dependencies.resolveProfileOwnerId ?? dashProfileOwnerId)();
     launch = reserveWorkLaunch(`Terminal ${input.sessionName}`);
+    launch.started(process.pid);
     const createdPane = dependencies.execFileSync(tmuxBin, dashTmuxArgs(
       'new-session', '-d', '-P', '-F', '#{pane_pid}', '-s', input.sessionName,
       '-x', String(input.cols), '-y', String(input.rows),

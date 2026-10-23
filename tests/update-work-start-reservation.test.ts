@@ -33,7 +33,7 @@ it('refuses worker process creation under the same persisted native reservation'
   expect(() => spawnWithWorkAdmission(process.execPath, ['-e', 'process.exit(0)'])).toThrow(/restart/i);
 });
 
-it('retains an uncertain PTY lease when recording the already spawned PID fails', async () => {
+it('retains the live host binding when recording the already spawned PID fails', async () => {
   const { chmodSync, readdirSync, readFileSync } = await import('node:fs');
   rmSync(join(root, 'cli-operation-admission'), { recursive: true });
   const directory = join(root, 'work-launches');
@@ -41,12 +41,17 @@ it('retains an uncertain PTY lease when recording the already spawned PID fails'
   let exited: (() => void) | undefined;
   const host = createInlineTerminalHost({ spawn() {
     file = join(directory, readdirSync(directory)[0]);
-    chmodSync(root, 0o500);
+    chmodSync(file, 0o400);
     return { pid: process.pid, onExit(callback: () => void) { exited = callback; } };
   } } as never);
   try { host.spawn({ file: 'sh', args: [], cwd: root, env: {}, cols: 80, rows: 24 }); }
-  finally { chmodSync(root, 0o700); }
-  expect(JSON.parse(readFileSync(file, 'utf8')).pid).toBeNull();
+  finally { chmodSync(file, 0o600); }
+  const work = JSON.parse(readFileSync(file, 'utf8'));
+  expect(work.pid).toBe(process.pid);
+  work.createdMonotonicMs = Number(process.hrtime.bigint()) / 1e6 - 60_000;
+  writeFileSync(file, JSON.stringify(work));
+  const { listWorkLaunches } = await import('@/lib/app-update/work-launch-admission');
+  expect(listWorkLaunches()).toHaveLength(1);
   expect(readdirSync(directory)).toHaveLength(1);
   exited?.();
   expect(readdirSync(directory)).toHaveLength(0);
@@ -83,4 +88,18 @@ it.each(['timeout', 'setup'])('retains the captured process when tmux %s follows
   expect(files).toHaveLength(1);
   expect(JSON.parse(readFileSync(join(directory, files[0]), 'utf8')).pid).toBe(process.pid);
   rmSync(join(directory, files[0]));
+});
+
+
+it('cancels an inline PTY if restart reclaims admission during spawn', async () => {
+  const { readdirSync } = await import('node:fs');
+  const kill = vi.fn();
+  const host = createInlineTerminalHost({ spawn() {
+    const directory = join(root, 'work-launches');
+    for (const name of readdirSync(directory)) rmSync(join(directory, name));
+    return { pid: process.pid, kill, onExit: vi.fn() };
+  } } as never);
+  expect(() => host.spawn({ file: 'sh', args: [], cwd: root, env: {}, cols: 80, rows: 24 })).toThrow(/admission/i);
+  expect(kill).toHaveBeenCalledWith('SIGKILL');
+  expect(readdirSync(join(root, 'work-launches'))).toEqual([]);
 });

@@ -447,6 +447,7 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
 
   const workLaunch = reserveWorkLaunch(`Run: ${command[0]}`);
   try {
+    workLaunch.started(process.pid);
     execFileSync(
       'tmux',
       ['new-session', '-d', '-s', session, '-x', '220', '-y', '50', 'sh', '-c', wrapper, 'o8run', ...command],
@@ -477,7 +478,16 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     }).trim();
     panePid = Number.parseInt(out, 10) || null;
   } catch { /* informational only */ }
-  workLaunch.started(panePid ?? undefined);
+  try { workLaunch.started(panePid ?? undefined); }
+  catch (error) {
+    // The command is still behind its go-gate; settle the waiting shell.
+    try { execFileSync('tmux', ['kill-session', '-t', session], { windowsHide: true, timeout: 3_000, stdio: 'ignore' }); } catch { /* Already gone. */ }
+    workLaunch.release();
+    for (const file of [logFile, exitFile, metadataFile, goFile, envFile]) {
+      try { rmSync(file, { force: true }); } catch { /* Already gone. */ }
+    }
+    throw error;
+  }
   let processGroupId: number | null = null;
   if (panePid && process.platform !== 'win32') {
     try {

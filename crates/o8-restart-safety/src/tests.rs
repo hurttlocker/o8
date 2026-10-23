@@ -220,7 +220,7 @@ fn never_bound_work_expires_at_native_admission() {
     fs::write(
         &file,
         serde_json::json!({"id":id,"label":"Unbound worker",
-        "ownerPid":std::process::id(),"pid":null,"createdAtMs":1})
+        "ownerPid":std::process::id(),"pid":null,"createdAtMs":1,"createdMonotonicMs":1})
         .to_string(),
     )
     .unwrap();
@@ -331,6 +331,28 @@ fn force_retries_when_installer_settles_before_owner_publication() {
     });
     let id = state.prepare_with_work(true).unwrap();
     state.before_restart(Some(&id)).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn legacy_unbound_age_is_monotonic_at_native_admission() {
+    let (root, state, calls) = fixture();
+    fs::create_dir(root.join("work-launches")).unwrap();
+    let id = Uuid::new_v4().to_string();
+    let file = root.join("work-launches").join(format!("{id}.json"));
+    fs::write(
+        &file,
+        serde_json::json!({"id":id,"label":"Legacy unbound",
+        "ownerPid":std::process::id(),"pid":null,"createdAtMs":1})
+        .to_string(),
+    )
+    .unwrap();
+    assert!(state.before_restart(None).is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    lease_owner::expire_observation(&file);
+    state.before_restart(None).unwrap();
+    assert!(!file.exists());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     fs::remove_dir_all(root).unwrap();
 }

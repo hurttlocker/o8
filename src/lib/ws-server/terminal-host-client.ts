@@ -11,7 +11,7 @@
  * (inline | child); default resolved by the caller.
  */
 
-import { reserveWorkLaunch, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
+import { reserveWorkLaunch, WorkAdmissionExpiredError, type WorkLaunchLease } from '@/lib/app-update/work-launch-admission';
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -42,14 +42,23 @@ export function createInlineTerminalHost(ptyModule: InlinePtyModule): TerminalHo
     spawn(spec: PtySpawnSpec): TerminalHandle {
       const lease = reserveWorkLaunch(`Terminal ${spec.file}`);
       let p: ChildPty | undefined;
-      try { p = ptyModule.spawn(spec.file, spec.args, {
-        name: spec.name ?? 'xterm-256color',
-        cols: spec.cols,
-        rows: spec.rows,
-        cwd: spec.cwd,
-        env: spec.env,
-      });
-        try { lease.started(p.pid); } catch { /* Preserve uncertain ownership through exit. */ }
+      try {
+        lease.started(process.pid);
+        p = ptyModule.spawn(spec.file, spec.args, {
+          name: spec.name ?? 'xterm-256color',
+          cols: spec.cols,
+          rows: spec.rows,
+          cwd: spec.cwd,
+          env: spec.env,
+        });
+        try { lease.started(p.pid); } catch (error) {
+          if (error instanceof WorkAdmissionExpiredError) {
+            p.kill('SIGKILL');
+            lease.release();
+            throw error;
+          }
+          // Preserve uncertain ownership through exit on a PID write I/O fault.
+        }
         p.onExit(lease.release);
       } catch (error) { if (!p) lease.release(); throw error; }
       const terminal = p;
@@ -148,7 +157,10 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
     switch (msg.type) {
       case 'spawned':
         h.pid = msg.pid;
-        try { h.lease.started(msg.pid); } catch { /* Retain reader until confirmed exit. */ }
+        try { h.lease.started(msg.pid); } catch (error) {
+          if (error instanceof WorkAdmissionExpiredError) h.kill('SIGKILL');
+          // Other PID write faults retain the reader until confirmed exit.
+        }
         break;
       case 'spawn-error':
         h.lease.release();
@@ -192,7 +204,7 @@ export function createChildTerminalHost(options: ChildTerminalHostOptions = {}):
       handles.set(id, handle);
       // IPC preserves order: the child processes this spawn (creating the pty)
       // before any subsequent write/resize/kill on the same id.
-      child.send?.({ type: 'spawn', id, spec });
+      child.send?.({ type: 'spawn', id, spec, admissionId: lease.id });
       return handle;
     },
     dispose() {

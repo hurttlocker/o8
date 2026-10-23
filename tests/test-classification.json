@@ -5349,6 +5349,15 @@
       ]
     },
     {
+      "path": "tests/update-lease-clock-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "native-build",
+        "real-path",
+        "terminal-host"
+      ]
+    },
+    {
       "path": "tests/update-lease-race-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5381,6 +5390,13 @@
         "process-signal",
         "terminal-host",
         "terminal-tool"
+      ]
+    },
+    {
+      "path": "tests/updater-cli-startup-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
       ]
     },
     {
