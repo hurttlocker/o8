@@ -40,6 +40,17 @@ function deferred<T = Response>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { resolve, promise };
 }
+function refuse(headers: Record<string, string> = { 'retry-after': '30' }, status = 429) {
+  fetchMock.mockImplementation(async input => input === '/api/panel/repos'
+    ? Response.json({ repos: [registry(repoA), registry(repoB)] }) : new Response(null, { status, headers }));
+}
+function recover(title = 'Recovered issue') {
+  fetchMock.mockImplementation(async input => {
+    if (input === '/api/panel/repos') return Response.json({ repos: [registry(repoA), registry(repoB)] });
+    const url = new URL(input, 'https://fixture.invalid');
+    return snapshot(url.searchParams.get('repo') ?? repoA, Number(url.pathname.split('/').pop()), title);
+  });
+}
 
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-22T12:30:00Z')); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -201,7 +212,7 @@ describe('shared issue details through the real IssueViewer', () => {
 
   it('lets Retry supersede an older background read and keeps the newer result', async () => {
     await render();
-    fetchMock.mockImplementation(async input => input === '/api/panel/repos' ? Response.json({ repos: [] }) : new Response(null, { status: 429 }));
+    fetchMock.mockImplementation(async input => input === '/api/panel/repos' ? Response.json({ repos: [] }) : new Response(null, { status: 503 }));
     await invalidate();
     const pending = deferred(); fetchMock.mockImplementationOnce(() => pending.promise);
     let background!: Promise<void>;
@@ -211,5 +222,77 @@ describe('shared issue details through the real IssueViewer', () => {
     await click('Retry'); expect(signal?.aborted).toBe(true);
     await act(async () => { pending.resolve(snapshot(repoA, 7, 'Superseded issue')); await background; });
     await settle(); expect(host.textContent).toContain('Newest issue'); expect(host.textContent).not.toContain('Superseded issue');
+  });
+
+  it('does not spend the configured automatic retries on a quota refusal', async () => {
+    client.setDefaultOptions({ queries: { retry: 3, retryDelay: 10 } });
+    refuse(); await render(); await settle(1_000);
+    expect(reads()).toHaveLength(1); expect(host.textContent).toContain('Failed to load issue #7');
+  });
+
+  it.each([
+    ['numeric Retry-After', 429, { 'retry-after': '30' }],
+    ['HTTP-date Retry-After', 403, { 'retry-after': 'Thu, 22 Oct 2026 12:30:30 GMT' }],
+    ['primary reset', 403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1792672230' }],
+    ['later reset', 429, { 'retry-after': '10', 'x-ratelimit-reset': '1792672230' }],
+  ] as const)('shares a recovery at %s after close and remount', async (_kind, status, headers) => {
+    refuse(headers, status); await render(2); await render(0); await render(2);
+    expect(reads()).toHaveLength(1); recover();
+    await settle(29_000); expect(reads()).toHaveLength(1);
+    await settle(1_001); await settle(); await settle();
+    expect(reads()).toHaveLength(2); expect(host.textContent?.match(/Recovered issue/g)).toHaveLength(2);
+    await settle(180_000); expect(reads()).toHaveLength(2);
+  });
+
+  it.each([false, true])('keeps known details and their age during backoff (stale: %s)', async stale => {
+    await render(2); await settle(stale ? 180_000 : 60_000);
+    refuse(); await invalidate();
+    expect(host.querySelectorAll('h2')).toHaveLength(2); expect(host.textContent).toContain(`Body ${repoA} 7`);
+    expect(host.textContent).toContain('Showing last successful issue'); expect(host.textContent).toContain(stale ? '3m ago' : '1m ago');
+    recover(); await settle(30_001); await settle(); await settle();
+    expect(reads()).toHaveLength(3); expect(host.textContent?.match(/Recovered issue/g)).toHaveLength(2);
+    expect(host.textContent).not.toContain('Showing last successful issue');
+  });
+
+  it('allows explicit Retry during a pause and clears the old deadline after success', async () => {
+    refuse(); await render(2); recover(); await click('Retry');
+    expect(reads()).toHaveLength(2); expect(host.textContent?.match(/Recovered issue/g)).toHaveLength(2);
+    await settle(60_000); expect(reads()).toHaveLength(2);
+  });
+
+  it('uses a renewed refusal deadline without spinning', async () => {
+    refuse(); await render(2); await settle(30_001); await settle(); await settle();
+    expect(reads()).toHaveLength(2); recover(); await settle(29_000); expect(reads()).toHaveLength(2);
+    await settle(1_001); await settle(); await settle();
+    expect(reads()).toHaveLength(3); expect(host.textContent).toContain('Recovered issue');
+  });
+
+  it('isolates a paused repository and issue from other reads and workspace launches', async () => {
+    refuse(); await render(); recover();
+    await render(1, repoB); await click('Launch In Workspace'); expect(launch.mock.calls[0][0].repo).toBe(repoB);
+    await render(1, repoA, 8); expect(reads()).toHaveLength(3);
+    await render(); expect(reads()).toHaveLength(3); expect(host.textContent).toContain('Failed to load issue #7');
+    await settle(30_001); await settle(); await settle(); expect(reads()).toHaveLength(4);
+    expect(host.textContent).toContain('Recovered issue');
+  });
+
+  it('cancels deadline work on final unmount and recovers when reopened after expiry', async () => {
+    refuse(); await render(2); await render(1); recover(); await settle(29_000); expect(reads()).toHaveLength(1);
+    await render(0); await settle(2_000); expect(reads()).toHaveLength(1);
+    await render(2); expect(reads()).toHaveLength(2); expect(host.textContent?.match(/Recovered issue/g)).toHaveLength(2);
+  });
+
+  it('ignores background invalidation during a pause and resumes at the deadline', async () => {
+    await render(2); refuse(); await invalidate(); recover();
+    await invalidate(); expect(reads()).toHaveLength(2);
+    await settle(30_001); await settle(); await settle(); expect(reads()).toHaveLength(3);
+    expect(host.textContent).toContain('Recovered issue');
+  });
+
+  it('preserves ordinary permission errors and the configured retry policy', async () => {
+    client.setDefaultOptions({ queries: { retry: 1, retryDelay: 10 } });
+    refuse({}, 403); await render(); await settle(100); expect(reads()).toHaveLength(2);
+    recover(); await render(0); await render(); expect(reads()).toHaveLength(3);
+    expect(host.textContent).toContain('Recovered issue');
   });
 });
