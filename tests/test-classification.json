@@ -3692,6 +3692,12 @@
       ]
     },
     {
+      "path": "tests/operator-defaults-values-invalidation-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/operator-mcp-review-merge-freshness-real-path.test.ts",
       "reasons": [
         "child-process",
