@@ -9,7 +9,7 @@ index 0840474..de2a7ee 100644
 +        const __o8LookupActionModule = (mapping, key)=>{
 +            const found = mapping[key] ?? mapping[key.replace(/\\/g, '/')] ?? mapping[key.replace(/\//g, '\\')];
 +            if (!found) {
-+                console.warn('[o8-port] action-module lookup miss for worker key', JSON.stringify(key), '— skipping its manifest entry (see o8-run/o8#1745; o8 ships no first-party server actions)');
++                console.warn('[o8-port] action-module lookup miss for worker key', JSON.stringify(key), '— skipping its manifest entry (see hurttlocker/o8#1745; o8 ships no first-party server actions)');
 +            }
 +            return found;
 +        };
