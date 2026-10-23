@@ -2,6 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { githubListQueryKey } from '@/lib/github-client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import { RepoCard } from './RepoCard';
@@ -27,13 +28,14 @@ let root: Root;
 let host: HTMLDivElement;
 let fetchMock: ReturnType<typeof vi.fn>;
 const reads = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/panel/prs?'));
+const detailReads = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/panel/pr?'));
 const cards = () => [...host.children].flatMap(node => [...node.children]) as HTMLDivElement[];
 const badges = () => cards().map(card => [...card.querySelectorAll('span')].find(node => /^\d+PR$/.test(node.textContent ?? ''))?.textContent ?? null);
 async function settle(ms = 0) { await act(async () => vi.advanceTimersByTimeAsync(ms)); }
-async function render(repos: RepoRegistryEntry[] = [repo]) {
+async function render(repos: RepoRegistryEntry[] = [repo], onSelectRepo = () => {}, onToggle = () => {}) {
   await act(async () => root.render(createElement(QueryClientProvider, { client },
     ...repos.map((entry, i) => createElement('section', { key: i }, createElement(RepoCard, {
-      repo: entry, workspaceNotice: null, expanded: false, onToggle: () => {},
+      repo: entry, workspaceNotice: null, expanded: false, onToggle, onSelectRepo,
       onLaunchAgent: () => {}, onOpenWorkspace: () => {}, onOpenGitHub: () => {}, onLocate: () => {},
       onRemove: () => {}, onSaveSetup: async () => {},
     }))),
@@ -130,4 +132,51 @@ it('keeps known card badges after a rate-limited background refresh', async () =
 it('does not crash the card for a malformed list', async () => {
   fetchMock.mockImplementation(async () => Response.json({ prs: {} }));
   await render(); await hover(); expect(badges()).toEqual([null]);
+});
+
+it('renders PR and CI badges for five cards without unused per-item detail reads', async () => {
+  await render(Array(5).fill(repo)); await hover();
+  expect(badges()).toEqual(Array(5).fill('2PR'));
+  expect(cards().every(card => card.textContent?.includes('PR #27'))).toBe(true);
+  expect(cards().every(card => card.querySelector('[title="1 passing"]'))).toBe(true);
+  expect(reads()).toHaveLength(1);
+  expect(detailReads()).toHaveLength(0);
+});
+
+it('mounts and remounts a warm list without detail reads before or after hovering', async () => {
+  client.setQueryData(githubListQueryKey('org/sample', 'prs'), await list().json());
+  await render();
+  expect(badges()).toEqual(['2PR']); expect(reads()).toHaveLength(0);
+  expect(detailReads()).toHaveLength(0);
+  await hover(); await hover(false); await render([]); await render(); await hover();
+  expect(badges()).toEqual(['2PR']); expect(reads()).toHaveLength(0);
+  expect(detailReads()).toHaveLength(0);
+});
+
+it('updates the selected PR and CI summary from the shared list without detail reads', async () => {
+  await render(); await hover();
+  const next = await list(81, 1).json();
+  next.prs[0].statusCheckRollup[0].conclusion = 'failure';
+  await act(async () => { client.setQueryData(githubListQueryKey('org/sample', 'prs'), next); });
+  await settle(1);
+  expect(badges()).toEqual(['1PR']); expect(host.textContent).toContain('PR #81');
+  expect(host.textContent).not.toContain('PR #27');
+  expect(host.querySelector('[title="1 failing"]')).not.toBeNull();
+  await act(async () => { client.setQueryData(githubListQueryKey('org/sample', 'prs'), { repo: 'org/sample', prs: [] }); });
+  await settle(1);
+  expect(badges()).toEqual([null]); expect(host.textContent).not.toContain('PR #81');
+  expect(host.querySelector('[title="1 failing"]')).toBeNull();
+  expect(detailReads()).toHaveLength(0);
+});
+
+it('keeps card selection and branch disclosure usable without fetching unused detail', async () => {
+  const select = vi.fn(); const toggle = vi.fn();
+  await render([repo], select, toggle); await hover();
+  await act(async () => {
+    host.querySelector('[role="button"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    host.querySelector('[role="button"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    host.querySelectorAll('[role="button"]')[1].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  expect(select).toHaveBeenCalledTimes(2); expect(toggle).toHaveBeenCalledTimes(1);
+  expect(badges()).toEqual(['2PR']); expect(detailReads()).toHaveLength(0);
 });

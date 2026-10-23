@@ -108,6 +108,7 @@ import {
   sameMetadataLockProcessIdentity,
 } from './metadata-lock-process-identity';
 import { writeManagedWorkspaceSafetyHooks } from './safety-hooks';
+import { timeWorktreePreparation } from './preparation-timing';
 
 const execFileAsync = materializationAwareExecFile;
 const TRASH_DIR_NAME = '.o8-trash';
@@ -771,13 +772,13 @@ export class WorktreeManager {
 
     let createdExecutionIdentity: Awaited<ReturnType<typeof captureWorktreeMaterializationIdentity>> | null = preparedExecutionIdentity;
     try {
-      await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+      await timeWorktreePreparation(opts, 'clone', () => withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
         execFileAsync('git', ['clone', '--local', '--no-checkout', this.repoRoot, taskId], {
           windowsHide: true,
           cwd: this.worktreeBase,
           timeout: 60_000,
         })
-      ));
+      )));
       await assertManagedWorktreeCreatedBoundary(
         this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
       );
@@ -797,11 +798,11 @@ export class WorktreeManager {
         });
       }
 
-      await execFileAsync('git', ['checkout', '-B', branchName, creationBaseCommit ?? baseBranch], {
+      await timeWorktreePreparation(opts, 'checkout', () => execFileAsync('git', ['checkout', '-B', branchName, creationBaseCommit ?? baseBranch], {
         windowsHide: true,
         cwd: worktreePath,
         timeout: 30_000,
-      });
+      }));
 
       if (opts.packetId && opts.branchName?.trim()) {
         await this.assertCreatedWorktreeBranch(worktreePath, opts.branchName.trim());
@@ -853,7 +854,7 @@ export class WorktreeManager {
         hydrationPaths: [],
       };
 
-      const hydrationPaths = await this.hydrateApfsCowAssets(worktreePath, capturedExecutionIdentity);
+      const hydrationPaths = await timeWorktreePreparation(opts, 'asset_hydration', () => this.hydrateApfsCowAssets(worktreePath, capturedExecutionIdentity));
       info.hydrationPaths = hydrationPaths;
       await this.updateMetaHydrationPaths(taskId, hydrationPaths);
 
@@ -1336,14 +1337,15 @@ export class WorktreeManager {
         await this.assertInstallableLocalNodeModules(worktreePath, identity);
       }
       if (installCommand) {
-        const result = await materializeDependencyInstall(worktreePath, installCommand, {
+        const result = await timeWorktreePreparation(launch, 'dependency_materialization', () => materializeDependencyInstall(worktreePath, installCommand, {
           materializationIdentity: identity,
+          cloneSourceWorkspace: this.repoRoot,
           persistReceipt: (receipt) => (
             receipt
               ? this.recordDependencyMaterialization(path.basename(worktreePath), receipt)
               : this.clearDependencyMaterialization(path.basename(worktreePath))
           ),
-        });
+        }));
         dependencyMaterialization = result.receipt;
         if (launch?.packetId && launch.laneId) {
           const verification = await verifyDependencyMaterialization(worktreePath);
@@ -1647,10 +1649,13 @@ export class WorktreeManager {
       const sourcePath = path.join(this.repoRoot, relativePath);
       if (!(await this.pathExists(sourcePath))) continue;
       try {
-        const disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, {
-          mode: 'copy-tree',
+        let disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, {
+          mode: 'clone-tree',
           source: sourcePath,
         });
+        if (disposition === 'unsupported') {
+          disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, { mode: 'copy-tree', source: sourcePath });
+        }
         if (disposition === 'created') hydrated.push(relativePath);
       } catch (err) {
         if (isPinnedWorkspacePublishError(err)) throw err;
