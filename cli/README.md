@@ -63,7 +63,7 @@ From a source checkout, run `npm run build:cli` then `node cli/dist/o8.mjs chat`
 | `o8 chat [--repo <path>] [--resume <thread>]` | Interactive local orchestrator conversation |
 | `o8 version` | CLI version + connected server version |
 | `o8 doctor` | Verify port + token resolution; ping `/api/panel/status` |
-| `o8 status` | Snapshot: running packets, active lanes, recent merges, pending approvals |
+| `o8 status` | Operator snapshot: running packets, active lanes, recent merges, pending approvals. Packet workers receive only live lane/packet IDs, states, and checkout paths. |
 | `o8 history <thoughts-thread-id> [--limit 200]` | Read one continuous orchestrator transcript with permanent, audited handoff seams |
 | `o8 worker spawn --title "..." [--repo <path>]` | Create and dispatch one governed worker from any local repo without adding it to Projects; the running app opens a dedicated worker pane |
 | `o8 worker login` | Connect a dedicated encrypted native worker token on macOS from an operator terminal; no source checkout is required and raw setup output is suppressed |
