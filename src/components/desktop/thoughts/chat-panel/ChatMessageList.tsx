@@ -2,7 +2,7 @@
 
 import { Fragment, forwardRef, useRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
-import { ComposerDeliveryTag, ComposerQueuedMessages, composerSendForEntry, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
+import { ComposerEntryDelivery, ComposerQueuedMessages, type ComposerTranscriptQueue } from './ComposerQueuedMessages';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import { ShimmerLine } from './turn-line';
@@ -321,7 +321,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                   repoPath={repoPath}
                   onRetryDelivery={onRetryDelivery}
                   visualizations={msg.role === 'assistant' ? visualsByIndex.get(index) : undefined}
-                  userDelivery={composerQueue && composerSendForEntry(msg.id, composerQueue.items) ? <ComposerDeliveryTag item={composerSendForEntry(msg.id, composerQueue.items)!} queue={composerQueue} /> : undefined}
+                  userDelivery={<ComposerEntryDelivery id={msg.id} queue={composerQueue} />}
                 />
               </div>
               {renderTaskArtifacts(index)}

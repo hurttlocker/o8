@@ -30,6 +30,16 @@ describe('buildMissionRenderItems', () => {
     expect(html).toContain('Queued');
     expect(html).toContain('Steer now');
   });
+  it('retains an acknowledged steer tag after its recent queue receipt leaves the window', () => {
+    const html = renderToStaticMarkup(createElement(ChatMessageList, {
+      displayMessages: [{ id: 'composer-steer-older-receipt', role: 'user', text: 'Keep the smaller change.' }], displayWaiting: false,
+      activeTargetLabel: 'Agent', activeTargetColor: 'var(--t-accent)', thoughtsMutedGlass: 'transparent',
+      thoughtsElevatedBorder: 'var(--t-divider)', thoughtsElevatedShadow: 'none', emptyStateFallback: null,
+      composerQueue: { items: [], canSteer: false, onSteer: () => {}, onCancel: () => {} },
+    }));
+    expect(html).toContain('Steer →');
+    expect(html).not.toContain('Queued');
+  });
   it('groups consecutive packet terminal status cards', () => {
     const items = buildMissionRenderItems([
       entry('merge-1', { kind: 'merge', packetTitle: 'One', branch: 'main' }),

@@ -67,7 +67,7 @@ describe('durable composer queue API and persisted state', () => {
     const response = await POST(request('POST', { ...target, id: 'queue-native-steer', intent: 'steer-now', payload: { ...payload, images: [], routing } }));
     expect(response.status).toBe(200);
     const { createComposerQueueHeartbeat } = await import('@/lib/ws-server/composer-queue-heartbeat');
-    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: () => [], publish: () => {}, registerAbort: () => () => {} });
+    const heartbeat = createComposerQueueHeartbeat({ isBusy: () => true, readTranscript: async () => [], publish: () => {}, registerAbort: () => () => {} });
     try {
       heartbeat();
       await vi.waitFor(() => expect(queue.readComposerSend('queue-native-steer')?.status).toBe(outcome === true ? 'applied' : outcome === false ? 'queued' : 'held'));

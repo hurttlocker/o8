@@ -37,6 +37,13 @@ export function ComposerDeliveryTag({ item, queue }: { item: QueuedComposerSendR
   </div>;
 }
 
+/** The persisted server message id keeps old acknowledgement tags after queue pagination. */
+export function ComposerEntryDelivery({ id, queue }: { id: string; queue?: ComposerTranscriptQueue }) {
+  const item = queue ? composerSendForEntry(id, queue.items) : undefined;
+  if (item && queue) return <ComposerDeliveryTag item={item} queue={queue} />;
+  return id.startsWith('composer-steer-') ? <span style={{ color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 300 }}>Steer →</span> : null;
+}
+
 export function ComposerQueuedMessages({ queue, messages }: { queue: ComposerTranscriptQueue; messages: readonly MobileTranscriptEntry[] }): ReactNode {
   const pending = queue.items.filter(item => item.status !== 'cancelled' && !messages.some(message => composerSendForEntry(message.id, [item])
     || (item.status === 'dispatching' && item.admittedAt !== null && message.role === 'user' && message.text === item.payload.text && (message.timestamp ?? 0) >= item.createdAt)));
