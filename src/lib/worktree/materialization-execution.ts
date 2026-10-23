@@ -1,6 +1,7 @@
 import { spawn, execFile, type ChildProcess, type ExecFileOptions } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
+import { resolveGitBinary } from '@/lib/git/binary';
 
 import { probeMetadataLockProcessIdentity, type MetadataLockProcessIdentity } from './metadata-lock-process-identity';
 
@@ -41,6 +42,7 @@ export function guardedWorkspaceInvocation(
   args: string[],
   identity: WorktreeMaterializationIdentity | null,
 ): { command: string; args: string[] } {
+  if (command === 'git') command = resolveGitBinary();
   if (!identity) return { command, args };
   return {
     command: process.execPath,

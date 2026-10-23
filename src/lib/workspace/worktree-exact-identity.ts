@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -132,7 +133,7 @@ export async function captureGitWorktreeAdminIdentity(
   const adminPath = path.resolve(workspacePath, match[1]);
   const [adminStat, gitDir, adminMarker] = await Promise.all([
     lstat(adminPath),
-    execFileAsync('git', ['rev-parse', '--path-format=absolute', '--git-dir'], {
+    execFileAsync(resolveGitBinary(), ['rev-parse', '--path-format=absolute', '--git-dir'], {
       windowsHide: true, cwd: repoPath, timeout: 5_000,
     }).then(({ stdout }) => path.resolve(stdout.trim())),
     readFile(path.join(adminPath, 'gitdir'), 'utf8'),
@@ -177,7 +178,7 @@ export async function recoverGitWorktreeAdminReceipt(
   repoPath: string,
   workspacePath: string,
 ): Promise<GitWorktreeAdminReceipt> {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--path-format=absolute', '--git-dir'], {
+  const { stdout } = await execFileAsync(resolveGitBinary(), ['rev-parse', '--path-format=absolute', '--git-dir'], {
     windowsHide: true, cwd: repoPath, timeout: 5_000,
   });
   const adminRoot = path.join(await realpath(path.resolve(stdout.trim())), 'worktrees');
@@ -228,7 +229,7 @@ export async function cleanupExactGitWorktreeAdmin(
     throw error;
   });
   if (!adminStat) return;
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--path-format=absolute', '--git-dir'], {
+  const { stdout } = await execFileAsync(resolveGitBinary(), ['rev-parse', '--path-format=absolute', '--git-dir'], {
     windowsHide: true, cwd: repoPath, timeout: 5_000,
   });
   const adminRoot = path.join(await realpath(path.resolve(stdout.trim())), 'worktrees');

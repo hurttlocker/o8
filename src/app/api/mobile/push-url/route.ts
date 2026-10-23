@@ -6,7 +6,7 @@
  * mobile-split-shell listener consumes the broadcast and re-points the
  * DevHostFrame iframe to the new URL.
  *
- * Issue: https://github.com/hurttlocker/o8/issues/782
+ * Issue: https://github.com/o8-run/o8/issues/782
  *
  * Body:
  *   { url: string, sourceRepoId?: string | null }

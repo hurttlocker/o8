@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFileSync } from 'node:child_process';
 import { and, asc, eq } from 'drizzle-orm';
 
@@ -8,7 +9,7 @@ const OBJECT_ID_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 function gitObject(cwd: string, args: string[]): string | null {
   try {
-    const value = execFileSync('git', args, {
+    const value = execFileSync(resolveGitBinary(), args, {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],

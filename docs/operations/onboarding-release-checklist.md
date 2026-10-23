@@ -48,7 +48,7 @@ The agreed non-media local acceptance scope is complete and included in v0.1.771
 
 ## Published artifact verification
 
-- Version PR [#2825](https://github.com/hurttlocker/o8/pull/2825) passed all required checks. The release tag points to the exact merged source above.
+- Version PR [#2825](https://github.com/o8-run/o8/pull/2825) passed all required checks. The release tag points to the exact merged source above.
 - Public updater archive signature, strict app signature, Gatekeeper assessment, and notarization tickets passed. The downloaded DMG contains the same app code signature as the updater archive.
 - Installed release launches with a disposable profile. At 1024 × 700, all four permission rows show Ready, the microphone test is a visible button, and scrolling has no visible scrollbar. Restart and return restores the permissions page and rechecks all four grants. Tool discovery settles on a suggested installed lead.
 - Microphone audio-input acceptance remains the previously recorded operator test on unchanged code; no new recording was made for this release.
@@ -63,16 +63,16 @@ The agreed non-media local acceptance scope is complete and included in v0.1.771
 - Native workspace shows the selected project and waits for the first message at 1024 × 700.
 - Keyboard acceptance found focus escaping into the obscured workspace through Tab navigation and late composer focus after startup. Both regressions fail before #2806 and all 16 flow tests pass afterward. Native Shift-Tab and Tab wrap within setup at 1024 × 700; a separate Help dialog can still own focus.
 - Final keyboard stack and subsequent microphone-button polish: hermetic suite passes with 5,111 tests passed and 4 skipped; TypeScript, touched ESLint, rule-check, and roadmap checks pass.
-- Final keyboard code CI (`515031de0`): https://github.com/hurttlocker/o8/actions/runs/36269653069. Later ledger-only commits do not change the tested application.
+- Final keyboard code CI (`515031de0`): https://github.com/o8-run/o8/actions/runs/36269653069. Later ledger-only commits do not change the tested application.
 - Local production candidate at `325038fb9`: real WKWebView boot and idle footprint gates pass. Clean-profile window appears at 3.962s, server ready at 7.978s. Restart window appears at 5.150s, server ready at 8.293s; permissions page restored, four permissions rechecked, resume marker consumed. These are startup milestones, not measured time to first interaction. No fatal WebView errors. The artifact is local, ad-hoc signed, and not notarized or published.
 - Idle sample: 15 seconds after cooldown, approximately 945 MB physical memory across the app process tree, 2.33% CPU, zero process churn. Loaded-worker footprint was not requested.
 - Final packaged UI at `515031de0`: production build and signature verification pass; initial and post-restart focus stay inside onboarding. Restart restores permissions and consumes the resume marker. At 1024 × 700, keyboard navigation reaches the microphone test and scrolls the return button fully into view. Launch milestones: window 4.044s, server 7.789s; restart: window 4.951s, server 8.160s.
 - Real microphone input passes: the operator completed the live check and its "We can hear you" success state was observed in the native app. Earlier silence correctly produced no success. The test and stop actions now use the established outlined button with a 44-pixel target; native layout verified at 1024 × 700.
 - Optimized debug launch: window at 17.5s; dashboard connection at 20.6s under concurrent load. Restart-and-return: window at 38.2s; dashboard at 43.4s; permissions page restored, all four statuses rechecked, resume marker consumed. Production timings are recorded above.
-- Continuity stack CI: https://github.com/hurttlocker/o8/actions/runs/36265555314. All gates passed, including build. Hermetic suite: 5,109 passed, 4 skipped.
-- Debug-profile stack CI: https://github.com/hurttlocker/o8/actions/runs/36265768866. All gates passed; subsequent changes only record these receipts.
+- Continuity stack CI: https://github.com/o8-run/o8/actions/runs/36265555314. All gates passed, including build. Hermetic suite: 5,109 passed, 4 skipped.
+- Debug-profile stack CI: https://github.com/o8-run/o8/actions/runs/36265768866. All gates passed; subsequent changes only record these receipts.
 
-- Installer acceptance found a dialog package mismatch (JavaScript 2.6.0, Rust 2.7.2). #2805 aligns the JavaScript package to 2.7.3; installed files were verified after repairing a stale local npm install. Four folder-opening integration tests and TypeScript pass. All CI gates pass: https://github.com/hurttlocker/o8/actions/runs/36267205775.
+- Installer acceptance found a dialog package mismatch (JavaScript 2.6.0, Rust 2.7.2). #2805 aligns the JavaScript package to 2.7.3; installed files were verified after repairing a stale local npm install. Four folder-opening integration tests and TypeScript pass. All CI gates pass: https://github.com/o8-run/o8/actions/runs/36267205775.
 
 ## Deferred
 

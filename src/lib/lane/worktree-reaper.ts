@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 /**
  * Stale-worktree reaper.
  *
@@ -70,7 +71,7 @@ async function branchIsMergedIntoBase(
     // tip is already reachable from base, 1 when it isn't. Anything else
     // (missing ref, bad repo) throws and we fall through to "not merged".
     await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['merge-base', '--is-ancestor', branch, baseBranch],
       { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
@@ -90,7 +91,7 @@ async function worktreeHasNoDiffAgainstBase(
     // state) also throws; we conservatively return false so we never archive
     // a lane we can't reason about.
     await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['diff', '--quiet', `${baseBranch}...HEAD`],
       { windowsHide: true, cwd: worktreeCwd, timeout: 5_000 },
     );
@@ -103,7 +104,7 @@ async function worktreeHasNoDiffAgainstBase(
 async function readTreeHash(repoPath: string, ref: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['rev-parse', `${ref}^{tree}`],
       { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
@@ -232,7 +233,7 @@ function repoSlugFromRemoteUrl(remoteUrl: string): string | null {
 async function resolveRepoFullName(repoPath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['remote', 'get-url', 'origin'],
       { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );

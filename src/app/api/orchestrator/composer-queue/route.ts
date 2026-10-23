@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       return receipt ? NextResponse.json(receipt, { headers: { 'Cache-Control': 'no-store' } }) : NextResponse.json({ error: 'This visual request was not found in this chat.' }, { status: 404 });
     }
     const backend = request.nextUrl.searchParams.get('backend');
-    const canSteer = (id: unknown) => isOrchestratorBackendId(id) && Boolean(getOrchestratorBackend(id).liveSteer);
+    const canSteer = (id: unknown) => isOrchestratorBackendId(id) && Boolean(getOrchestratorBackend(id, target).liveSteer);
     const items = listComposerTranscriptSends(target);
     const steerableIds = items.filter(item => canSteer(item.payload.routing.collide && item.payload.routing.mode !== 'single' ? 'collide' : item.payload.routing.backend)).map(item => item.id);
     return NextResponse.json({ items, canSteer: canSteer(backend), steerableIds }, { headers: { 'Cache-Control': 'no-store' } });

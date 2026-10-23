@@ -2111,6 +2111,24 @@
       ]
     },
     {
+      "path": "tests/codex-home-executable-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
+      "path": "tests/codex-live-steer-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/codex-review-config-isolation-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3839,6 +3857,7 @@
         "child-process",
         "git-cli",
         "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },

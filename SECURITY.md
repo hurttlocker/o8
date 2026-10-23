@@ -2,7 +2,7 @@
 
 ## Pre-launch security review
 
-o8's surface was adversarially reviewed before the repository was made public. Twenty findings were identified and fixed; the public summary — classes, severities, and how each was resolved — is [issue #1643](https://github.com/hurttlocker/o8/issues/1643).
+o8's surface was adversarially reviewed before the repository was made public. Twenty findings were identified and fixed; the public summary — classes, severities, and how each was resolved — is [issue #1643](https://github.com/o8-run/o8/issues/1643).
 
 Root-cause write-ups for those findings are retained privately rather than published. Every one is fixed in current releases, but signed builds of earlier versions remain downloadable, and a published exploit chain would apply to anyone still running one. The redaction protects those users; it does not indicate an unresolved issue. Accepted residual risks are tracked as open issues rather than carried silently.
 
@@ -16,7 +16,7 @@ The at-rest encryption master key also uses the macOS Keychain when it is availa
 
 A worker that o8 dispatches on your machine runs under your user account by default — the same posture as running `claude` or `codex` yourself in a terminal, which is what o8 is orchestrating on your behalf. o8 governs what an agent may do to your repository: what it can reach, what it may merge, and what requires your approval. That governance holds regardless of this setting, and it is enforced in o8's own principal and approval layers rather than by the operating system.
 
-Operating-system confinement is a separate layer, and it is available: setting `O8_WORKER_SANDBOX` runs locally dispatched workers inside an OS sandbox, which is fail-closed — if the sandbox cannot be established, the worker does not run. It is off by default because the profile has not yet been validated against the full range of work real workers do (repository and worktree access, the data directory, language toolchains, spawning further CLIs). Enabling it before that validation would break legitimate dispatches rather than degrade gracefully. Making it the default is tracked in [issue #1657](https://github.com/hurttlocker/o8/issues/1657).
+Operating-system confinement is a separate layer, and it is available: setting `O8_WORKER_SANDBOX` runs locally dispatched workers inside an OS sandbox, which is fail-closed — if the sandbox cannot be established, the worker does not run. It is off by default because the profile has not yet been validated against the full range of work real workers do (repository and worktree access, the data directory, language toolchains, spawning further CLIs). Enabling it before that validation would break legitimate dispatches rather than degrade gracefully. Making it the default is tracked in [issue #1657](https://github.com/o8-run/o8/issues/1657).
 
 The practical read: o8's default does not expand the trust you already extend to the coding CLIs it drives, and it adds a governance layer those CLIs do not have on their own. If your threat model includes a fully malicious worker rather than a prompt-injected one, enable the sandbox.
 
@@ -28,4 +28,4 @@ CodeQL is managed through GitHub's default setup in repository settings rather t
 
 ## Reporting a vulnerability
 
-Please use GitHub's private vulnerability reporting form for `hurttlocker/o8`. Include the affected version, impact, reproduction steps, and any suggested remediation. Do not publish exploit details in a public issue. If the private form is unavailable, open a public issue containing only a request for a private reporting channel.
+Please use GitHub's private vulnerability reporting form for `o8-run/o8`. Include the affected version, impact, reproduction steps, and any suggested remediation. Do not publish exploit details in a public issue. If the private form is unavailable, open a public issue containing only a request for a private reporting channel.

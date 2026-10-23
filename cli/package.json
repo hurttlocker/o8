@@ -20,14 +20,14 @@
     "codex",
     "orchestrator"
   ],
-  "homepage": "https://github.com/hurttlocker/o8#readme",
+  "homepage": "https://github.com/o8-run/o8#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hurttlocker/o8.git",
+    "url": "git+https://github.com/o8-run/o8.git",
     "directory": "cli"
   },
   "bugs": {
-    "url": "https://github.com/hurttlocker/o8/issues"
+    "url": "https://github.com/o8-run/o8/issues"
   },
   "license": "Apache-2.0",
   "author": "Marquise Hurtt",

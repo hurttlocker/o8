@@ -86,6 +86,6 @@ For maintainers who build, verify, release, recover, or harden o8.
 | [Dependency cache retention](operations/dependency-cache-retention.md) | Download-cache bounds, active-installer protection, legacy preservation, and maintenance receipts. |
 | [Sustained work and retirement](operations/sustained-work-retirement.md) | The twenty-check acceptance program for native execution, preservation, automatic retirement and verified restore on macOS and Linux. |
 
-Questions or problems? [Open an issue](https://github.com/hurttlocker/o8/issues) — the bug template asks for the details that make reports actionable.
+Questions or problems? [Open an issue](https://github.com/o8-run/o8/issues) — the bug template asks for the details that make reports actionable.
 
 <sub>Written by the fleet. Governed by one human.</sub>

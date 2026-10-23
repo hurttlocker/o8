@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import * as nodeModule from 'node:module';
 import {
@@ -157,7 +158,7 @@ function lintAvailability(cwd: string): { skip: false; eslintScript: string } | 
 async function gitOutput(cwd: string, args: string[], deadline: number, gitRepoPath?: string): Promise<string> {
   const execute = gitRepoPath
     ? (args: string[], options: { timeout: number; maxBuffer: number }) => laneGit(cwd, gitRepoPath, args, options)
-    : (args: string[], options: { timeout: number; maxBuffer: number }) => execFileAsync('git', args, { cwd, windowsHide: true, encoding: 'utf8', ...options });
+    : (args: string[], options: { timeout: number; maxBuffer: number }) => execFileAsync(resolveGitBinary(), args, { cwd, windowsHide: true, encoding: 'utf8', ...options });
   const { stdout } = await execute(args, {
     timeout: remainingTimeout(deadline),
     maxBuffer: LINT_MAX_BUFFER_BYTES,

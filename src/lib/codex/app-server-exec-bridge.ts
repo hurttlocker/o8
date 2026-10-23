@@ -14,6 +14,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import type { CodexAppBridgeSpec } from './app-bridge-spec';
 
 type Json = Record<string, unknown>;
+class RpcRefusal extends Error {}
 interface Usage { input_tokens: number; cached_input_tokens: number; output_tokens: number }
 
 const STOP_GRACE_MS = 1_500;
@@ -109,6 +110,21 @@ async function main(): Promise<void> {
     send({ id, method, params });
   });
 
+  // The parent owns durable admission. This bridge owns the native turn fence.
+  process.on('message', (value: unknown) => {
+    const message = asObject(value);
+    if (message?.type !== 'codex.bridge.steer' || typeof message.id !== 'string') return;
+    const reply = (result: Json) => process.send?.({ type: 'codex.bridge.steer.result', id: message.id, ...result });
+    if (stopping || !threadId || !turnId || message.threadId !== threadId || message.expectedTurnId !== turnId) {
+      reply({ accepted: false });
+      return;
+    }
+    const expectedTurnId = turnId;
+    void call('turn/steer', { threadId, expectedTurnId, input: message.input, clientUserMessageId: message.clientUserMessageId })
+      .then(result => reply(text(result.turnId) === expectedTurnId ? { accepted: true } : { unconfirmed: true }))
+      .catch((error: unknown) => reply(error instanceof RpcRefusal ? { accepted: false } : { unconfirmed: true }));
+  });
+
   const onMessage = (message: Json) => {
     const method = text(message.method);
     if (typeof message.id === 'number' && !method) {
@@ -116,7 +132,7 @@ async function main(): Promise<void> {
       if (!waiter) return;
       pending.delete(message.id);
       const error = asObject(message.error);
-      if (error) waiter.reject(new Error(text(error.message) || 'request failed'));
+      if (error) waiter.reject(new RpcRefusal(text(error.message) || 'request failed'));
       else waiter.resolve(asObject(message.result) ?? {});
       return;
     }
@@ -156,6 +172,8 @@ async function main(): Promise<void> {
     } else if (method === 'error') {
       if (params.willRetry !== true) out({ type: 'error', message: text(asObject(params.error)?.message) || 'Codex turn error' });
     } else if (method === 'turn/completed') {
+      turnId = null;
+      process.send?.({ type: 'codex.bridge.turn', threadId, turnId });
       const turn = asObject(params.turn) ?? {};
       const status = text(turn.status);
       if (status === 'completed') {
@@ -240,6 +258,7 @@ async function main(): Promise<void> {
       ...(spec.serviceTier ? { serviceTier: spec.serviceTier } : {}),
     });
     turnId = text(asObject(turn.turn)?.id) || null;
+    process.send?.({ type: 'codex.bridge.turn', threadId, turnId });
     // Lets o8 tell its own turns from turns added in the Codex app.
     if (turnId) out({ type: 'turn.started', thread_id: threadId, turn_id: turnId });
     if (stopping && turnId) send({ id: ++nextId, method: 'turn/interrupt', params: { threadId, turnId } });

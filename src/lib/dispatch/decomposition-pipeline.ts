@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, dirname } from 'node:path';
@@ -60,7 +61,7 @@ function countLines(content: string): number {
 
 async function resolveMergeSha(repoPath: string, mergeRef: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--verify', mergeRef], {
+    const { stdout } = await execFileAsync(resolveGitBinary(), ['rev-parse', '--verify', mergeRef], {
       windowsHide: true,
       cwd: repoPath,
       maxBuffer: 1024 * 1024,
@@ -85,7 +86,7 @@ async function readPreMergeLineCount(
 ): Promise<number | null> {
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['show', `${sha}^:${relativePath}`],
       { windowsHide: true, cwd: repoPath, maxBuffer: 16 * 1024 * 1024 },
     );
@@ -96,7 +97,7 @@ async function readPreMergeLineCount(
     // exists, the file was simply new in the merge (→ pre-count 0). If there
     // is no parent, we can't run the diff — return null.
     try {
-      await execFileAsync('git', ['cat-file', '-e', `${sha}^`], {
+      await execFileAsync(resolveGitBinary(), ['cat-file', '-e', `${sha}^`], {
         windowsHide: true,
         cwd: repoPath,
         maxBuffer: 128 * 1024,
@@ -121,7 +122,7 @@ export async function findDecompositionCandidates(options: {
   let touchedFiles: string[];
   try {
     const { stdout } = await execFileAsync(
-      'git',
+      resolveGitBinary(),
       ['show', '--name-only', '--pretty=', mergeSha],
       { windowsHide: true, cwd: repoPath, maxBuffer: 4 * 1024 * 1024 },
     );

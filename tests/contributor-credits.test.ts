@@ -118,7 +118,7 @@ describe('latest ship credit', () => {
     version: '0.1.790',
     tag: 'v0.1.790',
     publishedAt: '2026-10-09T12:00:00.000Z',
-    releaseUrl: 'https://github.com/hurttlocker/o8/releases/tag/v0.1.790',
+    releaseUrl: 'https://github.com/o8-run/o8/releases/tag/v0.1.790',
   };
 
   it('thanks the contributor on their item and nowhere else', () => {

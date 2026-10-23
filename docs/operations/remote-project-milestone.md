@@ -1,6 +1,6 @@
 # Remote project operation
 
-Status: planned implementation and operational proof. Tracking issue: [#2282](https://github.com/hurttlocker/o8/issues/2282).
+Status: planned implementation and operational proof. Tracking issue: [#2282](https://github.com/o8-run/o8/issues/2282).
 
 The first milestone is one persistent coordinator host, one external worker, and one project. An operator dispatches a task, disconnects the laptop, and returns to the same task, healthy preview, diff, evidence, steering controls, and approval path. A later packet uses a second supported agent system while retaining project rules and reviewed result lineage.
 
@@ -21,9 +21,9 @@ These are source and test boundaries. The milestone stays incomplete until an op
 
 ## Build order
 
-1. **Connect the existing worker** ([#2278](https://github.com/hurttlocker/o8/issues/2278)). Resolve a cloneable repository source and pinned base revision before claim. Preserve project, task, packet, lane, job, branch, and commit associations. Use the existing scoped cloud-worker keys, leases, event stream, and control acknowledgements. Control polling and lease renewal continue while the child runs; unsupported capabilities refuse explicitly. Preserve or version legacy compatibility.
-2. **Keep the workspace attached to its task** ([#2279](https://github.com/hurttlocker/o8/issues/2279)). Compose the governed service, port, health, preview, and cleanup work in [#1725](https://github.com/hurttlocker/o8/issues/1725) with cross-device continuity in [#1727](https://github.com/hurttlocker/o8/issues/1727). Workspace links target the executing workspace or explain their limitation. Previews and evidence resolve the authorized task and execution attempt, including after reconnect.
-3. **Prove operation and supplier continuity** ([#2280](https://github.com/hurttlocker/o8/issues/2280)). Run the first remote task with one supported runtime, then use a second existing runtime for a later packet in the same project. The second runtime may run through another existing placement. This does not require a second executor in the standalone worker, live process migration, or provider-session translation.
+1. **Connect the existing worker** ([#2278](https://github.com/o8-run/o8/issues/2278)). Resolve a cloneable repository source and pinned base revision before claim. Preserve project, task, packet, lane, job, branch, and commit associations. Use the existing scoped cloud-worker keys, leases, event stream, and control acknowledgements. Control polling and lease renewal continue while the child runs; unsupported capabilities refuse explicitly. Preserve or version legacy compatibility.
+2. **Keep the workspace attached to its task** ([#2279](https://github.com/o8-run/o8/issues/2279)). Compose the governed service, port, health, preview, and cleanup work in [#1725](https://github.com/o8-run/o8/issues/1725) with cross-device continuity in [#1727](https://github.com/o8-run/o8/issues/1727). Workspace links target the executing workspace or explain their limitation. Previews and evidence resolve the authorized task and execution attempt, including after reconnect.
+3. **Prove operation and supplier continuity** ([#2280](https://github.com/o8-run/o8/issues/2280)). Run the first remote task with one supported runtime, then use a second existing runtime for a later packet in the same project. The second runtime may run through another existing placement. This does not require a second executor in the standalone worker, live process migration, or provider-session translation.
 
 ## Acceptance run
 
@@ -40,12 +40,12 @@ Use a disposable fixture repository and an existing authorized environment. Reco
 | Project event while disconnected | The persistent host's existing scheduler consumes one authorized state/check event and creates one governed follow-up lane with project rules and association. Reconnect exposes the source fingerprint, fire, lane, and review outcome. Replayed events do not duplicate the accepted action, and pause or expiry prevents further work. |
 | Service access and cleanup | Preview access is authenticated and packet-scoped. Service failure, cancel, and cleanup invalidate stale routes and leave no owned process running. |
 
-Attach commands and source/build versions, identity and commit receipts, and operator-visible evidence. Measure time to useful content after reconnect, click count, manual intervention, attempts, review and rework, elapsed time, and accepted quality. Use [#2163](https://github.com/hurttlocker/o8/issues/2163)'s interaction criteria under active output. Record attributable API spend or subscription capacity only where measured; unknown values remain unknown. A subscription allowance does not imply a per-token dollar saving.
+Attach commands and source/build versions, identity and commit receipts, and operator-visible evidence. Measure time to useful content after reconnect, click count, manual intervention, attempts, review and rework, elapsed time, and accepted quality. Use [#2163](https://github.com/o8-run/o8/issues/2163)'s interaction criteria under active output. Record attributable API spend or subscription capacity only where measured; unknown values remain unknown. A subscription allowance does not imply a per-token dollar saving.
 
-An acceptance failure remains open with a receipt and an owner. Link lifecycle failures to [#2197](https://github.com/hurttlocker/o8/issues/2197), settings propagation to [#2217](https://github.com/hurttlocker/o8/issues/2217), and cost/capacity measurement to [#1791](https://github.com/hurttlocker/o8/issues/1791). A child checkbox becomes complete only after closure and release; the tracker also requires the operational proof.
+An acceptance failure remains open with a receipt and an owner. Link lifecycle failures to [#2197](https://github.com/o8-run/o8/issues/2197), settings propagation to [#2217](https://github.com/o8-run/o8/issues/2217), and cost/capacity measurement to [#1791](https://github.com/o8-run/o8/issues/1791). A child checkbox becomes complete only after closure and release; the tracker also requires the operational proof.
 
 ## Broader direction
 
 The project workflow should survive changes of agent system and execution environment. Each runtime retains its own capabilities; the shared contract carries task identity, project rules, evidence, recovery state, and approval authority. Execution locality and inference locality must be described separately. Privacy, portability, quality, and cost claims require evidence from the actual route.
 
-[#1690](https://github.com/hurttlocker/o8/issues/1690) remains the broader portable-environment work for placement policy, caches, suspension, and migration. Fleet pools, autoscaling, managed hosting, and multi-operator workspaces remain later. The first proof reuses the project board, task pool, runner, durable queue, runtime registry, and governance system already in the repository.
+[#1690](https://github.com/o8-run/o8/issues/1690) remains the broader portable-environment work for placement policy, caches, suspension, and migration. Fleet pools, autoscaling, managed hosting, and multi-operator workspaces remain later. The first proof reuses the project board, task pool, runner, durable queue, runtime registry, and governance system already in the repository.

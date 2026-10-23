@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { timeClosePhase } from '@/lib/orchestrator/close-timing';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
@@ -397,7 +398,7 @@ async function preserveBundle(snapshot: WorkspaceSnapshotRecord, repositoryPath:
       ['--git-dir=verify.git', 'rev-parse', 'refs/heads/recovered^{commit}', 'refs/heads/recovered^{tree}'],
       ['--git-dir=verify.git', 'rev-list', '--count', 'refs/heads/recovered'],
       ['--git-dir=verify.git', 'rev-list', '--objects', '--no-object-names', 'refs/heads/recovered'],
-    ].map(args => ({ command: 'git', args: laneGitArguments(args) }));
+    ].map(args => ({ command: resolveGitBinary(), args: laneGitArguments(args) }));
     const { stdout } = await executePreservationNode(String.raw`
       const input = JSON.parse(process.argv[1]);
       const outputs = [];

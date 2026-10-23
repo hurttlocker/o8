@@ -123,7 +123,6 @@ async function summarizeWithCodex(repoPath: string, prompt: string): Promise<Cod
     runtimeId: 'codex',
     binaryName: 'codex',
     envOverride: 'O8_CODEX_BIN',
-    extraEnvOverrides: ['CODEX_HOME'],
   })).path;
 
   // The prompt is a conversation transcript — free text. On Windows the spawn

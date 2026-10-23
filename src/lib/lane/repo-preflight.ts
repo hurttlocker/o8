@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -66,7 +67,7 @@ export function isGitWorkTreeSync(repoPath: string): boolean {
   // metadata check avoids spawning Git for them and detects a later git init.
   if (!couldContainGitWorkTree(repoPath)) return false;
   try {
-    return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+    return execFileSync(resolveGitBinary(), ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
       windowsHide: true,
       encoding: 'utf-8',
       timeout: 5_000,

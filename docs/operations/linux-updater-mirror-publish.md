@@ -11,7 +11,7 @@ AppImage there needs its own cross-repo credential.
    `hurttlocker/o8-releases` only, with the **Contents: Read and write**
    repository permission.
 2. Add it as an encrypted GitHub Actions secret named `RELEASES_MIRROR_TOKEN`
-   on `hurttlocker/o8`.
+   on `o8-run/o8`.
 
 ## What the workflow does — and does not — do
 
@@ -20,7 +20,7 @@ existing public release tag with `publish_to_mirror` enabled. The
 `publish-mirror` job:
 
 - Downloads `o8_<version>_linux_amd64_preview.AppImage` from the source
-  release on `hurttlocker/o8` (uploaded there by the `publish-preview` job in
+  release on `o8-run/o8` (uploaded there by the `publish-preview` job in
   the same run, or a previous one).
 - Copies it to the mirror release for the same tag on
   `hurttlocker/o8-releases`, authenticated with `RELEASES_MIRROR_TOKEN`. If a

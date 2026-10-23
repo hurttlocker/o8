@@ -53,21 +53,21 @@ describe('isSelfUpdatableInstall', () => {
 describe('releaseDownloadUrl', () => {
   it('points x86_64 Linux at the published AppImage asset', () => {
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'x64' }), '0.1.726'))
-      .toBe('https://github.com/hurttlocker/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
+      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'x86_64' }), 'v0.1.726'))
-      .toBe('https://github.com/hurttlocker/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
+      .toBe('https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage');
   });
 
   it('falls back to the release page for an arch with no published asset', () => {
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'arm64' }), '0.1.726'))
-      .toBe('https://github.com/hurttlocker/o8/releases/tag/v0.1.726');
+      .toBe('https://github.com/o8-run/o8/releases/tag/v0.1.726');
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: null }), '0.1.726'))
-      .toBe('https://github.com/hurttlocker/o8/releases/tag/v0.1.726');
+      .toBe('https://github.com/o8-run/o8/releases/tag/v0.1.726');
   });
 
   it('falls back to the latest release when the version is unknown', () => {
     expect(releaseDownloadUrl(info({ platform: 'linux', arch: 'x64' }), null))
-      .toBe('https://github.com/hurttlocker/o8/releases/latest');
+      .toBe('https://github.com/o8-run/o8/releases/latest');
   });
 });
 
@@ -84,7 +84,7 @@ describe('resolveUpdateAction', () => {
   it('renders a download link on a deb/rpm Linux install', () => {
     expect(resolveUpdateAction(info({ platform: 'linux', arch: 'x64' }), '0.1.726')).toEqual({
       kind: 'download',
-      url: 'https://github.com/hurttlocker/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
+      url: 'https://github.com/o8-run/o8/releases/download/v0.1.726/o8_0.1.726_linux_amd64_preview.AppImage',
     });
   });
 
