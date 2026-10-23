@@ -13,7 +13,7 @@ async function main() {
     O8_DEPENDENCY_CLONE_PROFILE: '1',
   });
   try {
-    execFileSync('git', ['clone', '--shared', '--quiet', source, target], { stdio: 'pipe' });
+    execFileSync('git', ['clone', '--local', '--quiet', source, target], { stdio: 'pipe' });
     const { materializeDependencyInstall } = await import('../src/lib/workspace/dependency-materializer');
     const { guardedWorkspaceInvocation, materializationAwareExecFile } = await import('../src/lib/worktree/materialization-execution');
     const { captureWorktreeMaterializationIdentity } = await import('../src/lib/worktree/materialization-identity');

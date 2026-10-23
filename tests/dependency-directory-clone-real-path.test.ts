@@ -39,7 +39,7 @@ function fixture() {
   writeFileSync(path.join(source, 'tools/package.json'), '{"name":"unrelated-tool"}');
   git('add', '.');
   git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'fixture');
-  git('clone', '--shared', '-q', source, workspace);
+  git('clone', '--local', '-q', source, workspace);
   mkdirSync(path.join(source, 'node_modules', '.bin'), { recursive: true });
   mkdirSync(path.join(source, 'node_modules', 'fixture'));
   writeFileSync(path.join(source, 'node_modules', 'fixture', 'package.json'), '{"name":"fixture","version":"1.0.0","bin":"../tool.js"}');
@@ -224,4 +224,120 @@ it.skipIf(process.platform !== 'darwin')('checks a manifest-declared native bind
   })).rejects.toThrow(/dlopen/);
   expect(persistReceipt).not.toHaveBeenCalled();
   expect(run).not.toHaveBeenCalled();
+});
+
+it.skipIf(process.platform !== 'darwin').each(['hasInstallScript', 'binding.gyp', 'prebuilds', 'platform'])(
+  'checks custom deep native output selected by %s metadata', async (marker) => {
+    const { source, workspace } = fixture();
+    if (marker === 'hasInstallScript') {
+      for (const relative of ['package-lock.json', 'node_modules/.package-lock.json']) {
+        const lock = JSON.parse(readFileSync(path.join(source, relative), 'utf8'));
+        lock.packages['node_modules/fixture'].hasInstallScript = true;
+        writeFileSync(path.join(source, relative), JSON.stringify(lock));
+      }
+      execFileSync('git', ['add', 'package-lock.json'], { cwd: source });
+      execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'native metadata'], { cwd: source });
+      execFileSync('git', ['pull', '-q', '--ff-only'], { cwd: workspace });
+    } else if (marker === 'binding.gyp') {
+      writeFileSync(path.join(source, 'node_modules/fixture/binding.gyp'), '{"targets":[]}');
+    } else if (marker === 'prebuilds') {
+      mkdirSync(path.join(source, 'node_modules/fixture/prebuilds'));
+    } else {
+      const manifest = JSON.parse(readFileSync(path.join(source, 'node_modules/fixture/package.json'), 'utf8'));
+      writeFileSync(path.join(source, 'node_modules/fixture/package.json'), JSON.stringify({...manifest, os:[process.platform], cpu:[process.arch]}));
+    }
+    mkdirSync(path.join(source, 'node_modules/fixture/custom/deep'), {recursive:true});
+    writeFileSync(path.join(source, 'node_modules/fixture/custom/deep/addon.node'), 'incompatible custom addon');
+    const persistReceipt = vi.fn();
+    await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+      env: { O8_APFS_DEPENDENCY_IMAGES: '0' }, persistReceipt,
+    })).rejects.toThrow(/dlopen/);
+    expect(persistReceipt).not.toHaveBeenCalled();
+  },
+);
+
+it.skipIf(process.platform !== 'darwin')('checks native output after the root lifecycle has replaced it', async () => {
+  const { source, workspace } = fixture();
+  writeFileSync(path.join(source, 'package.json'), JSON.stringify({name:'fixture', version:'1.0.0', scripts:{postinstall:'generate'}}));
+  execFileSync('git', ['add', 'package.json'], { cwd: source });
+  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'lifecycle'], { cwd: source });
+  execFileSync('git', ['pull', '-q', '--ff-only'], { cwd: workspace });
+  const persistReceipt = vi.fn();
+  const run = vi.fn(async () => { writeFileSync(path.join(workspace, 'node_modules/fixture/late.node'), 'incompatible lifecycle output'); });
+  await expect(materializeDependencyInstall(workspace, 'npm ci', {
+    cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0',
+    env:{O8_APFS_DEPENDENCY_IMAGES:'0'}, persistReceipt, run,
+  })).rejects.toThrow(/dlopen/);
+  expect(run).toHaveBeenCalledOnce();
+  expect(persistReceipt).not.toHaveBeenCalled();
+});
+
+it.skipIf(process.platform !== 'darwin').each(['lockfile', 'package-directory', 'deep-native'])(
+  'discards the exact clone and falls back when the source %s changes', async (mutation) => {
+    const { source, workspace } = fixture();
+    if (mutation === 'deep-native') {
+      writeFileSync(path.join(source, 'node_modules/fixture/binding.gyp'), '{"targets":[]}');
+      mkdirSync(path.join(source, 'node_modules/fixture/custom/deep'), {recursive:true});
+      writeFileSync(path.join(source, 'node_modules/fixture/custom/deep/addon.node'), 'before');
+    }
+    const run = vi.fn(async () => {
+      expect(() => lstatSync(path.join(workspace, 'node_modules'))).toThrow();
+      mkdirSync(path.join(workspace, 'node_modules'));
+      expect(() => readFileSync(path.join(workspace, 'node_modules/tool.js'))).toThrow();
+      writeFileSync(path.join(workspace, 'node_modules/fallback'), 'fresh private view');
+    });
+    const result = await materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+      cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0', env:{O8_APFS_DEPENDENCY_IMAGES:'0'}, run,
+      afterDependencyDirectoryClone: async () => {
+        if (mutation === 'lockfile') writeFileSync(path.join(source, 'package-lock.json'), '{"changed":true}');
+        else if (mutation === 'package-directory') {
+          const pkg = path.join(source, 'node_modules/fixture');
+          renameSync(pkg, `${pkg}-old`);
+          mkdirSync(pkg);
+          writeFileSync(path.join(pkg, 'package.json'), '{"version":"1.0.0"}');
+        } else writeFileSync(path.join(source, 'node_modules/fixture/custom/deep/addon.node'), 'after');
+      },
+    });
+    expect(run).toHaveBeenCalledOnce();
+    expect(result.receipt.source).toBeUndefined();
+    expect(readFileSync(path.join(workspace, 'node_modules/fallback'), 'utf8')).toBe('fresh private view');
+  },
+);
+
+it.skipIf(process.platform !== 'darwin')('refuses fallback when a competing directory replaces the receipted clone', async () => {
+  const { source, workspace } = fixture();
+  const run = vi.fn();
+  const persistReceipt = vi.fn();
+  await expect(materializeDependencyInstall(workspace, 'npm ci --ignore-scripts', {
+    cloneSourceWorkspace: source, resolveVersion: async () => '11.8.0', env:{O8_APFS_DEPENDENCY_IMAGES:'0'}, run, persistReceipt,
+    afterDependencyDirectoryClone: async () => {
+      writeFileSync(path.join(source, 'package-lock.json'), '{"changed":true}');
+      renameSync(path.join(workspace, 'node_modules'), path.join(workspace, 'admitted'));
+      mkdirSync(path.join(workspace, 'node_modules'));
+      writeFileSync(path.join(workspace, 'node_modules/sentinel'), 'preserve');
+    },
+  })).rejects.toThrow();
+  expect(run).not.toHaveBeenCalled();
+  expect(persistReceipt).not.toHaveBeenCalled();
+  expect(readFileSync(path.join(workspace, 'node_modules/sentinel'), 'utf8')).toBe('preserve');
+});
+
+it.skipIf(process.platform !== 'darwin')('refuses late source changes without replaying root lifecycle outputs', async () => {
+  const { source, workspace } = fixture();
+  writeFileSync(path.join(source, 'package.json'), JSON.stringify({name:'fixture', version:'1.0.0', scripts:{postinstall:'generate'}}));
+  execFileSync('git', ['add', 'package.json'], { cwd: source });
+  execFileSync('git', ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'lifecycle'], { cwd: source });
+  execFileSync('git', ['pull', '-q', '--ff-only'], { cwd: workspace });
+  const persistReceipt = vi.fn();
+  const run = vi.fn(async () => {
+    writeFileSync(path.join(workspace, 'generated.log'), 'one lifecycle execution');
+    writeFileSync(path.join(source, 'package-lock.json'), '{"changed":true}');
+  });
+  await expect(materializeDependencyInstall(workspace, 'npm ci', {
+    cloneSourceWorkspace:source, resolveVersion:async () => '11.8.0', env:{O8_APFS_DEPENDENCY_IMAGES:'0'}, run, persistReceipt,
+  })).rejects.toThrow('refusing to replay setup');
+  expect(run).toHaveBeenCalledOnce();
+  expect(persistReceipt).not.toHaveBeenCalled();
+  expect(readFileSync(path.join(workspace, 'generated.log'), 'utf8')).toBe('one lifecycle execution');
 });

@@ -511,11 +511,7 @@ export class WorktreeManager {
       base: baseExecutionIdentity,
     }, async () => {
 
-    // Packet branches are registered Git worktrees: their refs keep shared
-    // objects reachable for the entire lifetime without a private full clone.
-    const isolationKind = opts.packetId
-      ? 'git-worktree'
-      : await this.resolveIsolationKind(resolveIsolationPreference(opts));
+    const isolationKind = await this.resolveIsolationKind(resolveIsolationPreference(opts));
     if (isolationKind === 'apfs-cow-clone') {
       return this.createApfsCowClone({
         opts,
@@ -564,7 +560,7 @@ export class WorktreeManager {
     );
     const gitDirectory = gitDirectoryOutput.trim();
     if (!path.isAbsolute(gitDirectory)) throw new Error('Repository Git directory is not absolute.');
-    await timeWorktreePreparation(opts, 'checkout', () => withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
+    await withWorktreeMaterializationExecution(this.worktreeBase, baseExecutionIdentity, () => (
       execFileAsync('git', [
         ...reviewGitOptions,
         `--git-dir=${gitDirectory}`,
@@ -573,7 +569,7 @@ export class WorktreeManager {
         '-b', branchName,
         creationBaseCommit ?? baseBranch,
       ], { windowsHide: true, cwd: this.worktreeBase, timeout: 30_000 })
-    )));
+    ));
     await assertManagedWorktreeCreatedBoundary(
       this.repoRoot, worktreePath, admittedVolumeId, admittedRootIdentity, baseIdentity,
     );
@@ -614,9 +610,6 @@ export class WorktreeManager {
       isolationKind: 'git-worktree',
     };
 
-    const hydrationPaths = await timeWorktreePreparation(opts, 'asset_hydration', () => this.hydrateApfsCowAssets(worktreePath, createdExecutionIdentity));
-    info.hydrationPaths = hydrationPaths;
-    await this.updateMetaHydrationPaths(taskId, hydrationPaths);
     await this.bootstrapEnvFiles(worktreePath, createdExecutionIdentity, opts);
     await this.injectSafetyHooks(worktreePath, createdExecutionIdentity);
 

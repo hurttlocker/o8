@@ -29,21 +29,14 @@ export async function finishDependencyClone(input: {
   identity: WorktreeMaterializationIdentity;
   recipe: DependencyInstallRecipe;
   options: DependencyInstallOptions;
-  nativeFiles: string[];
 }): Promise<void> {
-  const { workspace, identity, recipe, options, nativeFiles } = input;
+  const { workspace, identity, recipe, options } = input;
   const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv, timeoutMs = 60_000) => {
     const guarded = guardedWorkspaceInvocation(command, args, identity);
     return materializationAwareExecFile(guarded.command, guarded.args, {
       cwd: workspace, env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024,
     });
   };
-  await profileDependencyClone('native-bindings', async () => {
-    if (nativeFiles.length) await execute(process.execPath, ['-e',
-      "const M=require('node:module'); for(const file of JSON.parse(process.argv[1])) process.dlopen(new M(file),file);",
-      JSON.stringify(nativeFiles.map((file) => path.join(workspace, file))),
-    ]);
-  });
   if (recipe.lifecycleScripts === 'disabled') return;
   const manifest = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8')) as { scripts?: Record<string, unknown> };
   if (!['preinstall', 'install', 'postinstall'].some((stage) => typeof manifest.scripts?.[stage] === 'string')) return;
@@ -73,4 +66,16 @@ export async function finishDependencyClone(input: {
   } finally {
     await profileDependencyClone('lifecycle-retire', () => purgeExactDirectory(runtime, receipt, undefined, options.afterRuntimeTreeCapture));
   }
+}
+
+/** Probe the final bindings, including anything generated or replaced by lifecycle. */
+export async function probeDependencyCloneNativeFiles(workspace: string, identity: WorktreeMaterializationIdentity, files: string[]): Promise<void> {
+  if (!files.length) return;
+  const invocation = guardedWorkspaceInvocation(process.execPath, ['-e',
+    "const M=require('node:module'); for(const file of JSON.parse(process.argv[1])) process.dlopen(new M(file),file);",
+    JSON.stringify(files.map((file) => path.join(workspace, file))),
+  ], identity);
+  await profileDependencyClone('native-bindings', () => materializationAwareExecFile(invocation.command, invocation.args, {
+    cwd: workspace, timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
+  }));
 }

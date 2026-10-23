@@ -115,6 +115,8 @@ export interface DependencyMaterializerOptions extends Pick<DependencyInstallOpt
   'run' | 'resolveVersion' | 'cacheRoot' | 'now' | 'materializationIdentity'> {
   preparedRecipe?: DependencyInstallRecipe;
   cloneSourceWorkspace?: string;
+  /** Deterministic race seam after native publication, before source revalidation. */
+  afterDependencyDirectoryClone?: () => Promise<void>;
   imageRegistryRoot?: string;
   env?: Record<string, string | undefined>;
   platform?: NodeJS.Platform;
@@ -349,6 +351,7 @@ export async function materializeDependencyInstall(
   const imageRequired = Boolean(options.expectedLease || options.exactGenerationRemount);
   if (!imageRequired && options.cloneSourceWorkspace && await tryCloneDependencyDirectory({
     sourceWorkspace: options.cloneSourceWorkspace,
+    afterClone: options.afterDependencyDirectoryClone,
     workspace,
     identity,
     recipe,

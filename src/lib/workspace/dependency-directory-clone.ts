@@ -6,11 +6,13 @@ import {
   captureWorktreeMaterializationIdentity,
   type WorktreeMaterializationIdentity,
 } from '@/lib/worktree/materialization-identity';
-import { createPinnedWorkspaceBinding, readPinnedWorkspaceFile } from '@/lib/worktree/materialization-leaf-io';
+import { clonePinnedWorkspaceDirectory, readPinnedWorkspaceFile } from '@/lib/worktree/materialization-leaf-io';
 import { guardedWorkspaceInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { DependencyInstallOptions, DependencyInstallRecipe } from './dependency-install';
 import { validateDependencyCloneGraph } from './dependency-clone-validation';
-import { finishDependencyClone } from './dependency-clone-lifecycle';
+import { finishDependencyClone, probeDependencyCloneNativeFiles } from './dependency-clone-lifecycle';
+import { purgeExactDirectory } from './exact-directory-purge';
+import { dependencyCloneSnapshotMatches } from './dependency-clone-snapshot';
 import { profileDependencyClone as profile } from './dependency-clone-profile';
 
 const CHECK_SOURCE_RECIPE = String.raw`
@@ -40,6 +42,7 @@ console.log(JSON.stringify(matches));
 /** Clone a trusted installed npm tree; validate its recipe/metadata, not payload bytes. */
 export async function tryCloneDependencyDirectory(input: {
   sourceWorkspace: string;
+  afterClone?: () => Promise<void>;
   workspace: string;
   identity: WorktreeMaterializationIdentity;
   recipe: DependencyInstallRecipe;
@@ -71,17 +74,28 @@ export async function tryCloneDependencyDirectory(input: {
   const graph = await profile('source-manifests', () => validateDependencyCloneGraph(sourceWorkspace));
   if (!graph || await readPinnedWorkspaceFile(workspace, identity, 'binding.gyp') !== null) return false;
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
-  const disposition = await profile('directory-clone-publication', () => createPinnedWorkspaceBinding(workspace, identity, 'node_modules', {
-    mode: 'clone-tree', source: sourcePath,
-  }));
-  if (disposition === 'unsupported') return false;
-  if (disposition !== 'created') throw new Error('Dependency clone destination already exists.');
+  const clone = await profile('directory-clone-publication', () => clonePinnedWorkspaceDirectory(workspace, identity, 'node_modules', sourcePath));
+  if (clone.disposition === 'unsupported') return false;
+  if (clone.disposition !== 'created') throw new Error('Dependency clone destination already exists.');
+  const discard = async () => {
+    await assertWorktreeMaterializationIdentity(workspace, identity);
+    await purgeExactDirectory(path.join(workspace, 'node_modules'), clone);
+    await assertWorktreeMaterializationIdentity(workspace, identity);
+    return false;
+  };
+  await input.afterClone?.();
   await assertWorktreeMaterializationIdentity(sourceWorkspace, sourceIdentity);
   await assertWorktreeMaterializationIdentity(workspace, identity);
-  if (!await profile('source-recipe-recheck', sourceMatches)) throw new Error('Dependency clone source recipe changed during materialization.');
+  const sourceUnchanged = async () => await dependencyCloneSnapshotMatches(sourceWorkspace, graph.snapshot) && await sourceMatches();
+  if (clone.sourceChanged || !await profile('source-recipe-recheck', sourceUnchanged)) return discard();
   const target = await profile('target-manifests', () => validateDependencyCloneGraph(workspace));
   if (!target || target.digest !== graph.digest) throw new Error('Dependency clone installed graph changed.');
-  await finishDependencyClone({ workspace, identity, recipe, options, nativeFiles: target.nativeFiles });
+  await finishDependencyClone({ workspace, identity, recipe, options });
+  const final = await profile('final-manifests', () => validateDependencyCloneGraph(workspace));
+  if (!final) throw new Error('Dependency clone lifecycle changed its installed graph.');
+  await probeDependencyCloneNativeFiles(workspace, identity, final.nativeFiles);
+  if (!await dependencyCloneSnapshotMatches(workspace, final.snapshot)) throw new Error('Dependency clone changed during native validation.');
+  if (!await profile('source-final-recheck', sourceUnchanged)) throw new Error('Dependency clone source changed after lifecycle; refusing to replay setup.');
   await assertWorktreeMaterializationIdentity(workspace, identity);
   return true;
 }

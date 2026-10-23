@@ -52,7 +52,7 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it('dispatches a packet to session_launched within 60 seconds under load with private dependencies and shared objects', async () => {
+it('dispatches a packet to session_launched within 60 seconds under load with private dependencies and standalone Git metadata', async () => {
   mkdirSync(repo);
   mkdirSync(bin);
   git('init', '-q', '-b', 'main');
@@ -121,6 +121,8 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
   } as OrchestratorPacket;
   const state = { missionId: 'launch-budget', repoPath: repo, packets: [packet], updatedAt: new Date().toISOString() } as OrchestratorMissionState;
   control.writeOrchestratorControlPlaneState(state);
+  const readMainHooks = () => { try { return git('config', '--local', '--get', 'core.hooksPath'); } catch { return null; } };
+  const mainHooks = readMainHooks();
   const dispatchStartedAt = Date.now();
   const started = performance.now();
   const result = await runDispatchTick(state, { launchBudget: { maxLaunches: 1 } });
@@ -156,11 +158,23 @@ it('dispatches a packet to session_launched within 60 seconds under load with pr
   expect(readFileSync(path.join(repo, 'README.md'), 'utf8')).toBe('source WIP\n');
   expect(sessionMs).toBeLessThan(60_000);
   expect(elapsedMs).toBeLessThan(60_000);
-  expect(lstatSync(path.join(workspace, '.git')).isFile()).toBe(true);
-  expect(timings.map((timing) => timing.stage)).toEqual(['checkout', 'asset_hydration', 'dependency_materialization']);
-  const workerHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
-  git('update-ref', 'refs/heads/main', 'HEAD~1');
+  if (process.platform !== 'darwin') return;
+  expect(lstatSync(path.join(workspace, '.git')).isDirectory()).toBe(true);
+  expect(existsSync(path.join(workspace, '.git/objects/info/alternates'))).toBe(false);
+  expect(timings.map((timing) => timing.stage)).toEqual(process.platform === 'darwin' ? ['clone', 'checkout', 'asset_hydration', 'dependency_materialization'] : ['dependency_materialization']);
+  const workerGit = (...args: string[]) => execFileSync('git', args, {cwd:workspace, encoding:'utf8', stdio:'pipe'}).trim();
+  const mainHead = git('rev-parse', 'refs/heads/main');
+  workerGit('update-ref', '-d', 'refs/heads/main');
+  workerGit('config', '--local', 'core.hooksPath', 'packet-hooks');
+  workerGit('tag', 'packet-only');
+  workerGit('update-ref', 'refs/stash', 'HEAD');
+  expect(git('rev-parse', 'refs/heads/main')).toBe(mainHead);
+  expect(readMainHooks()).toBe(mainHooks);
+  expect(git('tag', '--list', 'packet-only')).toBe('');
+  expect(git('for-each-ref', '--format=%(refname)', 'refs/stash')).toBe('');
+  const unpublished = execFileSync('git', ['hash-object', '-w', '--stdin'], {cwd:workspace, input:'unpublished packet object', encoding:'utf8'}).trim();
   git('reflog', 'expire', '--expire=now', '--all');
   git('gc', '--prune=now');
-  expect(execFileSync('git', ['cat-file', '-t', workerHead], { cwd: workspace, encoding: 'utf8' }).trim()).toBe('commit');
+  git('worktree', 'prune', '--expire=now');
+  expect(workerGit('cat-file', '-p', unpublished)).toBe('unpublished packet object');
 }, 120_000);

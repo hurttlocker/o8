@@ -73,7 +73,9 @@ async function cloneDirectory(sourcePath, targetPath) {
     const target = fs.lstatSync(targetPath);
     await waitForStep('clone-created');
     const published = fs.lstatSync(targetPath);
-    if (!sameSource(fs.fstatSync(source)) || !sameSource(fs.lstatSync(sourcePath))) {
+    const sourceAfter = fs.lstatSync(sourcePath);
+    if (!sourceAfter.isDirectory() || sourceAfter.isSymbolicLink()
+      || sourceAfter.dev !== before.dev || sourceAfter.ino !== before.ino) {
       throw new Error('Pinned clone source changed during cloning.');
     }
     if (!target.isDirectory() || target.isSymbolicLink()
@@ -82,7 +84,7 @@ async function cloneDirectory(sourcePath, targetPath) {
       || published.dev !== target.dev || published.ino !== target.ino) {
       throw new Error('Pinned clone target changed before publication.');
     }
-    return true;
+    return { device: target.dev, inode: target.ino, sourceChanged: !sameSource(fs.fstatSync(source)) || !sameSource(sourceAfter) };
   } finally {
     fs.closeSync(source);
     fs.closeSync(parent);

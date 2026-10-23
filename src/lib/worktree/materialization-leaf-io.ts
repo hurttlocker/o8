@@ -204,15 +204,11 @@ async function copyTree(sourcePath, targetPath) {
   }
 }
 
-function fingerprintTree(candidatePath, relative = '.', allowSymlinks = false) {
+function fingerprintTree(candidatePath, relative = '.') {
   const hash = crypto.createHash('sha256');
   const visit = (entryPath, entryRelative) => {
     const entry = fs.lstatSync(entryPath);
-    if (entry.isSymbolicLink()) {
-      if (!allowSymlinks) throw new Error('Pinned hydration refuses source symlinks.');
-      hash.update('symlink\0' + entryRelative + '\0' + fs.readlinkSync(entryPath) + '\0');
-      return;
-    }
+    if (entry.isSymbolicLink()) throw new Error('Pinned hydration refuses source symlinks.');
     if (entry.isFile()) {
       const handle = fs.openSync(entryPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
       try {
@@ -459,7 +455,9 @@ async function main() {
   }
   if (operation === 'clone-tree') {
     const input = JSON.parse(process.argv[3]);
-    if (!await cloneDirectory(input.source, prepared.target)) process.exitCode = 46;
+    const receipt = await cloneDirectory(input.source, prepared.target);
+    if (!receipt) process.exitCode = 46;
+    else process.stdout.write(JSON.stringify(receipt));
   }
   else if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
   else if (operation === 'symlink') {
@@ -749,6 +747,9 @@ export async function createPinnedWorkspaceBinding(
     workspacePath, identity, input.mode, relativePath,
     input.mode === 'clone-tree' ? JSON.stringify(input) : input.source, undefined, afterPinnedStep,
   );
+  if (input.mode === 'clone-tree' && receipt.code === 0 && JSON.parse(receipt.stdout).sourceChanged) {
+    throw new PinnedWorkspacePublishError('Pinned clone source changed during cloning.');
+  }
   return receipt.code === 46 ? 'unsupported' : receipt.code === 45 ? 'exists' : 'created';
 }
 
@@ -770,4 +771,15 @@ export async function ensurePinnedWorkspaceDirectory(
   }
   const result = parsed as WorktreeMaterializationIdentity;
   return { ...result, volumeId: await resolveStorageVolumeId(result.canonicalPath) };
+}
+
+/** The native publication receipt is the only authority for discarding a clone. */
+export async function clonePinnedWorkspaceDirectory(
+  workspacePath: string, identity: WorktreeMaterializationIdentity, relativePath: string, source: string,
+): Promise<{ disposition: 'created'; device: number; inode: number; sourceChanged: boolean } | { disposition: 'exists' | 'unsupported' }> {
+  const result = await runPinnedLeaf(workspacePath, identity, 'clone-tree', relativePath, JSON.stringify({ source }));
+  if (result.code !== 0) return { disposition: result.code === 46 ? 'unsupported' : 'exists' };
+  const receipt = JSON.parse(result.stdout) as { device: number; inode: number; sourceChanged: boolean };
+  if (!Number.isSafeInteger(receipt.device) || !Number.isSafeInteger(receipt.inode)) throw new PinnedWorkspacePublishError('Invalid native clone identity.');
+  return { disposition: 'created', ...receipt };
 }
