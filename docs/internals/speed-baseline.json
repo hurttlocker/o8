@@ -1,0 +1,722 @@
+{
+  "schema": "o8/speed-summary/v1",
+  "generatedAt": "2026-10-23T19:13:00.249Z",
+  "sourceHead": "d283e620b72fc0f774c8c1db9e1ee2f66fb5ccea",
+  "heapSnapshotMode": {"web":"paired","native":"paired"},
+  "browser": {
+    "arms": {
+      "1": {
+        "windows": 9,
+        "framesMs": {"n":3295,"median":16.7,"p95":50,"worst":300},
+        "keyMs": {"n":123,"median":44.6,"p95":161.9,"worst":278.3},
+        "taskMsPerSecond": {"n":9,"median":529.62,"p95":908.23,"worst":908.23},
+        "scriptMsPerSecond": {"n":9,"median":277.95,"p95":543.75,"worst":543.75},
+        "layoutMsPerSecond": {"n":9,"median":18.62,"p95":43.04,"worst":43.04},
+        "droppedFrames": [41,5,4,293,45,9,153,377,299],
+        "subscribers": [1,1,1,1,1,1,1,1,1],
+        "censoredInputs": 0
+      },
+      "4": {
+        "windows": 9,
+        "framesMs": {"n":4025,"median":16.7,"p95":16.8,"worst":233.4},
+        "keyMs": {"n":142,"median":44.25,"p95":104.2,"worst":392.5},
+        "taskMsPerSecond": {"n":9,"median":500.63,"p95":634.82,"worst":634.82},
+        "scriptMsPerSecond": {"n":9,"median":236.57,"p95":329.47,"worst":329.47},
+        "layoutMsPerSecond": {"n":9,"median":20.53,"p95":25.95,"worst":25.95},
+        "droppedFrames": [135,28,33,6,66,13,79,14,84],
+        "subscribers": [1,1,1,1,1,1,1,1,1],
+        "censoredInputs": 0
+      }
+    },
+    "calibrationMs": [165.5,232.3,173.5]
+  },
+  "mcp": [
+    {"name":"tools/list","firstCallMs":16.81,"bytes":127591,"ms":{"n":30,"median":12.04,"p95":108.11,"worst":127.87}},
+    {"name":"o8_status","firstCallMs":88.61,"bytes":6378,"ms":{"n":30,"median":35.5,"p95":1667.03,"worst":3490.43}},
+    {"name":"get_mission_status","firstCallMs":24.18,"bytes":1162,"ms":{"n":30,"median":21.34,"p95":72.35,"worst":193.03}},
+    {"name":"o8_task_list","firstCallMs":13.38,"bytes":4939,"ms":{"n":30,"median":14.18,"p95":65.83,"worst":271.99}},
+    {"name":"o8_operator_defaults","firstCallMs":28.2,"bytes":37451,"ms":{"n":30,"median":22.66,"p95":40.64,"worst":51.2}},
+    {"name":"o8_list_repos","firstCallMs":19.22,"bytes":419,"ms":{"n":30,"median":16.99,"p95":49.94,"worst":208.78}},
+    {"name":"o8_list_projects","firstCallMs":15.98,"bytes":496,"ms":{"n":30,"median":19.26,"p95":116.92,"worst":276.15}},
+    {"name":"o8_lease_list","firstCallMs":23.91,"bytes":169,"ms":{"n":30,"median":17.46,"p95":62.54,"worst":79.74}},
+    {"name":"o8_msg_agents","firstCallMs":32.88,"bytes":142,"ms":{"n":30,"median":18.38,"p95":33.29,"worst":35.01}},
+    {"name":"o8_problem_list","firstCallMs":9.68,"bytes":1395,"ms":{"n":30,"median":8.63,"p95":12.75,"worst":61.41}}
+  ],
+  "browserStartup": {
+    "firstPaintMs": {"n":3,"median":1640,"p95":2308,"worst":2308},
+    "navigationToInteractiveMs": {"n":3,"median":11504.73,"p95":15543.26,"worst":15543.26},
+    "nextHealthyMs": {"n":3,"median":12184.43,"p95":15817.51,"worst":15817.51},
+    "wsHealthyMs": {"n":3,"median":13651.63,"p95":18855.28,"worst":18855.28}
+  },
+  "nativeStartup": {
+    "loaderFirstContentfulPaintMs": {"n":3,"median":35687,"p95":37527,"worst":37527},
+    "firstPaintUpperBoundMs": {"n":3,"median":59659.08,"p95":73069.59,"worst":73069.59},
+    "interactiveMs": {"n":3,"median":70526.89,"p95":75897.48,"worst":75897.48},
+    "nextHealthyMs": {"n":3,"median":59035.76,"p95":62930.82,"worst":62930.82},
+    "wsHealthyMs": {"n":3,"median":51275.58,"p95":53813.51,"worst":53813.51},
+    "contextMs": {"n":3,"median":32425,"p95":34182,"worst":34182}
+  },
+  "workers": {
+    "codex": {
+      "n": 3,
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "limits": {
+        "fixture": "Local Git origin; no dependency install requested. Real dependency clone is a separate calibration.",
+        "firstToken": "Unavailable; completed assistant message is an upper bound"
+      },
+      "dispatchToAssistantOutputMs": {"n":3,"median":49913,"p95":52521,"worst":52521},
+      "dispatchToFirstByteMs": {"n":3,"median":40195,"p95":44584,"worst":44584},
+      "dispatchToRecordedSpawnMs": {"n":3,"median":37635,"p95":41866,"worst":41866},
+      "spawnToAssistantOutputMs": {"n":3,"median":10655,"p95":12278,"worst":12278},
+      "modelFirstTokenMs": {"n":0,"median":null,"p95":null,"worst":null},
+      "stages": {
+        "admissionMs": {"n":3,"median":688,"p95":1103,"worst":1103},
+        "workspaceProvisioningMs": {"n":3,"median":35654,"p95":39432,"worst":39432},
+        "runtimeSpawnMs": {"n":3,"median":1293,"p95":1747,"worst":1747},
+        "dependencyProvisioningMs": {"n":0,"median":null,"p95":null,"worst":null}
+      },
+      "preparation": {
+        "clone": {"n":3,"median":635,"p95":671,"worst":671},
+        "checkout": {"n":3,"median":530,"p95":1738,"worst":1738},
+        "asset_hydration": {"n":3,"median":896,"p95":1858,"worst":1858}
+      },
+      "processesBeforeOutput": [
+        {"git":66,"df":68,"diskutil":3,"node":37,"which":1,"codex":3,"ps":8,"claude":1,"bash":1,"lsof":4,"sqlite3":4,"du":1,"tmux":1},
+        {"git":132,"df":144,"node":53,"diskutil":2,"bash":2,"ps":30,"lsof":8,"sqlite3":7,"tmux":2,"sysctl":15,"claude":1,"codex":2,"pgrep":2},
+        {"git":122,"df":144,"node":52,"diskutil":2,"bash":2,"ps":32,"lsof":9,"sqlite3":8,"tmux":2,"sysctl":15,"pgrep":4,"claude":1,"codex":2}
+      ],
+      "separateFullWorkflow": {
+        "missionPreparationMs": {"n":3,"median":2557.69,"p95":8484.25,"worst":8484.25},
+        "requestToAssistantOutputMs": {"n":3,"median":73646,"p95":75578,"worst":75578},
+        "dispatchToAssistantOutputMs": {"n":3,"median":71191,"p95":73020,"worst":73020}
+      }
+    },
+    "claude-code": {
+      "n": 3,
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "limits": {
+        "fixture": "Local Git origin; no dependency install requested. Real dependency clone is a separate calibration.",
+        "firstToken": "First observed token delta includes CLI and network startup"
+      },
+      "dispatchToAssistantOutputMs": {"n":3,"median":30562,"p95":33831,"worst":33831},
+      "dispatchToFirstByteMs": {"n":3,"median":29110,"p95":32031,"worst":32031},
+      "dispatchToRecordedSpawnMs": {"n":3,"median":25444,"p95":28839,"worst":28839},
+      "spawnToAssistantOutputMs": {"n":3,"median":4992,"p95":5118,"worst":5118},
+      "modelFirstTokenMs": {"n":3,"median":4992,"p95":5118,"worst":5118},
+      "stages": {
+        "admissionMs": {"n":3,"median":645,"p95":872,"worst":872},
+        "workspaceProvisioningMs": {"n":3,"median":23785,"p95":26994,"worst":26994},
+        "runtimeSpawnMs": {"n":3,"median":1124,"p95":1200,"worst":1200},
+        "dependencyProvisioningMs": {"n":0,"median":null,"p95":null,"worst":null}
+      },
+      "preparation": {
+        "clone": {"n":3,"median":524,"p95":573,"worst":573},
+        "checkout": {"n":3,"median":375,"p95":512,"worst":512},
+        "asset_hydration": {"n":3,"median":445,"p95":618,"worst":618}
+      },
+      "processesBeforeOutput": [
+        {"git":398,"df":54,"node":48,"bash":8,"lsof":13,"tmux":7,"ps":20,"diskutil":2,"sqlite3":11,"codex":4,"claude":1},
+        {"git":404,"node":83,"df":135,"bash":7,"ps":39,"lsof":17,"diskutil":2,"sqlite3":16,"tmux":6,"sysctl":15,"pgrep":2,"claude":1,"codex":2},
+        {"git":379,"lsof":17,"ps":22,"sqlite3":16,"df":54,"node":48,"tmux":7,"diskutil":2,"bash":7,"codex":4,"claude":1}
+      ],
+      "separateFullWorkflow": {
+        "missionPreparationMs": {"n":3,"median":5207.93,"p95":7855,"worst":7855},
+        "requestToAssistantOutputMs": {"n":3,"median":69739,"p95":72711,"worst":72711},
+        "dispatchToAssistantOutputMs": {"n":3,"median":64530,"p95":69311,"worst":69311}
+      }
+    }
+  },
+  "webMemory": [
+    {
+      "sample": 1,
+      "bootRss": {"next":[{"process":"next-server","rssMiB":219.93,"role":"root"}],"ws":[{"process":"node","rssMiB":250.93,"role":"root"}]},
+      "workloadBootRss": {"next":[{"process":"next-server","rssMiB":279.08,"role":"root"}],"ws":[{"process":"node","rssMiB":231.62,"role":"root"}]},
+      "hourRss": {
+        "next": [
+          {"process":"helper","rssMiB":0,"role":"descendant"},
+          {"process":"helper","rssMiB":0.13,"role":"descendant"},
+          {"process":"next-server","rssMiB":530.07,"role":"root"}
+        ],
+        "ws": [
+          {"process":"esbuild","rssMiB":12.71,"role":"descendant"},
+          {"process":"esbuild","rssMiB":12.6,"role":"descendant"},
+          {"process":"helper","rssMiB":0,"role":"descendant"},
+          {"process":"node","rssMiB":239.75,"role":"root"}
+        ]
+      },
+      "beforeSoakPostGc": {
+        "next": {"rss":250454016,"heapTotal":136261632,"heapUsed":130214856,"external":4225347,"arrayBuffers":351891},
+        "ws": {"rss":236531712,"heapTotal":135852032,"heapUsed":127651464,"external":4443575,"arrayBuffers":110654}
+      },
+      "hourPostGc": {
+        "next": {"rss":511782912,"heapTotal":137011200,"heapUsed":129533368,"external":4159042,"arrayBuffers":281933},
+        "ws": {"rss":239529984,"heapTotal":137949184,"heapUsed":129714680,"external":4444391,"arrayBuffers":111470}
+      },
+      "heapBefore": {
+        "totalShallowBytes": 131184559,
+        "top": [
+          {"name":"string","bytes":65246632,"count":108338},
+          {"name":"code","bytes":30707256,"count":315435},
+          {"name":"array","bytes":9217224,"count":23344},
+          {"name":"closure","bytes":8497080,"count":149793},
+          {"name":"object shape","bytes":6793584,"count":70856},
+          {"name":"hidden","bytes":2491712,"count":68502},
+          {"name":"concatenated string","bytes":2280000,"count":71250},
+          {"name":"Object","bytes":1774088,"count":35806},
+          {"name":"object","bytes":1352568,"count":19848},
+          {"name":"native","bytes":567143,"count":608},
+          {"name":"Array","bytes":498216,"count":15460},
+          {"name":"sliced string","bytes":336416,"count":10513},
+          {"name":"Module","bytes":182288,"count":1787},
+          {"name":"h","bytes":175344,"count":1003},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"Set","bytes":46832,"count":1433},
+          {"name":"k","bytes":44488,"count":263}
+        ]
+      },
+      "heapAfter": {
+        "totalShallowBytes": 128531551,
+        "top": [
+          {"name":"string","bytes":64584768,"count":103960},
+          {"name":"code","bytes":28387664,"count":270617},
+          {"name":"array","bytes":9315848,"count":24772},
+          {"name":"closure","bytes":8659136,"count":152628},
+          {"name":"object shape","bytes":6763664,"count":71460},
+          {"name":"hidden","bytes":2625256,"count":61484},
+          {"name":"concatenated string","bytes":2226048,"count":69564},
+          {"name":"Object","bytes":1812928,"count":36302},
+          {"name":"object","bytes":1353224,"count":19903},
+          {"name":"Array","bytes":498976,"count":15483},
+          {"name":"native","bytes":497895,"count":598},
+          {"name":"sliced string","bytes":337376,"count":10543},
+          {"name":"Module","bytes":182384,"count":1791},
+          {"name":"h","bytes":174752,"count":1001},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"number","bytes":47600,"count":2975},
+          {"name":"Set","bytes":46736,"count":1427}
+        ]
+      },
+      "completed": true,
+      "durationMs": 3600036.73
+    },
+    {
+      "sample": 2,
+      "bootRss": {"next":[{"process":"next-server","rssMiB":222.7,"role":"root"}],"ws":[{"process":"node","rssMiB":257.3,"role":"root"}]},
+      "workloadBootRss": {"next":[{"process":"next-server","rssMiB":251.83,"role":"root"}],"ws":[{"process":"node","rssMiB":228.05,"role":"root"}]},
+      "hourRss": {
+        "next": [{"process":"next-server","rssMiB":562.12,"role":"root"}],
+        "ws": [
+          {"process":"node","rssMiB":219.8,"role":"root"},
+          {"process":"esbuild","rssMiB":13.79,"role":"descendant"},
+          {"process":"esbuild","rssMiB":11.3,"role":"descendant"}
+        ]
+      },
+      "beforeSoakPostGc": {
+        "next": {"rss":246165504,"heapTotal":136523776,"heapUsed":129336560,"external":4224932,"arrayBuffers":351476},
+        "ws": {"rss":234213376,"heapTotal":136900608,"heapUsed":127758144,"external":4443575,"arrayBuffers":110654}
+      },
+      "hourPostGc": {
+        "next": {"rss":541757440,"heapTotal":139108352,"heapUsed":129908128,"external":4156398,"arrayBuffers":281932},
+        "ws": {"rss":219648000,"heapTotal":138735616,"heapUsed":129648560,"external":4444375,"arrayBuffers":111454}
+      },
+      "heapBefore": {
+        "totalShallowBytes": 131273726,
+        "top": [
+          {"name":"string","bytes":65249856,"count":108381},
+          {"name":"code","bytes":30764920,"count":315477},
+          {"name":"array","bytes":9218936,"count":23410},
+          {"name":"closure","bytes":8501192,"count":149866},
+          {"name":"object shape","bytes":6800208,"count":70953},
+          {"name":"hidden","bytes":2493568,"count":68511},
+          {"name":"concatenated string","bytes":2280672,"count":71271},
+          {"name":"Object","bytes":1778112,"count":35876},
+          {"name":"object","bytes":1354896,"count":19887},
+          {"name":"native","bytes":567142,"count":608},
+          {"name":"Array","bytes":499816,"count":15510},
+          {"name":"sliced string","bytes":337216,"count":10538},
+          {"name":"Module","bytes":182288,"count":1787},
+          {"name":"h","bytes":175344,"count":1003},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"Set","bytes":46928,"count":1436},
+          {"name":"k","bytes":44520,"count":265}
+        ]
+      },
+      "heapAfter": {
+        "totalShallowBytes": 127838566,
+        "top": [
+          {"name":"string","bytes":64543568,"count":103565},
+          {"name":"code","bytes":28302928,"count":268360},
+          {"name":"array","bytes":9232936,"count":24707},
+          {"name":"closure","bytes":8526856,"count":150308},
+          {"name":"object shape","bytes":6572720,"count":69560},
+          {"name":"hidden","bytes":2503056,"count":60345},
+          {"name":"concatenated string","bytes":2226080,"count":69565},
+          {"name":"Object","bytes":1802000,"count":36117},
+          {"name":"object","bytes":1348128,"count":19822},
+          {"name":"Array","bytes":498272,"count":15461},
+          {"name":"native","bytes":497662,"count":594},
+          {"name":"sliced string","bytes":337056,"count":10533},
+          {"name":"Module","bytes":182312,"count":1788},
+          {"name":"h","bytes":174752,"count":1001},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"Set","bytes":46344,"count":1417},
+          {"name":"k","bytes":44472,"count":264}
+        ]
+      },
+      "completed": true,
+      "durationMs": 3600036.55
+    },
+    {
+      "sample": 3,
+      "bootRss": {"next":[{"process":"next-server","rssMiB":220.69,"role":"root"}],"ws":[{"process":"node","rssMiB":252.95,"role":"root"}]},
+      "workloadBootRss": {"next":[{"process":"next-server","rssMiB":284.89,"role":"root"}],"ws":[{"process":"node","rssMiB":228.87,"role":"root"}]},
+      "hourRss": {
+        "next": [{"process":"next-server","rssMiB":582.02,"role":"root"}],
+        "ws": [
+          {"process":"node","rssMiB":232.55,"role":"root"},
+          {"process":"esbuild","rssMiB":13.88,"role":"descendant"},
+          {"process":"esbuild","rssMiB":13.93,"role":"descendant"}
+        ]
+      },
+      "beforeSoakPostGc": {
+        "next": {"rss":247447552,"heapTotal":136523776,"heapUsed":129948680,"external":4225824,"arrayBuffers":352368},
+        "ws": {"rss":233054208,"heapTotal":136638464,"heapUsed":127825288,"external":4443575,"arrayBuffers":110654}
+      },
+      "hourPostGc": {
+        "next": {"rss":567164928,"heapTotal":140943360,"heapUsed":130286376,"external":4156011,"arrayBuffers":282555},
+        "ws": {"rss":232296448,"heapTotal":138473472,"heapUsed":129584408,"external":4443575,"arrayBuffers":110654}
+      },
+      "heapBefore": {
+        "totalShallowBytes": 131239652,
+        "top": [
+          {"name":"string","bytes":65248240,"count":108329},
+          {"name":"code","bytes":30761224,"count":315514},
+          {"name":"array","bytes":9205896,"count":23359},
+          {"name":"closure","bytes":8499296,"count":149836},
+          {"name":"object shape","bytes":6794232,"count":70883},
+          {"name":"hidden","bytes":2493344,"count":68555},
+          {"name":"concatenated string","bytes":2280000,"count":71250},
+          {"name":"Object","bytes":1776880,"count":35853},
+          {"name":"object","bytes":1353104,"count":19856},
+          {"name":"native","bytes":567620,"count":609},
+          {"name":"Array","bytes":498216,"count":15460},
+          {"name":"sliced string","bytes":337632,"count":10551},
+          {"name":"Module","bytes":182288,"count":1787},
+          {"name":"h","bytes":175344,"count":1003},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"Set","bytes":46832,"count":1433},
+          {"name":"k","bytes":44360,"count":262}
+        ]
+      },
+      "heapAfter": {
+        "totalShallowBytes": 127988951,
+        "top": [
+          {"name":"string","bytes":64546016,"count":103595},
+          {"name":"code","bytes":28344816,"count":268558},
+          {"name":"array","bytes":9245432,"count":24775},
+          {"name":"closure","bytes":8535408,"count":150463},
+          {"name":"object shape","bytes":6572800,"count":69544},
+          {"name":"hidden","bytes":2560336,"count":60567},
+          {"name":"concatenated string","bytes":2225792,"count":69556},
+          {"name":"Object","bytes":1806680,"count":36189},
+          {"name":"object","bytes":1352304,"count":19908},
+          {"name":"Array","bytes":498912,"count":15481},
+          {"name":"native","bytes":497663,"count":594},
+          {"name":"sliced string","bytes":338080,"count":10565},
+          {"name":"Module","bytes":182312,"count":1788},
+          {"name":"h","bytes":174776,"count":1002},
+          {"name":"regexp","bytes":125720,"count":2245},
+          {"name":"_TstNode","bytes":60096,"count":939},
+          {"name":"rQ","bytes":58344,"count":429},
+          {"name":"ZodOptional","bytes":54752,"count":236},
+          {"name":"Set","bytes":46312,"count":1416},
+          {"name":"number","bytes":44640,"count":2790}
+        ]
+      },
+      "completed": true,
+      "durationMs": 3601678.05
+    }
+  ],
+  "nativeMemory": {
+    "complete": true,
+    "failureCount": 0,
+    "samples": [
+      {
+        "sample": 1,
+        "workload": {"simulatedProvider":true,"persistedEntriesPerSession":300,"renderedMessages":600,"websocketHistoryLimit":200,"cadenceMs":1000},
+        "actualSoakMs": 3794411.59,
+        "beforePostGc": {
+          "next": {"rss":271888384,"heapTotal":142172160,"heapUsed":135013192,"external":3962690,"arrayBuffers":152473},
+          "ws": {"rss":200916992,"heapTotal":59969536,"heapUsed":57296360,"external":4015100,"arrayBuffers":110460}
+        },
+        "afterPostGc": {
+          "next": {"rss":700264448,"heapTotal":146329600,"heapUsed":135388864,"external":4026666,"arrayBuffers":91093},
+          "ws": {"rss":258146304,"heapTotal":88870912,"heapUsed":84782856,"external":4015090,"arrayBuffers":110410}
+        },
+        "bootRss": {
+          "shell": [
+            {"process":"o8","rssMiB":577.03,"role":"root"},
+            {"process":"next-server","rssMiB":314.23,"role":"next-server"},
+            {"process":"node","rssMiB":195.73,"role":"ws-server"},
+            {"process":"node","rssMiB":188.33,"role":"descendant"},
+            {"process":"node","rssMiB":143.18,"role":"descendant"},
+            {"process":"node","rssMiB":37.67,"role":"descendant"},
+            {"process":"helper","rssMiB":134.86,"role":"descendant"},
+            {"process":"helper","rssMiB":36.58,"role":"descendant"}
+          ]
+        },
+        "workloadBootRss": {
+          "shell": [
+            {"process":"o8","rssMiB":578.32,"role":"root"},
+            {"process":"next-server","rssMiB":321.05,"role":"next-server"},
+            {"process":"node","rssMiB":196.86,"role":"ws-server"},
+            {"process":"node","rssMiB":38.44,"role":"descendant"},
+            {"process":"node","rssMiB":50.39,"role":"descendant"},
+            {"process":"node","rssMiB":166.39,"role":"descendant"},
+            {"process":"node","rssMiB":38.25,"role":"descendant"},
+            {"process":"node","rssMiB":60.66,"role":"descendant"},
+            {"process":"node","rssMiB":50.97,"role":"descendant"},
+            {"process":"helper","rssMiB":49.15,"role":"descendant"},
+            {"process":"node","rssMiB":12.9,"role":"descendant"},
+            {"process":"node","rssMiB":1.2,"role":"descendant"}
+          ]
+        },
+        "hourRss": {
+          "shell": [
+            {"process":"codex","rssMiB":154.86,"role":"descendant"},
+            {"process":"o8","rssMiB":509.92,"role":"root"},
+            {"process":"next-server","rssMiB":719.56,"role":"next-server"},
+            {"process":"node","rssMiB":262.27,"role":"ws-server"}
+          ]
+        },
+        "heapBefore": {
+          "totalShallowBytes": 135613073,
+          "top": [
+            {"name":"string","bytes":67548088,"count":118539},
+            {"name":"code","bytes":31281632,"count":314427},
+            {"name":"array","bytes":9395016,"count":24397},
+            {"name":"closure","bytes":8750488,"count":154259},
+            {"name":"object shape","bytes":7069344,"count":73616},
+            {"name":"concatenated string","bytes":2634304,"count":82322},
+            {"name":"hidden","bytes":2606232,"count":70375},
+            {"name":"Object","bytes":2006480,"count":39009},
+            {"name":"object","bytes":1398376,"count":20674},
+            {"name":"Array","bytes":518112,"count":16084},
+            {"name":"sliced string","bytes":488992,"count":15281},
+            {"name":"native","bytes":368681,"count":608},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":175344,"count":1003},
+            {"name":"regexp","bytes":128912,"count":2302},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"Set","bytes":48200,"count":1472},
+            {"name":"k","bytes":46984,"count":307}
+          ]
+        },
+        "heapAfter": {
+          "totalShallowBytes": 133849517,
+          "top": [
+            {"name":"string","bytes":66818256,"count":113593},
+            {"name":"code","bytes":30722864,"count":276175},
+            {"name":"array","bytes":9289112,"count":24866},
+            {"name":"closure","bytes":8684568,"count":153088},
+            {"name":"object shape","bytes":6775880,"count":71556},
+            {"name":"hidden","bytes":2758984,"count":63428},
+            {"name":"concatenated string","bytes":2612672,"count":81646},
+            {"name":"Object","bytes":2005480,"count":38672},
+            {"name":"object","bytes":1361176,"count":20093},
+            {"name":"Array","bytes":501472,"count":15564},
+            {"name":"sliced string","bytes":484032,"count":15126},
+            {"name":"native","bytes":306653,"count":589},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":174776,"count":1002},
+            {"name":"regexp","bytes":128856,"count":2301},
+            {"name":"number","bytes":69728,"count":4358},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"Set","bytes":46600,"count":1422}
+          ]
+        },
+        "renderedMessages": "600",
+        "feedErrors": 0
+      },
+      {
+        "sample": 2,
+        "workload": {"simulatedProvider":true,"persistedEntriesPerSession":300,"renderedMessages":200,"websocketHistoryLimit":200,"cadenceMs":1000},
+        "actualSoakMs": 3726362.49,
+        "beforePostGc": {
+          "next": {"rss":272257024,"heapTotal":144269312,"heapUsed":135249208,"external":3964332,"arrayBuffers":154115},
+          "ws": {"rss":202219520,"heapTotal":59969536,"heapUsed":57695904,"external":4019115,"arrayBuffers":114475}
+        },
+        "afterPostGc": {
+          "next": {"rss":729960448,"heapTotal":150016000,"heapUsed":139349272,"external":4954168,"arrayBuffers":1140258},
+          "ws": {"rss":268398592,"heapTotal":89919488,"heapUsed":85117432,"external":4080624,"arrayBuffers":110408}
+        },
+        "bootRss": {
+          "shell": [
+            {"process":"next-server","rssMiB":310.11,"role":"next-server"},
+            {"process":"node","rssMiB":196.4,"role":"ws-server"},
+            {"process":"node","rssMiB":37.93,"role":"descendant"},
+            {"process":"codex","rssMiB":107.64,"role":"descendant"},
+            {"process":"helper","rssMiB":2.19,"role":"descendant"},
+            {"process":"node","rssMiB":1.35,"role":"descendant"},
+            {"process":"helper","rssMiB":0.8,"role":"descendant"},
+            {"process":"helper","rssMiB":0.07,"role":"descendant"},
+            {"process":"o8","rssMiB":577.07,"role":"root"}
+          ]
+        },
+        "workloadBootRss": {
+          "shell": [
+            {"process":"next-server","rssMiB":321.21,"role":"next-server"},
+            {"process":"node","rssMiB":196.92,"role":"ws-server"},
+            {"process":"node","rssMiB":38.5,"role":"descendant"},
+            {"process":"node","rssMiB":50.71,"role":"descendant"},
+            {"process":"node","rssMiB":38.05,"role":"descendant"},
+            {"process":"node","rssMiB":61.69,"role":"descendant"},
+            {"process":"node","rssMiB":39.61,"role":"descendant"},
+            {"process":"node","rssMiB":38.46,"role":"descendant"},
+            {"process":"o8","rssMiB":578.14,"role":"root"}
+          ]
+        },
+        "hourRss": {
+          "shell": [
+            {"process":"next-server","rssMiB":743.73,"role":"next-server"},
+            {"process":"node","rssMiB":276.74,"role":"ws-server"},
+            {"process":"claude","rssMiB":34.23,"role":"descendant"},
+            {"process":"codex","rssMiB":0.09,"role":"descendant"},
+            {"process":"o8","rssMiB":405.73,"role":"root"}
+          ]
+        },
+        "heapBefore": {
+          "totalShallowBytes": 135467779,
+          "top": [
+            {"name":"string","bytes":67540352,"count":117954},
+            {"name":"code","bytes":31326848,"count":314689},
+            {"name":"array","bytes":9344440,"count":24096},
+            {"name":"closure","bytes":8736688,"count":154021},
+            {"name":"object shape","bytes":7070864,"count":73618},
+            {"name":"concatenated string","bytes":2618432,"count":81826},
+            {"name":"hidden","bytes":2611416,"count":70400},
+            {"name":"Object","bytes":1949584,"count":38010},
+            {"name":"object","bytes":1388000,"count":20516},
+            {"name":"Array","bytes":509792,"count":15824},
+            {"name":"sliced string","bytes":466944,"count":14592},
+            {"name":"native","bytes":369339,"count":608},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":175344,"count":1003},
+            {"name":"regexp","bytes":128856,"count":2301},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"Set","bytes":47656,"count":1455},
+            {"name":"k","bytes":45760,"count":289}
+          ]
+        },
+        "heapAfter": {
+          "totalShallowBytes": 134457450,
+          "top": [
+            {"name":"string","bytes":66818984,"count":113357},
+            {"name":"code","bytes":31015560,"count":276646},
+            {"name":"array","bytes":9332352,"count":25104},
+            {"name":"closure","bytes":8721760,"count":153756},
+            {"name":"object shape","bytes":6778416,"count":71582},
+            {"name":"hidden","bytes":2827888,"count":64455},
+            {"name":"concatenated string","bytes":2593664,"count":81052},
+            {"name":"Object","bytes":2016888,"count":38866},
+            {"name":"object","bytes":1376496,"count":20404},
+            {"name":"Array","bytes":503712,"count":15634},
+            {"name":"sliced string","bytes":484640,"count":15145},
+            {"name":"native","bytes":323650,"count":803},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":174776,"count":1002},
+            {"name":"regexp","bytes":128856,"count":2301},
+            {"name":"number","bytes":88624,"count":5539},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"synthetic","bytes":51056,"count":102}
+          ]
+        },
+        "renderedMessages": "600",
+        "feedErrors": 0
+      },
+      {
+        "sample": 3,
+        "workload": {"simulatedProvider":true,"persistedEntriesPerSession":300,"renderedMessages":600,"websocketHistoryLimit":200,"cadenceMs":1000},
+        "actualSoakMs": 3641584.91,
+        "beforePostGc": {
+          "next": {"rss":276398080,"heapTotal":143745024,"heapUsed":135102768,"external":3950950,"arrayBuffers":140733},
+          "ws": {"rss":203337728,"heapTotal":59969536,"heapUsed":57347096,"external":4015094,"arrayBuffers":110454}
+        },
+        "afterPostGc": {
+          "next": {"rss":538927104,"heapTotal":142921728,"heapUsed":135044240,"external":3905585,"arrayBuffers":91675},
+          "ws": {"rss":250707968,"heapTotal":88870912,"heapUsed":85397304,"external":4017158,"arrayBuffers":112478}
+        },
+        "bootRss": {
+          "shell": [
+            {"process":"o8","rssMiB":578.53,"role":"root"},
+            {"process":"next-server","rssMiB":308.69,"role":"next-server"},
+            {"process":"node","rssMiB":196.57,"role":"ws-server"},
+            {"process":"node","rssMiB":31.97,"role":"descendant"},
+            {"process":"codex","rssMiB":109.73,"role":"descendant"}
+          ]
+        },
+        "workloadBootRss": {
+          "shell": [
+            {"process":"o8","rssMiB":579.59,"role":"root"},
+            {"process":"next-server","rssMiB":323.07,"role":"next-server"},
+            {"process":"node","rssMiB":198.02,"role":"ws-server"},
+            {"process":"node","rssMiB":38.18,"role":"descendant"},
+            {"process":"node","rssMiB":38.34,"role":"descendant"},
+            {"process":"node","rssMiB":50.54,"role":"descendant"},
+            {"process":"node","rssMiB":60.89,"role":"descendant"},
+            {"process":"node","rssMiB":50.69,"role":"descendant"},
+            {"process":"helper","rssMiB":119.46,"role":"descendant"},
+            {"process":"node","rssMiB":60.7,"role":"descendant"},
+            {"process":"helper","rssMiB":77.84,"role":"descendant"}
+          ]
+        },
+        "hourRss": {
+          "shell": [
+            {"process":"o8","rssMiB":477.05,"role":"root"},
+            {"process":"next-server","rssMiB":564.3,"role":"next-server"},
+            {"process":"node","rssMiB":257.45,"role":"ws-server"},
+            {"process":"helper","rssMiB":0,"role":"descendant"}
+          ]
+        },
+        "heapBefore": {
+          "totalShallowBytes": 135376923,
+          "top": [
+            {"name":"string","bytes":67469000,"count":117673},
+            {"name":"code","bytes":31430256,"count":315540},
+            {"name":"array","bytes":9303928,"count":23823},
+            {"name":"closure","bytes":8720792,"count":153746},
+            {"name":"object shape","bytes":7052208,"count":73453},
+            {"name":"concatenated string","bytes":2618304,"count":81822},
+            {"name":"hidden","bytes":2611024,"count":70521},
+            {"name":"Object","bytes":1947456,"count":37853},
+            {"name":"object","bytes":1377256,"count":20341},
+            {"name":"Array","bytes":503760,"count":15634},
+            {"name":"sliced string","bytes":465472,"count":14546},
+            {"name":"native","bytes":352347,"count":603},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":175344,"count":1003},
+            {"name":"regexp","bytes":128856,"count":2301},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"Set","bytes":47144,"count":1439},
+            {"name":"k","bytes":44960,"count":274}
+          ]
+        },
+        "heapAfter": {
+          "totalShallowBytes": 133794347,
+          "top": [
+            {"name":"string","bytes":66807560,"count":113364},
+            {"name":"code","bytes":30743664,"count":276226},
+            {"name":"array","bytes":9286408,"count":24800},
+            {"name":"closure","bytes":8682000,"count":153047},
+            {"name":"object shape","bytes":6765080,"count":71460},
+            {"name":"hidden","bytes":2751808,"count":63345},
+            {"name":"concatenated string","bytes":2589792,"count":80931},
+            {"name":"Object","bytes":2000848,"count":38601},
+            {"name":"object","bytes":1358296,"count":20037},
+            {"name":"Array","bytes":499328,"count":15497},
+            {"name":"sliced string","bytes":483840,"count":15120},
+            {"name":"native","bytes":307339,"count":590},
+            {"name":"Module","bytes":181600,"count":1784},
+            {"name":"h","bytes":174752,"count":1001},
+            {"name":"regexp","bytes":128856,"count":2301},
+            {"name":"number","bytes":68320,"count":4270},
+            {"name":"_TstNode","bytes":60096,"count":939},
+            {"name":"rQ","bytes":58344,"count":429},
+            {"name":"ZodOptional","bytes":54752,"count":236},
+            {"name":"Set","bytes":46536,"count":1420}
+          ]
+        },
+        "renderedMessages": "600",
+        "feedErrors": 0
+      }
+    ]
+  },
+  "dependencyCloneMs": {"n":3,"samples":[27183.64,31953.07,28501.05],"median":28501.05,"p95":31953.07,"worst":31953.07},
+  "guardCostMs": {"direct":{"n":60,"median":56.92,"p95":77.09,"worst":80.94},"guarded":{"n":60,"median":540.48,"p95":1055.13,"worst":1473.54},"medianOverhead":483.56},
+  "nativeAllocationOwners": {
+    "schema": "o8/speed-allocation-owners/v1",
+    "allocationRecords": 1163699,
+    "bytes": {"urlpatternRegex":499643904,"shellScopeRegex":314608,"otherRegex":0,"urlpatternOther":3471360},
+    "calls": {"urlpatternRegex":1016096,"shellScopeRegex":797,"otherRegex":0,"urlpatternOther":79552},
+    "limits": "Live stack-attributed allocation bytes, not dominator sizes or RSS. Unrelated VM/file mappings are deliberately not totaled. Logging perturbs the diagnostic process."
+  },
+  "snapshotControl": {
+    "samples": [
+      {
+        "sample": 1,
+        "before": {"rss":201740288,"heapTotal":115159040,"heapUsed":110938176,"external":3913897,"arrayBuffers":73859},
+        "idle": {"rss":203186176,"heapTotal":115814400,"heapUsed":110916880,"external":3921635,"arrayBuffers":81557},
+        "after": {"rss":491024384,"heapTotal":118697984,"heapUsed":113412704,"external":3932834,"arrayBuffers":92756},
+        "snapshotMiB": 67.1,
+        "idleRssDeltaMiB": 1.38,
+        "snapshotRssDeltaMiB": 274.5
+      },
+      {
+        "sample": 2,
+        "before": {"rss":200794112,"heapTotal":115683328,"heapUsed":110471960,"external":3913521,"arrayBuffers":73483},
+        "idle": {"rss":207695872,"heapTotal":118964224,"heapUsed":111644736,"external":4126039,"arrayBuffers":90184},
+        "after": {"rss":504397824,"heapTotal":117653504,"heapUsed":113316272,"external":3926051,"arrayBuffers":85973},
+        "snapshotMiB": 66.43,
+        "idleRssDeltaMiB": 6.58,
+        "snapshotRssDeltaMiB": 282.96
+      },
+      {
+        "sample": 3,
+        "before": {"rss":198942720,"heapTotal":114634752,"heapUsed":110445272,"external":3913521,"arrayBuffers":73483},
+        "idle": {"rss":207179776,"heapTotal":118042624,"heapUsed":110911616,"external":3930655,"arrayBuffers":90577},
+        "after": {"rss":497266688,"heapTotal":116994048,"heapUsed":112604928,"external":3930515,"arrayBuffers":90437},
+        "snapshotMiB": 67.09,
+        "idleRssDeltaMiB": 7.86,
+        "snapshotRssDeltaMiB": 276.65
+      }
+    ],
+    "snapshotAddedRssMiB": {"n":3,"samples":[274.5,282.96,276.65],"median":276.65,"p95":282.96,"worst":282.96},
+    "limits": "Instrument control on warmed MCP/source-server fixture, not an hour-long workload or attribution of all RSS growth."
+  },
+  "installedReadOnlyObservation": {
+    "date": "2026-10-23",
+    "mode": "passive read-only, not a controlled launch population",
+    "processes": {
+      "shell": {"physicalFootprintMiB":585.8},
+      "next": {
+        "physicalFootprintMiB": 884.8,
+        "MALLOC_LARGE_REUSABLE": {"virtualMiB":773.1,"residentMiB":682.6,"dirtyMiB":8},
+        "Memory Tag 255": {"virtualMiB":22630.4,"residentMiB":1228.8,"dirtyMiB":804.2}
+      },
+      "ws": {
+        "physicalFootprintMiB": 239.1,
+        "MALLOC_LARGE_REUSABLE": {"virtualMiB":57.2,"residentMiB":57.2,"dirtyMiB":0},
+        "Memory Tag 255": {"virtualMiB":11366.4,"residentMiB":113,"dirtyMiB":109.9}
+      }
+    },
+    "laterRssMiB": {"shell":1464.28,"next":2147.09,"ws":470.29},
+    "installedVersion": "0.1.805"
+  }
+}
