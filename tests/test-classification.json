@@ -4081,6 +4081,13 @@
       ]
     },
     {
+      "path": "tests/parked-output-preview-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/patch-id-aggregate-carry.test.ts",
       "reasons": [
         "child-process",
