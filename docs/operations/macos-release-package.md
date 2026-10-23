@@ -1,4 +1,33 @@
-# macOS release package compression
+# macOS release package
+
+## Notarization credentials in Keychain
+
+Store notarization credentials once in a notarytool Keychain profile. Run this
+interactively as the user who will run the approved release:
+
+```sh
+xcrun notarytool store-credentials o8-notary
+```
+
+Enter the Apple ID, team ID and app-specific password at the prompts. Do not
+put the password in command arguments, shell startup files or environment
+variables. The credentials remain in Keychain. Select the profile with the
+non-secret setting `APPLE_KEYCHAIN_PROFILE=o8-notary` in the release environment.
+`APPLE_SIGNING_IDENTITY` and the Tauri updater signing key are still required.
+
+When `APPLE_KEYCHAIN_PROFILE` is set, the signing pass uses
+`--keychain-profile` for both the app and installer submissions and does not
+read `APPLE_ID`, `APPLE_PASSWORD` or `APPLE_TEAM_ID`. Preflight verifies access
+with `notarytool history` before building. It discards the command output and
+reports only credential setting names, never profile or credential values.
+A missing, inaccessible or invalid profile stops preflight without falling back.
+
+Without a profile, the existing `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`
+environment settings remain supported. Preflight warns that this fallback
+exposes the password to child processes. After configuring a profile, remove
+any existing password export yourself and start a fresh release shell.
+
+## Compression
 
 Use the normal approved release workflow from the clean, tagged release checkout.
 On macOS, set the system `tar` writer's gzip compression level for that command:
