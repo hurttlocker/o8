@@ -1,3 +1,6 @@
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { NextRequest } from 'next/server';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { StorageVolumeObservation } from '@/lib/workspace/storage-admission';
+
+vi.mock('@/lib/runtime/inventory', () => ({ getRuntimeInventorySnapshot: async () => ({ agents: [] }) }));
 
 const worktreeFailure = vi.hoisted(() => new Error('synthetic packet worktree provision failure'));
 
@@ -98,8 +103,41 @@ function observed(targetPath: string): StorageVolumeObservation {
   };
 }
 
-beforeAll(() => {
+let apiBase: string;
+const server = createServer(async (request, response) => {
+  const url = new URL(request.url!, apiBase);
+  const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+  const req = new NextRequest(url, { headers: { authorization: `Bearer ${getOrCreateWsToken()}` } });
+  const routes: Record<string, () => Promise<Response>> = {
+    '/api/orchestrator/status': async () => (await import('@/app/api/orchestrator/status/route')).GET(req),
+    '/api/orchestrator/lane-events': async () => (await import('@/app/api/orchestrator/lane-events/route')).GET(req),
+    '/api/orchestrator/packet-transcript': async () => (await import('@/app/api/orchestrator/packet-transcript/route')).GET(req),
+    '/api/operator/status': async () => (await import('@/app/api/operator/status/route')).GET(req),
+  };
+  try {
+    const result = await (routes[url.pathname]?.() ?? Promise.resolve(Response.json({})));
+    response.writeHead(result.status, { 'content-type': 'application/json' });
+    response.end(await result.text());
+  } catch (error) { response.writeHead(500).end(String(error)); }
+});
+
+function parseResult(result: { content: Array<{ type: string; text?: string }> }) {
+  return JSON.parse(result.content[0].text!);
+}
+
+beforeAll(async () => {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Fixture did not bind');
+  apiBase = `http://127.0.0.1:${address.port}`;
+  const { setApiBase } = await import('@/lib/mcp/operator-handlers/shared');
+  setApiBase(apiBase);
   mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'api-port'), String(address.port));
+  vi.stubEnv('O8_API_PORT', String(address.port));
+  const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+  vi.stubEnv('O8_API_TOKEN', getOrCreateWsToken());
   mkdirSync(worktreeRoot, { recursive: true });
   mkdirSync(repoPath, { recursive: true });
   execFileSync('git', ['init', '--initial-branch=main'], { cwd: repoPath, stdio: 'pipe' });
@@ -113,6 +151,9 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  vi.unstubAllEnvs();
   const { closeDb } = await import('@/lib/db');
   closeDb();
   for (const [key, value] of priorEnv) {
@@ -122,51 +163,59 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+
+async function storageFixture(volumeId?: string) {
+  const observeFixtureVolume = async (targetPath: string) => ({ ...observed(targetPath), ...(volumeId ? { volumeId } : {}) });
+  const [
+    { launchPacketWithStorageAdmission },
+    { resolveWorkerRouting },
+    { createPacketStorageAdmissionCoordinator },
+    { StorageAdmissionStore },
+    controlPlane,
+    laneRegistry,
+    { getSqlite },
+  ] = await Promise.all([
+    import('@/lib/orchestrator/dispatch-packet-launch'),
+    import('@/lib/agents/routing'),
+    import('@/lib/orchestrator/storage-admission'),
+    import('@/lib/workspace/storage-admission'),
+    import('@/lib/orchestrator/control-plane'),
+    import('@/lib/lane/registry'),
+    import('@/lib/db'),
+  ]);
+  const sqlite = getSqlite();
+  const store = new StorageAdmissionStore(sqlite, {
+    now: Date.now,
+    observeVolume: observeFixtureVolume,
+  });
+  const storageAdmission = createPacketStorageAdmissionCoordinator({
+    sqlite,
+    store,
+    now: Date.now,
+    observeEstimate: async () => ({
+      status: 'observed',
+      exactBytes: estimateBytes,
+      source: 'source-size-fallback',
+      historySamples: 0,
+      workspacePaths: [],
+      error: null,
+    }),
+    resolveReservationTarget: () => worktreeRoot,
+    observeRootIdentity: async () => ({
+      canonicalPath: worktreeRoot,
+      device: 'provision-failure-test',
+      inode: '1',
+    }),
+    observeReservationVolume: observeFixtureVolume,
+    resolvePolicy: () => ({ reserveRatio: 0.1, absoluteFloorBytes: 10 * gib }),
+  });
+
+  return { sqlite, storageAdmission, controlPlane, laneRegistry, launchPacketWithStorageAdmission, resolveWorkerRouting };
+}
+
 describe('packet storage admission provision failure real path', () => {
   it('releases the failed owner and admits the next launch at the same free space', async () => {
-    const [
-      { launchPacketWithStorageAdmission },
-      { resolveWorkerRouting },
-      { createPacketStorageAdmissionCoordinator },
-      { StorageAdmissionStore },
-      controlPlane,
-      laneRegistry,
-      { getSqlite },
-    ] = await Promise.all([
-      import('@/lib/orchestrator/dispatch-packet-launch'),
-      import('@/lib/agents/routing'),
-      import('@/lib/orchestrator/storage-admission'),
-      import('@/lib/workspace/storage-admission'),
-      import('@/lib/orchestrator/control-plane'),
-      import('@/lib/lane/registry'),
-      import('@/lib/db'),
-    ]);
-    const sqlite = getSqlite();
-    const store = new StorageAdmissionStore(sqlite, {
-      now: Date.now,
-      observeVolume: async (targetPath) => observed(targetPath),
-    });
-    const storageAdmission = createPacketStorageAdmissionCoordinator({
-      sqlite,
-      store,
-      now: Date.now,
-      observeEstimate: async () => ({
-        status: 'observed',
-        exactBytes: estimateBytes,
-        source: 'source-size-fallback',
-        historySamples: 0,
-        workspacePaths: [],
-        error: null,
-      }),
-      resolveReservationTarget: () => worktreeRoot,
-      observeRootIdentity: async () => ({
-        canonicalPath: worktreeRoot,
-        device: 'provision-failure-test',
-        inode: '1',
-      }),
-      observeReservationVolume: async (targetPath) => observed(targetPath),
-      resolvePolicy: () => ({ reserveRatio: 0.1, absoluteFloorBytes: 10 * gib }),
-    });
+    const { sqlite, storageAdmission, controlPlane, laneRegistry, launchPacketWithStorageAdmission, resolveWorkerRouting } = await storageFixture();
 
     const launchAndReadFailure = async (packetId: string) => {
       const candidate = packet(packetId);
@@ -357,4 +406,151 @@ describe('packet storage admission provision failure real path', () => {
       }),
     ]));
   });
+});
+
+
+describe('provision failure diagnostics through agent entry points (#4071)', () => {
+  const packetId = 'pkt-diagnostic-provision-failure';
+  const reason = { code: 'packet_worktree_provision_failed', cause: worktreeFailure.message };
+
+  beforeAll(async () => {
+    const { storageAdmission, controlPlane, launchPacketWithStorageAdmission, resolveWorkerRouting } = await storageFixture('device:diagnostic-provision-test');
+    const candidate = packet(packetId);
+    controlPlane.writeOrchestratorControlPlaneState(mission(candidate));
+    await expect(launchPacketWithStorageAdmission({
+      packet: candidate, allPackets: [candidate], storageAdmission,
+      workerRouting: resolveWorkerRouting({ requestedRuntime: 'codex', source: 'scheduler-dispatch' }),
+    })).rejects.toThrow('packet_worktree_provision_failed');
+  });
+
+  it('returns the failed lane and durable cause through get_mission_status after reopening SQLite', async () => {
+    (await import('@/lib/db')).closeDb();
+    const { handleGetMissionStatus } = await import('@/lib/mcp/operator-handlers/mission');
+    const result = parseResult(await handleGetMissionStatus({ missionId: `mission-${packetId}` }));
+    expect(result.packets[0].lane).toMatchObject({ status: 'failed', terminalReason: reason });
+    expect(result.packets[0].terminalReason).toMatchObject(reason);
+    expect(result.agents[0].terminalReason).toMatchObject(reason);
+  });
+
+  it('returns durable reasons through o8_lane_events even with an exhausted transition cursor', async () => {
+    const { handleLaneEvents } = await import('@/lib/mcp/operator-handlers/status');
+    const { findLatestLaneByPacket } = await import('@/lib/lane/registry');
+    const lane = findLatestLaneByPacket(packetId)!;
+    const result = parseResult(await handleLaneEvents({ since: Number.MAX_SAFE_INTEGER, timeoutMs: 0, lanes: [lane.id] }));
+    expect(result.data.events).toEqual([]);
+    expect(result.data.terminalReasons).toEqual([expect.objectContaining({ laneId: lane.id, packetId, terminalReason: reason })]);
+  });
+
+  it('explains a packet without a session through o8_packet_transcript', async () => {
+    const { handleTranscript } = await import('@/lib/mcp/operator-handlers/status');
+    const result = parseResult(await handleTranscript({ packetId }));
+    expect(result.data.note).toBe('no_session_binding');
+    expect(result.data.terminalReason).toMatchObject(reason);
+    expect(result.summary).toContain(worktreeFailure.message);
+  });
+
+  it('includes sessionless provision failures in the o8_status diagnostic snapshot', async () => {
+    const { handleStatus } = await import('@/lib/mcp/operator-handlers/status');
+    const result = parseResult(await handleStatus({}));
+    expect(result.data.terminalReasons).toContainEqual(expect.objectContaining({ packetId, terminalReason: reason }));
+  });
+
+  it('prints the failed packet reason through CLI JSON and human status', async () => {
+    const { runStatus } = await import('../cli/src/commands/status');
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await runStatus({ human: false, verbose: false });
+      const result = JSON.parse(output.mock.calls.map(([chunk]) => String(chunk)).join(''));
+      expect(result.terminalReasons).toContainEqual(expect.objectContaining({ packetId, terminalReason: reason }));
+      output.mockClear();
+      await runStatus({ human: true, verbose: false });
+      const text = output.mock.calls.map(([chunk]) => String(chunk)).join('');
+      expect(text).toContain(packetId);
+      expect(text).toContain(reason.code);
+      expect(text).toContain(reason.cause);
+    } finally { output.mockRestore(); }
+  });
+
+  it('keeps the cause after noisy history and filters unrelated lane snapshots', async () => {
+    const { findLatestLaneByPacket } = await import('@/lib/lane/registry');
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    const { handleLaneEvents } = await import('@/lib/mcp/operator-handlers/status');
+    const { getSqlite } = await import('@/lib/db');
+    const lane = findLatestLaneByPacket(packetId)!;
+    for (let index = 0; index < 501; index++) recordLaneEvent(lane.id, 'update', 'system', { progress: index });
+    const before = getSqlite().prepare('SELECT COUNT(*) FROM lane_events').pluck().get();
+    const result = parseResult(await handleLaneEvents({ since: Number.MAX_SAFE_INTEGER, timeoutMs: 0, lanes: [lane.id] }));
+    expect(result.data.terminalReasons).toEqual([expect.objectContaining({ laneId: lane.id, terminalReason: reason })]);
+    const absent = parseResult(await handleLaneEvents({ timeoutMs: 0, lanes: ['missing-lane'] }));
+    expect(absent.data.terminalReasons).toEqual([]);
+    expect(getSqlite().prepare('SELECT COUNT(*) FROM lane_events').pluck().get()).toBe(before);
+  });
+
+  it('includes terminal causes in the historical mission fallback', async () => {
+    const { recordMission } = await import('@/lib/db/missions-store');
+    const { handleGetMissionStatus } = await import('@/lib/mcp/operator-handlers/mission');
+    recordMission({ id: 'diagnostic-history', repoPath, runtime: 'codex', prompt: '', summary: '',
+      constraints: '', totalWaves: 1, packetMeta: [{ id: packetId, title: 'diagnostic history', referenceLabel: 'HISTORY' }] });
+    // Legacy archive rows have no full snapshot; exercise that fallback explicitly.
+    (await import('@/lib/db')).getSqlite().prepare('UPDATE missions SET mission_state_json = NULL WHERE id = ?').run('diagnostic-history');
+    const result = parseResult(await handleGetMissionStatus({ missionId: 'diagnostic-history' }));
+    expect(result.historical).toBe(true);
+    expect(result.packets[0].lane).toMatchObject({ status: 'failed', terminalReason: reason });
+    expect(result.agents[0].terminalReason).toMatchObject(reason);
+  });
+
+  it('uses the latest sessionless lane instead of a prior attempt transcript', async () => {
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    const { handleTranscript } = await import('@/lib/mcp/operator-handlers/status');
+    const id = 'pkt-stale-session-binding';
+    const old = createLane({ repoPath, branch: 'prior-attempt', packetId: id, runtime: 'codex', sessionKey: 'codex:prior-attempt' });
+    setLaneStatus(old.id, 'failed');
+    const latest = createLane({ repoPath, branch: 'latest-attempt', packetId: id, runtime: 'codex' });
+    setLaneStatus(latest.id, 'failed', 'system', reason.code);
+    recordLaneEvent(latest.id, 'worktree_provision_failed', 'system', reason);
+    const result = parseResult(await handleTranscript({ packetId: id }));
+    expect(result.data).toMatchObject({ sessionKey: null, note: 'no_session_binding', terminalReason: reason });
+  });
+
+  it('keeps parsed runtime failures even when the process exits zero', async () => {
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { recordLaneEvent } = await import('@/lib/lane/events');
+    const { handleLaneEvents } = await import('@/lib/mcp/operator-handlers/status');
+    const lane = createLane({ repoPath, branch: 'parsed-runtime-failure', runtime: 'codex' });
+    setLaneStatus(lane.id, 'failed', 'system', 'runtime_failed');
+    recordLaneEvent(lane.id, 'runtime_process_exit', 'system', {
+      runtimeOutcome: 'failed', classification: 'clean-exit', exitCode: 0, stderr: 'fixture parsed runtime failure',
+    });
+    const result = parseResult(await handleLaneEvents({ lanes: [lane.id], timeoutMs: 0 }));
+    expect(result.data.terminalReasons[0].terminalReason).toEqual({ code: 'runtime_process_exit', cause: 'fixture parsed runtime failure' });
+  });
+
+  it('bounds global status diagnostics with the newest reasons first', async () => {
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { handleStatus } = await import('@/lib/mcp/operator-handlers/status');
+    for (let index = 0; index < 51; index++) {
+      const lane = createLane({ repoPath, branch: `diagnostic-history-${index}`, runtime: 'codex' });
+      setLaneStatus(lane.id, 'completed');
+    }
+    const latest = createLane({ repoPath, branch: 'newest-diagnostic', packetId: 'pkt-newest-failure', runtime: 'codex' });
+    setLaneStatus(latest.id, 'failed', 'system', 'newest_failure', { reason: 'newest fixture cause' });
+    const result = parseResult(await handleStatus({}));
+    expect(result.data.terminalReasons).toHaveLength(50);
+    expect(result.data.terminalReasonsTruncated).toBe(true);
+    expect(result.data.terminalReasons[0]).toMatchObject({ packetId: 'pkt-newest-failure',
+      terminalReason: { code: 'newest_failure', cause: 'newest fixture cause' } });
+  });
+
+  it('does not attribute a prior attempt failure to a new live lane', async () => {
+    const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
+    const { handleGetMissionStatus } = await import('@/lib/mcp/operator-handlers/mission');
+    const { handleTranscript } = await import('@/lib/mcp/operator-handlers/status');
+    const lane = createLane({ repoPath, branch: 'retry-diagnostics', packetId, runtime: 'codex' });
+    setLaneStatus(lane.id, 'launching', 'system', 'launching_session');
+    const result = parseResult(await handleGetMissionStatus({ missionId: `mission-${packetId}` }));
+    expect(result.packets[0].lane).toMatchObject({ laneId: lane.id, status: 'launching', terminalReason: null });
+    expect(parseResult(await handleTranscript({ packetId })).data.terminalReason).toBeNull();
+  });
+
 });

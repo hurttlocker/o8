@@ -58,6 +58,7 @@ interface MissionStatusPacket {
   title?: string;
   status?: string;
   blockedReason?: string | null;
+  terminalReason?: { code: string; cause: string | null } | null;
   storageAdmission?: {
     state?: string;
     reason?: string;
@@ -66,6 +67,12 @@ interface MissionStatusPacket {
     physicalAvailableBytes?: number | null;
     requiredReserveBytes?: number | null;
   } | null;
+}
+
+interface TerminalReasonRow {
+  packetId: string | null;
+  status?: string;
+  terminalReason: { code: string; cause: string | null };
 }
 
 interface MissionStatusResponse {
@@ -144,7 +151,7 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     apiFetch<{ approvals: Approval[] }>(cfg, '/api/panel/approvals', { query: { status: 'pending' } }),
     apiFetch<MissionStatusResponse>(cfg, '/api/orchestrator/status', { allowNotFound: true }),
     apiFetch<PanelStatusResponse>(cfg, '/api/panel/status', { allowNotFound: true }),
-    apiFetch<{ agents?: StatusSession[] }>(cfg, '/api/operator/status', { allowNotFound: true }),
+    apiFetch<{ agents?: StatusSession[]; terminalReasons?: TerminalReasonRow[]; terminalReasonsTruncated?: boolean }>(cfg, '/api/operator/status', { allowNotFound: true }),
   ]);
 
   const staleSessions = (operatorRes?.data?.agents ?? []).filter((session) => session.status === 'stale');
@@ -169,6 +176,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       physicalAvailableBytes: packet.storageAdmission?.physicalAvailableBytes ?? null,
       requiredReserveBytes: packet.storageAdmission?.requiredReserveBytes ?? null,
     }));
+  const terminalReasons = operatorRes?.data?.terminalReasons ?? (missionRes.data?.result?.packets ?? []).flatMap((packet) => packet.terminalReason
+    ? [{ packetId: packet.id, status: packet.status, terminalReason: packet.terminalReason }] : []);
   const shippedDarkAudit = panelStatusRes.data?.shippedDarkAudit ?? null;
   // Deliberate default-off flags stay in `shippedDarkAudit` for the operator to
   // read; only unreviewed promotion candidates age into a warning.
@@ -232,6 +241,8 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       ...approvalAge(a.createdAt),
     })),
     storageHolds,
+    terminalReasons,
+    terminalReasonsTruncated: operatorRes?.data?.terminalReasonsTruncated === true,
     shippedDarkAudit,
     shippedDarkWarnings,
     shippedDarkByDesign,
@@ -283,6 +294,12 @@ export async function runStatus(mode: OutputMode): Promise<number> {
         process.stdout.write(
           `  ${a.id.padEnd(28)} ${a.kind ?? '?'}  ${a.summary ?? ''}  age ${age.age}${age.overdue ? ' [overdue]' : ''}\n`,
         );
+      }
+    }
+    if (terminalReasons.length > 0) {
+      printHumanHeading('packet terminal reasons');
+      for (const item of terminalReasons) {
+        process.stdout.write(`  ${item.packetId}  ${item.terminalReason.code}${item.terminalReason.cause ? `: ${item.terminalReason.cause}` : ''}\n`);
       }
     }
     if (storageHolds.length > 0) {

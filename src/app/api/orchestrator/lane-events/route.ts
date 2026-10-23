@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { listLanes } from '@/lib/lane/registry';
+import { laneTerminalReasonSnapshot } from '@/lib/lane/terminal-reason';
 import { getLaneEventsSince } from '@/lib/orchestrator/runtime-status';
 
 export const runtime = 'nodejs';
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
   try {
     const result = await getLaneEventsSince(since, timeoutMs, laneFilter);
     return NextResponse.json(
-      { events: result.events, nextSince: result.nextSince },
+      { events: result.events, nextSince: result.nextSince, ...laneTerminalReasonSnapshot(listLanes().filter((lane) => !laneFilter || laneFilter.has(lane.id))) },
       { headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   } catch (error) {

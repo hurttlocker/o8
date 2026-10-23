@@ -5491,6 +5491,7 @@
       "reasons": [
         "child-process",
         "git-cli",
+        "network-listener",
         "real-path"
       ]
     },
