@@ -34,6 +34,7 @@ export function scanSpawnEnvironment(relPath: string, content: string): RuleViol
     const resolved = name.startsWith('@/') ? `src/${name.slice(2)}`
       : name.startsWith('.') ? posix.normalize(posix.join(posix.dirname(relPath), name)) : name;
     if (resolved.replace(/\.(?:ts|js)$/, '') === RAW_BOUNDARY.replace(/\.ts$/, '')) return 'wrapper';
+    if (resolved.replace(/\.(?:ts|js)$/, '') === 'src/lib/app-update/work-launch-admission') return 'wrapper';
     return moduleOrigin(name);
   };
   const source = ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true,
@@ -79,6 +80,7 @@ export function scanSpawnEnvironment(relPath: string, content: string): RuleViol
 
   function member(origin: Origin | undefined, key: string | undefined): Origin | undefined {
     if (origin === 'process' && key === 'env') return 'environment';
+    if (origin === 'wrapper' && key === 'spawnWithWorkAdmission') return 'call:wrapper:spawn';
     if ((origin === 'node' || origin === 'wrapper' || origin === 'pty') && key && METHODS.has(key)) {
       return `call:${origin}:${key}`;
     }

@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from '@/lib/providers/child-process';
+import type { ChildProcess } from 'node:child_process';
+import { spawnWithWorkAdmission as spawn } from '@/lib/app-update/work-launch-admission';
 import { withProviderStoreLock } from '@/lib/providers/store-lock';
 import { credentialPolicyFingerprint } from '@/lib/providers/credential-policy';
 import { assertOwnedMcpArtifactAvailable } from '@/lib/providers/mcp-artifacts';

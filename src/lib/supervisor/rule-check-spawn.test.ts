@@ -44,6 +44,9 @@ describe('child-process rule through the real git-backed entry point', () => {
 
   it.each([
     "import { spawn } from '@/lib/providers/child-process'; spawn('tool', [], { env: process.env });",
+    "import { spawnWithWorkAdmission } from '@/lib/app-update/work-launch-admission'; spawnWithWorkAdmission('tool', [], { env: process.env });",
+    "import { spawnWithWorkAdmission as launch } from '@/lib/app-update/work-launch-admission'; launch('tool', [], { env: { ...process.env } });",
+    "import * as admitted from '../app-update/work-launch-admission'; admitted.spawnWithWorkAdmission('tool', [], { env: process.env });",
     "import { spawn as launch } from '../providers/child-process'; const inherited = process.env; launch('tool', [], { env: { ...inherited } });",
     "import * as cp from '@/lib/providers/child-process'; const options = { env: process.env }; cp.execFile('tool', [], options);",
     "import { execSync } from '@/lib/providers/child-process'; import processAlias from 'node:process'; execSync('tool', { env: processAlias.env });",

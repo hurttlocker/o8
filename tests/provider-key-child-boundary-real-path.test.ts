@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -49,6 +49,21 @@ it('preserves API mode at the actual process boundary', () => {
   saveRuntimeBillingMode('codex', 'api');
   cp.execFileSync(process.execPath, [script], { env: childEnvironment({ runtimeId: 'codex' }) });
   expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(['fixture-boundary-key', 'fixture-boundary-key']);
+});
+it.each(['api', 'subscription'] as const)('preserves work admission and credential policy in %s', async mode => {
+  saveRuntimeBillingMode('codex', mode);
+  const { spawnWithWorkAdmission } = await import('@/lib/app-update/work-launch-admission');
+  const { childEnvironment: admittedEnvironment } = await import('@/lib/providers/spawn-environment');
+  const child = spawnWithWorkAdmission(process.execPath, [script], mode === 'api' ? { env: admittedEnvironment({ runtimeId: 'codex' }) } : {});
+  const leases = join(state.dir, 'work-launches');
+  const records = readdirSync(leases);
+  expect(records).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(leases, records[0]!), 'utf8')).pid).toBe(child.pid);
+  await new Promise<void>((resolve, reject) => {
+    child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+  });
+  expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(mode === 'api' ? ['fixture-boundary-key', 'fixture-boundary-key'] : [null, null]);
+  expect(readdirSync(leases)).toEqual([]);
 });
 
 it('the real app bridge can reread an override-encrypted store without giving its runtime the master key', async () => {
