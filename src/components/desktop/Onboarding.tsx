@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { TelemetryConsentCard } from './TelemetryConsentCard';
+import { ReleaseNotesSignup } from './ReleaseNotesSignup';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { OnboardingReposStep } from './onboarding/OnboardingReposStep';
 import { OnboardingPermissionsStep, type OnboardingPermissionClient } from './onboarding/OnboardingPermissionsStep';
@@ -271,7 +272,7 @@ const OnboardingFlow = memo(function OnboardingFlow({ onComplete, completionErro
         }} onSkip={() => navigate('open')} renderButton={renderButton} /> : null}
         {progress.step === 'permissions' ? <OnboardingPermissionsStep storage={progressStorage} client={permissionClient} onBusyChange={setChildBusy} onRestart={restartPermissions ?? (() => restartOnboardingAtPermissions(progressStorage, progressRef.current))} onContinue={() => navigate('open')} /> : null}
         {progress.step === 'mobile' ? <OnboardingMobileStep openExternal={openExternal} onContinue={() => navigate('open')} /> : null}
-        {progress.step === 'privacy' ? <TelemetryConsentCard onBusyChange={setChildBusy} embedded request={consentRequest} onContinue={() => enter(progressRef.current.project)} /> : null}
+        {progress.step === 'privacy' ? <><TelemetryConsentCard onBusyChange={setChildBusy} embedded request={consentRequest} onContinue={() => enter(progressRef.current.project)} /><ReleaseNotesSignup request={request} /></> : null}
         {!home && actionBusy ? <div role="status" style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>{status}</div> : null}
         {!home && (error || completionError) ? <div style={{ width: '100%', maxWidth: 640 }}><OnboardingFeedback tone="error" title={error ?? completionError ?? ''}>{storageError ? 'Keep this window open while you retry.' : 'Your saved choices are kept. You can retry or return to projects.'}</OnboardingFeedback></div> : null}
         {storageError ? <p role="status" style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Progress could not be saved for a restart. You can still continue.</p> : null}

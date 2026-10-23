@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { FloatingSurface } from '../FloatingSurface';
 import { COMPOSER_MODES, type ComposerMode } from './composer-mode';
@@ -36,6 +36,8 @@ function highlightMatch(text: string, query: string): React.ReactNode {
 }
 
 interface AttachFilesButtonProps {
+  buttonStyle?: CSSProperties;
+  allowDiskUpload?: boolean;
   onFileReferenceSelect?: (path: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   repoPath?: string | null;
@@ -95,6 +97,8 @@ function PromptGlyph() {
 }
 
 export function AttachFilesButton({
+  buttonStyle,
+  allowDiskUpload = true,
   onFileReferenceSelect,
   onUploadDiskFiles,
   repoPath,
@@ -180,6 +184,7 @@ export function AttachFilesButton({
           color: open ? 'var(--t-text)' : 'var(--t-text-muted)',
           cursor: 'pointer',
           transition: 'color 120ms, background 120ms',
+          ...buttonStyle,
         }}
         onMouseEnter={(event) => {
           event.currentTarget.style.color = 'var(--t-text)';
@@ -337,7 +342,7 @@ export function AttachFilesButton({
             ) : null}
             {/* Flat rows, same vocabulary as the mode rows above — the old
                 bordered input-bubbles read as chunky cards (Q 2026-07-17). */}
-            <button
+            {allowDiskUpload ? <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               style={{
@@ -366,7 +371,7 @@ export function AttachFilesButton({
             >
               <UploadGlyph />
               Upload from disk
-            </button>
+            </button> : null}
 
             <div style={{
               display: 'flex',

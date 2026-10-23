@@ -15,8 +15,8 @@
  */
 
 export type TranscriptEvent =
-  | { seq: number; ts: string; type: 'tool_call'; tool: string; args: string; summary: string }
-  | { seq: number; ts: string; type: 'tool_result'; tool: string; ok: boolean; summary: string }
+  | { seq: number; ts: string; type: 'tool_call'; callId?: string; tool: string; args: string; summary: string }
+  | { seq: number; ts: string; type: 'tool_result'; callId?: string; tool: string; ok: boolean; summary: string }
   | { seq: number; ts: string; type: 'assistant'; text: string }
   | { seq: number; ts: string; type: 'steer'; source: string; text: string; failed?: boolean; note?: string }
   | { seq: number; ts: string; type: 'error'; message: string }
@@ -54,9 +54,9 @@ function readNum(source: Record<string, unknown> | null, ...keys: string[]): num
   return undefined;
 }
 
-function clip(input: string | undefined, max: number): string {
+function clip(input: string | undefined, max: number, preserveLines = false): string {
   if (!input) return '';
-  const collapsed = input.replace(/\s+/g, ' ').trim();
+  const collapsed = preserveLines ? input.trim() : input.replace(/\s+/g, ' ').trim();
   return collapsed.length <= max ? collapsed : `${collapsed.slice(0, Math.max(0, max - 1))}…`;
 }
 
@@ -162,6 +162,7 @@ export function normalizeCodexEvents(
         seq: previousCall!.seq,
         ts: previousCall!.ts,
         type: 'tool_call',
+        callId: previousCall.type === 'tool_call' ? previousCall.callId : callId,
         tool,
         args,
         summary: clip(args || `call ${tool}`, MAX_SUMMARY),
@@ -186,7 +187,7 @@ export function normalizeCodexEvents(
     const thisSeq = nextSeq();
     pending.set(callId, { seq: thisSeq, tool });
     const summary = clip(args || `call ${tool}`, MAX_SUMMARY);
-    out.push({ seq: thisSeq, ts, type: 'tool_call', tool, args, summary });
+    out.push({ seq: thisSeq, ts, type: 'tool_call', callId, tool, args, summary });
     emitted.set(callId, { callIndex: out.length - 1, tool });
     if (identity) {
       aliases.push({ callId, shapes: new Set([shape]) });
@@ -203,7 +204,7 @@ export function normalizeCodexEvents(
     const ok = exitCode === undefined ? true : exitCode === 0;
     const previousResult = previous?.resultIndex === undefined ? undefined : out[previous.resultIndex];
     const result: TranscriptEvent = {
-      seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', tool, ok,
+      seq: previousResult?.seq ?? nextSeq(), ts: previousResult?.ts ?? ts, type: 'tool_result', callId: previous && out[previous.callIndex].type === 'tool_call' ? (out[previous.callIndex] as Extract<TranscriptEvent, { type: 'tool_call' }>).callId : callId, tool, ok,
       summary: output || (ok ? 'ok' : `exit ${exitCode}`),
     };
     if (previous && previous.resultIndex !== undefined) {
@@ -232,7 +233,7 @@ export function normalizeCodexEvents(
     if (type === 'event_msg' && payloadType === 'agent_message') {
       const text = clip(
         typeof payload!.message === 'string' ? payload!.message : extractText(payload!.content),
-        MAX_ASSISTANT_TEXT,
+        MAX_ASSISTANT_TEXT, true,
       );
       if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
       continue;
@@ -245,7 +246,7 @@ export function normalizeCodexEvents(
       if (itemType === 'agent_message') {
         const text = clip(
           readStr(item, 'text') || extractText(item!.content) || extractText(item!.message),
-          MAX_ASSISTANT_TEXT,
+          MAX_ASSISTANT_TEXT, true,
         );
         if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
         continue;

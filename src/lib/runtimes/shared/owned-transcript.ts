@@ -83,7 +83,8 @@ export function ownedTailToRuntimeTranscript(
         if (call?.toolCalls?.[0]) {
           call.toolCalls[0] = {
             ...call.toolCalls[0],
-            status: 'done',
+            status: entry.toolCall.status,
+            result: entry.toolCall.result ?? entry.text,
             preview: entry.toolCall.preview ?? call.toolCalls[0].preview,
           };
           return;

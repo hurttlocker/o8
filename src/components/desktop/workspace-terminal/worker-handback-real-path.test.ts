@@ -1,0 +1,70 @@
+import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { PacketWorkerHandback } from './chat-renderers/WorkerHandback';
+
+it('renders real persisted lane diff counts only on finish and opens its recorded PR', async () => {
+  const { JSDOM } = createRequire(import.meta.url)('jsdom');
+  const dom = new JSDOM('<html><body></body></html>', { url: 'http://localhost' });
+  for (const name of ['window', 'document', 'navigator', 'HTMLElement', 'CustomEvent']) vi.stubGlobal(name, name === 'window' ? dom.window : dom.window[name]);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  dom.window.fetch = (...args: Parameters<typeof fetch>) => globalThis.fetch(...args);
+  const repo = mkdtempSync(join(tmpdir(), 'o8-worker-handback-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe', encoding: 'utf8' });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const { closeDb } = await import('@/lib/db');
+  try {
+    git('init', '--initial-branch=main');
+    git('config', 'user.name', 'fixture'); git('config', 'user.email', 'fixture@example.test');
+    writeFileSync(join(repo, 'worker.ts'), 'old\n');
+    git('add', 'worker.ts'); git('commit', '-m', 'base'); git('checkout', '-b', 'worker-change');
+    writeFileSync(join(repo, 'worker.ts'), 'new\nextra\n');
+    git('add', 'worker.ts'); git('commit', '-m', 'change');
+    const { createLane, updateLane, getLane } = await import('@/lib/lane/registry');
+    const lane = createLane({ repoPath: repo, worktreePath: repo, branch: 'worker-change', baseBranch: 'main', runtime: 'codex' });
+    updateLane(lane.id, { prNumber: 42 }, 'user');
+    expect(getLane(lane.id)?.prNumber).toBe(42);
+    const diffRoute = await import('@/app/api/lanes/[id]/diff/route');
+    const laneRoute = await import('@/app/api/lanes/[id]/route');
+    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+    let fetched!: () => void;
+    const complete = new Promise<void>(resolve => { fetched = resolve; });
+    const fetcher = vi.fn(async (input: string) => {
+      const url = new URL(input, 'http://localhost');
+      const request = new NextRequest(url, { headers: { host: 'localhost', authorization: `Bearer ${getOrCreateWsToken()}` } });
+      const params = { params: Promise.resolve({ id: lane.id }) };
+      const response = url.pathname.endsWith('/diff') ? await diffRoute.GET(request, params) : await laneRoute.GET(request, params);
+      expect(response.status).toBe(200);
+      if (!url.pathname.endsWith('/diff')) fetched();
+      return response;
+    });
+    vi.stubGlobal('fetch', fetcher);
+    await act(async () => root.render(createElement(PacketWorkerHandback, { laneId: lane.id, repoPath: repo, finished: false, revision: 'turn' })));
+    expect(fetcher).not.toHaveBeenCalled();
+    await act(async () => root.render(createElement(PacketWorkerHandback, { laneId: lane.id, repoPath: repo, finished: true, revision: 'turn' })));
+    await act(async () => { await complete; });
+    expect(host.textContent).toContain('1 file');
+    expect(host.textContent).toContain('+2');
+    expect(host.textContent).toContain('−1');
+    expect(host.textContent).toContain('Open PR');
+    const opened = vi.fn();
+    window.addEventListener('o8:open-pr', opened);
+    await act(async () => host.querySelector('button')!.click());
+    expect(opened.mock.calls[0][0].detail).toEqual({ prNumber: 42, repoPath: repo });
+    await act(async () => root.render(createElement(PacketWorkerHandback, { laneId: lane.id, repoPath: repo, finished: false, revision: 'next-turn' })));
+    expect(host.querySelector('[data-worker-handback]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close(); closeDb();
+    rmSync(repo, { recursive: true, force: true });
+    vi.unstubAllGlobals();
+  }
+});

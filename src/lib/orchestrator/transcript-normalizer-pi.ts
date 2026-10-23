@@ -31,16 +31,16 @@ export function normalizePiBuiltinEvents(rawJsonl: string): TranscriptEvent[] {
     if (!record(value)) continue;
     const base = { seq: events.length + 1, ts: timestamp(value.at) };
     if (value.type === 'assistant' && typeof value.text === 'string' && value.text.trim()) {
-      events.push({ ...base, type: 'assistant', text: clip(value.text, 4_000) });
+      events.push({ ...base, type: 'assistant', text: value.text.trim().slice(0, 4_000) });
     } else if (value.type === 'tool_call' && typeof value.name === 'string' && value.name.trim()
       && record(value.args)) {
       let args: string;
       try { args = clip(JSON.stringify(value.args), 600); } catch { continue; }
-      events.push({ ...base, type: 'tool_call', tool: clip(value.name, 120), args,
+      events.push({ ...base, type: 'tool_call', ...(typeof value.id === 'string' ? { callId: value.id } : {}), tool: clip(value.name, 120), args,
         summary: clip(args, 240) });
     } else if (value.type === 'tool_result' && typeof value.name === 'string' && value.name.trim()
       && typeof value.output === 'string' && typeof value.isError === 'boolean') {
-      events.push({ ...base, type: 'tool_result', tool: clip(value.name, 120), ok: !value.isError,
+      events.push({ ...base, type: 'tool_result', ...(typeof value.id === 'string' ? { callId: value.id } : {}), tool: clip(value.name, 120), ok: !value.isError,
         summary: clip(value.output, 240) });
     } else if (value.type === 'settled' && typeof value.summary === 'string') {
       if (value.outcome === 'finished') {

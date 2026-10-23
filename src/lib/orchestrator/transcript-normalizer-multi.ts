@@ -29,9 +29,9 @@ const MAX_SUMMARY = 240;
 const MAX_ASSISTANT_TEXT = 4_000;
 const MAX_ARGS = 600;
 
-function clip(input: string | undefined, max: number): string {
+function clip(input: string | undefined, max: number, preserveLines = false): string {
   if (!input) return '';
-  const collapsed = input.replace(/\s+/g, ' ').trim();
+  const collapsed = preserveLines ? input.trim() : input.replace(/\s+/g, ' ').trim();
   return collapsed.length <= max ? collapsed : `${collapsed.slice(0, Math.max(0, max - 1))}…`;
 }
 
@@ -125,7 +125,7 @@ export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
 
     // ── assistant text ────────────────────────────────────────────────────────
     if (type === 'text' && partType === 'text') {
-      const text = clip(readStr(part, 'text'), MAX_ASSISTANT_TEXT);
+      const text = clip(readStr(part, 'text'), MAX_ASSISTANT_TEXT, true);
       if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
       continue;
     }
@@ -145,6 +145,7 @@ export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
         seq: previousCall?.seq ?? nextSeq(),
         ts: previousCall?.ts ?? ts,
         type: 'tool_call',
+        callId,
         tool,
         args,
         summary: clip(args || `call ${tool}`, MAX_SUMMARY),
@@ -165,6 +166,7 @@ export function normalizeOpencodeEvents(rawJsonl: string): TranscriptEvent[] {
           seq: previousResult?.seq ?? nextSeq(),
           ts: previousResult?.ts ?? ts,
           type: 'tool_result',
+          callId,
           tool,
           ok,
           summary: clip(summaryRaw || (ok ? 'ok' : 'error'), MAX_SUMMARY),
@@ -219,6 +221,7 @@ interface AnthropicContentBlock {
   input?: unknown;
   id?: string;
   tool_use_id?: string;
+  is_error?: boolean;
   content?: string | unknown[];
 }
 
@@ -294,7 +297,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
 
     // ── assistant text + tool_use blocks ──────────────────────────────────────
     if (type === 'assistant' && message) {
-      const text = clip(extractClaudeText(content), MAX_ASSISTANT_TEXT);
+      const text = clip(extractClaudeText(content), MAX_ASSISTANT_TEXT, true);
       if (text) out.push({ seq: nextSeq(), ts, type: 'assistant', text });
 
       for (const block of extractClaudeToolBlocks(content)) {
@@ -306,6 +309,7 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
           seq: nextSeq(),
           ts,
           type: 'tool_call',
+          callId,
           tool,
           args,
           summary: clip(args || `call ${tool}`, MAX_SUMMARY),
@@ -326,8 +330,9 @@ export function normalizeClaudeCodeEvents(rawJsonl: string): TranscriptEvent[] {
           seq: nextSeq(),
           ts,
           type: 'tool_result',
+          callId,
           tool,
-          ok: true,
+          ok: block.is_error !== true,
           summary: summary || 'ok',
         });
       }

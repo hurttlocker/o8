@@ -280,6 +280,8 @@ export interface BrainFeed {
 }
 
 export interface MobileTranscriptToolCall {
+  startedAt?: number;
+  finishedAt?: number;
   id?: string | null;
   name: string;
   args?: Record<string, unknown>;

@@ -1,4 +1,11 @@
-- The updater checks for updates on its own, even when no window is open, and never installs from an old check. Parked or finished lanes no longer block an update.
-- An update waits for live work to finish, and a crashed merge or terminal can no longer block updates forever. A forced update always goes through and records what was running.
-- Workers start much faster. Build caches and dependencies are cloned in one step instead of copied file by file.
-- More panels share cached GitHub reads and keep their last data when a refresh fails: pull request details, CI details, activity hovers and Diagnostics counts.
+- Worker panes read like a conversation. A worker's own words come first, and its commands fold into one line such as "Worked for 2m · Read 12 files · Ran 4 commands" that expands into a step list. Each command shows once, not twice.
+- Worker panes have short titles taken from the task, a one-line message box, and state pills (Paused, Blocked, Needs review, Waiting) with the matching actions. Repeated tab names now show the task title.
+- The sidebar shows real icons instead of empty boxes, and its section headings are quieter.
+- Steers you type in the canvas, a thread or an interactive terminal count as your corrections. Agent steers stay machine steering.
+- A project with several repositories is treated as one codebase. Each repository still gets its own packet, branch and review.
+- Usage shows today's cache share for Claude and Codex.
+- Brain indexes each repository's ROADMAP.md and CONTRIBUTING.md.
+- More GitHub panels wait for the real rate-limit reset and keep their last data when a refresh fails: Activity hovers, CI details, issue details and repository status.
+- Control-plane sync no longer replaces newer packets with an older snapshot.
+- Workspace service startup reports a cancellation and a service failure separately.
+- The first merged card can ask one optional feedback question. Nothing is sent unless you type and send it.
