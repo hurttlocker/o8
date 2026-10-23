@@ -328,7 +328,10 @@ const TOOLS: McpTool[] = [
       required: ['surfaceId', 'message'],
     },
   },
-  TRANSCRIPT_READ_TOOL,
+  {
+    name: 'cortex_read_transcript',
+    ...TRANSCRIPT_READ_TOOL,
+  },
   {
     name: 'cortex_interrupt_agent',
     description:

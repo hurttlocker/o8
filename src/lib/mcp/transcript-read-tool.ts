@@ -1,5 +1,4 @@
 export const TRANSCRIPT_READ_TOOL = {
-  name: 'cortex_read_transcript',
   description:
     'Read a runtime transcript with stable entry IDs. Pass nextCursor as sinceId for newer entries. Retrieve omitted text with entryId, nextTextOffset as textOffset, and textHash as expectedTextHash. Reads are bounded; changed text and unavailable entries are refused.',
   inputSchema: {
