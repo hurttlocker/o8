@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { issueListQuery } from '@/lib/github-client/queries';
 
 export interface IssueDetail {
@@ -13,15 +14,44 @@ export interface IssueDetail {
   url: string;
 }
 
+class IssueDetailDeferredError extends Error {
+  constructor(readonly retryAt: number) { super('Unable to read issue'); }
+}
+
+function quotaDeadline(response: Response): number | null {
+  if (response.status !== 429 && response.status !== 403) return null;
+  const now = Date.now();
+  const retry = response.headers.get('retry-after');
+  const seconds = Number(retry);
+  const retryAt = Number.isFinite(seconds) && seconds > 0 ? now + seconds * 1000 : Date.parse(retry ?? '');
+  if (response.status === 403 && !(retryAt > now) && response.headers.get('x-ratelimit-remaining') !== '0') return null;
+  const resetAt = Number(response.headers.get('x-ratelimit-reset')) * 1000;
+  const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0);
+  return Math.min(now + 24 * 60 * 60_000, deadline > now ? deadline : now + 60_000);
+}
+
 export function useIssueDetail(repo: string | undefined, issueNumber: number) {
+  const client = useQueryClient();
+  const [now, setNow] = useState(() => Date.now());
   const slug = repo?.trim() || null;
-  return useQuery<IssueDetail>({
-    ...issueListQuery(''),
+  const queryKey = ['gh', slug?.toLowerCase() ?? null, 'issue-viewer', issueNumber];
+  const options = issueListQuery('');
+  const inheritedRetry = client.defaultQueryOptions({ queryKey }).retry ?? (typeof window === 'undefined' ? 0 : 3);
+  const query = useQuery<IssueDetail>({
+    ...options,
     // Keep the enriched viewer response apart from list and default-repo reads.
-    queryKey: ['gh', slug?.toLowerCase() ?? null, 'issue-viewer', issueNumber],
+    queryKey,
+    enabled: entry => !(entry.state.error instanceof IssueDetailDeferredError
+      && Math.max(now, entry.state.errorUpdatedAt) < entry.state.error.retryAt),
+    // A refused refresh must recover even if the last successful detail is still fresh.
+    staleTime: entry => entry.state.error instanceof IssueDetailDeferredError ? 0 : options.staleTime,
+    retry: (failures, error) => !(error instanceof IssueDetailDeferredError) && (typeof inheritedRetry === 'function'
+      ? inheritedRetry(failures, error) : inheritedRetry === true || (typeof inheritedRetry === 'number' && failures < inheritedRetry)),
     queryFn: async ({ signal }) => {
       const repoParam = slug ? `?repo=${encodeURIComponent(slug)}` : '';
       const response = await fetch(`/api/panel/issues/${issueNumber}${repoParam}`, { signal });
+      const retryAt = quotaDeadline(response);
+      if (retryAt !== null) throw new IssueDetailDeferredError(retryAt);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       const detail = data.issue ?? data;
@@ -33,4 +63,10 @@ export function useIssueDetail(repo: string | undefined, issueNumber: number) {
     // Share existing detail reads without adding an interval to the viewer.
     refetchInterval: false,
   });
+  useEffect(() => {
+    if (!(query.error instanceof IssueDetailDeferredError)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, query.error.retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [query.error]);
+  return query;
 }
