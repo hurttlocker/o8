@@ -6,6 +6,7 @@ import {
   type CompactResponsePayload,
 } from './shared';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { mergeCompactionMarkers } from '@/lib/transcripts/compaction';
 
 interface RefLike<T> {
   current: T;
@@ -118,7 +119,6 @@ interface PrimeCompactedSessionOptions {
   setMessages: (entries: MobileTranscriptEntry[]) => void;
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
-  setTranscript?: boolean;
   telemetrySessionKeyRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
   isCurrent?: () => boolean;
@@ -146,10 +146,11 @@ export async function primeCompactedOrchestratorSession(
   options.telemetrySessionKeyRef.current = null;
   options.telemetryTotalRef.current = nextTotal;
 
-  if (options.setTranscript !== false) {
-    options.messagesRef.current = payload.transcript;
-    options.setMessages(payload.transcript);
-  }
+  // The primed transcript is model context, not new conversation turns.
+  // Even silent compaction adds its boundary while keeping the visible history.
+  const display = mergeCompactionMarkers(options.messagesRef.current, payload.transcript);
+  options.messagesRef.current = display;
+  options.setMessages(display);
 
   options.setTokenCount(0);
   options.setRunningTotal(nextTotal);
