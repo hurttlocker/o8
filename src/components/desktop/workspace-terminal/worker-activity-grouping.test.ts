@@ -49,6 +49,18 @@ describe('consecutive activity groups through the shared trace', () => {
     expect(html).not.toContain('data-activity-chip="file"');
     expect(html).toContain('<circle');
   });
+  it.each([
+    ['rg -n "utils" src', ['utils']],
+    [String(recordedWorkerActivity[28].tool.args?.command), ['src/lib/util', 'src/lib/utils']],
+  ])('uses search chips for a single search step: %s', (command, terms) => {
+    const { block, html } = render([entry(command, 0)]);
+    expect(rows(html)).toEqual(['ok']);
+    expect(block.steps[0]).toMatchObject({ searchTerms: terms, files: [] });
+    expect(html.match(/data-activity-chip="search"/g)).toHaveLength(terms.length);
+    for (const term of terms) expect(html).toContain(`&quot;${term}&quot;`);
+    expect(html).toContain('<circle');
+    expect(html).not.toContain('data-activity-chip="file"');
+  });
   it('keeps native search terms separate from file chips and supports shell pattern options', () => {
     expect(humanizeActivity({ name: 'Grep', args: { pattern: 'lane', path: 'src/router.ts' } })).toMatchObject({
       searchTerms: ['lane'], files: ['src/router.ts'],
@@ -57,7 +69,7 @@ describe('consecutive activity groups through the shared trace', () => {
       searchTerms: ['lane', 'utils'], files: [],
     });
     expect(humanizeActivity({ name: 'exec_command', args: { command: 'find src -name "*.test.ts"' } })).toMatchObject({ searchTerms: ['*.test.ts'] });
-    expect(humanizeActivity({ name: 'exec_command', args: { command: 'rg --files src' } })).toMatchObject({ searchTerms: [] });
+    expect(humanizeActivity({ name: 'exec_command', args: { command: 'rg --files src > files.txt 2>/dev/null' } })).toMatchObject({ searchTerms: ['src'], files: [] });
   });
   it('keeps the live group running and does not merge activity across prose', () => {
     const entries = [entry('cat src/a.ts', 0), entry('cat src/b.ts', 1, 'running')];

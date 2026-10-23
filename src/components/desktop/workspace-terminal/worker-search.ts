@@ -15,6 +15,10 @@ export function activitySearchTerms(executable: string, tokens: string[], args: 
     let options = true;
     for (let index = 0; index < words.length; index += 1) {
       const word = words[index];
+      if (fileListing && /^\d*[<>]/.test(word)) {
+        if (/^\d*(?:>>?|<<?)$/.test(word)) index += 1;
+        continue;
+      }
       if (options && word === '--') { options = false; continue; }
       if (options && /^(?:-e|--regexp)$/.test(word)) {
         if (words[index + 1]) terms.push(words[++index]);
@@ -26,7 +30,10 @@ export function activitySearchTerms(executable: string, tokens: string[], args: 
         index += 1;
       } else if (options && word.startsWith('-')) {
         continue;
-      } else if (!explicit && !fileListing && !positional) {
+      } else if (fileListing) {
+        // Filename discovery searches these scopes; they are not read files.
+        terms.push(word);
+      } else if (!explicit && !positional) {
         terms.push(word);
         positional = true;
       }
