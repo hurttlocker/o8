@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import type { WorkspaceHeaderTab } from '@/components/desktop/shell/workspace-header-strip-types';
 import { usePaletteFileSelection } from './hooks/usePaletteFileSelection';
 import { isTauri, canUseTauriEvents, browserViewHide } from '@/lib/tauri/bridge';
 import { isNonMacShell } from '@/lib/desktop/host-platform';
@@ -438,15 +439,7 @@ function DashboardInner() {
   // them all here so splits don't overwrite each other. The top header
   // label only renders when there's exactly one active workspace; with
   // multiple, each split's own lower TabBar carries its own title.
-  type WorkspaceTabSummary = {
-    id: string;
-    label: string;
-    kind: string;
-    runtime: string | null;
-    packetStatus: string | null;
-    orchestratorThreadId: string | null;
-    repoPath?: string | null;
-  };
+  type WorkspaceTabSummary = WorkspaceHeaderTab;
   type WorkspaceActivePayload = {
     workspaceId: string | null;
     tileId: string | null;
@@ -507,7 +500,10 @@ function DashboardInner() {
             const next = payload.tabs[index];
             return tab.id === next?.id && tab.label === next.label && tab.kind === next.kind
               && tab.runtime === next.runtime && tab.packetStatus === next.packetStatus
-              && tab.orchestratorThreadId === next.orchestratorThreadId && tab.repoPath === next.repoPath;
+              && tab.orchestratorThreadId === next.orchestratorThreadId && tab.repoPath === next.repoPath
+              && tab.labelSource === next.labelSource && tab.llmSummary === next.llmSummary
+              && tab.orchestrationPacket?.title === next.orchestrationPacket?.title
+              && tab.orchestrationPacket?.branchTarget === next.orchestrationPacket?.branchTarget;
           });
         if (previous && previous.tileId === payload.tileId && previous.label === payload.label && previous.tabId === payload.tabId
           && previous.kind === payload.kind && previous.finishedTabCount === payload.finishedTabCount
