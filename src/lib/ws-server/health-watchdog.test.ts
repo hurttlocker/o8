@@ -18,6 +18,7 @@ function makeDriver(overrides: Partial<{
   let cleared = false;
 
   const watchdog = new WsWatchdog({
+    cpuSampler: false,
     intervalMs: overrides.intervalMs ?? 1000,
     thresholdMs: overrides.thresholdMs ?? 250,
     sustainedSamples: overrides.sustainedSamples ?? 3,
@@ -140,6 +141,7 @@ describe('WsWatchdog', () => {
     // Real setInterval (faked) + Date-based clocks. Fake time is exact, so no
     // lag is produced — this asserts the wiring: interval fires, stays healthy.
     const watchdog = new WsWatchdog({
+      cpuSampler: false,
       intervalMs: 1000,
       thresholdMs: 250,
       nowMs: () => Date.now(),
