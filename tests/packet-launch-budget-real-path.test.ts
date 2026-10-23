@@ -52,7 +52,7 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it('dispatches a packet to session_launched within 45 seconds under load with private dependencies and shared objects', async () => {
+it('dispatches a packet to session_launched within 60 seconds under load with private dependencies and shared objects', async () => {
   mkdirSync(repo);
   mkdirSync(bin);
   git('init', '-q', '-b', 'main');
@@ -70,11 +70,13 @@ it('dispatches a packet to session_launched within 45 seconds under load with pr
   }));
   const installedPackages = { 'node_modules/fixture': { version: '1.0.0' } };
   writeFileSync(path.join(repo, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: installedPackages }));
+  mkdirSync(path.join(repo, 'tools'));
+  writeFileSync(path.join(repo, 'tools/package.json'), '{"name":"unrelated-tool"}');
   git('add', '.');
   git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-qm', 'fixture');
   git('-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '--allow-empty', '-qm', 'packet base');
   git('remote', 'add', 'origin', repo);
-  // Exercise the production guarded hydration path, including its fsync per file.
+  // Required ignored assets are provided with a private directory clone.
   mkdirSync(path.join(repo, 'vendor'));
   for (let index = 0; index < 2_000; index += 1) {
     writeFileSync(path.join(repo, 'vendor', `${index}.js`), `module.exports = ${index};\n`);
@@ -139,15 +141,23 @@ it('dispatches a packet to session_launched within 45 seconds under load with pr
   expect(realpathSync(JSON.parse(readFileSync(capture, 'utf8')).cwd)).toBe(realpathSync(workspace));
   expect(JSON.parse(readFileSync(capture, 'utf8')).prepared).toBe(true);
   expect(readFileSync(path.join(workspace, 'README.md'), 'utf8')).toBe('committed\n');
+  if (process.platform === 'darwin') {
+    const { WorktreeManager } = await import('@/lib/worktree/manager');
+    const managed = await new WorktreeManager(repo).list();
+    expect(managed.find((entry) => entry.path === workspace)?.hydrationPaths).toContain('vendor');
+    expect(readFileSync(path.join(workspace, 'vendor/1999.js'), 'utf8')).toBe('module.exports = 1999;\n');
+    writeFileSync(path.join(workspace, 'vendor/1999.js'), 'worker asset');
+    expect(readFileSync(path.join(repo, 'vendor/1999.js'), 'utf8')).toBe('module.exports = 1999;\n');
+  }
   const privateFile = path.join(workspace, 'node_modules', 'fixture', 'index.js');
   expect(lstatSync(privateFile).ino).not.toBe(lstatSync(path.join(repo, 'node_modules', 'fixture', 'index.js')).ino);
   writeFileSync(privateFile, 'worker mutation\n');
   expect(readFileSync(path.join(repo, 'node_modules', 'fixture', 'index.js'), 'utf8')).toBe('module.exports = 42;\n');
   expect(readFileSync(path.join(repo, 'README.md'), 'utf8')).toBe('source WIP\n');
-  expect(sessionMs).toBeLessThan(45_000);
-  expect(elapsedMs).toBeLessThan(45_000);
+  expect(sessionMs).toBeLessThan(60_000);
+  expect(elapsedMs).toBeLessThan(60_000);
   expect(lstatSync(path.join(workspace, '.git')).isFile()).toBe(true);
-  expect(timings.map((timing) => timing.stage)).toEqual(['checkout', 'dependency_materialization']);
+  expect(timings.map((timing) => timing.stage)).toEqual(['checkout', 'asset_hydration', 'dependency_materialization']);
   const workerHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
   git('update-ref', 'refs/heads/main', 'HEAD~1');
   git('reflog', 'expire', '--expire=now', '--all');

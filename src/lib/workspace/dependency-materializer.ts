@@ -31,6 +31,7 @@ import {
 } from './dependency-install';
 import { resolveApfsDependencyImagesOverride } from './dependency-image-policy';
 import { tryCloneDependencyDirectory } from './dependency-directory-clone';
+import { profileDependencyClone } from './dependency-clone-profile';
 
 export { APFS_DEPENDENCY_IMAGES_ENV } from './dependency-image-policy';
 
@@ -324,11 +325,11 @@ export async function materializeDependencyInstall(
   options: DependencyMaterializerOptions = {},
 ): Promise<DependencyMaterializationResult> {
   const workspace = path.resolve(workspacePath);
-  const recipe = options.preparedRecipe ?? await deriveDependencyInstallRecipe(
+  const recipe = options.preparedRecipe ?? await profileDependencyClone('recipe', () => deriveDependencyInstallRecipe(
     workspace,
     installCommand,
     { resolveVersion: options.resolveVersion },
-  );
+  ));
   const identity = await dependencyMaterializationWorkspaceIdentity(
     workspace,
     options.materializationIdentity,
@@ -351,7 +352,6 @@ export async function materializeDependencyInstall(
     workspace,
     identity,
     recipe,
-    installCommand,
     options,
   })) {
     const receipt: DependencyMaterializationReceipt = {

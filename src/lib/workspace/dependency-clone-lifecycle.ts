@@ -1,43 +1,76 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { guardedWorkspaceInvocation, materializationAwareExecFile } from '@/lib/worktree/materialization-execution';
 import type { WorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
-import { runDependencyInstall, type DependencyInstallOptions, type DependencyInstallRecipe } from './dependency-install';
+import { purgeExactDirectory } from './exact-directory-purge';
+import { resolveReceiptedPackageManagerExecution } from './dependency-manager-executable';
+import type { DependencyInstallOptions, DependencyInstallRecipe } from './dependency-install';
+import { profileDependencyClone } from './dependency-clone-profile';
 
-const ROOT_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
+const CREATE_RUNTIME = String.raw`
+const fs = require('node:fs');
+const name = process.argv[1];
+fs.mkdirSync(name, {mode: 0o700});
+const fd = fs.openSync(name, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+const receipt = fs.fstatSync(fd);
+process.chdir(name);
+if (fs.statSync('.').ino !== receipt.ino || fs.statSync('.').dev !== receipt.dev) throw new Error('Lifecycle runtime changed.');
+for (const child of ['home', 'config', 'cache', 'tmp', 'corepack']) fs.mkdirSync(child);
+for (const child of ['user.rc', 'global.rc']) fs.writeFileSync('config/' + child, '', {flag:'wx'});
+console.log(JSON.stringify({device:receipt.dev, inode:receipt.ino}));
+fs.closeSync(fd);
+`;
 
-/** Cloning installed packages does not replace workspace-local lifecycle output. */
+/** Replay root lifecycle generation with one private runtime, without installing. */
 export async function finishDependencyClone(input: {
   workspace: string;
   identity: WorktreeMaterializationIdentity;
   recipe: DependencyInstallRecipe;
-  installCommand: string;
   options: DependencyInstallOptions;
   nativeFiles: string[];
 }): Promise<void> {
-  const { workspace, identity, recipe, installCommand, options, nativeFiles } = input;
-  for (const file of nativeFiles) {
-    const invocation = guardedWorkspaceInvocation(process.execPath, ['-e',
-      "const Module=require('node:module'); process.dlopen(new Module(process.argv[1]),process.argv[1]);", file,
-    ], identity);
-    await materializationAwareExecFile(invocation.command, invocation.args, { cwd: workspace, timeout: 15_000 });
-  }
+  const { workspace, identity, recipe, options, nativeFiles } = input;
+  const execute = async (command: string, args: string[], env?: NodeJS.ProcessEnv) => {
+    const guarded = guardedWorkspaceInvocation(command, args, identity);
+    return materializationAwareExecFile(guarded.command, guarded.args, {
+      cwd: workspace, env, timeout: 60_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  };
+  await profileDependencyClone('native-bindings', async () => {
+    if (nativeFiles.length) await execute(process.execPath, ['-e',
+      "const M=require('node:module'); for(const file of JSON.parse(process.argv[1])) process.dlopen(new M(file),file);",
+      JSON.stringify(nativeFiles.map((file) => path.join(workspace, file))),
+    ]);
+  });
   if (recipe.lifecycleScripts === 'disabled') return;
   const manifest = JSON.parse(await readFile(path.join(workspace, 'package.json'), 'utf8')) as { scripts?: Record<string, unknown> };
-  const scripts = ROOT_LIFECYCLE.filter((stage) => typeof manifest.scripts?.[stage] === 'string');
-  if (scripts.length === 0) return;
-  await runDependencyInstall(workspace, installCommand, {
-    ...options, preparedRecipe: recipe, materializationIdentity: identity,
-    run: async (base) => {
-      const invocation = { ...base, args: ['rebuild', '.', ...recipe.installArgs.slice(1)] };
-      if (options.run) await options.run(invocation);
-      else {
-        const guarded = guardedWorkspaceInvocation(base.command, invocation.args, identity);
-        await materializationAwareExecFile(guarded.command, guarded.args, {
-          cwd: workspace, env: base.env, timeout: base.timeoutMs, maxBuffer: 8 * 1024 * 1024,
-        });
-      }
-    },
+  if (!['preinstall', 'install', 'postinstall'].some((stage) => typeof manifest.scripts?.[stage] === 'string')) return;
+  const execution = await resolveReceiptedPackageManagerExecution('npm', recipe.packageManagerVersion, Boolean(options.resolveVersion));
+  const name = `.o8-clone-lifecycle-${randomUUID()}`;
+  const { stdout } = await profileDependencyClone('lifecycle-runtime', () => execute(process.execPath, ['-e', CREATE_RUNTIME, name]));
+  const receipt = JSON.parse(stdout) as {device: number; inode: number};
+  const runtime = path.join(workspace, name);
+  const env: NodeJS.ProcessEnv = { NODE_ENV: 'development' };
+  for (const key of ['PATH', 'Path', 'PATHEXT', 'SystemRoot', 'COMSPEC', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE']) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  Object.assign(env, {
+    HOME: path.join(runtime, 'home'), USERPROFILE: path.join(runtime, 'home'),
+    XDG_CONFIG_HOME: path.join(runtime, 'config'), XDG_CACHE_HOME: path.join(runtime, 'cache'),
+    COREPACK_HOME: path.join(runtime, 'corepack'), TMPDIR: path.join(runtime, 'tmp'),
+    TMP: path.join(runtime, 'tmp'), TEMP: path.join(runtime, 'tmp'),
+    npm_config_cache: path.join(runtime, 'cache'), npm_config_userconfig: path.join(runtime, 'config/user.rc'),
+    npm_config_globalconfig: path.join(runtime, 'config/global.rc'), npm_config_prefer_offline: 'true',
   });
+  try {
+    const args = ['rebuild', '.', ...recipe.installArgs.slice(1)];
+    await profileDependencyClone('lifecycle-execute', async () => {
+      if (options.run) await options.run({ command: execution.executable, args, cwd: workspace, env, timeoutMs: 60_000 });
+      else await execute(execution.executable, args, env);
+    });
+  } finally {
+    await profileDependencyClone('lifecycle-retire', () => purgeExactDirectory(runtime, receipt, undefined, options.afterRuntimeTreeCapture));
+  }
 }

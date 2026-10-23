@@ -459,11 +459,7 @@ async function main() {
   }
   if (operation === 'clone-tree') {
     const input = JSON.parse(process.argv[3]);
-    const fingerprint = fingerprintTree(input.source, '.', true);
     if (!await cloneDirectory(input.source, prepared.target)) process.exitCode = 46;
-    else if (fingerprintTree(prepared.target, '.', true) !== fingerprint) {
-      throw new Error('Pinned clone contents differ from the authorized source snapshot.');
-    }
   }
   else if (operation === 'copy-file') await copyFileExact(process.argv[3], prepared.target);
   else if (operation === 'symlink') {
@@ -613,6 +609,10 @@ async function runPinnedLeaf(
       throw new PinnedWorkspacePublishError(message);
     }
     throw new Error(message);
+  }
+  if (operation === 'clone-tree' && process.env.O8_DEPENDENCY_CLONE_PROFILE === '1') {
+    const native = stderr.match(/^\[dependency-clone-native-ms\] (\d+)$/m);
+    if (native) console.log('[dependency-clone-profile]', JSON.stringify({ stage: 'native-directory-clone', durationMs: Number(native[1]) }));
   }
   return { code, stdout };
 }

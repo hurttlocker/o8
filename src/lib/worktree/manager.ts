@@ -614,6 +614,9 @@ export class WorktreeManager {
       isolationKind: 'git-worktree',
     };
 
+    const hydrationPaths = await timeWorktreePreparation(opts, 'asset_hydration', () => this.hydrateApfsCowAssets(worktreePath, createdExecutionIdentity));
+    info.hydrationPaths = hydrationPaths;
+    await this.updateMetaHydrationPaths(taskId, hydrationPaths);
     await this.bootstrapEnvFiles(worktreePath, createdExecutionIdentity, opts);
     await this.injectSafetyHooks(worktreePath, createdExecutionIdentity);
 
@@ -1653,10 +1656,13 @@ export class WorktreeManager {
       const sourcePath = path.join(this.repoRoot, relativePath);
       if (!(await this.pathExists(sourcePath))) continue;
       try {
-        const disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, {
-          mode: 'copy-tree',
+        let disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, {
+          mode: 'clone-tree',
           source: sourcePath,
         });
+        if (disposition === 'unsupported') {
+          disposition = await createPinnedWorkspaceBinding(worktreePath, identity, relativePath, { mode: 'copy-tree', source: sourcePath });
+        }
         if (disposition === 'created') hydrated.push(relativePath);
       } catch (err) {
         if (isPinnedWorkspacePublishError(err)) throw err;
