@@ -5,6 +5,7 @@ import os from 'node:os';
 import { promisify } from 'node:util';
 
 import { cliInvocation } from '@/lib/runtimes/shared/cli-spawn';
+import { isAgentInboxWakePending } from './inbox-wake';
 import type { AgentMessage, AgentPresence } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -64,6 +65,8 @@ type CodexQueueExec = (
 ) => Promise<unknown>;
 
 export interface CodexQueueDependencies {
+  /** Synchronous final check after preparation, immediately before the queue side effect. */
+  canSubmit?: () => boolean;
   resolveBinary?: () => Promise<string>;
   resolveSessionHome?: (sessionKey: string) => Promise<{
     threadId: string;
@@ -96,7 +99,7 @@ export async function submitCodexQueuedUserTurn(
   target: AgentPresence,
   content: string,
   dependencies: CodexQueueDependencies = {},
-): Promise<void> {
+): Promise<boolean> {
   if (!target.sessionKey) throw new Error('Codex thread metadata is incomplete.');
   const threadId = codexThreadId(target.sessionKey);
   if (!threadId) throw new Error('Codex thread metadata is incomplete.');
@@ -131,6 +134,7 @@ export async function submitCodexQueuedUserTurn(
     '--message',
     content,
   ]);
+  if (dependencies.canSubmit && !dependencies.canSubmit()) return false;
   await (dependencies.run ?? execFileAsync)(invocation.command, invocation.args, {
     windowsHide: true,
     timeout: 10_000,
@@ -144,6 +148,7 @@ export async function submitCodexQueuedUserTurn(
     },
     encoding: 'utf-8',
   });
+  return true;
 }
 
 export interface AgentUserRolePayload {
@@ -156,7 +161,7 @@ export interface AgentUserRolePayload {
 
 export interface AgentMessageDeliverySeams {
   sendClaude: (target: AgentPresence, payload: AgentUserRolePayload) => Promise<void>;
-  sendCodex: (target: AgentPresence, text: string) => Promise<void>;
+  sendCodex: (target: AgentPresence, text: string, canSubmit?: () => boolean) => Promise<void | boolean>;
 }
 
 export interface AgentInboxWakeSeams {
@@ -165,6 +170,7 @@ export interface AgentInboxWakeSeams {
     throughSequence: number;
   }) => string | null | Promise<string | null>;
   releaseCodexInboxWake: (target: AgentPresence, reservationId: string) => void | Promise<void>;
+  isCodexInboxWakePending?: (target: AgentPresence, reservationId: string) => boolean;
 }
 
 export function nativeAgentMessageText(message: AgentMessage): string {
@@ -224,17 +230,18 @@ async function defaultSendClaude(target: AgentPresence, payload: AgentUserRolePa
   });
 }
 
-async function defaultSendCodex(target: AgentPresence, text: string): Promise<void> {
+async function defaultSendCodex(target: AgentPresence, text: string, canSubmit?: () => boolean): Promise<boolean> {
   if (!target.sessionKey) throw new Error('Codex thread metadata is incomplete.');
   if (!target.sessionKey.startsWith('codex-owned:')) {
-    await submitCodexQueuedUserTurn(target, text);
-    return;
+    return submitCodexQueuedUserTurn(target, text, { canSubmit });
   }
   const { getRuntime } = await import('@/lib/runtimes');
   const runtime = getRuntime('codex');
   if (!runtime) throw new Error('Codex runtime is unavailable.');
+  if (canSubmit && !canSubmit()) return false;
   const result = await runtime.resume(target.sessionKey, text);
   if (!result.ok) throw new Error(result.note);
+  return true;
 }
 
 export const defaultAgentMessageDeliverySeams: AgentMessageDeliverySeams = {
@@ -251,6 +258,7 @@ export const defaultAgentInboxWakeSeams: AgentInboxWakeSeams = {
     const { releaseAgentInboxWake } = await import('./store');
     releaseAgentInboxWake(target, reservationId);
   },
+  isCodexInboxWakePending: (target, reservationId) => isAgentInboxWakePending(target, reservationId),
 };
 
 export async function deliverAgentMessage(
@@ -276,7 +284,13 @@ export async function deliverAgentMessage(
       };
     }
     try {
-      await seams.sendCodex(target, codexAgentInboxWakeText());
+      const isPending = wakeSeams.isCodexInboxWakePending;
+      const submitted = await seams.sendCodex(target, codexAgentInboxWakeText(),
+        isPending ? () => isPending(target, claimedWake) : undefined);
+      if (submitted === false) {
+        await wakeSeams.releaseCodexInboxWake(target, claimedWake);
+        return { delivery: 'poll', note: 'Inbox wake was acknowledged or superseded before submission.' };
+      }
       return {
         delivery: 'poll',
         note: 'Codex inbox wake accepted; retained in the durable inbox until the target reads it.',

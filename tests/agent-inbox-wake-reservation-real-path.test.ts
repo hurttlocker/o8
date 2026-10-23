@@ -15,6 +15,7 @@ writeFileSync(join(dataDir, 'ws-token'), `${token}\n`, 'utf8');
 process.env.O8_DATA_DIR = dataDir;
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
 
+const { submitCodexQueuedUserTurn } = await import('@/lib/agents/delivery');
 const { AGENT_NATIVE_WAKE_TTL_MS, ensureAgentBusSchema, releaseAgentInboxWake } = await import('@/lib/agents/store');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createAgentMessagePostHandler } = await import('@/lib/agents/message-route-handler');
@@ -62,6 +63,32 @@ async function fixture(suffix: string, sendCodex: AgentMessageDeliverySeams['sen
   };
 }
 
+function preparingCodexQueue(stage: 'session' | 'binary') {
+  const started = deferred();
+  const preparation = deferred();
+  const run = vi.fn().mockResolvedValue(undefined);
+  let delayed = true;
+  const sendCodex: AgentMessageDeliverySeams['sendCodex'] = async (agent, text, canSubmit) => {
+    const pause = async (current: typeof stage) => {
+      if (delayed && current === stage) {
+        delayed = false;
+        started.resolve();
+        await preparation.promise;
+      }
+    };
+    return submitCodexQueuedUserTurn(agent, text, {
+      resolveSessionHome: async () => {
+        await pause('session');
+        return { threadId: agent.sessionKey!.replace('codex:', ''), configHomeRef: dataDir };
+      },
+      resolveBinary: async () => { await pause('binary'); return process.execPath; },
+      run,
+      canSubmit,
+    });
+  };
+  return { started, preparation, run, sendCodex };
+}
+
 // Exercise real authorization, presence/message/inbox routes and SQLite with
 // fake native submission and empty discovery, not native dequeue/cancellation.
 describe('inbox wake reservation ownership through actual routes', () => {
@@ -71,6 +98,94 @@ describe('inbox wake reservation ownership through actual routes', () => {
   });
   afterEach(() => { vi.useRealTimers(); });
   afterAll(() => { closeDb(); });
+
+  it.each(['session', 'binary'] as const)('drops a wake acknowledged during %s resolution and still wakes for new work', async (stage) => {
+    const { started, preparation, run, sendCodex } = preparingCodexQueue(stage);
+    const target = await fixture(`ack-during-${stage}`, sendCodex);
+    const pending = target.post('A: read before queue submission');
+    try {
+      await Promise.race([started.promise, pending.then(() => { throw new Error('Missing preparation barrier'); })]);
+      expect((await target.read()).messages.map((message) => message.text)).toEqual(['A: read before queue submission']);
+      const acknowledged = target.state();
+      preparation.resolve();
+      const response = await pending;
+      expect(response.status).toBe(201);
+      expect(run.mock.calls.length).toBe(0);
+      expect(target.state()).toEqual(acknowledged);
+      await expect(response.json()).resolves.toMatchObject({ message: {
+        delivery: 'native', deliveryNote: 'Read from the durable inbox by the target session.',
+      } });
+      closeDb();
+      expect((await target.read()).messages).toEqual([]);
+      expect((await target.post('B: genuinely new after acknowledgement')).status).toBe(201);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect((await target.read()).messages.map((message) => message.text)).toEqual(['B: genuinely new after acknowledgement']);
+      expect((await target.read()).messages).toEqual([]);
+    } finally {
+      preparation.resolve();
+      await pending;
+    }
+  });
+
+  it('keeps the original wake useful after a partial read of coalesced messages', async () => {
+    const { started, preparation, run, sendCodex } = preparingCodexQueue('binary');
+    const target = await fixture('partial-read-during-preparation', sendCodex);
+    const pending = target.post('A: original message');
+    try {
+      await Promise.race([started.promise, pending.then(() => { throw new Error('Missing preparation barrier'); })]);
+      const reservationId = target.state().native_wake_id;
+      expect((await target.post('B: coalesced unread message')).status).toBe(201);
+      expect((await target.read(1)).messages.map((message) => message.text)).toEqual(['A: original message']);
+      preparation.resolve();
+      expect((await pending).status).toBe(201);
+      expect(run.mock.calls.length).toBe(1);
+      expect(target.state().native_wake_id).toBe(reservationId);
+      expect((await target.post('C: coalesced after submission')).status).toBe(201);
+      expect(run.mock.calls.length).toBe(1);
+      closeDb();
+      expect((await target.read()).messages.map((message) => message.text)).toEqual([
+        'B: coalesced unread message', 'C: coalesced after submission',
+      ]);
+      expect((await target.read()).messages).toEqual([]);
+    } finally {
+      preparation.resolve();
+      await pending;
+    }
+  });
+
+  it('drops an expired preparation without clearing or duplicating its newer wake', async () => {
+    const { started, preparation, run, sendCodex } = preparingCodexQueue('session');
+    const target = await fixture('expired-during-preparation', sendCodex);
+    const pending = target.post('A: expired preparation');
+    try {
+      await Promise.race([started.promise, pending.then(() => { throw new Error('Missing preparation barrier'); })]);
+      const original = target.state().native_wake_id;
+      vi.setSystemTime(Date.now() + AGENT_NATIVE_WAKE_TTL_MS);
+      expect((await target.joinTarget()).status).toBe(201);
+      expect((await target.post('B: replacement wake')).status).toBe(201);
+      const replacement = target.state();
+      expect(replacement.native_wake_id).not.toBe(original);
+      expect(run.mock.calls.length).toBe(1);
+      preparation.resolve();
+      const response = await pending;
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toMatchObject({ message: {
+        delivery: 'poll', deliveryNote: 'Inbox wake was acknowledged or superseded before submission.',
+      } });
+      expect(run.mock.calls.length).toBe(1);
+      expect(target.state()).toEqual(replacement);
+      expect((await target.post('C: coalesced with replacement')).status).toBe(201);
+      expect(run.mock.calls.length).toBe(1);
+      closeDb();
+      expect((await target.read()).messages.map((message) => message.text)).toEqual([
+        'A: expired preparation', 'B: replacement wake', 'C: coalesced with replacement',
+      ]);
+      expect((await target.read()).messages).toEqual([]);
+    } finally {
+      preparation.resolve();
+      await pending;
+    }
+  });
 
   it.each(['reject', 'resolve'] as const)('preserves the newer wake when the acknowledged old submission settles: %s', async (settlement) => {
     const started = deferred();
@@ -100,7 +215,7 @@ describe('inbox wake reservation ownership through actual routes', () => {
       expect(sendCodex).toHaveBeenCalledTimes(2);
       expect(sendCodex).toHaveBeenLastCalledWith(expect.objectContaining({
         agentId: target.agentId, repo: target.repo, sessionKey: target.sessionKey,
-      }), expect.stringContaining('[o8 agent inbox]'));
+      }), expect.stringContaining('[o8 agent inbox]'), expect.any(Function));
       // No in-flight service call holds the connection when it is reopened.
       closeDb();
       const first = await target.read(1);
