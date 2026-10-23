@@ -1,3 +1,4 @@
+import { withWorkAdmission } from '@/lib/app-update/work-launch-admission';
 /**
  * Lane Command Bus
  *
@@ -605,7 +606,7 @@ async function dispatchUnlocked(
         console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (create_pr)`);
       }
 
-      return withRepoActionRecovery(lane.repoPath, {
+      return withWorkAdmission(`PR publication ${command.laneId}`, () => withRepoActionRecovery(lane.repoPath, {
         laneId: command.laneId,
         packetId: lane.packetId,
         maxWaitMs: dependencies.repoActionLeaseMaxWaitMs,
@@ -740,7 +741,8 @@ async function dispatchUnlocked(
           const message = err instanceof Error ? err.message : 'PR creation failed.';
           return { ok: false, laneId: command.laneId, note: message };
         }
-      });
+      }), error => ({ ok: false, laneId: command.laneId, reason: 'app_restart_pending',
+        note: error instanceof Error ? error.message : 'Publication admission is unavailable.' }));
     }
 
     case 'merge': {

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { recordForcedRestart } from './forced-restart-receipt';
 import { recoverStoppedNativeTask } from './native-task';
 import { validRestartReservation } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
@@ -15,8 +16,8 @@ export async function controlAutoApply(input: Record<string, unknown>) {
   if (input.action === 'inspect-restart') {
     if (!validRestartReservation(input.reservationId)) return { allowed: false, error: { code: 'restart_reservation_invalid' } };
     const idle = await getUpdateIdleWindow(input.reservationId);
-    const protectedWork = idle.active.cliInstallers?.length || idle.active.restartPending;
-    return { allowed: !protectedWork && (input.force === true || idle.idle || idle.idleExceptParked), idle };
+    if (input.force === true) recordForcedRestart('native-inspection', idle);
+    return { allowed: input.force === true || idle.idle || idle.idleExceptParked, idle };
   }
   // A terminal wait report already proves the download ended without installing.
   // Do not misreport its stopped-task receipt as an abandoned installation.

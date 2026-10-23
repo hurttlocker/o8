@@ -5,10 +5,6 @@ import { canRestartWhenIdle, describeUpdateBlockers, type UpdateIdleResponse } f
 
 /** Only an operator's explicit restart may ask to interrupt work. */
 export async function confirmExplicitRestart(payload: UpdateIdleResponse | null): Promise<boolean> {
-  const idle = payload?.idle;
-  // Consent to interrupt a task never overrides installer ownership or another restart.
-  if (idle?.active?.cliInstallers?.length || idle?.active?.restartPending
-    || idle?.unavailable?.includes('cli-update-ownership')) return false;
   if (canRestartWhenIdle(payload)) return true;
 
   const { live } = describeUpdateBlockers(payload);

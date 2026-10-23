@@ -19,11 +19,19 @@ vi.mock('@tauri-apps/api/core', () => ({ Channel: class { onmessage?: (event: un
   invoke: async (command: string, args?: { force?: boolean }) => {
     if (command === 'get_running_bundle_integrity') return null;
     if (command === 'download_app_update') { fixture.lateWork?.(); return 23; }
-    if (command === 'discard_app_update_download') return;
+    if (command === 'discard_app_update_download' || command === 'restart_app') return;
+    if (command === 'prepare_app_restart') return 'fixture-reservation';
     if (command !== 'install_app_update') throw new Error(`Unexpected command ${command}`);
     fixture.guardedInstall(args?.force);
     const { inspectCliOperationAdmission } = await import('@/lib/setup/cli-operation-admission');
     const { listWorkLaunches } = await import('@/lib/app-update/work-launch-admission');
+    if (args?.force) {
+      const { recordForcedRestart } = await import('@/lib/app-update/forced-restart-receipt');
+      recordForcedRestart('fixture-native', inspectCliOperationAdmission());
+      // Model native cleanup after the receipt; the Windows plugin then exits.
+      fixture.busy = false; release?.(); release = undefined;
+      return;
+    }
     if (inspectCliOperationAdmission().blocked || listWorkLaunches().length) throw new Error('cli_operation_blocked: late work');
     throw new Error('Expected persisted late work');
   } }));
@@ -64,7 +72,7 @@ it.each([false, true])('checks fresh explicit Windows interruption consent after
     await vi.waitFor(() => expect(requestConfirm).toHaveBeenCalledOnce());
     await vi.waitFor(async () => {
       const payload = await (await state.GET()).json();
-      if (consent) expect(payload.state.lastInstall?.outcome).toBe('failed');
+      if (consent) { expect(fixture.guardedInstall).toHaveBeenCalledWith(true); expect(payload.state.lastInstall?.outcome).not.toBe('failed'); }
       else expect(payload.state.lastInstall).toBeNull();
     });
     if (consent) expect(fixture.guardedInstall).toHaveBeenCalledWith(true);
@@ -90,7 +98,8 @@ it.each(['webview', 'API', 'MCP'] as const)('%s install reaches native admission
     });
     await vi.waitFor(async () => {
       const payload = await (await state.GET()).json();
-      expect(payload.state.lastInstall?.outcome).toBe('failed');
+      if (entry === 'webview') expect(payload.state.lastInstall?.outcome).toBe('failed');
+      else { expect(fixture.guardedInstall).toHaveBeenCalledWith(true); expect(payload.state.lastInstall?.outcome).not.toBe('failed'); }
     });
     expect(fixture.guardedInstall).toHaveBeenCalledOnce();
     expect(fixture.unsafeExit).not.toHaveBeenCalled();

@@ -5349,11 +5349,19 @@
       ]
     },
     {
+      "path": "tests/update-lease-race-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/update-merge-reservation-real-path.test.ts",
       "reasons": [
         "child-process",
         "executable-fixture",
         "git-cli",
+        "native-build",
+        "process-signal",
         "real-path",
         "worktree-api"
       ]

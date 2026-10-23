@@ -104,7 +104,7 @@ const timer = setInterval(() => {
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); rmSync(root, { recursive: true, force: true }); });
 
-it('defers another client restart and forced apply while an executable installer owns admission, then releases after verification', async () => {
+it('defers normal restart but records and accepts forced apply while a real installer owns admission', async () => {
   const pending = updates.POST(request('/api/setup/cli-updates', { runtime: 'claude-code' }));
   let installation: Response;
   try {
@@ -116,15 +116,25 @@ it('defers another client restart and forced apply while an executable installer
     expect(restartPayload).toMatchObject({ relaunched: false, error: { code: 'cli_update_in_progress' } });
     expect(inspectCliOperationAdmission()).toMatchObject({ blocked: true, installers: [{ runtime: 'claude-code', state: 'active' }] });
     const forced = await apply.POST(request('/api/panel/update/apply', { force: true }));
-    expect(forced.status).toBe(409);
-    expect(fixture.publish).not.toHaveBeenCalled(); expect(fixture.drain).not.toHaveBeenCalled();
+    expect(forced.status).toBe(202);
+    const receipts = readdirSync(join(dataDir, 'forced-restarts'));
+    expect(receipts).toHaveLength(1);
+    expect(readFileSync(join(dataDir, 'forced-restarts', receipts[0]), 'utf8')).toContain('claude-code');
+    expect(fixture.publish).toHaveBeenCalledOnce(); expect(fixture.drain).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/api/panel/update/apply') ? apply.POST(new Request(String(input), init)) : new Response('2.0.2')));
+    const { handleUpdateApply } = await import('@/lib/mcp/operator-handlers/update');
+    expect((await handleUpdateApply({ force: true })).isError).toBe(false);
+    expect((await relaunch.POST(request('/api/panel/app/relaunch', { force: true }))).status).toBe(200);
+    expect(readdirSync(join(dataDir, 'forced-restarts'))).toHaveLength(3);
+    expect(fixture.publish).toHaveBeenCalledTimes(3);
     process.kill(Number(readFileSync(join(root, 'started'), 'utf8')), 0);
   } finally { writeFileSync(join(root, 'release'), 'finish'); installation = await pending; }
   expect(installation.status).toBe(200);
   expect(receipt()).toMatchObject({ status: 'succeeded', targetVersion: '2.0.2' });
   expect(existsSync(lockPath)).toBe(false); expect(existsSync(reservationPath)).toBe(false);
   expect((await relaunch.POST(request('/api/panel/app/relaunch'))).status).toBe(200);
-  expect(fixture.drain).not.toHaveBeenCalled(); expect(fixture.publish).toHaveBeenCalledOnce();
+  expect(fixture.drain).not.toHaveBeenCalled(); expect(fixture.publish).toHaveBeenCalledTimes(4);
   expect(readFileSync(join(fixture.home, '.claude/settings.json'), 'utf8')).toBe('{"autoUpdatesChannel":"stable"}');
 }, 15_000);
 
@@ -165,10 +175,10 @@ it('keeps interrupted and legacy installer owners held with a recovery reason', 
   const response = await relaunch.POST(request('/api/panel/app/relaunch'));
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ error: { code: 'cli_update_recovery_required', message: expect.stringContaining('no lock was removed') } });
-  expect(inspectCliOperationAdmission().installers[0]).toMatchObject({ state: 'interrupted' });
+  expect(inspectCliOperationAdmission().installers[0]).toMatchObject({ state: 'unconfirmed' });
   expect(fixture.publish).not.toHaveBeenCalled(); expect(fixture.drain).not.toHaveBeenCalled();
   expect(readFileSync(join(dataDir, 'codex-cli-update.lock'), 'utf8')).toBe('legacy-owner');
-  expect(existsSync(join(reservationPath, `${id}.json`))).toBe(true);
+  expect(existsSync(join(reservationPath, `${id}.json`))).toBe(false);
 });
 
 it('an old installer cleanup cannot remove a replacement operation or legacy lock', () => {

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ hasUpdate: true, pulled: false, outdated: true, failInstall: false, failFinal: false,
+const fixture = vi.hoisted(() => ({ hasUpdate: true, installExits: false, pulled: false, outdated: true, failInstall: false, failFinal: false,
   calls: [] as string[], download: vi.fn(), restart: vi.fn(), open: vi.fn() }));
 vi.mock('@/lib/tauri/bridge', () => ({ isTauri: () => true }));
 vi.mock('@/lib/desktop/open-external', () => ({ openExternalUrl: fixture.open }));
 vi.mock('@/lib/app-update/check', () => ({ check: async () => fixture.hasUpdate ? {
-  version: '0.1.902', downloadAndInstall: async () => { fixture.calls.push('app-download'); fixture.download(); },
+  version: '0.1.902', installExits: fixture.installExits, downloadAndInstall: async () => { fixture.calls.push('app-download'); fixture.download(); },
 } : null }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string) => {
   if (command === 'download_app_update') { fixture.calls.push('app-download'); fixture.download(); return 23; }
@@ -17,7 +17,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: async (command: string) => {
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: fixture.restart }));
 const { installUpdateAndRestart } = await import('@/lib/app-update/client-restart');
 beforeEach(() => {
-  fixture.hasUpdate = true; fixture.pulled = false; fixture.outdated = true; fixture.failInstall = false; fixture.failFinal = false;
+  fixture.hasUpdate = true; fixture.installExits = false; fixture.pulled = false; fixture.outdated = true; fixture.failInstall = false; fixture.failFinal = false;
   fixture.calls = []; vi.clearAllMocks(); let reports = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, options?: RequestInit) => {
     if (String(url).startsWith('/api/panel/release-health')) { fixture.calls.push('release-health'); return Response.json({ pulled: fixture.pulled }); }
@@ -68,6 +68,26 @@ describe('unified updates through the existing app install entry point', () => {
     finish(Response.json({ status: 'succeeded' }));
     await cli; await app;
     expect(idle).toHaveBeenCalledOnce(); expect(fixture.restart).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('honors force during an in-flight CLI update (Windows exit: %s)', async installExits => {
+    fixture.installExits = installExits;
+    const { synchronizeConnectedClis } = await import('@/lib/app-update/update-hub-client');
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    let started!: () => void;
+    const postStarted = new Promise<void>(resolve => { started = resolve; });
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (String(url) === '/api/setup/cli-updates' && options?.method === 'POST') {
+        started(); return new Promise<Response>(resolve => { finish = resolve; });
+      }
+      return original(url, options);
+    });
+    const cli = synchronizeConnectedClis('codex'); await postStarted;
+    const app = installUpdateAndRestart(undefined, { interruptWork: () => true });
+    try {
+      await vi.waitFor(() => expect(fixture.restart).toHaveBeenCalledOnce());
+      expect(await app).toMatchObject({ installed: true, restartDeferred: false });
+    } finally { finish(Response.json({ status: 'succeeded' })); await cli; await app; }
   });
   it.each(['hasUpdate', 'pulled'])('does not touch CLIs when the app update is absent or pulled (%s)', async key => {
     if (key === 'hasUpdate') fixture.hasUpdate = false; else fixture.pulled = true;

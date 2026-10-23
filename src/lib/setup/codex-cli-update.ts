@@ -99,7 +99,7 @@ async function performSelectedCodexUpdate(report: CliUpdateReporter, reservation
   const receiptPath = path.join(DATA_DIR, 'codex-cli-update.json');
   let receipt: { status: string; selectedPath: string; targetVersion: string; startedAt: string; finishedAt?: string } | undefined;
   try {
-    await lock.writeFile(JSON.stringify({ operationId: reservation.id }));
+    await lock.writeFile(JSON.stringify({ ...reservation.owner, pid: process.pid, operationId: reservation.id }));
     invalidateCliCache('codex');
     const selected = await resolveCli(spec);
     const tool = (await checkCliUpdates(true, 'codex')).find((item) => item.runtimeId === 'codex');

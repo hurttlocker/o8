@@ -1,3 +1,4 @@
+import { recordForcedRestart } from '@/lib/app-update/forced-restart-receipt';
 import { checkFreshness, ensureFreshUpdateCheck, UPDATE_RETRY } from '@/lib/app-update/fresh-check';
 import { inspectCliOperationAdmission } from '@/lib/setup/cli-operation-admission';
 import { randomUUID } from 'node:crypto';
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
   }
 
   const admission = inspectCliOperationAdmission();
-  if (admission.blocked) return response({ ok: false, requested: false,
+  if (!force && admission.blocked) return response({ ok: false, requested: false,
     error: { code: admission.code, message: admission.message }, state }, 409);
 
   const idle = await readIdleWindow();
@@ -108,6 +109,11 @@ export async function POST(request: Request) {
     }, 409);
   }
 
+  if (force) {
+    try { recordForcedRestart('update-apply', { admission, idle }); }
+    catch { return response({ ok: false, requested: false, error: { code: 'restart_receipt_unavailable',
+      message: 'The forced restart receipt could not be recorded.' } }, 503); }
+  }
   const now = new Date().toISOString();
   const published = await publishRealtimeMutation({
     mutation: {

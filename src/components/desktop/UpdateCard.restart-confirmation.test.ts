@@ -169,13 +169,14 @@ describe('explicit staged-update restart through the real rail and confirmation 
     expect(invoke.mock.calls.map(row => row[0])).toEqual(['prepare_app_restart', 'restart_app']);
   });
 
-  it.each(['active', 'interrupted', 'unconfirmed'])('does not offer to force past a %s CLI installer', async state => {
+  it.each(['active', 'interrupted', 'unconfirmed'])('requires explicit consent to force past a %s CLI installer', async state => {
     readiness = { ...parked, idle: { ...parked.idle, idleExceptParked: false,
       active: { ...parked.idle.active, cliInstallers: [{ runtime: 'codex', state }] } } };
     await mount();
     await clickRestart();
-    expect(button('Restart anyway')).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(button('Restart anyway')).toBeDefined();
+    await act(async () => button('Restart anyway')!.click());
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: true }));
     expect(document.body.textContent).toContain('CLI update');
   });
 
@@ -189,14 +190,15 @@ describe('explicit staged-update restart through the real rail and confirmation 
     expect(button('Restart anyway')).toBeUndefined();
   });
 
-  it.each(['reserved restart', 'unavailable installer ownership'])('does not force past %s', async blocker => {
+  it.each(['reserved restart', 'unavailable installer ownership'])('requires explicit consent to force past %s', async blocker => {
     readiness = { ...parked, idle: { ...parked.idle, idleExceptParked: false,
       unavailable: blocker === 'unavailable installer ownership' ? ['cli-update-ownership'] : [],
       active: { ...parked.idle.active, restartPending: blocker === 'reserved restart' } } };
     await mount();
     await clickRestart();
-    expect(button('Restart anyway')).toBeUndefined();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(button('Restart anyway')).toBeDefined();
+    await act(async () => button('Restart anyway')!.click());
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('prepare_app_restart', { force: true }));
   });
 
   it('keeps non-forced remote apply gated without a component-owned auto timer', async () => {

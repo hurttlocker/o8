@@ -179,7 +179,7 @@ describe('native auto-apply through the real state route without UpdateCard', ()
       expect(await (await inspect()).json()).toMatchObject({ allowed: false });
       expect(await (await inspect(true)).json()).toMatchObject({ allowed: true });
       writeFileSync(join(dataDir, 'fixture-cli-update.lock'), 'CLI installer');
-      expect(await (await inspect(true)).json()).toMatchObject({ allowed: false });
+      expect(await (await inspect(true)).json()).toMatchObject({ allowed: true });
     } finally {
       sessions = [];
       rmSync(join(dataDir, 'fixture-cli-update.lock'), { force: true });
@@ -287,11 +287,11 @@ describe('remote apply with persisted parked lanes', () => {
     rmSync(directory, { recursive: true });
   });
 
-  it('preserves CLI installer admission including force', async () => {
+  it('defers normal apply but accepts explicit force over a CLI installer', async () => {
     const lock = join(dataDir, 'fixture-cli-update.lock');
     writeFileSync(lock, 'fixture');
     expect((await apply()).status).toBe(409);
-    expect((await POST(new Request('http://localhost/api/panel/update/apply', { method: 'POST', body: JSON.stringify({ force: true }) }))).status).toBe(409);
+    expect((await POST(new Request('http://localhost/api/panel/update/apply', { method: 'POST', body: JSON.stringify({ force: true }) }))).status).toBe(202);
     rmSync(lock);
   });
 });

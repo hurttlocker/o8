@@ -475,7 +475,7 @@ function AppUpdateCard({ quiet }: { quiet: boolean }) {
         if (mutation?.status !== 'queued') continue;
         if (mutation.action !== 'app-relaunch-requested' && mutation.action !== 'app-update-apply-requested') continue;
         if (mutation.mutationId && !claimApplyMutation(mutation.mutationId)) continue;
-        const requireIdle = mutation.action === 'app-update-apply-requested' && mutation.force !== true;
+        const requireIdle = mutation.force !== true;
         void handleInstall({ requireIdle });
         return;
       }

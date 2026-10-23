@@ -1,3 +1,4 @@
+mod lease_owner;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
@@ -7,6 +8,11 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+#[cfg(test)]
+thread_local! {
+    static SETTLE_WRITER: std::cell::RefCell<Option<Box<dyn FnOnce(&Path)>>> = std::cell::RefCell::new(None);
+}
 
 const DIRECTORY: &str = "cli-operation-admission";
 const PREPARE_TTL: Duration = Duration::from_secs(30);
@@ -22,6 +28,12 @@ struct Operation {
     runtime: Option<String>,
     started_at: String,
     stage: String,
+    #[serde(default)]
+    owner_pid: u32,
+    #[serde(default)]
+    owner_identity: serde_json::Value,
+    #[serde(default)]
+    created_at_ms: u128,
 }
 
 struct Pending {
@@ -45,58 +57,82 @@ fn refusal(detail: &str) -> String {
     format!("cli_operation_blocked: {detail} No sessions were stopped.")
 }
 
+#[cfg(test)]
 fn read_operation(directory: &Path) -> Option<Operation> {
     let metadata = fs::symlink_metadata(directory).ok()?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() { return None; }
-    let entries: Vec<_> = fs::read_dir(directory).ok()?.collect::<Result<_, _>>().ok()?;
-    if entries.len() != 1 { return None; }
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    let entries: Vec<_> = fs::read_dir(directory)
+        .ok()?
+        .collect::<Result<_, _>>()
+        .ok()?;
+    if entries.len() != 1 {
+        return None;
+    }
     let owner_metadata = fs::symlink_metadata(entries[0].path()).ok()?;
-    if !owner_metadata.is_file() || owner_metadata.file_type().is_symlink() { return None; }
+    if !owner_metadata.is_file() || owner_metadata.file_type().is_symlink() {
+        return None;
+    }
     let operation: Operation = serde_json::from_slice(&fs::read(entries[0].path()).ok()?).ok()?;
-    if operation.version != 1 || operation.pid == 0
+    if operation.version != 1
+        || operation.pid == 0
         || Uuid::parse_str(&operation.id).is_err()
         || entries[0].file_name().to_str()? != format!("{}.json", operation.id)
-    { return None; }
+    {
+        return None;
+    }
     Some(operation)
 }
 
 fn release(directory: &Path, id: &str) -> bool {
-    let Some(operation) = read_operation(directory) else { return false; };
-    if operation.id != id { return false; }
-    // Unlink a unique owner file first. A stale cleanup cannot unlink the
-    // replacement owner's name, and a nonempty directory is never removed.
-    fs::remove_file(directory.join(format!("{id}.json"))).is_ok()
-        && fs::remove_dir(directory).is_ok()
+    let path = directory.join(format!("{id}.json"));
+    let operation = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Operation>(&bytes).ok());
+    if !operation.is_some_and(|owner| owner.id == id) {
+        return false;
+    }
+    if fs::remove_file(path).is_err() {
+        return false;
+    }
+    let _ = fs::remove_dir(directory);
+    true
 }
-
-#[cfg(unix)]
-fn owner_is_dead(pid: u32) -> bool {
-    extern "C" { fn kill(pid: i32, signal: i32) -> i32; }
-    if pid > i32::MAX as u32 { return false; }
-    // ESRCH is the only proof of absence; permission failures remain held.
-    unsafe { kill(pid as i32, 0) != 0 && std::io::Error::last_os_error().raw_os_error() == Some(3) }
-}
-
-#[cfg(not(unix))]
-fn owner_is_dead(_pid: u32) -> bool { false }
 
 /// Resolve once in the native process and pass this absolute path to sidecars.
 /// Empty overrides follow the same fallback rule as the Node data resolver.
-pub fn resolve_data_directory(primary: Option<&str>, legacy: Option<&str>, home: &Path, cwd: &Path) -> Result<PathBuf, &'static str> {
-    let selected = primary.filter(|value| !value.is_empty()).or_else(|| legacy.filter(|value| !value.is_empty()))
-        .map(PathBuf::from).unwrap_or_else(|| home.join(".o8"));
-    let absolute = if selected.is_absolute() { selected } else {
-        if !cwd.is_absolute() { return Err("A relative data directory needs an absolute native working directory."); }
+pub fn resolve_data_directory(
+    primary: Option<&str>,
+    legacy: Option<&str>,
+    home: &Path,
+    cwd: &Path,
+) -> Result<PathBuf, &'static str> {
+    let selected = primary
+        .filter(|value| !value.is_empty())
+        .or_else(|| legacy.filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".o8"));
+    let absolute = if selected.is_absolute() {
+        selected
+    } else {
+        if !cwd.is_absolute() {
+            return Err("A relative data directory needs an absolute native working directory.");
+        }
         cwd.join(selected)
     };
-    if !absolute.is_absolute() { return Err("The native data directory could not be resolved to an absolute path."); }
+    if !absolute.is_absolute() {
+        return Err("The native data directory could not be resolved to an absolute path.");
+    }
     // Match Node's lexical path joining before filesystem traversal. Resolving
     // symlinks first would send `link/../state` to a different admission slot.
     let mut normalized = PathBuf::new();
     for component in absolute.components() {
         match component {
-            Component::CurDir => {},
-            Component::ParentDir => { normalized.pop(); },
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
             other => normalized.push(other.as_os_str()),
         }
     }
@@ -105,45 +141,190 @@ pub fn resolve_data_directory(primary: Option<&str>, legacy: Option<&str>, home:
 
 impl RestartSafety {
     pub fn new(data_dir: PathBuf, before_restart: impl Fn() + Send + Sync + 'static) -> Self {
-        Self { data_dir, pending: Arc::new(Mutex::new(None)), before_restart: Arc::new(before_restart), inspect_work: Arc::new(|_, _| Ok(())) }
+        Self {
+            data_dir,
+            pending: Arc::new(Mutex::new(None)),
+            before_restart: Arc::new(before_restart),
+            inspect_work: Arc::new(|_, _| Ok(())),
+        }
     }
 
-    pub fn with_work_inspection(mut self, inspect: impl Fn(&str, bool) -> Result<(), String> + Send + Sync + 'static) -> Self {
+    pub fn with_work_inspection(
+        mut self,
+        inspect: impl Fn(&str, bool) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
         self.inspect_work = Arc::new(inspect);
         self
     }
 
-    fn check_launches(&self, force: bool) -> Result<(), String> {
-        let entries = match fs::read_dir(self.data_dir.join("work-launches")) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(_) => return Err(refusal("Work launch inventory is unavailable.")),
-        };
-        for entry in entries {
-            let entry = entry.map_err(|_| refusal("Work launch ownership is unavailable."))?;
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|_| refusal("Work launch ownership changed."))?;
-            if !metadata.is_file() || metadata.file_type().is_symlink() { return Err(refusal("Work launch ownership is unconfirmed.")); }
-            let work: serde_json::Value = serde_json::from_slice(&fs::read(entry.path()).map_err(|_| refusal("Work launch ownership is unavailable."))?)
-                .map_err(|_| refusal("Work launch ownership is unconfirmed."))?;
-            let id = work["id"].as_str().ok_or_else(|| refusal("Work launch ownership is unconfirmed."))?;
-            if Uuid::parse_str(id).is_err() || entry.file_name().to_str() != Some(&format!("{id}.json")) {
-                return Err(refusal("Work launch ownership is unconfirmed."));
-            }
-            let pid = work["pid"].as_u64().filter(|pid| *pid > 0 && *pid <= i32::MAX as u64);
-            if pid.is_some_and(|pid| owner_is_dead(pid as u32)) { continue; }
-            let label = work["label"].as_str().unwrap_or("Starting process");
-            // An unacknowledged spawn cannot be interrupted safely, even by force.
-            if !force || pid.is_none() { return Err(refusal(&format!("Waiting for {label}."))); }
+    /// Recover every lease using the same owner and bounded-unbound protocol.
+    fn check_leases(&self, force: bool) -> Result<(), String> {
+        // Force records all owners instead of waiting for process probes. A slow
+        // or unavailable liveness provider cannot turn a lease into a force veto.
+        if force {
+            return Ok(());
         }
-        Ok(())
+        let mut paths = Vec::new();
+        let launch_directory = self.data_dir.join("work-launches");
+        if fs::symlink_metadata(&launch_directory)
+            .is_ok_and(|m| !m.is_dir() || m.file_type().is_symlink())
+        {
+            return if force {
+                Ok(())
+            } else {
+                Err(refusal("Work inventory is unconfirmed."))
+            };
+        }
+        if let Ok(entries) = fs::read_dir(self.data_dir.join("work-launches")) {
+            for entry in entries {
+                paths.push(
+                    entry
+                        .map_err(|_| refusal("Work ownership unavailable."))?
+                        .path(),
+                );
+            }
+        } else if self.data_dir.join("work-launches").exists() && !force {
+            return Err(refusal("Work inventory unavailable."));
+        }
+        for entry in
+            fs::read_dir(&self.data_dir).map_err(|_| refusal("Work inventory unavailable."))?
+        {
+            let entry = entry.map_err(|_| refusal("Work ownership unavailable."))?;
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with("-cli-update.lock")
+            {
+                paths.push(entry.path());
+            }
+        }
+        let mut blocked = None;
+        for path in paths {
+            let value = lease_owner::read(&path);
+            if lease_owner::stale(&value, &path) {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+            if !force {
+                blocked.get_or_insert_with(|| {
+                    refusal(&format!(
+                        "Waiting for {}.",
+                        value["label"].as_str().unwrap_or("work owner")
+                    ))
+                });
+            }
+        }
+        blocked.map_or(Ok(()), Err)
     }
 
-    pub fn data_directory(&self) -> PathBuf { self.data_dir.clone() }
+    fn recover_operations(&self) {
+        let directory = self.data_dir.join(DIRECTORY);
+        if !fs::symlink_metadata(&directory)
+            .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+        {
+            return;
+        }
+        let empty_expired = lease_owner::stale(&serde_json::Value::Null, &directory);
+        let mut recovered = false;
+        if let Ok(entries) = fs::read_dir(&directory) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let value = lease_owner::read(&path);
+                if lease_owner::stale(&value, &path) {
+                    recovered |= fs::remove_file(path).is_ok();
+                }
+            }
+            if recovered || empty_expired {
+                let _ = fs::remove_dir(directory);
+            }
+        }
+    }
 
-    pub fn prepare(&self) -> Result<String, String> { self.prepare_with_work(false) }
+    /// Save all observed owners, including unreadable records, before forced effects.
+    fn record_force(
+        &self,
+        id: &str,
+        phase: &str,
+        inspection: Option<String>,
+    ) -> Result<(), String> {
+        let mut live = Vec::new();
+        for directory in [
+            self.data_dir.clone(),
+            self.data_dir.join("work-launches"),
+            self.data_dir.join(DIRECTORY),
+        ] {
+            if directory != self.data_dir
+                && !fs::symlink_metadata(&directory)
+                    .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+            {
+                if fs::symlink_metadata(&directory).is_ok() {
+                    live.push(serde_json::json!({"name":directory.file_name(),"unavailable":"unconfirmed admission directory"}));
+                }
+                continue;
+            }
+            match fs::read_dir(&directory) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(entry) => {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                if directory == self.data_dir && !name.ends_with("-cli-update.lock")
+                                {
+                                    continue;
+                                }
+                                live.push(serde_json::json!({"name":name,"record": if fs::symlink_metadata(entry.path()).is_ok_and(|m| m.is_file() && !m.file_type().is_symlink()) { fs::read_to_string(entry.path()).unwrap_or_else(|error| format!("unavailable: {error}")) } else { "unconfirmed owner".into() }}));
+                            }
+                            Err(error) => {
+                                live.push(serde_json::json!({"unavailable":error.to_string()}))
+                            }
+                        }
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => live.push(serde_json::json!({"unavailable":error.to_string()})),
+            }
+        }
+        let directory = self.data_dir.join("forced-restarts");
+        fs::create_dir_all(&directory)
+            .map_err(|e| format!("Forced restart receipt unavailable: {e}"))?;
+        let path = directory.join(format!("{id}.json"));
+        let mut receipt = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Vec<serde_json::Value>>(&bytes).ok())
+            .unwrap_or_default();
+        receipt.push(serde_json::json!({"phase":phase,"atMs":lease_owner::now_ms(),"live":live,"inspection":inspection}));
+        let temporary = directory.join(format!("{id}.tmp"));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
+        file.write_all(&serde_json::to_vec(&receipt).unwrap())
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
+        fs::rename(temporary, path).map_err(|e| e.to_string())
+    }
+
+    pub fn data_directory(&self) -> PathBuf {
+        self.data_dir.clone()
+    }
+
+    pub fn prepare(&self) -> Result<String, String> {
+        self.prepare_with_work(false)
+    }
 
     pub fn prepare_with_work(&self, force: bool) -> Result<String, String> {
-        let mut pending = self.pending.lock().map_err(|_| refusal("Restart ownership is unavailable."))?;
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| refusal("Restart ownership is unavailable."))?;
+        if force {
+            if let Some(existing) = pending.as_ref() {
+                self.record_force(&existing.id, "force-replaced", None)?;
+                release(&self.data_dir.join(DIRECTORY), &existing.id);
+                *pending = None;
+            }
+        }
         if let Some(existing) = pending.as_ref() {
             if existing.committed || existing.deadline > Instant::now() {
                 return Err(refusal("A restart is already reserved."));
@@ -151,74 +332,167 @@ impl RestartSafety {
             release(&self.data_dir.join(DIRECTORY), &existing.id);
             *pending = None;
         }
-        fs::create_dir_all(&self.data_dir).map_err(|_| refusal("CLI update ownership could not be checked."))?;
+        fs::create_dir_all(&self.data_dir)
+            .map_err(|_| refusal("CLI update ownership could not be checked."))?;
         let directory = self.data_dir.join(DIRECTORY);
-        if let Some(previous) = read_operation(&directory) {
-            if previous.kind == "restart" && owner_is_dead(previous.pid) { release(&directory, &previous.id); }
+        if !force {
+            self.recover_operations();
         }
+        let id = Uuid::new_v4().to_string();
+        if force {
+            self.record_force(&id, "prepare", None)?;
+        }
+        let operation = Operation {
+            version: 1,
+            id: id.clone(),
+            kind: "restart".into(),
+            pid: std::process::id(),
+            runtime: None,
+            owner_pid: std::process::id(),
+            owner_identity: lease_owner::identity(std::process::id())
+                .ok_or_else(|| refusal("Restart process identity unavailable."))?,
+            created_at_ms: lease_owner::now_ms(),
+            started_at: format!("{:?}", std::time::SystemTime::now()),
+            stage: "preparing".into(),
+        };
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         builder.mode(0o700);
-        builder.create(&directory).map_err(|_| refusal("A CLI update or restart is active, interrupted, or needs ownership recovery."))?;
-        let id = Uuid::new_v4().to_string();
-        let operation = Operation { version: 1, id: id.clone(), kind: "restart".into(),
-            pid: std::process::id(), runtime: None,
-            started_at: format!("{:?}", std::time::SystemTime::now()), stage: "preparing".into() };
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
         options.mode(0o600);
-        let saved = options.open(directory.join(format!("{id}.json")))
-            .and_then(|mut file| file.write_all(&serde_json::to_vec(&operation).unwrap()));
-        if saved.is_err() { let _ = fs::remove_dir(&directory); return Err(refusal("Restart ownership could not be recorded.")); }
-        let legacy = match fs::read_dir(&self.data_dir) {
-            Ok(mut entries) => entries.any(|entry| entry.map(|entry| entry.file_name().to_string_lossy().ends_with("-cli-update.lock")).unwrap_or(true)),
-            Err(_) => {
-                release(&directory, &id);
-                return Err(refusal("CLI update ownership could not be checked."));
+        loop {
+            if let Err(error) = builder.create(&directory) {
+                if !force {
+                    return Err(refusal(&format!("Work admission unavailable: {error}")));
+                }
+                match fs::symlink_metadata(&directory) {
+                    Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(format!("Forced admission unavailable: {error}")),
+                    Ok(_) => {
+                        // Move the entry itself; never traverse an unknown target.
+                        let displaced = self
+                            .data_dir
+                            .join("forced-restarts")
+                            .join(format!("{id}-{}.admission", Uuid::new_v4()));
+                        match fs::rename(&directory, displaced) {
+                            Ok(()) => continue,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(error) => {
+                                return Err(format!(
+                                    "Forced admission recovery unavailable: {error}"
+                                ))
+                            }
+                        }
+                    }
+                }
             }
-        };
-        if legacy {
-            release(&directory, &id);
-            return Err(refusal("A CLI update lock needs completion or verified recovery."));
+            #[cfg(test)]
+            SETTLE_WRITER.with(|hook| {
+                if let Some(settle) = hook.borrow_mut().take() {
+                    settle(&directory);
+                }
+            });
+            match options.open(directory.join(format!("{id}.json"))) {
+                // Installer settlement may unlink its owner and empty directory
+                // at any point before our unique owner file exists. Republish.
+                Err(error) if force && error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(format!("Restart ownership could not be recorded: {error}"))
+                }
+                Ok(mut file) => {
+                    if let Err(error) = file
+                        .write_all(&serde_json::to_vec(&operation).unwrap())
+                        .and_then(|_| file.sync_all())
+                    {
+                        let _ = fs::remove_file(directory.join(format!("{id}.json")));
+                        let _ = fs::remove_dir(&directory);
+                        return Err(format!("Restart ownership could not be recorded: {error}"));
+                    }
+                    break;
+                }
+            }
         }
-        if let Err(error) = self.check_launches(force) { release(&directory, &id); return Err(error); }
-        *pending = Some(Pending { id: id.clone(), deadline: Instant::now() + PREPARE_TTL, committed: false, force });
+        if let Err(error) = self.check_leases(force) {
+            if !force {
+                release(&directory, &id);
+                return Err(error);
+            }
+            self.record_force(&id, "inventory-unavailable", Some(error))?;
+        }
+        *pending = Some(Pending {
+            id: id.clone(),
+            deadline: Instant::now() + PREPARE_TTL,
+            committed: false,
+            force,
+        });
         let state = self.clone();
         let expiring = id.clone();
-        std::thread::spawn(move || { std::thread::sleep(PREPARE_TTL); let _ = state.cancel(&expiring); });
+        std::thread::spawn(move || {
+            std::thread::sleep(PREPARE_TTL);
+            let _ = state.cancel(&expiring);
+        });
         Ok(id)
     }
 
     pub fn cancel(&self, id: &str) -> Result<(), String> {
-        let mut pending = self.pending.lock().map_err(|_| refusal("Restart ownership is unavailable."))?;
-        let Some(current) = pending.as_ref() else { return Err(refusal("The restart reservation is no longer current.")); };
-        if current.id != id || current.committed { return Err(refusal("The restart reservation is no longer cancellable.")); }
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| refusal("Restart ownership is unavailable."))?;
+        let Some(current) = pending.as_ref() else {
+            return Err(refusal("The restart reservation is no longer current."));
+        };
+        if current.id != id || current.committed {
+            return Err(refusal("The restart reservation is no longer cancellable."));
+        }
         release(&self.data_dir.join(DIRECTORY), id);
         *pending = None;
         Ok(())
     }
 
     pub fn before_restart(&self, reservation: Option<&str>) -> Result<(), String> {
-        let id = match reservation { Some(id) => id.to_string(), None => self.prepare()? };
-        let mut pending = self.pending.lock().map_err(|_| refusal("Restart ownership is unavailable."))?;
-        let Some(current) = pending.as_mut() else { return Err(refusal("The restart reservation expired.")); };
-        let operation = read_operation(&self.data_dir.join(DIRECTORY));
-        if current.id != id || current.committed || current.deadline <= Instant::now()
-            || !operation.as_ref().is_some_and(|owner| owner.id == id && owner.kind == "restart" && owner.pid == std::process::id())
-        { return Err(refusal("Restart ownership changed or expired. Retry from the current window.")); }
-        let legacy = fs::read_dir(&self.data_dir).map_err(|_| refusal("CLI update ownership could not be checked."))?
-            .any(|entry| entry.map(|entry| entry.file_name().to_string_lossy().ends_with("-cli-update.lock")).unwrap_or(true));
-        if legacy { return Err(refusal("A CLI update lock appeared before restart; verify its completion or recovery.")); }
-        self.check_launches(current.force)?;
-        (self.inspect_work)(&id, current.force)?;
-        // Inspection crosses the server boundary. Legacy installers may predate
-        // shared admission, so recheck their holds immediately before cleanup.
-        self.check_launches(current.force)?;
-        let legacy = fs::read_dir(&self.data_dir).map_err(|_| refusal("CLI update ownership could not be checked."))?
-            .any(|entry| entry.map(|entry| entry.file_name().to_string_lossy().ends_with("-cli-update.lock")).unwrap_or(true));
-        if legacy { return Err(refusal("A CLI update appeared during final inspection.")); }
-        if current.deadline <= Instant::now() { return Err(refusal("Restart inspection exceeded its reservation. Retry.")); }
+        let id = match reservation {
+            Some(id) => id.to_string(),
+            None => self.prepare()?,
+        };
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| refusal("Restart ownership is unavailable."))?;
+        let Some(current) = pending.as_mut() else {
+            return Err(refusal("The restart reservation expired."));
+        };
+        let operation = fs::read(self.data_dir.join(DIRECTORY).join(format!("{id}.json")))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Operation>(&bytes).ok());
+        if current.id != id
+            || current.committed
+            || current.deadline <= Instant::now()
+            || !operation.as_ref().is_some_and(|owner| {
+                owner.id == id && owner.kind == "restart" && owner.pid == std::process::id()
+            })
+        {
+            return Err(refusal(
+                "Restart ownership changed or expired. Retry from the current window.",
+            ));
+        }
+        let inspection = self
+            .check_leases(current.force)
+            .and_then(|_| (self.inspect_work)(&id, current.force))
+            .and_then(|_| self.check_leases(current.force));
+        if current.force {
+            self.record_force(&id, "before-cleanup", inspection.err())?;
+        } else {
+            inspection?;
+        }
+        if current.deadline <= Instant::now() {
+            return Err(refusal(
+                "Restart inspection exceeded its reservation. Retry.",
+            ));
+        }
         current.committed = true;
         drop(pending);
         (self.before_restart)();
@@ -228,185 +502,4 @@ impl RestartSafety {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn fixture() -> (PathBuf, RestartSafety, Arc<AtomicUsize>) {
-        let root = std::env::temp_dir().join(format!("o8-restart-safety-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        let calls = Arc::new(AtomicUsize::new(0)); let recorded = calls.clone();
-        let state = RestartSafety::new(root.clone(), move || { recorded.fetch_add(1, Ordering::SeqCst); });
-        (root, state, calls)
-    }
-
-    #[test]
-    fn directory_selection_ignores_blank_primary_and_anchors_relative_overrides() {
-        let cwd = std::env::temp_dir().join("o8-native-cwd");
-        let home = std::env::temp_dir().join("o8-test-home");
-        assert_eq!(resolve_data_directory(Some(""), Some("legacy"), &home, &cwd).unwrap(), cwd.join("legacy"));
-        assert_eq!(resolve_data_directory(Some(""), Some(""), &home, &cwd).unwrap(), home.join(".o8"));
-        assert_eq!(resolve_data_directory(Some("state"), Some("legacy"), &home, &cwd).unwrap(), cwd.join("state"));
-        assert_eq!(resolve_data_directory(Some(home.to_str().unwrap()), None, &home, Path::new("")).unwrap(), home);
-    }
-
-    #[test]
-    fn directory_selection_normalizes_dot_segments_without_crossing_the_root() {
-        let cwd = std::env::temp_dir().join("o8-native-cwd");
-        let home = std::env::temp_dir().join("o8-test-home");
-        assert_eq!(resolve_data_directory(Some("./one/../state"), None, &home, &cwd).unwrap(), cwd.join("state"));
-        let root = cwd.ancestors().last().unwrap();
-        assert_eq!(resolve_data_directory(Some(root.join("../state").to_str().unwrap()), None, &home, &cwd).unwrap(), root.join("state"));
-        assert!(resolve_data_directory(Some("state"), None, &home, Path::new("")).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlink_parent_override_uses_the_same_lexical_installer_slot() {
-        let root = std::env::temp_dir().join(format!("o8-restart-root-{}", Uuid::new_v4()));
-        let expected = root.join("left/state");
-        let traversed = root.join("other/state");
-        fs::create_dir_all(&expected).unwrap();
-        fs::create_dir_all(root.join("other/tree")).unwrap();
-        fs::create_dir_all(&traversed).unwrap();
-        std::os::unix::fs::symlink(root.join("other/tree"), root.join("left/link")).unwrap();
-        fs::write(expected.join("codex-cli-update.lock"), "installer at Node's lexical root").unwrap();
-        let selected = root.join("left/link/../state");
-        let resolved = resolve_data_directory(Some(selected.to_str().unwrap()), None, &root, &root).unwrap();
-        assert_eq!(resolved, expected);
-        let calls = Arc::new(AtomicUsize::new(0));
-        let recorded = calls.clone();
-        let state = RestartSafety::new(resolved, move || { recorded.fetch_add(1, Ordering::SeqCst); });
-        assert!(state.before_restart(None).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert!(!traversed.join(DIRECTORY).exists());
-        assert_eq!(fs::read_to_string(expected.join("codex-cli-update.lock")).unwrap(), "installer at Node's lexical root");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn installer_and_legacy_locks_refuse_before_child_cleanup() {
-        let (root, state, calls) = fixture();
-        fs::create_dir(root.join(DIRECTORY)).unwrap();
-        assert!(state.before_restart(None).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        fs::remove_dir(root.join(DIRECTORY)).unwrap();
-        fs::write(root.join("codex-cli-update.lock"), "legacy owner").unwrap();
-        assert!(state.before_restart(None).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert_eq!(fs::read_to_string(root.join("codex-cli-update.lock")).unwrap(), "legacy owner");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn reservation_survives_checks_until_native_commit() {
-        let (root, state, calls) = fixture();
-        let id = state.prepare().unwrap();
-        assert!(state.prepare().is_err());
-        assert!(root.join(DIRECTORY).exists());
-        state.before_restart(Some(&id)).unwrap();
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(state.cancel(&id).is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_legacy_installer_appearing_after_prepare_refuses_before_cleanup() {
-        let (root, state, calls) = fixture();
-        let id = state.prepare().unwrap();
-        fs::write(root.join("codex-cli-update.lock"), "later legacy owner").unwrap();
-        assert!(state.before_restart(Some(&id)).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        state.cancel(&id).unwrap();
-        assert_eq!(fs::read_to_string(root.join("codex-cli-update.lock")).unwrap(), "later legacy owner");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn expired_preparation_never_runs_restart_side_effects() {
-        let (root, state, calls) = fixture();
-        let id = state.prepare().unwrap();
-        state.pending.lock().unwrap().as_mut().unwrap().deadline = Instant::now() - Duration::from_secs(1);
-        assert!(state.before_restart(Some(&id)).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        state.cancel(&id).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn cancelled_or_replaced_reservations_never_terminate_children() {
-        let (root, state, calls) = fixture();
-        let id = state.prepare().unwrap(); state.cancel(&id).unwrap();
-        assert!(state.before_restart(Some(&id)).is_err());
-        let other = state.prepare().unwrap();
-        fs::rename(root.join(DIRECTORY), root.join("old-owner")).unwrap();
-        fs::create_dir(root.join(DIRECTORY)).unwrap();
-        fs::write(root.join(DIRECTORY).join("replacement"), "preserve").unwrap();
-        assert!(state.before_restart(Some(&other)).is_err());
-        state.cancel(&other).unwrap();
-        assert!(root.join(DIRECTORY).join("replacement").exists());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn a_process_starting_after_an_earlier_idle_snapshot_refuses_cleanup() {
-        let (root, state, calls) = fixture();
-        fs::create_dir(root.join("work-launches")).unwrap();
-        let id = Uuid::new_v4().to_string();
-        fs::write(root.join("work-launches").join(format!("{id}.json")),
-            serde_json::json!({"id": id, "label": "Late terminal", "ownerPid": std::process::id(), "pid": std::process::id()}).to_string()).unwrap();
-        assert!(state.before_restart(None).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn force_never_interrupts_cli_installers_or_unacknowledged_starts() {
-        let (root, state, calls) = fixture();
-        fs::write(root.join("codex-cli-update.lock"), "CLI installer").unwrap();
-        assert!(state.prepare_with_work(true).is_err());
-        fs::remove_file(root.join("codex-cli-update.lock")).unwrap();
-        fs::create_dir(root.join("work-launches")).unwrap();
-        let id = Uuid::new_v4().to_string();
-        let file = root.join("work-launches").join(format!("{id}.json"));
-        fs::write(&file, serde_json::json!({"id": id, "label": "Queued terminal", "ownerPid": std::process::id(), "pid": null}).to_string()).unwrap();
-        assert!(state.prepare_with_work(true).is_err());
-        fs::write(&file, serde_json::json!({"id": id, "label": "Live terminal", "ownerPid": std::process::id(), "pid": std::process::id()}).to_string()).unwrap();
-        let reservation = state.prepare_with_work(true).unwrap();
-        state.before_restart(Some(&reservation)).unwrap();
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn final_inspection_is_under_reservation_and_refuses_before_cleanup() {
-        let (root, state, calls) = fixture();
-        let directory = root.clone();
-        let state = state.with_work_inspection(move |id, _| {
-            assert_eq!(read_operation(&directory.join(DIRECTORY)).unwrap().id, id);
-            Err("Late managed run".into())
-        });
-        let id = state.prepare().unwrap();
-        assert!(state.before_restart(Some(&id)).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        state.cancel(&id).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn a_legacy_installer_appearing_during_final_inspection_still_refuses_force() {
-        let (root, state, calls) = fixture();
-        let directory = root.clone();
-        let state = state.with_work_inspection(move |_, force| {
-            assert!(force);
-            fs::write(directory.join("codex-cli-update.lock"), "installer started during inspection").unwrap();
-            Ok(())
-        });
-        let id = state.prepare_with_work(true).unwrap();
-        assert!(state.before_restart(Some(&id)).is_err());
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        state.cancel(&id).unwrap();
-        fs::remove_dir_all(root).unwrap();
-    }
-
-}
+mod tests;

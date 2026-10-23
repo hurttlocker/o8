@@ -66,13 +66,26 @@ async function isVersionPulled(version: string): Promise<{ pulled: boolean; note
   }
 }
 
-export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+/** Explicit interruption consent can bypass a CLI wait; ordinary restart checks stay final. */
+async function confirmRestartAdmission(options: InstallUpdateOptions): Promise<boolean> {
   const { waitForConnectedCliUpdates } = await import('./update-hub-client');
+  const force = () => (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true;
+  if (force() || options.beforeRestart?.interruptWork) {
+    if (options.beforeRestart && !(await options.beforeRestart())) return false;
+    if (!force()) await waitForConnectedCliUpdates();
+    // Native admission always inspects current work under the reservation.
+    return true;
+  }
   await waitForConnectedCliUpdates();
-  if (options.beforeRestart && !(await options.beforeRestart())) return false;
+  return !options.beforeRestart || await options.beforeRestart();
+}
+
+export async function relaunchInstalledUpdate(options: InstallUpdateOptions = {}): Promise<boolean> {
+  if (!(await confirmRestartAdmission(options))) return false;
+  const force = (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true;
   const { invoke } = await import('@tauri-apps/api/core');
   let reservationId: string;
-  try { reservationId = await invoke<string>('prepare_app_restart', { force: (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true }); }
+  try { reservationId = await invoke<string>('prepare_app_restart', { force }); }
   catch (error) { if (String(error).includes('cli_operation_blocked:')) return false; throw error; }
   if (typeof reservationId !== 'string' || !reservationId.trim()) throw new Error('Native restart reservation was not recorded.');
   try {
@@ -125,9 +138,7 @@ export async function installUpdateAndRestart(
     if (result.installExits) {
       // Windows exits in the native installer. Confirm against fresh work after
       // download, then pass that consent to its final native exit guard.
-      const { waitForConnectedCliUpdates } = await import('./update-hub-client');
-      await waitForConnectedCliUpdates();
-      if (options.beforeRestart && !(await options.beforeRestart())) return { installed: false, version: result.version };
+      if (!(await confirmRestartAdmission(options))) return { installed: false, version: result.version };
     }
     await invoke('install_app_update', { rid: downloadedRid,
       force: (options.interruptWork?.() ?? options.beforeRestart?.interruptWork?.()) === true });

@@ -41,10 +41,11 @@ it('retains an uncertain PTY lease when recording the already spawned PID fails'
   let exited: (() => void) | undefined;
   const host = createInlineTerminalHost({ spawn() {
     file = join(directory, readdirSync(directory)[0]);
-    chmodSync(file, 0o400);
+    chmodSync(root, 0o500);
     return { pid: process.pid, onExit(callback: () => void) { exited = callback; } };
   } } as never);
-  host.spawn({ file: 'sh', args: [], cwd: root, env: {}, cols: 80, rows: 24 });
+  try { host.spawn({ file: 'sh', args: [], cwd: root, env: {}, cols: 80, rows: 24 }); }
+  finally { chmodSync(root, 0o700); }
   expect(JSON.parse(readFileSync(file, 'utf8')).pid).toBeNull();
   expect(readdirSync(directory)).toHaveLength(1);
   exited?.();

@@ -15,7 +15,7 @@ use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INV
 use tauri::{Manager, WebviewWindowBuilder};
 
 #[test]
-fn windows_webview_installer_refuses_late_terminal_worker_and_cli_installer() {
+fn windows_webview_installer_guards_late_work_and_honors_recorded_force() {
     for scenario in ["terminal", "worker", "cli-force", "auto-worker"] {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -32,7 +32,11 @@ fn windows_webview_installer_refuses_late_terminal_worker_and_cli_installer() {
             String::from_utf8_lossy(&result.stderr)
         );
         assert!(
-            String::from_utf8_lossy(&result.stdout).contains("native-installer-refused"),
+            String::from_utf8_lossy(&result.stdout).contains(if scenario == "cli-force" {
+                "native-force-recorded"
+            } else {
+                "native-installer-refused"
+            }),
             "{scenario}: plugin exited before native admission returned: {}",
             String::from_utf8_lossy(&result.stdout)
         );
@@ -154,9 +158,24 @@ fn windows_install_child() {
     }
     let cleaned = Arc::new(AtomicUsize::new(0));
     let calls = cleaned.clone();
+    let receipt_root = root.clone();
     app.manage(o8_restart_safety::RestartSafety::new(
         root.clone(),
         move || {
+            if force {
+                let receipts: Vec<_> = std::fs::read_dir(receipt_root.join("forced-restarts"))
+                    .unwrap()
+                    .flatten()
+                    .collect();
+                assert!(!receipts.is_empty());
+                assert!(receipts
+                    .iter()
+                    .any(|entry| std::fs::read_to_string(entry.path())
+                        .unwrap_or_default()
+                        .contains("fixture")));
+                println!("native-force-recorded");
+                std::io::stdout().flush().unwrap();
+            }
             calls.fetch_add(1, Ordering::SeqCst);
         },
     ));
@@ -218,12 +237,19 @@ fn windows_install_child() {
             serde_json::json!({"rid":bytes,"force":force}),
         )
         .unwrap_err();
-        assert!(
-            error.to_string().contains("cli_operation_blocked"),
-            "{error}"
-        );
+        if force {
+            assert!(
+                !error.to_string().contains("cli_operation_blocked"),
+                "{error}"
+            );
+        } else {
+            assert!(
+                error.to_string().contains("cli_operation_blocked"),
+                "{error}"
+            );
+        }
     }
     stop.store(true, Ordering::Release);
-    assert_eq!(cleaned.load(Ordering::SeqCst), 0);
+    assert_eq!(cleaned.load(Ordering::SeqCst), usize::from(force));
     println!("native-installer-refused");
 }
