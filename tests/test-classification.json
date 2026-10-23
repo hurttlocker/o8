@@ -2506,6 +2506,18 @@
       ]
     },
     {
+      "path": "tests/finished-packet-retirement-cli-real-path.test.ts",
+      "reasons": [
+        "apfs-tool",
+        "child-process",
+        "git-cli",
+        "native-build",
+        "network-listener",
+        "real-path",
+        "worktree-api"
+      ]
+    },
+    {
       "path": "tests/fixed-reports-range.test.ts",
       "reasons": [
         "child-process",
@@ -4903,6 +4915,12 @@
       "path": "tests/steer-packet-owned-resume.test.ts",
       "reasons": [
         "child-process"
+      ]
+    },
+    {
+      "path": "tests/steer-queue-real-path.test.ts",
+      "reasons": [
+        "real-path"
       ]
     },
     {

@@ -12,7 +12,7 @@ import type { PrDetail, PrTimelineEvent } from '../types';
 const control: React.CSSProperties = { minHeight: 28, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, border: '1px solid var(--t-divider)', borderRadius: 7, background: 'transparent', color: 'var(--t-text-secondary)', fontFamily: 'inherit', fontSize: 11, cursor: 'pointer' };
 
 export function TimelineTab({ detail, repoSlug, active, newestFirst, onToggleOrder, onOpenFile }: { detail: PrDetail; repoSlug?: string | null; active: boolean; newestFirst: boolean; onToggleOrder: () => void; onOpenFile: (path: string) => void }) {
-  const { data, loading, error, refresh, retry, loadMore } = usePrTimeline(detail.number, detail.resolvedRepo || repoSlug, active);
+  const { data, loadedAt, loading, error, refresh, retry, loadMore } = usePrTimeline(detail.number, detail.resolvedRepo || repoSlug, active);
   const events = useMemo(() => {
     const opened: PrTimelineEvent = { id: 'opened', kind: 'opened', title: 'opened this pull request', actor: detail.author, avatarUrl: detail.avatarUrl || null, at: detail.createdAt, body: '', url: detail.url };
     const list = [opened, ...(data?.events || [])];
@@ -26,6 +26,7 @@ export function TimelineTab({ detail, repoSlug, active, newestFirst, onToggleOrd
     </div>
     {loading && !data ? <div role="status" style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>Loading activity for PR #{detail.number}…</div> : null}
     {error ? <div role="alert" style={{ marginBottom: 12, fontSize: 12, color: 'var(--t-danger)' }}>{error} <button type="button" onClick={() => void retry()} style={control}>Retry activity</button></div> : null}
+    {error && data ? <div role="status" style={{ marginBottom: 12, fontSize: 11, color: 'var(--t-text-muted)' }}>Last successful activity read {relativeTimeLabel(loadedAt, { overflow: 'days', subMinute: 'just-now-lower' })}. Showing saved activity.</div> : null}
     {data ? <ol aria-label="Pull request timeline" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
       {events.map((event) => <li key={event.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '24px minmax(0, 1fr)', gap: 12, paddingBottom: 20 }}>
         <div aria-hidden="true" style={{ position: 'absolute', left: 11, top: 25, bottom: 2, width: 1, background: 'var(--t-divider)' }} />

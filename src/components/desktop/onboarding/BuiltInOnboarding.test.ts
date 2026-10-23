@@ -34,8 +34,9 @@ it('selects the built-in agent without a CLI and offers the ready setup', async 
   await mount([previewBuiltInAgent()]);
   expect(document.querySelector<HTMLButtonElement>('[aria-label="Built-in agent (Pi): Ready"]')?.getAttribute('aria-pressed')).toBe('true');
   expect(document.body.textContent).toContain('π');
-  expect(document.body.textContent).toContain('No install, key, or sign-in');
-  expect(document.body.textContent).toContain('free daily o8 model allowance');
+  expect(document.body.textContent).toContain('Uses the configured runtime');
+  expect(document.body.textContent).toContain('Uses the configured model connection');
+  expect(document.body.textContent).not.toMatch(/daily|weekly|allowance|upgrade/i);
   expect(document.body.textContent).not.toContain('Connect a coding tool');
   expect(button('Use this setup').disabled).toBe(false);
 });
@@ -44,7 +45,8 @@ it('keeps a detected CLI selected and allows the built-in choice without forcing
   const { request } = await mount([previewBuiltInAgent('pro'), cli]);
   const builtIn = document.querySelector<HTMLButtonElement>('[aria-label="Built-in agent (Pi): Ready"]')!;
   expect(builtIn.getAttribute('aria-pressed')).toBe('false');
-  expect(document.body.textContent).toContain('Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.');
+  expect(document.body.textContent).toContain('Uses the configured model connection');
+  expect(document.body.textContent).not.toMatch(/daily|weekly|allowance|upgrade/i);
   await act(async () => builtIn.click());
   expect(builtIn.getAttribute('aria-pressed')).toBe('true');
   await act(async () => button('Use this setup').click());

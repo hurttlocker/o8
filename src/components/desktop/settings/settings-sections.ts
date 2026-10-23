@@ -3,7 +3,7 @@ import type { SettingsTab } from './shared';
 // Preview major sections without mounting inactive tabs or loading their data.
 // Once a tab is active, the menu reads its rendered section markers instead.
 const SECTIONS: Partial<Record<SettingsTab, string[]>> = {
-  general: ['Plan', 'Presentation', 'Privacy'],
+  general: ['Presentation', 'Privacy'],
   account: ['Profile'],
   appearance: ['Theme'],
   'api-keys': ['Provider keys', 'Symon & voice keys', 'Key storage'],
@@ -18,7 +18,6 @@ const SECTIONS: Partial<Record<SettingsTab, string[]>> = {
   indexing: ['Repositories', 'Engineering Brain'],
   mcp: ['Clients', 'External servers', 'Diagnostics'],
   connections: ['Remote access', 'Symon Messages', 'Pairing', 'Paired devices'],
-  billing: ['Current plan', 'Free workspace', 'Hosted services', 'Planned services'],
   analytics: ['TOTALS', 'SPEND OVER TIME', 'BY SURFACE'],
   diagnostics: ['Connection health', 'Feature diagnostics', 'Shipped feature audit', 'Maintenance', 'Reset app data', 'Developer diagnostics'],
   about: ['Version', 'Links', 'Onboarding', 'Report an issue', 'Credits'],
@@ -26,7 +25,7 @@ const SECTIONS: Partial<Record<SettingsTab, string[]>> = {
 
 export function settingsSectionPreview(tab: SettingsTab, desktop: boolean): string[] {
   if (!desktop && (tab === 'voice' || tab === 'permissions')) return [];
-  if (desktop && tab === 'general') return ['Plan', 'Startup', 'Presentation', 'Privacy'];
+  if (desktop && tab === 'general') return ['Startup', 'Presentation', 'Privacy'];
   return SECTIONS[tab] ?? [];
 }
 

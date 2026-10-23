@@ -17,8 +17,6 @@ import type {
   GitHubActionKind,
 } from './settings/shared';
 import { searchSettings, SETTINGS_SEARCH_REGISTRY } from './settings/settings-search';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { isPaidPlan } from '@/lib/entitlement/flags';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -32,7 +30,6 @@ import {
   ActivityIcon,
   InfoIcon,
   SlidersIcon,
-  CreditCardIcon,
   MicIcon,
   GitHubIcon,
   BrainIcon,
@@ -57,7 +54,6 @@ import { ProjectsPanel } from './settings/ProjectsPanel';
 import { AppearanceTab } from './settings/AppearanceTab';
 import { VoiceTab } from './settings/VoiceTab';
 import { PermissionsTab } from './settings/PermissionsTab';
-import { BillingTab } from './settings/BillingTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
 import { AnalyticsPage } from './AnalyticsPage';
@@ -115,11 +111,10 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
   const [searchQuery, setSearchQuery] = useState('');
   const [openNavTab, setOpenNavTab] = useState<SettingsTab | null>(null);
   const { contentRef, navigate, notice, targetSection, navigationId, canBack, canForward, back, forward } = useSettingsSectionNavigation(activeTab, setActiveTab);
-  const { founder, plan } = useEntitlement();
   const auth = useO8Auth();
   const searchMatches = useMemo(
-    () => searchSettings(SETTINGS_SEARCH_REGISTRY, searchQuery, { founder: Boolean(founder) }),
-    [searchQuery, founder],
+    () => searchSettings(SETTINGS_SEARCH_REGISTRY, searchQuery),
+    [searchQuery],
   );
   const searching = searchQuery.trim().length >= 2;
   const [loading, setLoading] = useState(true);
@@ -312,7 +307,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
 
   const githubConnection: GitHubConnectionProps = {
     auth,
-    managedAppEntitled: isPaidPlan(plan),
     accounts,
     repoCount,
     broker: brokerStatus,
@@ -535,7 +529,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           <SettingsNavItem label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} tab="connections" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
 
           <SectionHeader>System</SectionHeader>
-          <SettingsNavItem label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} tab="billing" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} tab="analytics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} tab="diagnostics" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
           <SettingsNavItem label="About" icon={<InfoIcon />} active={activeTab === 'about'} tab="about" openTab={openNavTab} onOpen={setOpenNavTab} onNavigate={navigate} />
@@ -597,9 +590,6 @@ export function SettingsPage({ initialTab = 'general', onClose }: { initialTab?:
           )}
           {activeTab === 'permissions' && (
             <PermissionsTab />
-          )}
-          {activeTab === 'billing' && (
-            <BillingTab />
           )}
           {activeTab === 'diagnostics' && (
             <DiagnosticsTab />

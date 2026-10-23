@@ -1,11 +1,7 @@
-/**
- * Entitlement types — the open-core Free/Pro/Team tier model.
- *
- * This module is the type substrate for the entitlement layer. It is pure
- * (no I/O, not server-only) so both server code (store.ts) and the future
- * client provider can import it.
+/** Legacy service authorization types. The app has one free edition.
+ * Retained for funded inference, voice, relay admission, and token consumers
+ * until their replacement paths are ready. Never use these for local UI access.
  */
-
 export type Plan = 'free' | 'pro' | 'team' | 'founder';
 
 /**
@@ -39,22 +35,19 @@ export interface EntitlementFlags {
 export type EntitlementSource = 'env' | 'file' | 'default';
 
 export interface EntitlementState {
-  /** EFFECTIVE plan — the real plan after the dev "view-as" min-clamp (#1517). */
+  /** Effective legacy service class after any existing suppression. */
   plan: Plan;
-  /** Flags derived from the EFFECTIVE plan. */
+  /** Legacy service flags, never local UI access. */
   flags: EntitlementFlags;
   source: EntitlementSource;
-  /** Real resolved plan BEFORE the view-as clamp. Equals `plan` when no override. */
+  /** Resolved service class before existing suppression. */
   actualPlan: Plan;
-  /** True when a `~/.o8/dev-plan-override` view-as switch is active. */
+  /** Existing read-only suppression is active. Retained for funded callers. */
   overrideActive: boolean;
 }
 
-/**
- * Pro · Lifetime display metadata. Client-safe (pure, no I/O) so both the
- * server founder record (founder.ts) and the client context (context.tsx) share
- * one shape. Cosmetic — the entitlement is the signed `plan: 'founder'`; this
- * only carries the lifetime badge serial and legacy metadata.
+/** Legacy account metadata retained for service-license sync and cleanup.
+ * The application does not render edition badges or account serials.
  */
 export interface FounderInfo {
   operatorNumber: number;

@@ -19,8 +19,6 @@ export type SettingsSearchEntry = {
   description?: string;
   /** Extra match terms beyond label/group/description. */
   keywords?: string[];
-  /** Row only renders for founder entitlement — hide from non-founders. */
-  founders?: boolean;
 };
 
 export type SettingsSearchMatch = SettingsSearchEntry & { score: number };
@@ -30,14 +28,12 @@ const MAX_RESULTS = 14;
 export function searchSettings(
   registry: SettingsSearchEntry[],
   rawQuery: string,
-  opts: { founder: boolean },
 ): SettingsSearchMatch[] {
   const query = rawQuery.trim().toLowerCase();
   if (query.length < 2) return [];
   const tokens = query.split(/\s+/).filter(Boolean);
   const matches: SettingsSearchMatch[] = [];
   for (const entry of registry) {
-    if (entry.founders && !opts.founder) continue;
     const label = entry.label.toLowerCase();
     const group = entry.group?.toLowerCase() ?? '';
     const description = entry.description?.toLowerCase() ?? '';
@@ -77,8 +73,6 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'models', tabLabel: 'Providers', group: 'Advanced worker setup', label: 'Codex launch method', description: 'Start the tool directly or use the optional Ori launcher', keywords: ['execution carrier', 'ori', 'direct'] },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Identity", description: "Connect GitHub, manage the account, or sign out", keywords: ['sign in', 'sign out', 'login', 'identity', 'profile', 'github'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share usage data", description: "Allowlisted product events; optional and off by default", keywords: ['telemetry', 'usage', 'analytics', 'privacy'] },
-  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Plan", description: "Your current plan and Pro · Lifetime status", keywords: ['pro', 'lifetime', 'free', 'subscription'] },
-  { tab: 'general', tabLabel: 'General', group: "Plan", label: "Upgrade to Pro", description: "o8 High and hosted Brain assistance; fully hosted mobile and cloud execution are planned", keywords: ['upgrade', 'lifetime', 'pricing', 'pro'] },
   { tab: 'general', tabLabel: 'General', group: "Startup", label: "Launch at login", description: "Start o8 automatically when you sign in to your Mac", keywords: ['autostart', 'boot', 'startup'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Share crash reports", description: "Optionally send scrubbed error messages, stack traces, and user-initiated bug reports", keywords: ['telemetry', 'sentry', 'privacy', 'bug reports'] },
   { tab: 'general', tabLabel: 'General', group: "Privacy", label: "Automatically upload local crash logs", description: "Periodically upload saved crash logs when a destination is configured", keywords: ['telemetry', 'privacy'] },
@@ -105,16 +99,6 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'about', tabLabel: 'About', group: "Onboarding", label: "Replay onboarding", description: "Replays the welcome flow (intro, repos, runtimes)" },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Theme", label: "Workspace theme", description: "Light Solid, Dark Solid, or All Glass", keywords: ['window chrome', 'palette', 'transparency'] },
   { tab: 'appearance', tabLabel: 'Appearance', group: "Theme", label: "All Glass", description: "Glass across the entire window" },
-  { tab: 'billing', tabLabel: 'Plan & Billing', label: "Have a license key?", description: "Pro · Lifetime licenses activate here, or just sign in (expander row)" },
-  { tab: 'billing', tabLabel: 'Plan & Billing', label: "License key textarea", description: "Paste a signed license for Pro · Lifetime" },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: "Current plan", label: "View plans", description: "Opens o8.run/pricing (button, shown only when not on a paid plan)" },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: 'Planned services', label: 'Cloud execution', description: 'Planned hosted workers independent of your computer.' },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: 'Hosted services', label: 'o8 High & Engineering Brain', description: 'Hosted access subject to your active plan and usage limits.' },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: 'Planned services', label: 'Fully hosted mobile', description: 'Planned mobile services on o8 infrastructure.' },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: "Free workspace", label: "Code review & approvals", description: "Review completed work and control when changes can merge." },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: "Free workspace", label: "Projects & repositories", description: "Share project instructions across repositories." },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: "Free workspace", label: "Orchestrator & workers", description: "Plan and run tasks with connected AI tools." },
-  { tab: 'billing', tabLabel: 'Plan & Billing', group: "Free workspace", label: "Voice & dictation", description: "Local Symon dictation and read-aloud \u2014 free forever." },
   { tab: 'connections', tabLabel: 'Mobile', group: "Paired devices", label: "Refresh" },
   { tab: 'connections', tabLabel: 'Mobile', group: "Remote access", label: "Connect this Mac", description: "Keep an authenticated outbound connection to the o8 relay", keywords: ['connect', 'relay', 'remote', 'web', 'machine'] },
   { tab: 'connections', tabLabel: 'Mobile', group: "Symon Messages", label: "Text Symon", description: "Managed number, durable history, and CLI-backed replies", keywords: ['messages', 'text', 'sms', 'symon', 'cli', 'phone'] },
@@ -122,8 +106,8 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Repository & CLI access", description: "Connect GitHub through device flow or an access token" },
   { tab: 'git-prs', tabLabel: 'Git & PRs', group: "GitHub", label: "Automation app", description: "Install or manage the o8 GitHub App" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Reset app data", label: "Factory reset", description: "Wipes ~/.o8 \u2014 sessions, keys, mission state, watched repos; opens confirm modal" },
-  { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Demo sequence", label: "Run demo sequence", description: "Button drives live webview dashboard \u2192 Orchestrator tab \u2192 quick action, read-only", founders: true },
-  { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Loop status", label: "Recent merges", description: "Disclosure toggle expanding the last 5 merge commits (interactive only when commits exist)", founders: true },
+  { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Demo sequence", label: "Run demo sequence", description: "After explicit diagnostic authorization, button drives live webview dashboard \u2192 Orchestrator tab \u2192 quick action, read-only" },
+  { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Loop status", label: "Recent merges", description: "Disclosure toggle expanding the last 5 merge commits (interactive only when commits exist)" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Shipped feature audit", label: "Default-off feature flags", description: "Scheduled release-age check for features that remain dark", keywords: ['flags', 'experimental', 'promotion', 'release age', 'audit'] },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Maintenance", label: "Archive old Codex sessions", description: "Archive sessions older than 14 days" },
   { tab: 'diagnostics', tabLabel: 'Diagnostics', group: "Connection health", label: "Check installed tools", description: "Last checked <time> / Not yet checked; Check again refreshes tool detection" },
@@ -160,9 +144,9 @@ export const SETTINGS_SEARCH_REGISTRY: SettingsSearchEntry[] = [
   { tab: 'models', tabLabel: 'Providers', group: "Codex connection", label: "Codex worker effort", description: "Fallback effort for spawned Codex workers" },
   { tab: 'models', tabLabel: 'Providers', group: "Workers", label: "Default worker", description: "Codex by default \u2014 pick any installed dispatchable runtime to override (may be profile-pinned)" },
   { tab: 'models', tabLabel: 'Providers', group: "Workers", label: "Subscription profile", description: "Use both houses by default \u00b7 Codex/Claude auth status \u00b7 optional profile hint" },
-  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Canvas mode", description: "The glass canvas \u2014 voice-first fleet surface. Sole gate.", founders: true },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Canvas mode", description: "The glass canvas, a voice-first fleet surface." },
   { tab: 'models', tabLabel: 'Providers', group: "Antigravity connection", label: "Antigravity", description: "Google account connection for agent tasks", keywords: ['google', 'gemini', 'agy'] },
-  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Native browser-view", description: "Host-owned native window for the Browser pane (macOS)", founders: true },
+  { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Experimental", label: "Native browser-view", description: "Host-owned native window for the Browser pane (macOS)" },
   { tab: 'models', tabLabel: 'Providers', group: "OpenCode 2 connection", label: "OpenCode 2 runtime", description: "Show OpenCode 2 in dispatch pickers" },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: 'Fleet', label: 'Reuse dependencies (APFS)', description: 'Reuse eligible npm dependencies on compatible Macs; otherwise install normally' },
   { tab: 'operator-defaults', tabLabel: 'Dispatch', group: "Fleet", label: "Concurrent agents", description: "Maximum agent tasks running at once" },

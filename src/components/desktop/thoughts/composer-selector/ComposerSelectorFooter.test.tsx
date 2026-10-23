@@ -775,7 +775,7 @@ describe('ComposerSelectorFooter', () => {
     act(() => effortTrigger.click());
 
     const effectiveModel = resolveEffectiveComposerLeadModelId('codex', undefined)!;
-    const expectedStops = supportedEffortsForLead('codex', effectiveModel, true, false, true);
+    const expectedStops = supportedEffortsForLead('codex', effectiveModel, true, true);
     expect(container.querySelector('[role="slider"]')?.getAttribute('aria-valuemax'))
       .toBe(String(expectedStops.length - 1));
   });
