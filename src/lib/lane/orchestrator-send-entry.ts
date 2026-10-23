@@ -3,6 +3,7 @@ import { createBackendRoleRouteChoice } from '@/lib/operator/role-routing';
 import { recordRoleRoutingReceiptSafely } from '@/lib/operator/role-routing-ledger';
 import type { ComposerWireMode } from '@/lib/orchestrator/composer-wire';
 import { resolveOrchestratorExecutionMode } from './orchestrator-backends/orchestration-mode';
+import { assertOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
 import type { OrchestratorBackend, OrchestratorBackendId, OrchestratorTurnOptions } from './orchestrator-backends/types';
 
 /** Resolve the selected backend before subscriptions and persistence are built. */
@@ -43,6 +44,11 @@ export function sendOrchestratorBackendTurn(
   rawOrchestrationMode: unknown,
   leadingEvents: readonly OrchestratorEvent[] = [],
 ): Promise<void> {
+  try {
+    assertOrchestratorPermissionMode(backend.id, options.permissionMode, options.toolProfile);
+  } catch (error) {
+    return Promise.reject(error);
+  }
   for (const event of leadingEvents) onEvent(event);
   const requested = createBackendRoleRouteChoice(
     backend.id,

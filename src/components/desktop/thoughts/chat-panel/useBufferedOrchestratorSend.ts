@@ -16,7 +16,7 @@ import { contextualTurnMessage, type ContextualConversation } from './contextual
 
 export function useBufferedOrchestratorSend(input: {
   active: boolean; backend: OrchestratorBackendSetting; model: string; effort: ThinkingEffort;
-  permissionMode: 'full' | 'plan'; mode: ComposerMode; solo: boolean; collide: boolean;
+  permissionMode: import('@/lib/orchestrator/permission-mode').OrchestratorPermissionMode; mode: ComposerMode; solo: boolean; collide: boolean;
   projectId: string | null; context?: ContextualConversation['requestContext'];
   send: (message: string, options: OrchestratorSendOptions) => OrchestratorSendHandle | null;
 }) {

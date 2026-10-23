@@ -54,6 +54,21 @@ async function wheel(target: Element, options: WheelEventInit) {
   return event;
 }
 
+it('refreshes overflow after thread titles arrive without changing the tab identities', async () => {
+  Object.defineProperty(scroller, 'scrollWidth', { value: 200 });
+  await act(async () => scroller.dispatchEvent(new Event('scroll')));
+  expect(host.querySelector('[aria-label="Scroll tabs right"]')).toBeNull();
+  Object.defineProperty(scroller, 'scrollWidth', { value: 600 });
+  await act(async () => {
+    root.render(createElement(HeaderPillStrip, {
+      tabs: tabs.map(tab => ({ ...tab, label: `Review the complete task for ${tab.id}` })),
+      activeTabId: tabs[0].id, workspaceId: 'fixture-workspace',
+    }));
+  });
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+  expect(host.querySelector('[aria-label="Scroll tabs right"]')).not.toBeNull();
+});
+
 it.each([
   { mode: 0, delta: 40, expected: 40 },
   { mode: 1, delta: 3, expected: 48 },
