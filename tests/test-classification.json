@@ -3765,6 +3765,14 @@
       ]
     },
     {
+      "path": "tests/orchestrator-compaction-context-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "executable-fixture",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/orchestrator-handoff-transport-real-path.test.ts",
       "reasons": [
         "child-process",

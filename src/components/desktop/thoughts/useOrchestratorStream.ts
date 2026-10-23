@@ -5,7 +5,7 @@ import { stopRunningTools } from '@/components/desktop/transcript/activity';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { retainedTranscriptReducer, retainTranscriptEntries } from '@/lib/transcripts/retained-state';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
-import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
@@ -24,7 +24,7 @@ import { canReadSessionContext } from './use-orchestrator-stream/session-context
 import { optimisticUserEntry } from './use-orchestrator-stream/optimistic-user-entry';
 import { withSessionPrelude } from '@/lib/orchestrator/composer-wire';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
-import { primeCompactedOrchestratorSession, refreshOrchestratorTokenTelemetry, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
+import { primeCompactedOrchestratorSession, requestOrchestratorCompaction } from './use-orchestrator-stream/session';
 import {
   appendSnapshotTurnFailure,
   useNoSnapshotBusyFallback,
@@ -45,6 +45,7 @@ import {
   type OrchestratorStreamStatus,
 } from './use-orchestrator-stream/shared';
 import { useOrchestratorAutoCompaction } from './use-orchestrator-stream/auto-compaction';
+import { useOrchestratorTokenTelemetry } from './use-orchestrator-stream/token-telemetry';
 import {
   createOrchestratorMessageHandler,
   type CurrentAssistantStreamState,
@@ -220,30 +221,10 @@ export function useOrchestratorStream(
     setRunningTotal(value);
   }, []);
 
-  const refreshTokenTelemetry = useCallback(async () => {
-    return await refreshOrchestratorTokenTelemetry({
-      repoPath: repoPathRef.current,
-      threadId: threadIdRef.current,
-      backend: isOrchestratorBackendId(lastBackendRef.current) ? lastBackendRef.current : null,
-      setRunningTotal: updateRunningTotal,
-      setTokenCount,
-      telemetryBindingRef,
-      telemetryTotalRef,
-    });
-  }, [updateRunningTotal]);
-
-  const requestCompaction = useCallback(async (
-    activeRepoPath: string,
-    nextRunningTotal: number,
-    options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
-  ) => {
-    const activeThreadId = options?.threadId ?? threadIdRef.current;
-    if (!activeThreadId) return null;
-    return await requestOrchestratorCompaction(activeRepoPath, nextRunningTotal, {
-      ...options,
-      threadId: activeThreadId,
-    });
-  }, []);
+  const { refreshTokenTelemetry, requestCompaction } = useOrchestratorTokenTelemetry({
+    repoPathRef, threadIdRef, lastBackendRef, updateRunningTotal, setTokenCount,
+    telemetryBindingRef, telemetryTotalRef,
+  });
 
   const primeCompactedSession = useCallback(async (
     activeRepoPath: string,

@@ -19,6 +19,7 @@ import { compactionQuestions } from '@/lib/judgment/questions';
 import { isJudgmentRefereeEnabled } from '@/lib/judgment/route';
 import { ABSTAIN_CONFIDENCE } from '@/lib/judgment/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { compactionEntryText } from './compaction-text';
 
 export const COMPACTION_SCORER_SURFACE = 'compaction-scorer';
 
@@ -64,12 +65,6 @@ export function setCompactionScorerTransportForTests(options: AskJudgmentOptions
 }
 
 const approxTokens = (value: string) => Math.max(0, Math.ceil(value.length / 4));
-const stripCompactionTags = (value: string) => value.replace(/<\/?compacted_context\b[^>]*>/gi, '').trim();
-
-/** The entry text before the summarizer's own 1400-char cut. */
-function entryText(entry: MobileTranscriptEntry): string {
-  return entry.type === 'compaction' ? stripCompactionTags(entry.compaction?.summary ?? entry.text) : entry.text.trim();
-}
 
 export const questionIdFor = (entryId: string) => `entry_${entryId}`;
 
@@ -78,7 +73,7 @@ export function buildCompactionState(entries: readonly MobileTranscriptEntry[]):
   let truncated = entries.length > MAX_SCORED_ENTRIES;
   let used = 0;
   const stateEntries = entries.slice(0, MAX_SCORED_ENTRIES).map((entry): CompactionStateEntry => {
-    const full = entryText(entry);
+    const full = compactionEntryText(entry);
     const base = {
       question: questionIdFor(entry.id),
       id: entry.id,

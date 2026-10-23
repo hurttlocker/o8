@@ -17,6 +17,7 @@ interface RefreshTokenTelemetryOptions {
   backend: OrchestratorBackendId | null;
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
+  setContextSource?: (value: string | undefined) => void;
   telemetryBindingRef: RefLike<string | null>;
   telemetryTotalRef: RefLike<number | null>;
 }
@@ -25,6 +26,7 @@ interface RuntimeTelemetryResponse {
   telemetry?: {
     totalTokens?: number | null;
     contextTokens?: number | null;
+    contextSource?: string;
     estimatedCostUsd?: number | null;
     model?: string | null;
   };
@@ -58,13 +60,10 @@ export async function refreshOrchestratorTokenTelemetry(
 
     const payload = await response.json() as RuntimeTelemetryResponse;
     if (options.telemetryBindingRef.current !== binding) return null;
-    // Runtime totalTokens is the billable rollup and may include native child
-    // work. Auto-compact and the context meter use only the tokens that entered
-    // this parent session's own window.
-    const rawContextTokens = typeof payload.telemetry?.contextTokens === 'number'
-      ? payload.telemetry.contextTokens
-      : payload.telemetry?.totalTokens;
-    const totalTokens = typeof rawContextTokens === 'number'
+    // Never substitute billing totals: tool requests repeatedly bill the same
+    // prompt and can cross the compaction threshold with a small context.
+    const rawContextTokens = payload.telemetry?.contextTokens;
+    const totalTokens = typeof rawContextTokens === 'number' && Number.isFinite(rawContextTokens)
       ? Math.max(0, Math.min(ORCHESTRATOR_CONTEXT_LIMIT, rawContextTokens))
       : null;
     const estimatedCostUsd = typeof payload.telemetry?.estimatedCostUsd === 'number'
@@ -83,6 +82,7 @@ export async function refreshOrchestratorTokenTelemetry(
     options.telemetryTotalRef.current = totalTokens;
     options.setTokenCount(nextTokenCount);
     options.setRunningTotal(totalTokens);
+    options.setContextSource?.(payload.telemetry?.contextSource ?? 'runtime-context');
     emitTokenUsage({ repoPath: activeRepoPath, tokenCount: nextTokenCount, runningTotal: totalTokens });
     return { totalTokens, estimatedCostUsd, model: telemetryModel };
   } catch {
@@ -93,7 +93,7 @@ export async function refreshOrchestratorTokenTelemetry(
 export async function requestOrchestratorCompaction(
   activeRepoPath: string,
   nextRunningTotal: number,
-  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null },
+  options?: { keepTailCount?: number; trigger?: 'auto' | 'manual' | 'handoff'; threadId?: string | null; contextSource?: string },
 ): Promise<CompactResponsePayload | null> {
   const response = await fetch('/api/orchestrator/compact', {
     method: 'POST',
@@ -102,6 +102,7 @@ export async function requestOrchestratorCompaction(
       repoPath: activeRepoPath,
       threadId: options?.threadId,
       runningTotal: nextRunningTotal,
+      contextSource: options?.contextSource,
       keepTailCount: options?.keepTailCount,
       trigger: options?.trigger,
     }),
