@@ -26,6 +26,7 @@ import { isOwnedOrchestratorSessionKey } from '@/lib/orchestrator/runtime-capabi
 import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
 import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import type { Lane } from './types';
+import { probeOwnedRunIdentity } from '@/lib/runtimes/shared/owned-session/process-identity';
 
 /**
  * Result of an owned-session liveness probe. `alive` is a tri-state:
@@ -106,6 +107,11 @@ export async function probeOwnedSessionLiveness(
   if (run.tmuxSession === undefined && run.pid === undefined) {
     return (await probeCodexWorktreeContinuity(sessionKey, worktreePath))
       ?? { alive: false, source: 'owned-session-registry', note: 'owned session activeRun cleared' };
+  }
+  if (run.processIdentityRequired || run.processIdentity) {
+    const proof = await probeOwnedRunIdentity(run);
+    return { alive: proof.state === 'unknown' ? undefined : proof.state === 'match',
+      source: 'owned-process-identity', pid: run.pid, note: proof.state };
   }
   if (run.tmuxSession) {
     // Trust the tmux/bridge session first — it survives `zsh -l -c CMD` exec-ing

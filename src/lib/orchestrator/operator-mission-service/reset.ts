@@ -152,6 +152,8 @@ function markPacketResetCleanupFailed(packet: OrchestratorPacket) {
   packet.lastEventLabel = 'worktree_cleanup_failed';
 }
 
+// Refuse busy admission before changing packet state or starting retirement.
+// Finalization keeps its existing lock discipline after side effects begin.
 async function selectCurrentPacketForReset(input: ResetPacketInput) {
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { result } = await withLockedState((fresh) => {
@@ -165,7 +167,7 @@ async function selectCurrentPacketForReset(input: ResetPacketInput) {
       repoPath: fresh.repoPath?.trim() || packet.lane?.repoPath?.trim() || '',
       packet: structuredClone(packet),
     };
-  });
+  }, input.scope?.skipHoldIfStateMoved ? {} : { waitTimeoutMs: 1_000 });
   return result;
 }
 
