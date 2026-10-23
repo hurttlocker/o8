@@ -3365,6 +3365,12 @@
       ]
     },
     {
+      "path": "tests/mcp-response-budget-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-source-boot.test.ts",
       "reasons": [
         "child-process",
