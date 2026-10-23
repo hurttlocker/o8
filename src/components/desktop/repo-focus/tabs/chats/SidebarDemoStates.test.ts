@@ -94,6 +94,14 @@ describe('seeded states through the actual compact chat panel', () => {
     expect(container.textContent).not.toContain('Demo states');
     const shelves = [...container.querySelectorAll('[aria-label$=" conversations"]')].map((node) => node.getAttribute('aria-label'));
     expect(shelves).toEqual(['Pinned conversations', 'Recents conversations', 'Today conversations', 'Yesterday conversations', 'Previous 7 days conversations']);
+    for (const shelf of container.querySelectorAll<HTMLElement>('[aria-label$=" conversations"]')) {
+      const header = shelf.firstElementChild as HTMLElement;
+      expect(header.style.fontSize).toBe('12px');
+      expect(header.style.fontWeight).toBe('300');
+      expect(header.style.color).toBe('var(--t-text-faint)');
+      expect(header.style.paddingTop).toBe(shelf.getAttribute('aria-label') === 'Today conversations' ? '8px' : '16px');
+      expect(header.style.paddingBottom).toBe('6px');
+    }
     expect(container.querySelector('[aria-label="Pinned conversations"]')?.textContent).toContain('Pinned chat');
     expect(container.querySelector('[aria-label="Yesterday conversations"]')?.textContent).toContain('Demo · finished');
     expect(container.querySelector('[aria-label="Previous 7 days conversations"]')?.textContent).toContain('Demo · idle');
