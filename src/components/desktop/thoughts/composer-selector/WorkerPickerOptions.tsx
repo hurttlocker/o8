@@ -22,7 +22,7 @@ export function WorkerPickerOptions({ runtime, defaults, saving, onEffortChange,
   const supportsEffort = !providerDefault && getRuntimeCapability(runtime).reasoningEffort && (runtime === 'codex' || runtime === 'claude-code');
   const current = runtime === 'codex' ? defaults.codexWorkerEffort ?? 'adaptive' : defaults.claudeWorkerEffort ?? 'adaptive';
   const choices: readonly ThinkingEffort[] = supportsEffort
-    ? ['adaptive', ...supportedEffortsForLead(runtime === 'codex' ? 'codex' : 'claude', workerModelForDisplay(runtime, defaults), false, false, ultraEnabled)] : [];
+    ? ['adaptive', ...supportedEffortsForLead(runtime === 'codex' ? 'codex' : 'claude', workerModelForDisplay(runtime, defaults), false, ultraEnabled)] : [];
   return <div style={{ borderTop: '1px solid var(--t-border)', paddingTop: 6, paddingRight: 8, paddingBottom: 4, paddingLeft: 8 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 26, fontSize: 10.5, color: 'var(--t-text-muted)' }}>
       <span>Worker thinking</span>

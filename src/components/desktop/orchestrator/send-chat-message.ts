@@ -76,13 +76,13 @@ function friendlyErrorMessage(status: number, payload: ChatErrorResponse | null)
       : 'Sign in to use chat: [open sign-in](/sign-in).';
   }
   if (status === 429) {
-    return 'Free chat limit reached for today. Switch to Bring your own key in Settings, or upgrade when paid chat goes live.';
+    return 'Daily chat limit reached. Connect your own provider in Settings.';
   }
   if (payload?.error === 'byok_key_missing') {
     return 'Add a DeepSeek API key in Settings -> API Keys, then use Bring your own key again.';
   }
   if (payload?.error === 'paid_tier_not_yet_active') {
-    return 'Paid chat models are not active yet. Use o8 Default or Bring your own key for now.';
+    return 'This model is unavailable. Use o8 Default or Bring your own key for now.';
   }
   return payload?.message || `Chat request failed (${status}).`;
 }

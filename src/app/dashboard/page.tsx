@@ -39,7 +39,7 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { useVisualizationWorkspaceEvents } from '@/components/desktop/visualizations/useVisualizationWorkspaceEvents';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
-import { EntitlementProvider } from '@/lib/entitlement/context';
+import { AccountAuthorizationSync } from '@/lib/entitlement/AccountAuthorizationSync';
 // ConnectionBanner retired — ConnectionPill in AgentPanel surfaces WS state.
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -52,7 +52,6 @@ import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { useRightPanelMaximize } from '@/components/desktop/shell/useRightPanelMaximize';
 import { RightPrTabs } from '@/components/desktop/pr-panel/RightPrTabs';
 import { rightPrTabId, useRightPrTabs, type RightPrTab } from '@/components/desktop/pr-panel/useRightPrTabs';
-import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { DesktopCloseCoordinator } from '@/components/desktop/DesktopCloseCoordinator';
 import { TerminalCloseDialog } from '@/components/desktop/workspace-terminal/TerminalCloseDialog';
 import { useThreadWorkspaceNavigation } from '@/components/desktop/o8-panel/useThreadNavigation';
@@ -301,13 +300,13 @@ export default function DashboardPage() {
   return (
     <ThemeProvider>
       <AlertProvider>
-        <EntitlementProvider>
+        <AccountAuthorizationSync>
           <ReactiveQueryProvider>
             <DesktopWebSocketProvider>
               <DashboardInner />
             </DesktopWebSocketProvider>
           </ReactiveQueryProvider>
-        </EntitlementProvider>
+        </AccountAuthorizationSync>
       </AlertProvider>
     </ThemeProvider>
   );
@@ -5089,38 +5088,6 @@ function DashboardInner() {
 
       </div>{/* end center+right row */}
 
-      {/* Optional development indicator; the workspace uses the full height. */}
-      <DesktopStatusBar
-        branchName={(() => {
-          const projectBranch = globalRepoEntry?.readiness?.currentBranch
-            ?? globalRepoBranch
-            ?? workspaceTerminalPreferredRepo?.branch
-            ?? null;
-          const sel = orchestratorWorktreeSelection;
-          // Only override when the orchestrator's pick targets the same
-          // repo as the bottom-status context. Cross-repo picks fall back
-          // to the project branch so the pill doesn't surface PRs from a
-          // different repo than the chrome buttons point at.
-          if (!sel) return projectBranch;
-          const projectPath = globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
-          if (sel.repoPath && projectPath && sel.repoPath !== projectPath) return projectBranch;
-          return sel.branch || projectBranch;
-        })()}
-        repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
-        repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
-        // Only the registry entry knows the repo's default branch (readiness
-        // carries onDefaultBranch, but that describes the REPO's checkout — not
-        // whichever branch this cluster is showing, which may be an agent's
-        // worktree). Null when unknown, and the cluster then shows the chip
-        // rather than guessing it away.
-        defaultBranch={globalRepoEntry?.defaultBranch ?? null}
-        compact={compactShell}
-        glassSurface={effectiveGlassSurface}
-        parkedLanes={parkedLanes}
-        onOpenReviewLane={handleOpenReviewLane}
-        onOpenAwaitingMerge={handleOpenAwaitingMerge}
-        rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
-      />
       </div>{/* end center+right column */}
       </div>{/* end main layout */}
 

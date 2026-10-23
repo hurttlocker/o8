@@ -8,8 +8,6 @@ import {
   MONO_FONT_STACK,
   SettingsSegmented,
 } from './shared';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { ValuePill } from './grouped';
 import {
   readAdaptiveThinkingEnabled,
   readUltraEffortEnabled,
@@ -90,10 +88,6 @@ export function DispatchFoundersSection({
   // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
   const [adaptiveThinking, setAdaptiveThinking] = useState(() => readAdaptiveThinkingEnabled());
   const [ultraEffort, setUltraEffort] = useState(() => readUltraEffortEnabled());
-  // Managed-plan status mirrors inference-route.ts rule #1: an eligible plan
-  // token routes Brain calls through the managed proxy first.
-  const { plan } = useEntitlement();
-  const managedBrain = plan === 'founder' || plan === 'pro' || plan === 'team';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(sources, field) ? ENV_LOCKED_REASON : normal;
 
@@ -200,17 +194,6 @@ export function DispatchFoundersSection({
         <SettingsGroup
           footnote="Advanced choices for repository answers and worker access to the Brain. These may use the selected provider or connected CLI quota."
         >
-          <SettingsRow
-            icon={<ZapIcon />}
-            label="Managed inference"
-            subtitle={managedBrain
-              ? 'Brain answers try the managed inference route first.'
-              : 'Subscribe through o8 to make managed inference the first Brain route.'}
-            accessory={managedBrain
-              ? <ValuePill tone="success">Active</ValuePill>
-              : <ValuePill>Not active</ValuePill>}
-            divider
-          />
           <SettingsRow
             icon={<BrainRowIcon />}
             label="Brain answer model"

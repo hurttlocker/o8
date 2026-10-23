@@ -80,7 +80,7 @@ function IsolatedSelector({ threadId = null }: { threadId?: string | null }) {
   const [effort, setEffort] = useState<ThinkingEffort>('low');
   const controls = useComposerSelectorState({ enabled: true, isolated: true, mode: 'solo', modelId: model, modelLabel: model,
     backend: 'codex', effort, operatorDefaultEffort: 'low', adaptiveEnabled: false, threadId, repoPath: '/repo/alpha',
-    onModelRestore: setModel, onModelChange: setModel, onEffortChange: setEffort, isFreePlan: false });
+    onModelRestore: setModel, onModelChange: setModel, onEffortChange: setEffort });
   useEffect(() => { isolatedControls = controls; }, [controls]);
   return createElement('output', null, `${model}:${effort}`);
 }

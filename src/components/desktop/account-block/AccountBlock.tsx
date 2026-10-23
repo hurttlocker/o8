@@ -3,8 +3,6 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
-import { useEntitlement } from '@/lib/entitlement/context';
-import { PLAN_LABELS } from '@/lib/entitlement/display';
 import { ChromeButton, SIDEBAR_FOOTER_HIT_SIZE } from '../chrome/ChromeButton';
 import { DeviceMobileIcon } from '../desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from '../SettingsQuickDrawer';
@@ -86,7 +84,6 @@ export function AccountBlock({
   onOpenMobilePairing,
 }: AccountBlockProps) {
   const { isLoaded, signedIn, user } = useO8Auth();
-  const { plan, founder, actualPlan, actualFounder } = useEntitlement();
   const accountRowRef = useRef<HTMLDivElement | null>(null);
   const [popover, setPopover] = useState<AccountPopover>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
@@ -106,14 +103,6 @@ export function AccountBlock({
   const hasUser = signedIn && Boolean(user);
   const displayName = user?.name?.trim() || user?.email?.trim() || 'Account';
   const initial = Array.from(displayName)[0]?.toUpperCase() ?? '';
-  const isFounder = Boolean(founder || actualFounder) || plan === 'founder' || actualPlan === 'founder';
-  const isPaid = plan === 'pro' || plan === 'team' || actualPlan === 'pro' || actualPlan === 'team';
-  const planLabel = isFounder ? PLAN_LABELS.founder : isPaid ? PLAN_LABELS.pro : 'Free Plan';
-  // Signed out while a paid/founder entitlement is still cached = the Clerk
-  // session expired underneath the account (server-side lifetime, #1623) —
-  // an explicit sign-out clears the cached entitlement, so this state can
-  // only be reached by expiry. Say so instead of presenting as never-signed-in.
-  const sessionExpired = !hasUser && (isFounder || isPaid);
   const openSettings = onOpenSettings ?? NOOP;
 
   const syncAnchor = useCallback(() => {
@@ -231,19 +220,6 @@ export function AccountBlock({
                   }}
                 >
                   {hasUser ? initial : ''}
-                  {sessionExpired ? (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        right: 0,
-                        width: 7,
-                        height: 7,
-                        borderRadius: '50%',
-                        background: 'var(--t-brand-orange, #FF5A1F)',
-                      }}
-                    />
-                  ) : null}
                 </span>
               )}
               <span style={{ minWidth: 0, flex: 1 }}>
@@ -260,7 +236,7 @@ export function AccountBlock({
                     lineHeight: 1.25,
                   }}
                 >
-                  {hasUser ? displayName : sessionExpired ? 'Session expired' : 'Sign in'}
+                  {hasUser ? displayName : 'Sign in'}
                 </span>
                 <span
                   style={{
@@ -276,7 +252,7 @@ export function AccountBlock({
                     lineHeight: 1.25,
                   }}
                 >
-                  {hasUser ? planLabel : sessionExpired ? 'Sign in again to resync' : 'Sync your account'}
+                  {hasUser ? 'Account settings' : 'Sync your account'}
                 </span>
               </span>
             </button>

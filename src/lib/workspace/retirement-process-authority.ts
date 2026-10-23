@@ -1,4 +1,5 @@
-import { assertOrphanCloseOwner } from '@/lib/orchestrator/close-orphaned-owner';
+import { withCloseTiming } from '@/lib/orchestrator/close-timing';
+import { assertOrphanCloseOwner, prepareOrphanCloseOwners, withOrphanCloseContext } from '@/lib/orchestrator/close-orphaned-owner';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 
@@ -27,7 +28,16 @@ export async function withManagedRetirementOwnership<T>(
 ): Promise<T> {
   const lanes = await owningLanes(repositoryPath, sourcePath);
   if (lanes.length > 1) throw new Error('Retirement has ambiguous durable lane ownership.');
-  return withPacketLifecycleSpawnLock(lanes[0]?.packetId ?? null, operation);
+  const lane = lanes[0];
+  return withPacketLifecycleSpawnLock(lane?.packetId ?? null, () => {
+    if (!lane?.packetId || !['archived', 'completed', 'failed'].includes(lane.status)) return operation();
+    // Background terminal maintenance and merge tails use the same exact
+    // missing-session admission as explicit archive, under the spawn lease.
+    return withCloseTiming(lane.packetId, () => withOrphanCloseContext(lane.packetId!, async () => {
+      await prepareOrphanCloseOwners([lane]);
+      return operation();
+    }));
+  });
 }
 
 /** Prove the current owner before source writes and every destructive/replay seam. */

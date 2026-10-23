@@ -19,27 +19,6 @@ const cta = (dark: boolean): CSSProperties => ({
   cursor: 'pointer',
 });
 
-function Check({ dark }: { dark: boolean }) {
-  return (
-    <span
-      style={{
-        width: 16,
-        height: 16,
-        borderRadius: 999,
-        background: dark ? 'rgba(255,255,255,0.12)' : 'rgba(20,32,46,0.08)',
-        color: dark ? '#cfe6ff' : '#2c6df0',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 10,
-        flexShrink: 0,
-      }}
-    >
-      ✓
-    </span>
-  );
-}
-
 export default function PortalCardPreviewPage() {
   return (
     <div
@@ -58,7 +37,7 @@ export default function PortalCardPreviewPage() {
         <h1 style={{ fontSize: 22, fontWeight: 440, letterSpacing: '-0.4px', margin: 0 }}>Portal card lab</h1>
         <p style={{ fontSize: 13, color: 'var(--t-text-muted, #6b7280)', marginTop: 6, lineHeight: 1.5, maxWidth: 720 }}>
           The o8 motif — a clean glass card with the animated landscape inside a framed <strong>portal/window</strong>,
-          light spilling out. Not a photo background. Light &amp; dark, as pricing / feature / modal.
+          light spilling out. Not a photo background. Light &amp; dark, as feature / modal.
         </p>
       </header>
 
@@ -73,27 +52,6 @@ export default function PortalCardPreviewPage() {
           justifyContent: 'center',
         }}
       >
-        {/* LIGHT pricing card */}
-        <PortalCard variant="light" width={360} height={520} portalHeight={196}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <div style={{ fontSize: 11.5, fontWeight: 560, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#5d6a78' }}>Pro · Lifetime</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 7 }}>
-                <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.5px' }}>One-time purchase</span>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, fontSize: 13.5 }}>
-              {['Full governed fleet — no extra sub', 'Build-in-public roadmap priority', 'Pro · Lifetime status & voice', 'Lifetime — never a locked door'].map((f) => (
-                <div key={f} style={{ display: 'flex', gap: 9, alignItems: 'center', color: '#3a4654' }}>
-                  <Check dark={false} />
-                  {f}
-                </div>
-              ))}
-            </div>
-            <button type="button" style={cta(false)}>Get Pro · Lifetime</button>
-          </div>
-        </PortalCard>
-
         {/* DARK feature / hero card */}
         <PortalCard variant="dark" width={360} height={520} portalHeight={210}>
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -130,7 +88,7 @@ export default function PortalCardPreviewPage() {
       </div>
 
       <div style={{ maxWidth: 1180, margin: '0 auto', marginTop: 18, fontSize: 11, color: 'var(--t-text-muted, #6b7280)', textAlign: 'center' }}>
-        light pricing card · dark feature card · light modal — landscape lives in the portal, not the background
+        dark feature card · light modal. Landscape lives in the portal, not the background
       </div>
     </div>
   );

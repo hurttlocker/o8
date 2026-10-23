@@ -43,6 +43,10 @@ export async function archiveTerminalLanes(
     const lane = getLane(candidate.id);
     if (!lane || !isLaneTerminal(lane.status) || lane.status === 'archived') continue;
 
+    if (lane.packetId && lane.worktreePath && lane.ownership === 'managed') {
+      await import('./retire-finished-worktree').then(({ retireFinishedWorktree }) => retireFinishedWorktree(lane));
+    }
+
     if (lane.sessionKey) {
       // Same session retirement the per-row Archive performs, so the runtime
       // inventory stops re-adding a row for a lane that just left the rail.

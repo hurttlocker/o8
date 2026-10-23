@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useActivityExtras } from './useActivityExtras';
 import { ActivityFeedControls } from './ActivityFeedControls';
 import { ActivityFeedTimeline } from './ActivityFeedTimeline';
 import {
@@ -9,7 +10,6 @@ import {
   agentRepoSlug,
   normalizeActivitySubject,
   normalizeRepoSlug,
-  relativeAge,
   shortRepoLabel,
   shortWorkspaceLabel,
 } from './shared';
@@ -42,15 +42,6 @@ interface ActivityFeedProps {
   refreshKey?: number;
 }
 
-type ActivityExtras = {
-  issues: ActivityItem[];
-  prs: ActivityItem[];
-  ciRuns: ActivityItem[];
-  repoCommits: ActivityItem[];
-};
-
-const EMPTY_EXTRAS: ActivityExtras = { issues: [], prs: [], ciRuns: [], repoCommits: [] };
-
 export const ActivityFeed = memo(function ActivityFeed({
   events,
   commits,
@@ -65,8 +56,6 @@ export const ActivityFeed = memo(function ActivityFeed({
   activeAgentKey,
   refreshKey,
 }: ActivityFeedProps) {
-  const [extras, setExtras] = useState<ActivityExtras>(EMPTY_EXTRAS);
-  const [remoteScopeError, setRemoteScopeError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [repoOverrideState, setRepoOverrideState] = useState<{
     activeAgentKey: string | null;
@@ -85,7 +74,6 @@ export const ActivityFeed = memo(function ActivityFeed({
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [prHoverDetails, setPrHoverDetails] = useState<Record<string, PRHoverDetail>>({});
   const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
-  const [timelineOrigin, setTimelineOrigin] = useState(Date.now);
 
   useEffect(() => {
     ipcFetch('/api/panel/repos')
@@ -161,198 +149,7 @@ export const ActivityFeed = memo(function ActivityFeed({
     });
   }, [agentRepoById, events, isAllRepos, repo]);
 
-  const rateLimitPausedUntilRef = useRef<number>(0);
-  useEffect(() => {
-    async function fetchForRepo(repoSlug: string) {
-      if (Date.now() < rateLimitPausedUntilRef.current) {
-        return { issues: [], prs: [], ciRuns: [], commits: [], errors: ['GitHub rate limit — paused until reset'] };
-      }
-
-      const [issuesRes, prsRes, ciRes, commitsRes] = await Promise.all([
-        fetch(`/api/panel/issues?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
-        fetch(`/api/panel/prs?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
-        fetch(`/api/panel/ci?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
-        ipcFetch(`/api/panel/commits?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
-      ]);
-
-      for (const response of [issuesRes, prsRes, ciRes, commitsRes]) {
-        if (!response) continue;
-        if (response.status === 403 || response.status === 429) {
-          const retryAfter = response.headers.get('retry-after');
-          const resetHeader = response.headers.get('x-ratelimit-reset');
-          const pauseMs = retryAfter
-            ? Number(retryAfter) * 1000
-            : resetHeader
-              ? Math.max((Number(resetHeader) * 1000) - Date.now(), 60_000)
-              : 5 * 60_000;
-          rateLimitPausedUntilRef.current = Date.now() + pauseMs;
-          break;
-        }
-      }
-
-      const repoName = repoSlug.split('/').pop() ?? repoSlug;
-      const errors: string[] = [];
-      const issueItems: ActivityItem[] = [];
-      if (issuesRes?.ok) {
-        const data = await issuesRes.json();
-        if (data.error) errors.push(String(data.error));
-        for (const issue of (data.issues ?? []).slice(0, 8)) {
-          const ts = issue.createdAt ? new Date(issue.createdAt).getTime() : 0;
-          issueItems.push({
-            kind: 'issue',
-            number: issue.number,
-            title: issue.title,
-            state: (issue.state ?? '').toLowerCase(),
-            labels: issue.labels ?? [],
-            age: issue.createdAt ? relativeAge(issue.createdAt) : '',
-            ts,
-            repo: repoSlug,
-            author: issue.author?.login ?? 'unknown',
-            assignees: (issue.assignees ?? [])
-              .map((assignee: { login?: string | null }) => assignee.login ?? '')
-              .filter(Boolean),
-            comments: typeof issue.comments === 'number' ? issue.comments : 0,
-            body: (issue.body ?? '').trim(),
-          });
-        }
-      }
-
-      const prItems: ActivityItem[] = [];
-      if (prsRes?.ok) {
-        const data = await prsRes.json();
-        if (data.error) errors.push(String(data.error));
-        for (const pr of (data.prs ?? []).slice(0, 8)) {
-          const ts = pr.createdAt ? new Date(pr.createdAt).getTime() : 0;
-          const checks = pr.statusCheckRollup ?? [];
-          prItems.push({
-            kind: 'pr',
-            number: pr.number,
-            title: pr.title,
-            state: (pr.state ?? '').toLowerCase(),
-            author: pr.author?.login ?? '',
-            branch: pr.headRefName ?? '',
-            additions: pr.additions ?? 0,
-            deletions: pr.deletions ?? 0,
-            changedFiles: pr.changedFiles ?? 0,
-            reviewDecision: pr.reviewDecision ?? '',
-            checkSummary: {
-              passed: checks.filter((check: { conclusion?: string | null }) => check.conclusion?.toLowerCase() === 'success').length,
-              failed: checks.filter((check: { conclusion?: string | null }) => check.conclusion?.toLowerCase() === 'failure').length,
-              pending: checks.filter((check: { conclusion?: string | null; status?: string | null }) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length,
-            },
-            failingChecks: checks
-              .filter((check: { name?: string | null; conclusion?: string | null }) => check.conclusion?.toLowerCase() === 'failure')
-              .map((check: { name?: string | null }) => check.name || 'Unknown check')
-              .slice(0, 3),
-            age: pr.createdAt ? relativeAge(pr.createdAt) : '',
-            ts,
-            repo: repoSlug,
-          });
-        }
-      }
-
-      const ciItems: ActivityItem[] = [];
-      if (ciRes?.ok) {
-        const data = await ciRes.json();
-        if (data.error) errors.push(String(data.error));
-        for (const run of (data.runs ?? []).slice(0, 6)) {
-          const ts = run.createdAt ? new Date(run.createdAt).getTime() : 0;
-          ciItems.push({
-            kind: 'ci',
-            id: run.databaseId,
-            title: run.displayTitle ?? '',
-            status: run.status ?? '',
-            conclusion: run.conclusion ?? '',
-            branch: run.headBranch ?? '',
-            workflow: run.workflowName ?? '',
-            age: run.createdAt ? relativeAge(run.createdAt) : '',
-            ts,
-            repo: repoSlug,
-          });
-        }
-      }
-
-      const commitItems: ActivityItem[] = [];
-      if (commitsRes?.ok) {
-        const data = await commitsRes.json();
-        if (data.error) errors.push(String(data.error));
-        for (const commit of (data.commits ?? []).slice(0, 10)) {
-          const ts = commit.date ? new Date(commit.date).getTime() : 0;
-          commitItems.push({
-            kind: 'commit',
-            hash: commit.hash ?? '',
-            message: `${isAllRepos ? `[${repoName}] ` : ''}${commit.message ?? ''}`,
-            age: commit.date ? relativeAge(commit.date) : '',
-            ts,
-            repo: repoSlug,
-          });
-        }
-      }
-
-      return { issues: issueItems, prs: prItems, ciRuns: ciItems, commits: commitItems, errors };
-    }
-
-    async function fetchExtras() {
-      try {
-        if (!repo) {
-          setExtras(EMPTY_EXTRAS);
-          setRemoteScopeError(null);
-          return;
-        }
-
-        if (isAllRepos) {
-          if (allRepos.length === 0) {
-            setExtras(EMPTY_EXTRAS);
-            setRemoteScopeError(null);
-            return;
-          }
-
-          const results = await Promise.all(allRepos.map((repoSlug) => fetchForRepo(repoSlug).catch((error) => ({
-            issues: [],
-            prs: [],
-            ciRuns: [],
-            commits: [],
-            errors: [error instanceof Error ? error.message : 'Unable to load repo activity'],
-          }))));
-
-          const merged: ActivityExtras = { issues: [], prs: [], ciRuns: [], repoCommits: [] };
-          const mergedErrors: string[] = [];
-          for (const result of results) {
-            merged.issues.push(...result.issues);
-            merged.prs.push(...result.prs);
-            merged.ciRuns.push(...result.ciRuns);
-            merged.repoCommits.push(...result.commits);
-            mergedErrors.push(...result.errors);
-          }
-          setTimelineOrigin(Date.now());
-          setExtras(merged);
-          setRemoteScopeError(mergedErrors.length > 0 ? Array.from(new Set(mergedErrors)).join(' | ') : null);
-          return;
-        }
-
-        const result = await fetchForRepo(repo);
-        setTimelineOrigin(Date.now());
-        setExtras({ issues: result.issues, prs: result.prs, ciRuns: result.ciRuns, repoCommits: result.commits });
-        setRemoteScopeError(result.errors.length > 0 ? result.errors.join(' | ') : null);
-      } catch {
-        setRemoteScopeError(null);
-      }
-    }
-
-    void fetchExtras();
-    // WS-driven: refresh on agent/lane events instead of 5min-only polling
-    const handler = () => {
-      setTimelineOrigin(Date.now());
-      void fetchExtras();
-    };
-    const wsEvents = ['o8:lifecycle-reconcile'];
-    for (const e of wsEvents) window.addEventListener(e, handler);
-    const fallbackId = setInterval(handler, 300_000);
-    return () => {
-      clearInterval(fallbackId);
-      for (const e of wsEvents) window.removeEventListener(e, handler);
-    };
-  }, [allRepos, isAllRepos, refreshKey, repo]);
+  const { extras, remoteScopeError, timelineOrigin } = useActivityExtras(repo, allRepos, isAllRepos, refreshKey);
 
   const fallbackCommitItems = useMemo<ActivityItem[]>(() => {
     if (repo || extras.repoCommits.length > 0) return [];

@@ -7,7 +7,6 @@ import { THINKING_EFFORT_LABELS, type ThinkingEffort } from '@/lib/orchestrator/
 import type { OrchestratorBackendSetting } from './operator-defaults';
 import { MODEL_IDS } from '@/lib/models';
 import { codexSupportsReasoningEffort } from '@/lib/codex/reasoning-effort';
-import { useEntitlement } from '@/lib/entitlement/context';
 import { AcpModelPicker } from './AcpModelPicker';
 import { shortModelLabel as acpShortModelLabel } from '@/lib/orchestrator/acp-model-catalogue';
 import { CLAUDE_CODE_PROFILE_CHANGED_EVENT } from '@/lib/claude-code/worker-profile-types';
@@ -439,16 +438,13 @@ export function ModelThinkingChip({
   // levels we can't actually steer (Q ruling 2026-07-11).
   const thinkingKnown = activeBackend === 'claude' || activeBackend === 'fable'
     || activeBackend === 'codex' || activeBackend === 'auto';
-  // The o8 lead has one setting on every plan, so it shows no effort control
+  // The o8 lead has one managed setting, so it shows no effort control
   // (#2999, #3660). Mode rows (Solo/Collide) stay hidden for o8.
   const isO8Backend = activeBackend === 'o8';
-  const { plan: entitlementPlan } = useEntitlement();
-  const isFreePlan = entitlementPlan === 'free';
   const options = supportedEffortsForLead(
     activeBackend ?? 'auto',
     effectiveModelId ?? '',
     adaptiveEnabled,
-    isFreePlan,
     ultraEnabled,
   );
   // Backends without steerable thinking expose no effort stops.
@@ -679,7 +675,7 @@ export function ModelThinkingChip({
                               }
                               // Drop an effort only when the shared verified catalog excludes it.
                               if (!codexSupportsReasoningEffort(option.model, 'ultra') && effort === 'ultra') onEffortChange?.('max');
-                              // The o8 lead has one setting on every plan (#3660).
+                              // The o8 lead has one managed setting (#3660).
                               if (option.backend === 'o8') onEffortChange?.('low');
                               setOpen(false);
                             }}
