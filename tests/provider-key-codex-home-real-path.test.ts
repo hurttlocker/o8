@@ -20,6 +20,7 @@ const { CodexAppServerClient } = await import('@/lib/codex/app-server-client');
 const request = (path: string, body: unknown) => new NextRequest(`http://localhost/api/${path}`, { method: 'POST', headers: { host: 'localhost' }, body: JSON.stringify(body) });
 beforeEach(async () => {
   vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 112).toString('base64url'));
+  vi.stubEnv('HOME', state.home);
   vi.stubEnv('CODEX_HOME', '');
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: {} })));
   writeFileSync(join(source, 'config.toml'), '[model_providers.openai.http_headers]\nAuthorization="Bearer fixture-source-provider"\n');

@@ -1,7 +1,7 @@
 import { parse } from 'smol-toml';
 
 type Invocation = { command: string; args: string[] };
-type Server = { name: string; env?: Record<string, string> };
+type Server = { name: string; env?: Record<string, string> | null };
 const launches = new WeakMap<object, { actual: readonly string[]; checked: readonly string[] }>();
 
 function registeredEnvironmentArgument(arg: string, servers: readonly Server[]): boolean {

@@ -19,7 +19,7 @@ export function spawnCredentialCheckedChild(input: {
   session: OwnedSessionRecord; runtimeId: string; policy: string; runId: string;
   binary: string; args: string[]; env: Record<string, string>;
   stdinFd?: number; stdoutFd: number; stderrFd: number; mcpConfigPath?: string;
-  mcpServers?: readonly { name: string; env?: Record<string, string> }[];
+  mcpServers?: readonly { name: string; env?: Record<string, string> | null }[];
   materializationIdentity: Parameters<typeof guardedWorkspaceInvocation>[2];
 }): ChildProcess {
   return withProviderStoreLock(() => {
