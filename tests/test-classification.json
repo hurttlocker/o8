@@ -5717,6 +5717,13 @@
       ]
     },
     {
+      "path": "tests/worktree-maintenance-inventory-scope-real-path.test.ts",
+      "reasons": [
+        "real-path",
+        "worktree"
+      ]
+    },
+    {
       "path": "tests/worktree-maintenance-sweep.test.ts",
       "reasons": [
         "child-process",
