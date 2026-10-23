@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -36,7 +37,7 @@ function gitErrorMessage(error: unknown): string {
 }
 
 async function gitStdout(cwd: string, args: string[], timeout = DEFAULT_FETCH_TIMEOUT_MS): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout,

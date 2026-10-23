@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -18,7 +19,7 @@ export async function probeNoChangesProduced(
   baseBranch: string,
   runGit?: (args: string[]) => Promise<{ stdout: string; stderr: string }>,
 ): Promise<NoChangesProducedProbe> {
-  const execute = runGit ?? ((args: string[]) => execFileAsync('git', args, {
+  const execute = runGit ?? ((args: string[]) => execFileAsync(resolveGitBinary(), args, {
     windowsHide: true, cwd, maxBuffer: COMMAND_MAX_BUFFER,
   }));
   const baseRef = baseBranch.trim() || 'main';

@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 /**
  * Cross-Worktree Conflict Detection + Resolution
  *
@@ -176,17 +177,17 @@ async function getFileLineRanges(
 ): Promise<LineRange[]> {
   try {
     // Committed changes since base
-    const { stdout: committed } = await execFileAsync('git', [
+    const { stdout: committed } = await execFileAsync(resolveGitBinary(), [
       'diff', '--unified=0', `${baseBranch}...HEAD`, '--', filePath,
     ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
     // Uncommitted changes
-    const { stdout: uncommitted } = await execFileAsync('git', [
+    const { stdout: uncommitted } = await execFileAsync(resolveGitBinary(), [
       'diff', '--unified=0', '--', filePath,
     ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
     // Staged changes
-    const { stdout: staged } = await execFileAsync('git', [
+    const { stdout: staged } = await execFileAsync(resolveGitBinary(), [
       'diff', '--unified=0', '--cached', '--', filePath,
     ], { windowsHide: true, cwd: worktreePath, timeout: 5000 });
 
@@ -263,7 +264,7 @@ export async function analyzeLineConflict(
  */
 async function getWorktreeChangeSize(worktree: WorktreeInfo): Promise<number> {
   try {
-    const { stdout } = await execFileAsync('git', [
+    const { stdout } = await execFileAsync(resolveGitBinary(), [
       'diff', '--shortstat', `${worktree.baseBranch}...HEAD`,
     ], { windowsHide: true, cwd: worktree.path, timeout: 5000 });
 

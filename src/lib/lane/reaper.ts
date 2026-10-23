@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { eq } from 'drizzle-orm';
@@ -132,7 +133,7 @@ function heartbeatStaleMs(lane: Lane, now: number): number {
 
 async function localBranchExists(lane: Lane): Promise<boolean | null> {
   try {
-    await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${lane.branch}`], {
+    await execFileAsync(resolveGitBinary(), ['show-ref', '--verify', '--quiet', `refs/heads/${lane.branch}`], {
       windowsHide: true,
       cwd: lane.repoPath,
       timeout: 5_000,
