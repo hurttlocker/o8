@@ -78,9 +78,30 @@ Its [development preview](../../src/app/preview/worker-transcript/page.tsx) show
 the integration pattern. It maps grouped activity and messages; a fair baseline
 must preserve its current production behavior, not replace it with a mock.
 
-Terminal discovery checked PATH, system/user Applications folders, and Spotlight
-bundle identifiers `net.kovidgoyal.kitty` and `com.mitchellh.ghostty`; no match.
-No terminal was installed. No app launched, so no proof image exists to upload.
+Initial terminal discovery checked PATH, system/user Applications folders, and
+Spotlight bundle identifiers `net.kovidgoyal.kitty` and `com.mitchellh.ghostty`;
+no match. That initial absence is superseded by the follow-up below.
+
+## Terminal follow-up
+
+Ghostty is now installed. Its app metadata and `ghostty +version` both report
+`1.3.1`; the executable contains an `x86_64` slice. No installation was performed
+by this spike. The operator requires a terminal comparison using
+`GPUIX_TERMINAL=1`, a screenshot, equivalent frame/RSS measurements, and closure
+of only the windows opened for this experiment.
+
+The pinned README's "Run in a terminal" section says this uses the same React
+tree, GPUI layout, text and GPU paint with an offscreen Metal surface on macOS.
+The native renderer selects its terminal backend from `GPUIX_TERMINAL=1`.
+It still requires the native addon, and none has been built or found in the
+vendor checkout. Ghostty alone does not remove the toolchain blockers.
+
+Rechecking `xcrun metal --version` returned the same missing-toolchain error.
+Rustup still lists only stable and `rustc --version` remains `1.94.0`.
+Terminal mode is now blocked pending build, not skipped for terminal absence.
+All three surfaces have zero runs. No Ghostty window was opened or closed,
+and no transcript screenshot exists. [METHOD.md](METHOD.md) records the terminal
+measurement and window ownership requirements.
 
 ## Shortest unblock
 

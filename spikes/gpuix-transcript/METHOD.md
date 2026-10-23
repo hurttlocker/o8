@@ -1,6 +1,6 @@
 # Pending measurement method
 
-Not executed. No measurement script exists. Both sample counts are zero.
+Not executed. No measurement script exists. All three sample counts are zero.
 The source audit stop rule takes precedence over building this harness.
 
 1. Finish the build/download audit after the toolchain boundary is resolved.
@@ -24,7 +24,8 @@ The source audit stop rule takes precedence over building this harness.
    in the foreground with an equal 1200x800 content viewport, display scale,
    refresh rate and font settings. Verify the viewport; do not equate outer window
    bounds with the page viewport. Preserve unrelated browser windows and tabs.
-6. Script at least three paired runs with alternating order. Define cold launch
+6. Script at least three runs per surface, rotating native, Safari and Ghostty
+   order. Define cold launch
    as launch/navigation to the first displayed transcript frame. Keep the dev
    server ready and report compilation/cache state separately. Do not claim a
    cold filesystem cache unless it was actually controlled.
@@ -47,7 +48,38 @@ The source audit stop rule takes precedence over building this harness.
     with raw sample counts. Reject invalid runs with reasons; retain them rather
     than retrying invisibly. Do not infer a Rust backend speedup from renderer data.
 
-If kitty or Ghostty becomes available, `GPUIX_TERMINAL=1` is a separate terminal
-experiment, not a substitute for native desktop measurements. Do not install one.
+## Ghostty terminal comparison
+
+Ghostty `1.3.1` is installed. This leg is required and shares the native build
+blocker. Use the same built transcript command and fixture, changing only
+`GPUIX_TERMINAL=1`. After the audit/build gates clear, launch a dedicated instance:
+
+```text
+open -na /Applications/Ghostty.app --args -e /usr/bin/env GPUIX_TERMINAL=1 <absolute transcript command> <arguments>
+```
+
+This is a launch template, not a command that has been executed. Record existing
+Ghostty process/window IDs before launch. Associate the newly opened window with
+the run ID and child PID; never identify ownership by the app name alone.
+
+GPUIX terminal mode ignores `render()` width/height and follows terminal size.
+Verify the actual graphic content area is 1200x800, adjusting only the experiment's
+window. Use the same foreground status, display, refresh rate, streaming schedule,
+scroll traversal, typing and three-run aggregation as the native leg.
+
+Measure frames after Ghostty presents the graphics. GPUIX's offscreen rendering
+stats alone omit terminal presentation and cannot establish that frame time.
+Record the GPUIX child RSS at idle/300 seconds with the same sampling as native,
+and Ghostty's owned host/helper RSS separately. Report their combined total with
+the components, so terminal host overhead is visible rather than hidden.
+
+Capture the actual transcript in the owned Ghostty window. Inspect that screenshot
+before uploading to the PR proof branch. A blank terminal or failed launch is not
+proof that terminal rendering works. Do not publish unrelated windows or content.
+
+On completion or failure, interrupt only the experiment's child/session, then close
+only the recorded experiment window IDs. Preserve every pre-existing Ghostty
+window and process; do not issue a blanket app quit or process-name kill.
+
 Put any future screenshots only on `pr-proof-assets` under the PR number, never
 in this branch's commits or release assets. This blocked run has no screenshots.
