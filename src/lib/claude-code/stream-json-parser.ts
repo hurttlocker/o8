@@ -2,7 +2,7 @@ export type ClaudeCodeStreamJsonChatEvent =
   | { type: 'delta'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'thinking'; text: string; blockIndex?: number; messageIndex?: number; messageKey?: string }
   | { type: 'tool_call'; id?: string | null; name: string; status: 'calling' | 'running' | 'done'; args?: Record<string, unknown>; preview?: string }
-  | { type: 'tool_result'; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
+  | { type: 'tool_result'; isError?: boolean; id?: string | null; name?: string; args?: Record<string, unknown>; output?: string; preview?: string }
   | {
       type: 'usage';
       inputTokens: number;
@@ -294,6 +294,7 @@ export function createClaudeCodeStreamJsonParser(
     const output = shot ? shot[0] : rawOutput;
     events.push({
       type: 'tool_result',
+      ...(block.is_error === true ? { isError: true } : {}),
       id: matchedTool?.id ?? toolUseId,
       name: matchedTool?.name ?? asString(block.name) ?? asString(block.tool),
       ...(matchedTool?.input ? { args: matchedTool.input } : {}),

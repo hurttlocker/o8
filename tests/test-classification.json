@@ -312,6 +312,20 @@
       ]
     },
     {
+      "path": "src/components/desktop/workspace-terminal/worker-activity.test.ts",
+      "reasons": [
+        "native-build"
+      ]
+    },
+    {
+      "path": "src/components/desktop/workspace-terminal/worker-handback-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "real-path"
+      ]
+    },
+    {
       "path": "src/lib/acp/local-connection-integration.test.ts",
       "reasons": [
         "integration"
