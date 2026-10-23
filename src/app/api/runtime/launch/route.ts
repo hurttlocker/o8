@@ -18,6 +18,8 @@ import { findOwnedLaunchByMutationId } from '@/lib/runtimes/shared/owned-session
 import { isClaudeCodeModelSource } from '@/lib/claude-code/worker-profile-types';
 import { normalizePacketSpendCap } from '@/lib/orchestrator/metered-spend';
 import { assertSingleAttemptLaunch } from '@/lib/runtime/single-attempt-launch';
+import { EFFORT_CHOICE_LIST } from '@/lib/orchestrator/effort-pin';
+import { isThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -69,6 +71,11 @@ export async function POST(request: NextRequest) {
   }
   if (!payload || !clientMutationId) {
     return NextResponse.json({ error: 'clientMutationId is required for this launch route' }, { status: 400 });
+  }
+  if (payload.effort !== undefined && !isThinkingEffort(payload.effort)) {
+    return NextResponse.json({
+      error: `effort must be one of: ${EFFORT_CHOICE_LIST}.`, code: 'invalid_effort',
+    }, { status: 400 });
   }
   if ((payload.claudeCodeModel !== undefined && typeof payload.claudeCodeModel !== 'string')
     || (payload.executionPolicy !== undefined && payload.executionPolicy !== 'single-attempt')
