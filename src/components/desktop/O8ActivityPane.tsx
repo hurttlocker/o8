@@ -24,11 +24,9 @@ import { usePrLinkDestinationFlag } from '@/lib/operator/use-pr-link-destination
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import {
   ACTIVITY_COLORS,
-  EMPTY_DATA,
   FILTER_TABS,
   IconZap,
   feedIconForItem,
-  fetchRepoActivity,
   itemBadge,
   itemKey,
   itemSubline,
@@ -36,8 +34,8 @@ import {
   renderExpandedDetail,
   useExpandDetails,
   type O8FeedFilter,
-  type RepoActivityData,
 } from './o8-activity-helpers';
+import { useO8ActivityData } from './useO8ActivityData';
 import { repoSlugFromRemote } from './canvas-utils';
 import { groupActivityByCommitSha } from './o8-activity-grouping';
 import { useOrchestratorData } from './orchestrator-data-context';
@@ -76,19 +74,6 @@ function parseTs(value?: string | null): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// Transcript delivery cannot change the remote repository activity lists.
-// Keep unknown or mixed batches conservative so review and attention updates
-// still refresh immediately through the existing single-flight scheduler.
-function isTranscriptOnlyBatch(event: Event): boolean {
-  const detail = (event as CustomEvent<{ data?: { events?: unknown } }>).detail;
-  const events = detail?.data?.events;
-  return Array.isArray(events) && events.length > 0 && events.every((entry: unknown) => {
-    if (!entry || typeof entry !== 'object') return false;
-    const envelope = entry as { channel?: unknown; event?: unknown };
-    return envelope.channel === 'history' && envelope.event === 'history.snapshot';
-  });
-}
-
 // ── Component ──
 
 interface O8ActivityPaneProps {
@@ -123,8 +108,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   onClosePR,
 }: O8ActivityPaneProps) {
   const { workspaceGlass } = useTheme();
-  const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
-  const [loading, setLoading] = useState(true);
+  const [packetFallbackTimestamp] = useState(() => Date.now());
   const [filter, setFilter] = useState<O8FeedFilter>('all');
   const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -178,47 +162,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       text: draftText,
     });
   }, [orchestratorData]);
-
-  const {
-    proposals,
-    pendingProposalId,
-    handleAccept: handleAcceptProposal,
-    handleDismiss: handleDismissProposal,
-  } = useDirectiveProposals({
-    open: true,
-    visible: active || !loading,
-    retryNonce: 0,
-    onAccept: handleAcceptDirectiveProposal,
-  });
-
-  // #9 — unread / actionable hierarchy. Proposals not in the frozen seen
-  // snapshot read as "new": accent dot + border on the row, accent header,
-  // and a one-time auto-open so they aren't buried. We persist "seen" once
-  // the section is open (clears the emphasis on the NEXT load) but keep the
-  // snapshot frozen this session so opening doesn't make "N new" vanish
-  // while the operator is still looking.
-  const newProposalIds = useMemo(
-    () => new Set(proposals.filter((p) => !seenProposalSnapshot.has(p.id)).map((p) => p.id)),
-    [proposals, seenProposalSnapshot],
-  );
-  const unreadProposalCount = newProposalIds.size;
-
-  useEffect(() => {
-    if (proposalAutoOpenedRef.current || unreadProposalCount === 0) return;
-    proposalAutoOpenedRef.current = true;
-    setProposalsOpen(true);
-  }, [unreadProposalCount]);
-
-  useEffect(() => {
-    if (!proposalsOpen || proposals.length === 0) return;
-    // Persist only when the proposal set changes — the hook may hand us a
-    // fresh array reference each render, and we don't want a localStorage
-    // write on every one.
-    const sig = proposals.map((p) => p.id).sort().join('|');
-    if (persistedSeenSigRef.current === sig) return;
-    persistedSeenSigRef.current = sig;
-    markProposalsSeen(proposals.map((p) => p.id));
-  }, [proposalsOpen, proposals]);
 
   const registeredRepos = useMemo(() => {
     const slugs = registeredRepoEntries
@@ -292,82 +235,56 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   const isAllRepos = allRepos;
 
-  // Fetch activity data
+  const targets = useMemo(() => {
+    if (isAllRepos) return registeredRepoEntries.length > 0
+      ? registeredRepoEntries.map((entry) => ({ repo: repoSlugFromRemote(entry.remoteUrl), path: entry.localPath }))
+      : repoOptions.map((slug) => ({ repo: slug, path: pathForSlug.get(slug) ?? null }));
+    return effectiveRepo || repoPath
+      ? [{ repo: effectiveRepo, path: repoPath ?? (effectiveRepo ? pathForSlug.get(effectiveRepo) : null) ?? null }]
+      : [];
+  }, [isAllRepos, registeredRepoEntries, repoOptions, pathForSlug, effectiveRepo, repoPath]);
+  const { data, loading } = useO8ActivityData(targets, active, isAllRepos, retryNonce);
+
+  const {
+    proposals,
+    pendingProposalId,
+    handleAccept: handleAcceptProposal,
+    handleDismiss: handleDismissProposal,
+  } = useDirectiveProposals({
+    open: true,
+    visible: active || !loading,
+    retryNonce: 0,
+    onAccept: handleAcceptDirectiveProposal,
+  });
+
+  // #9 — unread / actionable hierarchy. Proposals not in the frozen seen
+  // snapshot read as "new": accent dot + border on the row, accent header,
+  // and a one-time auto-open so they aren't buried. We persist "seen" once
+  // the section is open (clears the emphasis on the NEXT load) but keep the
+  // snapshot frozen this session so opening doesn't make "N new" vanish
+  // while the operator is still looking.
+  const newProposalIds = useMemo(
+    () => new Set(proposals.filter((p) => !seenProposalSnapshot.has(p.id)).map((p) => p.id)),
+    [proposals, seenProposalSnapshot],
+  );
+  const unreadProposalCount = newProposalIds.size;
+
   useEffect(() => {
-    if (!active) return;
-    const showInitialSpinner = true;
-    let cancelled = false;
-    let inFlight: Promise<void> | null = null;
-    let trailingRefresh = false;
+    if (proposalAutoOpenedRef.current || unreadProposalCount === 0) return;
+    proposalAutoOpenedRef.current = true;
+    setProposalsOpen(true);
+  }, [unreadProposalCount]);
 
-    async function load(showSpinner: boolean) {
-      if (showSpinner) setLoading(true);
-      try {
-        if (isAllRepos) {
-          const results = await Promise.all(
-            registeredRepoEntries.length > 0
-              ? registeredRepoEntries.map((entry) => fetchRepoActivity(repoSlugFromRemote(entry.remoteUrl), entry.localPath).catch(() => ({ ...EMPTY_DATA, workspaceError: 'Could not load activity for this folder.' })))
-              : repoOptions.map((slug) => fetchRepoActivity(slug, pathForSlug.get(slug) ?? null).catch(() => ({ ...EMPTY_DATA, workspaceError: 'Could not load activity for this repository.' })))
-          );
-          if (cancelled) return;
-          const merged: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
-          for (const r of results) {
-            merged.commits.push(...r.commits);
-            merged.prs.push(...r.prs);
-            merged.issues.push(...r.issues);
-            merged.ciRuns.push(...r.ciRuns);
-          }
-          if (results.some((result) => result.workspaceError)) merged.workspaceError = 'Some folders could not be read. Select a folder to inspect its activity and recovery options.';
-          setData(merged);
-        } else if (effectiveRepo || repoPath) {
-          const result = await fetchRepoActivity(effectiveRepo, repoPath ?? (effectiveRepo ? pathForSlug.get(effectiveRepo) : null) ?? null);
-          if (cancelled) return;
-          setData(result);
-        } else {
-          setData(EMPTY_DATA);
-        }
-      } catch {
-        if (!cancelled) setData(EMPTY_DATA);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    function scheduleLoad(showSpinner = false) {
-      if (inFlight) {
-        trailingRefresh = true;
-        return;
-      }
-      inFlight = load(showSpinner).finally(() => {
-        inFlight = null;
-        if (trailingRefresh && !cancelled) {
-          trailingRefresh = false;
-          scheduleLoad();
-        }
-      });
-    }
-
-    // Initial load / scope change shows the skeleton; background refreshes
-    // below update the feed in place so the pane doesn't flash to the
-    // "Loading activity…" skeleton on every realtime tick (#1150).
-    scheduleLoad(showInitialSpinner);
-
-    // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
-    const handler = () => { scheduleLoad(); };
-    const handleRealtime = (event: Event) => {
-      if (!isTranscriptOnlyBatch(event)) scheduleLoad();
-    };
-    window.addEventListener('o8:realtime', handleRealtime);
-    window.addEventListener('o8:lifecycle-reconcile', handler);
-    const fallbackId = setInterval(handler, 300_000);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener('o8:realtime', handleRealtime);
-      window.removeEventListener('o8:lifecycle-reconcile', handler);
-      clearInterval(fallbackId);
-    };
-  }, [active, effectiveRepo, isAllRepos, repoOptions, repoPath, pathForSlug, registeredRepoEntries, retryNonce]);
+  useEffect(() => {
+    if (!proposalsOpen || proposals.length === 0) return;
+    // Persist only when the proposal set changes — the hook may hand us a
+    // fresh array reference each render, and we don't want a localStorage
+    // write on every one.
+    const sig = proposals.map((p) => p.id).sort().join('|');
+    if (persistedSeenSigRef.current === sig) return;
+    persistedSeenSigRef.current = sig;
+    markProposalsSeen(proposals.map((p) => p.id));
+  }, [proposalsOpen, proposals]);
 
   // Packet items are derived from orchestrator missionState (not the
   // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
@@ -380,11 +297,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       // Comparison-group siblings — render only the leader, like the
       // Mission rail used to do via ComparisonCard.
       if (packet.comparisonGroupId && packet.comparisonIndex && packet.comparisonIndex > 0) continue;
-      const ts = parseTs(packet.lane?.lastEventAt) ?? parseTs(packet.lastEventAt) ?? Date.now();
+      const ts = parseTs(packet.lane?.lastEventAt) ?? parseTs(packet.lastEventAt) ?? packetFallbackTimestamp;
       items.push({ kind: 'packet', packet, ts, repo: packet.workspaceTargetPath ?? undefined });
     }
     return items;
-  }, [missionPackets]);
+  }, [missionPackets, packetFallbackTimestamp]);
 
   // Build sorted timeline
   const allItems = useMemo<ActivityItem[]>(() => {
@@ -589,9 +506,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           onAccept={handleAcceptProposal}
           onDismiss={handleDismissProposal}
         />
-        {!loading && data.workspaceError ? (
+        {!loading && (data.workspaceError || data.remoteError) ? (
           <div role="status" style={{ paddingTop: 16, paddingRight: 14, paddingBottom: 16, paddingLeft: 14, color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.45 }}>
-            <div>{data.workspaceError}</div>
+            {data.workspaceError ? <div>{data.workspaceError}</div> : null}
+            {data.remoteError ? <div>{data.remoteError}</div> : null}
             <div style={{ marginTop: 8 }}><RamsButton variant="ghost" onClick={() => setRetryNonce((n) => n + 1)}>Retry</RamsButton></div>
           </div>
         ) : null}
@@ -608,7 +526,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           }}>
             Loading activity...
           </div>
-        ) : filtered.length === 0 && data.workspaceError ? null : filtered.length === 0 ? (
+        ) : filtered.length === 0 && (data.workspaceError || data.remoteError) ? null : filtered.length === 0 ? (
           <div style={{
             paddingTop: 32,
             paddingBottom: 32,
