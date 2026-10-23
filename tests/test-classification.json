@@ -3822,6 +3822,7 @@
         "child-process",
         "git-cli",
         "real-path",
+        "terminal-tool",
         "worktree-api"
       ]
     },

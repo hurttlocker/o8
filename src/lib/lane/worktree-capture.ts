@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { laneGit, LaneGitMetadataError } from '@/lib/lane/lane-git';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -96,7 +97,7 @@ export async function captureWorktreeState(
     // capture is still better than none.
     if (repo && path.resolve(repo) !== path.resolve(wt)) {
       try {
-        await execFileAsync('git', ['fetch', wt, `+${ref}:${ref}`], {
+        await execFileAsync(resolveGitBinary(), ['fetch', wt, `+${ref}:${ref}`], {
           cwd: repo, windowsHide: true, timeout: GIT_TIMEOUT_MS, maxBuffer: COMMAND_MAX_BUFFER,
         });
       } catch (error) {

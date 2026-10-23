@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 
@@ -44,7 +45,7 @@ export interface BranchUnresolvedPayload {
 }
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, {
+  return execFileSync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout: 5000,

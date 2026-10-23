@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from 'node:child_process';
 import { laneGit } from '@/lib/lane/lane-git';
 import path from 'node:path';
@@ -27,7 +28,7 @@ function branchSafeId(value: string): string {
 }
 
 async function git(cwd: string, args: string[]) {
-  return execFileAsync('git', args, {
+  return execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout: 30_000,

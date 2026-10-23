@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { execFileSync } from 'node:child_process';
 
 import { LaneGitMetadataError } from '@/lib/lane/lane-git';
@@ -126,7 +127,7 @@ function relocatedLinesInHunk(hunk: string[], available: Map<string, number>): n
  */
 export function getRelocatedDeletionCredits(cwd: string, baseBranch: string, runGit?: (args: string[]) => string): Map<string, number> {
   try {
-    const execute = runGit ?? ((args: string[]) => execFileSync('git', args, {
+    const execute = runGit ?? ((args: string[]) => execFileSync(resolveGitBinary(), args, {
       cwd, windowsHide: true, encoding: 'utf8', timeout: 15_000, maxBuffer: 10 * 1024 * 1024,
     }));
     const diff = execute(['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`]);

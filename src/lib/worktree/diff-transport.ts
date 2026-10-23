@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createReadStream, lstatSync, readlinkSync } from 'node:fs';
@@ -62,7 +63,7 @@ function gitErrorMessage(error: unknown): string {
 }
 
 async function runGit(cwd: string, args: string[], timeout = GIT_TIMEOUT_MS): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await execFileAsync(resolveGitBinary(), args, {
     windowsHide: true,
     cwd,
     timeout,
@@ -367,7 +368,7 @@ async function appendGitDiff(
   allowedExitCodes: number[] = [0],
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn('git', args, {
+    const child = spawn(resolveGitBinary(), args, {
       windowsHide: true,
       cwd,
       env: { ...process.env, LC_ALL: 'C' },

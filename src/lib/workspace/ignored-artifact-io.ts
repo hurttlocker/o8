@@ -1,3 +1,4 @@
+import { resolveGitBinary } from '@/lib/git/binary';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -62,7 +63,7 @@ function git(args) {
   verifyRoot();
   const env = { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_WORK_TREE: '.' };
   for (const key of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES']) delete env[key];
-  return execFileSync('git', args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+  return execFileSync(process.argv[3], args, { encoding: 'utf8', env, timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
 }
 function readRevision() {
   try {
@@ -241,7 +242,7 @@ async function runArtifactIoNative<T>(input: {
   onReceipt?: (event: ArtifactRestoreEvent) => void;
 }): Promise<T> {
   const invocation = guardedWorkspaceInvocation(
-    process.execPath, ['-e', ARTIFACT_IO_SCRIPT, input.mode, artifactNodeScript()], input.identity,
+    process.execPath, ['-e', ARTIFACT_IO_SCRIPT, input.mode, artifactNodeScript(), resolveGitBinary()], input.identity,
   );
   return new Promise((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {
@@ -367,7 +368,7 @@ function runArtifactIo<T>(input: Parameters<typeof runArtifactIoNative>[0]): Pro
     if (!reader.active || reader.poisoned) throw new Error('Close artifact reader authority expired or was refused.');
     if (!reader.child) {
       reader.starts += 1;
-      reader.child = spawn(process.execPath, ['-e', ARTIFACT_IO_SCRIPT, 'close-reader', artifactNodeScript()], {
+      reader.child = spawn(process.execPath, ['-e', ARTIFACT_IO_SCRIPT, 'close-reader', artifactNodeScript(), resolveGitBinary()], {
         cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
       });
       reader.closed = new Promise(resolve => reader.child!.once('close', code => resolve(code)));
