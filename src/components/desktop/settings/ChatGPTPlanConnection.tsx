@@ -115,7 +115,7 @@ export function ChatGPTPlanConnection() {
   };
 
   return <div style={{ marginTop: 20, marginBottom: 20 }}>
-    <SettingsGroup header="ChatGPT plan" footnote="Use your ChatGPT plan for o8 text requests without an API key or CLI. Plan limits still apply. This does not open your ChatGPT chats or memories, and o8 pricing is separate.">
+    <SettingsGroup header="ChatGPT plan" footnote="Use your ChatGPT plan for o8 text requests without an API key or CLI. Plan limits still apply. This does not open your ChatGPT chats or memories.">
       <SettingsRow label={status?.planEnabled ? 'Using ChatGPT plan' : 'Connect ChatGPT'} subtitle={busy ?? (status?.planEnabled ? 'Choose an available model in the chat composer.' : 'Connection failures stop this route.')} accessory={<>
         {!owner ? <button type="button" style={buttonStyle} onClick={auth.signIn}>Sign in to o8</button> : <button type="button" disabled={Boolean(busy)} style={buttonStyle} onClick={() => { const accountId = status?.activeId ?? status?.accounts.at(-1)?.id; void update(renderEpoch, 'start', accountId ? { accountId } : {}); }}>Continue with ChatGPT</button>}
       </>} />

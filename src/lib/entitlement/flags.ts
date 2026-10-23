@@ -1,48 +1,14 @@
 import type { EntitlementFlags, Plan } from './types';
 
-/** Pro, Team, and Founder are the paid tiers. Keep paid-feature checks on this
- * predicate so a new caller cannot accidentally treat "signed in" as paid. */
+/** Legacy funded-service eligibility. Sign-in alone never grants access. */
 export function isPaidPlan(plan: Plan): boolean {
   return plan === 'pro' || plan === 'team' || plan === 'founder';
 }
 
-/**
- * The SINGLE source of truth for the per-plan cost/reach levers.
- *
- * Pure function, no I/O. NOTE: these are NOT feature gates. Every moat —
- * governance, the Engineering Brain, multi-repo fleet, mobile-on-LAN, local
- * voice — is FREE and ungated by the public entitlement contract, so it isn't
- * here. This only maps a Plan to the paid cost/reach levers; real access is
- * additionally enforced at call time by the account token + the server-side
- * spend cap, never by a flag alone.
- *
- *  - free:    no paid levers (BYO / local / the proxy's free taste-allowance).
- *  - pro:     managed-inference proxy.
- *  - team:    managed-inference proxy + shared team governance.
- *  - founder: managed-inference proxy (included for life, fair-use-capped); NOT
- *             team.shared. Early-access (experimental*) uses isPaidPlan through
- *             use-early-access + the experimental hooks. It is not a cost/reach
- *             lever, so it isn't in the resolved flags.
- *
- * relay.offNetwork follows the public relay contract in docs/internals/connect-contract.md.
- * Entitlement is "all paid tiers" in principle; today only 'founder' is a live
- * paid tier (the $19 'pro'/$29 'team' tiers aren't sold yet), so it reads as
- * founders-only in practice but flips on automatically the moment pro/team launch
- * ("future paid → true at launch", zero code change). free → false.
- *
- *   ⚠️ PROTOCOL DRIFT HAZARD — `relay.offNetwork` is part of the versioned
- *   entitlement contract consumed by the desktop, mobile client, and hosted
- *   relay. All three must resolve the same plan-to-flag mapping or off-network
- *   silently half-works. Until signed tokens carry the resolved flags, any
- *   contract version that changes this mapping must update every consumer in
- *   lockstep.
- *
- * cloud.runners isn't built yet → false for every plan until that lever ships.
- *
- * voice.liveBrain is the phone's per-session brain choice
- * (docs/internals/symon-agent-mode.md). It follows the same all-paid-tiers rule
- * as the relay, and free keeps the standard realtime brain rather than losing
- * voice: the lever is the metered live layer, never Symon itself.
+/** Compatibility mapping for funded services and relay admission.
+ * These values must stay aligned with existing signed-token consumers until
+ * the funded-service and connect migrations replace them. No local UI gate
+ * reads this mapping. Unimplemented cloud runners remain disabled.
  */
 export function resolveFlags(plan: Plan): EntitlementFlags {
   const proxy = isPaidPlan(plan);

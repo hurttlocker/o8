@@ -26,7 +26,6 @@ import {
   type FactoryResetResult,
   type FactoryResetStage,
 } from './DiagnosticsResetModals';
-import { useEntitlement } from '@/lib/entitlement/context';
 
 // ── Types ──
 
@@ -69,13 +68,7 @@ function toolStatusLine(tool: DiagnosticTool): string {
 // ── Diagnostics Tab ──
 
 export function DiagnosticsTab() {
-  const { founder } = useEntitlement();
-  // INTERNAL instrumentation, not a founders perk (operator, 2026-07-06):
-  // substrate-health reds and loop state are repair signals for the team, not
-  // something any customer — founder included — should be reading into.
-  // Gated to Founding Operator #1 (the builder) until a proper internal-role
-  // flag exists. Dev builds always show it.
-  const internalMode = founder?.operatorNumber === 1 || process.env.NODE_ENV !== 'production';
+  const [internalMode, setInternalMode] = useState(false);
   const [tools, setTools] = useState<DiagnosticTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -403,9 +396,17 @@ export function DiagnosticsTab() {
         </SettingsGroup>
       </section>
 
-      {/* Builder instrumentation — Brain recall latency, autonomous-loop state,
-          and the golden-demo runner. Internal-only: repair signals for the
-          team, never customer-facing (not even founders). */}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Diagnostic authorization" footnote="Enable these tools only when you intend to inspect this workspace. Authorization lasts until you leave this page. Running a demo still requires a separate confirmation.">
+          <SettingsRow
+            icon={<ActivityIcon />}
+            label="Developer tools"
+            subtitle="Inspect memory retrieval, automation, and demo runs."
+            accessory={<RamsButton onClick={() => setInternalMode((enabled) => !enabled)}>{internalMode ? 'Disable developer diagnostics' : 'Enable developer diagnostics'}</RamsButton>}
+          />
+        </SettingsGroup>
+      </section>
+
       {internalMode ? (
         <SettingsAdvanced
           label="Developer diagnostics"

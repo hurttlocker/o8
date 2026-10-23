@@ -24,7 +24,6 @@ import {
 } from './shared';
 import { SettingsGroup, SettingsRow, ValuePill, GroupFootnote } from './grouped';
 
-const MANAGED_APP_UPGRADE_URL = 'https://o8.run/pricing';
 const LOCAL_GITHUB_APP_SETUP_URL = 'https://github.com/settings/apps/new';
 
 /**
@@ -34,8 +33,6 @@ const LOCAL_GITHUB_APP_SETUP_URL = 'https://github.com/settings/apps/new';
  */
 export type GitHubConnectionProps = {
   auth: O8AuthState;
-  /** Hosted App tokens are a paid service; local GitHub access remains free. */
-  managedAppEntitled: boolean;
   accounts: GitHubAccount[];
   repoCount: number;
   broker: GitHubBrokerStatus | null;
@@ -58,7 +55,6 @@ export type GitHubConnectionProps = {
  */
 export function GitHubConnectionSections({
   auth,
-  managedAppEntitled,
   accounts,
   repoCount,
   broker,
@@ -93,8 +89,7 @@ export function GitHubConnectionSections({
   const appConnected = !!(broker
     && broker.tokenReady
     && broker.installationReachable
-    && broker.privateKeyConfigured
-    && (broker.managed !== true || managedAppEntitled));
+    && broker.privateKeyConfigured);
   const showProdDiagnostics = !!(broker && (broker.publicBaseUrlConfigured || broker.webhookSecretConfigured));
 
   async function copyDeviceCode() {
@@ -131,15 +126,14 @@ export function GitHubConnectionSections({
   // Managed install and local App setup are separate actions. A missing hosted
   // install URL must never fall through to GitHub's create-App page.
   const managedInstallUrl = broker?.managedInstallUrl || null;
-  const managedInstall = managedAppEntitled
-    && !broker?.installationId
+  const managedInstall = !broker?.installationId
     && !!managedInstallUrl;
   const manageInstallationUrl = broker?.installationId
     ? `https://github.com/settings/installations/${broker.installationId}`
     : 'https://github.com/settings/installations';
 
   function useManagedApp() {
-    if (!managedAppEntitled || !managedInstallUrl) return;
+    if (!managedInstallUrl) return;
     requestO8Capability({
       capability: 'github.managed',
       signedIn: auth.signedIn,
@@ -381,11 +375,9 @@ export function GitHubConnectionSections({
               ? `Installed on @${broker?.installationAccount} for ${repoCount} ${repoCount === 1 ? 'repository' : 'repositories'}`
               : localAppConfigured
                 ? 'Finish the local GitHub App setup on this machine'
-                : !managedAppEntitled
-                  ? 'Managed issue and pull-request sync is included with Pro; local setup stays free'
-                  : managedInstall
-                    ? 'Install the managed App for issue and pull-request sync'
-                    : 'Sign in with your paid o8 account to load the managed installation'}
+                : managedInstall
+                  ? 'Install the managed App for issue and pull-request sync'
+                  : 'Sign in with your o8 account to load the managed installation'}
             accessory={
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <ValuePill tone={appConnected ? 'success' : 'default'}>
@@ -393,9 +385,7 @@ export function GitHubConnectionSections({
                     ? 'Installed'
                     : localAppConfigured
                       ? 'Needs setup'
-                      : managedAppEntitled
-                        ? 'Not installed'
-                        : 'Pro'}
+                      : 'Not installed'}
                 </ValuePill>
                 {appConnected ? (
                   <a href={manageInstallationUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
@@ -405,15 +395,6 @@ export function GitHubConnectionSections({
                   <a href={LOCAL_GITHUB_APP_SETUP_URL} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
                     Set up
                   </a>
-                ) : !managedAppEntitled ? (
-                  <>
-                    <RamsButton variant="ghost" onClick={() => openExternalUrl(MANAGED_APP_UPGRADE_URL)}>
-                      Upgrade
-                    </RamsButton>
-                    <a href={LOCAL_GITHUB_APP_SETUP_URL} target="_blank" rel="noreferrer" style={primaryLinkStyle(false)}>
-                      Set up locally
-                    </a>
-                  </>
                 ) : managedInstall ? (
                   <RamsButton variant="ghost" onClick={useManagedApp}>Install</RamsButton>
                 ) : (
@@ -469,7 +450,7 @@ export function GitHubConnectionSections({
           ) : null}
         </SettingsGroup>
         <GroupFootnote>
-          The local connection stays on this machine and does not require an o8 account. The managed Automation app is included with paid plans.
+          Use your local GitHub connection for repository access. It does not require an o8 account. The managed Automation app uses your o8 account for issue and pull-request sync.
         </GroupFootnote>
       </section>
     </>

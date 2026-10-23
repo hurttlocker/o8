@@ -1,5 +1,3 @@
-import { isPaidPlan } from '@/lib/entitlement/flags';
-import type { Plan } from '@/lib/entitlement/types';
 import type { OrchestratorBackendSetting } from '@/lib/operator/backend-setting';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/runtime-capabilities';
 import type { SetupRuntime } from './runtime-recommendation';
@@ -13,7 +11,7 @@ export interface BuiltInAgentRegistration {
 // Null keeps production off. The external Pi CLI runtime must not fill this slot.
 export const BUILT_IN_AGENT_REGISTRATION: BuiltInAgentRegistration | null = null;
 
-export function createBuiltInAgentRuntime(registration: BuiltInAgentRegistration, plan: Plan, platform: string): SetupRuntime {
+export function createBuiltInAgentRuntime(registration: BuiltInAgentRegistration, platform: string): SetupRuntime {
   const available = platform === 'darwin' || platform === 'linux';
   return {
     id: registration.id,
@@ -22,14 +20,12 @@ export function createBuiltInAgentRuntime(registration: BuiltInAgentRegistration
     installed: true,
     unavailableReason: available ? null : 'unsupported_platform',
     detail: available
-      ? 'No install, key, or sign-in. Asks before file writes and commands; workspace rules can allow commands.'
+      ? 'Uses the configured runtime. Asks before file writes and commands; workspace rules can allow commands.'
       : 'Available on macOS and Linux. Windows support is not available yet.',
     fix: '',
     builtIn: {
       backend: registration.backend,
-      planDetail: isPaidPlan(plan)
-        ? 'Uses the included managed model on your weekly o8 model allowance. Resets Monday at 00:00 UTC.'
-        : 'Uses your free daily o8 model allowance. Resets at midnight UTC.',
+      planDetail: 'Uses the configured model connection. Availability and usage limits are checked when a request starts.',
     },
   };
 }

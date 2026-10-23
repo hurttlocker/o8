@@ -34,6 +34,27 @@ afterAll(() => {
 });
 
 describe('operator-defaults dispatchable runtime inventory', () => {
+  it('persists non-funded stability toggles without a license', async () => {
+    for (const enabled of [false, true, false]) {
+      const values = {
+        experimentalCanvas: enabled,
+        experimentalGemini: enabled,
+        experimentalOpencode: enabled,
+        nativeBrowserView: enabled,
+      };
+      const response = await operatorDefaultsRoute.POST(new Request('http://localhost/api/panel/operator-defaults', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      }));
+      expect(response.status).toBe(200);
+      const read = await operatorDefaultsRoute.GET(new Request('http://localhost/api/panel/operator-defaults?include=values'));
+      expect(await read.json()).toMatchObject({
+        values,
+        sources: { experimentalCanvas: 'file', experimentalGemini: 'file', experimentalOpencode: 'file', nativeBrowserView: 'file' },
+      });
+    }
+  });
+
   it('defaults explainers off and persists both positions of the existing toggle', async () => {
     const read = async () => (await operatorDefaultsRoute.GET(
       new Request('http://127.0.0.1/api/panel/operator-defaults'),
